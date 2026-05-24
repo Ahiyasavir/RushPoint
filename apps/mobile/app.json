@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "RushPoint",
+    "slug": "rushpoint",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.rushpoint.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "RushPoint uses your location to guide you to mission stations.",
+        "NSLocationAlwaysUsageDescription": "RushPoint tracks your location in the background to update your team's position.",
+        "NSCameraUsageDescription": "RushPoint uses your camera to scan QR codes and capture mission photos.",
+        "NSPhotoLibraryUsageDescription": "RushPoint saves mission photos to your library.",
+        "NSMicrophoneUsageDescription": "RushPoint may use your microphone for audio recording during missions."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0a"
+      },
+      "package": "com.rushpoint.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location",
+      "expo-camera",
+      [
+        "expo-av",
+        { "microphonePermission": false }
+      ]
+    ],
+    "scheme": "rushpoint",
+    "extra": {
+      "eas": {
+        "projectId": "YOUR_EAS_PROJECT_ID"
+      }
+    }
+  }
+}

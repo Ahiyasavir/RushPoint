@@ -1,0 +1,52 @@
+{
+  "name": "rushpoint",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/mobile",
+    "apps/admin",
+    "functions",
+    "packages/shared",
+    "scripts"
+  ],
+  "scripts": {
+    "//──── Cross-repo (Turborepo) ────────────────────────────────────────": "",
+    "build":       "turbo run build",
+    "typecheck":   "turbo run typecheck",
+    "lint":        "turbo run lint",
+    "lint:fix":    "turbo run lint -- --fix",
+    "format":      "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
+    "format:check":"prettier --check \"**/*.{ts,tsx,js,json,md,css}\"",
+
+    "//──── Individual apps ───────────────────────────────────────────────": "",
+    "mobile":          "npm run dev      --workspace=apps/mobile",
+    "mobile:ios":      "npm run ios      --workspace=apps/mobile",
+    "mobile:android":  "npm run android  --workspace=apps/mobile",
+    "admin":           "npm run dev      --workspace=apps/admin",
+    "admin:build":     "npm run build    --workspace=apps/admin",
+    "shared:build":    "npm run build    --workspace=packages/shared",
+
+    "//──── Firebase ─────────────────────────────────────────────────────": "",
+    "emulator":        "firebase emulators:start",
+    "emulator:export": "firebase emulators:export .firebase/emulator-data",
+    "emulator:import": "firebase emulators:start --import=.firebase/emulator-data",
+    "functions:serve": "npm run serve --workspace=functions",
+    "functions:deploy":"npm run deploy --workspace=functions",
+
+    "//──── Dev data ──────────────────────────────────────────────────────": "",
+    "seed":       "npm run seed      --workspace=scripts",
+    "seed:reset": "npm run seed:reset --workspace=scripts"
+  },
+  "devDependencies": {
+    "turbo":                          "^2.0.0",
+    "typescript":                     "^5.4.0",
+    "prettier":                       "^3.3.0",
+    "eslint":                         "^8.57.0",
+    "@typescript-eslint/parser":      "^7.14.0",
+    "@typescript-eslint/eslint-plugin":"^7.14.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm":  ">=10.0.0"
+  }
+}

@@ -1,0 +1,33 @@
+node_modules/
+.env
+.env.local
+*.env
+
+# Expo
+apps/mobile/.expo/
+apps/mobile/dist/
+
+# Admin build
+apps/admin/dist/
+
+# Firebase
+functions/lib/
+functions/serviceAccount.json
+# Note: .firebaserc is committed — it contains project aliases, no secrets.
+# The actual Firebase project ID is also in .env files (gitignored).
+.firebase/              # emulator export/import data directory
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Shared build
+packages/shared/dist/

@@ -1,0 +1,17 @@
+# Built output
+dist/
+lib/
+build/
+.expo/
+.firebase/
+
+# Generated / third-party
+node_modules/
+*.min.js
+*.min.css
+apps/mobile/assets/
+
+# Lock files (prettier can corrupt these)
+package-lock.json
+yarn.lock
+pnpm-lock.yaml

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "lib/**"],
+      "env": ["NODE_ENV"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "seed": {
+      "cache": false,
+      "env": [
+        "RUSHPOINT_APP_ID",
+        "GCLOUD_PROJECT",
+        "FIRESTORE_EMULATOR_HOST",
+        "FIREBASE_AUTH_EMULATOR_HOST"
+      ]
+    },
+    "seed:reset": {
+      "cache": false,
+      "env": [
+        "RUSHPOINT_APP_ID",
+        "GCLOUD_PROJECT",
+        "FIRESTORE_EMULATOR_HOST",
+        "FIREBASE_AUTH_EMULATOR_HOST"
+      ]
+    }
+  }
+}

@@ -1,0 +1,115 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RushPoint — Firestore Security Rules
+//
+// PATH CONVENTION (enforced below, never deviate):
+//
+//   PUBLIC shared data  →  artifacts/{appId}/public/data/{collection}/{docId}
+//   PRIVATE user data   →  artifacts/{appId}/users/{userId}/{collection}/{docId}
+//
+// Admin identity: Firebase Auth custom claim  { role: "admin" }
+//   Set via Cloud Functions / Firebase Admin SDK — never store in Firestore docs.
+//
+// All write operations from the mobile app go through Cloud Functions
+// (which use the Admin SDK and bypass these rules). Client writes are
+// intentionally narrow: teams may only write their own private data.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Deny everything not explicitly matched ───────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /artifacts/{appId} {
+
+      // ── PUBLIC DATA ────────────────────────────────────────────────────────
+      //    Path: artifacts/{appId}/public/data/{collection}/{docId}
+      //
+      //    Contains: tasks, events, leaderboard, flashMissions
+      //    Read  → any authenticated user (teams, judges, spectators)
+      //    Write → admins only (via custom claim); all other writes go through
+      //            Cloud Functions with the Admin SDK
+
+      match /public/data/{collection}/{docId} {
+        allow read:  if isAuthenticated();
+        allow write: if isAdmin();
+      }
+
+      // Catch subcollections inside public docs (e.g. task/checkIns)
+      match /public/data/{collection}/{docId}/{rest=**} {
+        allow read:  if isAuthenticated();
+        allow write: if isAdmin();
+      }
+
+
+      // ── PRIVATE USER DATA ──────────────────────────────────────────────────
+      //    Path: artifacts/{appId}/users/{userId}/{collection}/{docId}
+      //
+      //    Contains: profile, gameState, checkIns, assignments
+      //
+      //    Read  → the owner (userId == auth.uid) OR an admin
+      //    Write → owner writes are scoped per collection (see below)
+      //            Admins can write anything
+
+      match /users/{userId}/{collection}/{docId} {
+
+        allow read: if isOwner(userId) || isAdmin();
+
+        // ── profile ──────────────────────────────────────────────────────────
+        //    Team name, member list. Created once on registration; no updates.
+        allow create: if collection == 'profile'
+                      && isOwner(userId)
+                      && isValidProfile(request.resource.data);
+
+        // gameState write is handled exclusively by Cloud Functions.
+        // Teams must NOT be able to set their own score or slot status.
+        allow write: if collection != 'profile'
+                     && collection != 'gameState'
+                     && isOwner(userId);
+
+        // Admins can write anything (scoring, overrides)
+        allow write: if isAdmin();
+      }
+
+      // Catch subcollections under user docs
+      match /users/{userId}/{collection}/{docId}/{rest=**} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow write: if isAdmin();
+      }
+    }
+
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Helper functions
+    // ═════════════════════════════════════════════════════════════════════════
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Admin role is set as a Firebase Auth custom claim — no document reads needed.
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.token.get('role', '') == 'admin';
+    }
+
+    // Basic profile shape validation — prevents malformed documents
+    function isValidProfile(data) {
+      return data.keys().hasAll(['name', 'memberNames', 'createdAt'])
+          && data.name is string
+          && data.name.size() >= 1
+          && data.name.size() <= 40
+          && data.memberNames is list
+          && data.memberNames.size() >= 2
+          && data.memberNames.size() <= 8;
+    }
+  }
+}
