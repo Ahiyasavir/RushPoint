@@ -1,6 +1,21 @@
 # RushPoint — START HERE
-> Upload this file at the start of tomorrow's session alongside TECH_SPEC.md.
-> TECH_SPEC.md is the full reference. This file is the mission briefing.
+> TECH_SPEC.md is the full reference. This file was the original tracer-bullet briefing.
+> For the **current** state, dev workflow, and data model, read **CLAUDE.md** first.
+
+---
+
+## ✅ STATUS — Tracer Bullet is BUILT and running on the emulator
+
+The 6-step flow below is implemented and was verified end-to-end against the Firebase Emulator
+(anonymous token → callables return live data). Two intentional divergences from the original plan:
+
+- **Auth is an Access-Code system** (not generic registration). Enter a code → `registerTeam`
+  Cloud Function claims it and seeds the team. Local demo code: **`1234`**.
+- **Writes go through Cloud Functions** (registration + judging), since `gameState`/score are
+  server-only. The judge step uses `listPendingArrivals` / `checkInArrival` / `finalizeJudgeEvaluation`.
+
+**Boot it:** `npm run dev:all` → Mobile http://localhost:8081 · Admin **http://localhost:5180** ·
+Emulator UI http://127.0.0.1:4000. (Details + caveats in CLAUDE.md.)
 
 ---
 
@@ -117,10 +132,11 @@ rushpoint/
 
 ---
 
-**Start command sequence:**
+**Start command sequence (current — one terminal):**
 ```bash
-npm run emulator        # terminal 1 — keep running
-npm run seed:reset      # terminal 2 — run once
-npm run mobile          # terminal 3
-npm run admin           # terminal 4
+npm run dev:all         # emulator + seed (if empty) + mobile (web) + admin
+# optional, for the full multi-team dataset (Teams A–D, judge scenarios):
+npm run seed:reset
 ```
+Admin → http://localhost:5180 · Mobile → http://localhost:8081 · Emulator UI → http://127.0.0.1:4000.
+Stop with **Ctrl+C** so emulator data is exported. (The legacy 4-terminal flow still works if preferred.)

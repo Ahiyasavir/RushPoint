@@ -9,7 +9,7 @@ import {
   MAX_PRESENTATION_SCORE,
 } from './scoring/teneProducts';
 
-// ─── Path + auth helpers for the judge flow ───────────────────────────────────
+// â”€â”€â”€ Path + auth helpers for the judge flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 
@@ -58,8 +58,8 @@ interface JudgingState {
 /**
  * Apply the slot unlock rules after a slot completes, stamping startedAt on any
  * slot that newly becomes active (this resumes the elapsed clock on mobile).
- * Mirrors the mobile gameStore rules: green[n]→green[n+1]; green[3]→orange;
- * orange→all three gold; gold→nothing further.
+ * Mirrors the mobile gameStore rules: green[n]â†’green[n+1]; green[3]â†’orange;
+ * orangeâ†’all three gold; goldâ†’nothing further.
  */
 function unlockNext(slots: JudgeSlot[], completedIndex: number, nowIso: string): void {
   const activate = (i: number) => {
@@ -72,7 +72,7 @@ function unlockNext(slots: JudgeSlot[], completedIndex: number, nowIso: string):
   else if (completedIndex === 4) { activate(5); activate(6); activate(7); }
 }
 
-// ─── requestNextTask ──────────────────────────────────────────────────────────
+// â”€â”€â”€ requestNextTask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Called by the mobile app when a team completes a task and needs the next one.
 // Returns { taskId } or { injectRiddle: true } if park is at capacity.
 export const requestNextTask = functions.https.onCall(async (data, context) => {
@@ -93,7 +93,7 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
   return assignNextTask(teamId, { lat, lng }, completedTaskIds, targetType);
 });
 
-// ─── checkOutTask ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ checkOutTask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Called when a team leaves a station (QR scan confirmed or task approved).
 export const checkOutTask = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
@@ -105,7 +105,7 @@ export const checkOutTask = functions.https.onCall(async (data, context) => {
   return { success: true };
 });
 
-// ─── triggerLeaderboardFreeze ─────────────────────────────────────────────────
+// â”€â”€â”€ triggerLeaderboardFreeze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Admin-callable or auto-triggered 30 min before event end.
 export const triggerLeaderboardFreeze = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
@@ -122,7 +122,7 @@ export const triggerLeaderboardFreeze = functions.https.onCall(async (data, cont
   return { success: true };
 });
 
-// ─── pushFlashMission ─────────────────────────────────────────────────────────
+// â”€â”€â”€ pushFlashMission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Admin broadcasts a flash mission to all active teams.
 export const pushFlashMission = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
@@ -153,13 +153,13 @@ export const pushFlashMission = functions.https.onCall(async (data, context) => 
   return { id: ref.id, expiresAt };
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // JUDGE FLOW (Tracer Bullet Step 3)
 // All three callables use the Admin SDK and therefore bypass Firestore rules,
 // keeping score/gameState writes server-authoritative per the TECH_SPEC.
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// ─── listPendingArrivals ──────────────────────────────────────────────────────
+// â”€â”€â”€ listPendingArrivals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Returns every team with a 'pending' check-in, enriched with team + task names,
 // so the judge can pick who is standing at their station.
 export const listPendingArrivals = functions.https.onCall(async (_data, context) => {
@@ -192,7 +192,7 @@ export const listPendingArrivals = functions.https.onCall(async (_data, context)
   return { arrivals };
 });
 
-// ─── checkInArrival ───────────────────────────────────────────────────────────
+// â”€â”€â”€ checkInArrival â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Judge confirms the team physically arrived. Records arrival time and FREEZES
 // the elapsed clock for the active slot on the mobile client (gameState.judging).
 // Idempotent: re-running for the same check-in returns the existing freeze.
@@ -237,7 +237,7 @@ export const checkInArrival = functions.https.onCall(async (data, context) => {
   });
 });
 
-// ─── finalizeJudgeEvaluation ──────────────────────────────────────────────────
+// â”€â”€â”€ finalizeJudgeEvaluation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Atomic write that scores the basket, completes the slot, unfreezes the clock,
 // and transitions the team to their next objective.
 export const finalizeJudgeEvaluation = functions.https.onCall(async (data, context) => {
@@ -266,7 +266,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     throw new functions.https.HttpsError('invalid-argument', 'products must be an array of ids');
   }
 
-  // Authoritative scoring — never trust a total sent by the client.
+  // Authoritative scoring â€” never trust a total sent by the client.
   const productScore = computeProductScore(products);
   const design       = clampScore(designScore, MAX_DESIGN_SCORE);
   const presentation = clampScore(presentationScore, MAX_PRESENTATION_SCORE);
@@ -294,7 +294,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
       throw new functions.https.HttpsError('failed-precondition', 'No slot available to finalize');
     }
 
-    // Idempotent: slot already scored (e.g. double submit) — return current state.
+    // Idempotent: slot already scored (e.g. double submit) â€” return current state.
     if (slots[target].status === 'completed') {
       return { newScore: gs.score, total, alreadyFinalized: true };
     }
@@ -341,18 +341,18 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // REGISTRATION (Tracer Bullet Step 1/2)
 // Server-authoritative team registration. Replaces the client-side batch write so
 // the access-code claim + profile + initial gameState are written atomically with
-// the Admin SDK (clients cannot write gameState — see firestore.rules).
-// ═══════════════════════════════════════════════════════════════════════════════
+// the Admin SDK (clients cannot write gameState â€” see firestore.rules).
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // Initial 8-slot layout. startedAt must be a concrete value (Firestore forbids
-// serverTimestamp() sentinels inside array elements) — server clock is authoritative.
+// serverTimestamp() sentinels inside array elements) â€” server clock is authoritative.
 function buildInitialSlots(nowIso: string): JudgeSlot[] {
   return [
-    { index: 0, type: 'green',  status: 'active', startedAt: nowIso },
+    { index: 0, type: 'green',  status: 'active', startedAt: nowIso, taskId: 'task-green-001', taskTitle: 'Jerusalem Landmarks Photo Hunt' },
     { index: 1, type: 'green',  status: 'locked' },
     { index: 2, type: 'green',  status: 'locked' },
     { index: 3, type: 'green',  status: 'locked' },
@@ -382,7 +382,7 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
     waiverAccepted?: boolean;
   };
 
-  // ── Validate input ───────────────────────────────────────────────────────────
+  // â”€â”€ Validate input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const normalizedCode = (code ?? '').trim().toUpperCase();
   const name           = (teamName ?? '').trim();
   const phone          = (captainPhone ?? '').trim();
@@ -420,11 +420,11 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
 
     const cd = codeSnap.data() as { claimed?: boolean; teamId?: string | null };
 
-    // Idempotent: this user already claimed this code — return success on retry.
+    // Idempotent: this user already claimed this code â€” return success on retry.
     if (cd.claimed && cd.teamId && cd.teamId === uid) {
       return { teamId: uid, teamName: name, alreadyRegistered: true };
     }
-    // Claimed by someone else — block.
+    // Claimed by someone else â€” block.
     if (cd.claimed && cd.teamId && cd.teamId !== uid) {
       throw new functions.https.HttpsError('already-exists', 'This access code has already been claimed');
     }

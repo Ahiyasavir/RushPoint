@@ -4,7 +4,7 @@ import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // Emulator-safe defaults: the Firebase SDK only requires non-empty apiKey/appId
-// strings to initialize locally — they are never validated against the emulator.
+// strings to initialize locally â€” they are never validated against the emulator.
 // projectId MUST match .firebaserc and the seed script (race-to-tzion-2026).
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -23,17 +23,17 @@ export const functions = getFunctions(app);
 
 export const APP_ID = import.meta.env.VITE_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 
-// ── Emulator wiring (dev only) ────────────────────────────────────────────────
+// â”€â”€ Emulator wiring (dev only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Guard against double-connect under Vite HMR (module re-evaluation).
 const emuFlag = globalThis as unknown as { __rushpointEmu?: boolean };
 if (import.meta.env.DEV && !emuFlag.__rushpointEmu) {
   emuFlag.__rushpointEmu = true;
-  connectFirestoreEmulator(db, 'localhost', 8080);
-  connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, 'localhost', 5001);
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Auth â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Judge callables only require an authenticated caller on the emulator. A single
 // anonymous sign-in satisfies that; production judges carry an admin claim.
 let authReady: Promise<void> | null = null;

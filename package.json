@@ -1,55 +1,62 @@
 {
-  "name": "rushpoint",
-  "version": "0.1.0",
-  "private": true,
-  "packageManager": "npm@11.12.0",
-  "workspaces": [
-    "apps/mobile",
-    "apps/admin",
-    "functions",
-    "packages/shared",
-    "scripts"
-  ],
-  "scripts": {
-    "//──── Cross-repo (Turborepo) ────────────────────────────────────────": "",
-    "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint",
-    "lint:fix": "turbo run lint -- --fix",
-    "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,css}\"",
-    "//──── Individual apps ───────────────────────────────────────────────": "",
-    "mobile": "npm run dev      --workspace=apps/mobile",
-    "mobile:ios": "npm run ios      --workspace=apps/mobile",
-    "mobile:android": "npm run android  --workspace=apps/mobile",
-    "admin": "npm run dev      --workspace=apps/admin",
-    "admin:build": "npm run build    --workspace=apps/admin",
-    "shared:build": "npm run build    --workspace=packages/shared",
-    "//──── Firebase ─────────────────────────────────────────────────────": "",
-    "emulator": "firebase emulators:start",
-    "emulator:export": "firebase emulators:export .firebase/emulator-data",
-    "emulator:import": "firebase emulators:start --import=.firebase/emulator-data",
-    "functions:serve": "npm run serve --workspace=functions",
-    "functions:deploy": "npm run deploy --workspace=functions",
-    "//──── Dev data ──────────────────────────────────────────────────────": "",
-    "seed": "npm run seed      --workspace=scripts",
-    "seed:reset": "npm run seed:reset --workspace=scripts"
-  },
-  "devDependencies": {
-    "turbo": "^2.0.0",
-    "typescript": "^5.4.0",
-    "prettier": "^3.3.0",
-    "eslint": "^8.57.0",
-    "@typescript-eslint/parser": "^7.14.0",
-    "@typescript-eslint/eslint-plugin": "^7.14.0"
-  },
-  "engines": {
-    "node": ">=20.0.0",
-    "npm": ">=10.0.0"
-  },
-  "dependencies": {
-    "@expo/metro-runtime": "~4.0.1",
-    "react-dom": "18.3.1",
-    "react-native-web": "~0.19.13"
-  }
+    "name":  "rushpoint",
+    "version":  "0.1.0",
+    "private":  true,
+    "packageManager":  "npm@11.12.0",
+    "workspaces":  [
+                       "apps/mobile",
+                       "apps/admin",
+                       "functions",
+                       "packages/shared",
+                       "scripts"
+                   ],
+    "scripts":  {
+                    "//Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Cross-repo (Turborepo) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬":  "",
+                    "build":  "turbo run build",
+                    "typecheck":  "turbo run typecheck",
+                    "lint":  "turbo run lint",
+                    "lint:fix":  "turbo run lint -- --fix",
+                    "format":  "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
+                    "format:check":  "prettier --check \"**/*.{ts,tsx,js,json,md,css}\"",
+                    "//Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Individual apps Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬":  "",
+                    "mobile":  "npm run dev      --workspace=apps/mobile",
+                    "mobile:ios":  "npm run ios      --workspace=apps/mobile",
+                    "mobile:android":  "npm run android  --workspace=apps/mobile",
+                    "admin":  "npm run dev --workspace=apps/admin -- --port 5180",
+                    "admin:build":  "npm run build    --workspace=apps/admin",
+                    "shared:build":  "npm run build    --workspace=packages/shared",
+                    "//Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Firebase Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬":  "",
+                    "emulator:export":  "firebase emulators:export .firebase/emulator-data",
+                    "emulator:import":  "firebase emulators:start --import=.firebase/emulator-data",
+                    "functions:serve":  "npm run serve --workspace=functions",
+                    "functions:deploy":  "npm run deploy --workspace=functions",
+                    "//Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ One-command dev (boots everything in one terminal) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬":  "",
+                    "//Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Dev data Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬":  "",
+                    "seed":  "npm run seed      --workspace=scripts",
+                    "seed:reset":  "npm run seed:reset --workspace=scripts",
+                    "mobile:web":  "npm run dev --workspace=apps/mobile -- --web",
+                    "emulator":  "node scripts/dev-emulator.mjs",
+                    "predev:all":  "node scripts/free-ports.mjs",
+                    "dev:all":  "concurrently --names EMU,SEED,MOBILE,ADMIN --prefix-colors blue,green,magenta,cyan \"npm:emulator\" \"npm:dev:seed\" \"npm:mobile:web\" \"npm:admin\"",
+                    "dev:seed":  "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 \u0026\u0026 node scripts/seed-local.mjs"
+                },
+    "devDependencies":  {
+                            "turbo":  "^2.0.0",
+                            "typescript":  "^5.4.0",
+                            "prettier":  "^3.3.0",
+                            "eslint":  "^8.57.0",
+                            "@typescript-eslint/parser":  "^7.14.0",
+                            "@typescript-eslint/eslint-plugin":  "^7.14.0",
+                            "concurrently":  "^9.1.0",
+                            "wait-on":  "^8.0.1"
+                        },
+    "engines":  {
+                    "node":  "\u003e=20.0.0",
+                    "npm":  "\u003e=10.0.0"
+                },
+    "dependencies":  {
+                         "@expo/metro-runtime":  "~4.0.1",
+                         "react-dom":  "18.3.1",
+                         "react-native-web":  "~0.19.13"
+                     }
 }
