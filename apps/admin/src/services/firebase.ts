@@ -3,13 +3,16 @@ import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
+// Emulator-safe defaults: the Firebase SDK only requires non-empty apiKey/appId
+// strings to initialize locally — they are never validated against the emulator.
+// projectId MUST match .firebaserc and the seed script (race-to-tzion-2026).
 const firebaseConfig = {
-  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'demo-api-key',
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN         ?? 'rushpoint-dev.firebaseapp.com',
-  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID          ?? 'rushpoint-dev',
-  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET      ?? 'rushpoint-dev.appspot.com',
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN         ?? 'race-to-tzion-2026.firebaseapp.com',
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID          ?? 'race-to-tzion-2026',
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET      ?? 'race-to-tzion-2026.appspot.com',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? '000000000000',
-  appId:             import.meta.env.VITE_FIREBASE_APP_ID              ?? '1:000000000000:web:demo',
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID              ?? 'emulator-app-id',
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);

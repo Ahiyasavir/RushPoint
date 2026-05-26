@@ -34,7 +34,7 @@ service cloud.firestore {
       //    (claimed: true + teamId) is written exclusively by the registerTeam
       //    Cloud Function via the Admin SDK — never directly by a client.
       match /accessCodes/{code} {
-        allow read:  if isAuthenticated();
+        allow read, get: if true;
         allow write: if isAdmin();
       }
 

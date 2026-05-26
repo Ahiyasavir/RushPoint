@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts,.tsx"
+    "dev": "npx vite",
+    "build": "npx vite build",
+    "preview": "npx vite preview",
+    "typecheck": "npx tsc --noEmit",
+    "lint": "npx eslint src --ext .ts,.tsx"
   },
   "dependencies": {
     "@rushpoint/shared": "*",

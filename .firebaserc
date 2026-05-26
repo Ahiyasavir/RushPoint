@@ -1,12 +1,12 @@
 {
   "projects": {
-    "default": "YOUR_FIREBASE_PROJECT_ID",
-    "dev":     "YOUR_FIREBASE_PROJECT_ID"
+    "default": "race-to-tzion-2026",
+    "dev":     "race-to-tzion-2026"
   },
   "targets": {
-    "YOUR_FIREBASE_PROJECT_ID": {
+    "race-to-tzion-2026": {
       "hosting": {
-        "admin": ["YOUR_FIREBASE_PROJECT_ID"]
+        "admin": ["race-to-tzion-2026"]
       }
     }
   }

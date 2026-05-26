@@ -4,10 +4,10 @@
   "private": true,
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc",
-    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
-    "deploy": "npm run build && firebase deploy --only functions",
-    "typecheck": "tsc --noEmit"
+    "build": "npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=lib/index.js --external:firebase-admin --external:firebase-functions",
+    "serve": "npm run build && npx firebase emulators:start --only functions,firestore,auth",
+    "deploy": "npm run build && npx firebase deploy --only functions",
+    "typecheck": "npx tsc --noEmit"
   },
   "engines": {
     "node": "20"

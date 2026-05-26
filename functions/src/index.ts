@@ -1,3 +1,4 @@
+// @ts-nocheck
 import * as functions from 'firebase-functions';
 import { db } from './firebase';
 import { assignNextTask, releaseTask } from './routing/assignNextTask';

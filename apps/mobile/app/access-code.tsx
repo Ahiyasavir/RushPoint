@@ -28,9 +28,11 @@ export default function AccessCodeScreen() {
 
     const codeRef = doc(db, `artifacts/${APP_ID}/accessCodes/${trimmed}`);
     let codeSnap;
+   
     try {
       codeSnap = await getDoc(codeRef);
-    } catch {
+    } catch (error) {
+      console.error("🔥 Firestore Error:", error); // השורה שהוספנו
       showToast('שגיאת חיבור — נסה שוב', 'error');
       return;
     }
