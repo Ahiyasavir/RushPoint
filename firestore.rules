@@ -26,6 +26,18 @@ service cloud.firestore {
 
     match /artifacts/{appId} {
 
+      // ── ACCESS CODES ───────────────────────────────────────────────────────
+      //    Path: artifacts/{appId}/accessCodes/{code}
+      //
+      //    Pre-generated event codes handed to teams. Clients READ to check a
+      //    code's validity / claimed state before registering. The claim itself
+      //    (claimed: true + teamId) is written exclusively by the registerTeam
+      //    Cloud Function via the Admin SDK — never directly by a client.
+      match /accessCodes/{code} {
+        allow read:  if isAuthenticated();
+        allow write: if isAdmin();
+      }
+
       // ── PUBLIC DATA ────────────────────────────────────────────────────────
       //    Path: artifacts/{appId}/public/data/{collection}/{docId}
       //
@@ -65,8 +77,10 @@ service cloud.firestore {
                       && isOwner(userId)
                       && isValidProfile(request.resource.data);
 
-        // gameState write is handled exclusively by Cloud Functions.
-        // Teams must NOT be able to set their own score or slot status.
+        // gameState write is handled exclusively by Cloud Functions
+        // (registerTeam seeds it; checkInArrival / finalizeJudgeEvaluation mutate
+        // it). Teams must NEVER write their own score or slot status — the
+        // exclusion below keeps this path closed to all client writes.
         allow write: if collection != 'profile'
                      && collection != 'gameState'
                      && isOwner(userId);

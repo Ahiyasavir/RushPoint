@@ -38,6 +38,8 @@ const pub    = (col: string)                        => `artifacts/${APP_ID}/publ
 const priv   = (uid: string, col: string)           => `artifacts/${APP_ID}/users/${uid}/${col}`;
 const pubDoc = (col: string, id: string)            => `${pub(col)}/${id}`;
 const prvDoc = (uid: string, col: string, id: string) => `${priv(uid, col)}/${id}`;
+const codes        = ()           => `artifacts/${APP_ID}/accessCodes`;
+const codeDoc      = (code: string) => `${codes()}/${code}`;
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 const minsAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
@@ -205,9 +207,9 @@ const TASKS = [
 const locked = (index: number, type: 'green' | 'orange' | 'gold') =>
   ({ index, type, status: 'locked' });
 
-/** Active slot template */
-const active = (index: number, type: 'green' | 'orange' | 'gold') =>
-  ({ index, type, status: 'active' });
+/** Active slot template — startedAt drives the mobile elapsed-time clock */
+const active = (index: number, type: 'green' | 'orange' | 'gold', startedMinsAgo = 5) =>
+  ({ index, type, status: 'active', startedAt: minsAgo(startedMinsAgo) });
 
 /** Completed slot template */
 const done = (
@@ -232,7 +234,7 @@ const gameStateA = {
   bonusPenalty: 0,
   currentTaskId: 'task-green-001',
   slots: [
-    active(0, 'green'),
+    active(0, 'green', 2),
     locked(1, 'green'),
     locked(2, 'green'),
     locked(3, 'green'),
@@ -276,9 +278,9 @@ const gameStateC = {
     done(2, 'green',  'task-green-003', 'Bible Trivia Blitz',             58),
     done(3, 'green',  'task-green-004', 'The Human Knot',                 44),
     done(4, 'orange', 'task-orange-001', 'Find Your Tene in the Bible Park', 25),
-    active(5, 'gold'),
-    active(6, 'gold'),
-    active(7, 'gold'),
+    active(5, 'gold', 8),
+    active(6, 'gold', 8),
+    active(7, 'gold', 8),
   ],
   updatedAt: minsAgo(2),
 };
@@ -353,6 +355,7 @@ async function resetEmulator(): Promise<void> {
   await deleteCollection(pub('tasks'));
   await deleteCollection(pub('events'));
   await deleteCollection(pub('leaderboard'));
+  await deleteCollection(codes());
 
   // Private collections for each mock team
   for (const uid of ALL_UIDS) {
@@ -445,6 +448,24 @@ async function seedLeaderboard(): Promise<void> {
   console.info(`  ✅ Leaderboard seeded  (4 teams ranked)`);
 }
 
+// ─── Access codes — pre-generated, handed out at the event ────────────────────
+// Path: artifacts/{appId}/accessCodes/{code}
+// Unclaimed codes route to registration; claimed codes log into an existing team.
+const ACCESS_CODES = ['LION01', 'BEAR02', 'WOLF03'];
+
+async function seedAccessCodes(): Promise<void> {
+  const batch = db.batch();
+  for (const code of ACCESS_CODES) {
+    batch.set(
+      db.doc(codeDoc(code)),
+      { code, claimed: false, teamId: null, createdAt: now() },
+      { merge: !RESET },
+    );
+  }
+  await batch.commit();
+  console.info(`  ✅ Access codes seeded: ${ACCESS_CODES.join(', ')}  (all unclaimed)`);
+}
+
 async function seedTeam(
   team: typeof TEAMS[keyof typeof TEAMS],
   members: string[],
@@ -499,6 +520,7 @@ async function main(): Promise<void> {
   await seedTasks();
   await seedEvent();
   await seedLeaderboard();
+  await seedAccessCodes();
 
   console.info('\n🌱 Seeding Auth users...');
   await seedAuthUsers();
@@ -554,6 +576,8 @@ async function main(): Promise<void> {
   console.info(`    ${TEAMS.B.code}  ${TEAMS.B.name.padEnd(22)} → slot 1 active, 100 pts`);
   console.info(`    ${TEAMS.C.code}  ${TEAMS.C.name.padEnd(22)} → park, pending judge check-in, 550 pts`);
   console.info(`    ${TEAMS.D.code}  ${TEAMS.D.name.padEnd(22)} → finished, judge scored (82), 2104 pts\n`);
+  console.info('  Unclaimed access codes (for registration flow):');
+  console.info(`    ${ACCESS_CODES.join('   ')}\n`);
 }
 
 main().catch((err) => {

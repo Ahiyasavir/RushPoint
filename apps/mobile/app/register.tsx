@@ -1,140 +1,229 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, Pressable, ScrollView,
-  KeyboardAvoidingView, Platform,
+  View, ScrollView, KeyboardAvoidingView, Platform,
+  Pressable, Switch,
 } from 'react-native';
-import { router } from 'expo-router';
-import { getAuth } from 'firebase/auth';
+import { router, useLocalSearchParams } from 'expo-router';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../src/services/firebase.config';
 import { useGameStore } from '../src/store/gameStore';
+import { Text } from '../src/components/Text';
+import { Input } from '../src/components/Input';
+import { Button } from '../src/components/Button';
+import { Card } from '../src/components/Card';
+import { useToast } from '../src/components/Toast';
 
-const MAX_MEMBERS = 8;
-const MIN_MEMBERS = 2;
+interface Participant {
+  name: string;
+  age: string;
+}
+
+type FormErrors = Partial<{
+  teamName:     string;
+  captainPhone: string;
+  participants: string;
+  waiver:       string;
+}>;
+
+const registerTeam = httpsCallable(functions, 'registerTeam');
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function RegisterScreen() {
-  const initTeam = useGameStore((s) => s.initTeam);
-  const auth     = getAuth();
+  const { code = '' } = useLocalSearchParams<{ code: string }>();
+  const initTeam      = useGameStore((s) => s.initTeam);
+  const { show: showToast } = useToast();
 
-  const [teamName, setTeamName] = useState('');
-  const [members, setMembers]   = useState(['', '']);
-  const [error, setError]       = useState('');
+  const [teamName,       setTeamName]       = useState('');
+  const [captainPhone,   setCaptainPhone]   = useState('');
+  const [participants,   setParticipants]   = useState<Participant[]>([{ name: '', age: '' }]);
+  const [waiverAccepted, setWaiverAccepted] = useState(false);
+  const [errors,         setErrors]         = useState<FormErrors>({});
 
-  function addMember() {
-    if (members.length < MAX_MEMBERS) setMembers([...members, '']);
+  // ── Participant helpers ──────────────────────────────────────────────────────
+
+  function addParticipant() {
+    setParticipants((prev) => [...prev, { name: '', age: '' }]);
   }
 
-  function removeMember(i: number) {
-    if (members.length <= MIN_MEMBERS) return;
-    setMembers(members.filter((_, idx) => idx !== i));
+  function removeParticipant(i: number) {
+    if (participants.length <= 1) return;
+    setParticipants((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  function updateMember(i: number, value: string) {
-    setMembers(members.map((m, idx) => (idx === i ? value : m)));
+  function updateParticipant(i: number, field: keyof Participant, value: string) {
+    setParticipants((prev) =>
+      prev.map((p, idx) => (idx === i ? { ...p, [field]: value } : p)),
+    );
+    if (field === 'name') setErrors((e) => ({ ...e, participants: undefined }));
   }
 
-  function handleStart() {
-    const trimmedName    = teamName.trim();
-    const trimmedMembers = members.map((m) => m.trim()).filter(Boolean);
+  // ── Validation ───────────────────────────────────────────────────────────────
 
-    if (!trimmedName) {
-      setError('Enter a team name.');
-      return;
+  function validate(): boolean {
+    const errs: FormErrors = {};
+
+    if (!teamName.trim())
+      errs.teamName = 'Team name is required.';
+
+    if (!captainPhone.trim())
+      errs.captainPhone = "Captain's phone number is required.";
+
+    const filledParticipants = participants.filter((p) => p.name.trim());
+    if (filledParticipants.length < 1)
+      errs.participants = 'Add at least one participant name.';
+
+    if (!waiverAccepted)
+      errs.waiver = 'You must accept the waiver to continue.';
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  }
+
+  // ── Submit ───────────────────────────────────────────────────────────────────
+
+  async function handleSubmit() {
+    if (!validate()) return;
+
+    const validParticipants = participants.filter((p) => p.name.trim());
+    const memberNames       = validParticipants.map((p) => p.name.trim());
+
+    // The server-side registerTeam function authoritatively claims the access
+    // code, writes the profile, and seeds the initial gameState with the Admin SDK.
+    try {
+      const res = await registerTeam({
+        code,
+        teamName:       teamName.trim(),
+        captainPhone:   captainPhone.trim(),
+        participants:   validParticipants,
+        waiverAccepted: true,
+      });
+      const { teamId } = res.data as { teamId: string };
+      initTeam(teamId, teamName.trim(), memberNames);
+      router.replace('/dashboard');
+    } catch (err) {
+      const message =
+        (err as { message?: string }).message ??
+        'Registration failed — check your connection and try again.';
+      showToast(message, 'error');
     }
-    if (trimmedMembers.length < MIN_MEMBERS) {
-      setError(`Add at least ${MIN_MEMBERS} team members.`);
-      return;
-    }
-
-    const uid = auth.currentUser?.uid ?? `local-${Date.now()}`;
-    initTeam(uid, trimmedName, trimmedMembers);
-    router.replace('/dashboard');
   }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-app-bg"
+      className="flex-1 bg-zinc-950"
     >
       <ScrollView
         className="flex-1"
-        contentContainerClassName="px-6 pt-16 pb-12"
+        contentContainerClassName="px-6 pt-14 pb-20"
         keyboardShouldPersistTaps="handled"
       >
-        {/* Logo / Title */}
-        <View className="mb-10">
-          <Text className="text-zinc-500 text-sm tracking-[0.2em] uppercase mb-1">
-            הַמִּרוּץ לְצִיּוֹן
-          </Text>
-          <Text className="text-white text-4xl font-black tracking-tight leading-tight">
-            Rush{'\n'}
-            <Text className="text-emerald-400">Point</Text>
-          </Text>
-          <Text className="text-zinc-500 text-sm mt-3 leading-relaxed">
-            Register your team to begin the adventure.
+        {/* Header */}
+        <View className="mb-8">
+          <Text variant="label" className="text-emerald-600 mb-1">Code: {code}</Text>
+          <Text variant="heading">Register Your Team</Text>
+          <Text variant="bodySmall" className="text-zinc-500 mt-1">
+            Fill in the details below to begin the race.
           </Text>
         </View>
 
-        {/* Team Name */}
-        <Text className="text-zinc-400 text-xs font-semibold uppercase tracking-widest mb-2">
-          Team Name
-        </Text>
-        <TextInput
+        {/* ── Team Name ─────────────────────────────────────────────────── */}
+        <Input
+          label="Team Name"
           value={teamName}
-          onChangeText={(v) => { setTeamName(v); setError(''); }}
+          onChangeText={(v) => { setTeamName(v); setErrors((e) => ({ ...e, teamName: undefined })); }}
           placeholder="e.g. The Lions"
-          placeholderTextColor="#3f3f46"
-          className="bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3.5 text-white text-base mb-6"
-          maxLength={30}
+          maxLength={40}
           autoCapitalize="words"
+          error={errors.teamName}
+          className="mb-5"
         />
 
-        {/* Members */}
-        <Text className="text-zinc-400 text-xs font-semibold uppercase tracking-widest mb-3">
-          Team Members ({members.length}/{MAX_MEMBERS})
-        </Text>
+        {/* ── Captain Phone ─────────────────────────────────────────────── */}
+        <Input
+          label="Captain's Phone Number"
+          value={captainPhone}
+          onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
+          placeholder="+972 50 000 0000"
+          keyboardType="phone-pad"
+          error={errors.captainPhone}
+          className="mb-6"
+        />
 
-        {members.map((name, i) => (
-          <View key={i} className="flex-row items-center gap-2 mb-2.5">
-            <TextInput
-              value={name}
-              onChangeText={(v) => { updateMember(i, v); setError(''); }}
-              placeholder={`Member ${i + 1}`}
-              placeholderTextColor="#3f3f46"
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm"
+        {/* ── Participants ──────────────────────────────────────────────── */}
+        <Text variant="label" className="mb-3">Participants</Text>
+
+        {participants.map((p, i) => (
+          <View key={i} className="flex-row gap-2 mb-3 items-start">
+            <Input
+              value={p.name}
+              onChangeText={(v) => updateParticipant(i, 'name', v)}
+              placeholder={`Name ${i + 1}`}
               maxLength={30}
               autoCapitalize="words"
+              className="flex-1"
             />
-            {members.length > MIN_MEMBERS && (
+            <Input
+              value={p.age}
+              onChangeText={(v) => updateParticipant(i, 'age', v)}
+              placeholder="Age"
+              keyboardType="number-pad"
+              maxLength={3}
+              className="w-20"
+            />
+            {participants.length > 1 && (
               <Pressable
-                onPress={() => removeMember(i)}
-                className="w-9 h-9 rounded-full bg-zinc-800 items-center justify-center"
+                onPress={() => removeParticipant(i)}
+                className="w-10 h-[52px] rounded-xl bg-zinc-800 items-center justify-center"
               >
-                <Text className="text-zinc-400 text-lg leading-none">×</Text>
+                <Text variant="subheading" className="text-zinc-400 leading-none">×</Text>
               </Pressable>
             )}
           </View>
         ))}
 
-        {members.length < MAX_MEMBERS && (
-          <Pressable onPress={addMember} className="mt-1 mb-6">
-            <Text className="text-emerald-500 text-sm font-semibold">+ Add member</Text>
-          </Pressable>
-        )}
-
-        {/* Error */}
-        {error ? (
-          <Text className="text-red-400 text-sm mb-4">{error}</Text>
+        {errors.participants ? (
+          <Text variant="caption" className="text-red-400 mb-2">{errors.participants}</Text>
         ) : null}
 
-        {/* CTA */}
-        <Pressable
-          onPress={handleStart}
-          className="bg-emerald-500 active:bg-emerald-600 rounded-2xl py-4 items-center mt-2"
-          style={{ shadowColor: '#22c55e', shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 4 }, elevation: 10 }}
-        >
-          <Text className="text-white text-base font-bold tracking-wide">
-            Start the Adventure →
+        <View className="mb-6">
+          <Button variant="ghost" size="sm" onPress={addParticipant}>
+            + Add Participant
+          </Button>
+        </View>
+
+        {/* ── Liability Waiver ──────────────────────────────────────────── */}
+        <Card className="p-4 mb-2">
+          <Text variant="label" className="mb-2">Liability & Health Waiver</Text>
+          <Text variant="caption" className="text-zinc-400 leading-relaxed mb-4">
+            I confirm all participants are in good health and fit to participate in
+            this physical outdoor activity. I release the organizers from any liability
+            for personal injuries or accidents during the event.
           </Text>
-        </Pressable>
+          <View className="flex-row items-center justify-between">
+            <Text variant="bodySmall" className="text-zinc-300 flex-1 mr-4">
+              I accept all terms and conditions
+            </Text>
+            <Switch
+              value={waiverAccepted}
+              onValueChange={(v) => { setWaiverAccepted(v); setErrors((e) => ({ ...e, waiver: undefined })); }}
+              trackColor={{ false: '#3f3f46', true: '#10b981' }}
+              thumbColor={waiverAccepted ? '#ffffff' : '#71717a'}
+            />
+          </View>
+        </Card>
+
+        {errors.waiver ? (
+          <Text variant="caption" className="text-red-400 mb-4">{errors.waiver}</Text>
+        ) : <View className="mb-4" />}
+
+        {/* ── Submit ────────────────────────────────────────────────────── */}
+        <Button onPress={handleSubmit} fullWidth disabled={!waiverAccepted}>
+          Start the Race →
+        </Button>
       </ScrollView>
     </KeyboardAvoidingView>
   );
