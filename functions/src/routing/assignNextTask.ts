@@ -1,7 +1,11 @@
+import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../firebase';
-import type { Task, Assignment, GeoPoint } from '@rushpoint/shared';
+import type { Task, GeoPoint, TaskRecommendation } from '@rushpoint/shared';
 
-const MAX_TEAMS_PER_STATION = 3;
+const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const tasksCol = () => `artifacts/${APP_ID}/public/data/tasks`;
+
+// ─── Geo ──────────────────────────────────────────────────────────────────────
 
 function haversineKm(a: GeoPoint, b: GeoPoint): number {
   const R = 6371;
@@ -15,79 +19,177 @@ function haversineKm(a: GeoPoint, b: GeoPoint): number {
   return R * 2 * Math.asin(Math.sqrt(h));
 }
 
-/**
- * Scores each candidate task for a given team position.
- * Lower score = better assignment.
- *
- * Formula:
- *   score = distance_km * 1.0
- *           + congestion_count * 15.0   ← penalise crowded stations heavily
- *           + (estimatedMinutes / 10)   ← slight bias toward faster tasks
- */
-function scoreTask(task: Task, teamLocation: GeoPoint): number {
-  const dist = haversineKm(teamLocation, task.coordinates);
-  const congestion = task.currentTeamIds.length;
-  return dist * 1.0 + congestion * 15.0 + task.estimatedMinutes / 10;
+// ─── Priority sub-formulas ────────────────────────────────────────────────────
+
+/** Φ: station availability — 1.0 when empty, 0.0 when full */
+function loadFactor(task: Task): number {
+  const cap = task.maxConcurrentTeams;
+  return cap > 0 ? (cap - task.currentTeamCount) / cap : 0;
+}
+
+/** Transit time in minutes, assuming 5 km/h walking pace */
+function transitMinutes(teamLocation: GeoPoint, task: Task): number {
+  if (!task.coordinates) return 5;
+  return haversineKm(teamLocation, task.coordinates) * 12;
 }
 
 /**
- * Assigns the next best open-field (green) task to a team.
- * If all Bible Park (gold) slots are full, injects an off-site riddle instead.
+ * Ω: skill-difficulty match.
+ * S_i ∈ [-1, 1]  (negative = team runs fast, positive = team runs slow)
+ * D_j ∈ [1, 10]  normalised to [-0.8, 1.0]
  */
-export async function assignNextTask(
-  teamId: string,
+function skillMatch(skillRatio: number, difficulty: number): number {
+  const normalizedDifficulty = (difficulty - 5) / 5;
+  return 1 - Math.abs(skillRatio - normalizedDifficulty);
+}
+
+/**
+ * Priority(i, j) = 0.5 * Φ(Load_j) - 0.3 * TransitNorm(i,j) + 0.2 * Ω(S_i, D_j)
+ * Higher = better assignment for this team.
+ */
+function priorityScore(task: Task, teamLocation: GeoPoint, skillRatio: number): number {
+  const transitNorm = Math.min(transitMinutes(teamLocation, task), 30) / 30;
+  return (
+    0.5 * loadFactor(task) -
+    0.3 * transitNorm +
+    0.2 * skillMatch(skillRatio, task.difficulty ?? 5)
+  );
+}
+
+// ─── Skill ratio ──────────────────────────────────────────────────────────────
+
+type SlotSummary = { taskId?: string; startedAt?: string; completedAt?: string };
+
+/**
+ * Computes the team's historical performance ratio S_i ∈ [-1, 1].
+ * Negative = consistently faster than target; positive = consistently slower.
+ * Returns 0 (neutral) when no completed slots have timing data.
+ */
+export async function computeSkillRatio(completedSlots: SlotSummary[]): Promise<number> {
+  const measurable = completedSlots.filter(
+    (s) => s.taskId && s.startedAt && s.completedAt,
+  );
+  if (measurable.length === 0) return 0;
+
+  const taskRefs = measurable.map((s) => db.doc(`${tasksCol()}/${s.taskId!}`));
+  const taskSnaps = await db.getAll(...taskRefs);
+
+  let total = 0;
+  let count = 0;
+  for (let i = 0; i < measurable.length; i++) {
+    const snap = taskSnaps[i];
+    if (!snap.exists) continue;
+    const task = snap.data() as Task;
+    const slot = measurable[i];
+    const actualMs =
+      new Date(slot.completedAt!).getTime() - new Date(slot.startedAt!).getTime();
+    const actualMinutes = actualMs / 60_000;
+    const targetMinutes = task.estimatedMinutes;
+    if (targetMinutes > 0) {
+      total += Math.max(-1, Math.min(1, (actualMinutes - targetMinutes) / targetMinutes));
+      count++;
+    }
+  }
+  return count > 0 ? total / count : 0;
+}
+
+// ─── Recommendation list (read-only, no Firestore writes) ────────────────────
+
+export async function buildRecommendations(
   teamLocation: GeoPoint,
   completedTaskIds: string[],
   targetType: 'green' | 'gold',
-): Promise<{ taskId?: string; injectRiddle?: boolean }> {
+  skillRatio: number,
+  limit = 5,
+): Promise<TaskRecommendation[]> {
   const snapshot = await db
-    .collection('tasks')
+    .collection(tasksCol())
     .where('type', '==', targetType)
+    .where('isActive', '==', true)
     .get();
 
   const candidates: Task[] = [];
   for (const doc of snapshot.docs) {
     const task = { id: doc.id, ...doc.data() } as Task;
     if (completedTaskIds.includes(task.id)) continue;
-    if (task.currentTeamIds.length >= (task.maxConcurrentTeams ?? MAX_TEAMS_PER_STATION)) continue;
+    if (task.currentTeamCount >= task.maxConcurrentTeams) continue;
     candidates.push(task);
   }
 
-  // If targeting gold (park) and no capacity, signal to inject a delay riddle
+  return candidates
+    .map((task) => ({
+      task,
+      priority: priorityScore(task, teamLocation, skillRatio),
+      distanceKm: task.coordinates
+        ? haversineKm(teamLocation, task.coordinates)
+        : 0,
+    }))
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, limit)
+    .map(({ task, priority, distanceKm }) => ({
+      taskId: task.id,
+      title: task.title,
+      titleHe: task.titleHe,
+      priority: Math.round(priority * 1000) / 1000,
+      estimatedMinutes: task.estimatedMinutes,
+      difficulty: task.difficulty ?? 5,
+      currentLoad:
+        task.maxConcurrentTeams > 0
+          ? task.currentTeamCount / task.maxConcurrentTeams
+          : 0,
+      distanceKm: Math.round(distanceKm * 100) / 100,
+    }));
+}
+
+// ─── Task assignment (writes to Firestore) ───────────────────────────────────
+
+export async function assignNextTask(
+  teamId: string,
+  teamLocation: GeoPoint,
+  completedTaskIds: string[],
+  targetType: 'green' | 'gold',
+  skillRatio = 0,
+): Promise<{ taskId?: string; injectRiddle?: boolean }> {
+  const snapshot = await db
+    .collection(tasksCol())
+    .where('type', '==', targetType)
+    .where('isActive', '==', true)
+    .get();
+
+  const candidates: Task[] = [];
+  for (const doc of snapshot.docs) {
+    const task = { id: doc.id, ...doc.data() } as Task;
+    if (completedTaskIds.includes(task.id)) continue;
+    if (task.currentTeamCount >= task.maxConcurrentTeams) continue;
+    candidates.push(task);
+  }
+
   if (targetType === 'gold' && candidates.length === 0) {
     return { injectRiddle: true };
   }
-
   if (candidates.length === 0) return {};
 
-  const sorted = candidates.sort(
-    (a, b) => scoreTask(a, teamLocation) - scoreTask(b, teamLocation),
-  );
-  const chosen = sorted[0];
+  const chosen = candidates.sort(
+    (a, b) =>
+      priorityScore(b, teamLocation, skillRatio) -
+      priorityScore(a, teamLocation, skillRatio),
+  )[0];
 
-  // Atomically add team to currentTeamIds
-  await db
-    .collection('tasks')
-    .doc(chosen.id)
-    .update({
-      currentTeamIds: [...chosen.currentTeamIds, teamId],
-    });
+  await db.collection(tasksCol()).doc(chosen.id).update({
+    currentTeamCount: FieldValue.increment(1),
+  });
 
   return { taskId: chosen.id };
 }
 
-/**
- * Called when a team checks out of a task (completed or skipped).
- * Removes teamId from the task's currentTeamIds.
- */
-export async function releaseTask(taskId: string, teamId: string): Promise<void> {
-  const doc = await db.collection('tasks').doc(taskId).get();
-  if (!doc.exists) return;
-  const task = doc.data() as Task;
-  await db
-    .collection('tasks')
-    .doc(taskId)
-    .update({
-      currentTeamIds: task.currentTeamIds.filter((id) => id !== teamId),
-    });
+// ─── Task release ─────────────────────────────────────────────────────────────
+
+export async function releaseTask(taskId: string, _teamId?: string): Promise<void> {
+  const taskRef = db.collection(tasksCol()).doc(taskId);
+  const snap = await taskRef.get();
+  if (!snap.exists) return;
+  const current = (snap.data() as Task).currentTeamCount ?? 0;
+  if (current > 0) {
+    await taskRef.update({ currentTeamCount: FieldValue.increment(-1) });
+  }
 }

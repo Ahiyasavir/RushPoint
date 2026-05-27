@@ -8,12 +8,15 @@ import { Text } from '../src/components/Text';
 import { Input } from '../src/components/Input';
 import { Button } from '../src/components/Button';
 import { useToast } from '../src/components/Toast';
+import { LanguageToggle } from '../src/components/LanguageToggle';
+import { useTranslation } from '../src/i18n';
 
 const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 
 export default function AccessCodeScreen() {
   const initTeam = useGameStore((s) => s.initTeam);
   const { show: showToast } = useToast();
+  const { t } = useTranslation();
 
   const [code, setCode]         = useState('');
   const [codeError, setCodeError] = useState('');
@@ -21,24 +24,24 @@ export default function AccessCodeScreen() {
   async function handleSubmit() {
     const trimmed = code.trim().toUpperCase();
     if (!trimmed) {
-      setCodeError('Please enter your access code.');
+      setCodeError(t('access.codeRequired'));
       return;
     }
     setCodeError('');
 
     const codeRef = doc(db, `artifacts/${APP_ID}/accessCodes/${trimmed}`);
     let codeSnap;
-   
+
     try {
       codeSnap = await getDoc(codeRef);
     } catch (error) {
-      console.error("🔥 Firestore Error:", error); // השורה שהוספנו
-      showToast('שגיאת חיבור — נסה שוב', 'error');
+      console.error('Firestore error reading access code:', error);
+      showToast(t('access.connError'), 'error');
       return;
     }
 
     if (!codeSnap.exists()) {
-      showToast('קוד גישה שגוי', 'error');
+      showToast(t('access.invalidCode'), 'error');
       return;
     }
 
@@ -74,24 +77,29 @@ export default function AccessCodeScreen() {
         contentContainerClassName="px-6 pb-12"
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── Language toggle ───────────────────────────────────────────── */}
+        <View className="flex-row justify-end mt-12">
+          <LanguageToggle />
+        </View>
+
         {/* ── Branding ──────────────────────────────────────────────────── */}
-        <View className="mt-24 mb-14">
+        <View className="mt-10 mb-14">
           <Text variant="label" className="text-zinc-600 mb-1">
-            הַמִּרוּץ לְצִיּוֹן
+            {t('brand.tagline')}
           </Text>
           <Text variant="display">Rush</Text>
           <Text variant="display" className="text-emerald-400">Point</Text>
           <Text variant="bodySmall" className="text-zinc-500 mt-3 leading-relaxed">
-            Enter your event access code to begin the race.
+            {t('access.intro')}
           </Text>
         </View>
 
         {/* ── Code input ────────────────────────────────────────────────── */}
         <Input
-          label="Access Code"
+          label={t('access.codeLabel')}
           value={code}
           onChangeText={(v) => { setCode(v); setCodeError(''); }}
-          placeholder="e.g. LION01"
+          placeholder={t('access.codePlaceholder')}
           autoCapitalize="characters"
           autoCorrect={false}
           maxLength={10}
@@ -100,7 +108,7 @@ export default function AccessCodeScreen() {
         />
 
         <Button onPress={handleSubmit} fullWidth>
-          Enter Event →
+          {t('access.enter')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

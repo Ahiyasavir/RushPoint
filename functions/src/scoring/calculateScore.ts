@@ -1,4 +1,4 @@
-import type { Team } from '@rushpoint/shared';
+import type { GameState } from '@rushpoint/shared';
 
 const SLOT_POINT_VALUES = {
   green: 100,
@@ -13,17 +13,18 @@ const SPEED_BONUS_THRESHOLD_MINUTES = 120; // top speed bonus window
 /**
  * Computes the final team score:
  *   base slot points + judge basket score + speed bonus - clue penalties
+ * Used by Phase 3 leaderboard finalisation — not called during live judging.
  */
 export function calculateScore(
-  team: Team,
+  gs: GameState,
   judgeBasketScore: number,   // 0–100 from judge
   durationMinutes: number,
 ): number {
-  const slotPoints = team.slots
+  const slotPoints = gs.slots
     .filter((s) => s.status === 'completed')
     .reduce((sum, s) => sum + SLOT_POINT_VALUES[s.type], 0);
 
-  const allCompleted = team.slots.every((s) => s.status === 'completed');
+  const allCompleted = gs.slots.every((s) => s.status === 'completed');
   const completionBonus = allCompleted ? COMPLETION_BONUS : 0;
 
   // Speed bonus: linear decay from SPEED_BONUS_MAX down to 0 over threshold window
@@ -34,6 +35,6 @@ export function calculateScore(
   const basketBonus = Math.round(judgeBasketScore * 3); // 0–300 pts
 
   return Math.round(
-    slotPoints + completionBonus + speedBonus + basketBonus - team.bonusPenalty,
+    slotPoints + completionBonus + speedBonus + basketBonus - gs.bonusPenalty,
   );
 }

@@ -46,13 +46,13 @@ async function main() {
     id: 'task-green-001', title: 'Jerusalem Landmarks Photo Hunt',
     description: 'Photograph all 5 specified Jerusalem landmarks as a team.',
     type: 'green', qrCode: 'QR-GREEN-001', maxConcurrentTeams: 3, currentTeamCount: 0,
-    photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
+    difficulty: 3, photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
   });
   await db.doc(`${tasksPath}/task-gold-001`).set({
     id: 'task-gold-001', title: 'Ancient Grape Press',
     description: 'Use the replica press to fill and seal a clay flask for your Tene.',
     type: 'gold', qrCode: 'QR-GOLD-001', maxConcurrentTeams: 2, currentTeamCount: 1,
-    photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
+    difficulty: 8, photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
   });
   console.log('[seed-local] Seeded tasks: task-green-001, task-gold-001');
 

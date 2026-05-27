@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions, ensureAuth } from '../services/firebase';
+import { useI18n } from '../i18n';
 import {
   TENE_PRODUCTS,
   TIER_LABEL,
@@ -31,6 +32,7 @@ interface FinalizeResult {
     productScore: number;
     designScore: number;
     presentationScore: number;
+    taskScore: number;
     total: number;
   };
   allDone: boolean;
@@ -49,6 +51,7 @@ const finalizeJudgeEvaluation = httpsCallable(functions, 'finalizeJudgeEvaluatio
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function JudgePage() {
+  const { t } = useI18n();
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
@@ -75,12 +78,12 @@ export default function JudgePage() {
       const res = await listPendingArrivals();
       setArrivals((res.data as { arrivals: Arrival[] }).arrivals ?? []);
     } catch (err) {
-      setError('Could not load pending teams. Is the emulator running?');
+      setError(t('judge.loadError'));
       console.error('[judge] listPendingArrivals failed:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadArrivals();
@@ -100,7 +103,7 @@ export default function JudgePage() {
       setPresentation(0);
       setNote('');
     } catch (err) {
-      setError('Check-in failed. Try again.');
+      setError(t('judge.checkInError'));
       console.error('[judge] checkInArrival failed:', err);
     } finally {
       setCheckingInId(null);
@@ -143,7 +146,7 @@ export default function JudgePage() {
       setActive(null);
       void loadArrivals();
     } catch (err) {
-      setError('Could not finalize the score. Try again.');
+      setError(t('judge.finalizeError'));
       console.error('[judge] finalizeJudgeEvaluation failed:', err);
     } finally {
       setSubmitting(false);
@@ -157,18 +160,18 @@ export default function JudgePage() {
   return (
     <div className="max-w-3xl mx-auto p-8">
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-2xl font-bold text-white">Judge Station</h1>
+        <h1 className="text-2xl font-bold text-white">{t('judge.title')}</h1>
         {!active && !result && (
           <button
             onClick={() => void loadArrivals()}
             className="text-sm text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
           >
-            ↻ Refresh
+            ↻ {t('common.refresh')}
           </button>
         )}
       </div>
       <p className="text-zinc-500 text-sm mb-8">
-        Check teams in on arrival, then grade their Tene basket.
+        {t('judge.subtitle')}
       </p>
 
       {error && (
@@ -221,17 +224,18 @@ function ArrivalList({
   checkingInId: string | null;
   onCheckIn: (a: Arrival) => void;
 }) {
+  const { t } = useI18n();
   if (loading) {
     return (
       <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-500">
-        Loading pending teams…
+        {t('judge.loadingTeams')}
       </div>
     );
   }
   if (arrivals.length === 0) {
     return (
       <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-600">
-        No teams waiting. They’ll appear here when they check in at your station.
+        {t('judge.noTeams')}
       </div>
     );
   }
@@ -258,7 +262,7 @@ function ArrivalList({
             disabled={checkingInId !== null}
             className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
           >
-            {checkingInId === a.checkInId ? 'Checking in…' : 'Approve Arrival / Check-In'}
+            {checkingInId === a.checkInId ? t('judge.checkingIn') : t('judge.approve')}
           </button>
         </div>
       ))}
@@ -288,21 +292,22 @@ function EvaluationForm({
   onFinalize: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div>
       {/* Frozen banner */}
       <div className="rounded-xl bg-sky-950 border border-sky-800 px-5 py-3 mb-6 flex items-center justify-between">
         <div>
-          <p className="text-sky-300 font-semibold">{arrival.teamName} checked in</p>
-          <p className="text-sky-500/80 text-sm">Their race clock is frozen while you grade.</p>
+          <p className="text-sky-300 font-semibold">{t('judge.checkedInBanner', { team: arrival.teamName })}</p>
+          <p className="text-sky-500/80 text-sm">{t('judge.clockFrozen')}</p>
         </div>
         <button onClick={onCancel} className="text-sky-400 hover:text-sky-200 text-sm">
-          ← Back
+          ← {t('common.back')}
         </button>
       </div>
 
       {/* A. Tene product checklist */}
-      <Section title="A. Tene Checklist" hint="Tick everything the team actually brought.">
+      <Section title={t('judge.sectionChecklist')} hint={t('judge.sectionChecklistHint')}>
         <div className="space-y-5">
           {TIER_ORDER.map((tier) => (
             <div key={tier}>
@@ -338,28 +343,28 @@ function EvaluationForm({
             </div>
           ))}
         </div>
-        <div className="mt-3 text-right text-sm text-zinc-400">
-          Product score: <span className="font-bold text-white">{productScore}</span>
+        <div className="mt-3 text-end text-sm text-zinc-400">
+          {t('judge.productScore')} <span className="font-bold text-white">{productScore}</span>
         </div>
       </Section>
 
       {/* B. Visual design */}
-      <Section title="B. Visual Design & Aesthetics" hint={`Decorations and effort (0–${MAX_DESIGN_SCORE}).`}>
+      <Section title={t('judge.sectionDesign')} hint={t('judge.sectionDesignHint', { max: MAX_DESIGN_SCORE })}>
         <ScoreSlider value={design} max={MAX_DESIGN_SCORE} onChange={onDesign} />
       </Section>
 
       {/* C. Presentation */}
-      <Section title="C. Team Presentation & Synergy" hint={`Cohesion and delivery (0–${MAX_PRESENTATION_SCORE}).`}>
+      <Section title={t('judge.sectionPresentation')} hint={t('judge.sectionPresentationHint', { max: MAX_PRESENTATION_SCORE })}>
         <ScoreSlider value={presentation} max={MAX_PRESENTATION_SCORE} onChange={onPresentation} />
       </Section>
 
       {/* Note */}
-      <Section title="Judge Note" hint="Optional — recorded with the score.">
+      <Section title={t('judge.note')} hint={t('judge.noteHint')}>
         <textarea
           value={note}
           onChange={(e) => onNote(e.target.value)}
           rows={2}
-          placeholder="e.g. Beautiful olive arrangement, great teamwork."
+          placeholder={t('judge.notePlaceholder')}
           className="w-full px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none text-sm"
         />
       </Section>
@@ -368,12 +373,12 @@ function EvaluationForm({
       <div className="sticky bottom-0 mt-8 rounded-xl bg-zinc-900 border border-zinc-700 p-5">
         <div className="flex items-end justify-between mb-4">
           <div className="text-sm text-zinc-400 space-y-0.5">
-            <div>Products <span className="text-zinc-500">{productScore}</span></div>
-            <div>Design <span className="text-zinc-500">{design}</span></div>
-            <div>Presentation <span className="text-zinc-500">{presentation}</span></div>
+            <div>{t('judge.labelProducts')} <span className="text-zinc-500">{productScore}</span></div>
+            <div>{t('judge.labelDesign')} <span className="text-zinc-500">{design}</span></div>
+            <div>{t('judge.labelPresentation')} <span className="text-zinc-500">{presentation}</span></div>
           </div>
-          <div className="text-right">
-            <p className="text-xs uppercase tracking-wider text-zinc-500">Total Calculated Score</p>
+          <div className="text-end">
+            <p className="text-xs uppercase tracking-wider text-zinc-500">{t('judge.totalCalculated')}</p>
             <p className="text-4xl font-black text-emerald-400 tabular-nums">{total}</p>
           </div>
         </div>
@@ -382,7 +387,7 @@ function EvaluationForm({
           disabled={submitting}
           className="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold transition-colors"
         >
-          {submitting ? 'Releasing…' : 'Finalize & Release Team'}
+          {submitting ? t('judge.releasing') : t('judge.finalize')}
         </button>
       </div>
     </div>
@@ -397,27 +402,31 @@ function ResultCard({
   result: FinalizeResult & { teamName: string };
   onNext: () => void;
 }) {
+  const { t } = useI18n();
   const b = result.breakdown;
   return (
     <div className="rounded-xl bg-emerald-950/40 border border-emerald-800 p-6">
       <p className="text-emerald-400 font-bold text-lg mb-1">
-        {result.teamName} released {result.allDone ? '— race complete! 🏁' : ''}
+        {result.allDone
+          ? t('judge.releasedComplete', { team: result.teamName })
+          : t('judge.released', { team: result.teamName })}
       </p>
-      <p className="text-zinc-400 text-sm mb-5">Their clock has resumed for the next mission.</p>
+      <p className="text-zinc-400 text-sm mb-5">{t('judge.clockResumed')}</p>
 
       <div className="rounded-lg bg-zinc-900 border border-zinc-800 divide-y divide-zinc-800 text-sm">
-        <Row label="Product score"      value={b.productScore} />
-        <Row label="Visual design"      value={b.designScore} />
-        <Row label="Team presentation"  value={b.presentationScore} />
-        <Row label="Basket total"       value={b.total} strong />
-        <Row label="New team score"     value={result.newScore} strong accent />
+        <Row label={t('judge.rowTaskCompletion')} value={b.taskScore} />
+        <Row label={t('judge.rowProductScore')}   value={b.productScore} />
+        <Row label={t('judge.rowVisualDesign')}    value={b.designScore} />
+        <Row label={t('judge.rowPresentation')}    value={b.presentationScore} />
+        <Row label={t('judge.rowBasketTotal')}     value={b.total} strong />
+        <Row label={t('judge.rowNewScore')}        value={result.newScore} strong accent />
       </div>
 
       <button
         onClick={onNext}
         className="mt-5 text-sm text-zinc-400 hover:text-white"
       >
-        ← Judge another team
+        ← {t('judge.judgeAnother')}
       </button>
     </div>
   );

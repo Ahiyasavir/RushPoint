@@ -12,6 +12,7 @@ import { Input } from '../src/components/Input';
 import { Button } from '../src/components/Button';
 import { Card } from '../src/components/Card';
 import { useToast } from '../src/components/Toast';
+import { useTranslation } from '../src/i18n';
 
 interface Participant {
   name: string;
@@ -33,6 +34,7 @@ export default function RegisterScreen() {
   const { code = '' } = useLocalSearchParams<{ code: string }>();
   const initTeam      = useGameStore((s) => s.initTeam);
   const { show: showToast } = useToast();
+  const { t } = useTranslation();
 
   const [teamName,       setTeamName]       = useState('');
   const [captainPhone,   setCaptainPhone]   = useState('');
@@ -64,17 +66,17 @@ export default function RegisterScreen() {
     const errs: FormErrors = {};
 
     if (!teamName.trim())
-      errs.teamName = 'Team name is required.';
+      errs.teamName = t('register.errTeamName');
 
     if (!captainPhone.trim())
-      errs.captainPhone = "Captain's phone number is required.";
+      errs.captainPhone = t('register.errPhone');
 
     const filledParticipants = participants.filter((p) => p.name.trim());
     if (filledParticipants.length < 1)
-      errs.participants = 'Add at least one participant name.';
+      errs.participants = t('register.errParticipants');
 
     if (!waiverAccepted)
-      errs.waiver = 'You must accept the waiver to continue.';
+      errs.waiver = t('register.errWaiver');
 
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -103,8 +105,7 @@ export default function RegisterScreen() {
       router.replace('/dashboard');
     } catch (err) {
       const message =
-        (err as { message?: string }).message ??
-        'Registration failed — check your connection and try again.';
+        (err as { message?: string }).message ?? t('register.errSubmit');
       showToast(message, 'error');
     }
   }
@@ -123,19 +124,19 @@ export default function RegisterScreen() {
       >
         {/* Header */}
         <View className="mb-8">
-          <Text variant="label" className="text-emerald-600 mb-1">Code: {code}</Text>
-          <Text variant="heading">Register Your Team</Text>
+          <Text variant="label" className="text-emerald-600 mb-1">{t('register.codeLabel', { code })}</Text>
+          <Text variant="heading">{t('register.title')}</Text>
           <Text variant="bodySmall" className="text-zinc-500 mt-1">
-            Fill in the details below to begin the race.
+            {t('register.subtitle')}
           </Text>
         </View>
 
         {/* ── Team Name ─────────────────────────────────────────────────── */}
         <Input
-          label="Team Name"
+          label={t('register.teamName')}
           value={teamName}
           onChangeText={(v) => { setTeamName(v); setErrors((e) => ({ ...e, teamName: undefined })); }}
-          placeholder="e.g. The Lions"
+          placeholder={t('register.teamNamePlaceholder')}
           maxLength={40}
           autoCapitalize="words"
           error={errors.teamName}
@@ -144,7 +145,7 @@ export default function RegisterScreen() {
 
         {/* ── Captain Phone ─────────────────────────────────────────────── */}
         <Input
-          label="Captain's Phone Number"
+          label={t('register.captainPhone')}
           value={captainPhone}
           onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
           placeholder="+972 50 000 0000"
@@ -154,14 +155,14 @@ export default function RegisterScreen() {
         />
 
         {/* ── Participants ──────────────────────────────────────────────── */}
-        <Text variant="label" className="mb-3">Participants</Text>
+        <Text variant="label" className="mb-3">{t('register.participants')}</Text>
 
         {participants.map((p, i) => (
           <View key={i} className="flex-row gap-2 mb-3 items-start">
             <Input
               value={p.name}
               onChangeText={(v) => updateParticipant(i, 'name', v)}
-              placeholder={`Name ${i + 1}`}
+              placeholder={t('register.namePlaceholder', { n: i + 1 })}
               maxLength={30}
               autoCapitalize="words"
               className="flex-1"
@@ -169,7 +170,7 @@ export default function RegisterScreen() {
             <Input
               value={p.age}
               onChangeText={(v) => updateParticipant(i, 'age', v)}
-              placeholder="Age"
+              placeholder={t('register.age')}
               keyboardType="number-pad"
               maxLength={3}
               className="w-20"
@@ -191,21 +192,19 @@ export default function RegisterScreen() {
 
         <View className="mb-6">
           <Button variant="ghost" size="sm" onPress={addParticipant}>
-            + Add Participant
+            {t('register.addParticipant')}
           </Button>
         </View>
 
         {/* ── Liability Waiver ──────────────────────────────────────────── */}
         <Card className="p-4 mb-2">
-          <Text variant="label" className="mb-2">Liability & Health Waiver</Text>
+          <Text variant="label" className="mb-2">{t('register.waiverTitle')}</Text>
           <Text variant="caption" className="text-zinc-400 leading-relaxed mb-4">
-            I confirm all participants are in good health and fit to participate in
-            this physical outdoor activity. I release the organizers from any liability
-            for personal injuries or accidents during the event.
+            {t('register.waiverBody')}
           </Text>
           <View className="flex-row items-center justify-between">
-            <Text variant="bodySmall" className="text-zinc-300 flex-1 mr-4">
-              I accept all terms and conditions
+            <Text variant="bodySmall" className="text-zinc-300 flex-1 me-4">
+              {t('register.waiverAccept')}
             </Text>
             <Switch
               value={waiverAccepted}
@@ -222,7 +221,7 @@ export default function RegisterScreen() {
 
         {/* ── Submit ────────────────────────────────────────────────────── */}
         <Button onPress={handleSubmit} fullWidth disabled={!waiverAccepted}>
-          Start the Race →
+          {t('register.start')}
         </Button>
       </ScrollView>
     </KeyboardAvoidingView>

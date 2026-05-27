@@ -8,6 +8,8 @@ import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
 import { Badge } from '../src/components/Badge';
 import type { BadgeProps } from '../src/components/Badge';
+import { LanguageToggle } from '../src/components/LanguageToggle';
+import { useTranslation } from '../src/i18n';
 
 const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 
@@ -64,12 +66,6 @@ function formatElapsed(seconds: number): string {
 
 // ─── Static maps (NativeWind requires fully-spelled-out strings) ──────────────
 
-const SLOT_TYPE_LABEL: Record<SlotType, string> = {
-  green:  'Open Field Mission',
-  orange: 'Find the Tene',
-  gold:   'Fill the Basket',
-};
-
 const SLOT_BADGE_VARIANT: Record<SlotType, BadgeProps['variant']> = {
   green:  'green',
   orange: 'orange',
@@ -92,6 +88,7 @@ const DOT_COLOR: Record<SlotType, Record<SlotStatus, string>> = {
 
 export default function DashboardScreen() {
   const insets   = useSafeAreaInsets();
+  const { t }    = useTranslation();
   const teamId   = useGameStore((s) => s.teamId);
   const teamName = useGameStore((s) => s.teamName);
 
@@ -140,23 +137,27 @@ export default function DashboardScreen() {
         className="border-b border-zinc-800/60 px-5 pb-4"
         style={{ paddingTop: insets.top + 8 }}
       >
+        <View className="flex-row justify-end mb-3">
+          <LanguageToggle />
+        </View>
+
         <View className="flex-row items-start justify-between">
-          <View className="flex-1 mr-4">
-            <Text variant="label">Team</Text>
+          <View className="flex-1 me-4">
+            <Text variant="label">{t('dash.team')}</Text>
             <Text variant="heading" numberOfLines={1}>{teamName || '—'}</Text>
           </View>
 
           <View className="items-end">
-            <Text variant="label">Score</Text>
+            <Text variant="label">{t('dash.score')}</Text>
             <Text variant="display" className="text-emerald-400 leading-tight">
               {score}
             </Text>
-            <Text variant="label" className="text-zinc-600">pts</Text>
+            <Text variant="label" className="text-zinc-600">{t('dash.pts')}</Text>
           </View>
         </View>
 
         <Text variant="caption" className="text-zinc-600 mt-2">
-          {completedCount} of 8 slots completed
+          {t('dash.slotsCompleted', { n: completedCount })}
         </Text>
       </View>
 
@@ -166,7 +167,7 @@ export default function DashboardScreen() {
         contentContainerClassName="px-4 pt-6 pb-16"
         showsVerticalScrollIndicator={false}
       >
-        <Text variant="label" className="mb-4">Current Mission</Text>
+        <Text variant="label" className="mb-4">{t('dash.currentMission')}</Text>
 
         {loading ? (
           <View className="py-10 items-center">
@@ -175,7 +176,7 @@ export default function DashboardScreen() {
         ) : snapError ? (
           <Card className="p-6 items-center">
             <Text variant="bodySmall" className="text-red-400 text-center">
-              Could not load game state. Check your connection.
+              {t('dash.loadError')}
             </Text>
           </Card>
         ) : activeSlot ? (
@@ -183,7 +184,7 @@ export default function DashboardScreen() {
         ) : (
           <Card className="p-6 items-center">
             <Text variant="bodySmall" className="text-zinc-500 text-center">
-              No active mission — check with your game master.
+              {t('dash.noMission')}
             </Text>
           </Card>
         )}
@@ -191,7 +192,7 @@ export default function DashboardScreen() {
         {/* ── Slot progress dots ────────────────────────────────────── */}
         {gameState && (
           <View className="mt-10">
-            <Text variant="label" className="mb-3">Race Progress</Text>
+            <Text variant="label" className="mb-3">{t('dash.raceProgress')}</Text>
             <View className="flex-row gap-2 flex-wrap">
               {gameState.slots.map((s) => (
                 <SlotDot key={s.index} slot={s} />
@@ -213,6 +214,7 @@ function ActiveTaskCard({
   judging: JudgingState | null;
   nowMs: number;
 }) {
+  const { t } = useTranslation();
   const frozen  = !!judging && judging.slotIndex === slot.index;
   const startMs = toMillis(slot.startedAt);
   const endMs   = frozen ? (toMillis(judging?.arrivedAt) ?? nowMs) : nowMs;
@@ -221,20 +223,20 @@ function ActiveTaskCard({
   return (
     <Card glowColor={SLOT_GLOW_COLOR[slot.type]} className="p-5">
       <View className="flex-row items-center justify-between mb-4">
-        <Badge label={SLOT_TYPE_LABEL[slot.type]} variant={SLOT_BADGE_VARIANT[slot.type]} />
+        <Badge label={t(`slot.${slot.type}`)} variant={SLOT_BADGE_VARIANT[slot.type]} />
         <Text variant="mono" className="text-zinc-600">
           {String(slot.index + 1).padStart(2, '0')}
         </Text>
       </View>
 
       <Text variant="subheading" className="mb-2">
-        {slot.taskTitle ?? 'Active Mission'}
+        {slot.taskTitle ?? t('dash.activeMission')}
       </Text>
 
       <Text variant="bodySmall" className="text-zinc-400 mb-4">
         {slot.taskId
-          ? `Task: ${slot.taskId}`
-          : 'Your task is being assigned. Stand by.'}
+          ? t('dash.taskLabel', { id: slot.taskId })
+          : t('dash.assigning')}
       </Text>
 
       {/* Elapsed-time clock — freezes while a judge is evaluating */}
@@ -242,13 +244,13 @@ function ActiveTaskCard({
         <View className="flex-row items-center justify-between border-t border-zinc-800 pt-4">
           <View>
             <Text variant="label" className={frozen ? 'text-sky-400' : 'text-zinc-600'}>
-              {frozen ? 'Time frozen' : 'Elapsed'}
+              {frozen ? t('dash.timeFrozen') : t('dash.elapsed')}
             </Text>
             <Text variant="mono" className={`text-2xl ${frozen ? 'text-sky-300' : 'text-white'}`}>
               {formatElapsed(elapsedSec)}
             </Text>
           </View>
-          {frozen && <Badge label="Being judged" variant="info" />}
+          {frozen && <Badge label={t('dash.beingJudged')} variant="info" />}
         </View>
       )}
     </Card>

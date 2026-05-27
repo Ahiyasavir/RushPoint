@@ -1,13 +1,13 @@
-// @ts-nocheck
 import * as functions from 'firebase-functions';
 import { db } from './firebase';
-import { assignNextTask, releaseTask } from './routing/assignNextTask';
+import { assignNextTask, releaseTask, buildRecommendations, computeSkillRatio } from './routing/assignNextTask';
 import {
   computeProductScore,
   clampScore,
   MAX_DESIGN_SCORE,
   MAX_PRESENTATION_SCORE,
 } from './scoring/teneProducts';
+import { calculateTaskScore } from './scoring/taskScore';
 
 // â”€â”€â”€ Path + auth helpers for the judge flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -45,6 +45,7 @@ interface JudgeSlot {
     productScore: number;
     designScore: number;
     presentationScore: number;
+    taskScore: number;
     total: number;
   };
 }
@@ -74,23 +75,54 @@ function unlockNext(slots: JudgeSlot[], completedIndex: number, nowIso: string):
 
 // â”€â”€â”€ requestNextTask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Called by the mobile app when a team completes a task and needs the next one.
+// completedTaskIds are read server-side from GameState — never trusted from the client.
 // Returns { taskId } or { injectRiddle: true } if park is at capacity.
 export const requestNextTask = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
 
-  const { teamId, lat, lng, completedTaskIds, targetType } = data as {
-    teamId: string;
+  const { lat, lng, targetType } = data as {
     lat: number;
     lng: number;
-    completedTaskIds: string[];
-    targetType: 'green' | 'gold';
+    targetType?: 'green' | 'gold';
   };
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    throw new functions.https.HttpsError('invalid-argument', 'lat and lng are required numbers');
+  }
+  const teamId = context.auth.uid;
 
-  if (context.auth.uid !== teamId) {
-    throw new functions.https.HttpsError('permission-denied', 'Can only request for own team');
+  // Read completed tasks and skill ratio from authoritative GameState
+  const gsSnap = await db.doc(`${userPath(teamId)}/gameState/current`).get();
+  const completedTaskIds: string[] = [];
+  let skillRatio = 0;
+  let activeSlotType: 'green' | 'orange' | 'gold' | undefined;
+
+  if (gsSnap.exists) {
+    const gs = gsSnap.data() as { slots: JudgeSlot[] };
+    const completedSlots = gs.slots.filter((s) => s.status === 'completed');
+    for (const slot of completedSlots) {
+      if (slot.taskId) completedTaskIds.push(slot.taskId);
+    }
+    activeSlotType = gs.slots.find((s) => s.status === 'active')?.type;
+    skillRatio = await computeSkillRatio(completedSlots);
   }
 
-  return assignNextTask(teamId, { lat, lng }, completedTaskIds, targetType);
+  // Routing only targets green or gold tasks. Prefer the client hint, else infer
+  // from the team's active slot. Orange (find-the-Tene) is a fixed location, not routed.
+  const resolvedTarget: 'green' | 'gold' | undefined =
+    targetType === 'green' || targetType === 'gold'
+      ? targetType
+      : activeSlotType === 'green' || activeSlotType === 'gold'
+        ? activeSlotType
+        : undefined;
+
+  if (!resolvedTarget) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'No routable target: provide targetType ("green" or "gold") or have an active green/gold slot',
+    );
+  }
+
+  return assignNextTask(teamId, { lat, lng }, completedTaskIds, resolvedTarget, skillRatio);
 });
 
 // â”€â”€â”€ checkOutTask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -103,6 +135,93 @@ export const checkOutTask = functions.https.onCall(async (data, context) => {
   }
   await releaseTask(taskId, teamId);
   return { success: true };
+});
+
+// â”€â”€â”€ getRecommendedTasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Returns a prioritised list of open tasks without committing an assignment.
+// The mobile app can display this as a recommendation carousel; the team then
+// calls requestNextTask to atomically claim their chosen task.
+export const getRecommendedTasks = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+
+  const { lat, lng, targetType } = data as {
+    lat: number;
+    lng: number;
+    targetType: 'green' | 'gold';
+  };
+  const teamId = context.auth.uid;
+
+  // Read game state server-side so completedTaskIds can't be spoofed
+  const gsSnap = await db.doc(`${userPath(teamId)}/gameState/current`).get();
+  const completedTaskIds: string[] = [];
+  let skillRatio = 0;
+
+  if (gsSnap.exists) {
+    const gs = gsSnap.data() as { slots: JudgeSlot[] };
+    const completedSlots = gs.slots.filter((s) => s.status === 'completed');
+    for (const slot of completedSlots) {
+      if (slot.taskId) completedTaskIds.push(slot.taskId);
+    }
+    skillRatio = await computeSkillRatio(completedSlots);
+  }
+
+  const recommendations = await buildRecommendations(
+    { lat, lng },
+    completedTaskIds,
+    targetType,
+    skillRatio,
+  );
+  return { recommendations };
+});
+
+// â”€â”€â”€ listTeams â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Returns all registered teams with their live score and slot progress.
+// Uses Admin SDK so it bypasses Firestore rules (safe — judge-gated callable).
+export const listTeams = functions.https.onCall(async (_data, context) => {
+  assertJudge(context);
+
+  // Fetch all profile/team docs and gameState/current docs in parallel
+  const [profileSnap, gsSnap] = await Promise.all([
+    db.collectionGroup('profile').get(),
+    db.collectionGroup('gameState').get(),
+  ]);
+
+  // Build a map of userId → gameState for O(1) join
+  const scoreMap: Record<string, { score: number; completedSlots: number }> = {};
+  for (const doc of gsSnap.docs) {
+    const parts = doc.ref.path.split('/');
+    // path: artifacts/{appId}/users/{userId}/gameState/{docId}
+    const userId = parts[parts.indexOf('users') + 1];
+    const gs = doc.data() as { score?: number; slots?: { status: string }[] };
+    scoreMap[userId] = {
+      score: gs.score ?? 0,
+      completedSlots: (gs.slots ?? []).filter((s) => s.status === 'completed').length,
+    };
+  }
+
+  const teams = profileSnap.docs
+    .filter((doc) => doc.id === 'team')          // only the profile/team document
+    .map((doc) => {
+      const parts = doc.ref.path.split('/');
+      const userId = parts[parts.indexOf('users') + 1];
+      const profile = doc.data() as {
+        name: string; code: string; status: string;
+        memberNames?: string[]; startedAt?: string;
+      };
+      return {
+        id:             userId,
+        name:           profile.name,
+        code:           profile.code,
+        status:         profile.status,
+        memberNames:    profile.memberNames ?? [],
+        startedAt:      profile.startedAt ?? null,
+        score:          scoreMap[userId]?.score ?? 0,
+        completedSlots: scoreMap[userId]?.completedSlots ?? 0,
+      };
+    })
+    .sort((a, b) => b.score - a.score);          // highest score first
+
+  return { teams };
 });
 
 // â”€â”€â”€ triggerLeaderboardFreeze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -266,11 +385,10 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     throw new functions.https.HttpsError('invalid-argument', 'products must be an array of ids');
   }
 
-  // Authoritative scoring â€” never trust a total sent by the client.
+  // Basket scoring — authoritative, never trust client totals.
   const productScore = computeProductScore(products);
   const design       = clampScore(designScore, MAX_DESIGN_SCORE);
   const presentation = clampScore(presentationScore, MAX_PRESENTATION_SCORE);
-  const total        = productScore + design + presentation;
   const nowIso       = new Date().toISOString();
 
   return db.runTransaction(async (tx) => {
@@ -296,16 +414,37 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
 
     // Idempotent: slot already scored (e.g. double submit) â€” return current state.
     if (slots[target].status === 'completed') {
-      return { newScore: gs.score, total, alreadyFinalized: true };
+      return { newScore: gs.score, total: slots[target].earnedScore ?? 0, alreadyFinalized: true };
     }
 
-    const ci        = ciSnap.exists ? (ciSnap.data() as { taskId?: string; taskTitle?: string }) : {};
-    const breakdown = { products, productScore, designScore: design, presentationScore: presentation, total };
+    const ci = ciSnap.exists ? (ciSnap.data() as { taskId?: string; taskTitle?: string }) : {};
+
+    // Sigmoid task score: read task difficulty + timing from Firestore
+    let taskScore = 0;
+    const resolvedTaskId = slots[target].taskId ?? ci.taskId;
+    if (resolvedTaskId) {
+      const taskSnap = await tx.get(db.doc(taskPath(resolvedTaskId)));
+      if (taskSnap.exists) {
+        const task = taskSnap.data() as { difficulty?: number; estimatedMinutes?: number };
+        const difficulty    = task.difficulty ?? 5;
+        const estimatedMins = task.estimatedMinutes ?? 15;
+        const startMs = slots[target].startedAt
+          ? new Date(slots[target].startedAt!).getTime()
+          : gs.judging?.arrivedAt
+            ? new Date(gs.judging.arrivedAt).getTime()
+            : Date.now() - estimatedMins * 60_000;
+        const actualMins = (Date.now() - startMs) / 60_000;
+        taskScore = calculateTaskScore(difficulty, actualMins, estimatedMins);
+      }
+    }
+
+    const total     = productScore + design + presentation + taskScore;
+    const breakdown = { products, productScore, designScore: design, presentationScore: presentation, taskScore, total };
 
     slots[target] = {
       ...slots[target],
       status:    'completed',
-      taskId:    slots[target].taskId ?? ci.taskId,
+      taskId:    resolvedTaskId,
       taskTitle: slots[target].taskTitle ?? ci.taskTitle,
       completedAt: nowIso,
       earnedScore: total,

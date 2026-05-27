@@ -22,8 +22,6 @@ export function ProgressBar({ completed, total = 8 }: Props) {
     width: `${progress.value * 100}%`,
   }));
 
-  const pct = Math.round((completed / total) * 100);
-
   return (
     <View className="w-full">
       <View className="flex-row justify-between mb-1.5">
@@ -50,7 +48,6 @@ export function ProgressBar({ completed, total = 8 }: Props) {
           const done = i < completed;
           const isGreen  = i < 4;
           const isOrange = i === 4;
-          const isGold   = i >= 5;
 
           const dotColor = done
             ? isGreen  ? 'bg-emerald-500'

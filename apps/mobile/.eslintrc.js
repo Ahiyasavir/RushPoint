@@ -3,6 +3,8 @@ module.exports = {
   extends: ['../../.eslintrc.js'],
   parserOptions: {
     ecmaFeatures: { jsx: true },
+    project: './tsconfig.json',
+    tsconfigRootDir: __dirname,
   },
   env: {
     browser: false,   // RN is not a browser

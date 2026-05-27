@@ -1,18 +1,20 @@
 import React, { useState } from 'react';
+import { useI18n } from '../i18n';
 
 export default function LeaderboardPage() {
+  const { t } = useI18n();
   const [frozen, setFrozen] = useState(false);
 
   return (
     <div className="p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Leaderboard</h1>
+          <h1 className="text-2xl font-bold mb-1">{t('leaderboard.title')}</h1>
           <p className="text-zinc-500 text-sm">
             {frozen ? (
-              <span className="text-yellow-400 font-medium">Frozen — rankings hidden until ceremony</span>
+              <span className="text-yellow-400 font-medium">{t('leaderboard.frozenNote')}</span>
             ) : (
-              'Live rankings'
+              t('leaderboard.live')
             )}
           </p>
         </div>
@@ -24,12 +26,12 @@ export default function LeaderboardPage() {
               : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
           }`}
         >
-          {frozen ? 'Unfreeze' : 'Freeze Board'}
+          {frozen ? t('leaderboard.unfreeze') : t('leaderboard.freeze')}
         </button>
       </div>
 
       <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-600">
-        {frozen ? 'Leaderboard is frozen' : 'No finishers yet'}
+        {frozen ? t('leaderboard.frozenBody') : t('leaderboard.noFinishers')}
       </div>
     </div>
   );

@@ -31,3 +31,6 @@ npm-debug.log*
 
 # Shared build
 packages/shared/dist/
+
+# Turborepo local cache
+.turbo/

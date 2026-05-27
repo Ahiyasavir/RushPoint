@@ -66,6 +66,7 @@ export interface SlotRecord {
   status: SlotStatus;
   taskId?: string;     // populated when a task is assigned to this slot
   taskTitle?: string;  // denormalised for display (avoids extra read)
+  startedAt?: string;  // ISO 8601 — stamped when slot becomes active
   completedAt?: string; // ISO 8601
 }
 
@@ -132,6 +133,7 @@ export interface Task {
   currentTeamCount: number;    // denormalised counter (no arrays — Firestore limit)
 
   // Scoring / routing weights
+  difficulty: number;        // 1–10 task difficulty rating (sigmoid scoring)
   pointValue: number;
   estimatedMinutes: number;
 
@@ -302,4 +304,25 @@ export interface SubmitJudgeScorePayload {
 export interface SubmitJudgeScoreResult {
   success: boolean;
   newScore: number;
+}
+
+export interface GetRecommendedTasksPayload {
+  lat: number;
+  lng: number;
+  targetType: TaskType;
+}
+
+export interface TaskRecommendation {
+  taskId: string;
+  title: string;
+  titleHe?: string;
+  priority: number;          // composite score, higher = better
+  estimatedMinutes: number;
+  difficulty: number;
+  currentLoad: number;       // fraction 0..1 of capacity used
+  distanceKm: number;
+}
+
+export interface GetRecommendedTasksResult {
+  recommendations: TaskRecommendation[];
 }
