@@ -58,6 +58,17 @@ const en: Dict = {
   'slot.green': 'Open Field Mission',
   'slot.orange': 'Find the Tene',
   'slot.gold': 'Fill the Basket',
+
+  // Connectivity
+  'offline.lost': "You're offline — progress is saved and will sync when you reconnect.",
+  'offline.restored': 'Back online — syncing your progress.',
+
+  // Map
+  'map.open': 'Mission Map',
+  'map.title': 'Mission Map',
+  'map.subtitle': 'Station locations across the Jerusalem course.',
+  'map.noToken': 'Add EXPO_PUBLIC_MAPBOX_TOKEN to apps/mobile/.env to show the live map.',
+  'map.back': '← Back',
 };
 
 const he: Dict = {
@@ -111,6 +122,17 @@ const he: Dict = {
   'slot.green': 'משימת שטח פתוח',
   'slot.orange': 'מצאו את הטנא',
   'slot.gold': 'מלאו את הסל',
+
+  // Connectivity
+  'offline.lost': 'אין חיבור — ההתקדמות נשמרת ותסונכרן כשהחיבור יחזור.',
+  'offline.restored': 'החיבור חזר — מסנכרן את ההתקדמות.',
+
+  // Map
+  'map.open': 'מפת המשימות',
+  'map.title': 'מפת המשימות',
+  'map.subtitle': 'מיקומי העמדות לאורך מסלול ירושלים.',
+  'map.noToken': 'הוסיפו EXPO_PUBLIC_MAPBOX_TOKEN לקובץ apps/mobile/.env כדי להציג את המפה.',
+  'map.back': '← חזרה',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

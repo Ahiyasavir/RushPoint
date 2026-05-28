@@ -238,8 +238,8 @@ vs `maxConcurrentTeams`; transit is haversine at ~5 km/h; skillMatch aligns the 
 | Phase | Status | Scope |
 |---|---|---|
 | **Phase 1 — MVP** | ✅ tracer bullet working on emulator | Access-code auth, dashboard, judge scoring slice, component kit |
-| **Phase 2 — Core Math & Routing** | ✅ math engine + smart routing live | Sigmoid task scoring, priority routing (load/transit/skill), `getRecommendedTasks`, real Teams list, **bilingual EN/HE UI** |
-| **Phase 2 (remaining)** | ⬜ planned | Offline queue, admin heatmap (Mapbox), map screen, audio |
+| **Phase 2 — Core Math & Routing** | ✅ math engine + smart routing live | Sigmoid task scoring, priority routing (load/transit/skill), `getRecommendedTasks`, real Teams list, **bilingual EN/HE UI**, admin skip-task (awards task average) |
+| **Phase 2 — Live & Maps** | ✅ done | Live Firestore sync (mobile store mirror via `useGameSync`), offline persistence + toast, slot audio cues (Web Audio), Mapbox admin heatmap + mobile mission map |
 | **Phase 3 — Gamification** | ⬜ planned | Leaderboard freeze, SOS, flash missions, Wrapped cards |
 
 ## Key Decisions & Caveats (things we already hit)

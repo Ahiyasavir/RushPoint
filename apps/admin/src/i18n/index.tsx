@@ -26,8 +26,12 @@ const en: Dict = {
 
   // Heatmap
   'heatmap.title': 'Live Team Map',
-  'heatmap.subtitle': 'Real-time GPS positions of all active teams',
+  'heatmap.subtitle': 'Station positions across the Jerusalem course',
   'heatmap.placeholder': 'Mapbox integration — Phase 2',
+  'heatmap.noToken': 'Add a Mapbox token (VITE_MAPBOX_TOKEN) to apps/admin/.env to enable the live map.',
+  'heatmap.legendGreen': 'Open-field',
+  'heatmap.legendOrange': 'Bible Park',
+  'heatmap.legendGold': 'Basket craft',
 
   // Teams
   'teams.title': 'Teams',
@@ -128,8 +132,12 @@ const he: Dict = {
 
   // Heatmap
   'heatmap.title': 'מפת קבוצות חיה',
-  'heatmap.subtitle': 'מיקומי GPS בזמן אמת של כל הקבוצות הפעילות',
+  'heatmap.subtitle': 'מיקומי העמדות לאורך מסלול ירושלים',
   'heatmap.placeholder': 'אינטגרציית Mapbox — שלב 2',
+  'heatmap.noToken': 'הוסיפו טוקן Mapbox‏ (VITE_MAPBOX_TOKEN) לקובץ apps/admin/.env כדי להפעיל את המפה החיה.',
+  'heatmap.legendGreen': 'שטח פתוח',
+  'heatmap.legendOrange': 'פארק התנ"ך',
+  'heatmap.legendGold': 'מלאכת סל',
 
   // Teams
   'teams.title': 'קבוצות',

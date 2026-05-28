@@ -1,53 +1,58 @@
-import { useEffect, useRef, useCallback } from 'react';
-import { Audio } from 'expo-av';
+import { useCallback, useRef } from 'react';
 import type { SlotType } from '../store/gameStore';
 
-// Drop sound files into assets/sounds/ with these exact names.
-// If a file is missing the hook silently skips — never crashes the app.
-const SOUND_MAP: Record<SlotType, any> = {
-  green:  require('../../assets/sounds/unlock_green.mp3'),
-  orange: require('../../assets/sounds/unlock_orange.mp3'),
-  gold:   require('../../assets/sounds/unlock_gold.mp3'),
+// Distinct two-note chimes per slot tier. Synthesised with the Web Audio API
+// so the demo needs zero binary assets and never breaks the Metro bundle.
+// On native (no window.AudioContext) every call is a silent no-op.
+const CHIME: Record<SlotType, number[]> = {
+  green:  [523.25, 783.99], // C5 → G5
+  orange: [587.33, 880.0],  // D5 → A5
+  gold:   [659.25, 987.77], // E5 → B5
 };
 
+type AudioCtor = typeof AudioContext;
+
+function getAudioContextCtor(): AudioCtor | null {
+  const g = globalThis as unknown as {
+    AudioContext?: AudioCtor;
+    webkitAudioContext?: AudioCtor;
+  };
+  return g.AudioContext ?? g.webkitAudioContext ?? null;
+}
+
 export function useSlotSound() {
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
 
-  // Keep audio session non-interrupting so field music keeps playing
-  useEffect(() => {
-    Audio.setAudioModeAsync({
-      playsInSilentModeIOS: false,
-      staysActiveInBackground: false,
-    }).catch(() => {});
+  const playUnlock = useCallback((type: SlotType) => {
+    const Ctor = getAudioContextCtor();
+    if (!Ctor) return; // native / unsupported — silent
 
-    return () => {
-      soundRef.current?.unloadAsync().catch(() => {});
-    };
-  }, []);
-
-  const playUnlock = useCallback(async (type: SlotType) => {
     try {
-      // Unload any previous sound to free memory immediately
-      if (soundRef.current) {
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
-      }
+      const ctx = ctxRef.current ?? (ctxRef.current = new Ctor());
+      // Browsers start the context suspended until a user gesture.
+      if (ctx.state === 'suspended') void ctx.resume();
 
-      const { sound } = await Audio.Sound.createAsync(SOUND_MAP[type], {
-        shouldPlay: true,
-        volume: 0.75,
-      });
-      soundRef.current = sound;
+      const notes = CHIME[type];
+      const now = ctx.currentTime;
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + i * 0.12;
+        const end = start + 0.22;
 
-      // Auto-unload after playback to avoid leaking native resources
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
-          soundRef.current = null;
-        }
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        // Short pluck envelope to avoid clicks.
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.3, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(end);
       });
     } catch {
-      // Missing file or device audio error — fail silently
+      // Audio unavailable / autoplay blocked — fail silently.
     }
   }, []);
 

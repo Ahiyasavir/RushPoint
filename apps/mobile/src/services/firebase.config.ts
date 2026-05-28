@@ -1,5 +1,13 @@
+import { Platform } from 'react-native';
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
+  type Firestore,
+} from 'firebase/firestore';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
@@ -18,7 +26,23 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-export const db = getFirestore(app);
+// Offline persistence: on web, back Firestore with IndexedDB so reads/writes
+// survive a dropped connection and sync on reconnect. Native runtimes (no
+// IndexedDB) and HMR re-evaluation fall back to the already-started instance.
+function initDb(): Firestore {
+  if (Platform.OS === 'web') {
+    try {
+      return initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      });
+    } catch {
+      // Already initialised (Fast Refresh) — reuse it.
+    }
+  }
+  return getFirestore(app);
+}
+
+export const db = initDb();
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const functions = getFunctions(app);

@@ -1,46 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { View, ScrollView, ActivityIndicator } from 'react-native';
+import { View, ScrollView, ActivityIndicator, Pressable } from 'react-native';
+import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../src/services/firebase.config';
-import { useGameStore } from '../src/store/gameStore';
+import { useGameStore, type LiveSlot, type LiveJudging } from '../src/store/gameStore';
+import { useGameSync } from '../src/hooks/useGameSync';
 import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
 import { Badge } from '../src/components/Badge';
 import type { BadgeProps } from '../src/components/Badge';
 import { LanguageToggle } from '../src/components/LanguageToggle';
+import { useOfflineToast } from '../src/hooks/useOfflineToast';
 import { useTranslation } from '../src/i18n';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
-
-// ─── Local types matching the Firestore gameState shape ───────────────────────
-// (avoids depending on @rushpoint/shared until its dist/ is built)
-
+// Slot shape is mirrored from the store (LiveSlot / LiveJudging).
 type SlotType   = 'green' | 'orange' | 'gold';
 type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
-
-interface FirestoreSlot {
-  index:      number;
-  type:       SlotType;
-  status:     SlotStatus;
-  taskId?:    string;
-  taskTitle?: string;
-  startedAt?: unknown; // ISO string or Firestore Timestamp
-}
-
-interface JudgingState {
-  slotIndex: number;
-  checkInId: string;
-  arrivedAt: unknown;
-}
-
-interface FirestoreGameState {
-  teamId:       string;
-  slots:        FirestoreSlot[];
-  score:        number;
-  bonusPenalty: number;
-  judging?:     JudgingState | null;
-}
+type FirestoreSlot = LiveSlot;
+type JudgingState  = LiveJudging;
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -91,11 +67,14 @@ export default function DashboardScreen() {
   const { t }    = useTranslation();
   const teamId   = useGameStore((s) => s.teamId);
   const teamName = useGameStore((s) => s.teamName);
+  const gameState = useGameStore((s) => s.live);
+  const syncState = useGameStore((s) => s.syncState);
 
-  const [gameState, setGameState] = useState<FirestoreGameState | null>(null);
-  const [loading,   setLoading]   = useState(true);
-  const [snapError, setSnapError] = useState(false);
-  const [nowMs,     setNowMs]     = useState(Date.now());
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  // Live Firestore mirror (drives score/slots) + offline notifications.
+  useGameSync(teamId);
+  useOfflineToast();
 
   // Tick once per second to drive the live elapsed-time clock.
   useEffect(() => {
@@ -103,29 +82,8 @@ export default function DashboardScreen() {
     return () => clearInterval(id);
   }, []);
 
-  useEffect(() => {
-    if (!teamId) return;
-
-    const ref = doc(db, `artifacts/${APP_ID}/users/${teamId}/gameState/current`);
-
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        if (snap.exists()) {
-          setGameState(snap.data() as FirestoreGameState);
-          setSnapError(false);
-        }
-        setLoading(false);
-      },
-      () => {
-        setSnapError(true);
-        setLoading(false);
-      },
-    );
-
-    return unsub;
-  }, [teamId]);
-
+  const loading         = syncState === 'loading' && !gameState;
+  const snapError       = syncState === 'error' && !gameState;
   const activeSlot      = gameState?.slots.find((s) => s.status === 'active') ?? null;
   const completedCount  = gameState?.slots.filter((s) => s.status === 'completed').length ?? 0;
   const score           = gameState?.score ?? 0;
@@ -137,7 +95,14 @@ export default function DashboardScreen() {
         className="border-b border-zinc-800/60 px-5 pb-4"
         style={{ paddingTop: insets.top + 8 }}
       >
-        <View className="flex-row justify-end mb-3">
+        <View className="flex-row justify-between items-center mb-3">
+          <Pressable
+            onPress={() => router.push('/map')}
+            hitSlop={8}
+            className="px-3 py-1.5 rounded-full border border-zinc-700 bg-zinc-900 active:bg-zinc-800"
+          >
+            <Text variant="caption" className="text-emerald-400">🗺  {t('map.open')}</Text>
+          </Pressable>
           <LanguageToggle />
         </View>
 

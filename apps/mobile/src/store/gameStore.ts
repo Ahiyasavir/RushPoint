@@ -14,6 +14,34 @@ export interface SlotState {
   completedAt?: number; // unix ms
 }
 
+// ─── Live mirror types ──────────────────────────────────────────────────────
+// Phase 2: the store mirrors the authoritative Firestore `gameState/current`
+// document via an onSnapshot listener (see useGameSync). startedAt/arrivedAt
+// arrive as ISO strings or Firestore Timestamps, so they stay `unknown`.
+export interface LiveSlot {
+  index: number;
+  type: SlotType;
+  status: SlotStatus;
+  taskId?: string;
+  taskTitle?: string;
+  startedAt?: unknown;
+  completedAt?: unknown;
+}
+
+export interface LiveJudging {
+  slotIndex: number;
+  checkInId: string;
+  arrivedAt: unknown;
+}
+
+export interface LiveGame {
+  slots: LiveSlot[];
+  score: number;
+  judging?: LiveJudging | null;
+}
+
+export type SyncState = 'loading' | 'live' | 'error';
+
 interface GameState {
   // Team
   teamId: string | null;
@@ -22,14 +50,21 @@ interface GameState {
   score: number;
   isOnline: boolean;
 
-  // Slots — always exactly 8
+  // Slots — always exactly 8 (local Phase-1 buffer; superseded by `live`)
   slots: SlotState[];
+
+  // ── Live Firestore mirror (Phase 2) ──
+  live: LiveGame | null;
+  syncState: SyncState;
+  fromCache: boolean;
 
   // Actions
   initTeam: (teamId: string, teamName: string, members: string[]) => void;
   completeSlot: (index: number, taskTitle?: string) => void;
   addScore: (points: number) => void;
   setOnline: (online: boolean) => void;
+  applyLiveGame: (game: LiveGame, fromCache: boolean) => void;
+  setSyncState: (state: SyncState) => void;
   resetGame: () => void;
 }
 
@@ -81,6 +116,9 @@ export const useGameStore = create<GameState>((set) => ({
   score:       0,
   isOnline:    true,
   slots:       buildInitialSlots(),
+  live:        null,
+  syncState:   'loading',
+  fromCache:   false,
 
   initTeam: (teamId, teamName, members) =>
     set({
@@ -89,7 +127,14 @@ export const useGameStore = create<GameState>((set) => ({
       memberNames: members,
       score: 0,
       slots: buildInitialSlots(),
+      live: null,
+      syncState: 'loading',
     }),
+
+  applyLiveGame: (game, fromCache) =>
+    set({ live: game, score: game.score, syncState: 'live', fromCache }),
+
+  setSyncState: (state) => set({ syncState: state }),
 
   completeSlot: (index, taskTitle) =>
     set((state) => {
@@ -107,7 +152,10 @@ export const useGameStore = create<GameState>((set) => ({
   setOnline: (online) => set({ isOnline: online }),
 
   resetGame: () =>
-    set({ teamId: null, teamName: '', memberNames: [], score: 0, slots: buildInitialSlots() }),
+    set({
+      teamId: null, teamName: '', memberNames: [], score: 0,
+      slots: buildInitialSlots(), live: null, syncState: 'loading', fromCache: false,
+    }),
 }));
 
 // ─── Derived helpers ──────────────────────────────────────────────────────────
