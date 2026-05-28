@@ -224,11 +224,37 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
   return { teams };
 });
 
+// Average score teams have actually earned on a given task (completed slots only).
+// Falls back to the on-target sigmoid score when no team has completed it yet,
+// so a skip is never penalised just because it's early in the event.
+async function averageTaskScore(
+  taskId: string,
+  difficulty: number,
+  estimatedMinutes: number,
+): Promise<number> {
+  const snap = await db.collectionGroup('gameState').get();
+  const scores: number[] = [];
+  for (const d of snap.docs) {
+    const gs = d.data() as { slots?: JudgeSlot[] };
+    for (const s of gs.slots ?? []) {
+      if (s.taskId === taskId && s.status === 'completed' && typeof s.earnedScore === 'number') {
+        scores.push(s.earnedScore);
+      }
+    }
+  }
+  if (scores.length > 0) {
+    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  }
+  return calculateTaskScore(difficulty, estimatedMinutes, estimatedMinutes);
+}
+
 // ─── skipTask ──────────────────────────────────────────────────────────────────
 // Admin/judge escape hatch: skip a team's current task and advance them to the
-// next one WITHOUT awarding points. The slot is marked 'skipped' (terminal but
-// not 'completed'), so it never counts toward the score yet no longer blocks the
-// team. Releases the claimed station slot and clears any pending judge state.
+// next one. Rather than zeroing the slot, the team is AWARDED the average score
+// other teams earned on that same task (fair, non-punitive default). The slot is
+// marked 'skipped' (terminal, but distinct from a judge-graded 'completed') and
+// the award is added to the team score. Releases the claimed station slot and
+// clears any pending judge state.
 export const skipTask = functions.https.onCall(async (data, context) => {
   assertJudge(context);
 
@@ -238,9 +264,31 @@ export const skipTask = functions.https.onCall(async (data, context) => {
   }
 
   const nowIso = new Date().toISOString();
+  const gsRef  = db.doc(`${userPath(teamId)}/gameState/current`);
 
-  const { skippedTaskId, skippedIndex, allDone } = await db.runTransaction(async (tx) => {
-    const gsRef   = db.doc(`${userPath(teamId)}/gameState/current`);
+  // Pre-read (outside the transaction) to find which task is being skipped and
+  // compute its average award — collectionGroup reads don't belong in a tx.
+  const preSnap = await gsRef.get();
+  if (!preSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Game state not found for team');
+  }
+  const preSlots  = (preSnap.data() as { slots: JudgeSlot[] }).slots;
+  const preTarget = preSlots.findIndex((s) => s.status === 'active');
+  if (preTarget < 0) {
+    throw new functions.https.HttpsError('failed-precondition', 'Team has no active task to skip');
+  }
+
+  let awarded = 0;
+  const skipTaskId = preSlots[preTarget].taskId;
+  if (skipTaskId) {
+    const taskSnap = await db.doc(taskPath(skipTaskId)).get();
+    const task = taskSnap.exists
+      ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number })
+      : {};
+    awarded = await averageTaskScore(skipTaskId, task.difficulty ?? 5, task.estimatedMinutes ?? 15);
+  }
+
+  const { skippedTaskId, skippedIndex, allDone, newScore } = await db.runTransaction(async (tx) => {
     const profRef = db.doc(`${userPath(teamId)}/profile/team`);
 
     const gsSnap = await tx.get(gsRef);
@@ -262,7 +310,11 @@ export const skipTask = functions.https.onCall(async (data, context) => {
       ...slots[target],
       status: 'skipped',
       completedAt: nowIso,
-      earnedScore: 0,
+      earnedScore: awarded,
+      scoreBreakdown: {
+        products: [], productScore: 0, designScore: 0, presentationScore: 0,
+        taskScore: awarded, total: awarded,
+      },
     };
 
     // Unlock whatever the next objective would have been.
@@ -271,9 +323,11 @@ export const skipTask = functions.https.onCall(async (data, context) => {
     // Unfreeze the mobile clock if the judge had this slot checked in.
     const clearJudging = gs.judging?.slotIndex === target;
     const done = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+    const updatedScore = (gs.score ?? 0) + awarded;
 
     tx.update(gsRef, {
       slots,
+      score:     updatedScore,
       updatedAt: nowIso,
       ...(clearJudging ? { judging: null } : {}),
     });
@@ -282,7 +336,7 @@ export const skipTask = functions.https.onCall(async (data, context) => {
       tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
     }
 
-    return { skippedTaskId: taskId, skippedIndex: target, allDone: done };
+    return { skippedTaskId: taskId, skippedIndex: target, allDone: done, newScore: updatedScore };
   });
 
   // Post-transaction side effects (safe to run outside the atomic write):
@@ -303,7 +357,7 @@ export const skipTask = functions.https.onCall(async (data, context) => {
     await batch.commit();
   }
 
-  return { success: true, skippedIndex, allDone };
+  return { success: true, skippedIndex, allDone, awardedScore: awarded, newScore };
 });
 
 // â”€â”€â”€ triggerLeaderboardFreeze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

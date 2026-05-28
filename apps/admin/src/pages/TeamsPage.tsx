@@ -22,10 +22,10 @@ interface TeamRow {
 }
 
 const listTeamsFn = httpsCallable<void, { teams: TeamRow[] }>(functions, 'listTeams');
-const skipTaskFn = httpsCallable<{ teamId: string }, { success: boolean; allDone: boolean }>(
-  functions,
-  'skipTask',
-);
+const skipTaskFn = httpsCallable<
+  { teamId: string },
+  { success: boolean; allDone: boolean; awardedScore: number; newScore: number }
+>(functions, 'skipTask');
 
 export default function TeamsPage() {
   const { t } = useI18n();
@@ -60,8 +60,8 @@ export default function TeamsPage() {
     setNotice(null);
     try {
       await ensureAuth();
-      await skipTaskFn({ teamId });
-      setNotice(t('teams.skipDone'));
+      const res = await skipTaskFn({ teamId });
+      setNotice(t('teams.skipDone', { score: res.data.awardedScore }));
       await fetchTeams();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('teams.skipError'));

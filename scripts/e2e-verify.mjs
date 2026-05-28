@@ -71,23 +71,26 @@ async function main() {
     check('listTeams succeeds', false, e.message);
   }
 
-  // 2b. skipTask — advances the active slot WITHOUT awarding points.
+  // 2b. skipTask — advances the active slot and AWARDS the average task score.
   try {
     const before = await readGameState(uid);
     const beforeScore = before?.score ?? 0;
     const activeIdx = before?.slots?.findIndex((s) => s.status === 'active');
-    await call('skipTask', { teamId: uid });
+    const res = await call('skipTask', { teamId: uid });
+    const awarded = res?.awardedScore ?? 0;
     const after = await readGameState(uid);
     const skipped = after?.slots?.[activeIdx];
     const next = after?.slots?.[activeIdx + 1];
     check('skipTask marks the active slot skipped', skipped?.status === 'skipped',
       `slot ${activeIdx} -> ${skipped?.status}`);
-    check('  skipped slot earns 0 points', (skipped?.earnedScore ?? 0) === 0,
+    check('  skip awards a positive average score', awarded > 0,
+      `awardedScore=${awarded}`);
+    check('  skipped slot stores the awarded score', (skipped?.earnedScore ?? -1) === awarded,
       `earnedScore=${skipped?.earnedScore}`);
     check('  next slot becomes active', next?.status === 'active',
       `slot ${activeIdx + 1} -> ${next?.status}`);
-    check('  team score unchanged by skip', (after?.score ?? 0) === beforeScore,
-      `score ${beforeScore} -> ${after?.score}`);
+    check('  team score increases by the award', (after?.score ?? 0) === beforeScore + awarded,
+      `score ${beforeScore} + ${awarded} -> ${after?.score}`);
   } catch (e) {
     check('skipTask succeeds', false, e.message);
   }
