@@ -22,13 +22,22 @@ interface TeamRow {
 }
 
 const listTeamsFn = httpsCallable<void, { teams: TeamRow[] }>(functions, 'listTeams');
+const skipTaskFn = httpsCallable<{ teamId: string }, { success: boolean; allDone: boolean }>(
+  functions,
+  'skipTask',
+);
 
 export default function TeamsPage() {
   const { t } = useI18n();
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+
+  // Two-step skip: first click arms the confirm, second click executes.
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [skippingId, setSkippingId] = useState<string | null>(null);
 
   const fetchTeams = useCallback(async () => {
     try {
@@ -43,6 +52,23 @@ export default function TeamsPage() {
       setLoading(false);
     }
   }, [t]);
+
+  const handleSkip = useCallback(async (teamId: string) => {
+    setSkippingId(teamId);
+    setConfirmId(null);
+    setError(null);
+    setNotice(null);
+    try {
+      await ensureAuth();
+      await skipTaskFn({ teamId });
+      setNotice(t('teams.skipDone'));
+      await fetchTeams();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('teams.skipError'));
+    } finally {
+      setSkippingId(null);
+    }
+  }, [t, fetchTeams]);
 
   useEffect(() => {
     void fetchTeams();
@@ -79,6 +105,12 @@ export default function TeamsPage() {
         </div>
       )}
 
+      {notice && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-emerald-950 border border-emerald-800 text-emerald-300 text-sm">
+          {notice}
+        </div>
+      )}
+
       <div className="rounded-xl border border-zinc-800 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wider">
@@ -88,46 +120,74 @@ export default function TeamsPage() {
               <th className="text-start px-4 py-3">{t('teams.colStatus')}</th>
               <th className="text-end px-4 py-3">{t('teams.colSlots')}</th>
               <th className="text-end px-4 py-3">{t('teams.colScore')}</th>
+              <th className="text-end px-4 py-3">{t('teams.colAction')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {loading && teams.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
                   {t('teams.loadingRow')}
                 </td>
               </tr>
             ) : teams.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
                   {t('teams.empty')}
                 </td>
               </tr>
             ) : (
-              teams.map((team) => (
-                <tr key={team.id} className="bg-zinc-950 hover:bg-zinc-900 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-white">{team.name}</div>
-                    {team.memberNames.length > 0 && (
-                      <div className="text-xs text-zinc-500 mt-0.5">
-                        {team.memberNames.join(', ')}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-zinc-400">{team.code}</td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[team.status] ?? 'bg-zinc-800 text-zinc-400'}`}>
-                      {t(`status.${team.status}`)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-end font-mono text-zinc-400">
-                    {team.completedSlots}/8
-                  </td>
-                  <td className="px-4 py-3 text-end font-mono text-zinc-200 font-medium">
-                    {team.score.toLocaleString()}
-                  </td>
-                </tr>
-              ))
+              teams.map((team) => {
+                const finished = team.status === 'finished';
+                const isSkipping = skippingId === team.id;
+                const isConfirming = confirmId === team.id;
+                return (
+                  <tr key={team.id} className="bg-zinc-950 hover:bg-zinc-900 transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-white">{team.name}</div>
+                      {team.memberNames.length > 0 && (
+                        <div className="text-xs text-zinc-500 mt-0.5">
+                          {team.memberNames.join(', ')}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-zinc-400">{team.code}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[team.status] ?? 'bg-zinc-800 text-zinc-400'}`}>
+                        {t(`status.${team.status}`)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-end font-mono text-zinc-400">
+                      {team.completedSlots}/8
+                    </td>
+                    <td className="px-4 py-3 text-end font-mono text-zinc-200 font-medium">
+                      {team.score.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-end">
+                      {!finished && (
+                        <button
+                          onClick={() =>
+                            isConfirming ? void handleSkip(team.id) : setConfirmId(team.id)
+                          }
+                          onBlur={() => isConfirming && setConfirmId(null)}
+                          disabled={isSkipping}
+                          className={`px-3 py-1 text-xs rounded-lg border transition-colors disabled:opacity-40 ${
+                            isConfirming
+                              ? 'bg-amber-900 border-amber-700 text-amber-200 hover:bg-amber-800'
+                              : 'border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800'
+                          }`}
+                        >
+                          {isSkipping
+                            ? t('teams.skipping')
+                            : isConfirming
+                              ? t('teams.confirmSkip')
+                              : t('teams.skip')}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

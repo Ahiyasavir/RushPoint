@@ -49,7 +49,7 @@ export interface GeoPoint {
 }
 
 export type SlotType   = 'green' | 'orange' | 'gold';
-export type SlotStatus = 'locked' | 'active' | 'completed';
+export type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 export type TaskType   = 'green' | 'orange' | 'gold';
 export type TeamStatus = 'registered' | 'active' | 'park' | 'finished';
 export type EventStatus = 'pre' | 'live' | 'frozen' | 'ended';

@@ -17,7 +17,7 @@ const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 // (avoids depending on @rushpoint/shared until its dist/ is built)
 
 type SlotType   = 'green' | 'orange' | 'gold';
-type SlotStatus = 'locked' | 'active' | 'completed';
+type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 
 interface FirestoreSlot {
   index:      number;
@@ -79,9 +79,9 @@ const SLOT_GLOW_COLOR: Record<SlotType, 'green' | 'orange' | 'gold'> = {
 };
 
 const DOT_COLOR: Record<SlotType, Record<SlotStatus, string>> = {
-  green:  { completed: 'bg-emerald-500', active: 'bg-emerald-400', locked: 'bg-zinc-800' },
-  orange: { completed: 'bg-orange-500',  active: 'bg-orange-400',  locked: 'bg-zinc-800' },
-  gold:   { completed: 'bg-amber-400',   active: 'bg-amber-300',   locked: 'bg-zinc-800' },
+  green:  { completed: 'bg-emerald-500', active: 'bg-emerald-400', locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
+  orange: { completed: 'bg-orange-500',  active: 'bg-orange-400',  locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
+  gold:   { completed: 'bg-amber-400',   active: 'bg-amber-300',   locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
 };
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────

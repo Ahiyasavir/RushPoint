@@ -3,6 +3,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
+import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
 
 const app = initializeApp({
   apiKey: 'emulator-key',
@@ -11,8 +12,15 @@ const app = initializeApp({
 });
 const auth = getAuth(app);
 const functions = getFunctions(app);
+const fs = getFirestore(app);
 connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+connectFirestoreEmulator(fs, '127.0.0.1', 8080);
+const APP_ID = 'race-to-tzion-2026';
+const readGameState = (uid) =>
+  getDoc(doc(fs, `artifacts/${APP_ID}/users/${uid}/gameState/current`)).then((s) =>
+    s.exists() ? s.data() : null,
+  );
 
 const call = (name, data) => httpsCallable(functions, name)(data).then((r) => r.data);
 
@@ -61,6 +69,27 @@ async function main() {
     }
   } catch (e) {
     check('listTeams succeeds', false, e.message);
+  }
+
+  // 2b. skipTask — advances the active slot WITHOUT awarding points.
+  try {
+    const before = await readGameState(uid);
+    const beforeScore = before?.score ?? 0;
+    const activeIdx = before?.slots?.findIndex((s) => s.status === 'active');
+    await call('skipTask', { teamId: uid });
+    const after = await readGameState(uid);
+    const skipped = after?.slots?.[activeIdx];
+    const next = after?.slots?.[activeIdx + 1];
+    check('skipTask marks the active slot skipped', skipped?.status === 'skipped',
+      `slot ${activeIdx} -> ${skipped?.status}`);
+    check('  skipped slot earns 0 points', (skipped?.earnedScore ?? 0) === 0,
+      `earnedScore=${skipped?.earnedScore}`);
+    check('  next slot becomes active', next?.status === 'active',
+      `slot ${activeIdx + 1} -> ${next?.status}`);
+    check('  team score unchanged by skip', (after?.score ?? 0) === beforeScore,
+      `score ${beforeScore} -> ${after?.score}`);
+  } catch (e) {
+    check('skipTask succeeds', false, e.message);
   }
 
   // 3. getRecommendedTasks — ranked list, priority desc, no assignment.

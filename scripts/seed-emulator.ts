@@ -20,9 +20,11 @@
 import * as admin from 'firebase-admin';
 
 // ─── Emulator connection ──────────────────────────────────────────────────────
-// Must be set BEFORE admin.initializeApp()
-process.env.FIRESTORE_EMULATOR_HOST     = process.env.FIRESTORE_EMULATOR_HOST     ?? 'localhost:8080';
-process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? 'localhost:9099';
+// Must be set BEFORE admin.initializeApp().
+// Use 127.0.0.1 (not localhost): on Windows `localhost` resolves to IPv6 ::1,
+// but the emulators bind IPv4 — the auth REST client then hits ECONNREFUSED.
+process.env.FIRESTORE_EMULATOR_HOST     = process.env.FIRESTORE_EMULATOR_HOST     ?? '127.0.0.1:8080';
+process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
 
 const APP_ID     = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 // Firebase project id — must match .firebaserc default and the client configs so

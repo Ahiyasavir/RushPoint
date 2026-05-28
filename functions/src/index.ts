@@ -34,7 +34,7 @@ function assertJudge(context: functions.https.CallableContext): void {
 interface JudgeSlot {
   index: number;
   type: 'green' | 'orange' | 'gold';
-  status: 'locked' | 'active' | 'completed';
+  status: 'locked' | 'active' | 'completed' | 'skipped';
   taskId?: string;
   taskTitle?: string;
   startedAt?: string;
@@ -222,6 +222,88 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
     .sort((a, b) => b.score - a.score);          // highest score first
 
   return { teams };
+});
+
+// ─── skipTask ──────────────────────────────────────────────────────────────────
+// Admin/judge escape hatch: skip a team's current task and advance them to the
+// next one WITHOUT awarding points. The slot is marked 'skipped' (terminal but
+// not 'completed'), so it never counts toward the score yet no longer blocks the
+// team. Releases the claimed station slot and clears any pending judge state.
+export const skipTask = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+
+  const { teamId } = data as { teamId: string };
+  if (!teamId) {
+    throw new functions.https.HttpsError('invalid-argument', 'teamId is required');
+  }
+
+  const nowIso = new Date().toISOString();
+
+  const { skippedTaskId, skippedIndex, allDone } = await db.runTransaction(async (tx) => {
+    const gsRef   = db.doc(`${userPath(teamId)}/gameState/current`);
+    const profRef = db.doc(`${userPath(teamId)}/profile/team`);
+
+    const gsSnap = await tx.get(gsRef);
+    if (!gsSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Game state not found for team');
+    }
+
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number; judging?: JudgingState | null };
+    const slots = gs.slots.map((s) => ({ ...s }));
+
+    // Skip the lowest-index active slot (handles the 3 simultaneous gold slots).
+    const target = slots.findIndex((s) => s.status === 'active');
+    if (target < 0) {
+      throw new functions.https.HttpsError('failed-precondition', 'Team has no active task to skip');
+    }
+
+    const taskId = slots[target].taskId;
+    slots[target] = {
+      ...slots[target],
+      status: 'skipped',
+      completedAt: nowIso,
+      earnedScore: 0,
+    };
+
+    // Unlock whatever the next objective would have been.
+    unlockNext(slots, target, nowIso);
+
+    // Unfreeze the mobile clock if the judge had this slot checked in.
+    const clearJudging = gs.judging?.slotIndex === target;
+    const done = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+
+    tx.update(gsRef, {
+      slots,
+      updatedAt: nowIso,
+      ...(clearJudging ? { judging: null } : {}),
+    });
+
+    if (done) {
+      tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
+    }
+
+    return { skippedTaskId: taskId, skippedIndex: target, allDone: done };
+  });
+
+  // Post-transaction side effects (safe to run outside the atomic write):
+  // 1. Free the station capacity the team was occupying.
+  if (skippedTaskId) {
+    await releaseTask(skippedTaskId, teamId);
+  }
+  // 2. Drop any pending check-ins for this team so they leave the judge queue.
+  const pending = await db
+    .collection(`${userPath(teamId)}/checkIns`)
+    .where('status', '==', 'pending')
+    .get();
+  if (!pending.empty) {
+    const batch = db.batch();
+    for (const doc of pending.docs) {
+      batch.update(doc.ref, { status: 'skipped', resolvedAt: nowIso });
+    }
+    await batch.commit();
+  }
+
+  return { success: true, skippedIndex, allDone };
 });
 
 // â”€â”€â”€ triggerLeaderboardFreeze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -455,7 +537,8 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     unlockNext(slots, target, nowIso);
 
     const newScore  = (gs.score ?? 0) + total;
-    const allDone   = slots.every((s) => s.status === 'completed');
+    // A team is done when no slot is still pending — completed or skipped both count as terminal.
+    const allDone   = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
 
     tx.update(gsRef, {
       slots,

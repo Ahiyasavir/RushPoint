@@ -3,7 +3,7 @@ import { create } from 'zustand';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type SlotType   = 'green' | 'orange' | 'gold';
-export type SlotStatus = 'locked' | 'active' | 'completed';
+export type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 
 export interface SlotState {
   index: number;
