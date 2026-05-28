@@ -51,7 +51,7 @@ export interface GeoPoint {
   lng: number;
 }
 
-export type SlotType   = 'green' | 'orange' | 'gold';
+export type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
 export type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 export type TaskType   = 'green' | 'orange' | 'gold';
 export type TeamStatus = 'registered' | 'active' | 'park' | 'crafting' | 'sprinting' | 'finished';

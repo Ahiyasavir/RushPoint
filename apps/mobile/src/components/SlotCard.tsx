@@ -19,6 +19,11 @@ const CARD_CLASSES: Record<SlotType, Record<string, string>> = {
     active:    'bg-emerald-950 border-2 border-emerald-500',
     completed: 'bg-emerald-950/60 border border-emerald-700',
   },
+  gate: {
+    locked:    'bg-zinc-900 border border-zinc-800',
+    active:    'bg-sky-950 border-2 border-sky-500',
+    completed: 'bg-sky-950/60 border border-sky-700',
+  },
   orange: {
     locked:    'bg-zinc-900 border border-zinc-800',
     active:    'bg-orange-950 border-2 border-orange-500',
@@ -33,19 +38,22 @@ const CARD_CLASSES: Record<SlotType, Record<string, string>> = {
 
 const LABEL_CLASSES: Record<SlotType, Record<string, string>> = {
   green:  { active: 'text-emerald-400', completed: 'text-emerald-300', locked: 'text-zinc-600' },
+  gate:   { active: 'text-sky-400',     completed: 'text-sky-300',     locked: 'text-zinc-600' },
   orange: { active: 'text-orange-400',  completed: 'text-orange-300',  locked: 'text-zinc-600' },
   gold:   { active: 'text-amber-400',   completed: 'text-amber-300',   locked: 'text-zinc-600' },
 };
 
 const TYPE_LABELS: Record<SlotType, string> = {
   green:  'Open Field',
+  gate:   'Gate Filter',
   orange: 'Find Tene',
-  gold:   'Fill Basket',
+  gold:   'Craft & Judge',
 };
 
 // Native shadow values per type (can't do glow with pure Tailwind on RN)
 const GLOW_SHADOW: Record<SlotType, object> = {
   green:  { shadowColor: '#22c55e', shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 10 },
+  gate:   { shadowColor: '#38bdf8', shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 10 },
   orange: { shadowColor: '#f97316', shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 10 },
   gold:   { shadowColor: '#eab308', shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 0 }, elevation: 10 },
 };

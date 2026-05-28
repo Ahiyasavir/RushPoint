@@ -1,19 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { View, ScrollView, ActivityIndicator, Pressable } from 'react-native';
+import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useGameStore, type LiveSlot, type LiveJudging } from '../src/store/gameStore';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../src/services/firebase.config';
+import { useGameStore, type LiveSlot, type LiveJudging, type MatchStatus } from '../src/store/gameStore';
 import { useGameSync } from '../src/hooks/useGameSync';
 import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
 import { Badge } from '../src/components/Badge';
+import { Button } from '../src/components/Button';
 import type { BadgeProps } from '../src/components/Badge';
 import { LanguageToggle } from '../src/components/LanguageToggle';
 import { useOfflineToast } from '../src/hooks/useOfflineToast';
 import { useTranslation } from '../src/i18n';
 
 // Slot shape is mirrored from the store (LiveSlot / LiveJudging).
-type SlotType   = 'green' | 'orange' | 'gold';
+type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
 type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 type FirestoreSlot = LiveSlot;
 type JudgingState  = LiveJudging;
@@ -47,18 +50,21 @@ function formatElapsed(seconds: number): string {
 
 const SLOT_BADGE_VARIANT: Record<SlotType, BadgeProps['variant']> = {
   green:  'green',
+  gate:   'info',
   orange: 'orange',
   gold:   'gold',
 };
 
 const SLOT_GLOW_COLOR: Record<SlotType, 'green' | 'orange' | 'gold'> = {
   green:  'green',
+  gate:   'orange',
   orange: 'orange',
   gold:   'gold',
 };
 
 const DOT_COLOR: Record<SlotType, Record<SlotStatus, string>> = {
   green:  { completed: 'bg-emerald-500', active: 'bg-emerald-400', locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
+  gate:   { completed: 'bg-sky-500',     active: 'bg-sky-400',     locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
   orange: { completed: 'bg-orange-500',  active: 'bg-orange-400',  locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
   gold:   { completed: 'bg-amber-400',   active: 'bg-amber-300',   locked: 'bg-zinc-800', skipped: 'bg-zinc-600' },
 };
@@ -171,6 +177,8 @@ export default function DashboardScreen() {
               {t('dash.loadError')}
             </Text>
           </Card>
+        ) : activeSlot?.type === 'gate' ? (
+          <GateCard matchStatus={gameState?.matchStatus} teamId={teamId} />
         ) : activeSlot ? (
           <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} />
         ) : (
@@ -194,7 +202,7 @@ export default function DashboardScreen() {
         )}
 
         {/* ── Phase 3: Basket zone link ─────────────────────────────── */}
-        {isOrangeActive && gateCheckedIn && !craftingActive && (
+        {activeSlot?.type === 'orange' && !craftingActive && (
           <Pressable
             onPress={() => router.push('/basket-zone')}
             className="mt-4 rounded-xl border border-amber-700 bg-amber-950/30 p-4 active:opacity-70"
@@ -327,6 +335,90 @@ function CraftingCountdownCard({
           )}
         </View>
       )}
+    </Card>
+  );
+}
+
+// ─── Gate card (matchmaking filter) ──────────────────────────────────────────
+
+function GateCard({ matchStatus, teamId }: { matchStatus?: MatchStatus; teamId: string | null }) {
+  const { t } = useTranslation();
+  const [joining, setJoining]     = useState(false);
+  const [bypassing, setBypassing] = useState(false);
+
+  async function handleJoin() {
+    setJoining(true);
+    try {
+      const fn = httpsCallable(functions, 'joinMatchQueue');
+      const res = await fn({});
+      const data = res.data as { matched: boolean; opponentName?: string };
+      if (data.matched) {
+        Alert.alert(t('match.title'), t('match.matched', { opponent: data.opponentName ?? '?' }));
+      }
+    } catch {
+      Alert.alert('Error', 'Could not join match queue. Try again.');
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  async function handleBypass() {
+    setBypassing(true);
+    try {
+      const fn = httpsCallable(functions, 'bypassMatchmaking');
+      await fn({});
+    } catch {
+      Alert.alert('Error', 'Could not bypass. Try again.');
+    } finally {
+      setBypassing(false);
+    }
+  }
+
+  return (
+    <Card glowColor="orange" className="p-5">
+      <View className="flex-row items-center justify-between mb-4">
+        <Badge label={t('slot.gate')} variant="info" />
+        <Text variant="mono" className="text-zinc-600">🥊</Text>
+      </View>
+
+      <Text variant="subheading" className="mb-1">{t('match.title')}</Text>
+
+      {!matchStatus || matchStatus === 'bypassed' ? (
+        <>
+          <Text variant="bodySmall" className="text-zinc-400 mb-4">{t('match.waiting')}</Text>
+          <View className="gap-3">
+            <Button onPress={handleJoin} disabled={joining} fullWidth>
+              {joining ? '…' : t('match.joinQueue')}
+            </Button>
+            <Button onPress={handleBypass} disabled={bypassing} variant="ghost" fullWidth>
+              {bypassing ? '…' : t('match.bypassed')}
+            </Button>
+          </View>
+        </>
+      ) : matchStatus === 'waiting' ? (
+        <>
+          <Text variant="bodySmall" className="text-sky-400 mb-4 animate-pulse">{t('match.waiting')}</Text>
+          <Button onPress={handleBypass} disabled={bypassing} variant="ghost" fullWidth>
+            {bypassing ? '…' : t('match.bypassed')}
+          </Button>
+        </>
+      ) : matchStatus === 'matched' ? (
+        <Text variant="bodySmall" className="text-blue-400">{t('match.matched', { opponent: '?' })}</Text>
+      ) : matchStatus === 'won' ? (
+        <>
+          <Text variant="bodySmall" className="text-emerald-400 mb-4">{t('match.won', { bonus: '150' })}</Text>
+          <Button onPress={() => router.push('/basket-zone')} fullWidth>
+            {t('basket.title')} →
+          </Button>
+        </>
+      ) : matchStatus === 'lost' ? (
+        <>
+          <Text variant="bodySmall" className="text-red-400 mb-4">{t('match.lost', { delay: '90' })}</Text>
+          <Button onPress={() => router.push('/basket-zone')} fullWidth>
+            {t('basket.title')} →
+          </Button>
+        </>
+      ) : null}
     </Card>
   );
 }

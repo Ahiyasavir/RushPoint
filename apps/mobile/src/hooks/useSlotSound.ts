@@ -6,6 +6,7 @@ import type { SlotType } from '../store/gameStore';
 // On native (no window.AudioContext) every call is a silent no-op.
 const CHIME: Record<SlotType, number[]> = {
   green:  [523.25, 783.99], // C5 → G5
+  gate:   [440.0,  880.0],  // A4 → A5 (octave jump for drama)
   orange: [587.33, 880.0],  // D5 → A5
   gold:   [659.25, 987.77], // E5 → B5
 };

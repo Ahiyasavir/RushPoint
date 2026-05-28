@@ -78,6 +78,7 @@ async function main() {
     createdAt: minsAgo(100), startedAt: minsAgo(95),
   });
 
+  // 7-slot layout: 4×green → gate (matchmaking) → orange (basket) → gold (craft+judge)
   await db.doc(`${userPath(DEMO_UID)}/gameState/current`).set({
     teamId: DEMO_UID, score: 550, bonusPenalty: 0, currentTaskId: 'task-gold-001',
     judging: null, updatedAt: now,
@@ -86,8 +87,9 @@ async function main() {
       done(1, 'green', 'task-green-002', 'Blindfolded Trust Relay', 70),
       done(2, 'green', 'task-green-003', 'Bible Trivia Blitz', 60),
       done(3, 'green', 'task-green-004', 'The Human Knot', 50),
-      done(4, 'orange', 'task-orange-001', 'Find Your Tene', 30),
-      goldActive(5), goldActive(6), goldActive(7),
+      done(4, 'gate',   null, 'Gate Filter', 20),
+      done(5, 'orange', 'task-orange-001', 'Find Your Tene', 30),
+      goldActive(6),
     ],
   });
 

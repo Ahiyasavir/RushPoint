@@ -2,7 +2,7 @@ import { create } from 'zustand';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type SlotType   = 'green' | 'orange' | 'gold';
+export type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
 export type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 
 export interface SlotState {
@@ -79,38 +79,28 @@ interface GameState {
 
 function buildInitialSlots(): SlotState[] {
   return [
-    // Green slots 0–3: first is immediately active
-    { index: 0, type: 'green',  status: 'active'  },
-    { index: 1, type: 'green',  status: 'locked'  },
-    { index: 2, type: 'green',  status: 'locked'  },
-    { index: 3, type: 'green',  status: 'locked'  },
-    // Orange slot 4: unlocks after all 4 greens complete
-    { index: 4, type: 'orange', status: 'locked'  },
-    // Gold slots 5–7: unlock after orange completes
-    { index: 5, type: 'gold',   status: 'locked'  },
-    { index: 6, type: 'gold',   status: 'locked'  },
-    { index: 7, type: 'gold',   status: 'locked'  },
+    // Green slots 0–3: field tasks
+    { index: 0, type: 'green',  status: 'active' },
+    { index: 1, type: 'green',  status: 'locked' },
+    { index: 2, type: 'green',  status: 'locked' },
+    { index: 3, type: 'green',  status: 'locked' },
+    // Gate slot 4: matchmaking filter
+    { index: 4, type: 'gate',   status: 'locked' },
+    // Orange slot 5: find basket zone
+    { index: 5, type: 'orange', status: 'locked' },
+    // Gold slot 6: 20-min crafting + final judging
+    { index: 6, type: 'gold',   status: 'locked' },
   ];
 }
 
 // ─── Unlock rules ─────────────────────────────────────────────────────────────
 // Returns the updated slots array after applying post-completion unlock logic.
+// Linear chain: each slot activates exactly the next one (mirrors server unlockNext).
 function applyUnlockRules(slots: SlotState[], completedIndex: number): SlotState[] {
   const updated = [...slots];
-
-  if (completedIndex < 3) {
-    // Completing a green slot unlocks the next green slot
+  if (completedIndex + 1 < updated.length) {
     updated[completedIndex + 1] = { ...updated[completedIndex + 1], status: 'active' };
-  } else if (completedIndex === 3) {
-    // Completing the 4th green slot unlocks the orange slot
-    updated[4] = { ...updated[4], status: 'active' };
-  } else if (completedIndex === 4) {
-    // Completing orange unlocks all 3 gold slots simultaneously
-    updated[5] = { ...updated[5], status: 'active' };
-    updated[6] = { ...updated[6], status: 'active' };
-    updated[7] = { ...updated[7], status: 'active' };
   }
-
   return updated;
 }
 

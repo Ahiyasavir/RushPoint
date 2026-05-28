@@ -40,7 +40,7 @@ function assertJudge(context: functions.https.CallableContext): void {
 
 interface JudgeSlot {
   index: number;
-  type: 'green' | 'orange' | 'gold';
+  type: 'green' | 'gate' | 'orange' | 'gold';
   status: 'locked' | 'active' | 'completed' | 'skipped';
   taskId?: string;
   taskTitle?: string;
@@ -75,9 +75,8 @@ function unlockNext(slots: JudgeSlot[], completedIndex: number, nowIso: string):
       slots[i] = { ...slots[i], status: 'active', startedAt: nowIso };
     }
   };
-  if (completedIndex < 3) activate(completedIndex + 1);
-  else if (completedIndex === 3) activate(4);
-  else if (completedIndex === 4) { activate(5); activate(6); activate(7); }
+  // Linear chain: each slot activates exactly the next one.
+  if (completedIndex + 1 < slots.length) activate(completedIndex + 1);
 }
 
 // â”€â”€â”€ requestNextTask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -101,7 +100,7 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
   const gsSnap = await db.doc(`${userPath(teamId)}/gameState/current`).get();
   const completedTaskIds: string[] = [];
   let skillRatio = 0;
-  let activeSlotType: 'green' | 'orange' | 'gold' | undefined;
+  let activeSlotType: 'green' | 'gate' | 'orange' | 'gold' | undefined;
 
   if (gsSnap.exists) {
     const gs = gsSnap.data() as { slots: JudgeSlot[] };
@@ -738,6 +737,45 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
 // PHASE 3 — GATE SPRINT · BASKET ZONES · CRAFTING · MATCHMAKING · LEADERBOARD
 // ═══════════════════════════════════════════════════════════════════════════
 
+const GATE_SLOT_INDEX    = 4;
+const BASKET_SLOT_INDEX  = 5;
+
+/**
+ * Marks the gate slot (4) as completed and activates the basket slot (5).
+ * Called server-side by resolveMatch and bypassMatchmaking.
+ */
+async function completeGateSlot(teamId: string, nowIso: string): Promise<void> {
+  const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gsRef);
+    if (!snap.exists) return;
+    const gs    = snap.data() as { slots: JudgeSlot[] };
+    const slots = gs.slots.map((s) => ({ ...s }));
+    if (slots[GATE_SLOT_INDEX]?.status === 'active') {
+      slots[GATE_SLOT_INDEX] = { ...slots[GATE_SLOT_INDEX], status: 'completed', completedAt: nowIso };
+      unlockNext(slots, GATE_SLOT_INDEX, nowIso);
+      tx.update(gsRef, { slots, updatedAt: nowIso });
+    }
+  });
+}
+
+/**
+ * Marks the basket (orange) slot as completed and activates the crafting (gold) slot.
+ * Called when the team scans the basket QR (startCraftingTimer).
+ */
+async function completeBasketSlot(teamId: string, nowIso: string, tx: FirebaseFirestore.Transaction): Promise<void> {
+  const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+  const snap  = await tx.get(gsRef);
+  if (!snap.exists) return;
+  const gs    = snap.data() as { slots: JudgeSlot[] };
+  const slots = gs.slots.map((s) => ({ ...s }));
+  if (slots[BASKET_SLOT_INDEX]?.status === 'active') {
+    slots[BASKET_SLOT_INDEX] = { ...slots[BASKET_SLOT_INDEX], status: 'completed', completedAt: nowIso };
+    unlockNext(slots, BASKET_SLOT_INDEX, nowIso);
+    tx.update(gsRef, { slots, updatedAt: nowIso });
+  }
+}
+
 // Static basket zone definitions (fallback when Firestore zones are not seeded).
 const STATIC_BASKET_ZONES = [
   {
@@ -859,34 +897,44 @@ export const startCraftingTimer = functions.https.onCall(async (data, context) =
   const nowIso  = new Date().toISOString();
 
   const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
-  return db.runTransaction(async (tx) => {
+  const result = await db.runTransaction(async (tx) => {
     const gsSnap = await tx.get(gsRef);
     if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found');
-    const gs = gsSnap.data() as { craftingStartedAt?: string; matchStatus?: string };
+    const gs = gsSnap.data() as { craftingStartedAt?: string; matchStatus?: string; slots: JudgeSlot[] };
 
     if (gs.craftingStartedAt) {
       const deadlineAt = new Date(new Date(gs.craftingStartedAt).getTime() + CRAFTING_DURATION_SECONDS * 1000).toISOString();
       return { alreadyStarted: true, craftingStartedAt: gs.craftingStartedAt, deadlineAt };
     }
 
+    // Complete the basket (orange) slot and activate the crafting (gold) slot.
+    const slots = gs.slots.map((s) => ({ ...s }));
+    if (slots[BASKET_SLOT_INDEX]?.status === 'active') {
+      slots[BASKET_SLOT_INDEX] = { ...slots[BASKET_SLOT_INDEX], status: 'completed', completedAt: nowIso };
+      unlockNext(slots, BASKET_SLOT_INDEX, nowIso);
+    }
+
     tx.update(gsRef, {
+      slots,
       craftingStartedAt: nowIso,
       matchStatus: gs.matchStatus === 'waiting' ? 'bypassed' : (gs.matchStatus ?? 'bypassed'),
       updatedAt: nowIso,
     });
     tx.set(db.doc(`${userPath(teamId)}/profile/team`), { status: 'crafting' }, { merge: true });
 
-    // Best-effort zone counter increment.
-    if (zoneId) {
-      db.doc(`artifacts/${APP_ID}/public/data/basketZones/${zoneId}`)
-        .update({ currentTeamCount: admin.firestore.FieldValue.increment(1) })
-        .catch(() => undefined);
-    }
-
     const deadlineAt      = new Date(new Date(nowIso).getTime() + CRAFTING_DURATION_SECONDS * 1000).toISOString();
     const sprintDeadlineAt = new Date(new Date(deadlineAt).getTime() + SPRINT_BUDGET_SECONDS * 1000).toISOString();
     return { alreadyStarted: false, craftingStartedAt: nowIso, deadlineAt, sprintDeadlineAt };
   });
+
+  // Best-effort zone counter increment (outside transaction).
+  if (zoneId) {
+    db.doc(`artifacts/${APP_ID}/public/data/basketZones/${zoneId}`)
+      .update({ currentTeamCount: admin.firestore.FieldValue.increment(1) })
+      .catch(() => undefined);
+  }
+
+  return result;
 });
 
 // ─── joinMatchQueue ───────────────────────────────────────────────────────────
@@ -972,7 +1020,24 @@ export const resolveMatch = functions.https.onCall(async (data, context) => {
   batch.set(queueColl.doc(loserId),  { status: 'resolved' }, { merge: true });
   await batch.commit();
 
+  // Complete the gate slot for both teams → activates basket slot (5).
+  await Promise.all([
+    completeGateSlot(winnerId, nowIso),
+    completeGateSlot(loserId,  nowIso),
+  ]);
+
   return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS };
+});
+
+// ─── bypassMatchmaking ────────────────────────────────────────────────────────
+// Team (or judge) skips the matchmaking step. Completes gate slot immediately.
+export const bypassMatchmaking = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const teamId = context.auth.uid;
+  const nowIso = new Date().toISOString();
+  await db.doc(`${userPath(teamId)}/gameState/current`).set({ matchStatus: 'bypassed', updatedAt: nowIso }, { merge: true });
+  await completeGateSlot(teamId, nowIso);
+  return { success: true };
 });
 
 // ─── finalizeLeaderboard ──────────────────────────────────────────────────────

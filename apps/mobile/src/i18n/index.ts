@@ -56,8 +56,9 @@ const en: Dict = {
   'dash.elapsed': 'Elapsed',
   'dash.beingJudged': 'Being judged',
   'slot.green': 'Open Field Mission',
+  'slot.gate': 'Gate Filter',
   'slot.orange': 'Find the Tene',
-  'slot.gold': 'Fill the Basket',
+  'slot.gold': 'Craft & Judge',
 
   // Connectivity
   'offline.lost': "You're offline — progress is saved and will sync when you reconnect.",
@@ -153,8 +154,9 @@ const he: Dict = {
   'dash.elapsed': 'זמן שחלף',
   'dash.beingJudged': 'בשיפוט',
   'slot.green': 'משימת שטח פתוח',
+  'slot.gate': 'מסנן השער',
   'slot.orange': 'מצאו את הטנא',
-  'slot.gold': 'מלאו את הסל',
+  'slot.gold': 'יצירה ושיפוט',
 
   // Connectivity
   'offline.lost': 'אין חיבור — ההתקדמות נשמרת ותסונכרן כשהחיבור יחזור.',
