@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions';
 import { db } from './firebase';
+import * as admin from 'firebase-admin';
 import { assignNextTask, releaseTask, buildRecommendations, computeSkillRatio } from './routing/assignNextTask';
 import {
   computeProductScore,
@@ -8,6 +9,12 @@ import {
   MAX_PRESENTATION_SCORE,
 } from './scoring/teneProducts';
 import { calculateTaskScore } from './scoring/taskScore';
+import {
+  computeTransitPenalty,
+  computeSprintPenalty,
+  applyZScoreBonus,
+  completionBonus,
+} from './scoring/calculateScore';
 
 // â”€â”€â”€ Path + auth helpers for the judge flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -363,22 +370,17 @@ export const skipTask = functions.https.onCall(async (data, context) => {
 // â”€â”€â”€ triggerLeaderboardFreeze â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Admin-callable or auto-triggered 30 min before event end.
 export const triggerLeaderboardFreeze = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
-  const adminDoc = await db.collection('admins').doc(context.auth.uid).get();
-  if (!adminDoc.exists || adminDoc.data()?.role !== 'admin') {
-    throw new functions.https.HttpsError('permission-denied', 'Admins only');
-  }
-
-  const { eventId } = data as { eventId: string };
-  await db.collection('leaderboard').doc(eventId).update({
-    frozen: true,
-    frozenAt: new Date().toISOString(),
-  });
-  return { success: true };
+  assertJudge(context);
+  const { freeze = true } = data as { freeze?: boolean };
+  const nowIso = new Date().toISOString();
+  const lbRef = db.doc('artifacts/' + APP_ID + '/public/data/leaderboard/current');
+  await lbRef.set(
+    { frozen: freeze, ...(freeze ? { frozenAt: nowIso } : {}), updatedAt: nowIso },
+    { merge: true },
+  );
+  return { success: true, frozen: freeze };
 });
 
-// â”€â”€â”€ pushFlashMission â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Admin broadcasts a flash mission to all active teams.
 export const pushFlashMission = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const adminDoc = await db.collection('admins').doc(context.auth.uid).get();
@@ -729,4 +731,353 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
 
     return { teamId: uid, teamName: name, alreadyRegistered: false };
   });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 3 — GATE SPRINT · BASKET ZONES · CRAFTING · MATCHMAKING · LEADERBOARD
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Static basket zone definitions (fallback when Firestore zones are not seeded).
+const STATIC_BASKET_ZONES = [
+  {
+    id: 'zone-a',
+    name: 'Olive Press Area',
+    nameHe: 'אזור בית הבד',
+    riddle: 'Where ancient stones press the golden fruit — find your basket near the millstone.',
+    riddleHe: 'בין אבני הקדם שסוחטות את הפרי הזהוב — מצאו את הסל ליד אבן הריחיים.',
+    coordinates: { lat: 31.7683, lng: 35.2137 },
+    currentTeamCount: 0,
+    maxTeams: 3,
+  },
+  {
+    id: 'zone-b',
+    name: 'Fig Tree Grove',
+    nameHe: 'חורשת התאנים',
+    riddle: 'Under the shade of the fig tree, where the prophet once rested — your basket awaits.',
+    riddleHe: 'בצל תאנה, שם הנביא נח — מחכה לכם הסל שלכם.',
+    coordinates: { lat: 31.769, lng: 35.2145 },
+    currentTeamCount: 0,
+    maxTeams: 3,
+  },
+  {
+    id: 'zone-c',
+    name: 'Vineyard Terrace',
+    nameHe: 'מדרגות הכרם',
+    riddle: 'Climb the stone terraces where grapes once grew in abundance — your treasure is here.',
+    riddleHe: 'טפסו במדרגות האבן שם גדלו ענבים בשפע — המטמון שלכם חבוי כאן.',
+    coordinates: { lat: 31.7676, lng: 35.213 },
+    currentTeamCount: 0,
+    maxTeams: 3,
+  },
+];
+
+const TARGET_TRANSIT_MINUTES = 20;
+const CRAFTING_DURATION_SECONDS = 20 * 60;
+const SPRINT_BUDGET_SECONDS = 90;
+const MATCH_WIN_BONUS = 150;
+
+// ─── checkInGate ──────────────────────────────────────────────────────────────
+// Called when a team scans the Bible Park gate QR.
+// Records gateArrivedAt and applies an exponential transit penalty if late.
+export const checkInGate = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const teamId = context.auth.uid;
+  const nowIso = new Date().toISOString();
+  const nowMs  = Date.now();
+
+  const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+  return db.runTransaction(async (tx) => {
+    const gsSnap = await tx.get(gsRef);
+    if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found');
+    const gs = gsSnap.data() as { slots: JudgeSlot[]; bonusPenalty?: number; gateArrivedAt?: string };
+
+    if (gs.gateArrivedAt) {
+      return { alreadyCheckedIn: true, gateArrivedAt: gs.gateArrivedAt, penaltyPoints: 0 };
+    }
+
+    // Transit clock starts when slot 4 (orange) was activated.
+    const orangeStartedAt = gs.slots[4]?.startedAt;
+    const transitStartMs  = orangeStartedAt ? new Date(orangeStartedAt).getTime() : nowMs;
+    const actualMins      = (nowMs - transitStartMs) / 60_000;
+    const penaltyPoints   = computeTransitPenalty(actualMins, TARGET_TRANSIT_MINUTES);
+
+    tx.update(gsRef, {
+      gateArrivedAt: nowIso,
+      bonusPenalty:  (gs.bonusPenalty ?? 0) + penaltyPoints,
+      updatedAt:     nowIso,
+    });
+    tx.set(db.doc(`${userPath(teamId)}/profile/team`), { status: 'park' }, { merge: true });
+
+    return {
+      alreadyCheckedIn: false,
+      gateArrivedAt:    nowIso,
+      penaltyPoints,
+      transitMinutes:   Math.round(actualMins),
+    };
+  });
+});
+
+// ─── getBasketZone ────────────────────────────────────────────────────────────
+// Returns the least-crowded basket zone with its riddle. Does not claim the spot.
+export const getBasketZone = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+
+  const zonesSnap = await db
+    .collection(`artifacts/${APP_ID}/public/data/basketZones`)
+    .get();
+
+  const zones = zonesSnap.empty
+    ? STATIC_BASKET_ZONES
+    : (zonesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as typeof STATIC_BASKET_ZONES);
+
+  const best = zones.reduce((prev, cur) => {
+    const prevLoad = prev.currentTeamCount / prev.maxTeams;
+    const curLoad  = cur.currentTeamCount  / cur.maxTeams;
+    return curLoad < prevLoad ? cur : prev;
+  });
+
+  return {
+    zoneId:      best.id,
+    zoneName:    best.name,
+    zoneNameHe:  best.nameHe,
+    riddle:      best.riddle,
+    riddleHe:    best.riddleHe,
+    coordinates: best.coordinates,
+    currentLoad: best.currentTeamCount,
+    maxTeams:    best.maxTeams,
+  };
+});
+
+// ─── startCraftingTimer ───────────────────────────────────────────────────────
+// Called when the team scans the basket QR at their zone.
+// Stamps craftingStartedAt and starts the 20-minute countdown on mobile.
+export const startCraftingTimer = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const teamId  = context.auth.uid;
+  const { zoneId } = data as { zoneId?: string };
+  const nowIso  = new Date().toISOString();
+
+  const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+  return db.runTransaction(async (tx) => {
+    const gsSnap = await tx.get(gsRef);
+    if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found');
+    const gs = gsSnap.data() as { craftingStartedAt?: string; matchStatus?: string };
+
+    if (gs.craftingStartedAt) {
+      const deadlineAt = new Date(new Date(gs.craftingStartedAt).getTime() + CRAFTING_DURATION_SECONDS * 1000).toISOString();
+      return { alreadyStarted: true, craftingStartedAt: gs.craftingStartedAt, deadlineAt };
+    }
+
+    tx.update(gsRef, {
+      craftingStartedAt: nowIso,
+      matchStatus: gs.matchStatus === 'waiting' ? 'bypassed' : (gs.matchStatus ?? 'bypassed'),
+      updatedAt: nowIso,
+    });
+    tx.set(db.doc(`${userPath(teamId)}/profile/team`), { status: 'crafting' }, { merge: true });
+
+    // Best-effort zone counter increment.
+    if (zoneId) {
+      db.doc(`artifacts/${APP_ID}/public/data/basketZones/${zoneId}`)
+        .update({ currentTeamCount: admin.firestore.FieldValue.increment(1) })
+        .catch(() => undefined);
+    }
+
+    const deadlineAt      = new Date(new Date(nowIso).getTime() + CRAFTING_DURATION_SECONDS * 1000).toISOString();
+    const sprintDeadlineAt = new Date(new Date(deadlineAt).getTime() + SPRINT_BUDGET_SECONDS * 1000).toISOString();
+    return { alreadyStarted: false, craftingStartedAt: nowIso, deadlineAt, sprintDeadlineAt };
+  });
+});
+
+// ─── joinMatchQueue ───────────────────────────────────────────────────────────
+// Team enters the matchmaking queue at the gate.
+// Immediately matched if an opponent within 300 pts is already waiting.
+export const joinMatchQueue = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const teamId = context.auth.uid;
+  const nowIso = new Date().toISOString();
+
+  const [gsSnap, profSnap] = await Promise.all([
+    db.doc(`${userPath(teamId)}/gameState/current`).get(),
+    db.doc(`${userPath(teamId)}/profile/team`).get(),
+  ]);
+  if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found');
+
+  const teamScore = (gsSnap.data() as { score?: number }).score ?? 0;
+  const teamName  = (profSnap.data() as { name?: string })?.name ?? teamId;
+
+  const queueColl  = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
+  const matchColl  = db.collection(`artifacts/${APP_ID}/public/data/matches`);
+
+  const waitingSnap = await queueColl.where('status', '==', 'waiting').get();
+  const opponent = waitingSnap.docs
+    .filter((d) => d.id !== teamId)
+    .find((d) => Math.abs(((d.data() as { score: number }).score) - teamScore) <= 300);
+
+  if (opponent) {
+    const oppData  = opponent.data() as { teamName: string; score: number };
+    const matchRef = matchColl.doc();
+    const batch    = db.batch();
+    batch.set(matchRef, {
+      teamAId: teamId, teamAName: teamName,
+      teamBId: opponent.id, teamBName: oppData.teamName,
+      scoreA: teamScore, scoreB: oppData.score,
+      createdAt: nowIso, penaltySeconds: SPRINT_BUDGET_SECONDS,
+    });
+    batch.set(queueColl.doc(teamId),   { teamId, teamName, score: teamScore, joinedAt: nowIso, status: 'matched', matchId: matchRef.id });
+    batch.update(opponent.ref, { status: 'matched', matchId: matchRef.id });
+    batch.set(db.doc(`${userPath(teamId)}/gameState/current`),   { matchStatus: 'matched', updatedAt: nowIso }, { merge: true });
+    batch.set(db.doc(`${userPath(opponent.id)}/gameState/current`), { matchStatus: 'matched', updatedAt: nowIso }, { merge: true });
+    await batch.commit();
+    return { matched: true, matchId: matchRef.id, opponentName: oppData.teamName, opponentScore: oppData.score };
+  }
+
+  await queueColl.doc(teamId).set({ teamId, teamName, score: teamScore, joinedAt: nowIso, status: 'waiting' });
+  await db.doc(`${userPath(teamId)}/gameState/current`).update({ matchStatus: 'waiting', updatedAt: nowIso });
+  return { matched: false, status: 'waiting' };
+});
+
+// ─── resolveMatch ─────────────────────────────────────────────────────────────
+// Judge records the 1v1 outcome. Winner: +150 pts. Loser: matchStatus = 'lost'.
+export const resolveMatch = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { matchId, winnerId } = data as { matchId: string; winnerId: string };
+  if (!matchId || !winnerId) {
+    throw new functions.https.HttpsError('invalid-argument', 'matchId and winnerId are required');
+  }
+  const nowIso = new Date().toISOString();
+
+  const matchRef  = db.doc(`artifacts/${APP_ID}/public/data/matches/${matchId}`);
+  const matchSnap = await matchRef.get();
+  if (!matchSnap.exists) throw new functions.https.HttpsError('not-found', 'Match not found');
+
+  const match = matchSnap.data() as { teamAId: string; teamBId: string; resolvedAt?: string };
+  if (match.resolvedAt) return { alreadyResolved: true };
+
+  const loserId   = match.teamAId === winnerId ? match.teamBId : match.teamAId;
+  const winnerRef = db.doc(`${userPath(winnerId)}/gameState/current`);
+  const winnerGs  = (await winnerRef.get()).data() as { score?: number } | undefined;
+
+  const batch = db.batch();
+  batch.update(matchRef, { winnerId, loserId, resolvedAt: nowIso });
+  batch.update(winnerRef, {
+    score: (winnerGs?.score ?? 0) + MATCH_WIN_BONUS,
+    matchStatus: 'won',
+    updatedAt: nowIso,
+  });
+  batch.set(db.doc(`${userPath(loserId)}/gameState/current`), { matchStatus: 'lost', updatedAt: nowIso }, { merge: true });
+
+  const queueColl = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
+  batch.set(queueColl.doc(winnerId), { status: 'resolved' }, { merge: true });
+  batch.set(queueColl.doc(loserId),  { status: 'resolved' }, { merge: true });
+  await batch.commit();
+
+  return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS };
+});
+
+// ─── finalizeLeaderboard ──────────────────────────────────────────────────────
+// Admin-triggered at event end. Reads all teams, applies Z-Score normalization,
+// adds completion bonus, and writes the canonical leaderboard doc.
+export const finalizeLeaderboard = functions.https.onCall(async (_data, context) => {
+  assertJudge(context);
+  const nowIso = new Date().toISOString();
+
+  const [profileSnap, gsSnap] = await Promise.all([
+    db.collectionGroup('profile').get(),
+    db.collectionGroup('gameState').get(),
+  ]);
+
+  // Build gameState map: userId → gs data.
+  const gsMap: Record<string, {
+    score: number;
+    bonusPenalty: number;
+    slots: JudgeSlot[];
+    craftingStartedAt?: string;
+    startedAt?: string;
+  }> = {};
+  for (const doc of gsSnap.docs) {
+    const parts  = doc.ref.path.split('/');
+    const userId = parts[parts.indexOf('users') + 1];
+    const gs     = doc.data() as typeof gsMap[string];
+    gsMap[userId] = {
+      score:             gs.score ?? 0,
+      bonusPenalty:      gs.bonusPenalty ?? 0,
+      slots:             gs.slots ?? [],
+      craftingStartedAt: gs.craftingStartedAt,
+    };
+  }
+
+  // Build profile map.
+  const profMap: Record<string, { name: string; startedAt?: string; finishedAt?: string }> = {};
+  for (const doc of profileSnap.docs) {
+    if (doc.id !== 'team') continue;
+    const parts  = doc.ref.path.split('/');
+    const userId = parts[parts.indexOf('users') + 1];
+    profMap[userId] = doc.data() as typeof profMap[string];
+  }
+
+  interface TeamResult {
+    teamId: string;
+    teamName: string;
+    rawScore: number;
+    finalScore: number;
+    completedSlots: number;
+    finishedAt?: string;
+    durationMinutes?: number;
+  }
+
+  const results: TeamResult[] = Object.keys(profMap).map((teamId) => {
+    const prof = profMap[teamId];
+    const gs   = gsMap[teamId];
+    if (!gs) return null;
+    const completedSlots = gs.slots.filter((s) => s.status === 'completed' || s.status === 'skipped').length;
+    const allDone        = completedSlots === 8;
+    let durationMinutes: number | undefined;
+    if (allDone && prof.startedAt) {
+      const endProxy  = gs.craftingStartedAt ?? nowIso;
+      durationMinutes = (new Date(endProxy).getTime() - new Date(prof.startedAt).getTime()) / 60_000;
+    }
+    const bonus    = allDone ? 500 : 0;
+    const rawScore = gs.score + bonus;
+    return { teamId, teamName: prof.name, rawScore, finalScore: rawScore, completedSlots, finishedAt: prof.finishedAt, durationMinutes };
+  }).filter(Boolean) as TeamResult[];
+
+  // Apply Z-Score to finished teams.
+  const finishedDurations = results.filter((r) => r.durationMinutes != null).map((r) => r.durationMinutes as number);
+  for (const r of results) {
+    if (r.durationMinutes != null) {
+      r.finalScore = applyZScoreBonus(r.rawScore, r.durationMinutes, finishedDurations);
+    }
+  }
+
+  // Sort: finished teams first, then by finalScore desc.
+  results.sort((a, b) => {
+    const aF = a.durationMinutes != null ? 1 : 0;
+    const bF = b.durationMinutes != null ? 1 : 0;
+    if (aF !== bF) return bF - aF;
+    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+    return b.completedSlots - a.completedSlots;
+  });
+
+  const rankings = results.map((r, i) => ({
+    rank:            i + 1,
+    teamId:          r.teamId,
+    teamName:        r.teamName,
+    score:           r.finalScore,
+    rawScore:        r.rawScore,
+    completedSlots:  r.completedSlots,
+    finishedAt:      r.finishedAt ?? null,
+    durationMinutes: r.durationMinutes ?? null,
+  }));
+
+  const lbRef = db.doc(`artifacts/${APP_ID}/public/data/leaderboard/current`);
+  await lbRef.set({
+    eventId:     APP_ID,
+    rankings,
+    frozen:      false,
+    finalizedAt: nowIso,
+    updatedAt:   nowIso,
+  });
+
+  return { success: true, count: rankings.length, rankings };
 });

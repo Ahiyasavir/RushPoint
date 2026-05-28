@@ -21,6 +21,9 @@ export const COLLECTIONS = {
   LEADERBOARD:    'leaderboard',
   FLASH_MISSIONS: 'flashMissions',
   ADMIN_ALERTS:   'adminAlerts',
+  BASKET_ZONES:   'basketZones',
+  MATCH_QUEUE:    'matchQueue',
+  MATCHES:        'matches',
 
   // Private per-user collections
   PROFILE:        'profile',
@@ -51,7 +54,8 @@ export interface GeoPoint {
 export type SlotType   = 'green' | 'orange' | 'gold';
 export type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 export type TaskType   = 'green' | 'orange' | 'gold';
-export type TeamStatus = 'registered' | 'active' | 'park' | 'finished';
+export type TeamStatus = 'registered' | 'active' | 'park' | 'crafting' | 'sprinting' | 'finished';
+export type MatchStatus = 'waiting' | 'matched' | 'won' | 'lost' | 'bypassed';
 export type EventStatus = 'pre' | 'live' | 'frozen' | 'ended';
 export type CheckInStatus = 'pending' | 'approved' | 'rejected';
 
@@ -59,6 +63,15 @@ export type CheckInStatus = 'pending' | 'approved' | 'rejected';
 // ─── Slot ─────────────────────────────────────────────────────────────────────
 // A single entry in the 8-slot task board.
 // Stored inside GameState (not as its own Firestore document).
+
+export interface SlotScoreBreakdown {
+  products?: string[];
+  productScore?: number;
+  designScore?: number;
+  presentationScore?: number;
+  taskScore?: number;
+  total?: number;
+}
 
 export interface SlotRecord {
   index: number;       // 0–7 (fixed positions: 0-3 green, 4 orange, 5-7 gold)
@@ -68,6 +81,8 @@ export interface SlotRecord {
   taskTitle?: string;  // denormalised for display (avoids extra read)
   startedAt?: string;  // ISO 8601 — stamped when slot becomes active
   completedAt?: string; // ISO 8601
+  earnedScore?: number;
+  scoreBreakdown?: SlotScoreBreakdown;
 }
 
 
@@ -95,14 +110,26 @@ export interface Team {
 // The authoritative record of a team's slot progression.
 // Written ONLY by Cloud Functions — client is read-only on this document.
 
+export interface JudgingState {
+  slotIndex: number;
+  checkInId: string;
+  arrivedAt: string;
+}
+
 export interface GameState {
   teamId: string;
   slots: SlotRecord[];  // always exactly 8 entries
   score: number;
-  bonusPenalty: number; // accumulated clue-hint deductions
+  bonusPenalty: number; // accumulated deductions (transit, sprint, hints)
   currentTaskId?: string;
   lastSyncedAt?: string; // last successful server sync (ISO 8601)
   updatedAt: string;    // ISO 8601
+  // Phase 3 fields
+  judging?: JudgingState | null;
+  gateArrivedAt?: string;       // stamped when team checks in at Bible Park gate
+  craftingStartedAt?: string;   // stamped when team scans basket QR (20-min clock starts)
+  finalSprintStartedAt?: string; // stamped when 20-min crafting ends
+  matchStatus?: MatchStatus;
 }
 
 
@@ -325,4 +352,48 @@ export interface TaskRecommendation {
 
 export interface GetRecommendedTasksResult {
   recommendations: TaskRecommendation[];
+}
+
+
+// ─── Basket Zone ──────────────────────────────────────────────────────────────
+// Stored at: artifacts/{appId}/public/data/basketZones/{zoneId}
+// 3 zones in Bible Park; teams are routed to the least-crowded one.
+
+export interface BasketZone {
+  id: string;
+  name: string;
+  nameHe?: string;
+  riddle: string;
+  riddleHe?: string;
+  coordinates: GeoPoint;
+  currentTeamCount: number;
+  maxTeams: number;
+}
+
+
+// ─── Matchmaking ──────────────────────────────────────────────────────────────
+// Stored at: artifacts/{appId}/public/data/matchQueue/{teamId}
+//            artifacts/{appId}/public/data/matches/{matchId}
+
+export interface MatchQueueEntry {
+  teamId: string;
+  teamName: string;
+  score: number;
+  joinedAt: string;
+  status: 'waiting' | 'matched' | 'resolved';
+  matchId?: string;
+}
+
+export interface Match {
+  id: string;
+  teamAId: string;
+  teamAName: string;
+  teamBId: string;
+  teamBName: string;
+  scoreA: number;
+  scoreB: number;
+  createdAt: string;
+  resolvedAt?: string;
+  winnerId?: string;
+  penaltySeconds: number; // delay applied to the loser before they can access basket
 }

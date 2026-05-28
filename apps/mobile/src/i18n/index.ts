@@ -69,6 +69,39 @@ const en: Dict = {
   'map.subtitle': 'Station locations across the Jerusalem course.',
   'map.noToken': 'Add EXPO_PUBLIC_MAPBOX_TOKEN to apps/mobile/.env to show the live map.',
   'map.back': '← Back',
+
+  // Gate sprint (orange slot)
+  'gate.title': 'Race to Bible Park!',
+  'gate.subtitle': 'Target: {target} min transit. Clock is running.',
+  'gate.elapsed': 'Transit time',
+  'gate.warning': '⚠️ Late — penalty will apply',
+  'gate.arrived': 'Check in at gate →',
+  'gate.penalty': 'Transit penalty: {pts} pts',
+
+  // Matchmaking
+  'match.title': 'Gate Match',
+  'match.waiting': 'Waiting for opponent…',
+  'match.matched': 'Matched vs {opponent}!',
+  'match.won': '🏆 You won! +{bonus} pts',
+  'match.lost': '😤 You lost — {delay}s delay',
+  'match.bypassed': 'No match — proceed to basket.',
+  'match.joinQueue': 'Enter Match Queue',
+
+  // Basket zone
+  'basket.title': 'Find Your Basket',
+  'basket.riddleLabel': 'Your riddle:',
+  'basket.zone': 'Zone: {name}',
+  'basket.scanPrompt': 'Scan the basket QR when you arrive.',
+  'basket.startTimer': 'Start 20-min Timer',
+  'basket.delay': 'Match penalty — wait {sec}s',
+
+  // Crafting countdown
+  'craft.title': 'Decorate Your Basket!',
+  'craft.timeLeft': 'Time left',
+  'craft.expired': 'Time\'s up — sprint to the judge!',
+  'craft.sprintWindow': 'Sprint window',
+  'craft.sprintLeft': '{sec}s to reach the judge',
+  'craft.sprintExpired': 'Late — exponential penalty accumulating!',
 };
 
 const he: Dict = {
@@ -133,6 +166,39 @@ const he: Dict = {
   'map.subtitle': 'מיקומי העמדות לאורך מסלול ירושלים.',
   'map.noToken': 'הוסיפו EXPO_PUBLIC_MAPBOX_TOKEN לקובץ apps/mobile/.env כדי להציג את המפה.',
   'map.back': '← חזרה',
+
+  // Gate sprint (orange slot)
+  'gate.title': 'רוצו לפארק התנ"ך!',
+  'gate.subtitle': 'יעד: {target} דק׳ מעבר. השעון רץ.',
+  'gate.elapsed': 'זמן מעבר',
+  'gate.warning': '⚠️ איחור — יוחל עונש',
+  'gate.arrived': 'צ׳ק-אין בשער ←',
+  'gate.penalty': 'עונש מעבר: {pts} נק׳',
+
+  // Matchmaking
+  'match.title': 'דו-קרב בשער',
+  'match.waiting': 'ממתינים ליריב…',
+  'match.matched': 'זווגתם מול {opponent}!',
+  'match.won': '🏆 ניצחתם! +{bonus} נק׳',
+  'match.lost': '😤 הפסדתם — עיכוב {delay} שנ׳',
+  'match.bypassed': 'אין זיווג — המשיכו לסל.',
+  'match.joinQueue': 'כניסה לתור הזיווג',
+
+  // Basket zone
+  'basket.title': 'מצאו את הסל שלכם',
+  'basket.riddleLabel': 'החידה שלכם:',
+  'basket.zone': 'אזור: {name}',
+  'basket.scanPrompt': 'סרקו את ה-QR של הסל כשתגיעו.',
+  'basket.startTimer': 'התחלת טיימר 20 דק׳',
+  'basket.delay': 'עונש דו-קרב — המתינו {sec} שנ׳',
+
+  // Crafting countdown
+  'craft.title': 'קשטו את הסל!',
+  'craft.timeLeft': 'זמן שנותר',
+  'craft.expired': 'הזמן נגמר — רוצו לשופט!',
+  'craft.sprintWindow': 'חלון ריצה',
+  'craft.sprintLeft': '{sec} שנ׳ להגיע לשופט',
+  'craft.sprintExpired': 'איחור — עונש מצטבר!',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

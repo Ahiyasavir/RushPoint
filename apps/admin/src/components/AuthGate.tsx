@@ -6,7 +6,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    ensureAuth();
+    void ensureAuth();
     const unsub = onAuthStateChanged(auth, (user) => {
       if (user) {
         setReady(true);

@@ -34,10 +34,17 @@ export interface LiveJudging {
   arrivedAt: unknown;
 }
 
+export type MatchStatus = 'waiting' | 'matched' | 'won' | 'lost' | 'bypassed';
+
 export interface LiveGame {
   slots: LiveSlot[];
   score: number;
   judging?: LiveJudging | null;
+  // Phase 3
+  gateArrivedAt?: unknown;
+  craftingStartedAt?: unknown;
+  finalSprintStartedAt?: unknown;
+  matchStatus?: MatchStatus;
 }
 
 export type SyncState = 'loading' | 'live' | 'error';

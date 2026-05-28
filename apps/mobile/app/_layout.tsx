@@ -23,6 +23,7 @@ export default function RootLayout() {
           <Stack.Screen name="register" />
           <Stack.Screen name="dashboard" options={{ gestureEnabled: false }} />
           <Stack.Screen name="map" options={{ animation: 'slide_from_bottom' }} />
+          <Stack.Screen name="basket-zone" options={{ animation: 'slide_from_bottom' }} />
         </Stack>
         </ToastProvider>
       </SafeAreaProvider>

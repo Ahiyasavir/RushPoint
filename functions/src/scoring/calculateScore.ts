@@ -1,40 +1,61 @@
-import type { GameState } from '@rushpoint/shared';
-
-const SLOT_POINT_VALUES = {
-  green: 100,
-  orange: 150,
-  gold: 200,
-};
-
-const COMPLETION_BONUS = 500;
-const SPEED_BONUS_MAX = 1000;
-const SPEED_BONUS_THRESHOLD_MINUTES = 120; // top speed bonus window
+// ─── Penalty helpers ──────────────────────────────────────────────────────────
 
 /**
- * Computes the final team score:
- *   base slot points + judge basket score + speed bonus - clue penalties
- * Used by Phase 3 leaderboard finalisation — not called during live judging.
+ * Exponential transit penalty for arriving late at the park gate.
+ * 50 * (e^(0.2 * minutesLate) - 1), capped at 500 pts.
  */
-export function calculateScore(
-  gs: GameState,
-  judgeBasketScore: number,   // 0–100 from judge
-  durationMinutes: number,
+export function computeTransitPenalty(actualMinutes: number, targetMinutes: number): number {
+  const late = actualMinutes - targetMinutes;
+  if (late <= 0) return 0;
+  return Math.min(500, Math.round(50 * (Math.exp(0.2 * late) - 1)));
+}
+
+/**
+ * Exponential sprint penalty for arriving late to the final judge.
+ * 10 * (e^(0.05 * secondsLate) - 1), capped at 300 pts.
+ */
+export function computeSprintPenalty(secondsLate: number): number {
+  if (secondsLate <= 0) return 0;
+  return Math.min(300, Math.round(10 * (Math.exp(0.05 * secondsLate) - 1)));
+}
+
+
+// ─── Z-Score normalization ────────────────────────────────────────────────────
+
+/**
+ * Applies a Z-Score bonus/deduction to a team's raw score based on how their
+ * completion time compares to all finishers. Faster than average → bonus;
+ * slower → deduction. 1σ difference = ±200 pts.
+ */
+export function applyZScoreBonus(
+  rawScore: number,
+  teamDurationMinutes: number,
+  allDurationMinutes: number[],
 ): number {
-  const slotPoints = gs.slots
-    .filter((s) => s.status === 'completed')
-    .reduce((sum, s) => sum + SLOT_POINT_VALUES[s.type], 0);
+  if (allDurationMinutes.length < 2) return rawScore;
+  const mu = allDurationMinutes.reduce((a, b) => a + b, 0) / allDurationMinutes.length;
+  const variance =
+    allDurationMinutes.reduce((sum, d) => sum + (d - mu) ** 2, 0) / allDurationMinutes.length;
+  const sigma = Math.sqrt(variance);
+  if (sigma === 0) return rawScore;
+  // Negative z means faster than average → positive bonus
+  const z = (teamDurationMinutes - mu) / sigma;
+  return Math.max(0, rawScore + Math.round(-z * 200));
+}
 
-  const allCompleted = gs.slots.every((s) => s.status === 'completed');
-  const completionBonus = allCompleted ? COMPLETION_BONUS : 0;
 
-  // Speed bonus: linear decay from SPEED_BONUS_MAX down to 0 over threshold window
-  const speedBonus = allCompleted
-    ? Math.max(0, SPEED_BONUS_MAX * (1 - durationMinutes / SPEED_BONUS_THRESHOLD_MINUTES))
-    : 0;
+// ─── Slot completion bonus ────────────────────────────────────────────────────
 
-  const basketBonus = Math.round(judgeBasketScore * 3); // 0–300 pts
+const COMPLETION_BONUS = 500;
 
-  return Math.round(
-    slotPoints + completionBonus + speedBonus + basketBonus - gs.bonusPenalty,
-  );
+/**
+ * Adds a flat completion bonus when all 8 slots are terminal (completed or skipped).
+ * The live score accumulates per-slot earnedScore during the event; this bonus is
+ * applied on top when the team finishes.
+ */
+export function completionBonus(
+  slots: Array<{ status: string }>,
+): number {
+  const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+  return allDone ? COMPLETION_BONUS : 0;
 }

@@ -18,6 +18,9 @@ type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 type FirestoreSlot = LiveSlot;
 type JudgingState  = LiveJudging;
 
+const CRAFTING_DURATION_SECS = 20 * 60;
+const SPRINT_BUDGET_SECS     = 90;
+
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
 function toMillis(value: unknown): number | null {
@@ -88,6 +91,30 @@ export default function DashboardScreen() {
   const completedCount  = gameState?.slots.filter((s) => s.status === 'completed').length ?? 0;
   const score           = gameState?.score ?? 0;
 
+  // Phase 3 derived state
+  function toMs(v: unknown): number | null {
+    if (!v) return null;
+    if (typeof v === 'string') { const t = Date.parse(v); return isNaN(t) ? null : t; }
+    if (typeof v === 'object') {
+      const o = v as { toMillis?: () => number; seconds?: number };
+      if (typeof o.toMillis === 'function') return o.toMillis();
+      if (typeof o.seconds === 'number') return o.seconds * 1000;
+    }
+    return null;
+  }
+
+  const craftingStartMs = toMs(gameState?.craftingStartedAt);
+  const craftingActive  = craftingStartMs != null;
+  const craftingElapsed = craftingActive ? Math.max(0, Math.floor((nowMs - craftingStartMs!) / 1000)) : 0;
+  const craftingLeft    = Math.max(0, CRAFTING_DURATION_SECS - craftingElapsed);
+  const craftingDone    = craftingElapsed >= CRAFTING_DURATION_SECS;
+  const sprintElapsed   = craftingDone ? Math.max(0, craftingElapsed - CRAFTING_DURATION_SECS) : 0;
+  const sprintLeft      = Math.max(0, SPRINT_BUDGET_SECS - sprintElapsed);
+
+  const isOrangeActive  = activeSlot?.type === 'orange';
+  const gateArrivedMs   = toMs(gameState?.gateArrivedAt);
+  const gateCheckedIn   = gateArrivedMs != null;
+
   return (
     <View className="flex-1 bg-zinc-950">
       {/* ── Header ───────────────────────────────────────────────────── */}
@@ -152,6 +179,29 @@ export default function DashboardScreen() {
               {t('dash.noMission')}
             </Text>
           </Card>
+        )}
+
+        {/* ── Phase 3: Crafting countdown ───────────────────────────── */}
+        {craftingActive && (
+          <View className="mt-6">
+            <CraftingCountdownCard
+              craftingLeft={craftingLeft}
+              craftingDone={craftingDone}
+              sprintLeft={sprintLeft}
+              sprintExpired={sprintElapsed > SPRINT_BUDGET_SECS}
+            />
+          </View>
+        )}
+
+        {/* ── Phase 3: Basket zone link ─────────────────────────────── */}
+        {isOrangeActive && gateCheckedIn && !craftingActive && (
+          <Pressable
+            onPress={() => router.push('/basket-zone')}
+            className="mt-4 rounded-xl border border-amber-700 bg-amber-950/30 p-4 active:opacity-70"
+          >
+            <Text variant="label" className="text-amber-400">🧺 {t('basket.title')}</Text>
+            <Text variant="bodySmall" className="text-zinc-400 mt-1">{t('basket.scanPrompt')}</Text>
+          </Pressable>
         )}
 
         {/* ── Slot progress dots ────────────────────────────────────── */}
@@ -229,4 +279,54 @@ function SlotDot({ slot }: { slot: FirestoreSlot }) {
   const sizeClass = slot.status === 'active' ? 'w-3.5 h-3.5' : 'w-2.5 h-2.5';
 
   return <View className={`${sizeClass} rounded-full ${dotColor}`} />;
+}
+
+// ─── Crafting countdown card ──────────────────────────────────────────────────
+
+function CraftingCountdownCard({
+  craftingLeft, craftingDone, sprintLeft, sprintExpired,
+}: {
+  craftingLeft: number;
+  craftingDone: boolean;
+  sprintLeft: number;
+  sprintExpired: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Card glowColor="gold" className="p-5">
+      <View className="flex-row items-center justify-between mb-3">
+        <Badge label={t('craft.title')} variant="gold" />
+        <Text variant="mono" className="text-zinc-600">🧺</Text>
+      </View>
+      {!craftingDone ? (
+        <View className="items-center">
+          <Text variant="label" className="text-zinc-500 mb-1">{t('craft.timeLeft')}</Text>
+          <Text
+            variant="mono"
+            className={`text-4xl font-bold ${craftingLeft < 120 ? 'text-red-400' : 'text-amber-300'}`}
+          >
+            {formatElapsed(craftingLeft)}
+          </Text>
+        </View>
+      ) : (
+        <View className="items-center">
+          <Text variant="bodySmall" className="text-red-400 mb-2 text-center animate-pulse">
+            {t('craft.expired')}
+          </Text>
+          <Text variant="label" className="text-zinc-500 mb-1">{t('craft.sprintWindow')}</Text>
+          <Text
+            variant="mono"
+            className={`text-3xl font-bold ${sprintExpired ? 'text-red-500' : 'text-orange-300'}`}
+          >
+            {sprintExpired ? '⚠️ LATE' : formatElapsed(sprintLeft)}
+          </Text>
+          {!sprintExpired && (
+            <Text variant="caption" className="text-zinc-500 mt-1 text-center">
+              {t('craft.sprintLeft', { sec: sprintLeft })}
+            </Text>
+          )}
+        </View>
+      )}
+    </Card>
+  );
 }
