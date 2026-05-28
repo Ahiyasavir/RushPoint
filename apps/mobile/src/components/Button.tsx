@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ActivityIndicator, Text } from 'react-native';
+import { Pressable, ActivityIndicator, Text, View } from 'react-native';
 import { GLOW } from './tokens';
 
 export interface ButtonProps {
@@ -16,9 +16,9 @@ export interface ButtonProps {
 
 // Static class maps — NativeWind requires fully-spelled-out strings.
 const SIZE_CLASSES = {
-  sm: 'px-3 py-2',
-  md: 'px-5 py-3',
-  lg: 'px-6 py-4',
+  sm: 'px-4 py-2.5',
+  md: 'px-6 py-3.5',
+  lg: 'px-8 py-4.5',
 } as const;
 
 const SIZE_TEXT_CLASSES = {
@@ -28,16 +28,16 @@ const SIZE_TEXT_CLASSES = {
 } as const;
 
 const VARIANT_CLASSES = {
-  primary:   'bg-emerald-500 active:bg-emerald-600',
-  secondary: 'bg-transparent border border-zinc-600 active:bg-zinc-800',
-  ghost:     'bg-transparent active:bg-zinc-900',
+  primary:   'bg-neon-green active:bg-neon-cyan',
+  secondary: 'bg-transparent border border-zinc-600/50 active:bg-white/5',
+  ghost:     'bg-transparent active:bg-white/5',
   danger:    'bg-red-600 active:bg-red-700',
 } as const;
 
 const VARIANT_TEXT_CLASSES = {
-  primary:   'text-white',
-  secondary: 'text-zinc-300',
-  ghost:     'text-emerald-400',
+  primary:   'text-black',
+  secondary: 'text-zinc-200',
+  ghost:     'text-neon-green',
   danger:    'text-white',
 } as const;
 
@@ -76,21 +76,21 @@ export function Button({
       disabled={isDisabled}
       style={glowStyle}
       className={[
-        'items-center justify-center flex-row rounded-xl',
+        'items-center justify-center flex-row rounded-2xl',
         SIZE_CLASSES[size],
         VARIANT_CLASSES[variant],
         fullWidth ? 'w-full' : '',
-        isDisabled ? 'opacity-50' : '',
+        isDisabled ? 'opacity-40' : '',
       ].join(' ')}
     >
       {isLoading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'ghost' ? '#34d399' : '#ffffff'}
+          color={variant === 'ghost' ? '#00ffaa' : variant === 'primary' ? '#000000' : '#ffffff'}
         />
       ) : (
         <Text
-          className={`font-semibold ${SIZE_TEXT_CLASSES[size]} ${VARIANT_TEXT_CLASSES[variant]}`}
+          className={`font-bold tracking-wide ${SIZE_TEXT_CLASSES[size]} ${VARIANT_TEXT_CLASSES[variant]}`}
         >
           {children}
         </Text>

@@ -9,26 +9,26 @@ export interface BadgeProps {
 
 // Static class maps — NativeWind requires fully-spelled-out strings.
 const VARIANT_BG_CLASSES = {
-  green:   'bg-emerald-950 border border-emerald-800',
-  orange:  'bg-orange-950 border border-orange-800',
-  gold:    'bg-amber-950 border border-amber-800',
-  neutral: 'bg-zinc-800 border border-zinc-700',
-  error:   'bg-red-950 border border-red-800',
-  info:    'bg-blue-950 border border-blue-800',
+  green:   'bg-neon-green/10 border border-neon-green/30',
+  orange:  'bg-neon-orange/10 border border-neon-orange/30',
+  gold:    'bg-neon-gold/10 border border-neon-gold/30',
+  neutral: 'bg-white/5 border border-white/10',
+  error:   'bg-red-500/10 border border-red-500/30',
+  info:    'bg-neon-blue/10 border border-neon-blue/30',
 } as const;
 
 const VARIANT_TEXT_CLASSES = {
-  green:   'text-emerald-400',
-  orange:  'text-orange-400',
-  gold:    'text-amber-400',
+  green:   'text-neon-green',
+  orange:  'text-neon-orange',
+  gold:    'text-neon-gold',
   neutral: 'text-zinc-400',
   error:   'text-red-400',
-  info:    'text-blue-400',
+  info:    'text-neon-blue',
 } as const;
 
 const SIZE_CLASSES = {
-  sm: 'px-2 py-0.5',
-  md: 'px-2.5 py-1',
+  sm: 'px-2.5 py-0.5',
+  md: 'px-3 py-1',
 } as const;
 
 const SIZE_TEXT_CLASSES = {
@@ -39,7 +39,7 @@ const SIZE_TEXT_CLASSES = {
 export function Badge({ label, variant, size = 'md' }: BadgeProps) {
   return (
     <View className={`rounded-full self-start ${SIZE_CLASSES[size]} ${VARIANT_BG_CLASSES[variant]}`}>
-      <Text className={`font-semibold ${SIZE_TEXT_CLASSES[size]} ${VARIANT_TEXT_CLASSES[variant]}`}>
+      <Text className={`font-bold tracking-wider ${SIZE_TEXT_CLASSES[size]} ${VARIANT_TEXT_CLASSES[variant]}`}>
         {label}
       </Text>
     </View>

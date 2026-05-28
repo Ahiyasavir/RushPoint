@@ -27,8 +27,16 @@ export default function IndexScreen() {
   }, []);
 
   return (
-    <View className="flex-1 bg-zinc-950 items-center justify-center">
-      <ActivityIndicator size="large" color="#10b981" />
+    <View className="flex-1 bg-app-bg items-center justify-center">
+      <View
+        style={{
+          width: 48, height: 48, borderRadius: 24,
+          backgroundColor: 'rgba(0,255,170,0.08)',
+          alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        <ActivityIndicator size="large" color="#00ffaa" />
+      </View>
     </View>
   );
 }

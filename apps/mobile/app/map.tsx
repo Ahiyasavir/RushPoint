@@ -19,10 +19,10 @@ export default function MapScreen() {
   const mapH = Math.round(mapW * 0.66);
 
   return (
-    <View className="flex-1 bg-zinc-950">
+    <View className="flex-1 bg-app-bg">
       <View className="px-5 pb-4" style={{ paddingTop: insets.top + 8 }}>
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text variant="bodySmall" className="text-emerald-400">{t('map.back')}</Text>
+          <Text variant="bodySmall" className="text-neon-green">{t('map.back')}</Text>
         </Pressable>
         <Text variant="heading" className="mt-2">{t('map.title')}</Text>
         <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('map.subtitle')}</Text>
@@ -32,12 +32,12 @@ export default function MapScreen() {
         {MAPBOX_TOKEN ? (
           <Image
             source={{ uri: buildStaticMapUrl(MAPBOX_TOKEN, mapW, mapH) }}
-            style={{ width: mapW, height: mapH, borderRadius: 16 }}
+            style={{ width: mapW, height: mapH, borderRadius: 16, borderColor: 'rgba(0,255,170,0.15)', borderWidth: 1 }}
             resizeMode="cover"
             accessibilityLabel={t('map.title')}
           />
         ) : (
-          <Card className="p-6 items-center justify-center h-80">
+          <Card className="p-6 items-center justify-center h-80 border border-glass-border">
             <Text variant="bodySmall" className="text-zinc-500 text-center">
               {t('map.noToken')}
             </Text>

@@ -158,13 +158,13 @@ export default function JudgePage() {
   // ════════════════════════════════════════════════════════════════════════════
 
   return (
-    <div className="max-w-3xl mx-auto p-8">
+    <div className="max-w-3xl mx-auto p-6 md:p-8">
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-2xl font-bold text-white">{t('judge.title')}</h1>
+        <h1 className="font-brand text-2xl font-bold text-white">{t('judge.title')}</h1>
         {!active && !result && (
           <button
             onClick={() => void loadArrivals()}
-            className="text-sm text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+            className="text-sm text-zinc-400 hover:text-white px-3 py-1.5 rounded-lg border border-glass-border hover:bg-white/5 transition-all"
           >
             ↻ {t('common.refresh')}
           </button>
@@ -175,7 +175,7 @@ export default function JudgePage() {
       </p>
 
       {error && (
-        <div className="mb-6 rounded-lg bg-red-950 border border-red-800 px-4 py-3 text-red-300 text-sm">
+        <div className="mb-6 rounded-xl bg-red-950/50 border border-red-500/30 px-4 py-3 text-red-300 text-sm">
           {error}
         </div>
       )}
@@ -227,14 +227,14 @@ function ArrivalList({
   const { t } = useI18n();
   if (loading) {
     return (
-      <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-500">
+      <div className="rounded-2xl bg-app-card border border-glass-border p-12 text-center text-zinc-500">
         {t('judge.loadingTeams')}
       </div>
     );
   }
   if (arrivals.length === 0) {
     return (
-      <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-600">
+      <div className="rounded-2xl bg-app-card border border-glass-border p-12 text-center text-zinc-500">
         {t('judge.noTeams')}
       </div>
     );
@@ -244,13 +244,13 @@ function ArrivalList({
       {arrivals.map((a) => (
         <div
           key={a.checkInId}
-          className="flex items-center justify-between rounded-xl bg-zinc-900 border border-zinc-800 px-5 py-4"
+          className="flex items-center justify-between rounded-2xl bg-app-card border border-glass-border px-5 py-4 hover:border-neon-green/20 transition-all"
         >
           <div>
             <div className="flex items-center gap-2">
               <span className="font-semibold text-white">{a.teamName}</span>
               {a.teamCode && (
-                <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                <span className="text-xs font-mono px-1.5 py-0.5 rounded bg-app-raised text-zinc-400">
                   {a.teamCode}
                 </span>
               )}
@@ -260,7 +260,7 @@ function ArrivalList({
           <button
             onClick={() => onCheckIn(a)}
             disabled={checkingInId !== null}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+            className="px-4 py-2 rounded-xl bg-neon-green/10 border border-neon-green/30 hover:bg-neon-green/20 disabled:opacity-50 disabled:cursor-not-allowed text-neon-green text-sm font-semibold transition-all"
           >
             {checkingInId === a.checkInId ? t('judge.checkingIn') : t('judge.approve')}
           </button>
@@ -296,12 +296,12 @@ function EvaluationForm({
   return (
     <div>
       {/* Frozen banner */}
-      <div className="rounded-xl bg-sky-950 border border-sky-800 px-5 py-3 mb-6 flex items-center justify-between">
+      <div className="rounded-2xl bg-neon-blue/5 border border-neon-blue/30 px-5 py-4 mb-6 flex items-center justify-between backdrop-blur-sm">
         <div>
-          <p className="text-sky-300 font-semibold">{t('judge.checkedInBanner', { team: arrival.teamName })}</p>
-          <p className="text-sky-500/80 text-sm">{t('judge.clockFrozen')}</p>
+          <p className="text-neon-blue font-semibold">{t('judge.checkedInBanner', { team: arrival.teamName })}</p>
+          <p className="text-neon-blue/60 text-sm">{t('judge.clockFrozen')}</p>
         </div>
-        <button onClick={onCancel} className="text-sky-400 hover:text-sky-200 text-sm">
+        <button onClick={onCancel} className="text-neon-blue/70 hover:text-neon-blue text-sm transition-colors">
           ← {t('common.back')}
         </button>
       </div>
@@ -321,17 +321,17 @@ function EvaluationForm({
                     <button
                       key={p.id}
                       onClick={() => onToggle(p.id)}
-                      className={`flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-colors ${
+                      className={`flex items-center justify-between px-3 py-2.5 rounded-xl border text-sm transition-all ${
                         on
-                          ? 'bg-emerald-950 border-emerald-700 text-emerald-300'
-                          : 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-600'
+                          ? 'bg-neon-green/10 border-neon-green/30 text-neon-green shadow-glow-green'
+                          : 'bg-app-card border-glass-border text-zinc-300 hover:border-white/20'
                       }`}
                     >
                       <span className="flex items-center gap-2">
                         <span className={`inline-block w-4 h-4 rounded border ${
-                          on ? 'bg-emerald-500 border-emerald-500' : 'border-zinc-600'
+                          on ? 'bg-neon-green border-neon-green' : 'border-zinc-600'
                         }`}>
-                          {on && <span className="block text-white text-xs leading-4 text-center">✓</span>}
+                          {on && <span className="block text-black text-xs leading-4 text-center">✓</span>}
                         </span>
                         {p.label}
                       </span>
@@ -365,12 +365,12 @@ function EvaluationForm({
           onChange={(e) => onNote(e.target.value)}
           rows={2}
           placeholder={t('judge.notePlaceholder')}
-          className="w-full px-4 py-2.5 rounded-lg bg-zinc-900 border border-zinc-700 text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none text-sm"
+          className="w-full px-4 py-2.5 rounded-xl bg-app-card border border-glass-border text-white placeholder-zinc-600 focus:outline-none focus:border-neon-green/40 focus:ring-1 focus:ring-neon-green/20 resize-none text-sm transition-all"
         />
       </Section>
 
       {/* Live total + finalize */}
-      <div className="sticky bottom-0 mt-8 rounded-xl bg-zinc-900 border border-zinc-700 p-5">
+      <div className="sticky bottom-0 mt-8 rounded-2xl bg-app-surface/90 border border-glass-border p-5 backdrop-blur-xl">
         <div className="flex items-end justify-between mb-4">
           <div className="text-sm text-zinc-400 space-y-0.5">
             <div>{t('judge.labelProducts')} <span className="text-zinc-500">{productScore}</span></div>
@@ -378,14 +378,14 @@ function EvaluationForm({
             <div>{t('judge.labelPresentation')} <span className="text-zinc-500">{presentation}</span></div>
           </div>
           <div className="text-end">
-            <p className="text-xs uppercase tracking-wider text-zinc-500">{t('judge.totalCalculated')}</p>
-            <p className="text-4xl font-black text-emerald-400 tabular-nums">{total}</p>
+            <p className="text-xs uppercase tracking-widest text-zinc-500">{t('judge.totalCalculated')}</p>
+            <p className="text-4xl font-black text-neon-green tabular-nums font-mono">{total}</p>
           </div>
         </div>
         <button
           onClick={onFinalize}
           disabled={submitting}
-          className="w-full py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold transition-colors"
+          className="w-full py-3.5 rounded-xl bg-neon-green text-black font-bold hover:opacity-90 disabled:opacity-50 transition-all text-sm tracking-wide shadow-glow-cta"
         >
           {submitting ? t('judge.releasing') : t('judge.finalize')}
         </button>
@@ -405,15 +405,15 @@ function ResultCard({
   const { t } = useI18n();
   const b = result.breakdown;
   return (
-    <div className="rounded-xl bg-emerald-950/40 border border-emerald-800 p-6">
-      <p className="text-emerald-400 font-bold text-lg mb-1">
+    <div className="rounded-2xl bg-neon-green/5 border border-neon-green/30 p-6">
+      <p className="text-neon-green font-bold text-lg mb-1">
         {result.allDone
           ? t('judge.releasedComplete', { team: result.teamName })
           : t('judge.released', { team: result.teamName })}
       </p>
       <p className="text-zinc-400 text-sm mb-5">{t('judge.clockResumed')}</p>
 
-      <div className="rounded-lg bg-zinc-900 border border-zinc-800 divide-y divide-zinc-800 text-sm">
+      <div className="rounded-xl bg-app-card border border-glass-border divide-y divide-glass-border text-sm">
         <Row label={t('judge.rowTaskCompletion')} value={b.taskScore} />
         <Row label={t('judge.rowProductScore')}   value={b.productScore} />
         <Row label={t('judge.rowVisualDesign')}    value={b.designScore} />
@@ -424,7 +424,7 @@ function ResultCard({
 
       <button
         onClick={onNext}
-        className="mt-5 text-sm text-zinc-400 hover:text-white"
+        className="mt-5 text-sm text-zinc-400 hover:text-white transition-colors"
       >
         ← {t('judge.judgeAnother')}
       </button>
@@ -454,7 +454,7 @@ function ScoreSlider({ value, max, onChange }: { value: number; max: number; onC
         step={1}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="flex-1 accent-emerald-500"
+        className="flex-1 accent-[#00ffaa]"
       />
       <span className="w-12 text-right font-mono text-lg text-white tabular-nums">{value}</span>
     </div>
@@ -465,7 +465,7 @@ function Row({ label, value, strong, accent }: { label: string; value: number; s
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
       <span className={strong ? 'text-white font-semibold' : 'text-zinc-400'}>{label}</span>
-      <span className={`font-mono tabular-nums ${accent ? 'text-emerald-400 font-bold' : strong ? 'text-white font-semibold' : 'text-zinc-300'}`}>
+      <span className={`font-mono tabular-nums ${accent ? 'text-neon-green font-bold' : strong ? 'text-white font-semibold' : 'text-zinc-300'}`}>
         {value}
       </span>
     </div>

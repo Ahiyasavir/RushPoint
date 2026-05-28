@@ -10,13 +10,13 @@ export default function HeatmapPage() {
   const { t } = useI18n();
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold mb-2">{t('heatmap.title')}</h1>
+    <div className="p-6 md:p-8 min-h-screen">
+      <h1 className="font-brand text-2xl font-bold text-white mb-1">{t('heatmap.title')}</h1>
       <p className="text-zinc-500 text-sm mb-6">{t('heatmap.subtitle')}</p>
 
       {MAPBOX_TOKEN ? (
         <>
-          <div className="rounded-xl overflow-hidden border border-zinc-800 h-[600px]">
+          <div className="rounded-2xl overflow-hidden border border-neon-green/20 shadow-glow-green h-[600px]">
             <Map
               mapboxAccessToken={MAPBOX_TOKEN}
               initialViewState={{ longitude: JERUSALEM.lng, latitude: JERUSALEM.lat, zoom: 13.5 }}
@@ -38,7 +38,7 @@ export default function HeatmapPage() {
           <Legend />
         </>
       ) : (
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 h-[600px] flex flex-col items-center justify-center gap-3 px-8 text-center">
+        <div className="rounded-2xl bg-app-card border border-glass-border h-[600px] flex flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="text-zinc-400">{t('heatmap.placeholder')}</p>
           <p className="text-zinc-600 text-sm max-w-md">{t('heatmap.noToken')}</p>
         </div>
@@ -55,12 +55,12 @@ function Legend() {
     { key: 'heatmap.legendGold', type: 'gold' },
   ];
   return (
-    <div className="flex gap-5 mt-4 text-sm text-zinc-400">
+    <div className="flex gap-6 mt-5 text-sm text-zinc-400 flex-wrap">
       {items.map(({ key, type }) => (
         <span key={key} className="flex items-center gap-2">
           <span
-            className="w-3 h-3 rounded-full border border-white/40"
-            style={{ backgroundColor: STATION_COLOR[type] }}
+            className="w-3 h-3 rounded-full border border-white/40 shadow-[0_0_8px_2px_currentColor]"
+            style={{ backgroundColor: STATION_COLOR[type], color: STATION_COLOR[type] }}
           />
           {t(key)}
         </span>

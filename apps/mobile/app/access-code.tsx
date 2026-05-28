@@ -70,7 +70,7 @@ export default function AccessCodeScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-zinc-950"
+      className="flex-1 bg-app-bg"
     >
       <ScrollView
         className="flex-1"
@@ -84,12 +84,15 @@ export default function AccessCodeScreen() {
 
         {/* ── Branding ──────────────────────────────────────────────────── */}
         <View className="mt-10 mb-14">
-          <Text variant="label" className="text-zinc-600 mb-1">
+          <Text variant="label" className="text-zinc-500 mb-2 tracking-widest uppercase text-xs">
             {t('brand.tagline')}
           </Text>
-          <Text variant="display">Rush</Text>
-          <Text variant="display" className="text-emerald-400">Point</Text>
-          <Text variant="bodySmall" className="text-zinc-500 mt-3 leading-relaxed">
+          <Text variant="display" className="font-brand text-white leading-none">Rush</Text>
+          <Text variant="display" className="font-brand text-neon-green leading-none animate-pulse-neon">
+            Point
+          </Text>
+          <View className="w-16 h-px bg-neon-green mt-3 mb-4" style={{ opacity: 0.4 }} />
+          <Text variant="bodySmall" className="text-zinc-500 leading-relaxed">
             {t('access.intro')}
           </Text>
         </View>
@@ -107,7 +110,7 @@ export default function AccessCodeScreen() {
           className="mb-6"
         />
 
-        <Button onPress={handleSubmit} fullWidth>
+        <Button onPress={handleSubmit} fullWidth size="lg">
           {t('access.enter')}
         </Button>
       </ScrollView>

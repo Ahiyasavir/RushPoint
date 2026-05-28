@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Text } from 'react-native';
+import { Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -27,15 +27,21 @@ export function useToast(): ToastContextValue {
 // ─── Static class maps ────────────────────────────────────────────────────────
 
 const BG_CLASSES: Record<ToastType, string> = {
-  info:    'bg-zinc-800 border border-zinc-700',
-  success: 'bg-emerald-950 border border-emerald-700',
-  error:   'bg-red-950 border border-red-700',
+  info:    'border border-white/10',
+  success: 'border border-neon-green/30',
+  error:   'border border-red-500/30',
 };
 
 const TEXT_CLASSES: Record<ToastType, string> = {
   info:    'text-zinc-200',
-  success: 'text-emerald-300',
+  success: 'text-neon-green',
   error:   'text-red-300',
+};
+
+const ICON: Record<ToastType, string> = {
+  info:    'ℹ️',
+  success: '✓',
+  error:   '✕',
 };
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
@@ -54,10 +60,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hide = useCallback(() => {
-    translateY.value = withTiming(-120, { duration: 250 });
-    opacity.value    = withTiming(0,    { duration: 250 });
+    translateY.value = withTiming(-120, { duration: 300 });
+    opacity.value    = withTiming(0,    { duration: 300 });
     // Delay state clear until slide-out finishes so text doesn't vanish mid-animation.
-    setTimeout(() => setToastState((s) => ({ ...s, visible: false })), 300);
+    setTimeout(() => setToastState((s) => ({ ...s, visible: false })), 350);
   }, [translateY, opacity]);
 
   const show = useCallback(
@@ -65,7 +71,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       if (timerRef.current) clearTimeout(timerRef.current);
 
       setToastState({ message, type, visible: true });
-      translateY.value = withSpring(0, { damping: 14, stiffness: 120 });
+      translateY.value = withSpring(0, { damping: 16, stiffness: 140 });
       opacity.value    = withTiming(1, { duration: 200 });
 
       timerRef.current = setTimeout(hide, 3500);
@@ -84,11 +90,23 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
       {toastState.visible && (
         <Animated.View
-          style={[animatedStyle, { top: insets.top + 8, zIndex: 999 }]}
-          className={`absolute left-4 right-4 rounded-xl px-4 py-3 ${BG_CLASSES[toastState.type]}`}
+          style={[
+            animatedStyle,
+            {
+              top: insets.top + 8,
+              zIndex: 999,
+              backgroundColor: 'rgba(15,15,24,0.95)',
+            },
+          ]}
+          className={`absolute left-4 right-4 rounded-2xl px-4 py-3.5 flex-row items-center ${BG_CLASSES[toastState.type]}`}
           pointerEvents="none"
         >
-          <Text className={`text-sm font-medium ${TEXT_CLASSES[toastState.type]}`}>
+          <View className="w-6 h-6 rounded-full bg-white/5 items-center justify-center me-3">
+            <Text className={`text-xs font-bold ${TEXT_CLASSES[toastState.type]}`}>
+              {ICON[toastState.type]}
+            </Text>
+          </View>
+          <Text className={`flex-1 text-sm font-medium ${TEXT_CLASSES[toastState.type]}`}>
             {toastState.message}
           </Text>
         </Animated.View>

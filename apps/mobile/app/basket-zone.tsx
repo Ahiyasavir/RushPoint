@@ -99,32 +99,32 @@ export default function BasketZoneScreen() {
   // ── Crafting countdown screen ──────────────────────────────────────────────
   if (craftingActive) {
     return (
-      <View className="flex-1 bg-zinc-950" style={{ paddingTop: insets.top + 8 }}>
+      <View className="flex-1 bg-app-bg" style={{ paddingTop: insets.top + 8 }}>
         <View className="px-5 pb-4 border-b border-zinc-800">
           <Pressable onPress={() => router.back()} hitSlop={8}>
-            <Text variant="caption" className="text-zinc-500">{t('map.back')}</Text>
+            <Text variant="caption" className="text-neon-green">{t('map.back')}</Text>
           </Pressable>
         </View>
         <View className="flex-1 px-5 pt-8 items-center">
-          <Text variant="heading" className="text-amber-400 mb-2 text-center">{t('craft.title')}</Text>
+          <Text variant="heading" className="text-neon-gold mb-2 text-center">{t('craft.title')}</Text>
 
           {!craftingDone ? (
             <>
               <Text variant="label" className="text-zinc-500 mb-1">{t('craft.timeLeft')}</Text>
-              <Text variant="display" className={`text-5xl font-mono mb-6 ${craftingLeft < 120 ? 'text-red-400 animate-pulse' : 'text-amber-300'}`}>
+              <Text variant="display" className={`text-5xl font-mono mb-6 ${craftingLeft < 120 ? 'text-neon-orange animate-pulse-neon' : 'text-neon-gold'}`}>
                 {formatCountdown(craftingLeft)}
               </Text>
             </>
           ) : (
             <>
-              <Text variant="subheading" className="text-red-400 mb-4 text-center animate-pulse">
+              <Text variant="subheading" className="text-neon-red mb-4 text-center animate-pulse-neon">
                 {t('craft.expired')}
               </Text>
               <Card className="p-5 w-full items-center">
                 <Text variant="label" className="mb-1 text-zinc-400">
                   {sprintExpired ? t('craft.sprintExpired') : t('craft.sprintWindow')}
                 </Text>
-                <Text variant="display" className={`text-4xl font-mono ${sprintExpired ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                <Text variant="display" className={`text-4xl font-mono ${sprintExpired ? 'text-neon-red animate-pulse-neon' : 'text-neon-orange'}`}>
                   {sprintExpired ? `+${formatCountdown(sprintElapsed - SPRINT_SECS)}` : formatCountdown(sprintLeft)}
                 </Text>
                 {!sprintExpired && (
@@ -143,8 +143,8 @@ export default function BasketZoneScreen() {
   // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View className="flex-1 bg-zinc-950 items-center justify-center">
-        <ActivityIndicator color="#f59e0b" />
+      <View className="flex-1 bg-app-bg items-center justify-center">
+        <ActivityIndicator color="#00ffaa" />
       </View>
     );
   }
@@ -154,15 +154,15 @@ export default function BasketZoneScreen() {
   const displayRiddle = isRtl ? (zone?.riddleHe ?? zone?.riddle) : zone?.riddle;
 
   return (
-    <View className="flex-1 bg-zinc-950" style={{ paddingTop: insets.top + 8 }}>
+    <View className="flex-1 bg-app-bg" style={{ paddingTop: insets.top + 8 }}>
       <View className="px-5 pb-4 border-b border-zinc-800 flex-row items-center justify-between">
         <Pressable onPress={() => router.back()} hitSlop={8}>
-          <Text variant="caption" className="text-zinc-500">{t('map.back')}</Text>
+          <Text variant="caption" className="text-neon-green">{t('map.back')}</Text>
         </Pressable>
       </View>
 
       <View className="flex-1 px-5 pt-6">
-        <Text variant="heading" className="text-amber-400 mb-1">{t('basket.title')}</Text>
+        <Text variant="heading" className="text-neon-gold mb-1">{t('basket.title')}</Text>
         {displayName && (
           <Text variant="caption" className="text-zinc-500 mb-6">
             {t('basket.zone', { name: displayName })}
@@ -177,15 +177,15 @@ export default function BasketZoneScreen() {
           <>
             {/* Match delay banner */}
             {underMatchDelay && (
-              <Card className="p-4 mb-4 border border-red-800 bg-red-950/30">
-                <Text variant="bodySmall" className="text-red-400 text-center animate-pulse">
+              <Card className="p-4 mb-4" style={{ borderColor: 'rgba(255,61,0,0.3)', borderWidth: 1, backgroundColor: 'rgba(255,61,0,0.05)' }}>
+                <Text variant="bodySmall" className="text-neon-red text-center animate-pulse-neon">
                   {t('basket.delay', { sec: matchDelaySecs })}
                 </Text>
               </Card>
             )}
 
             <Card glowColor="gold" className="p-5 mb-6">
-              <Text variant="label" className="text-amber-500 mb-3">{t('basket.riddleLabel')}</Text>
+              <Text variant="label" className="text-neon-gold mb-3">{t('basket.riddleLabel')}</Text>
               <Text variant="body" className="text-white leading-relaxed">
                 {displayRiddle}
               </Text>

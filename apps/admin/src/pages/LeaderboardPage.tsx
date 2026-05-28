@@ -105,16 +105,16 @@ export default function LeaderboardPage() {
     : rankings;
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-6 md:p-8 max-w-5xl mx-auto">
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-bold mb-1">{t('leaderboard.title')}</h1>
+          <h1 className="font-brand text-2xl font-bold text-white mb-1">{t('leaderboard.title')}</h1>
           <p className="text-zinc-500 text-sm">
             {isFrozen
-              ? <span className="text-yellow-400 font-medium">{t('leaderboard.frozenNote')}</span>
+              ? <span className="text-neon-gold font-medium">{t('leaderboard.frozenNote')}</span>
               : finalizedAt
-                ? <span className="text-emerald-400">{t('leaderboard.finalizedAt', { time: new Date(finalizedAt).toLocaleTimeString() })}</span>
+                ? <span className="text-neon-green">{t('leaderboard.finalizedAt', { time: new Date(finalizedAt).toLocaleTimeString() })}</span>
                 : t('leaderboard.live')}
           </p>
         </div>
@@ -124,7 +124,7 @@ export default function LeaderboardPage() {
           <button
             onClick={handleFinalize}
             disabled={finalizing || freezing}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-emerald-900 text-emerald-300 hover:bg-emerald-800 disabled:opacity-50 transition-colors"
+            className="px-4 py-2 rounded-xl text-sm font-semibold bg-neon-green/10 border border-neon-green/30 text-neon-green hover:bg-neon-green/20 disabled:opacity-50 transition-all"
           >
             {finalizing ? t('leaderboard.finalizing') : t('leaderboard.finalize')}
           </button>
@@ -133,10 +133,10 @@ export default function LeaderboardPage() {
           <button
             onClick={() => handleFreeze(!isFrozen)}
             disabled={freezing || finalizing}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all disabled:opacity-50 ${
               isFrozen
-                ? 'bg-yellow-900 text-yellow-300 hover:bg-yellow-800'
-                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                ? 'bg-neon-gold/10 border border-neon-gold/30 text-neon-gold hover:bg-neon-gold/20'
+                : 'bg-white/5 border border-glass-border text-zinc-300 hover:bg-white/10'
             }`}
           >
             {isFrozen ? t('leaderboard.unfreeze') : t('leaderboard.freeze')}
@@ -154,7 +154,7 @@ export default function LeaderboardPage() {
                   setRevealIndex(null);
                 }
               }}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-purple-900 text-purple-300 hover:bg-purple-800 transition-colors"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-neon-purple/10 border border-neon-purple/30 text-neon-purple hover:bg-neon-purple/20 transition-all"
             >
               {!inReveal
                 ? t('leaderboard.reveal')
@@ -168,36 +168,36 @@ export default function LeaderboardPage() {
 
       {error && <p className="text-red-400 text-sm mb-4">{error}</p>}
       {toast && (
-        <div className="mb-4 px-4 py-2 rounded-lg bg-zinc-800 text-zinc-200 text-sm animate-pulse">
+        <div className="mb-4 px-4 py-2 rounded-xl bg-app-card border border-glass-border text-zinc-200 text-sm">
           {toast}
         </div>
       )}
 
       {/* ── Reveal banner ───────────────────────────────────────────────── */}
       {inReveal && visibleRankings.length > 0 && (
-        <div className="mb-4 rounded-xl bg-purple-950 border border-purple-800 px-6 py-4 text-center">
-          <p className="text-purple-300 text-sm font-medium mb-1">
+        <div className="mb-4 rounded-2xl bg-neon-purple/5 border border-neon-purple/30 px-6 py-5 text-center backdrop-blur-sm">
+          <p className="text-neon-purple text-sm font-medium mb-1">
             {t('leaderboard.revealPos', { rank: visibleRankings[0].rank })}
           </p>
-          <p className="text-white text-2xl font-bold">{visibleRankings[0].teamName}</p>
-          <p className="text-purple-400 text-lg mt-1">{visibleRankings[0].score} pts</p>
+          <p className="text-white text-3xl font-brand font-bold">{visibleRankings[0].teamName}</p>
+          <p className="text-neon-purple text-xl mt-1">{visibleRankings[0].score} pts</p>
         </div>
       )}
 
       {/* ── Rankings table ──────────────────────────────────────────────── */}
       {loading ? (
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-600">
+        <div className="rounded-2xl bg-app-card border border-glass-border p-12 text-center text-zinc-600">
           {t('common.loading')}
         </div>
       ) : rankings.length === 0 ? (
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 p-12 text-center text-zinc-600">
+        <div className="rounded-2xl bg-app-card border border-glass-border p-12 text-center text-zinc-600">
           {isFrozen ? t('leaderboard.frozenBody') : t('leaderboard.noFinishers')}
         </div>
       ) : (
-        <div className="rounded-xl bg-zinc-900 border border-zinc-800 overflow-hidden">
+        <div className="rounded-2xl bg-app-card border border-glass-border overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wide">
+              <tr className="border-b border-glass-border text-zinc-500 text-xs uppercase tracking-widest">
                 <th className="text-start px-4 py-3 w-10">{t('leaderboard.colRank')}</th>
                 <th className="text-start px-4 py-3">{t('leaderboard.colTeam')}</th>
                 <th className="text-end px-4 py-3">{t('leaderboard.colScore')}</th>
@@ -210,17 +210,21 @@ export default function LeaderboardPage() {
               {visibleRankings.map((entry) => (
                 <tr
                   key={entry.teamId}
-                  className={`border-b border-zinc-800/50 transition-colors ${
-                    entry.rank === 1 ? 'bg-amber-950/30' :
-                    entry.rank === 2 ? 'bg-zinc-800/20' :
-                    entry.rank === 3 ? 'bg-amber-900/10' : ''
+                  className={`border-b border-glass-border transition-colors ${
+                    entry.rank === 1 ? 'bg-neon-gold/5 border-neon-gold/10' :
+                    entry.rank === 2 ? 'bg-white/[0.03]' :
+                    entry.rank === 3 ? 'bg-neon-orange/5' : ''
                   }`}
                 >
                   <td className="px-4 py-3 text-center font-bold text-lg">
-                    {entry.rank <= 3 ? MEDAL[entry.rank - 1] : entry.rank}
+                    {entry.rank <= 3 ? (
+                      <span style={{ filter: 'drop-shadow(0 0 6px currentColor)' }}>
+                        {MEDAL[entry.rank - 1]}
+                      </span>
+                    ) : entry.rank}
                   </td>
                   <td className="px-4 py-3 font-medium text-white">{entry.teamName}</td>
-                  <td className="px-4 py-3 text-end font-bold text-emerald-400">{entry.score}</td>
+                  <td className="px-4 py-3 text-end text-neon-green font-bold font-mono tabular-nums">{entry.score}</td>
                   <td className="px-4 py-3 text-end text-zinc-500 hidden sm:table-cell">
                     {entry.rawScore != null && entry.rawScore !== entry.score ? entry.rawScore : '—'}
                   </td>

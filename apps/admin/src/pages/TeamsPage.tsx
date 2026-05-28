@@ -4,10 +4,10 @@ import { functions, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 
 const STATUS_COLORS: Record<string, string> = {
-  registered: 'bg-zinc-700 text-zinc-300',
-  active: 'bg-blue-900 text-blue-300',
-  park: 'bg-orange-900 text-orange-300',
-  finished: 'bg-green-900 text-green-300',
+  registered: 'bg-zinc-800 text-zinc-300 border border-zinc-700',
+  active: 'bg-neon-blue/10 text-neon-blue border border-neon-blue/30',
+  park: 'bg-neon-orange/10 text-neon-orange border border-neon-orange/30',
+  finished: 'bg-neon-green/10 text-neon-green border border-neon-green/30',
 };
 
 interface TeamRow {
@@ -77,10 +77,10 @@ export default function TeamsPage() {
   }, [fetchTeams]);
 
   return (
-    <div className="p-8">
+    <div className="p-6 md:p-8">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold mb-1">{t('teams.title')}</h1>
+          <h1 className="font-brand text-2xl font-bold text-white mb-1">{t('teams.title')}</h1>
           <p className="text-zinc-500 text-sm">
             {loading ? t('common.loading') : t('teams.count', { n: teams.length })}
             {lastRefreshed && !loading && (
@@ -93,27 +93,27 @@ export default function TeamsPage() {
         <button
           onClick={() => { setLoading(true); void fetchTeams(); }}
           disabled={loading}
-          className="px-3 py-1.5 text-sm rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+          className="px-3 py-1.5 text-sm rounded-xl border border-glass-border text-zinc-300 hover:bg-white/5 hover:text-white disabled:opacity-40 transition-all backdrop-blur-sm"
         >
           {loading ? t('teams.refreshing') : t('common.refresh')}
         </button>
       </div>
 
       {error && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-red-950 border border-red-800 text-red-300 text-sm">
+        <div className="mb-4 px-4 py-3 rounded-xl bg-red-950/50 border border-red-500/30 text-red-300 text-sm">
           {error}
         </div>
       )}
 
       {notice && (
-        <div className="mb-4 px-4 py-3 rounded-lg bg-emerald-950 border border-emerald-800 text-emerald-300 text-sm">
+        <div className="mb-4 px-4 py-3 rounded-xl bg-neon-green/5 border border-neon-green/30 text-neon-green text-sm">
           {notice}
         </div>
       )}
 
-      <div className="rounded-xl border border-zinc-800 overflow-hidden">
+      <div className="rounded-2xl border border-glass-border overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-900 text-zinc-400 text-xs uppercase tracking-wider">
+          <thead className="bg-app-surface text-zinc-500 text-xs uppercase tracking-widest">
             <tr>
               <th className="text-start px-4 py-3">{t('teams.colTeam')}</th>
               <th className="text-start px-4 py-3">{t('teams.colCode')}</th>
@@ -123,7 +123,7 @@ export default function TeamsPage() {
               <th className="text-end px-4 py-3">{t('teams.colAction')}</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-800">
+          <tbody>
             {loading && teams.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
@@ -142,9 +142,9 @@ export default function TeamsPage() {
                 const isSkipping = skippingId === team.id;
                 const isConfirming = confirmId === team.id;
                 return (
-                  <tr key={team.id} className="bg-zinc-950 hover:bg-zinc-900 transition-colors">
+                  <tr key={team.id} className="bg-app-card hover:bg-app-raised transition-colors border-b border-glass-border">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-white">{team.name}</div>
+                      <div className="font-semibold text-white">{team.name}</div>
                       {team.memberNames.length > 0 && (
                         <div className="text-xs text-zinc-500 mt-0.5">
                           {team.memberNames.join(', ')}
@@ -160,7 +160,7 @@ export default function TeamsPage() {
                     <td className="px-4 py-3 text-end font-mono text-zinc-400">
                       {team.completedSlots}/8
                     </td>
-                    <td className="px-4 py-3 text-end font-mono text-zinc-200 font-medium">
+                    <td className="px-4 py-3 text-end font-mono text-neon-green font-semibold tabular-nums">
                       {team.score.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-end">
@@ -171,10 +171,10 @@ export default function TeamsPage() {
                           }
                           onBlur={() => isConfirming && setConfirmId(null)}
                           disabled={isSkipping}
-                          className={`px-3 py-1 text-xs rounded-lg border transition-colors disabled:opacity-40 ${
+                          className={`px-3 py-1 text-xs border transition-all disabled:opacity-40 ${
                             isConfirming
-                              ? 'bg-amber-900 border-amber-700 text-amber-200 hover:bg-amber-800'
-                              : 'border-zinc-700 text-zinc-400 hover:text-white hover:bg-zinc-800'
+                              ? 'bg-neon-orange/10 border-neon-orange/30 text-neon-orange hover:bg-neon-orange/20 rounded-lg'
+                              : 'border-glass-border text-zinc-500 hover:text-white hover:bg-white/5 rounded-lg'
                           }`}
                         >
                           {isSkipping

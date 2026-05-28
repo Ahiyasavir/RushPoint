@@ -115,7 +115,7 @@ export default function RegisterScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1 bg-zinc-950"
+      className="flex-1 bg-app-bg"
     >
       <ScrollView
         className="flex-1"
@@ -124,7 +124,14 @@ export default function RegisterScreen() {
       >
         {/* Header */}
         <View className="mb-8">
-          <Text variant="label" className="text-emerald-600 mb-1">{t('register.codeLabel', { code })}</Text>
+          <View className="flex-row items-center gap-2 mb-3">
+            <View className="px-2.5 py-1 rounded-full bg-neon-green/10 border border-neon-green/20">
+              <Text variant="caption" className="text-neon-green font-mono tracking-widest">
+                {code}
+              </Text>
+            </View>
+            <Text variant="caption" className="text-zinc-600">{t('register.codeLabel', { code: '' }).trim()}</Text>
+          </View>
           <Text variant="heading">{t('register.title')}</Text>
           <Text variant="bodySmall" className="text-zinc-500 mt-1">
             {t('register.subtitle')}
@@ -178,7 +185,7 @@ export default function RegisterScreen() {
             {participants.length > 1 && (
               <Pressable
                 onPress={() => removeParticipant(i)}
-                className="w-10 h-[52px] rounded-xl bg-zinc-800 items-center justify-center"
+                className="w-10 h-[52px] rounded-xl bg-app-raised border border-glass-border items-center justify-center active:bg-app-card"
               >
                 <Text variant="subheading" className="text-zinc-400 leading-none">×</Text>
               </Pressable>
@@ -209,8 +216,8 @@ export default function RegisterScreen() {
             <Switch
               value={waiverAccepted}
               onValueChange={(v) => { setWaiverAccepted(v); setErrors((e) => ({ ...e, waiver: undefined })); }}
-              trackColor={{ false: '#3f3f46', true: '#10b981' }}
-              thumbColor={waiverAccepted ? '#ffffff' : '#71717a'}
+              trackColor={{ false: '#141420', true: '#00ffaa' }}
+              thumbColor={waiverAccepted ? '#050508' : '#52525b'}
             />
           </View>
         </Card>

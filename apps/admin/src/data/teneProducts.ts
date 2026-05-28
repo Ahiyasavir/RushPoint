@@ -34,6 +34,6 @@ export const TIER_LABEL: Record<ProductTier, string> = {
 
 export const TIER_ACCENT: Record<ProductTier, string> = {
   basic:  'text-zinc-400',
-  medium: 'text-sky-400',
-  hard:   'text-amber-400',
+  medium: 'text-neon-blue',
+  hard:   'text-neon-gold',
 };

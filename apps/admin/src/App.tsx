@@ -20,10 +20,11 @@ const NAV_ITEMS = [
 export default function App() {
   const { t, toggle } = useI18n();
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="bg-zinc-900 border-b border-zinc-800 px-6 py-3 flex items-center gap-8">
-        <span className="font-bold text-lg tracking-tight text-white">
-          RushPoint <span className="text-zinc-500 font-normal text-sm">{t('app.brandSuffix')}</span>
+    <div className="min-h-screen flex flex-col bg-app-bg">
+      <header className="sticky top-0 z-50 bg-app-surface/80 backdrop-blur-xl border-b border-glass-border px-6 py-3 flex items-center gap-6">
+        <span className="font-brand text-lg font-bold tracking-tight">
+          Rush<span className="text-neon-green">Point</span>{' '}
+          <span className="text-zinc-500 font-normal text-sm">{t('app.brandSuffix')}</span>
         </span>
         <nav className="flex gap-1">
           {NAV_ITEMS.map(({ to, key }) => (
@@ -31,10 +32,10 @@ export default function App() {
               key={to}
               to={to}
               className={({ isActive }) =>
-                `px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                `px-3 py-1.5 text-sm font-medium transition-all duration-200 ${
                   isActive
-                    ? 'bg-zinc-700 text-white'
-                    : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                    ? 'bg-neon-green/10 text-neon-green border border-neon-green/20 rounded-lg'
+                    : 'text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg'
                 }`
               }
             >
@@ -45,13 +46,13 @@ export default function App() {
         <button
           onClick={toggle}
           title={t('lang.label')}
-          className="ms-auto px-3 py-1.5 rounded text-sm font-medium text-zinc-300 border border-zinc-700 hover:bg-zinc-800 transition-colors"
+          className="ms-auto border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-white rounded-lg px-3 py-1.5 text-sm transition-all backdrop-blur-sm"
         >
           {t('lang.toggle')}
         </button>
       </header>
 
-      <main className="flex-1">
+      <main className="flex-1 min-h-0">
         <Routes>
           <Route path="/" element={<Navigate to="/heatmap" replace />} />
           <Route path="/heatmap" element={<HeatmapPage />} />

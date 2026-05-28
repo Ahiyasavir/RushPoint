@@ -11,24 +11,26 @@ export interface InputProps extends Omit<TextInputProps, 'className'> {
 }
 
 export function Input({ label, error, className = '', ...rest }: InputProps) {
-  const borderClass = error ? 'border-red-600' : 'border-zinc-700';
+  const borderClass = error
+    ? 'border-red-500/60'
+    : 'border-white/10';
 
   return (
     <View className={className}>
       {label ? (
-        <Text className="text-zinc-400 text-xs font-semibold uppercase tracking-widest mb-2">
+        <Text className="text-zinc-400 text-xs font-bold uppercase tracking-[0.15em] mb-2">
           {label}
         </Text>
       ) : null}
 
       <TextInput
-        placeholderTextColor="#52525b"
-        className={`bg-zinc-900 border ${borderClass} rounded-xl px-4 py-3.5 text-white text-base`}
+        placeholderTextColor="#3f3f46"
+        className={`bg-white/[0.03] border ${borderClass} rounded-2xl px-4 py-3.5 text-white text-base`}
         {...rest}
       />
 
       {error ? (
-        <Text className="text-red-400 text-xs mt-1.5">{error}</Text>
+        <Text className="text-red-400 text-xs font-medium mt-1.5">{error}</Text>
       ) : null}
     </View>
   );
