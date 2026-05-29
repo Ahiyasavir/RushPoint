@@ -8,15 +8,42 @@
 | Phase | Status | תיאור |
 |-------|--------|--------|
 | Phase 1 — MVP | ✅ הושלם | Auth, רישום, dashboard, שיפוט, component kit |
-| Phase 2 — Backend & Maps | ✅ הושלם | Firestore sync, routing, scoring, מפות, offline, EN/HE |
-| Phase 3 — Gamification | 🔶 חלקי | Gate/matchmaking, basket zones, leaderboard — SOS/Flash/Final Run חסרים |
+| Phase 2 — Core Math & Routing | ✅ הושלם | Sigmoid scoring, smart routing (Φ/transit/Ω), skill ratio, Z-Score |
+| Phase 2 — Backend & Maps | ✅ הושלם | Firestore sync, מפות, offline, EN/HE |
+| Phase 3 — Gamification | ✅ הושלם (ליבה) | Gate/matchmaking, basket zones, leaderboard, Flash, SOS, Clue-hint, Final Run |
 | UI Overhaul | ✅ הושלם | Dark neon theme, glassmorphism, Inter+Outfit+JetBrains Mono |
+
+> **רק Wrapped Cards (סיכום אירוע) ופרישה ל-production נשארו.** ראו למטה.
+
+---
+
+## 🧬 התאמה לבלופרינט Phase 2 (7 שלבי המשחק) — מאומת ✅
+
+כל הליבה המתמטית של הבלופרינט כבר ממומשת בקוד (לא צריך לרוץ מחדש את בלוק ה-PowerShell):
+
+| שלב בבלופרינט | מימוש בקוד | סטטוס |
+|----------------|-------------|--------|
+| Sigmoid Task Score `100·D·M(x)`, `M(x)=0.2+1.3/(1+e^(3(x−1)))` | `functions/src/scoring/taskScore.ts` | ✅ זהה לנוסחה |
+| Smart Routing `Priority=0.5·Φ−0.3·transit+0.2·Ω` | `functions/src/routing/assignNextTask.ts` | ✅ זהה |
+| Φ load factor `(C−N)/C` | `loadFactor()` | ✅ |
+| Transit time (haversine, הליכה) | `transitMinutes()` | ✅ |
+| Skill matcher `Ω=1−|S−(D−5)/5|` | `skillMatch()` | ✅ |
+| Skill ratio `S∈[−1,1]` מביצועי עבר | `computeSkillRatio()` | ✅ |
+| Gate sprint — עונש מעריכי | `computeTransitPenalty()` | ✅ |
+| Matchmaking 1v1 + בונוס/עונש | `joinMatchQueue` / `resolveMatch` / `bypassMatchmaking` | ✅ |
+| 3 אזורי סל (least crowded + חידה) | `getBasketZone` | ✅ |
+| טיימר יצירה 20 דק׳ | `startCraftingTimer` | ✅ |
+| Sprint 90 שנ׳ — עונש מעריכי | `computeSprintPenalty()` | ✅ |
+| Z-Score normalization | `applyZScoreBonus()` | ✅ |
+| חשיפה הדרגתית last→first | `LeaderboardPage` reveal mode | ✅ |
+
+⚠️ **טרם ממומש מהבלופרינט:** *Team Cohesion Rule* (עונש על חברי צוות חסרים בשלב היצירה) — דורש קלט שופט ידני. מועמד לסשן הבא.
 
 ---
 
 ## ✅ מה יש — הושלם
 
-### Backend — Cloud Functions (18 פונקציות)
+### Backend — Cloud Functions (21 פונקציות)
 
 | Function | תיאור |
 |----------|--------|
@@ -37,7 +64,11 @@
 | `joinMatchQueue` | הצטרפות לתור matchmaking |
 | `resolveMatch` | הכרעת תוצאה בין שתי קבוצות |
 | `bypassMatchmaking` | עקיפת matchmaking (מאסטר) |
-| `finalizeLeaderboard` | חישוב סופי + דירוג (Phase 3) |
+| `finalizeLeaderboard` | חישוב סופי + Z-Score + דירוג (מחסר bonusPenalty) |
+| `pushFlashMission` | שידור משימת ברק לכל הקבוצות (נתיב קנוני + assertJudge) |
+| `triggerSOS` | קבוצה מעלה התראת חירום → adminAlerts (עם GPS) |
+| `acknowledgeAlert` | שופט מסמן התראה כטופלה |
+| `requestClueHint` | קבוצה קונה רמז תמורת 50 נק׳ (bonusPenalty) |
 
 ### Mobile App — מסכים
 
@@ -49,11 +80,14 @@
 | Dashboard | `dashboard.tsx` | ✅ (8 slots, gate card, crafting, matchmaking) |
 | Map | `map.tsx` | ✅ (מפה סטטית Mapbox) |
 | Basket Zone | `basket-zone.tsx` | ✅ (חידה + match delay + crafting countdown) |
+| SOS | `sos.tsx` | ✅ (אישור דו-שלבי + GPS + triggerSOS) |
+| Final Run | `final-run.tsx` | ✅ (גביע מונפש + fanfare + ניקוד סופי) |
 
 ### Mobile App — קומפוננטים
 
-`Text · Button · Card · Badge · Input · Toast · LanguageToggle · SlotCard · ProgressBar`  
-+ `tokens.ts` (GLOW, GLASS, GRADIENTS, BG)
+`Text · Button · Card · Badge · Input · Toast · LanguageToggle · SlotCard · ProgressBar · FlashMissionBanner`  
++ `tokens.ts` (GLOW, GLASS, GRADIENTS, BG)  
++ hooks: `useGameSync · useOfflineToast · useFlashMissions · useSlotSound` (chime + fanfare סינתטי)
 
 ### Admin Dashboard — דפים
 
@@ -78,74 +112,38 @@
 
 ---
 
-## 🔶 Phase 3 — מה עוד חסר
+## ✅ Phase 3 — הושלם בסשן זה
 
-### 1. Final Run Screen ⭐ עדיפות גבוהה
+### 1. Final Run Screen ✅
+`app/final-run.tsx` — גביע מונפש (spring + float), זוהר זהב פועם, ניקוד סופי (score − penalty),
+fanfare סינתטי. ה-dashboard מנווט אוטומטית (ref-guarded) כשכל 8 הסלוטים terminal.
 
-**מה חסר:** כשכל 8 הסלוטים מסתיימים — אין מסך חגיגה.  
-`finalizeJudgeEvaluation` מחזיר `allDone: true` כשמשימה אחרונה מסתיימת, אבל ה-dashboard לא מטפל בזה.
+### 2. Flash Mission Banner ✅
+`useFlashMissions` (onSnapshot + סינון בזיכרון + טיקר תפוגה) → `FlashMissionBanner` (overlay סגול
+glassmorphism עם countdown). Admin שולח מ-MatchmakingPage (EN/HE + bonus + TTL).
+**תוקן באג:** `pushFlashMission` כתב לנתיב לא-קנוני ועם בדיקת אדמין ששברה על האמולטור.
 
-**מה לבנות:**
-- מסך `app/final-run.tsx` — ✨ ממתין לחנות מוצגות (animation + מוזיקה + מיקום סופי)
-- לוגיקה ב-dashboard: כשכל הסלוטים `completed` → `router.replace('/final-run')`
-- קובץ `final_run.mp3` ב-`assets/sounds/`
+### 3. SOS Emergency Button ✅
+`app/sos.tsx` — אישור דו-שלבי + GPS best-effort → `triggerSOS`. כפתור 🆘 בheader.
+Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישור Google Maps).
 
----
+### 4. Clue-Hint Penalty UI ✅
+כפתור 💡 ב-ActiveTaskCard (אישור דו-שלבי) → `requestClueHint` (+50 ל-bonusPenalty, transaction).
+ה-dashboard מציג ניקוד אפקטיבי + קנס. `finalizeLeaderboard` עכשיו **מחסר** bonusPenalty (היה באג).
 
-### 2. Flash Mission Banner ⭐ עדיפות גבוהה
-
-**מה חסר:** `pushFlashMission` קיים בBackend, אבל Mobile לא מאזין לflash missions.
-
-**מה לבנות:**
-- `FlashMissionBanner.tsx` — popup overlay עם countdown ו-neon styling
-- hook ב-dashboard שמאזין ל-`artifacts/{appId}/public/data/flashMissions` (onSnapshot)
-- Admin: כפתור שליחה ב-MatchmakingPage עם טופס (כותרת + TTL)
-- כשflash mission חדש מגיע → banner מופיע + צליל התראה
-
----
-
-### 3. SOS Emergency Button 🆘
-
-**מה חסר:** אין כפתור SOS במובייל, אין callable בbackend.
-
-**מה לבנות:**
-- `app/sos.tsx` — מסך עם כפתור גדול + מאשר דו-שלבי (מניעת לחיצה בשגגה)
-- Cloud Function `triggerSOS` — כותב מסמך `adminAlerts/{id}` ב-Firestore
-- Admin: התראה live ב-CheckInsPage כשSOS מגיע
-- כפתור קטן בpressable ב-dashboard header (🆘 icon)
+### 5. קבצי קול ✅ (נפתר דרך סינתזה)
+`useSlotSound` מסנתז chimes (Web Audio) ל-unlock + `playFanfare` ל-Final Run — **אין צורך ב-mp3**.
+קבצי mp3 אמיתיים נשארו כשדרוג קוסמטי אופציונלי בלבד.
 
 ---
 
-### 4. Clue-Hint Penalty UI 💡
+## 🔶 מה עוד נשאר
 
-**מה חסר:** `bonusPenalty` קיים ב-gameState ובfunctions, אבל אין UI לבקשת רמז.
+### Team Cohesion Rule (מהבלופרינט) ⬜
+עונש על חברי צוות חסרים בשלב היצירה — דורש קלט שופט ידני ב-JudgePage + שדה ב-finalize. לא ממומש.
 
-**מה לבנות:**
-- כפתור "💡 רמז" ב-ActiveTaskCard — 50 נקודות לניכוי
-- אישור דו-שלבי לפני בקשה
-- Cloud Function `requestClueHint` — מוסיף 50 ל-`bonusPenalty`
-- הצגת `bonusPenalty` ב-dashboard (אם > 0)
-
----
-
-### 5. קבצי קול 🔊
-
-**מה חסר:** תיקיית `assets/sounds/` ריקה (רק README).
-
-**מה נדרש:**
-- `unlock_green.mp3` — צליל השלמת משימה ירוקה
-- `unlock_orange.mp3` — כניסה לאזור הגן/סל
-- `unlock_gold.mp3` — התחלת craft זהב
-- `final_run.mp3` — צליל חגיגה גמר (Phase 3)
-
-מקורות חינמיים: Freesound.org / Zapsplat  
-ה-hook `useSlotSound.ts` כבר קיים ומוכן לטעון את הקבצים.
-
----
-
-### 6. Wrapped Cards / Event Summary ⬜ נדחה
-
-כרטיסי סיכום אחרי האירוע (Phase 3 מאוחר — לא דחוף לפרישה).
+### Wrapped Cards / Event Summary ⬜ נדחה
+כרטיסי סיכום אחרי האירוע — לא דחוף לפרישה.
 
 ---
 
@@ -189,21 +187,20 @@
 ## 📋 סדר עדיפויות מומלץ לסשנים הבאים
 
 ```
-סשן הבא:
-  1. Flash Mission Banner (mobile listener + admin UI)
-  2. Final Run screen (+ animation + ניווט מdashboard)
+✅ הושלם בסשן זה:
+  Flash Missions · SOS · Clue-hint penalty · Final Run · fanfare סינתטי
 
-אחריו:
-  3. SOS button + callable + admin alert
-  4. Clue-hint penalty UI
-  5. Sound files (רכישה + הוספה)
+סשן הבא (פיצ׳רים אופציונליים):
+  1. Team Cohesion Rule (קלט שופט + עונש ב-finalize)
+  2. Wrapped Cards / סיכום אירוע
+  3. (אופציונלי) קבצי mp3 אמיתיים במקום סינתזה
 
-הכנה לפרישה (לפני האירוע):
-  6. Production Firebase deploy
-  7. Admin auth custom claims
-  8. תוכן אמיתי (tasks, coordinates, access codes)
-  9. EAS mobile build
-  10. בדיקות e2e מלאות
+הכנה לפרישה (לפני האירוע) — העיקר עכשיו:
+  4. Production Firebase deploy (functions + rules + storage + indexes)
+  5. Admin auth custom claims (במקום anonymous)
+  6. תוכן אמיתי (tasks, coordinates, access codes, basketZones)
+  7. EAS mobile build (iOS + Android)
+  8. בדיקות e2e מלאות + עומס
 ```
 
 ---
@@ -228,6 +225,9 @@ CODES   → artifacts/race-to-tzion-2026/accessCodes/{code}
 
 **Score formula:**
 ```
-per-slot = 100·difficulty · sigmoid(actual/target)
-sigmoid  = 0.2 + 1.3/(1+e^(3(x−1)))   ← x = actual/target minutes
+per-slot   = 100·difficulty · sigmoid(actual/target)
+sigmoid    = 0.2 + 1.3/(1+e^(3(x−1)))   ← x = actual/target minutes
+final/team = max(0, Σ earnedScore + 500·allDone − bonusPenalty), ואז Z-Score:
+             finalScore = max(0, raw + round(−z·200))   ← z = (dur_team − μ)/σ
+routing    = 0.5·Φ − 0.3·transitNorm + 0.2·Ω    (Φ=(C−N)/C, Ω=1−|S−(D−5)/5|)
 ```
