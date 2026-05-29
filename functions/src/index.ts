@@ -1351,26 +1351,40 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
 // SOS / ADMIN ALERTS (Phase 3)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── triggerSOS ───────────────────────────────────────────────────────────────
-// Any authenticated team can raise an emergency alert. The team identity is taken
-// from the auth token (never trusted from the client). Writes an AdminAlert that
-// the admin dashboard surfaces live. Optional GPS coordinates help locate them.
+// ─── triggerSOS ("Call staff") ────────────────────────────────────────────────
+// Any authenticated team can summon staff. The team identity is taken from the
+// auth token (never trusted from the client). `kind` distinguishes a real
+// emergency (loud alarm in the admin UIs) from a planned/technical issue (soft
+// chime). The alert carries everything staff need to respond: team name, member
+// roster, captain phone, and GPS when available.
 export const triggerSOS = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Login required');
   }
   const uid = context.auth.uid;
-  const { lat, lng, message } = (data ?? {}) as { lat?: number; lng?: number; message?: string };
+  const { lat, lng, message, kind } = (data ?? {}) as {
+    lat?: number; lng?: number; message?: string; kind?: 'emergency' | 'technical';
+  };
+  const alertKind: 'emergency' | 'technical' = kind === 'technical' ? 'technical' : 'emergency';
 
   const profSnap = await db.doc(`${userPath(uid)}/profile/team`).get();
-  const teamName = profSnap.exists ? (profSnap.data()?.name ?? uid) : uid;
+  const prof = profSnap.exists
+    ? (profSnap.data() as { name?: string; memberNames?: string[]; captainPhone?: string })
+    : null;
+  const teamName = prof?.name ?? uid;
 
   const nowIso = new Date().toISOString();
+  const defaultMsg = alertKind === 'emergency'
+    ? `🆘 ${teamName} — emergency`
+    : `🛠️ ${teamName} — needs assistance`;
   const alert: Record<string, unknown> = {
     type:         'sos',
+    kind:         alertKind,
     teamId:       uid,
     teamName,
-    message:      (message ?? '').trim() || `🆘 ${teamName} needs help`,
+    memberNames:  prof?.memberNames ?? [],
+    captainPhone: prof?.captainPhone ?? '',
+    message:      (message ?? '').trim() || defaultMsg,
     timestamp:    nowIso,
     acknowledged: false,
   };

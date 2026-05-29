@@ -132,7 +132,22 @@ const en: Dict = {
   'flash.expiresIn': 'Ends in {sec}s',
   'flash.dismiss': 'Got it',
 
-  // SOS
+  // Call staff (emergency / technical)
+  'staff.open': 'Call staff',
+  'staff.title': 'Call Staff',
+  'staff.subtitle': 'Choose the type of help you need. Staff get your location, team roster and captain phone.',
+  'staff.emergency': 'Emergency',
+  'staff.emergencyDesc': 'Injury or danger — raises a loud alert for staff.',
+  'staff.technical': 'Technical issue',
+  'staff.technicalDesc': 'Equipment or logistics — staff will come help.',
+  'staff.sending': 'Calling staff…',
+  'staff.sent': 'Staff notified.',
+  'staff.sentEmergency': 'Emergency alert sent — help is on the way.',
+  'staff.sentTechnical': 'Request sent — staff will assist shortly.',
+  'staff.staySafe': 'Stay where you are. Staff have been notified.',
+  'staff.error': 'Could not reach staff. Try again.',
+
+  // SOS (legacy keys, retained)
   'sos.open': 'SOS',
   'sos.title': 'Emergency',
   'sos.subtitle': 'Send an alert to the event staff. Only use this in a real emergency.',
@@ -287,7 +302,22 @@ const he: Dict = {
   'flash.expiresIn': 'מסתיים בעוד {sec} שנ׳',
   'flash.dismiss': 'הבנתי',
 
-  // SOS
+  // Call staff (emergency / technical)
+  'staff.open': 'קריאה לצוות',
+  'staff.title': 'קריאה לאיש צוות',
+  'staff.subtitle': 'בחרו את סוג העזרה שאתם צריכים. הצוות יקבל את המיקום, רשימת החברים וטלפון הקפטן.',
+  'staff.emergency': 'אירוע חירום',
+  'staff.emergencyDesc': 'פציעה או סכנה — מפעיל אזעקה חזקה אצל הצוות.',
+  'staff.technical': 'תקלה תכנית',
+  'staff.technicalDesc': 'ציוד או לוגיסטיקה — איש צוות יגיע לעזור.',
+  'staff.sending': 'קורא לצוות…',
+  'staff.sent': 'הצוות קיבל התראה.',
+  'staff.sentEmergency': 'התראת חירום נשלחה — עזרה בדרך.',
+  'staff.sentTechnical': 'הבקשה נשלחה — איש צוות יסייע בקרוב.',
+  'staff.staySafe': 'הישארו במקום. הצוות קיבל התראה.',
+  'staff.error': 'לא ניתן ליצור קשר עם הצוות. נסו שוב.',
+
+  // SOS (legacy keys, retained)
   'sos.open': 'מצוקה',
   'sos.title': 'חירום',
   'sos.subtitle': 'שלחו התראה לצוות האירוע. השתמשו בזה רק במצב חירום אמיתי.',

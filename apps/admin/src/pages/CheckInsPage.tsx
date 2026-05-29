@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { onSnapshot, collection } from 'firebase/firestore';
-import { db, functions, APP_ID, ensureAuth } from '../services/firebase';
+import { functions, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
+import AlertsBanner from '../components/AlertsBanner';
 
 interface Arrival {
   checkInId: string;
@@ -15,16 +15,6 @@ interface Arrival {
   arrivedAt: string | null;
 }
 
-interface AlertDoc {
-  id: string;
-  type: string;
-  teamName?: string;
-  message: string;
-  timestamp: string;
-  acknowledged: boolean;
-  location?: { lat: number; lng: number };
-}
-
 const listPendingArrivals = httpsCallable(functions, 'listPendingArrivals');
 
 export default function CheckInsPage() {
@@ -32,39 +22,6 @@ export default function CheckInsPage() {
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [alerts, setAlerts] = useState<AlertDoc[]>([]);
-  const [ackingId, setAckingId] = useState<string | null>(null);
-
-  // Live SOS / admin alerts (unacknowledged only).
-  useEffect(() => {
-    let unsub: (() => void) | undefined;
-    void ensureAuth().then(() => {
-      unsub = onSnapshot(
-        collection(db, `artifacts/${APP_ID}/public/data/adminAlerts`),
-        (snap) => {
-          const list = snap.docs
-            .map((d) => ({ id: d.id, ...d.data() }) as AlertDoc)
-            .filter((a) => !a.acknowledged)
-            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          setAlerts(list);
-        },
-        () => setAlerts([]),
-      );
-    });
-    return () => unsub?.();
-  }, []);
-
-  async function handleAck(alertId: string) {
-    setAckingId(alertId);
-    try {
-      await ensureAuth();
-      await httpsCallable(functions, 'acknowledgeAlert')({ alertId });
-    } catch (e) {
-      console.error('[checkins] acknowledgeAlert failed:', e);
-    } finally {
-      setAckingId(null);
-    }
-  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,45 +42,8 @@ export default function CheckInsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-2xl mx-auto">
-      {/* ── Live SOS / emergency alerts ──────────────────────────────────── */}
-      {alerts.length > 0 && (
-        <div className="mb-6 space-y-2">
-          {alerts.map((a) => (
-            <div
-              key={a.id}
-              className="flex items-center justify-between gap-4 rounded-2xl bg-neon-red/10 border border-neon-red/40 px-5 py-4 animate-pulse"
-              style={{ animationDuration: '2.5s' }}
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">🆘</span>
-                <div>
-                  <p className="font-bold text-neon-red">
-                    {a.teamName ?? t('alerts.unknownTeam')}
-                    <span className="ms-2 text-xs font-mono text-neon-red/60 uppercase">{a.type}</span>
-                  </p>
-                  <p className="text-sm text-zinc-300">{a.message}</p>
-                  {a.location && (
-                    <a
-                      href={`https://maps.google.com/?q=${a.location.lat},${a.location.lng}`}
-                      target="_blank" rel="noreferrer"
-                      className="text-xs text-neon-blue hover:underline font-mono"
-                    >
-                      📍 {a.location.lat.toFixed(5)}, {a.location.lng.toFixed(5)}
-                    </a>
-                  )}
-                </div>
-              </div>
-              <button
-                onClick={() => void handleAck(a.id)}
-                disabled={ackingId === a.id}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-neon-red/40 text-neon-red hover:bg-neon-red/15 disabled:opacity-40 transition-all whitespace-nowrap"
-              >
-                {ackingId === a.id ? t('alerts.acking') : t('alerts.ack')}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* ── Live SOS / call-staff alerts (shared component) ──────────────── */}
+      <AlertsBanner />
 
       <div className="flex items-center justify-between mb-1">
         <h1 className="font-brand text-2xl font-bold text-white">{t('checkins.title')}</h1>

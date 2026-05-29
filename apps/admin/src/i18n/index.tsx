@@ -196,6 +196,11 @@ const en: Dict = {
   'alerts.ack': 'Acknowledge',
   'alerts.acking': 'Saving…',
   'alerts.unknownTeam': 'Unknown team',
+  'alerts.live': 'Live alerts ({n})',
+  'alerts.emergency': 'Emergency',
+  'alerts.technical': 'Technical',
+  'alerts.mute': '🔇 Mute',
+  'alerts.unmute': '🔔 Unmute',
 
   // Check-ins
   'checkins.title': 'Check-in Review',
@@ -439,6 +444,11 @@ const he: Dict = {
   'alerts.ack': 'טופל',
   'alerts.acking': 'שומר…',
   'alerts.unknownTeam': 'קבוצה לא ידועה',
+  'alerts.live': 'התראות חיות ({n})',
+  'alerts.emergency': 'חירום',
+  'alerts.technical': 'תקלה',
+  'alerts.mute': '🔇 השתק',
+  'alerts.unmute': '🔔 בטל השתקה',
 
   // Check-ins
   'checkins.title': 'בדיקת צ׳ק-אין',

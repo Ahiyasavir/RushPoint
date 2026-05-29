@@ -223,7 +223,7 @@ export default function DashboardScreen() {
               hitSlop={8}
               className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20"
             >
-              <Text variant="caption" className="text-neon-red font-mono">🆘 {t('sos.open')}</Text>
+              <Text variant="caption" className="text-neon-red font-mono">📣 {t('staff.open')}</Text>
             </Pressable>
           </View>
           <LanguageToggle />

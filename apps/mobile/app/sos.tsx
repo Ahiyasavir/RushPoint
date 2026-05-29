@@ -9,18 +9,20 @@ import { Card } from '../src/components/Card';
 import { useToast } from '../src/components/Toast';
 import { useTranslation } from '../src/i18n';
 
+type StaffKind = 'emergency' | 'technical';
+
 /**
- * Emergency SOS screen. A two-step confirm (arm → send) prevents accidental
- * alerts. On send, calls the triggerSOS callable which writes an AdminAlert the
- * dashboard surfaces live. Best-effort geolocation is attached when available.
+ * "Call staff" screen. Two one-tap actions — a real Emergency (raises a loud
+ * alarm on the staff dashboards) and a Technical/planned issue (soft chime).
+ * Either way the alert carries the team's roster, captain phone and GPS so staff
+ * can respond. Single tap (no multi-step arming) by design.
  */
-export default function SosScreen() {
+export default function CallStaffScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const { show } = useToast();
-  const [armed, setArmed]     = useState(false);
-  const [sending, setSending] = useState(false);
-  const [sent, setSent]       = useState(false);
+  const [sending, setSending] = useState<StaffKind | null>(null);
+  const [sent, setSent]       = useState<StaffKind | null>(null);
 
   async function getCoords(): Promise<{ lat?: number; lng?: number }> {
     const geo = (globalThis as unknown as { navigator?: { geolocation?: Geolocation } }).navigator?.geolocation;
@@ -36,19 +38,17 @@ export default function SosScreen() {
     });
   }
 
-  async function handleSend() {
-    setSending(true);
+  async function call(kind: StaffKind) {
+    setSending(kind);
     try {
       const coords = await getCoords();
-      const fn = httpsCallable(functions, 'triggerSOS');
-      await fn(coords);
-      setSent(true);
-      show(t('sos.sent'), 'success');
+      await httpsCallable(functions, 'triggerSOS')({ ...coords, kind });
+      setSent(kind);
+      show(t('staff.sent'), 'success');
     } catch {
-      show(t('sos.error'), 'error');
-      setArmed(false);
+      show(t('staff.error'), 'error');
     } finally {
-      setSending(false);
+      setSending(null);
     }
   }
 
@@ -61,44 +61,45 @@ export default function SosScreen() {
       </View>
 
       <View className="flex-1 px-5 items-center justify-center">
-        <Text className="text-6xl mb-4">🆘</Text>
-        <Text variant="heading" className="text-neon-red mb-2 text-center">{t('sos.title')}</Text>
+        <Text className="text-5xl mb-3">📣</Text>
+        <Text variant="heading" className="mb-2 text-center">{t('staff.title')}</Text>
         <Text variant="bodySmall" className="text-zinc-400 mb-10 text-center leading-relaxed">
-          {t('sos.subtitle')}
+          {t('staff.subtitle')}
         </Text>
 
         {sent ? (
           <Card className="p-6 w-full items-center" style={{ borderColor: 'rgba(0,255,170,0.3)', borderWidth: 1 }}>
-            <Text variant="subheading" className="text-neon-green mb-1 text-center">✓ {t('sos.confirmed')}</Text>
-            <Text variant="bodySmall" className="text-zinc-400 text-center">{t('sos.staySafe')}</Text>
+            <Text variant="subheading" className="text-neon-green mb-1 text-center">
+              ✓ {sent === 'emergency' ? t('staff.sentEmergency') : t('staff.sentTechnical')}
+            </Text>
+            <Text variant="bodySmall" className="text-zinc-400 text-center">{t('staff.staySafe')}</Text>
           </Card>
         ) : sending ? (
           <View className="items-center py-6">
-            <ActivityIndicator size="large" color="#ff3d00" />
-            <Text variant="bodySmall" className="text-zinc-500 mt-3">{t('sos.sending')}</Text>
+            <ActivityIndicator size="large" color={sending === 'emergency' ? '#ff3d00' : '#ffb020'} />
+            <Text variant="bodySmall" className="text-zinc-500 mt-3">{t('staff.sending')}</Text>
           </View>
-        ) : !armed ? (
-          <Pressable
-            onPress={() => setArmed(true)}
-            className="w-48 h-48 rounded-full bg-neon-red/15 border-2 border-neon-red/50 items-center justify-center active:bg-neon-red/25"
-            style={{ shadowColor: '#ff3d00', shadowOpacity: 0.5, shadowRadius: 30, shadowOffset: { width: 0, height: 0 }, elevation: 16 }}
-          >
-            <Text variant="subheading" className="text-neon-red text-center">{t('sos.tapToArm')}</Text>
-          </Pressable>
         ) : (
-          <View className="w-full items-center gap-4">
-            <Text variant="bodySmall" className="text-neon-red text-center animate-pulse-neon">
-              {t('sos.confirmPrompt')}
-            </Text>
+          <View className="w-full gap-4">
+            {/* Emergency — loud alarm on the staff side */}
             <Pressable
-              onPress={() => void handleSend()}
-              className="w-full py-4 rounded-2xl bg-neon-red items-center active:opacity-90"
-              style={{ shadowColor: '#ff3d00', shadowOpacity: 0.5, shadowRadius: 22, shadowOffset: { width: 0, height: 4 }, elevation: 14 }}
+              onPress={() => void call('emergency')}
+              className="w-full rounded-2xl bg-neon-red/15 border-2 border-neon-red/50 p-5 items-center active:bg-neon-red/25"
+              style={{ shadowColor: '#ff3d00', shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 0 }, elevation: 12 }}
             >
-              <Text className="text-white font-bold text-lg tracking-wide">{t('sos.sendNow')}</Text>
+              <Text className="text-4xl mb-1">🆘</Text>
+              <Text variant="subheading" className="text-neon-red text-center">{t('staff.emergency')}</Text>
+              <Text variant="caption" className="text-zinc-400 text-center mt-1">{t('staff.emergencyDesc')}</Text>
             </Pressable>
-            <Pressable onPress={() => setArmed(false)} hitSlop={8} className="py-2">
-              <Text variant="bodySmall" className="text-zinc-500">{t('sos.cancel')}</Text>
+
+            {/* Technical / planned — soft chime on the staff side */}
+            <Pressable
+              onPress={() => void call('technical')}
+              className="w-full rounded-2xl bg-neon-orange/10 border border-neon-orange/40 p-5 items-center active:bg-neon-orange/20"
+            >
+              <Text className="text-4xl mb-1">🛠️</Text>
+              <Text variant="subheading" className="text-neon-orange text-center">{t('staff.technical')}</Text>
+              <Text variant="caption" className="text-zinc-400 text-center mt-1">{t('staff.technicalDesc')}</Text>
             </Pressable>
           </View>
         )}
