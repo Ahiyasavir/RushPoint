@@ -309,13 +309,18 @@ export default function DashboardScreen() {
           </Pressable>
         )}
 
-        {/* ── Slot progress dots ────────────────────────────────────── */}
+        {/* ── Race progress — labeled stage tracker ─────────────────── */}
         {gameState && (
           <View className="mt-10">
             <Text variant="label" className="mb-3">{t('dash.raceProgress')}</Text>
-            <View className="flex-row gap-2 flex-wrap">
-              {gameState.slots.map((s) => (
-                <SlotDot key={s.index} slot={s} />
+            <View className="rounded-2xl border border-glass-border bg-app-card/40 overflow-hidden">
+              {gameState.slots.map((s, i) => (
+                <StageRow
+                  key={s.index}
+                  slot={s}
+                  greenIndex={gameState.slots.slice(0, i + 1).filter((x) => x.type === 'green').length}
+                  isLast={i === gameState.slots.length - 1}
+                />
               ))}
             </View>
           </View>
@@ -353,11 +358,13 @@ function ActiveTaskCard({
         {slot.taskTitle ?? t('dash.activeMission')}
       </Text>
 
-      <Text variant="bodySmall" className="text-zinc-400 mb-4">
-        {slot.taskId
-          ? t('dash.taskLabel', { id: slot.taskId })
-          : t('dash.assigning')}
-      </Text>
+      {/* Only surface the friendly "assigning" hint when no task is set yet —
+          never the raw task id (the title + badge already name the mission). */}
+      {!slot.taskId && (
+        <Text variant="bodySmall" className="text-zinc-400 mb-4">
+          {t('dash.assigning')}
+        </Text>
+      )}
 
       {/* Elapsed-time clock — freezes while a judge is evaluating */}
       {elapsedSec != null && (
@@ -500,13 +507,45 @@ function ClueHintButton() {
   );
 }
 
-// ─── Slot progress dot ────────────────────────────────────────────────────────
+// ─── Stage tracker row ─────────────────────────────────────────────────────────
+// One labeled row per stage: status marker + stage name + status chip. Replaces
+// the old anonymous colour dots so a participant can read exactly where they are.
 
-function SlotDot({ slot }: { slot: FirestoreSlot }) {
+const STATUS_CHIP: Record<SlotStatus, { key: string; cls: string }> = {
+  completed: { key: 'stage.done',    cls: 'text-neon-green' },
+  active:    { key: 'stage.current', cls: 'text-white' },
+  locked:    { key: 'stage.locked',  cls: 'text-zinc-600' },
+  skipped:   { key: 'stage.skipped', cls: 'text-zinc-500' },
+};
+
+function StageRow({ slot, greenIndex, isLast }: { slot: FirestoreSlot; greenIndex: number; isLast: boolean }) {
+  const { t } = useTranslation();
   const dotColor = DOT_COLOR[slot.type][slot.status];
-  const sizeClass = slot.status === 'active' ? 'w-4 h-4' : 'w-2.5 h-2.5';
   const isActive = slot.status === 'active';
-  return <View className={`${sizeClass} rounded-full ${dotColor} ${isActive ? 'animate-pulse-neon' : ''}`} />;
+  const done     = slot.status === 'completed';
+  const chip     = STATUS_CHIP[slot.status];
+
+  // Green stages are numbered (Field Mission 1/2/3); others use their stage name.
+  const label = slot.type === 'green'
+    ? t('slot.greenN', { n: greenIndex })
+    : t(`slot.${slot.type}`);
+
+  return (
+    <View className={`flex-row items-center gap-3 px-4 py-3 ${isLast ? '' : 'border-b border-glass-border'} ${isActive ? 'bg-white/5' : ''}`}>
+      <View
+        className={`w-6 h-6 rounded-full items-center justify-center ${done || isActive ? dotColor : 'bg-app-raised'} ${isActive ? 'animate-pulse-neon' : ''}`}
+      >
+        {done && <Text className="text-black text-xs font-bold">✓</Text>}
+        {isActive && <View className="w-2 h-2 rounded-full bg-black/60" />}
+      </View>
+      <Text variant="bodySmall" className={`flex-1 ${slot.status === 'locked' ? 'text-zinc-600' : 'text-zinc-200'}`} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text variant="caption" className={`${chip.cls} font-mono uppercase tracking-wide`}>
+        {t(chip.key)}
+      </Text>
+    </View>
+  );
 }
 
 // ─── Crafting countdown card ──────────────────────────────────────────────────

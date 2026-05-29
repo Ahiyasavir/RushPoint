@@ -185,7 +185,7 @@ Key documents:
 > "The Lions") show in the Admin panel (which reads across all teams) but are a *different identity*
 > than whatever you register on the phone — that's expected, not a bug.
 
-## Cloud Functions (v1 `https.onCall`) — 30 callables
+## Cloud Functions (v1 `https.onCall`) — 33 callables
 
 | Function | Role |
 |---|---|

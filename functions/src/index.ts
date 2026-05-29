@@ -783,9 +783,11 @@ const MIN_TEAM_SIZE = 4;
 const MAX_TEAM_SIZE = 7;
 
 // Initial 6-slot layout: 0-2 green (field missions), 3 gate (matchmaking),
-// 4 orange (find the Tene), 5 gold (fill the Tene + judging). startedAt must be a
-// concrete value (Firestore forbids serverTimestamp() sentinels inside array
-// elements) â€” server clock is authoritative.
+// 4 orange (find the Tene), 5 gold (fill the Tene + judging). Slot 0 is pre-seeded
+// with a starting task so the dashboard skips the "stand by" screen on first load;
+// slots 1-2 are assigned on unlock by the load-balancing router (requestNextTask,
+// auto-invoked by the mobile dashboard). startedAt must be a concrete value
+// (Firestore forbids serverTimestamp() sentinels inside array elements).
 function buildInitialSlots(nowIso: string): JudgeSlot[] {
   return [
     { index: 0, type: 'green',  status: 'active', startedAt: nowIso, taskId: 'task-green-001', taskTitle: 'Jerusalem Landmarks Photo Hunt' },

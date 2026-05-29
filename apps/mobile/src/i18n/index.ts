@@ -60,9 +60,16 @@ const en: Dict = {
   'dash.elapsed': 'Elapsed',
   'dash.beingJudged': 'Being judged',
   'slot.green': 'Open Field Mission',
+  'slot.greenN': 'Field Mission {n}',
   'slot.gate': 'Matchmaking Duel',
   'slot.orange': 'Find the Tene',
   'slot.gold': 'Craft & Judge',
+
+  // Stage tracker status chips
+  'stage.done': 'Done',
+  'stage.current': 'Now',
+  'stage.locked': 'Locked',
+  'stage.skipped': 'Skipped',
 
   // Judge check-in (team requests grading)
   'checkin.arrived': "I've arrived at the judge",
@@ -233,9 +240,16 @@ const he: Dict = {
   'dash.elapsed': 'זמן שחלף',
   'dash.beingJudged': 'בשיפוט',
   'slot.green': 'משימת שטח פתוח',
+  'slot.greenN': 'משימת שדה {n}',
   'slot.gate': 'דו-קרב זיווג',
   'slot.orange': 'מצאו את הטנא',
   'slot.gold': 'יצירה ושיפוט',
+
+  // Stage tracker status chips
+  'stage.done': 'הושלם',
+  'stage.current': 'עכשיו',
+  'stage.locked': 'נעול',
+  'stage.skipped': 'דולג',
 
   // Judge check-in (team requests grading)
   'checkin.arrived': 'הגעתי לשופט',

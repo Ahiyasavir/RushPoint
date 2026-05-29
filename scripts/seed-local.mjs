@@ -49,6 +49,20 @@ async function main() {
     difficulty: 3, photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
     status: 'active', maxDurationMinutes: 30,
   });
+  await db.doc(`${tasksPath}/task-green-002`).set({
+    id: 'task-green-002', title: 'Blindfolded Trust Relay', titleHe: 'ריצת השליחות בעיניים עצומות',
+    description: 'Guide a blindfolded teammate through a short course using only your voices.',
+    type: 'green', qrCode: 'QR-GREEN-002', maxConcurrentTeams: 3, currentTeamCount: 0,
+    difficulty: 5, photoRequired: true, pointValue: 100, estimatedMinutes: 20, isActive: true,
+    status: 'active', maxDurationMinutes: 40,
+  });
+  await db.doc(`${tasksPath}/task-green-003`).set({
+    id: 'task-green-003', title: 'Bible Trivia Blitz', titleHe: 'חידון תנ"ך ירושלמי',
+    description: 'Answer 10 Jerusalem-themed Bible trivia questions together.',
+    type: 'green', qrCode: 'QR-GREEN-003', maxConcurrentTeams: 4, currentTeamCount: 0,
+    difficulty: 4, photoRequired: false, pointValue: 100, estimatedMinutes: 12, isActive: true,
+    status: 'active', maxDurationMinutes: 24,
+  });
   await db.doc(`${tasksPath}/task-gold-001`).set({
     id: 'task-gold-001', title: 'Ancient Grape Press',
     description: 'Use the replica press to fill and seal a clay flask for your Tene.',
@@ -56,7 +70,7 @@ async function main() {
     difficulty: 8, photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
     status: 'active', maxDurationMinutes: 40,
   });
-  console.log('[seed-local] Seeded tasks: task-green-001, task-gold-001');
+  console.log('[seed-local] Seeded tasks: task-green-001/002/003, task-gold-001');
 
   // Access codes for the mobile registration flow.
   const codes = ['1234', 'LION01', 'BEAR02', 'WOLF03'];

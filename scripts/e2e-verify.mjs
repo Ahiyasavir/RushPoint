@@ -63,7 +63,7 @@ async function main() {
     check('listTeams includes newly registered team', !!mine,
       `total teams=${teams.length}`);
     if (mine) {
-      check('  team carries member names', Array.isArray(mine.memberNames) && mine.memberNames.length === 3,
+      check('  team carries member names', Array.isArray(mine.memberNames) && mine.memberNames.length === 4,
         JSON.stringify(mine.memberNames));
       check('  team has a code + status', !!mine.code && !!mine.status,
         `code=${mine.code} status=${mine.status} score=${mine.score} slots=${mine.completedSlots}`);

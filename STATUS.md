@@ -107,7 +107,7 @@
 
 ## ✅ מה יש — הושלם
 
-### Backend — Cloud Functions (30 פונקציות)
+### Backend — Cloud Functions (33 פונקציות)
 
 | Function | תיאור |
 |----------|--------|
@@ -228,7 +228,7 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ### Firebase Production
 - [ ] יצירת Firebase project בproduction (או וידוא `race-to-tzion-2026` מוגדר)
-- [ ] `firebase deploy --only functions` — פרישת כל 30 הפונקציות
+- [ ] `firebase deploy --only functions` — פרישת כל 33 הפונקציות
 - [ ] `firebase deploy --only firestore:rules` — חוקי אבטחה
 - [ ] `firebase deploy --only storage` — חוקי Storage
 - [ ] אימות שה-Firestore indexes (`firestore.indexes.json`) מועלים
