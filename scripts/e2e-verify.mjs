@@ -3,7 +3,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
-import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, getDoc, collection, getDocs } from 'firebase/firestore';
 
 const app = initializeApp({
   apiKey: 'emulator-key',
@@ -140,6 +140,7 @@ async function main() {
         products: [],
         designScore: 15,
         presentationScore: 18,
+        missingMembers: 1,
         judgeNote: 'e2e',
       });
       const b = fin.breakdown || {};
@@ -150,9 +151,57 @@ async function main() {
       check('  total = productScore + design + presentation + taskScore',
         b.total === b.productScore + b.designScore + b.presentationScore + b.taskScore,
         `total=${b.total} (p=${b.productScore} d=${b.designScore} pr=${b.presentationScore} t=${b.taskScore})`);
+      check('  cohesion penalty recorded (1 missing = 100)', b.cohesionPenalty === 100,
+        `cohesionPenalty=${b.cohesionPenalty} missingMembers=${b.missingMembers}`);
     }
   } catch (e) {
     check('judge flow succeeds', false, e.message);
+  }
+
+  // 6. Clue hint — increments bonusPenalty by 50 (server-authoritative).
+  try {
+    const before = (await readGameState(uid))?.bonusPenalty ?? 0;
+    const res = await call('requestClueHint', {});
+    const after = (await readGameState(uid))?.bonusPenalty ?? 0;
+    check('requestClueHint adds a 50pt penalty', after === before + 50,
+      `bonusPenalty ${before} -> ${after} (applied=${res?.penaltyApplied})`);
+  } catch (e) {
+    check('requestClueHint succeeds', false, e.message);
+  }
+
+  // 7. Flash mission — admin broadcast lands on the canonical public path.
+  try {
+    const res = await call('pushFlashMission', {
+      title: 'E2E Flash', titleHe: 'ברק E2E', description: 'test',
+      bonusPoints: 200, ttlSeconds: 120,
+    });
+    check('pushFlashMission returns an id + expiry', !!res?.id && !!res?.expiresAt,
+      JSON.stringify(res));
+    const snap = await getDocs(collection(fs, `artifacts/${APP_ID}/public/data/flashMissions`));
+    const mine = snap.docs.find((d) => d.id === res.id);
+    check('  flash mission written to canonical path', !!mine,
+      `docs=${snap.size}`);
+    check('  flash mission carries bilingual fields + bonus', !!mine && mine.data().titleHe === 'ברק E2E' && mine.data().bonusPoints === 200,
+      mine ? JSON.stringify(mine.data()).slice(0, 160) : 'missing');
+  } catch (e) {
+    check('pushFlashMission succeeds', false, e.message);
+  }
+
+  // 8. SOS — team raises an alert, admin acknowledges it.
+  try {
+    const res = await call('triggerSOS', { lat: 31.7717, lng: 35.2035 });
+    check('triggerSOS returns an alert id', !!res?.id, JSON.stringify(res));
+    const snap = await getDocs(collection(fs, `artifacts/${APP_ID}/public/data/adminAlerts`));
+    const mine = snap.docs.find((d) => d.id === res.id);
+    check('  alert written with type=sos + location', !!mine && mine.data().type === 'sos' && !!mine.data().location,
+      mine ? JSON.stringify(mine.data()).slice(0, 160) : 'missing');
+    const ack = await call('acknowledgeAlert', { alertId: res.id });
+    check('  acknowledgeAlert succeeds', ack?.success === true, JSON.stringify(ack));
+    const after = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/adminAlerts/${res.id}`));
+    check('  alert marked acknowledged', after.exists() && after.data().acknowledged === true,
+      `acknowledged=${after.data()?.acknowledged}`);
+  } catch (e) {
+    check('SOS flow succeeds', false, e.message);
   }
 
   console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
