@@ -34,6 +34,8 @@ interface FinalizeResult {
     presentationScore: number;
     taskScore: number;
     total: number;
+    missingMembers?: number;
+    cohesionPenalty?: number;
   };
   allDone: boolean;
 }
@@ -64,6 +66,7 @@ export default function JudgePage() {
   const [picked, setPicked]             = useState<Set<string>>(new Set());
   const [design, setDesign]             = useState(0);
   const [presentation, setPresentation] = useState(0);
+  const [missingMembers, setMissingMembers] = useState(0);
   const [note, setNote]                 = useState('');
   const [submitting, setSubmitting]     = useState(false);
 
@@ -101,6 +104,7 @@ export default function JudgePage() {
       setPicked(new Set());
       setDesign(0);
       setPresentation(0);
+      setMissingMembers(0);
       setNote('');
     } catch (err) {
       setError(t('judge.checkInError'));
@@ -139,6 +143,7 @@ export default function JudgePage() {
         products:          Array.from(picked),
         designScore:       design,
         presentationScore: presentation,
+        missingMembers,
         judgeNote:         note.trim(),
       });
       const data = res.data as FinalizeResult;
@@ -194,6 +199,8 @@ export default function JudgePage() {
           presentation={presentation}
           onDesign={setDesign}
           onPresentation={setPresentation}
+          missingMembers={missingMembers}
+          onMissingMembers={setMissingMembers}
           note={note}
           onNote={setNote}
           productScore={productScore}
@@ -275,6 +282,7 @@ function ArrivalList({
 function EvaluationForm({
   arrival, picked, onToggle,
   design, presentation, onDesign, onPresentation,
+  missingMembers, onMissingMembers,
   note, onNote, productScore, total, submitting, onFinalize, onCancel,
 }: {
   arrival: Arrival;
@@ -284,6 +292,8 @@ function EvaluationForm({
   presentation: number;
   onDesign: (v: number) => void;
   onPresentation: (v: number) => void;
+  missingMembers: number;
+  onMissingMembers: (v: number) => void;
   note: string;
   onNote: (v: string) => void;
   productScore: number;
@@ -358,6 +368,31 @@ function EvaluationForm({
         <ScoreSlider value={presentation} max={MAX_PRESENTATION_SCORE} onChange={onPresentation} />
       </Section>
 
+      {/* D. Team cohesion */}
+      <Section title={t('judge.sectionCohesion')} hint={t('judge.sectionCohesionHint')}>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onMissingMembers(Math.max(0, missingMembers - 1))}
+            className="w-9 h-9 rounded-lg border border-glass-border text-zinc-300 hover:bg-white/5 text-lg leading-none disabled:opacity-40 transition-all"
+            disabled={missingMembers <= 0}
+          >−</button>
+          <span className={`w-10 text-center font-mono text-2xl tabular-nums ${missingMembers > 0 ? 'text-neon-red' : 'text-white'}`}>
+            {missingMembers}
+          </span>
+          <button
+            type="button"
+            onClick={() => onMissingMembers(missingMembers + 1)}
+            className="w-9 h-9 rounded-lg border border-glass-border text-zinc-300 hover:bg-white/5 text-lg leading-none transition-all"
+          >+</button>
+          {missingMembers > 0 && (
+            <span className="ms-2 text-sm font-mono text-neon-red">
+              −{missingMembers * 100} {t('judge.cohesionPenalty')}
+            </span>
+          )}
+        </div>
+      </Section>
+
       {/* Note */}
       <Section title={t('judge.note')} hint={t('judge.noteHint')}>
         <textarea
@@ -376,6 +411,9 @@ function EvaluationForm({
             <div>{t('judge.labelProducts')} <span className="text-zinc-500">{productScore}</span></div>
             <div>{t('judge.labelDesign')} <span className="text-zinc-500">{design}</span></div>
             <div>{t('judge.labelPresentation')} <span className="text-zinc-500">{presentation}</span></div>
+            {missingMembers > 0 && (
+              <div className="text-neon-red">{t('judge.labelCohesion')} <span className="font-mono">−{missingMembers * 100}</span></div>
+            )}
           </div>
           <div className="text-end">
             <p className="text-xs uppercase tracking-widest text-zinc-500">{t('judge.totalCalculated')}</p>
@@ -418,6 +456,9 @@ function ResultCard({
         <Row label={t('judge.rowProductScore')}   value={b.productScore} />
         <Row label={t('judge.rowVisualDesign')}    value={b.designScore} />
         <Row label={t('judge.rowPresentation')}    value={b.presentationScore} />
+        {b.cohesionPenalty ? (
+          <Row label={t('judge.rowCohesion')} value={-b.cohesionPenalty} penalty />
+        ) : null}
         <Row label={t('judge.rowBasketTotal')}     value={b.total} strong />
         <Row label={t('judge.rowNewScore')}        value={result.newScore} strong accent />
       </div>
@@ -461,11 +502,11 @@ function ScoreSlider({ value, max, onChange }: { value: number; max: number; onC
   );
 }
 
-function Row({ label, value, strong, accent }: { label: string; value: number; strong?: boolean; accent?: boolean }) {
+function Row({ label, value, strong, accent, penalty }: { label: string; value: number; strong?: boolean; accent?: boolean; penalty?: boolean }) {
   return (
     <div className="flex items-center justify-between px-4 py-2.5">
-      <span className={strong ? 'text-white font-semibold' : 'text-zinc-400'}>{label}</span>
-      <span className={`font-mono tabular-nums ${accent ? 'text-neon-green font-bold' : strong ? 'text-white font-semibold' : 'text-zinc-300'}`}>
+      <span className={penalty ? 'text-neon-red' : strong ? 'text-white font-semibold' : 'text-zinc-400'}>{label}</span>
+      <span className={`font-mono tabular-nums ${penalty ? 'text-neon-red font-semibold' : accent ? 'text-neon-green font-bold' : strong ? 'text-white font-semibold' : 'text-zinc-300'}`}>
         {value}
       </span>
     </div>

@@ -54,6 +54,8 @@ interface JudgeSlot {
     presentationScore: number;
     taskScore: number;
     total: number;
+    missingMembers?: number;
+    cohesionPenalty?: number;
   };
 }
 
@@ -503,6 +505,8 @@ export const checkInArrival = functions.https.onCall(async (data, context) => {
 // â”€â”€â”€ finalizeJudgeEvaluation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Atomic write that scores the basket, completes the slot, unfreezes the clock,
 // and transitions the team to their next objective.
+const COHESION_PENALTY_PER_MEMBER = 100;
+
 export const finalizeJudgeEvaluation = functions.https.onCall(async (data, context) => {
   assertJudge(context);
 
@@ -512,6 +516,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     products = [],
     designScore = 0,
     presentationScore = 0,
+    missingMembers = 0,
     judgeNote = '',
   } = data as {
     teamId: string;
@@ -519,6 +524,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     products: string[];
     designScore: number;
     presentationScore: number;
+    missingMembers?: number;
     judgeNote?: string;
   };
 
@@ -533,6 +539,9 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
   const productScore = computeProductScore(products);
   const design       = clampScore(designScore, MAX_DESIGN_SCORE);
   const presentation = clampScore(presentationScore, MAX_PRESENTATION_SCORE);
+  // Team cohesion: severe penalty per missing member (teams must stay together).
+  const missing      = Math.max(0, Math.floor(Number(missingMembers) || 0));
+  const cohesionPenalty = missing * COHESION_PENALTY_PER_MEMBER;
   const nowIso       = new Date().toISOString();
 
   return db.runTransaction(async (tx) => {
@@ -545,7 +554,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
       throw new functions.https.HttpsError('not-found', 'Game state not found for team');
     }
 
-    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score: number; judging?: JudgingState | null };
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score: number; bonusPenalty?: number; judging?: JudgingState | null };
     const slots = gs.slots.map((s) => ({ ...s }));
 
     // Target = the slot that was checked in, else lowest active slot.
@@ -583,7 +592,10 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     }
 
     const total     = productScore + design + presentation + taskScore;
-    const breakdown = { products, productScore, designScore: design, presentationScore: presentation, taskScore, total };
+    const breakdown = {
+      products, productScore, designScore: design, presentationScore: presentation,
+      taskScore, total, missingMembers: missing, cohesionPenalty,
+    };
 
     slots[target] = {
       ...slots[target],
@@ -598,15 +610,17 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     // Transition: unlock the next objective and resume its clock.
     unlockNext(slots, target, nowIso);
 
-    const newScore  = (gs.score ?? 0) + total;
+    const newScore     = (gs.score ?? 0) + total;
+    const newPenalty   = (gs.bonusPenalty ?? 0) + cohesionPenalty;
     // A team is done when no slot is still pending — completed or skipped both count as terminal.
     const allDone   = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
 
     tx.update(gsRef, {
       slots,
-      score:     newScore,
-      judging:   null,       // unfreeze the mobile clock
-      updatedAt: nowIso,
+      score:        newScore,
+      bonusPenalty: newPenalty,
+      judging:      null,       // unfreeze the mobile clock
+      updatedAt:    nowIso,
     });
 
     tx.update(ciRef, {
