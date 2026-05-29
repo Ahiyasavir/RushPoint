@@ -7,8 +7,14 @@ import LeaderboardPage from './pages/LeaderboardPage';
 import JudgePage from './pages/JudgePage';
 import MatchmakingPage from './pages/MatchmakingPage';
 import ManagerPage from './pages/ManagerPage';
+import StationPage from './pages/StationPage';
+import VolunteerPage from './pages/VolunteerPage';
+import RoleSelect from './components/RoleSelect';
 import { useI18n } from './i18n';
+import { useRole, canAccess, defaultRouteFor } from './roles';
 
+// Master nav list. Each item is shown only if the active role may access its
+// route (see ROLE_ROUTES in roles.tsx).
 const NAV_ITEMS = [
   { to: '/heatmap', key: 'nav.liveMap' },
   { to: '/teams', key: 'nav.teams' },
@@ -17,10 +23,27 @@ const NAV_ITEMS = [
   { to: '/judge', key: 'nav.judge' },
   { to: '/matchmaking', key: 'nav.matchmaking' },
   { to: '/manager', key: 'nav.manager' },
+  { to: '/station', key: 'nav.station' },
+  { to: '/volunteer', key: 'nav.volunteer' },
 ];
 
 export default function App() {
   const { t, toggle } = useI18n();
+  const { role, stationId, clearRole } = useRole();
+
+  // No role chosen yet → full-screen role picker.
+  if (!role) return <RoleSelect />;
+
+  const home = defaultRouteFor(role);
+  const visibleNav = NAV_ITEMS.filter((item) => canAccess(role, item.to));
+  const roleLabel = role === 'operator' && stationId
+    ? t('role.operatorAt', { n: stationId })
+    : t(`role.${role}`);
+
+  // A route element gated by the active role; redirects home if out of scope.
+  const guard = (path: string, element: React.ReactNode) =>
+    canAccess(role, path) ? element : <Navigate to={home} replace />;
+
   return (
     <div className="min-h-screen flex flex-col bg-app-bg">
       <header className="sticky top-0 z-50 bg-app-surface/80 backdrop-blur-xl border-b border-glass-border px-6 py-3 flex items-center gap-6">
@@ -29,7 +52,7 @@ export default function App() {
           <span className="text-zinc-500 font-normal text-sm">{t('app.brandSuffix')}</span>
         </span>
         <nav className="flex gap-1">
-          {NAV_ITEMS.map(({ to, key }) => (
+          {visibleNav.map(({ to, key }) => (
             <NavLink
               key={to}
               to={to}
@@ -45,25 +68,37 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
-        <button
-          onClick={toggle}
-          title={t('lang.label')}
-          className="ms-auto border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-white rounded-lg px-3 py-1.5 text-sm transition-all backdrop-blur-sm"
-        >
-          {t('lang.toggle')}
-        </button>
+        <div className="ms-auto flex items-center gap-2">
+          <button
+            onClick={clearRole}
+            title={t('role.switch')}
+            className="border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-white rounded-lg px-3 py-1.5 text-sm transition-all backdrop-blur-sm"
+          >
+            <span className="text-zinc-500 me-1.5">●</span>{roleLabel}
+          </button>
+          <button
+            onClick={toggle}
+            title={t('lang.label')}
+            className="border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-white rounded-lg px-3 py-1.5 text-sm transition-all backdrop-blur-sm"
+          >
+            {t('lang.toggle')}
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 min-h-0">
         <Routes>
-          <Route path="/" element={<Navigate to="/heatmap" replace />} />
-          <Route path="/heatmap" element={<HeatmapPage />} />
-          <Route path="/teams" element={<TeamsPage />} />
-          <Route path="/checkins" element={<CheckInsPage />} />
-          <Route path="/leaderboard" element={<LeaderboardPage />} />
-          <Route path="/judge" element={<JudgePage />} />
-          <Route path="/matchmaking" element={<MatchmakingPage />} />
-          <Route path="/manager" element={<ManagerPage />} />
+          <Route path="/" element={<Navigate to={home} replace />} />
+          <Route path="/heatmap" element={guard('/heatmap', <HeatmapPage />)} />
+          <Route path="/teams" element={guard('/teams', <TeamsPage />)} />
+          <Route path="/checkins" element={guard('/checkins', <CheckInsPage />)} />
+          <Route path="/leaderboard" element={guard('/leaderboard', <LeaderboardPage />)} />
+          <Route path="/judge" element={guard('/judge', <JudgePage />)} />
+          <Route path="/matchmaking" element={guard('/matchmaking', <MatchmakingPage />)} />
+          <Route path="/manager" element={guard('/manager', <ManagerPage />)} />
+          <Route path="/station" element={guard('/station', <StationPage />)} />
+          <Route path="/volunteer" element={guard('/volunteer', <VolunteerPage />)} />
+          <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>
       </main>
     </div>

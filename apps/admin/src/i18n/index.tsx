@@ -23,6 +23,7 @@ const en: Dict = {
   'common.refresh': 'Refresh',
   'common.loading': 'Loading…',
   'common.back': 'Back',
+  'common.comingSoon': 'Coming soon.',
 
   // Heatmap
   'heatmap.title': 'Live Team Map',
@@ -82,6 +83,27 @@ const en: Dict = {
   'leaderboard.minsLabel': '{m} min',
   'nav.matchmaking': 'Matchmaking',
   'nav.manager': 'Manager',
+  'nav.station': 'My Station',
+  'nav.volunteer': 'Volunteer',
+
+  // Roles
+  'role.chooseTitle': 'Who are you?',
+  'role.chooseHint': 'Choose your role for this event. You can switch later.',
+  'role.switch': 'Switch role',
+  'role.enter': 'Enter',
+  'role.manager': 'Event Manager',
+  'role.managerDesc': 'Full control — map, teams, leaderboard, flash missions, station control.',
+  'role.judge': 'Tene Judge',
+  'role.judgeDesc': 'Grade arriving baskets at the judging station.',
+  'role.operator': 'Station Operator',
+  'role.operatorDesc': 'Run one mission station — see incoming teams, pass or release them.',
+  'role.operatorAt': 'Operator · Station {n}',
+  'role.volunteer': 'Volunteer',
+  'role.volunteerDesc': 'Roam teams: info, cohesion fines, and emergency alerts.',
+  'role.pickStation': 'Which station?',
+  'role.pickStationHint': 'Pick the station number you are operating.',
+  'role.stationN': 'Station {n}',
+  'station.title': 'Station {n}',
 
   // Event Manager console
   'mgr.title': 'Event Manager',
@@ -235,6 +257,7 @@ const he: Dict = {
   'common.refresh': 'רענון',
   'common.loading': 'טוען…',
   'common.back': 'חזרה',
+  'common.comingSoon': 'בקרוב.',
 
   // Heatmap
   'heatmap.title': 'מפת קבוצות חיה',
@@ -294,6 +317,27 @@ const he: Dict = {
   'leaderboard.minsLabel': '{m} דק׳',
   'nav.matchmaking': 'זיווג',
   'nav.manager': 'ניהול',
+  'nav.station': 'התחנה שלי',
+  'nav.volunteer': 'מתנדב',
+
+  // Roles
+  'role.chooseTitle': 'מי אתם?',
+  'role.chooseHint': 'בחרו את התפקיד שלכם לאירוע. אפשר להחליף בהמשך.',
+  'role.switch': 'החלפת תפקיד',
+  'role.enter': 'כניסה',
+  'role.manager': 'מנהל אירוע',
+  'role.managerDesc': 'שליטה מלאה — מפה, קבוצות, טבלת מובילים, משימות פתע, ניהול תחנות.',
+  'role.judge': 'שופט טנא',
+  'role.judgeDesc': 'שיפוט הסלים המגיעים בעמדת השיפוט.',
+  'role.operator': 'מתפעל תחנה',
+  'role.operatorDesc': 'הפעלת תחנת משימה אחת — קבוצות נכנסות, הכרעה ושחרור.',
+  'role.operatorAt': 'מתפעל · תחנה {n}',
+  'role.volunteer': 'מתנדב',
+  'role.volunteerDesc': 'ניוד בין קבוצות: מידע, קנסות לכידות, והתראות חירום.',
+  'role.pickStation': 'איזו תחנה?',
+  'role.pickStationHint': 'בחרו את מספר התחנה שאתם מפעילים.',
+  'role.stationN': 'תחנה {n}',
+  'station.title': 'תחנה {n}',
 
   // Event Manager console
   'mgr.title': 'מנהל האירוע',

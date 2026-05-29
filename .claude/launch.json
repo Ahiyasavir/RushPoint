@@ -5,7 +5,7 @@
       "name": "admin",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "admin"],
-      "port": 5182
+      "port": 5180
     },
     {
       "name": "mobile",
