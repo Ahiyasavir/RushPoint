@@ -114,6 +114,26 @@ const en: Dict = {
   'role.stationN': 'Station {n}',
   'station.title': 'Station {n}',
 
+  // Volunteer console
+  'vol.title': 'Volunteer Console',
+  'vol.subtitle': 'Roam the course — respond to alerts, confirm judging arrivals, and keep teams together.',
+  'vol.queueTitle': 'Judging Queue',
+  'vol.queueHint': 'Confirm a team reached the judging line — this freezes their clock.',
+  'vol.queueEmpty': 'No teams waiting in the judging queue.',
+  'vol.confirmArrival': 'Confirm arrival',
+  'vol.confirming': 'Freezing…',
+  'vol.arrivedDone': '{team} confirmed — clock frozen.',
+  'vol.confirmError': 'Could not confirm arrival. Try again.',
+  'vol.teamsTitle': 'All Teams',
+  'vol.teamsHint': 'Full roster, captain phone, and a cohesion fine for teams not staying together.',
+  'vol.colPhone': 'Captain',
+  'vol.noPhone': 'no phone',
+  'vol.fine': '−{pts} cohesion',
+  'vol.fineConfirm': 'Confirm −{pts}',
+  'vol.fining': 'Applying…',
+  'vol.fineDone': 'Fined {team} −{pts}.',
+  'vol.fineError': 'Could not apply the fine. Try again.',
+
   // Event Manager console
   'mgr.title': 'Event Manager',
   'mgr.subtitle': 'Live operational control — stations, broadcasts, and the audit trail.',
@@ -361,6 +381,26 @@ const he: Dict = {
   'role.pickStationHint': 'בחרו את מספר התחנה שאתם מפעילים.',
   'role.stationN': 'תחנה {n}',
   'station.title': 'תחנה {n}',
+
+  // Volunteer console
+  'vol.title': 'ממשק מתנדב',
+  'vol.subtitle': 'ניוד במסלול — מענה להתראות, אישור הגעה לשיפוט, ושמירה על לכידות הקבוצות.',
+  'vol.queueTitle': 'תור השיפוט',
+  'vol.queueHint': 'אשרו שהקבוצה הגיעה לתור השיפוט — הפעולה מקפיאה את הטיימר שלה.',
+  'vol.queueEmpty': 'אין קבוצות הממתינות בתור השיפוט.',
+  'vol.confirmArrival': 'אישור הגעה',
+  'vol.confirming': 'מקפיא…',
+  'vol.arrivedDone': '{team} אושרה — הטיימר הוקפא.',
+  'vol.confirmError': 'לא ניתן לאשר הגעה. נסו שוב.',
+  'vol.teamsTitle': 'כל הקבוצות',
+  'vol.teamsHint': 'רשימת חברים מלאה, טלפון קפטן, וקנס לכידות לקבוצות שלא נשארות יחד.',
+  'vol.colPhone': 'קפטן',
+  'vol.noPhone': 'אין טלפון',
+  'vol.fine': '−{pts} לכידות',
+  'vol.fineConfirm': 'אישור −{pts}',
+  'vol.fining': 'מחיל…',
+  'vol.fineDone': 'נקנסה {team} ב־{pts}-.',
+  'vol.fineError': 'לא ניתן להחיל קנס. נסו שוב.',
 
   // Event Manager console
   'mgr.title': 'מנהל האירוע',

@@ -288,7 +288,7 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
       const userId = parts[parts.indexOf('users') + 1];
       const profile = doc.data() as {
         name: string; code: string; status: string;
-        memberNames?: string[]; startedAt?: string;
+        memberNames?: string[]; startedAt?: string; captainPhone?: string;
       };
       return {
         id:             userId,
@@ -296,6 +296,7 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
         code:           profile.code,
         status:         profile.status,
         memberNames:    profile.memberNames ?? [],
+        captainPhone:   profile.captainPhone ?? '',
         startedAt:      profile.startedAt ?? null,
         score:          scoreMap[userId]?.score ?? 0,
         completedSlots: scoreMap[userId]?.completedSlots ?? 0,
