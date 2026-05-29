@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Pressable, ViewStyle } from 'react-native';
+import { View, Pressable } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { GLOW, GLASS } from './tokens';
 
 export interface CardProps {

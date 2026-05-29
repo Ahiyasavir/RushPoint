@@ -10,7 +10,6 @@ import Animated, {
   Easing,
 } from 'react-native-reanimated';
 import { Text } from './Text';
-import { GLOW } from './tokens';
 import { useTranslation } from '../i18n';
 import type { FlashMission } from '@rushpoint/shared';
 

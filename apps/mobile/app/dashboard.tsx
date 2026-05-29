@@ -139,10 +139,6 @@ export default function DashboardScreen() {
   const sprintElapsed   = craftingDone ? Math.max(0, craftingElapsed - CRAFTING_DURATION_SECS) : 0;
   const sprintLeft      = Math.max(0, SPRINT_BUDGET_SECS - sprintElapsed);
 
-  const isOrangeActive  = activeSlot?.type === 'orange';
-  const gateArrivedMs   = toMs(gameState?.gateArrivedAt);
-  const gateCheckedIn   = gateArrivedMs != null;
-
   return (
     <View className="flex-1 bg-app-bg">
       {/* ── Flash-mission overlay (admin broadcast) ──────────────────── */}
@@ -218,7 +214,7 @@ export default function DashboardScreen() {
             </Text>
           </Card>
         ) : activeSlot?.type === 'gate' ? (
-          <GateCard matchStatus={gameState?.matchStatus} teamId={teamId} />
+          <GateCard matchStatus={gameState?.matchStatus} />
         ) : activeSlot ? (
           <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} />
         ) : (
@@ -432,7 +428,7 @@ function CraftingCountdownCard({
 
 // ─── Gate card (matchmaking filter) ──────────────────────────────────────────
 
-function GateCard({ matchStatus, teamId }: { matchStatus?: MatchStatus; teamId: string | null }) {
+function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
   const { t } = useTranslation();
   const [joining, setJoining]     = useState(false);
   const [bypassing, setBypassing] = useState(false);

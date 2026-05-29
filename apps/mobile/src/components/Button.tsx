@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ActivityIndicator, Text, View } from 'react-native';
+import { Pressable, ActivityIndicator, Text } from 'react-native';
 import { GLOW } from './tokens';
 
 export interface ButtonProps {
