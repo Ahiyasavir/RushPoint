@@ -132,6 +132,13 @@ const en: Dict = {
   'hint.cancel': 'Cancel',
   'hint.applied': 'Hint unlocked — 50 pts deducted.',
   'hint.error': 'Could not request a hint.',
+
+  // Final run
+  'final.label': 'FINISHED',
+  'final.title': 'Race Complete!',
+  'final.finalScore': 'Your final score',
+  'final.awaitReveal': 'Results are revealed live at the finish line — last place to first. Good luck!',
+  'final.backToDash': 'Back to dashboard',
 };
 
 const he: Dict = {
@@ -259,6 +266,13 @@ const he: Dict = {
   'hint.cancel': 'ביטול',
   'hint.applied': 'הרמז נפתח — נוכו 50 נק׳.',
   'hint.error': 'לא ניתן לבקש רמז.',
+
+  // Final run
+  'final.label': 'הסתיים',
+  'final.title': 'המירוץ הושלם!',
+  'final.finalScore': 'הניקוד הסופי שלכם',
+  'final.awaitReveal': 'התוצאות נחשפות בשידור חי בקו הסיום — מהמקום האחרון לראשון. בהצלחה!',
+  'final.backToDash': 'חזרה ללוח',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

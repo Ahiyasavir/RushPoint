@@ -57,5 +57,37 @@ export function useSlotSound() {
     }
   }, []);
 
-  return { playUnlock };
+  // Triumphant ascending arpeggio for the Final Run reveal — synthesised, no asset.
+  const playFanfare = useCallback(() => {
+    const Ctor = getAudioContextCtor();
+    if (!Ctor) return;
+    try {
+      const ctx = ctxRef.current ?? (ctxRef.current = new Ctor());
+      if (ctx.state === 'suspended') void ctx.resume();
+
+      // C-major triad climbing to a held high C.
+      const notes = [523.25, 659.25, 783.99, 1046.5];
+      const now = ctx.currentTime;
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const start = now + i * 0.14;
+        const end = start + (i === notes.length - 1 ? 0.6 : 0.22);
+
+        osc.type = 'triangle';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.35, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, end);
+
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(end);
+      });
+    } catch {
+      // silent fallback
+    }
+  }, []);
+
+  return { playUnlock, playFanfare };
 }

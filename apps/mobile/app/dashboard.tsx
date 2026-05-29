@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -98,6 +98,18 @@ export default function DashboardScreen() {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
+
+  // When every slot is terminal, sweep into the Final Run celebration once.
+  const navigatedFinal = useRef(false);
+  useEffect(() => {
+    const slots = gameState?.slots;
+    if (!slots || slots.length < 8) return;
+    const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+    if (allDone && !navigatedFinal.current) {
+      navigatedFinal.current = true;
+      router.push('/final-run');
+    }
+  }, [gameState?.slots]);
 
   const loading         = syncState === 'loading' && !gameState;
   const snapError       = syncState === 'error' && !gameState;
