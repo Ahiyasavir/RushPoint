@@ -33,6 +33,14 @@ export default function MatchmakingPage() {
   const [toast, setToast]     = useState('');
   const [resolving, setResolving] = useState<string | null>(null);
 
+  // Flash mission broadcast form
+  const [flashTitle, setFlashTitle]   = useState('');
+  const [flashTitleHe, setFlashTitleHe] = useState('');
+  const [flashDesc, setFlashDesc]     = useState('');
+  const [flashBonus, setFlashBonus]   = useState(100);
+  const [flashTtl, setFlashTtl]       = useState(300);
+  const [flashSending, setFlashSending] = useState(false);
+
   const queuePath   = `artifacts/${APP_ID}/public/data/matchQueue`;
   const matchesPath = `artifacts/${APP_ID}/public/data/matches`;
 
@@ -72,6 +80,28 @@ export default function MatchmakingPage() {
     }
   }
 
+  async function handleSendFlash() {
+    if (!flashTitle.trim()) { showToast(t('flash.titleRequired')); return; }
+    setFlashSending(true);
+    try {
+      await ensureAuth();
+      const fn = httpsCallable(functions, 'pushFlashMission');
+      await fn({
+        title:       flashTitle.trim(),
+        titleHe:     flashTitleHe.trim() || flashTitle.trim(),
+        description: flashDesc.trim(),
+        bonusPoints: flashBonus,
+        ttlSeconds:  flashTtl,
+      });
+      showToast(t('flash.sent'));
+      setFlashTitle(''); setFlashTitleHe(''); setFlashDesc('');
+    } catch {
+      showToast(t('flash.error'));
+    } finally {
+      setFlashSending(false);
+    }
+  }
+
   const waiting  = queue.filter((q) => q.status === 'waiting');
   const matched  = queue.filter((q) => q.status === 'matched');
   const activeM  = matches.filter((m) => !m.resolvedAt);
@@ -89,6 +119,62 @@ export default function MatchmakingPage() {
           {toast}
         </div>
       )}
+
+      {/* ── Flash mission broadcast ─────────────────────────────────────── */}
+      <section className="mb-8 rounded-2xl bg-neon-purple/5 border border-neon-purple/30 p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <span>⚡</span>
+          <h2 className="text-sm font-bold text-neon-purple uppercase tracking-widest">{t('flash.title')}</h2>
+        </div>
+        <p className="text-zinc-500 text-sm mb-4">{t('flash.subtitle')}</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+          <input
+            value={flashTitle}
+            onChange={(e) => setFlashTitle(e.target.value)}
+            placeholder={t('flash.titleEn')}
+            className="px-3 py-2 rounded-xl bg-app-card border border-glass-border text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-neon-purple/40"
+          />
+          <input
+            value={flashTitleHe}
+            onChange={(e) => setFlashTitleHe(e.target.value)}
+            placeholder={t('flash.titleHe')}
+            dir="rtl"
+            className="px-3 py-2 rounded-xl bg-app-card border border-glass-border text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-neon-purple/40"
+          />
+        </div>
+        <input
+          value={flashDesc}
+          onChange={(e) => setFlashDesc(e.target.value)}
+          placeholder={t('flash.descEn')}
+          className="w-full px-3 py-2 rounded-xl bg-app-card border border-glass-border text-white placeholder-zinc-600 text-sm focus:outline-none focus:border-neon-purple/40 mb-3"
+        />
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs text-zinc-500">
+            {t('flash.bonus')}
+            <input
+              type="number" min={0} value={flashBonus}
+              onChange={(e) => setFlashBonus(Number(e.target.value))}
+              className="mt-1 block w-28 px-3 py-2 rounded-xl bg-app-card border border-glass-border text-white text-sm focus:outline-none focus:border-neon-purple/40"
+            />
+          </label>
+          <label className="text-xs text-zinc-500">
+            {t('flash.ttl')}
+            <input
+              type="number" min={10} value={flashTtl}
+              onChange={(e) => setFlashTtl(Number(e.target.value))}
+              className="mt-1 block w-28 px-3 py-2 rounded-xl bg-app-card border border-glass-border text-white text-sm focus:outline-none focus:border-neon-purple/40"
+            />
+          </label>
+          <button
+            onClick={() => void handleSendFlash()}
+            disabled={flashSending || !flashTitle.trim()}
+            className="ms-auto px-5 py-2 rounded-xl text-sm font-semibold bg-neon-purple/15 border border-neon-purple/40 text-neon-purple hover:bg-neon-purple/25 disabled:opacity-40 transition-all"
+          >
+            {flashSending ? t('flash.sending') : `⚡ ${t('flash.send')}`}
+          </button>
+        </div>
+      </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* ── Queue ─────────────────────────────────────────────────────── */}

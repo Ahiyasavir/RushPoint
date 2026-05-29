@@ -100,6 +100,20 @@ const en: Dict = {
   'match.resolved': 'Match resolved — {winner} won (+{bonus} pts).',
   'match.bonusPts': '+{bonus} pts to winner',
 
+  // Flash mission broadcast
+  'flash.title': 'Flash Mission',
+  'flash.subtitle': 'Broadcast a time-limited bonus mission to every team.',
+  'flash.titleEn': 'Title (EN)',
+  'flash.titleHe': 'Title (HE)',
+  'flash.descEn': 'Description (EN)',
+  'flash.bonus': 'Bonus points',
+  'flash.ttl': 'Duration (seconds)',
+  'flash.send': 'Broadcast',
+  'flash.sending': 'Sending…',
+  'flash.sent': '⚡ Flash mission broadcast to all teams.',
+  'flash.error': 'Could not send flash mission.',
+  'flash.titleRequired': 'A title is required.',
+
   // Check-ins
   'checkins.title': 'Check-in Review',
   'checkins.subtitle': 'Teams waiting to be graded. Use the Judge tab to score them.',
@@ -239,6 +253,20 @@ const he: Dict = {
   'match.resolveError': 'לא ניתן לשמור תוצאה.',
   'match.resolved': 'הזיווג נפתר — {winner} ניצח/ה (+{bonus} נק׳).',
   'match.bonusPts': '+{bonus} נק׳ למנצח',
+
+  // Flash mission broadcast
+  'flash.title': 'משימת ברק',
+  'flash.subtitle': 'שדרו משימת בונוס מוגבלת בזמן לכל הקבוצות.',
+  'flash.titleEn': 'כותרת (אנגלית)',
+  'flash.titleHe': 'כותרת (עברית)',
+  'flash.descEn': 'תיאור',
+  'flash.bonus': 'נקודות בונוס',
+  'flash.ttl': 'משך (שניות)',
+  'flash.send': 'שדר',
+  'flash.sending': 'שולח…',
+  'flash.sent': '⚡ משימת הברק שודרה לכל הקבוצות.',
+  'flash.error': 'לא ניתן לשלוח משימת ברק.',
+  'flash.titleRequired': 'נדרשת כותרת.',
 
   // Check-ins
   'checkins.title': 'בדיקת צ׳ק-אין',

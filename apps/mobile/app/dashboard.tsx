@@ -13,6 +13,8 @@ import { Button } from '../src/components/Button';
 import type { BadgeProps } from '../src/components/Badge';
 import { LanguageToggle } from '../src/components/LanguageToggle';
 import { useOfflineToast } from '../src/hooks/useOfflineToast';
+import { useFlashMissions } from '../src/hooks/useFlashMissions';
+import { FlashMissionBanner, useDismissableFlash } from '../src/components/FlashMissionBanner';
 import { useTranslation } from '../src/i18n';
 import { GLOW } from '../src/components/tokens';
 
@@ -86,6 +88,10 @@ export default function DashboardScreen() {
   useGameSync(teamId);
   useOfflineToast();
 
+  // Live flash-mission broadcast (admin-pushed), with local dismissal.
+  const flashMission = useFlashMissions();
+  const { visible: visibleFlash, dismiss: dismissFlash } = useDismissableFlash(flashMission);
+
   // Tick once per second to drive the live elapsed-time clock.
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -124,6 +130,11 @@ export default function DashboardScreen() {
 
   return (
     <View className="flex-1 bg-app-bg">
+      {/* ── Flash-mission overlay (admin broadcast) ──────────────────── */}
+      {visibleFlash && (
+        <FlashMissionBanner mission={visibleFlash} onDismiss={dismissFlash} />
+      )}
+
       {/* ── Header ───────────────────────────────────────────────────── */}
       <View
         className="bg-app-surface/80 border-b border-glass-border px-5 pb-4"

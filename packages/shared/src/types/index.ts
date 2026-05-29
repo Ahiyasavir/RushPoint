@@ -270,9 +270,12 @@ export interface FlashMission {
   id: string;
   eventId: string;
   title: string;
+  titleHe?: string;
   description: string;
+  descriptionHe?: string;
   bonusPoints: number;
   expiresAt: string;    // ISO 8601
+  createdAt?: string;   // ISO 8601
   isActive: boolean;
   winnerTeamId?: string;
 }

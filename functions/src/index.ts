@@ -381,29 +381,36 @@ export const triggerLeaderboardFreeze = functions.https.onCall(async (data, cont
 });
 
 export const pushFlashMission = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
-  const adminDoc = await db.collection('admins').doc(context.auth.uid).get();
-  if (!adminDoc.exists || adminDoc.data()?.role !== 'admin') {
-    throw new functions.https.HttpsError('permission-denied', 'Admins only');
-  }
+  assertJudge(context);
 
-  const { eventId, title, description, bonusPoints, ttlSeconds } = data as {
-    eventId: string;
+  const { title, titleHe, description, descriptionHe, bonusPoints, ttlSeconds } = data as {
     title: string;
+    titleHe?: string;
     description: string;
+    descriptionHe?: string;
     bonusPoints: number;
     ttlSeconds: number;
   };
 
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString();
-  const ref = await db.collection('flashMissions').add({
-    eventId,
+  if (!title || typeof title !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'title is required');
+  }
+  const ttl = Number(ttlSeconds) > 0 ? Number(ttlSeconds) : 300;
+  const bonus = Number(bonusPoints) >= 0 ? Number(bonusPoints) : 0;
+
+  const nowIso    = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + ttl * 1000).toISOString();
+
+  const ref = await db.collection(`artifacts/${APP_ID}/public/data/flashMissions`).add({
+    eventId:       APP_ID,
     title,
-    description,
-    bonusPoints,
+    titleHe:       titleHe ?? title,
+    description:   description ?? '',
+    descriptionHe: descriptionHe ?? description ?? '',
+    bonusPoints:   bonus,
     expiresAt,
-    isActive: true,
-    createdAt: new Date().toISOString(),
+    isActive:      true,
+    createdAt:     nowIso,
   });
 
   return { id: ref.id, expiresAt };

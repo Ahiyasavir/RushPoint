@@ -103,6 +103,12 @@ const en: Dict = {
   'craft.sprintWindow': 'Sprint window',
   'craft.sprintLeft': '{sec}s to reach the judge',
   'craft.sprintExpired': 'Late — exponential penalty accumulating!',
+
+  // Flash mission
+  'flash.label': 'FLASH MISSION',
+  'flash.bonus': '+{bonus} pts',
+  'flash.expiresIn': 'Ends in {sec}s',
+  'flash.dismiss': 'Got it',
 };
 
 const he: Dict = {
@@ -201,6 +207,12 @@ const he: Dict = {
   'craft.sprintWindow': 'חלון ריצה',
   'craft.sprintLeft': '{sec} שנ׳ להגיע לשופט',
   'craft.sprintExpired': 'איחור — עונש מצטבר!',
+
+  // Flash mission
+  'flash.label': 'משימת ברק',
+  'flash.bonus': '+{bonus} נק׳',
+  'flash.expiresIn': 'מסתיים בעוד {sec} שנ׳',
+  'flash.dismiss': 'הבנתי',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };
