@@ -1473,6 +1473,159 @@ export const saveTeneSelection = functions.https.onCall(async (data, context) =>
 // ADVANCED OPERATIONAL FEATURES (Phase 3) — station mgmt, broadcast, audit, geo
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ─── getStationTeams ──────────────────────────────────────────────────────────
+// Station operator console: list the teams currently AT this station (their active
+// slot's taskId === this task). Returns each team's roster, captain phone, member
+// count and how long they've been on the task — everything the operator needs to
+// judge the mission and decide whether all members are present.
+export const getStationTeams = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { taskId } = data as { taskId?: string };
+  if (!taskId) {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
+  }
+
+  const [gsSnap, taskSnap] = await Promise.all([
+    db.collectionGroup('gameState').get(),
+    db.doc(taskPath(taskId)).get(),
+  ]);
+
+  const teams = await Promise.all(
+    gsSnap.docs.map(async (doc) => {
+      const parts  = doc.ref.path.split('/');
+      const userId = parts[parts.indexOf('users') + 1];
+      const gs     = doc.data() as { slots?: JudgeSlot[] };
+      const active = (gs.slots ?? []).find((s) => s.status === 'active');
+      if (!active || active.taskId !== taskId) return null;
+
+      const prof = (await db.doc(`${userPath(userId)}/profile/team`).get()).data() as
+        | { name?: string; code?: string; memberNames?: string[]; captainPhone?: string }
+        | undefined;
+      return {
+        teamId:       userId,
+        teamName:     prof?.name ?? userId,
+        teamCode:     prof?.code ?? '',
+        memberNames:  prof?.memberNames ?? [],
+        memberCount:  prof?.memberNames?.length ?? 0,
+        captainPhone: prof?.captainPhone ?? '',
+        slotIndex:    active.index,
+        startedAt:    active.startedAt ?? null,
+      };
+    }),
+  );
+
+  return {
+    taskId,
+    taskTitle: taskSnap.exists ? (taskSnap.data() as { title?: string }).title ?? taskId : taskId,
+    teams: teams.filter(Boolean),
+  };
+});
+
+// ─── stationReleaseTeam ───────────────────────────────────────────────────────
+// Station operator's verdict: the team passed (or not) this station's mission.
+// Completes the active slot with the sigmoid task score, applies a cohesion
+// penalty for any missing members, advances the team to their next objective,
+// and frees the station counter. A non-pass marks the slot 'skipped' with no
+// award (the team still moves on so the event keeps flowing).
+const STATION_COHESION_PENALTY = 100;
+export const stationReleaseTeam = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { teamId, taskId, missingMembers = 0, passed = true } = data as {
+    teamId?: string; taskId?: string; missingMembers?: number; passed?: boolean;
+  };
+  if (!teamId || !taskId) {
+    throw new functions.https.HttpsError('invalid-argument', 'teamId and taskId are required');
+  }
+  const missing  = Math.max(0, Math.floor(Number(missingMembers) || 0));
+  const cohesion = missing * STATION_COHESION_PENALTY;
+  const nowIso   = new Date().toISOString();
+
+  // Pre-read task difficulty/timing target (outside the tx).
+  const taskSnap = await db.doc(taskPath(taskId)).get();
+  const task = taskSnap.exists
+    ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number })
+    : {};
+
+  const result = await db.runTransaction(async (tx) => {
+    const gsRef   = db.doc(`${userPath(teamId)}/gameState/current`);
+    const profRef = db.doc(`${userPath(teamId)}/profile/team`);
+    const gsSnap  = await tx.get(gsRef);
+    if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found for team');
+
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number; bonusPenalty?: number; judging?: JudgingState | null };
+    const slots = gs.slots.map((s) => ({ ...s }));
+    const target = slots.findIndex((s) => s.status === 'active' && s.taskId === taskId);
+    if (target < 0) {
+      throw new functions.https.HttpsError('failed-precondition', 'This team is not active at your station');
+    }
+
+    let taskScore = 0;
+    if (passed) {
+      const difficulty = task.difficulty ?? 5;
+      const estMins    = task.estimatedMinutes ?? 15;
+      const startMs    = slots[target].startedAt ? new Date(slots[target].startedAt!).getTime() : Date.now() - estMins * 60_000;
+      const actualMins = (Date.now() - startMs) / 60_000;
+      taskScore = calculateTaskScore(difficulty, actualMins, estMins);
+    }
+
+    slots[target] = {
+      ...slots[target],
+      status:      passed ? 'completed' : 'skipped',
+      completedAt: nowIso,
+      earnedScore: taskScore,
+      scoreBreakdown: {
+        products: [], productScore: 0, designScore: 0, presentationScore: 0,
+        taskScore, total: taskScore, missingMembers: missing, cohesionPenalty: cohesion,
+      },
+    };
+    unlockNext(slots, target, nowIso);
+
+    const newScore   = (gs.score ?? 0) + taskScore;
+    const newPenalty = (gs.bonusPenalty ?? 0) + cohesion;
+    const allDone    = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+    const clearJudging = gs.judging?.slotIndex === target;
+
+    tx.update(gsRef, {
+      slots,
+      score:        newScore,
+      bonusPenalty: newPenalty,
+      updatedAt:    nowIso,
+      ...(clearJudging ? { judging: null } : {}),
+    });
+    if (allDone) tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
+
+    return { taskScore, cohesion, newScore, allDone };
+  });
+
+  // Free the station counter the team was occupying.
+  await releaseTask(taskId, teamId);
+
+  return { success: true, passed, ...result };
+});
+
+// ─── stationCallHelp ──────────────────────────────────────────────────────────
+// A station operator summons roaming staff (e.g. supplies, a dispute, a break).
+// Writes a 'technical' admin alert tagged with the station so it surfaces in the
+// shared alerts feed (soft chime, not the emergency siren).
+export const stationCallHelp = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { taskId, station, message } = data as { taskId?: string; station?: string; message?: string };
+  const nowIso = new Date().toISOString();
+  const label  = station ? `Station ${station}` : (taskId ?? 'A station');
+  await db.collection(`artifacts/${APP_ID}/public/data/adminAlerts`).add({
+    type:         'station',
+    kind:         'technical',
+    teamId:       '',
+    teamName:     label,
+    memberNames:  [],
+    captainPhone: '',
+    message:      (message ?? '').trim() || `🛠️ ${label} needs assistance`,
+    timestamp:    nowIso,
+    acknowledged: false,
+  });
+  return { success: true };
+});
+
 // ─── setStationStatus ─────────────────────────────────────────────────────────
 // Event Manager toggles a station 'active' | 'paused' | 'closed'. Paused/closed
 // stations are excluded from routing (see routing/assignNextTask.ts).

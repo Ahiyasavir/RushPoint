@@ -133,7 +133,7 @@ rushpoint/
 │           └── services/        # firebase.ts (emulator-wired + ensureAuth anonymous)
 ├── functions/
 │   └── src/
-│       ├── index.ts            # 30 callables — see the Cloud Functions table below
+│       ├── index.ts            # 33 callables — see the Cloud Functions table below
 │       ├── firebase.ts          # Admin SDK init (ignoreUndefinedProperties enabled)
 │       ├── routing/assignNextTask.ts   # Phase 2 — priority routing (load/transit/skill) ✅
 │       └── scoring/
@@ -214,6 +214,13 @@ Key documents:
 | `adjustTeamScore` | Manager: apply a fine (delta) or score override — writes an audit entry with prev/new |
 | `listAuditLogs` | Manager: read the immutable action log (admin-only path `artifacts/{appId}/auditLogs`) |
 | `updateLocation` | Mobile: lean per-team location ping (foreground geo-throttling) → `public/data/teamLocations` for the live heatmap |
+| `getStationTeams` | Station operator: teams currently at a station (active slot taskId match) + roster/phone |
+| `stationReleaseTeam` | Station operator: pass/fail a team's mission, apply missing-member cohesion penalty, advance + release the counter |
+| `stationCallHelp` | Station operator: summon roaming staff (writes a 'technical' admin alert tagged with the station) |
+
+> Note: `bypassMatchmaking` is retained but now **rejects** — teams must win a duel (no skip).
+> Role gating in the admin app is **client-side** (simple role selection, demo-grade); for
+> production swap for Firebase custom claims.
 
 Judge/admin callables require an authenticated caller; the admin-claim check (`assertJudge`) is
 **relaxed on the emulator** (`FUNCTIONS_EMULATOR`) so the demo runs with a plain anonymous sign-in.
