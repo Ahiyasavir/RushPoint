@@ -24,6 +24,11 @@ export const COLLECTIONS = {
   BASKET_ZONES:   'basketZones',
   MATCH_QUEUE:    'matchQueue',
   MATCHES:        'matches',
+  ANNOUNCEMENTS:  'announcements',
+  TEAM_LOCATIONS: 'teamLocations',
+
+  // Admin-only collection (read gated to admins; written by Cloud Functions)
+  AUDIT_LOGS:     'auditLogs',
 
   // Private per-user collections
   PROFILE:        'profile',
@@ -54,6 +59,7 @@ export interface GeoPoint {
 export type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
 export type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 export type TaskType   = 'green' | 'orange' | 'gold';
+export type StationStatus = 'active' | 'paused' | 'closed';
 export type TeamStatus = 'registered' | 'active' | 'park' | 'crafting' | 'sprinting' | 'finished';
 export type MatchStatus = 'waiting' | 'matched' | 'won' | 'lost' | 'bypassed';
 export type EventStatus = 'pre' | 'live' | 'frozen' | 'ended';
@@ -61,7 +67,7 @@ export type CheckInStatus = 'pending' | 'approved' | 'rejected';
 
 
 // ─── Slot ─────────────────────────────────────────────────────────────────────
-// A single entry in the 8-slot task board.
+// A single entry in the 6-slot task board.
 // Stored inside GameState (not as its own Firestore document).
 
 export interface SlotScoreBreakdown {
@@ -74,7 +80,7 @@ export interface SlotScoreBreakdown {
 }
 
 export interface SlotRecord {
-  index: number;       // 0–7 (fixed positions: 0-3 green, 4 orange, 5-7 gold)
+  index: number;       // 0–5 (fixed positions: 0-2 green, 3 gate, 4 orange, 5 gold)
   type: SlotType;
   status: SlotStatus;
   taskId?: string;     // populated when a task is assigned to this slot
@@ -118,7 +124,7 @@ export interface JudgingState {
 
 export interface GameState {
   teamId: string;
-  slots: SlotRecord[];  // always exactly 8 entries
+  slots: SlotRecord[];  // always exactly 6 entries (0-2 green, 3 gate, 4 orange, 5 gold)
   score: number;
   bonusPenalty: number; // accumulated deductions (transit, sprint, hints)
   currentTaskId?: string;
@@ -130,6 +136,8 @@ export interface GameState {
   craftingStartedAt?: string;   // stamped when team scans basket QR (20-min clock starts)
   finalSprintStartedAt?: string; // stamped when 20-min crafting ends
   matchStatus?: MatchStatus;
+  teneSelection?: string[];     // product ids the team selected during crafting (slot 5)
+  evacuatedFrom?: string | null; // station title the team was force-evacuated from (transient)
 }
 
 
@@ -165,6 +173,10 @@ export interface Task {
   estimatedMinutes: number;
 
   isActive: boolean;    // admin can toggle off without deleting
+
+  // Operational controls (Phase 3)
+  status?: StationStatus;     // missing = 'active'. 'paused'/'closed' excluded from routing
+  maxDurationMinutes?: number; // safety cap: operator is warned past this once a team checks in
 }
 
 
@@ -308,6 +320,62 @@ export interface SosEvent {
   timestamp: string;    // ISO 8601
   resolved: boolean;
   resolvedAt?: string;
+}
+
+
+// ─── Operational Broadcast (Phase 3) ──────────────────────────────────────────
+// Stored at: artifacts/{appId}/public/data/announcements/{id}
+// Global administrative announcements (distinct from gamified flash missions).
+// Persist until the admin deactivates them; teams dismiss locally per-device.
+
+export type AnnouncementLevel = 'info' | 'warning' | 'critical';
+
+export interface Announcement {
+  id: string;
+  message: string;
+  messageHe?: string;
+  level: AnnouncementLevel;
+  active: boolean;
+  createdAt: string;    // ISO 8601
+  operatorId?: string;
+}
+
+
+// ─── Audit Trail (Phase 3) ────────────────────────────────────────────────────
+// Stored at: artifacts/{appId}/auditLogs/{id} (admin-read-only; Cloud-Function-written)
+// Immutable record of every administrative action, for dispute resolution.
+
+export type AuditActionType =
+  | 'fine'
+  | 'score_override'
+  | 'manual_unlock'
+  | 'evacuation'
+  | 'skip';
+
+export interface AuditLogEntry {
+  id: string;
+  timestamp: string;    // ISO 8601
+  teamId: string;
+  teamName?: string;
+  operatorId: string;
+  actionType: AuditActionType;
+  previousValue?: number | string | null;
+  newValue?: number | string | null;
+  reason?: string;
+}
+
+
+// ─── Live Team Location (Phase 3) ─────────────────────────────────────────────
+// Stored at: artifacts/{appId}/public/data/teamLocations/{teamId}
+// Written by the lean updateLocation callable; read by the admin heatmap.
+
+export interface TeamLocation {
+  teamId: string;
+  teamName?: string;
+  lat: number;
+  lng: number;
+  slotType?: SlotType;
+  updatedAt: string;    // ISO 8601
 }
 
 

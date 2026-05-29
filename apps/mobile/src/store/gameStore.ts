@@ -46,6 +46,7 @@ export interface LiveGame {
   craftingStartedAt?: unknown;
   finalSprintStartedAt?: unknown;
   matchStatus?: MatchStatus;
+  teneSelection?: string[];
 }
 
 export type SyncState = 'loading' | 'live' | 'error';
@@ -58,7 +59,7 @@ interface GameState {
   score: number;
   isOnline: boolean;
 
-  // Slots — always exactly 8 (local Phase-1 buffer; superseded by `live`)
+  // Slots — always exactly 6 (local Phase-1 buffer; superseded by `live`)
   slots: SlotState[];
 
   // ── Live Firestore mirror (Phase 2) ──
@@ -80,17 +81,16 @@ interface GameState {
 
 function buildInitialSlots(): SlotState[] {
   return [
-    // Green slots 0–3: field tasks
+    // Green slots 0–2: field missions
     { index: 0, type: 'green',  status: 'active' },
     { index: 1, type: 'green',  status: 'locked' },
     { index: 2, type: 'green',  status: 'locked' },
-    { index: 3, type: 'green',  status: 'locked' },
-    // Gate slot 4: matchmaking filter
-    { index: 4, type: 'gate',   status: 'locked' },
-    // Orange slot 5: find basket zone
-    { index: 5, type: 'orange', status: 'locked' },
-    // Gold slot 6: 20-min crafting + final judging
-    { index: 6, type: 'gold',   status: 'locked' },
+    // Gate slot 3: matchmaking (only the winner advances)
+    { index: 3, type: 'gate',   status: 'locked' },
+    // Orange slot 4: find the Tene basket
+    { index: 4, type: 'orange', status: 'locked' },
+    // Gold slot 5: 20-min crafting + sprint + final judging
+    { index: 5, type: 'gold',   status: 'locked' },
   ];
 }
 

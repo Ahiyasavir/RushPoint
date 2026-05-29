@@ -10,13 +10,13 @@ Gamified real-time team management app powering the Race to Tzion adventure even
 ## Current Status (Phases 1–3 ✅ complete — feature-complete on the local emulator)
 
 > Live status & next steps: **[STATUS.md](STATUS.md)**. All Phase 2 blueprint math + Phase 3
-> gamification are implemented and verified e2e (`node scripts/e2e-verify.mjs` → 28/28 PASS).
+> gamification are implemented and verified e2e (`node scripts/e2e-verify.mjs` → 44/44 PASS).
 
 The full game lifecycle runs against the Firebase Emulator Suite:
 
 1. **Access code → Register** — server-side `registerTeam` validates/claims the code and seeds
    the team profile + initial `gameState` (slot 0 active).
-2. **Dashboard** — live `gameState` mirror: 8 slots, score (effective = score − penalty), gate
+2. **Dashboard** — live `gameState` mirror: 6 stages, score (effective = score − penalty), gate
    card, crafting countdown, matchmaking, flash-mission overlay, SOS + clue-hint buttons.
 3. **Smart routing** — `requestNextTask` / `getRecommendedTasks` rank stations by load (Φ),
    transit (haversine) and skill match (Ω); Teams admin page reflects live registrations.
@@ -109,28 +109,31 @@ rushpoint/
 │   │   │   ├── index.tsx       # anonymous auth gate
 │   │   │   ├── access-code.tsx # enter Access Code (validates against accessCodes)
 │   │   │   ├── register.tsx    # team form → calls registerTeam callable
-│   │   │   ├── dashboard.tsx   # 8 slots, score, gate/crafting/match, flash overlay, SOS+hint
+│   │   │   ├── dashboard.tsx   # 6 stages, score, gate/crafting/match, flash overlay, SOS+hint
 │   │   │   ├── map.tsx         # Mapbox static mission map
-│   │   │   ├── basket-zone.tsx # riddle + match delay + 20-min crafting countdown
+│   │   │   ├── basket-zone.tsx # riddle + interactive Tene-fill menu + 20-min/sprint countdown
 │   │   │   ├── sos.tsx         # emergency alert (two-step confirm + GPS → triggerSOS)
 │   │   │   └── final-run.tsx   # race-complete celebration (animated trophy + synth fanfare)
 │   │   └── src/
 │   │       ├── components/      # Tier 1 kit: Text, Button, Card, Badge, Input, Toast, tokens.ts
-│   │       │                    # + SlotCard, ProgressBar, LanguageToggle, FlashMissionBanner
-│   │       ├── hooks/           # useGameSync, useOfflineToast, useFlashMissions,
-│   │       │                    # useSlotSound (synth chimes + playFanfare — no mp3 assets)
-│   │       ├── services/        # firebase.config.ts (emulator-wired, 127.0.0.1)
+│   │       │                    # + SlotCard, ProgressBar, LanguageToggle, FlashMissionBanner,
+│   │       │                    # AnnouncementBanner (persistent operational marquee)
+│   │       ├── hooks/           # useGameSync, useOfflineToast, useFlashMissions, useSlotSound,
+│   │       │                    # useAnnouncements, useAdaptiveLocation (geo-throttled pings)
+│   │       ├── data/            # teneProducts.ts (crafting-menu mirror of the catalog)
+│   │       ├── services/        # firebase.config.ts (emulator-wired, 127.0.0.1, AsyncStorage auth)
 │   │       └── store/           # gameStore (Zustand mirror of gameState)
 │   └── admin/
 │       └── src/
-│           ├── pages/           # JudgePage (grading + cohesion), CheckInsPage (pending + SOS alerts),
+│           ├── pages/           # JudgePage (grading + cohesion + timeout warning), CheckInsPage,
 │           │                    # TeamsPage, LeaderboardPage (freeze/Z-Score/reveal),
-│           │                    # MatchmakingPage (queue/duels + flash broadcast), HeatmapPage
+│           │                    # MatchmakingPage, HeatmapPage (+ live team markers),
+│           │                    # ManagerPage (stations + evacuate, broadcast, audit log)
 │           ├── data/            # teneProducts.ts (UI mirror of the scoring catalog)
 │           └── services/        # firebase.ts (emulator-wired + ensureAuth anonymous)
 ├── functions/
 │   └── src/
-│       ├── index.ts            # 21 callables — see the Cloud Functions table below
+│       ├── index.ts            # 30 callables — see the Cloud Functions table below
 │       ├── firebase.ts          # Admin SDK init (ignoreUndefinedProperties enabled)
 │       ├── routing/assignNextTask.ts   # Phase 2 — priority routing (load/transit/skill) ✅
 │       └── scoring/
@@ -142,7 +145,9 @@ rushpoint/
     ├── dev-emulator.mjs        # Java-21-aware emulator launcher + persistence
     ├── free-ports.mjs          # predev port cleanup
     ├── seed-local.mjs          # seed-if-empty (minimal demo set)
-    └── seed-emulator.ts        # comprehensive seed (npm run seed / seed:reset)
+    ├── seed-emulator.ts        # comprehensive seed (npm run seed / seed:reset)
+    ├── e2e-verify.mjs          # end-to-end callable check vs emulator (44/44)
+    └── test-tiebreaker.ts      # tie-breaker unit test (npx tsx)
 ```
 
 ---
@@ -180,11 +185,12 @@ Key documents:
 > "The Lions") show in the Admin panel (which reads across all teams) but are a *different identity*
 > than whatever you register on the phone — that's expected, not a bug.
 
-## Cloud Functions (v1 `https.onCall`) — 21 callables
+## Cloud Functions (v1 `https.onCall`) — 30 callables
 
 | Function | Role |
 |---|---|
 | `registerTeam` | Claim access code + create profile + seed gameState |
+| `joinTeam` | Second device joins an already-claimed code → mints a custom token for the original team uid (same account, two devices) |
 | `listPendingArrivals` | Admin: list teams with `status:'pending'` check-ins (collectionGroup) |
 | `checkInArrival` | Judge: record arrival, freeze the team's mobile clock (`gameState.judging`) |
 | `finalizeJudgeEvaluation` | Judge: basket score **+ sigmoid task score − cohesion penalty**, complete slot, advance |
@@ -193,19 +199,25 @@ Key documents:
 | `checkOutTask` | Release a station slot (`currentTeamCount` decrement) when a team leaves |
 | `listTeams` | Admin: all registered teams + live score/progress (collectionGroup, score-sorted) |
 | `skipTask` | Admin: skip the active slot, awarding the task average |
-| `checkInGate` | Mobile: arrive at the park gate (slot 4) |
+| `checkInGate` | Arrive at the park (transit penalty) — kept for backend/e2e; not on the active mobile path |
 | `getBasketZone` | Mobile: assign the least-crowded basket zone + riddle |
 | `startCraftingTimer` | Mobile: start the 20-min crafting countdown (+ 90-sec sprint window) |
-| `joinMatchQueue` / `resolveMatch` / `bypassMatchmaking` | Gate 1v1 matchmaking (queue, win/lose, master bypass) |
+| `joinMatchQueue` / `resolveMatch` / `bypassMatchmaking` | Gate 1v1 matchmaking. `resolveMatch`: **only the winner advances** (+150 + gate slot completes); the loser is re-queued (`waiting`). `joinMatchQueue` is idempotent (no double matches) |
+| `saveTeneSelection` | Mobile: persist the crafting-menu product picks to `gameState.teneSelection` (pre-fills the judge checklist) |
 | `triggerLeaderboardFreeze` | Admin: freeze/unfreeze the leaderboard |
 | `finalizeLeaderboard` | Admin: final ranking — completion bonus − bonusPenalty, then **Z-Score** normalization |
 | `pushFlashMission` | Admin: broadcast a time-limited bonus mission (canonical public path) |
 | `triggerSOS` / `acknowledgeAlert` | Mobile raises an emergency alert; admin clears it |
 | `requestClueHint` | Mobile: trade 50 pts (→ `bonusPenalty`) for a hint |
+| `setStationStatus` / `evacuateStation` | Manager: pause/close a station (excluded from routing) / release teams off a closed station without penalty (audited) |
+| `pushAnnouncement` / `deactivateAnnouncement` | Manager: global operational broadcast (persists until deactivated) — distinct from gamified flash missions |
+| `adjustTeamScore` | Manager: apply a fine (delta) or score override — writes an audit entry with prev/new |
+| `listAuditLogs` | Manager: read the immutable action log (admin-only path `artifacts/{appId}/auditLogs`) |
+| `updateLocation` | Mobile: lean per-team location ping (foreground geo-throttling) → `public/data/teamLocations` for the live heatmap |
 
 Judge/admin callables require an authenticated caller; the admin-claim check (`assertJudge`) is
 **relaxed on the emulator** (`FUNCTIONS_EMULATOR`) so the demo runs with a plain anonymous sign-in.
-All 21 are exercised by `node scripts/e2e-verify.mjs` (28/28 PASS against the emulator).
+The full set is exercised by `node scripts/e2e-verify.mjs` against the emulator.
 
 ## UI Component Kit (mobile, Tier 1)
 
@@ -233,11 +245,13 @@ dictionary + a `t(key, vars)` interpolator per app.
 
 ## Core Concepts
 
-### Slot System (8 slots)
-- Slots 0–3 (🟢 green): open-field missions — slot 0 active on start.
-- Slot 4 (🟠 orange): navigate to Bible Park, find the Tene basket.
-- Slots 5–7 (🥇 gold): basket-filling crafts; judge-graded.
-- Unlock rules: green[n]→green[n+1]; green[3]→orange; orange→all three gold; all 8 done → Final Run.
+### Slot System (6 stages)
+- Slots 0–2 (🟢 green): open-field missions, judge-advanced — slot 0 active on start.
+- Slot 3 (🔵 gate): matchmaking duel (זיווג). **Only the winner advances**; the loser is
+  sent back to the queue (`matchStatus:'lost'` → re-paired) until they win.
+- Slot 4 (🟠 orange): find the Tene basket + scan its QR (starts the 20-min crafting clock).
+- Slot 5 (🥇 gold): fill the Tene from the menu (20 min) + 90-sec sprint to the judges + judging.
+- Unlock rules: linear chain — each completed slot activates the next; all 6 done → Final Run.
 
 ### Scoring
 Per-slot score = **task score + basket grade**, computed **authoritatively in the Cloud Function**:
@@ -255,6 +269,21 @@ Per-slot score = **task score + basket grade**, computed **authoritatively in th
 vs `maxConcurrentTeams`; transit is haversine at ~5 km/h; skillMatch aligns the team's measured pace
 (`S_i ∈ [−1,1]`) to task difficulty. `requestNextTask` claims the top task with an atomic increment;
 `getRecommendedTasks` returns the ranked list without writing.
+
+### Operational features (Phase 3 advanced)
+- **Station control:** `Task.status` (`active`/`paused`/`closed`) — paused/closed stations are
+  excluded from routing. `evacuateStation` releases teams off a closed station (no penalty), clears
+  their slot, decrements the counter, and flags `gameState.evacuatedFrom` (mobile toasts once).
+- **Broadcast:** `announcements` (public) drive a persistent marquee on the mobile dashboard
+  (per-device dismissal), separate from gamified flash missions.
+- **Geo-throttling:** mobile `useAdaptiveLocation` pings `updateLocation` fast (~20 s) in transit,
+  slow (~4 min) when checked-in/crafting → `public/data/teamLocations` feeds the live heatmap.
+- **Audit trail:** every admin mutation writes to `artifacts/{appId}/auditLogs` (admin-read-only);
+  the Event Manager page (`/manager`) reads it via `listAuditLogs` and can fine/override scores.
+- **Timeout safety net:** `Task.maxDurationMinutes` drives a flashing warning on the Judge page once
+  a checked-in team exceeds it — the judge then extends or force-skips (judge decides).
+- **Tie-breaker:** `finalizeLeaderboard` breaks score ties via `compareForRanking`
+  (penalties → combined green time → transit time), a pure unit-tested comparator.
 
 ---
 

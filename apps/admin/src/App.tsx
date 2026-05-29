@@ -6,6 +6,7 @@ import CheckInsPage from './pages/CheckInsPage';
 import LeaderboardPage from './pages/LeaderboardPage';
 import JudgePage from './pages/JudgePage';
 import MatchmakingPage from './pages/MatchmakingPage';
+import ManagerPage from './pages/ManagerPage';
 import { useI18n } from './i18n';
 
 const NAV_ITEMS = [
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/leaderboard', key: 'nav.leaderboard' },
   { to: '/judge', key: 'nav.judge' },
   { to: '/matchmaking', key: 'nav.matchmaking' },
+  { to: '/manager', key: 'nav.manager' },
 ];
 
 export default function App() {
@@ -61,6 +63,7 @@ export default function App() {
           <Route path="/leaderboard" element={<LeaderboardPage />} />
           <Route path="/judge" element={<JudgePage />} />
           <Route path="/matchmaking" element={<MatchmakingPage />} />
+          <Route path="/manager" element={<ManagerPage />} />
         </Routes>
       </main>
     </div>

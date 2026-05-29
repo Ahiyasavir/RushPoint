@@ -1,6 +1,6 @@
 # RushPoint — Master Technical Specification
 > Upload this file at the start of every coding session to restore full project context.
-> Last updated: 2026-05-29 | **Phases 1–3 feature-complete** on the emulator (e2e 28/28).
+> Last updated: 2026-05-29 | **Phases 1–3 feature-complete** on the emulator (e2e 44/44 + tie-breaker unit test).
 > This file is the architecture reference; for the live build status read **STATUS.md**.
 > Note: sections below describe the original plan — some figures evolved during build (e.g. scoring
 > moved to the sigmoid/Z-Score model in §"Scoring", routing to the Φ/transit/Ω model). Code wins.
@@ -11,13 +11,14 @@
 
 **RushPoint** powers "Race to Tzion" (המירוץ לציון) — a gamified outdoor team-race event in Jerusalem. Teams navigate physical locations, solve riddles, and fill a wicker basket (Tene). A real-time load-balancing algorithm prevents station bottlenecks. A judge panel scores the physical basket at the finish line.
 
-**Core mechanic:** An 8-slot task board drives the full game flow:
-| Slots | Type | Color | Unlocks when |
-|-------|------|-------|--------------|
-| 0–3 | Open-field missions | 🟢 Green | Immediate (slot 0 active on start) |
-| 4 | Find the Tene basket | 🟠 Orange | All 4 green slots completed |
-| 5–7 | Basket-filling crafts | 🥇 Gold | Orange slot completed |
-| — | Final Run reveal | — | All 8 slots completed → music + location |
+**Core mechanic:** A 6-stage task board drives the full game flow:
+| Slot | Type | Color | Unlocks when |
+|------|------|-------|--------------|
+| 0–2 | Open-field missions (judge-advanced) | 🟢 Green | Immediate (slot 0 active on start) |
+| 3 | Matchmaking duel (זיווג) | 🔵 Gate | All 3 green slots completed — **only the winner advances**; the loser re-queues |
+| 4 | Find the Tene basket + scan QR | 🟠 Orange | Gate won |
+| 5 | Fill the Tene (20-min menu) + 90-s sprint + judging | 🥇 Gold | Tene QR scanned |
+| — | Final Run reveal | — | All 6 stages completed → music + location |
 
 ---
 
@@ -132,9 +133,9 @@ interface GameState {
 }
 
 interface SlotRecord {
-  index: number;         // 0–7
-  type: 'green' | 'orange' | 'gold';
-  status: 'locked' | 'active' | 'completed';
+  index: number;         // 0–5 (0-2 green, 3 gate, 4 orange, 5 gold)
+  type: 'green' | 'gate' | 'orange' | 'gold';
+  status: 'locked' | 'active' | 'completed' | 'skipped';
   taskId?: string;
   taskTitle?: string;    // denormalised for display
   completedAt?: string;
@@ -204,10 +205,11 @@ Never stored in a Firestore document — zero reads-per-request overhead.
 finalScore = slotPoints + completionBonus + speedBonus + basketBonus - bonusPenalty
 
 slotPoints      = completed slots × pointValue (green=100, orange=150, gold=200)
-completionBonus = 500  (all 8 slots filled)
+completionBonus = 500  (all 6 stages terminal)
 speedBonus      = max(0, 1000 × (1 - durationMinutes / 120))  ← decays to 0 after 2 hrs
 basketBonus     = judgeScore × 3  (0–300 pts, from judge's 0–100 rating)
-bonusPenalty    = accumulated clue-hint deductions (50 pts each, Phase 3)
+bonusPenalty    = clue-hints (50 ea) + cohesion (100/missing member) + transit/sprint + fines
+tie-breaker     = on equal finalScore: penalties ↑, then combined green-task time ↑, then transit ↑
 ```
 
 ---
@@ -315,10 +317,12 @@ Copy from `*.env.example` files in each directory.
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| **Phase 1 — MVP** | ✅ Done | Auth gate, 8-slot dashboard, judge scoring, atomic UI kit |
+| **Phase 1 — MVP** | ✅ Done | Auth gate, 6-stage dashboard, judge scoring, atomic UI kit |
 | **Phase 2 — Core Math & Backend** | ✅ Done | Sigmoid scoring, Φ/transit/Ω routing, live Firestore sync, offline, heatmap, audio, EN/HE |
 | **Phase 3 — Gamification** | ✅ Done | Gate matchmaking, basket zones, crafting/sprint penalties, leaderboard freeze + Z-Score + reveal, flash missions, SOS, clue-hints, team cohesion, Final Run |
-| **Remaining** | ⬜ | Wrapped/summary cards (deferred) + **production deploy** |
+| **6-Stage Flow Rework** | ✅ Done | 8→6 stages, multi-device join (custom token), AsyncStorage auth persistence, interactive Tene-fill menu, winner-only matchmaking |
+| **Phase 3 — Advanced Operational** | ✅ Done | Station status + evacuation, operational broadcast, geo-throttled location → live heatmap, audit log + Event Manager page, task-timeout safety net, score tie-breaker |
+| **Remaining** | ⬜ | Wrapped/summary cards (deferred) + **production deploy** + fix green-slot `requestNextTask` assignment + browser UI pass |
 
 ### Next steps (production readiness — see STATUS.md → "הכנה לפרישה")
 - [ ] Firebase production project: `deploy` functions + firestore:rules + storage + indexes
@@ -389,7 +393,7 @@ These are explicitly deferred. Do not build them during Phase 1, even if they se
 **Phase 1 MVP definition of done:**
 - [ ] Anonymous Firebase Auth sign-in works against emulator
 - [ ] Team can register (name + members) and land on the dashboard
-- [ ] Dashboard reads `gameState` from Firestore and renders 8 slots correctly
+- [ ] Dashboard reads `gameState` from Firestore and renders the 6 stages correctly
 - [ ] Tapping a slot (dev shortcut) completes it and the next slot activates
 - [ ] Admin opens Judge Panel, finds Team C's pending check-in, submits a score
 - [ ] Score is written to Firestore and reflected on the team's dashboard
@@ -595,7 +599,7 @@ All timestamps use **Firestore `serverTimestamp()`** — never `new Date()` or `
 | `status` | `'registered' \| 'active' \| 'park' \| 'finished'` | `string` | ✅ | Written by Cloud Functions only |
 | `createdAt` | `Timestamp` | `timestamp` | ✅ | `serverTimestamp()` on creation |
 | `startedAt` | `Timestamp?` | `timestamp` | ❌ | Set when team taps first slot |
-| `finishedAt` | `Timestamp?` | `timestamp` | ❌ | Set when all 8 slots complete |
+| `finishedAt` | `Timestamp?` | `timestamp` | ❌ | Set when all 6 stages complete |
 
 #### `Task` — `artifacts/{appId}/public/data/tasks/{taskId}`
 

@@ -28,6 +28,10 @@ type FormErrors = Partial<{
 
 const registerTeam = httpsCallable(functions, 'registerTeam');
 
+// Team-size rules (event constraint): min 4, max 7 participants.
+const MIN_PARTICIPANTS = 4;
+const MAX_PARTICIPANTS = 7;
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function RegisterScreen() {
@@ -38,14 +42,18 @@ export default function RegisterScreen() {
 
   const [teamName,       setTeamName]       = useState('');
   const [captainPhone,   setCaptainPhone]   = useState('');
-  const [participants,   setParticipants]   = useState<Participant[]>([{ name: '', age: '' }]);
+  const [participants,   setParticipants]   = useState<Participant[]>(
+    Array.from({ length: MIN_PARTICIPANTS }, () => ({ name: '', age: '' })),
+  );
   const [waiverAccepted, setWaiverAccepted] = useState(false);
   const [errors,         setErrors]         = useState<FormErrors>({});
 
   // ── Participant helpers ──────────────────────────────────────────────────────
 
   function addParticipant() {
-    setParticipants((prev) => [...prev, { name: '', age: '' }]);
+    setParticipants((prev) =>
+      prev.length >= MAX_PARTICIPANTS ? prev : [...prev, { name: '', age: '' }],
+    );
   }
 
   function removeParticipant(i: number) {
@@ -72,8 +80,10 @@ export default function RegisterScreen() {
       errs.captainPhone = t('register.errPhone');
 
     const filledParticipants = participants.filter((p) => p.name.trim());
-    if (filledParticipants.length < 1)
-      errs.participants = t('register.errParticipants');
+    if (filledParticipants.length < MIN_PARTICIPANTS)
+      errs.participants = t('register.errMinParticipants', { min: MIN_PARTICIPANTS });
+    else if (filledParticipants.length > MAX_PARTICIPANTS)
+      errs.participants = t('register.errMaxParticipants', { max: MAX_PARTICIPANTS });
 
     if (!waiverAccepted)
       errs.waiver = t('register.errWaiver');
@@ -162,7 +172,10 @@ export default function RegisterScreen() {
         />
 
         {/* ── Participants ──────────────────────────────────────────────── */}
-        <Text variant="label" className="mb-3">{t('register.participants')}</Text>
+        <Text variant="label" className="mb-1">{t('register.participants')}</Text>
+        <Text variant="caption" className="text-zinc-600 mb-3">
+          {t('register.teamSizeHint', { min: MIN_PARTICIPANTS, max: MAX_PARTICIPANTS })}
+        </Text>
 
         {participants.map((p, i) => (
           <View key={i} className="flex-row gap-2 mb-3 items-start">
@@ -198,7 +211,12 @@ export default function RegisterScreen() {
         ) : null}
 
         <View className="mb-6">
-          <Button variant="ghost" size="sm" onPress={addParticipant}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={addParticipant}
+            disabled={participants.length >= MAX_PARTICIPANTS}
+          >
             {t('register.addParticipant')}
           </Button>
         </View>

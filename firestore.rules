@@ -26,6 +26,16 @@ service cloud.firestore {
 
     match /artifacts/{appId} {
 
+      // ── AUDIT LOGS ─────────────────────────────────────────────────────────
+      //    Path: artifacts/{appId}/auditLogs/{id}
+      //    Immutable dispute-resolution trail. Written ONLY by Cloud Functions
+      //    (Admin SDK); readable only by an Event Manager (admin claim). Clients
+      //    never write, and non-admins never read.
+      match /auditLogs/{logId} {
+        allow read:  if isAdmin();
+        allow write: if false;
+      }
+
       // ── ACCESS CODES ───────────────────────────────────────────────────────
       //    Path: artifacts/{appId}/accessCodes/{code}
       //

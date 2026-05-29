@@ -67,7 +67,7 @@ If it is not on the 6-step critical path above, it does not get built tomorrow.
 
 | Do NOT build | Reason |
 |---|---|
-| Full 8-slot animated dashboard | Tracer bullet only needs slot 0 and slot 1 |
+| Full 6-stage animated dashboard | Tracer bullet only needs slot 0 and slot 1 |
 | Slot unlock animations (Reanimated) | Phase 3 |
 | Load-balancing routing algorithm | Phase 2 |
 | Map screen | Phase 2 |

@@ -28,6 +28,7 @@ const en: Dict = {
   'register.participants': 'Participants',
   'register.namePlaceholder': 'Name {n}',
   'register.age': 'Age',
+  'register.teamSizeHint': 'Teams must have {min}–{max} members.',
   'register.addParticipant': '+ Add Participant',
   'register.waiverTitle': 'Liability & Health Waiver',
   'register.waiverBody':
@@ -37,6 +38,8 @@ const en: Dict = {
   'register.errTeamName': 'Team name is required.',
   'register.errPhone': "Captain's phone number is required.",
   'register.errParticipants': 'Add at least one participant name.',
+  'register.errMinParticipants': 'A team needs at least {min} participants.',
+  'register.errMaxParticipants': 'A team can have at most {max} participants.',
   'register.errWaiver': 'You must accept the waiver to continue.',
   'register.errSubmit': 'Registration failed — check your connection and try again.',
 
@@ -45,7 +48,7 @@ const en: Dict = {
   'dash.score': 'Score',
   'dash.pts': 'pts',
   'dash.penalty': 'penalty',
-  'dash.slotsCompleted': '{n} of 8 slots completed',
+  'dash.slotsCompleted': '{n} of 6 stages completed',
   'dash.currentMission': 'Current Mission',
   'dash.loadError': 'Could not load game state. Check your connection.',
   'dash.noMission': 'No active mission — check with your game master.',
@@ -57,9 +60,19 @@ const en: Dict = {
   'dash.elapsed': 'Elapsed',
   'dash.beingJudged': 'Being judged',
   'slot.green': 'Open Field Mission',
-  'slot.gate': 'Gate Filter',
+  'slot.gate': 'Matchmaking Duel',
   'slot.orange': 'Find the Tene',
   'slot.gold': 'Craft & Judge',
+
+  // Judge check-in (team requests grading)
+  'checkin.arrived': "I've arrived at the judge",
+  'checkin.requested': 'The judge has been notified.',
+  'checkin.waiting': 'Waiting for the judge…',
+  'checkin.error': 'Could not notify the judge. Try again.',
+  'checkin.basketTitle': 'Tene Basket — Final Judging',
+
+  // Evacuation (force-majeure station closure)
+  'evac.moved': 'Management moved you off "{station}". Await your next assignment.',
 
   // Connectivity
   'offline.lost': "You're offline — progress is saved and will sync when you reconnect.",
@@ -86,7 +99,10 @@ const en: Dict = {
   'match.matched': 'Matched vs {opponent}!',
   'match.won': '🏆 You won! +{bonus} pts',
   'match.lost': '😤 You lost — {delay}s delay',
+  'match.lostTitle': '😤 You lost this duel',
+  'match.rematchWaiting': 'Waiting for a new opponent — only the winner advances.',
   'match.bypassed': 'No match — proceed to basket.',
+  'match.mustDuel': 'You must win a duel to advance. Enter the queue when ready.',
   'match.joinQueue': 'Enter Match Queue',
 
   // Basket zone
@@ -104,6 +120,11 @@ const en: Dict = {
   'craft.sprintWindow': 'Sprint window',
   'craft.sprintLeft': '{sec}s to reach the judge',
   'craft.sprintExpired': 'Late — exponential penalty accumulating!',
+  'craft.menuTitle': 'Fill your Tene',
+  'craft.menuHint': 'Tap each product you prepare — the judge sees your picks.',
+  'craft.minShort': 'min',
+  'craft.estTime': 'Est. time: {min} min',
+  'craft.potentialPts': 'Potential: +{pts} pts',
 
   // Flash mission
   'flash.label': 'FLASH MISSION',
@@ -162,6 +183,7 @@ const he: Dict = {
   'register.participants': 'משתתפים',
   'register.namePlaceholder': 'שם {n}',
   'register.age': 'גיל',
+  'register.teamSizeHint': 'בקבוצה חייבים להיות {min}–{max} חברים.',
   'register.addParticipant': '+ הוספת משתתף',
   'register.waiverTitle': 'הצהרת בריאות ואחריות',
   'register.waiverBody':
@@ -171,6 +193,8 @@ const he: Dict = {
   'register.errTeamName': 'שם הקבוצה הוא שדה חובה.',
   'register.errPhone': 'מספר הטלפון של הקפטן הוא שדה חובה.',
   'register.errParticipants': 'הוסיפו לפחות שם משתתף אחד.',
+  'register.errMinParticipants': 'בקבוצה חייבים להיות לפחות {min} משתתפים.',
+  'register.errMaxParticipants': 'בקבוצה יכולים להיות עד {max} משתתפים.',
   'register.errWaiver': 'יש לאשר את ההצהרה כדי להמשיך.',
   'register.errSubmit': 'הרישום נכשל — בדקו את החיבור ונסו שוב.',
 
@@ -179,7 +203,7 @@ const he: Dict = {
   'dash.score': 'ניקוד',
   'dash.pts': 'נק׳',
   'dash.penalty': 'קנס',
-  'dash.slotsCompleted': '{n} מתוך 8 משבצות הושלמו',
+  'dash.slotsCompleted': '{n} מתוך 6 שלבים הושלמו',
   'dash.currentMission': 'המשימה הנוכחית',
   'dash.loadError': 'לא ניתן לטעון את מצב המשחק. בדקו את החיבור.',
   'dash.noMission': 'אין משימה פעילה — פנו למנהל המשחק.',
@@ -191,9 +215,19 @@ const he: Dict = {
   'dash.elapsed': 'זמן שחלף',
   'dash.beingJudged': 'בשיפוט',
   'slot.green': 'משימת שטח פתוח',
-  'slot.gate': 'מסנן השער',
+  'slot.gate': 'דו-קרב זיווג',
   'slot.orange': 'מצאו את הטנא',
   'slot.gold': 'יצירה ושיפוט',
+
+  // Judge check-in (team requests grading)
+  'checkin.arrived': 'הגעתי לשופט',
+  'checkin.requested': 'השופט קיבל התראה.',
+  'checkin.waiting': 'ממתינים לשופט…',
+  'checkin.error': 'לא ניתן ליידע את השופט. נסו שוב.',
+  'checkin.basketTitle': 'טנא — שיפוט סופי',
+
+  // Evacuation (force-majeure station closure)
+  'evac.moved': 'ההנהלה העבירה אתכם מ"{station}". המתינו למשימה הבאה.',
 
   // Connectivity
   'offline.lost': 'אין חיבור — ההתקדמות נשמרת ותסונכרן כשהחיבור יחזור.',
@@ -220,7 +254,10 @@ const he: Dict = {
   'match.matched': 'זווגתם מול {opponent}!',
   'match.won': '🏆 ניצחתם! +{bonus} נק׳',
   'match.lost': '😤 הפסדתם — עיכוב {delay} שנ׳',
+  'match.lostTitle': '😤 הפסדתם בדו-קרב',
+  'match.rematchWaiting': 'ממתינים ליריב חדש — רק המנצח ממשיך.',
   'match.bypassed': 'אין זיווג — המשיכו לסל.',
+  'match.mustDuel': 'חובה לנצח בדו-קרב כדי להתקדם. היכנסו לתור כשאתם מוכנים.',
   'match.joinQueue': 'כניסה לתור הזיווג',
 
   // Basket zone
@@ -238,6 +275,11 @@ const he: Dict = {
   'craft.sprintWindow': 'חלון ריצה',
   'craft.sprintLeft': '{sec} שנ׳ להגיע לשופט',
   'craft.sprintExpired': 'איחור — עונש מצטבר!',
+  'craft.menuTitle': 'מלאו את הטנא',
+  'craft.menuHint': 'סמנו כל מוצר שהכנתם — הבחירות מוצגות לשופט.',
+  'craft.minShort': 'דק׳',
+  'craft.estTime': 'זמן מוערך: {min} דק׳',
+  'craft.potentialPts': 'פוטנציאל: +{pts} נק׳',
 
   // Flash mission
   'flash.label': 'משימת ברק',

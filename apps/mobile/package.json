@@ -11,6 +11,7 @@
     "lint": "npx eslint app src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "1.23.1",
     "@rushpoint/shared": "*",
     "@tanstack/react-query": "^5.0.0",
     "expo": "~52.0.0",

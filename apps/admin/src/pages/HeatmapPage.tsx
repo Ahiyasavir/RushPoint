@@ -1,13 +1,35 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Map, { Marker, NavigationControl } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db, APP_ID, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 import { JERUSALEM, STATIONS, STATION_COLOR } from '../data/stations';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 
+interface LiveTeam { teamId: string; teamName?: string; lat: number; lng: number; updatedAt?: string }
+
+/** Live team positions, pinged by the mobile app's adaptive-location hook. */
+function useLiveTeams(): LiveTeam[] {
+  const [teams, setTeams] = useState<LiveTeam[]>([]);
+  useEffect(() => {
+    let unsub = () => {};
+    void ensureAuth().then(() => {
+      unsub = onSnapshot(
+        collection(db, `artifacts/${APP_ID}/public/data/teamLocations`),
+        (snap) => setTeams(snap.docs.map((d) => d.data() as LiveTeam).filter((x) => typeof x.lat === 'number')),
+        () => setTeams([]),
+      );
+    });
+    return () => unsub();
+  }, []);
+  return teams;
+}
+
 export default function HeatmapPage() {
   const { t } = useI18n();
+  const liveTeams = useLiveTeams();
 
   return (
     <div className="p-6 md:p-8 min-h-screen">
@@ -30,6 +52,14 @@ export default function HeatmapPage() {
                     title={s.label}
                     className="w-4 h-4 rounded-full border-2 border-white shadow-lg"
                     style={{ backgroundColor: STATION_COLOR[s.type] }}
+                  />
+                </Marker>
+              ))}
+              {liveTeams.map((team) => (
+                <Marker key={team.teamId} longitude={team.lng} latitude={team.lat} anchor="center">
+                  <div
+                    title={team.teamName ?? team.teamId}
+                    className="w-3.5 h-3.5 rounded-full bg-white border border-neon-green animate-pulse shadow-[0_0_10px_3px_rgba(0,255,170,0.7)]"
                   />
                 </Marker>
               ))}

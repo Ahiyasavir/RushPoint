@@ -2,11 +2,18 @@
 
 Legend:  ✅ exists   🔲 planned (Phase 2)   ⬜ planned (later / deferred)
 
-> **Updated 2026-05-29 — Phases 1–3 are feature-complete** (verified e2e: 28/28). Access-code auth,
-> the full 8-slot game flow, smart routing + sigmoid scoring, gate matchmaking, basket zones,
-> crafting/sprint penalties, leaderboard freeze + Z-Score + reveal, flash missions, SOS, clue-hints,
-> team cohesion, Final Run, the dark-neon UI overhaul, and the one-command dev tooling all exist.
-> Remaining: Wrapped/summary cards (deferred) + production deploy. See STATUS.md for the live tracker.
+> **Updated 2026-05-29 — Phases 1–3 are feature-complete** (verified e2e: 44/44 + tie-breaker unit
+> test). Access-code auth with **multi-device join** (custom token), the **6-stage** game flow
+> (3 green → gate/matchmaking → find-Tene → craft+judge), smart routing + sigmoid scoring, the
+> interactive **Tene-filling menu**, gate matchmaking (winner-only), basket zones, crafting/sprint
+> penalties, leaderboard freeze + Z-Score + reveal + **tie-breaker**, flash missions, SOS, clue-hints,
+> team cohesion, Final Run, and the **advanced operational suite** (station status + evacuation,
+> operational broadcast, geo-throttled location → live heatmap, audit log + Event Manager page,
+> task-timeout safety net) all exist. Remaining: Wrapped/summary cards (deferred) + production
+> deploy. See STATUS.md for the live tracker.
+>
+> ⚠️ Known gap: mobile never calls `requestNextTask`, so green slots 1–2 don't receive a `taskId`
+> in the real play flow; and the new admin/mobile UI hasn't been driven in a browser yet.
 
 ```
 rushpoint/
@@ -51,9 +58,10 @@ rushpoint/
 │   │   │   ├── access-code.tsx     ✅  Enter Access Code; validates against accessCodes
 │   │   │   ├── register.tsx        ✅  Team form (name, captain phone, participants, waiver)
 │   │   │   │                           → calls the registerTeam Cloud Function
-│   │   │   ├── dashboard.tsx       ✅  8 slots, score, gate/crafting/match, flash overlay, SOS+hint
+│   │   │   ├── dashboard.tsx       ✅  6 stages, score, gate/crafting/match, flash + announcement
+│   │   │   │                           banners, SOS+hint, "I've arrived" check-in, geo-throttling
 │   │   │   ├── map.tsx             ✅  Mapbox static mission map
-│   │   │   ├── basket-zone.tsx     ✅  Riddle + match delay + 20-min crafting countdown
+│   │   │   ├── basket-zone.tsx     ✅  Riddle + interactive Tene-fill menu + 20-min/sprint countdown
 │   │   │   ├── sos.tsx             ✅  Emergency SOS screen (two-step confirm + GPS → triggerSOS)
 │   │   │   └── final-run.tsx       ✅  Race-complete celebration (animated trophy + synth fanfare)
 │   │   │
@@ -68,18 +76,24 @@ rushpoint/
 │   │       │   ├── Toast.tsx           ✅  Tier 1 — ToastProvider + useToast()
 │   │       │   ├── LanguageToggle.tsx  ✅  EN/HE toggle pill
 │   │       │   ├── SlotCard.tsx        ✅  Animated slot tile (Reanimated + NativeWind)
-│   │       │   ├── ProgressBar.tsx     ✅  Spring-animated 8-pip progress bar
-│   │       │   └── FlashMissionBanner.tsx  ✅  Neon overlay for admin-pushed flash missions
+│   │       │   ├── ProgressBar.tsx     ✅  Spring-animated progress bar
+│   │       │   ├── FlashMissionBanner.tsx  ✅  Neon overlay for admin-pushed flash missions
+│   │       │   └── AnnouncementBanner.tsx  ✅  Persistent operational marquee (per-device dismiss)
 │   │       │
 │   │       ├── hooks/
-│   │       │   ├── useSlotSound.ts     ✅  Web Audio synth chimes + playFanfare (no mp3 assets)
-│   │       │   ├── useGameSync.ts      ✅  onSnapshot gameState → Zustand mirror + unlock chime
-│   │       │   ├── useOfflineToast.ts  ✅  Online/offline connectivity toasts
-│   │       │   └── useFlashMissions.ts ✅  Live flash-mission listener (active + non-expired)
+│   │       │   ├── useSlotSound.ts        ✅  Web Audio synth chimes + playFanfare (no mp3 assets)
+│   │       │   ├── useGameSync.ts         ✅  onSnapshot gameState → Zustand mirror + unlock chime
+│   │       │   ├── useOfflineToast.ts     ✅  Online/offline connectivity toasts
+│   │       │   ├── useFlashMissions.ts    ✅  Live flash-mission listener (active + non-expired)
+│   │       │   ├── useAnnouncements.ts    ✅  Live operational announcements (active only)
+│   │       │   └── useAdaptiveLocation.ts ✅  Geo-throttled location pings → updateLocation
+│   │       │
+│   │       ├── data/
+│   │       │   └── teneProducts.ts     ✅  Display mirror of the Tene catalog (crafting menu)
 │   │       │
 │   │       ├── services/
-│   │       │   └── firebase.config.ts  ✅  Firebase init + emulator wiring (db/auth/functions/
-│   │       │                               storage; 127.0.0.1; __DEV__ guard)
+│   │       │   └── firebase.config.ts  ✅  Firebase init + emulator wiring; native Auth persistence
+│   │       │                               via AsyncStorage; 127.0.0.1; __DEV__ guard
 │   │       │
 │   │       └── store/
 │   │           ├── gameStore.ts        ✅  Zustand: live gameState mirror (slots, score, penalty)
@@ -107,8 +121,10 @@ rushpoint/
 │           │   ├── CheckInsPage.tsx    ✅  Live pending check-ins + live SOS/emergency alerts
 │           │   ├── TeamsPage.tsx       ✅  Live team table (listTeams) + skip-task action
 │           │   ├── LeaderboardPage.tsx ✅  Freeze/unfreeze + Z-Score finalize + sequential reveal
-│           │   ├── MatchmakingPage.tsx ✅  Gate queue + 1v1 duels + flash-mission broadcast form
-│           │   └── HeatmapPage.tsx     ✅  Mapbox live station map + legend
+│           │   ├── MatchmakingPage.tsx ✅  Gate queue + 1v1 duels (winner-only) + flash broadcast
+│           │   ├── HeatmapPage.tsx     ✅  Mapbox station map + legend + LIVE team markers
+│           │   └── ManagerPage.tsx     ✅  Event Manager: station status + evacuate, broadcast,
+│           │                               audit log + fine/override
 │           │
 │           ├── data/
 │           │   └── teneProducts.ts     ✅  UI mirror of the Tene scoring catalog (display only)
@@ -127,9 +143,10 @@ rushpoint/
 │   ├── serviceAccount.json     —   (gitignored — for local emulator only)
 │   │
 │   └── src/
-│       ├── index.ts            ✅  21 callables (registration, routing, judging, gate/match,
-│       │                           basket/crafting, leaderboard, flash, SOS, clue-hint) —
-│       │                           full list in CLAUDE.md → "Cloud Functions"
+│       ├── index.ts            ✅  30 callables (registration + joinTeam, routing, judging,
+│       │                           gate/match, basket/crafting, Tene selection, leaderboard,
+│       │                           flash, SOS, clue-hint, station mgmt + evacuate, announcements,
+│       │                           audit log, score-adjust, location) — full list in CLAUDE.md
 │       ├── firebase.ts         ✅  Admin SDK initialisation
 │       ├── routing/
 │       │   └── assignNextTask.ts   ✅  Haversine + congestion load-balancing + skill match (Φ/transit/Ω)
@@ -148,11 +165,12 @@ rushpoint/
             └── types/
                 └── index.ts        ✅  Canonical interfaces:
                                         FIRESTORE_PATHS, COLLECTIONS,
-                                        Team, GameState, Task,
+                                        Team, GameState, Task (+status/maxDuration),
                                         SlotRecord, Assignment, CheckIn,
                                         Leaderboard, LeaderboardEntry,
-                                        Event, FlashMission, AdminAlert,
-                                        SosEvent, API payload types
+                                        Event, FlashMission, AdminAlert, SosEvent,
+                                        Announcement, AuditLogEntry, TeamLocation,
+                                        API payload types
 │
 └── scripts/                            Dev tooling (run from repo root)
     ├── dev-emulator.mjs        ✅  Emulator launcher: Java-21 auto-detect, builds functions,
@@ -160,8 +178,10 @@ rushpoint/
     ├── free-ports.mjs          ✅  predev:all — kills stale dev ports (Metro/Vite/emulator)
     ├── seed-local.mjs          ✅  Seed-if-empty: tasks, access codes (incl. 1234), test user,
     │                               demo team "The Lions" + pending check-in, leaderboard
-    ├── seed-emulator.ts        ✅  Comprehensive seed (npm run seed / seed:reset) — Teams A–D
-    ├── e2e-verify.mjs          ✅  End-to-end check of all 21 callables vs the emulator (28/28)
+    ├── seed-emulator.ts        ✅  Comprehensive seed (npm run seed / seed:reset) — Teams A–D,
+    │                               6-slot states, task status/maxDuration, reset clears transient cols
+    ├── e2e-verify.mjs          ✅  End-to-end check of the callables vs the emulator (44/44)
+    ├── test-tiebreaker.ts      ✅  Unit test for the leaderboard tie-breaker (npx tsx)
     ├── package.json            ✅
     └── tsconfig.json           ✅
 ```

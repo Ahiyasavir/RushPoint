@@ -18,10 +18,14 @@ interface Arrival {
   teamId:    string;
   teamName:  string;
   teamCode:  string;
+  memberNames?: string[];
+  captainPhone?: string;
   taskId:    string;
   taskTitle: string;
   timestamp: string | null;
   arrivedAt: string | null;
+  teneSelection?: string[];
+  maxDurationMinutes?: number | null;
 }
 
 interface FinalizeResult {
@@ -47,6 +51,7 @@ const TIER_ORDER: ProductTier[] = ['basic', 'medium', 'hard'];
 const listPendingArrivals    = httpsCallable(functions, 'listPendingArrivals');
 const checkInArrival         = httpsCallable(functions, 'checkInArrival');
 const finalizeJudgeEvaluation = httpsCallable(functions, 'finalizeJudgeEvaluation');
+const skipTask               = httpsCallable(functions, 'skipTask');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Judge Page
@@ -71,6 +76,16 @@ export default function JudgePage() {
   const [submitting, setSubmitting]     = useState(false);
 
   const [result, setResult] = useState<(FinalizeResult & { teamName: string }) | null>(null);
+
+  // Station timeout safety net: track when the active team was checked in, tick a
+  // clock, and warn once they exceed the task's maxDurationMinutes.
+  const [checkedInAt, setCheckedInAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [warnDismissed, setWarnDismissed] = useState(false);
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // ── Load pending arrivals ────────────────────────────────────────────────────
   const loadArrivals = useCallback(async () => {
@@ -99,9 +114,12 @@ export default function JudgePage() {
     try {
       await ensureAuth();
       await checkInArrival({ teamId: arrival.teamId, checkInId: arrival.checkInId });
-      // Move into evaluation; reset the grading sheet.
+      // Move into evaluation; pre-fill the checklist with the team's own picks
+      // (the judge verifies against the real basket and can adjust).
       setActive(arrival);
-      setPicked(new Set());
+      setCheckedInAt(Date.now());
+      setWarnDismissed(false);
+      setPicked(new Set(arrival.teneSelection ?? []));
       setDesign(0);
       setPresentation(0);
       setMissingMembers(0);
@@ -128,6 +146,25 @@ export default function JudgePage() {
       else next.add(id);
       return next;
     });
+  }
+
+  // ── Force-checkout (station timeout) — judge decides: extend or skip ──────────
+  async function handleForceSkip() {
+    if (!active) return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await ensureAuth();
+      await skipTask({ teamId: active.teamId });
+      setActive(null);
+      setCheckedInAt(null);
+      void loadArrivals();
+    } catch (err) {
+      setError(t('judge.finalizeError'));
+      console.error('[judge] force-skip failed:', err);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   // ── Finalize & release ───────────────────────────────────────────────────────
@@ -193,6 +230,16 @@ export default function JudgePage() {
       ) : active ? (
         <EvaluationForm
           arrival={active}
+          timeoutOver={
+            !warnDismissed &&
+            !!active.maxDurationMinutes &&
+            checkedInAt != null &&
+            (nowMs - checkedInAt) / 60000 > active.maxDurationMinutes
+          }
+          elapsedMin={checkedInAt != null ? Math.floor((nowMs - checkedInAt) / 60000) : 0}
+          maxMin={active.maxDurationMinutes ?? 0}
+          onExtend={() => setWarnDismissed(true)}
+          onForceSkip={() => void handleForceSkip()}
           picked={picked}
           onToggle={toggleProduct}
           design={design}
@@ -284,6 +331,7 @@ function EvaluationForm({
   design, presentation, onDesign, onPresentation,
   missingMembers, onMissingMembers,
   note, onNote, productScore, total, submitting, onFinalize, onCancel,
+  timeoutOver, elapsedMin, maxMin, onExtend, onForceSkip,
 }: {
   arrival: Arrival;
   picked: Set<string>;
@@ -301,10 +349,33 @@ function EvaluationForm({
   submitting: boolean;
   onFinalize: () => void;
   onCancel: () => void;
+  timeoutOver: boolean;
+  elapsedMin: number;
+  maxMin: number;
+  onExtend: () => void;
+  onForceSkip: () => void;
 }) {
   const { t } = useI18n();
   return (
     <div>
+      {/* Station timeout safety net — flashing warning past the max cap */}
+      {timeoutOver && (
+        <div className="rounded-2xl bg-neon-red/10 border border-neon-red/50 px-5 py-4 mb-4 flex items-center justify-between animate-pulse">
+          <p className="text-neon-red font-semibold text-sm">
+            {t('judge.timeoutWarn', { max: maxMin, elapsed: elapsedMin })}
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={onExtend} className="px-3 py-1.5 rounded-lg border border-glass-border text-zinc-300 text-sm hover:bg-white/5">
+              {t('judge.extend')}
+            </button>
+            <button onClick={onForceSkip} disabled={submitting}
+              className="px-3 py-1.5 rounded-lg border border-neon-red/40 text-neon-red text-sm font-semibold hover:bg-neon-red/10 disabled:opacity-50">
+              {t('teams.skip')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Frozen banner */}
       <div className="rounded-2xl bg-neon-blue/5 border border-neon-blue/30 px-5 py-4 mb-6 flex items-center justify-between backdrop-blur-sm">
         <div>
@@ -370,6 +441,23 @@ function EvaluationForm({
 
       {/* D. Team cohesion */}
       <Section title={t('judge.sectionCohesion')} hint={t('judge.sectionCohesionHint')}>
+        {arrival.memberNames && arrival.memberNames.length > 0 && (
+          <div className="mb-3 rounded-xl bg-app-card border border-glass-border px-4 py-3">
+            <p className="text-xs uppercase tracking-wider text-zinc-500 mb-2">
+              {t('judge.roster', { n: arrival.memberNames.length })}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {arrival.memberNames.map((name, i) => (
+                <span key={i} className="px-2 py-0.5 rounded-lg bg-app-raised border border-glass-border text-sm text-zinc-200">
+                  {name}
+                </span>
+              ))}
+            </div>
+            {arrival.captainPhone && (
+              <p className="text-xs text-zinc-500 mt-2 font-mono">📞 {arrival.captainPhone}</p>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <button
             type="button"

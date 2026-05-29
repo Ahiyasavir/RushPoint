@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { router } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../src/services/firebase.config';
+import { httpsCallable } from 'firebase/functions';
+import { signInWithCustomToken } from 'firebase/auth';
+import { db, functions, auth } from '../src/services/firebase.config';
 import { useGameStore } from '../src/store/gameStore';
 import { Text } from '../src/components/Text';
 import { Input } from '../src/components/Input';
@@ -48,18 +50,22 @@ export default function AccessCodeScreen() {
     const codeData = codeSnap.data() as { claimed: boolean; teamId?: string };
 
     if (codeData.claimed && codeData.teamId) {
-      // Code already used — load the existing team and go straight to dashboard.
+      // Code already used — this is a second device joining the SAME team.
+      // Anonymous auth gives this device a different uid, so it can't read the
+      // team's owner-scoped data. joinTeam mints a custom token for the original
+      // team uid; signing in with it makes this device the same account.
       try {
-        const teamRef  = doc(db, `artifacts/${APP_ID}/users/${codeData.teamId}/profile/team`);
-        const teamSnap = await getDoc(teamRef);
-        if (teamSnap.exists()) {
-          const t = teamSnap.data() as { name: string; memberNames: string[] };
-          initTeam(codeData.teamId, t.name, t.memberNames ?? []);
-        }
-      } catch {
-        // Non-fatal: still navigate; dashboard will surface any Firestore error.
+        const joinTeam = httpsCallable(functions, 'joinTeam');
+        const res = await joinTeam({ code: trimmed });
+        const { token, teamId, teamName, memberNames } =
+          res.data as { token: string; teamId: string; teamName: string; memberNames: string[] };
+        await signInWithCustomToken(auth, token);
+        initTeam(teamId, teamName, memberNames ?? []);
+        router.replace('/dashboard');
+      } catch (error) {
+        console.error('joinTeam failed:', error);
+        showToast(t('access.connError'), 'error');
       }
-      router.replace('/dashboard');
       return;
     }
 

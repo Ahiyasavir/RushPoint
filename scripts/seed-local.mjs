@@ -47,12 +47,14 @@ async function main() {
     description: 'Photograph all 5 specified Jerusalem landmarks as a team.',
     type: 'green', qrCode: 'QR-GREEN-001', maxConcurrentTeams: 3, currentTeamCount: 0,
     difficulty: 3, photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
+    status: 'active', maxDurationMinutes: 30,
   });
   await db.doc(`${tasksPath}/task-gold-001`).set({
     id: 'task-gold-001', title: 'Ancient Grape Press',
     description: 'Use the replica press to fill and seal a clay flask for your Tene.',
     type: 'gold', qrCode: 'QR-GOLD-001', maxConcurrentTeams: 2, currentTeamCount: 1,
     difficulty: 8, photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
+    status: 'active', maxDurationMinutes: 40,
   });
   console.log('[seed-local] Seeded tasks: task-green-001, task-gold-001');
 
@@ -78,7 +80,7 @@ async function main() {
     createdAt: minsAgo(100), startedAt: minsAgo(95),
   });
 
-  // 7-slot layout: 4×green → gate (matchmaking) → orange (basket) → gold (craft+judge)
+  // 6-slot layout: 3×green → gate (matchmaking) → orange (find Tene) → gold (craft+judge)
   await db.doc(`${userPath(DEMO_UID)}/gameState/current`).set({
     teamId: DEMO_UID, score: 550, bonusPenalty: 0, currentTaskId: 'task-gold-001',
     judging: null, updatedAt: now,
@@ -86,10 +88,9 @@ async function main() {
       done(0, 'green', 'task-green-001', 'Jerusalem Landmarks Photo Hunt', 80),
       done(1, 'green', 'task-green-002', 'Blindfolded Trust Relay', 70),
       done(2, 'green', 'task-green-003', 'Bible Trivia Blitz', 60),
-      done(3, 'green', 'task-green-004', 'The Human Knot', 50),
-      done(4, 'gate',   null, 'Gate Filter', 20),
-      done(5, 'orange', 'task-orange-001', 'Find Your Tene', 30),
-      goldActive(6),
+      done(3, 'gate',   null, 'Matchmaking Duel', 30),
+      done(4, 'orange', 'task-orange-001', 'Find Your Tene', 20),
+      goldActive(5),
     ],
   });
 

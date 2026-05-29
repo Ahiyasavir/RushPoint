@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View, ActivityIndicator, Pressable, Alert } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { httpsCallable } from 'firebase/functions';
@@ -9,6 +9,7 @@ import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
 import { Button } from '../src/components/Button';
 import { useTranslation } from '../src/i18n';
+import { TENE_PRODUCTS } from '../src/data/teneProducts';
 
 interface ZoneInfo {
   zoneId: string;
@@ -66,13 +67,30 @@ export default function BasketZoneScreen() {
   const sprintLeft       = Math.max(0, SPRINT_SECS - sprintElapsed);
   const sprintExpired    = craftingDone && sprintElapsed > SPRINT_SECS;
 
-  // Match delay: if team lost a match, show 90s delay before basket access.
-  const matchStatus    = live?.matchStatus;
-  const gateArrivedMs  = toMs(live?.gateArrivedAt);
-  const matchDelaySecs = matchStatus === 'lost' && gateArrivedMs
-    ? Math.max(0, SPRINT_SECS - Math.floor((nowMs - gateArrivedMs) / 1000))
-    : 0;
-  const underMatchDelay = matchDelaySecs > 0;
+  // ── Tene product selection (the crafting menu) ─────────────────────────────
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && live?.teneSelection && live.teneSelection.length > 0) {
+      setPicked(new Set(live.teneSelection));
+      seeded.current = true;
+    }
+  }, [live?.teneSelection]);
+
+  async function toggleProduct(id: string) {
+    const next = new Set(picked);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPicked(next);
+    try {
+      await httpsCallable(functions, 'saveTeneSelection')({ productIds: Array.from(next) });
+    } catch {
+      // Non-fatal: selection is re-sent on the next toggle.
+    }
+  }
+
+  const pickedTotalMinutes = TENE_PRODUCTS.filter((p) => picked.has(p.id)).reduce((s, p) => s + p.estimatedMinutes, 0);
+  const pickedTotalPoints  = TENE_PRODUCTS.filter((p) => picked.has(p.id)).reduce((s, p) => s + p.points, 0);
 
   useEffect(() => {
     if (craftingActive) return; // Already started — no need to fetch zone.
@@ -96,7 +114,7 @@ export default function BasketZoneScreen() {
     }
   }
 
-  // ── Crafting countdown screen ──────────────────────────────────────────────
+  // ── Crafting countdown + Tene menu screen ──────────────────────────────────
   if (craftingActive) {
     return (
       <View className="flex-1 bg-app-bg" style={{ paddingTop: insets.top + 8 }}>
@@ -105,37 +123,76 @@ export default function BasketZoneScreen() {
             <Text variant="caption" className="text-neon-green">{t('map.back')}</Text>
           </Pressable>
         </View>
-        <View className="flex-1 px-5 pt-8 items-center">
-          <Text variant="heading" className="text-neon-gold mb-2 text-center">{t('craft.title')}</Text>
+        <ScrollView className="flex-1" contentContainerClassName="px-5 pt-6 pb-16">
+          <Text variant="heading" className="text-neon-gold mb-3 text-center">{t('craft.title')}</Text>
 
           {!craftingDone ? (
-            <>
+            <View className="items-center mb-6">
               <Text variant="label" className="text-zinc-500 mb-1">{t('craft.timeLeft')}</Text>
-              <Text variant="display" className={`text-5xl font-mono mb-6 ${craftingLeft < 120 ? 'text-neon-orange animate-pulse-neon' : 'text-neon-gold'}`}>
+              <Text variant="display" className={`text-5xl font-mono ${craftingLeft < 120 ? 'text-neon-orange animate-pulse-neon' : 'text-neon-gold'}`}>
                 {formatCountdown(craftingLeft)}
               </Text>
-            </>
+            </View>
           ) : (
-            <>
-              <Text variant="subheading" className="text-neon-red mb-4 text-center animate-pulse-neon">
+            <Card className="p-5 w-full items-center mb-6">
+              <Text variant="subheading" className="text-neon-red mb-3 text-center animate-pulse-neon">
                 {t('craft.expired')}
               </Text>
-              <Card className="p-5 w-full items-center">
-                <Text variant="label" className="mb-1 text-zinc-400">
-                  {sprintExpired ? t('craft.sprintExpired') : t('craft.sprintWindow')}
+              <Text variant="label" className="mb-1 text-zinc-400">
+                {sprintExpired ? t('craft.sprintExpired') : t('craft.sprintWindow')}
+              </Text>
+              <Text variant="display" className={`text-4xl font-mono ${sprintExpired ? 'text-neon-red animate-pulse-neon' : 'text-neon-orange'}`}>
+                {sprintExpired ? `+${formatCountdown(sprintElapsed - SPRINT_SECS)}` : formatCountdown(sprintLeft)}
+              </Text>
+              {!sprintExpired && (
+                <Text variant="bodySmall" className="text-zinc-500 mt-2 text-center">
+                  {t('craft.sprintLeft', { sec: sprintLeft })}
                 </Text>
-                <Text variant="display" className={`text-4xl font-mono ${sprintExpired ? 'text-neon-red animate-pulse-neon' : 'text-neon-orange'}`}>
-                  {sprintExpired ? `+${formatCountdown(sprintElapsed - SPRINT_SECS)}` : formatCountdown(sprintLeft)}
-                </Text>
-                {!sprintExpired && (
-                  <Text variant="bodySmall" className="text-zinc-500 mt-2 text-center">
-                    {t('craft.sprintLeft', { sec: sprintLeft })}
-                  </Text>
-                )}
-              </Card>
-            </>
+              )}
+            </Card>
           )}
-        </View>
+
+          {/* ── Tene fill menu ──────────────────────────────────────────── */}
+          <Text variant="label" className="text-neon-gold mb-1">{t('craft.menuTitle')}</Text>
+          <Text variant="caption" className="text-zinc-500 mb-4">{t('craft.menuHint')}</Text>
+
+          <View className="gap-2">
+            {TENE_PRODUCTS.map((p) => {
+              const on = picked.has(p.id);
+              return (
+                <Pressable
+                  key={p.id}
+                  onPress={() => void toggleProduct(p.id)}
+                  className={`flex-row items-center justify-between px-4 py-3 rounded-xl border ${
+                    on ? 'bg-neon-gold/10 border-neon-gold/40' : 'bg-app-card border-glass-border'
+                  } active:opacity-80`}
+                >
+                  <View className="flex-row items-center gap-3 flex-1">
+                    <View className={`w-5 h-5 rounded items-center justify-center border ${on ? 'bg-neon-gold border-neon-gold' : 'border-zinc-600'}`}>
+                      {on && <Text className="text-black text-xs leading-none">✓</Text>}
+                    </View>
+                    <Text variant="body" className={on ? 'text-neon-gold' : 'text-zinc-300'}>
+                      {isRtl ? p.labelHe : p.label}
+                    </Text>
+                  </View>
+                  <View className="items-end">
+                    <Text variant="caption" className="text-zinc-500">~{p.estimatedMinutes} {t('craft.minShort')}</Text>
+                    <Text variant="caption" className="text-zinc-600 font-mono">+{p.points}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View className="flex-row justify-between mt-5 px-1">
+            <Text variant="bodySmall" className="text-zinc-400">
+              {t('craft.estTime', { min: pickedTotalMinutes })}
+            </Text>
+            <Text variant="bodySmall" className="text-neon-gold font-mono">
+              {t('craft.potentialPts', { pts: pickedTotalPoints })}
+            </Text>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -175,15 +232,6 @@ export default function BasketZoneScreen() {
           </Card>
         ) : (
           <>
-            {/* Match delay banner */}
-            {underMatchDelay && (
-              <Card className="p-4 mb-4" style={{ borderColor: 'rgba(255,61,0,0.3)', borderWidth: 1, backgroundColor: 'rgba(255,61,0,0.05)' }}>
-                <Text variant="bodySmall" className="text-neon-red text-center animate-pulse-neon">
-                  {t('basket.delay', { sec: matchDelaySecs })}
-                </Text>
-              </Card>
-            )}
-
             <Card glowColor="gold" className="p-5 mb-6">
               <Text variant="label" className="text-neon-gold mb-3">{t('basket.riddleLabel')}</Text>
               <Text variant="body" className="text-white leading-relaxed">
@@ -197,7 +245,7 @@ export default function BasketZoneScreen() {
 
             <Button
               onPress={handleStartTimer}
-              disabled={starting || underMatchDelay}
+              disabled={starting}
               fullWidth
             >
               {starting ? '…' : t('basket.startTimer')}

@@ -158,7 +158,7 @@ export default function TeamsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-end font-mono text-zinc-400">
-                      {team.completedSlots}/8
+                      {team.completedSlots}/6
                     </td>
                     <td className="px-4 py-3 text-end font-mono text-neon-green font-semibold tabular-nums">
                       {team.score.toLocaleString()}

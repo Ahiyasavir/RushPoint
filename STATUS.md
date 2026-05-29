@@ -12,8 +12,39 @@
 | Phase 2 — Backend & Maps | ✅ הושלם | Firestore sync, מפות, offline, EN/HE |
 | Phase 3 — Gamification | ✅ הושלם | Gate/matchmaking, basket zones, leaderboard, Flash, SOS, Clue-hint, Final Run, Cohesion |
 | UI Overhaul | ✅ הושלם | Dark neon theme, glassmorphism, Inter+Outfit+JetBrains Mono |
+| 6-Slot Flow Rework | ✅ הושלם | מעבר מ-8 ל-**6 שלבים**, התחברות רב-מכשירית (custom token), תפריט מילוי טנא |
+| Phase 3 — Advanced Operational | ✅ הושלם | ניהול תחנות + פינוי, כרוז, geo-throttling, יומן פעולות, timeout, tie-breaker |
 
-> **כל הפיצ'רים מהבלופרינט הושלמו ואומתו (e2e 28/28).** רק Wrapped Cards (סיכום אירוע) ופרישה ל-production נשארו.
+> **כל הפיצ'רים הושלמו ואומתו (e2e 44/44, + unit test ל-tie-breaker).** רק Wrapped Cards (סיכום אירוע) ופרישה ל-production נשארו.
+
+---
+
+## 🆕 עודכן בסשנים האחרונים (מבנה 6 שלבים + תפעול מתקדם)
+
+### מבנה משחק חדש — 6 שלבים (היה 8)
+`0-2 ירוק (משימות שדה, שופט מקדם)` → `3 gate (זיווג — רק המנצח ממשיך, המפסיד חוזר לתור)` →
+`4 orange (מציאת הטנא + סריקת QR)` → `5 gold (20 דק׳ מילוי טנא מתוך תפריט + ספרינט 90ש׳ + שיפוט)`.
+שרשור unlock לינארי; כל 6 הושלמו → Final Run.
+
+### התחברות רב-מכשירית
+`joinTeam` callable מנפיק custom token ל-uid המקורי → טלפון שני מצטרף לאותה קבוצה (אותו חשבון).
+תיקן את ה-hang בקוד-שכבר-נוצל. Auth נשמר ב-AsyncStorage (native) כך שלא צריך קוד שוב אחרי הפעלה מחדש.
+
+### תפריט מילוי הטנא
+`basket-zone.tsx` — בזמן ה-20 דק׳ הצוות מסמן מוצרים (זמן מוערך + ניקוד) → `saveTeneSelection`,
+והבחירות מופיעות מסומנות-מראש אצל השופט (`listPendingArrivals` מחזיר `teneSelection`).
+
+### 6 פיצ'רים תפעוליים (Phase 3 advanced)
+1. **ניהול תחנות:** `Task.status` (active/paused/closed) — מוחרג מהניתוב. `evacuateStation` משחרר צוותים ללא קנס (`evacuatedFrom` → toast במובייל).
+2. **כרוז:** `announcements` → באנר marquee קבוע בדאשבורד (dismiss לכל מכשיר).
+3. **Geo-throttling:** `useAdaptiveLocation` → `updateLocation` (מהיר בתנועה, איטי בעמדה) → heatmap חי.
+4. **יומן פעולות:** `auditLogs` (admin-only) — כל פעולה ניהולית נרשמת. דף Manager + fine/override.
+5. **Timeout:** `Task.maxDurationMinutes` → אזהרה מהבהבת בדף השיפוט (השופט מאריך/מדלג).
+6. **Tie-breaker:** `finalizeLeaderboard` שובר תיקו לפי penalties → זמן משימות ירוקות → transit (פונקציה טהורה עם unit test).
+
+> ⚠️ **פער ידוע (לא תוקן):** המובייל לא קורא ל-`requestNextTask`, אז משבצות ירוק 1–2 לא מקבלות `taskId`
+> בזרימה האמיתית (slot 0 בלבד מ-seed). כפתור "הגעתי לשופט" נופל ל-`tene-basket` כשאין taskId. דורש תיקון.
+> כמו כן ה-UI החדש (Manager, באנר, תפריט) **לא נבדק בדפדפן** — רק שכבת ה-callables אומתה ב-e2e.
 
 ---
 
@@ -38,18 +69,19 @@
 | חשיפה הדרגתית last→first | `LeaderboardPage` reveal mode | ✅ |
 | Team Cohesion Rule (עונש על חברים חסרים) | `finalizeJudgeEvaluation` + JudgePage stepper | ✅ |
 
-✅ **כל הבלופרינט ממומש.** אומת end-to-end מול האמולטור (`node scripts/e2e-verify.mjs` — 28/28 PASS).
+✅ **כל הבלופרינט ממומש.** אומת end-to-end מול האמולטור (`node scripts/e2e-verify.mjs` — 44/44 PASS).
 
 ---
 
 ## ✅ מה יש — הושלם
 
-### Backend — Cloud Functions (21 פונקציות)
+### Backend — Cloud Functions (30 פונקציות)
 
 | Function | תיאור |
 |----------|--------|
 | `registerTeam` | תביעת קוד גישה + יצירת פרופיל + seed gameState |
-| `requestNextTask` | הקצאת משימה הבאה (routing חכם) |
+| `joinTeam` | טלפון שני מצטרף לקוד תפוס → custom token ל-uid המקורי |
+| `requestNextTask` | הקצאת משימה הבאה (routing חכם; מחריג תחנות paused/closed) |
 | `checkOutTask` | שחרור סלוט בתחנה |
 | `getRecommendedTasks` | רשימת משימות מדורגות (ללא commit) |
 | `listTeams` | כל הקבוצות + ציון + התקדמות |
@@ -59,7 +91,7 @@
 | `listPendingArrivals` | רשימת קבוצות עם check-in ממתין |
 | `checkInArrival` | הקפאת שעון הקבוצה במובייל |
 | `finalizeJudgeEvaluation` | ציון סל + sigmoid task score, שחרור + קידום |
-| `checkInGate` | כניסה לאזור הגייט (slot 4) |
+| `checkInGate` | כניסה לפארק (transit penalty) — נשאר ב-backend/e2e, לא בנתיב המובייל הפעיל |
 | `getBasketZone` | מציאת אזור סל + חידה |
 | `startCraftingTimer` | התחלת טיימר יצירה + sprint window |
 | `joinMatchQueue` | הצטרפות לתור matchmaking |
@@ -70,6 +102,12 @@
 | `triggerSOS` | קבוצה מעלה התראת חירום → adminAlerts (עם GPS) |
 | `acknowledgeAlert` | שופט מסמן התראה כטופלה |
 | `requestClueHint` | קבוצה קונה רמז תמורת 50 נק׳ (bonusPenalty) |
+| `saveTeneSelection` | שמירת בחירת מוצרי הטנא (תפריט המובייל) → pre-fill לשופט |
+| `setStationStatus` / `evacuateStation` | ניהול: השהיה/סגירת תחנה / פינוי צוותים ללא קנס (audited) |
+| `pushAnnouncement` / `deactivateAnnouncement` | ניהול: כרוז תפעולי גלובלי (נשאר עד כיבוי) |
+| `adjustTeamScore` | ניהול: קנס/דריסת ניקוד — נרשם ביומן (prev/new) |
+| `listAuditLogs` | ניהול: קריאת יומן הפעולות (נתיב admin-only `auditLogs`) |
+| `updateLocation` | מובייל: ping מיקום רזה (geo-throttling) → `teamLocations` ל-heatmap |
 
 ### Mobile App — מסכים
 
@@ -78,17 +116,17 @@
 | Auth gate | `index.tsx` | ✅ |
 | Access Code | `access-code.tsx` | ✅ |
 | Register | `register.tsx` | ✅ |
-| Dashboard | `dashboard.tsx` | ✅ (8 slots, gate card, crafting, matchmaking) |
+| Dashboard | `dashboard.tsx` | ✅ (6 שלבים, gate card, crafting, matchmaking, באנר כרוז, "הגעתי לשופט") |
 | Map | `map.tsx` | ✅ (מפה סטטית Mapbox) |
-| Basket Zone | `basket-zone.tsx` | ✅ (חידה + match delay + crafting countdown) |
+| Basket Zone | `basket-zone.tsx` | ✅ (חידה + תפריט מילוי טנא + crafting/sprint countdown) |
 | SOS | `sos.tsx` | ✅ (אישור דו-שלבי + GPS + triggerSOS) |
 | Final Run | `final-run.tsx` | ✅ (גביע מונפש + fanfare + ניקוד סופי) |
 
 ### Mobile App — קומפוננטים
 
-`Text · Button · Card · Badge · Input · Toast · LanguageToggle · SlotCard · ProgressBar · FlashMissionBanner`  
-+ `tokens.ts` (GLOW, GLASS, GRADIENTS, BG)  
-+ hooks: `useGameSync · useOfflineToast · useFlashMissions · useSlotSound` (chime + fanfare סינתטי)
+`Text · Button · Card · Badge · Input · Toast · LanguageToggle · SlotCard · ProgressBar · FlashMissionBanner · AnnouncementBanner`  
++ `tokens.ts` (GLOW, GLASS, GRADIENTS, BG) + `data/teneProducts.ts` (מירור תפריט הטנא)  
++ hooks: `useGameSync · useOfflineToast · useFlashMissions · useSlotSound · useAnnouncements · useAdaptiveLocation`
 
 ### Admin Dashboard — דפים
 
@@ -100,6 +138,7 @@
 | TeamsPage | ✅ (live table + skip action) |
 | LeaderboardPage | ✅ (freeze/unfreeze + reveal mode + finalize) |
 | MatchmakingPage | ✅ (queue + active matches + resolve) |
+| ManagerPage | ✅ (`/manager` — ניהול תחנות + פינוי, כרוז, יומן פעולות + fine/override) |
 
 ### Infrastructure
 
@@ -117,7 +156,7 @@
 
 ### 1. Final Run Screen ✅
 `app/final-run.tsx` — גביע מונפש (spring + float), זוהר זהב פועם, ניקוד סופי (score − penalty),
-fanfare סינתטי. ה-dashboard מנווט אוטומטית (ref-guarded) כשכל 8 הסלוטים terminal.
+fanfare סינתטי. ה-dashboard מנווט אוטומטית (ref-guarded) כשכל 6 השלבים terminal.
 
 ### 2. Flash Mission Banner ✅
 `useFlashMissions` (onSnapshot + סינון בזיכרון + טיקר תפוגה) → `FlashMissionBanner` (overlay סגול
@@ -157,7 +196,7 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ### Firebase Production
 - [ ] יצירת Firebase project בproduction (או וידוא `race-to-tzion-2026` מוגדר)
-- [ ] `firebase deploy --only functions` — פרישת כל 21 הפונקציות
+- [ ] `firebase deploy --only functions` — פרישת כל 30 הפונקציות
 - [ ] `firebase deploy --only firestore:rules` — חוקי אבטחה
 - [ ] `firebase deploy --only storage` — חוקי Storage
 - [ ] אימות שה-Firestore indexes (`firestore.indexes.json`) מועלים

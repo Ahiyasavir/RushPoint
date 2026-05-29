@@ -112,6 +112,7 @@ export async function buildRecommendations(
   for (const doc of snapshot.docs) {
     const task = { id: doc.id, ...doc.data() } as Task;
     if (completedTaskIds.includes(task.id)) continue;
+    if (task.status === 'paused' || task.status === 'closed') continue; // operator override
     if (task.currentTeamCount >= task.maxConcurrentTeams) continue;
     candidates.push(task);
   }
@@ -160,6 +161,7 @@ export async function assignNextTask(
   for (const doc of snapshot.docs) {
     const task = { id: doc.id, ...doc.data() } as Task;
     if (completedTaskIds.includes(task.id)) continue;
+    if (task.status === 'paused' || task.status === 'closed') continue; // operator override
     if (task.currentTeamCount >= task.maxConcurrentTeams) continue;
     candidates.push(task);
   }

@@ -59,3 +59,70 @@ export function completionBonus(
   const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
   return allDone ? COMPLETION_BONUS : 0;
 }
+
+
+// ─── Final-standings tie-breaker (Phase 3) ────────────────────────────────────
+// When two teams finish with the SAME finalScore, rank by secondary metrics in a
+// strict order: (1) fewest cumulative penalties, (2) fastest combined green-task
+// time, (3) lowest total transit time between consecutive slots. Pure + testable.
+
+interface TieSlot {
+  type?: string;
+  status?: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+
+export interface TieMetrics {
+  penalties: number;   // lower is better
+  fieldTaskMs: number; // lower is better — combined time across green slots
+  transitMs: number;   // lower is better — gaps between consecutive slots
+}
+
+/** Parse an ISO string to ms, returning null on anything unparseable. */
+function ms(value?: string | null): number | null {
+  if (!value) return null;
+  const t = Date.parse(value);
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * Derive the tie-break metrics for one team. Robust to missing/garbage
+ * timestamps — a slot with incomplete timing simply contributes 0 to that sum.
+ */
+export function computeTieMetrics(slots: TieSlot[], bonusPenalty: number): TieMetrics {
+  let fieldTaskMs = 0;
+  for (const s of slots) {
+    if (s.type !== 'green') continue;
+    const start = ms(s.startedAt);
+    const end = ms(s.completedAt);
+    if (start != null && end != null && end > start) fieldTaskMs += end - start;
+  }
+
+  // Transit = positive gaps between one slot completing and the next one starting.
+  let transitMs = 0;
+  const ordered = [...slots].sort((a, b) => (a as { index?: number }).index! - (b as { index?: number }).index!);
+  for (let i = 0; i + 1 < ordered.length; i++) {
+    const prevEnd = ms(ordered[i].completedAt);
+    const nextStart = ms(ordered[i + 1].startedAt);
+    if (prevEnd != null && nextStart != null && nextStart > prevEnd) transitMs += nextStart - prevEnd;
+  }
+
+  return { penalties: Math.max(0, bonusPenalty || 0), fieldTaskMs, transitMs };
+}
+
+export interface RankCandidate {
+  finalScore: number;
+  metrics: TieMetrics;
+}
+
+/**
+ * Comparator for Array.sort — higher finalScore first; ties broken by penalties,
+ * then field-task time, then transit time (all ascending = lower is better).
+ */
+export function compareForRanking(a: RankCandidate, b: RankCandidate): number {
+  if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+  if (a.metrics.penalties !== b.metrics.penalties) return a.metrics.penalties - b.metrics.penalties;
+  if (a.metrics.fieldTaskMs !== b.metrics.fieldTaskMs) return a.metrics.fieldTaskMs - b.metrics.fieldTaskMs;
+  return a.metrics.transitMs - b.metrics.transitMs;
+}

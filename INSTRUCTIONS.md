@@ -10,14 +10,15 @@ Your goal is to assist the developer in building this app step-by-step, prioriti
 
 RushPoint is a real-time event application. Teams of participants race through physical locations solving riddles and completing tasks.
 
-**The 8-Slot Task Board:** The main UI shows 8 empty slots.
-- **First 4 slots (Green):** Open-field team-building missions (assigned dynamically from a 25-task pool to balance traffic).
-- **Slot 5 (Orange):** Unlocks after the first 4 tasks. Leads to finding the "Tene" (basket) using map and physical clues.
-- **Next 3 slots (Gold):** Unlocks after finding the Tene. Practical crafting challenges. Teams can do bonus tasks but must balance time spent vs. extra points.
+**The 6-Stage Task Board:** The main UI shows 6 stages.
+- **Slots 0–2 (Green):** Open-field team-building missions (assigned dynamically to balance traffic); each is advanced by the station judge with a score.
+- **Slot 3 (Gate):** A 1v1 matchmaking duel (זיווג). **Only the winner advances**; the loser returns to the queue until they win.
+- **Slot 4 (Orange):** Find the "Tene" (basket) using map and physical clues, then scan its QR.
+- **Slot 5 (Gold):** A 20-minute window to fill the Tene from a menu, then a 90-second sprint to the judges + final judging.
 
 **Judges' Scoring:** Physical judges rate the "Tene" at the finish line and submit scores directly via a secure web portal.
 
-**The Climax:** Filling all 8 slots triggers a high-tempo soundtrack and reveals the final sprint location.
+**The Climax:** Completing all 6 stages triggers a high-tempo soundtrack and reveals the final sprint location.
 
 ---
 

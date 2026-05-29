@@ -8,7 +8,19 @@ import {
   connectFirestoreEmulator,
   type Firestore,
 } from 'firebase/firestore';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
+import {
+  getAuth,
+  initializeAuth,
+  connectAuthEmulator,
+  type Auth,
+} from 'firebase/auth';
+// getReactNativePersistence ships in firebase's React-Native build (resolved by
+// Metro) but is absent from the default web typings in firebase 10 — import it
+// separately so the type-only gap doesn't break the rest of the auth imports.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-expect-error RN-only export missing from firebase/auth web typings
+import { getReactNativePersistence } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getStorage, connectStorageEmulator } from 'firebase/storage';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
@@ -42,8 +54,23 @@ function initDb(): Firestore {
   return getFirestore(app);
 }
 
+// On native, back Auth with AsyncStorage so the signed-in session (anonymous or
+// the custom-token team identity) survives an app restart — otherwise RN defaults
+// to in-memory persistence and the user would have to re-enter their code. On web,
+// Auth persists in localStorage by default. Guard against Fast-Refresh re-init.
+function initAuth(): Auth {
+  if (Platform.OS !== 'web') {
+    try {
+      return initializeAuth(app, { persistence: getReactNativePersistence(AsyncStorage) });
+    } catch {
+      // Already initialised (Fast Refresh) — reuse it.
+    }
+  }
+  return getAuth(app);
+}
+
 export const db = initDb();
-export const auth = getAuth(app);
+export const auth = initAuth();
 export const storage = getStorage(app);
 export const functions = getFunctions(app);
 

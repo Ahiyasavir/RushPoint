@@ -3,9 +3,15 @@ import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-nat
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../src/services/firebase.config';
+import { addDoc, collection } from 'firebase/firestore';
+import { functions, db } from '../src/services/firebase.config';
+
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 import { useGameStore, type LiveSlot, type LiveJudging, type MatchStatus } from '../src/store/gameStore';
 import { useGameSync } from '../src/hooks/useGameSync';
+import { useAdaptiveLocation } from '../src/hooks/useAdaptiveLocation';
+import { useAnnouncements } from '../src/hooks/useAnnouncements';
+import { AnnouncementBanner } from '../src/components/AnnouncementBanner';
 import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
 import { Badge } from '../src/components/Badge';
@@ -84,14 +90,66 @@ export default function DashboardScreen() {
   const syncState = useGameStore((s) => s.syncState);
 
   const [nowMs, setNowMs] = useState(Date.now());
+  const { show: showToast } = useToast();
 
   // Live Firestore mirror (drives score/slots) + offline notifications.
   useGameSync(teamId);
   useOfflineToast();
+  // Battery-aware location pings (fast in transit, slow when stationary).
+  useAdaptiveLocation(teamId);
 
   // Live flash-mission broadcast (admin-pushed), with local dismissal.
   const flashMission = useFlashMissions();
   const { visible: visibleFlash, dismiss: dismissFlash } = useDismissableFlash(flashMission);
+
+  // Operational announcements (persistent marquee until dismissed per-device).
+  const announcements = useAnnouncements();
+
+  // Auto-request task assignment when a green slot becomes active without a taskId.
+  // requestNextTask writes the result back to gameState (server-authoritative),
+  // so useGameSync picks it up via onSnapshot — no local state needed.
+  const activeSlotForAssignment = gameState?.slots.find((s) => s.status === 'active');
+  const needsAssignment = activeSlotForAssignment?.type === 'green' && !activeSlotForAssignment?.taskId;
+  const assignmentKey   = `${activeSlotForAssignment?.index ?? -1}-${activeSlotForAssignment?.taskId ?? 'none'}`;
+  useEffect(() => {
+    if (!needsAssignment || !teamId) return;
+    let cancelled = false;
+    const assign = httpsCallable(functions, 'requestNextTask');
+
+    async function request() {
+      const geo = (globalThis as unknown as { navigator?: { geolocation?: Geolocation } }).navigator?.geolocation;
+      let lat = 31.7683, lng = 35.2137; // Jerusalem centre fallback
+      if (geo) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 5000);
+          geo.getCurrentPosition(
+            (pos) => { clearTimeout(timer); lat = pos.coords.latitude; lng = pos.coords.longitude; resolve(); },
+            () => { clearTimeout(timer); resolve(); },
+            { enableHighAccuracy: false, timeout: 5000, maximumAge: 15_000 },
+          );
+        });
+      }
+      if (!cancelled) {
+        try { await assign({ lat, lng, targetType: 'green' }); }
+        catch { /* transient — will retry when gameState updates */ }
+      }
+    }
+
+    void request();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignmentKey, needsAssignment, teamId]);
+
+  // Surface a one-time toast when management evacuates the team off a station.
+  const evacuatedFrom = (gameState as { evacuatedFrom?: string | null } | null)?.evacuatedFrom ?? null;
+  const lastEvacRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (evacuatedFrom && evacuatedFrom !== lastEvacRef.current) {
+      lastEvacRef.current = evacuatedFrom;
+      showToast(t('evac.moved', { station: evacuatedFrom }), 'info');
+    }
+    if (!evacuatedFrom) lastEvacRef.current = null;
+  }, [evacuatedFrom, showToast, t]);
 
   // Tick once per second to drive the live elapsed-time clock.
   useEffect(() => {
@@ -103,7 +161,7 @@ export default function DashboardScreen() {
   const navigatedFinal = useRef(false);
   useEffect(() => {
     const slots = gameState?.slots;
-    if (!slots || slots.length < 8) return;
+    if (!slots || slots.length < 6) return;
     const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
     if (allDone && !navigatedFinal.current) {
       navigatedFinal.current = true;
@@ -194,6 +252,9 @@ export default function DashboardScreen() {
           {t('dash.slotsCompleted', { n: completedCount })}
         </Text>
       </View>
+
+      {/* ── Operational announcement (persistent, until dismissed) ────── */}
+      <AnnouncementBanner announcements={announcements} />
 
       {/* ── Body ─────────────────────────────────────────────────────── */}
       <ScrollView
@@ -313,9 +374,81 @@ function ActiveTaskCard({
         </View>
       )}
 
+      {/* Arrived at the judge → enter the pending queue for grading */}
+      {!frozen && (slot.type === 'green' || slot.type === 'gold') && (
+        <RequestCheckInButton slot={slot} />
+      )}
+
       {/* Clue hint — costs points, only while actively working the task */}
       {!frozen && slot.taskId && <ClueHintButton />}
     </Card>
+  );
+}
+
+// ─── Request judge check-in (creates a pending check-in) ───────────────────────
+
+function RequestCheckInButton({ slot }: { slot: FirestoreSlot }) {
+  const { t } = useTranslation();
+  const { show } = useToast();
+  const teamId = useGameStore((s) => s.teamId);
+  const [busy, setBusy] = useState(false);
+  const [requested, setRequested] = useState(false);
+
+  // Green slots must have a real taskId before the team can check in.
+  // The auto-assignment effect writes it to Firestore; this guard prevents
+  // a phantom 'tene-basket' entry while the assignment is in flight.
+  if (slot.type === 'green' && !slot.taskId) {
+    return (
+      <View className="border-t border-zinc-800 mt-4 pt-4 items-center">
+        <Text variant="bodySmall" className="text-neon-blue animate-pulse-neon">
+          {t('dash.assigning')}
+        </Text>
+      </View>
+    );
+  }
+
+  async function request() {
+    if (!teamId) return;
+    setBusy(true);
+    try {
+      await addDoc(collection(db, `artifacts/${APP_ID}/users/${teamId}/checkIns`), {
+        teamId,
+        taskId:    slot.taskId ?? 'tene-basket',
+        taskTitle: slot.taskTitle ?? (slot.type === 'gold' ? t('checkin.basketTitle') : t('dash.activeMission')),
+        status:    'pending',
+        timestamp: new Date().toISOString(),
+      });
+      setRequested(true);
+      show(t('checkin.requested'), 'success');
+    } catch {
+      show(t('checkin.error'), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (requested) {
+    return (
+      <View className="border-t border-zinc-800 mt-4 pt-4">
+        <Text variant="bodySmall" className="text-neon-blue text-center animate-pulse-neon">
+          {t('checkin.waiting')}
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View className="border-t border-zinc-800 mt-4 pt-4">
+      <Pressable
+        onPress={() => void request()}
+        disabled={busy}
+        className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20"
+      >
+        <Text variant="bodySmall" className="text-neon-green font-semibold">
+          {busy ? '…' : t('checkin.arrived')}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
 
@@ -431,7 +564,7 @@ function CraftingCountdownCard({
 function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
   const { t } = useTranslation();
   const [joining, setJoining]     = useState(false);
-  const [bypassing, setBypassing] = useState(false);
+  const rejoinedAfterLoss = useRef(false);
 
   async function handleJoin() {
     setJoining(true);
@@ -449,17 +582,17 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
     }
   }
 
-  async function handleBypass() {
-    setBypassing(true);
-    try {
-      const fn = httpsCallable(functions, 'bypassMatchmaking');
-      await fn({});
-    } catch {
-      Alert.alert('Error', 'Could not bypass. Try again.');
-    } finally {
-      setBypassing(false);
+  // After a loss the team must face a new opponent. Re-enter the queue once
+  // (the server keeps them 'waiting'); reset the guard when they leave 'lost'.
+  useEffect(() => {
+    if (matchStatus === 'lost' && !rejoinedAfterLoss.current) {
+      rejoinedAfterLoss.current = true;
+      void handleJoin();
+    } else if (matchStatus !== 'lost') {
+      rejoinedAfterLoss.current = false;
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchStatus]);
 
   return (
     <Card glowColor="orange" className="p-5">
@@ -470,25 +603,15 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
 
       <Text variant="subheading" className="mb-1">{t('match.title')}</Text>
 
-      {!matchStatus || matchStatus === 'bypassed' ? (
+      {!matchStatus ? (
         <>
-          <Text variant="bodySmall" className="text-zinc-400 mb-4">{t('match.waiting')}</Text>
-          <View className="gap-3">
-            <Button onPress={handleJoin} disabled={joining} fullWidth>
-              {joining ? '…' : t('match.joinQueue')}
-            </Button>
-            <Button onPress={handleBypass} disabled={bypassing} variant="ghost" fullWidth>
-              {bypassing ? '…' : t('match.bypassed')}
-            </Button>
-          </View>
-        </>
-      ) : matchStatus === 'waiting' ? (
-        <>
-          <Text variant="bodySmall" className="text-neon-blue mb-4 animate-pulse-neon">{t('match.waiting')}</Text>
-          <Button onPress={handleBypass} disabled={bypassing} variant="ghost" fullWidth>
-            {bypassing ? '…' : t('match.bypassed')}
+          <Text variant="bodySmall" className="text-zinc-400 mb-4">{t('match.mustDuel')}</Text>
+          <Button onPress={handleJoin} disabled={joining} fullWidth>
+            {joining ? '…' : t('match.joinQueue')}
           </Button>
         </>
+      ) : matchStatus === 'waiting' ? (
+        <Text variant="bodySmall" className="text-neon-blue mb-2 animate-pulse-neon">{t('match.waiting')}</Text>
       ) : matchStatus === 'matched' ? (
         <Text variant="bodySmall" className="text-neon-blue">{t('match.matched', { opponent: '?' })}</Text>
       ) : matchStatus === 'won' ? (
@@ -499,12 +622,12 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
           </Button>
         </>
       ) : matchStatus === 'lost' ? (
-        <>
-          <Text variant="bodySmall" className="text-red-400 mb-4">{t('match.lost', { delay: '90' })}</Text>
-          <Button onPress={() => router.push('/basket-zone')} fullWidth>
-            {t('basket.title')} →
-          </Button>
-        </>
+        <View className="items-center py-2">
+          <Text variant="subheading" className="text-neon-red mb-1 text-center">{t('match.lostTitle')}</Text>
+          <Text variant="bodySmall" className="text-neon-blue text-center animate-pulse-neon">
+            {t('match.rematchWaiting')}
+          </Text>
+        </View>
       ) : null}
     </Card>
   );

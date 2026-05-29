@@ -47,6 +47,7 @@ async function main() {
         { name: 'Alice', age: '12' },
         { name: 'Bob', age: '13' },
         { name: 'Carol', age: '11' },
+        { name: 'Dave', age: '12' },
       ],
       waiverAccepted: true,
     });
@@ -202,6 +203,153 @@ async function main() {
       `acknowledged=${after.data()?.acknowledged}`);
   } catch (e) {
     check('SOS flow succeeds', false, e.message);
+  }
+
+  // 9. saveTeneSelection — persists the crafting menu picks to gameState.
+  try {
+    const res = await call('saveTeneSelection', { productIds: ['olives', 'pomegranates', 'bogus-id'] });
+    const sel = res?.teneSelection ?? [];
+    check('saveTeneSelection drops unknown ids', !sel.includes('bogus-id') && sel.includes('olives') && sel.includes('pomegranates'),
+      JSON.stringify(sel));
+    const gs = await readGameState(uid);
+    check('  selection mirrored onto gameState', Array.isArray(gs?.teneSelection) && gs.teneSelection.includes('olives'),
+      JSON.stringify(gs?.teneSelection));
+  } catch (e) {
+    check('saveTeneSelection succeeds', false, e.message);
+  }
+
+  // 10. joinTeam — a SECOND device joins the same (already-claimed) code and
+  //     receives a custom token for the original team uid.
+  try {
+    const app2  = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' }, 'device2');
+    const auth2 = getAuth(app2);
+    const fns2  = getFunctions(app2);
+    connectAuthEmulator(auth2, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFunctionsEmulator(fns2, '127.0.0.1', 5001);
+    await signInAnonymously(auth2);
+    const res = await httpsCallable(fns2, 'joinTeam')({ code }).then((r) => r.data);
+    check('joinTeam returns a custom token for the original team', !!res?.token && res?.teamId === uid,
+      `teamId=${res?.teamId} (reg uid=${uid})`);
+  } catch (e) {
+    check('joinTeam succeeds', false, e.message);
+  }
+
+  // 11. Matchmaking — only the winner advances; the loser is re-queued ('waiting').
+  try {
+    const oppApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' }, 'opponent');
+    const oppAuth = getAuth(oppApp);
+    const oppFns  = getFunctions(oppApp);
+    const oppFs   = getFirestore(oppApp);
+    connectAuthEmulator(oppAuth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFunctionsEmulator(oppFns, '127.0.0.1', 5001);
+    connectFirestoreEmulator(oppFs, '127.0.0.1', 8080);
+    const oppCred = await signInAnonymously(oppAuth);
+    const oppUid  = oppCred.user.uid;
+    await httpsCallable(oppFns, 'registerTeam')({
+      code: 'BEAR02', teamName: 'E2E Opponent', captainPhone: '0500000001',
+      participants: [{ name: 'Dee', age: '12' }, { name: 'Eli', age: '13' }, { name: 'Fox', age: '12' }, { name: 'Gil', age: '11' }], waiverAccepted: true,
+    });
+
+    await call('joinMatchQueue', {});                                   // main team waits
+    const matched = await httpsCallable(oppFns, 'joinMatchQueue')({}).then((r) => r.data); // opponent matches
+    check('joinMatchQueue pairs two waiting teams', matched?.matched === true && !!matched?.matchId,
+      JSON.stringify(matched));
+
+    if (matched?.matchId) {
+      await call('resolveMatch', { matchId: matched.matchId, winnerId: uid });  // main team wins
+      // Read each team's private gameState with that team's own auth (rules block
+      // cross-team reads — by design).
+      const winnerGs = await readGameState(uid);
+      const loserGs  = await getDoc(doc(oppFs, `artifacts/${APP_ID}/users/${oppUid}/gameState/current`)).then((s) => (s.exists() ? s.data() : null));
+      check('  winner matchStatus = won', winnerGs?.matchStatus === 'won', `status=${winnerGs?.matchStatus}`);
+      check('  loser matchStatus = lost', loserGs?.matchStatus === 'lost', `status=${loserGs?.matchStatus}`);
+      const lq = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/matchQueue/${oppUid}`));
+      check('  loser re-queued as waiting', lq.exists() && lq.data().status === 'waiting',
+        `queueStatus=${lq.data()?.status}`);
+    }
+  } catch (e) {
+    check('matchmaking flow succeeds', false, e.message);
+  }
+
+  // 12. Operational features — location, announcements, score adjust + audit.
+  try {
+    await call('updateLocation', { lat: 31.7717, lng: 35.2035, teamName: 'E2E Test Squad' });
+    const loc = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/teamLocations/${uid}`));
+    check('updateLocation writes a team location', loc.exists() && loc.data().lat === 31.7717,
+      `lat=${loc.data()?.lat}`);
+  } catch (e) {
+    check('updateLocation succeeds', false, e.message);
+  }
+
+  try {
+    const res = await call('pushAnnouncement', { message: 'E2E weather warning', messageHe: 'אזהרת מזג אוויר', level: 'warning' });
+    check('pushAnnouncement returns an id', !!res?.id, JSON.stringify(res));
+    const snap = await getDocs(collection(fs, `artifacts/${APP_ID}/public/data/announcements`));
+    const mine = snap.docs.find((d) => d.id === res.id);
+    check('  announcement written + active', !!mine && mine.data().active === true && mine.data().level === 'warning',
+      mine ? JSON.stringify(mine.data()).slice(0, 120) : 'missing');
+  } catch (e) {
+    check('pushAnnouncement succeeds', false, e.message);
+  }
+
+  try {
+    const before = (await readGameState(uid))?.score ?? 0;
+    const res = await call('adjustTeamScore', { teamId: uid, kind: 'fine', delta: -50, reason: 'e2e fine' });
+    const { newScore } = res.data ?? res;
+    const after = (await readGameState(uid))?.score ?? 0;
+    check('adjustTeamScore applies a fine', after === Math.max(0, before - 50),
+      `score ${before} → ${after}`);
+    const { logs } = await call('listAuditLogs', {});
+    const fineLog = (logs ?? []).find((l) => l.teamId === uid && l.actionType === 'fine');
+    check('  audit log records the fine with prev/new', !!fineLog && fineLog.previousValue === before && fineLog.newValue === after,
+      fineLog ? `${fineLog.previousValue}→${fineLog.newValue}` : 'no fine log');
+  } catch (e) {
+    check('adjustTeamScore + listAuditLogs succeed', false, e.message);
+  }
+
+  // 13. setStationStatus removes a paused station from routing recommendations.
+  try {
+    const recs0 = (await call('getRecommendedTasks', { lat: 31.7717, lng: 35.2035, targetType: 'green' })).recommendations || [];
+    const target = recs0[0]?.taskId;
+    check('have a green station to pause', !!target, `count=${recs0.length}`);
+    if (target) {
+      await call('setStationStatus', { taskId: target, status: 'paused' });
+      const recs1 = (await call('getRecommendedTasks', { lat: 31.7717, lng: 35.2035, targetType: 'green' })).recommendations || [];
+      check('paused station excluded from recommendations', !recs1.some((r) => r.taskId === target),
+        `target=${target} stillListed=${recs1.some((r) => r.taskId === target)}`);
+      await call('setStationStatus', { taskId: target, status: 'active' }); // restore
+    }
+  } catch (e) {
+    check('setStationStatus succeeds', false, e.message);
+  }
+
+  // 14. evacuateStation releases a team off a station (fresh team on task-green-001).
+  try {
+    const evApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' }, 'evacteam');
+    const evAuth = getAuth(evApp);
+    const evFns  = getFunctions(evApp);
+    const evFs   = getFirestore(evApp);
+    connectAuthEmulator(evAuth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFunctionsEmulator(evFns, '127.0.0.1', 5001);
+    connectFirestoreEmulator(evFs, '127.0.0.1', 8080);
+    const evCred = await signInAnonymously(evAuth);
+    const evUid  = evCred.user.uid;
+    await httpsCallable(evFns, 'registerTeam')({
+      code: 'WOLF03', teamName: 'E2E Evac', captainPhone: '0500000002',
+      participants: [{ name: 'Fae', age: '12' }, { name: 'Gus', age: '13' }, { name: 'Hal', age: '12' }, { name: 'Ivy', age: '11' }], waiverAccepted: true,
+    });
+    // Fresh team starts active on slot 0 = task-green-001.
+    const res = await call('evacuateStation', { taskId: 'task-green-001' });
+    const { evacuatedCount } = res;
+    check('evacuateStation releases at least the fresh team', (evacuatedCount ?? 0) >= 1, `count=${evacuatedCount}`);
+    const evGs = await getDoc(doc(evFs, `artifacts/${APP_ID}/users/${evUid}/gameState/current`)).then((s) => (s.exists() ? s.data() : null));
+    check('  evacuated team flagged + slot cleared', evGs?.evacuatedFrom != null && evGs?.slots?.[0]?.taskId == null,
+      `evacuatedFrom=${evGs?.evacuatedFrom} slot0Task=${evGs?.slots?.[0]?.taskId}`);
+    const { logs } = await call('listAuditLogs', {});
+    check('  evacuation recorded in audit log', (logs ?? []).some((l) => l.teamId === evUid && l.actionType === 'evacuation'),
+      `logs=${logs?.length}`);
+  } catch (e) {
+    check('evacuateStation succeeds', false, e.message);
   }
 
   console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);

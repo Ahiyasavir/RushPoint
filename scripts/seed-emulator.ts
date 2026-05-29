@@ -215,18 +215,20 @@ const TASKS = [
 // GAME STATE BUILDERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+type SlotType = 'green' | 'gate' | 'orange' | 'gold';
+
 /** Locked slot template */
-const locked = (index: number, type: 'green' | 'orange' | 'gold') =>
+const locked = (index: number, type: SlotType) =>
   ({ index, type, status: 'locked' });
 
 /** Active slot template — startedAt drives the mobile elapsed-time clock */
-const active = (index: number, type: 'green' | 'orange' | 'gold', startedMinsAgo = 5) =>
+const active = (index: number, type: SlotType, startedMinsAgo = 5) =>
   ({ index, type, status: 'active', startedAt: minsAgo(startedMinsAgo) });
 
 /** Completed slot template */
 const done = (
   index: number,
-  type: 'green' | 'orange' | 'gold',
+  type: SlotType,
   taskId: string,
   taskTitle: string,
   completedMinsAgo: number,
@@ -249,11 +251,9 @@ const gameStateA = {
     active(0, 'green', 2),
     locked(1, 'green'),
     locked(2, 'green'),
-    locked(3, 'green'),
+    locked(3, 'gate'),
     locked(4, 'orange'),
     locked(5, 'gold'),
-    locked(6, 'gold'),
-    locked(7, 'gold'),
   ],
   updatedAt: now(),
 };
@@ -268,37 +268,32 @@ const gameStateB = {
     done(0, 'green', 'task-green-001', 'Jerusalem Landmarks Photo Hunt', 30),
     active(1, 'green'),
     locked(2, 'green'),
-    locked(3, 'green'),
+    locked(3, 'gate'),
     locked(4, 'orange'),
     locked(5, 'gold'),
-    locked(6, 'gold'),
-    locked(7, 'gold'),
   ],
   updatedAt: minsAgo(5),
 };
 
 // ─── Team C — "The Basket Finders" — in park, pending judge check-in ─────────
-// Score: 4×100 (green) + 150 (orange) = 550
+// Score: 3×100 (green) + 150 (gate win) = 450
 const gameStateC = {
   teamId:       TEAMS.C.uid,
-  score:        550,
+  score:        450,
   bonusPenalty: 0,
   currentTaskId: 'task-gold-001',
   slots: [
     done(0, 'green',  'task-green-001', 'Jerusalem Landmarks Photo Hunt', 90),
     done(1, 'green',  'task-green-002', 'Blindfolded Trust Relay',        75),
     done(2, 'green',  'task-green-003', 'Bible Trivia Blitz',             58),
-    done(3, 'green',  'task-green-004', 'The Human Knot',                 44),
+    done(3, 'gate',   '', 'Matchmaking Duel',                            44),
     done(4, 'orange', 'task-orange-001', 'Find Your Tene in the Bible Park', 25),
     active(5, 'gold', 8),
-    active(6, 'gold', 8),
-    active(7, 'gold', 8),
   ],
   updatedAt: minsAgo(2),
 };
 
-// ─── Team D — "The Champions" — fully finished ────────────────────────────────
-// Score: slotPoints(1150) + completionBonus(500) + speedBonus(208) + basketBonus(246) = 2104
+// ─── Team D — "The Champions" — fully finished (all 6 stages) ─────────────────
 const gameStateD = {
   teamId:        TEAMS.D.uid,
   score:         2104,
@@ -308,11 +303,9 @@ const gameStateD = {
     done(0, 'green',  'task-green-001', 'Jerusalem Landmarks Photo Hunt', 85),
     done(1, 'green',  'task-green-002', 'Blindfolded Trust Relay',        70),
     done(2, 'green',  'task-green-003', 'Bible Trivia Blitz',             55),
-    done(3, 'green',  'task-green-004', 'The Human Knot',                 43),
+    done(3, 'gate',   '', 'Matchmaking Duel',                            43),
     done(4, 'orange', 'task-orange-001', 'Find Your Tene in the Bible Park', 30),
     done(5, 'gold',   'task-gold-001', 'Ancient Grape Press',             22),
-    done(6, 'gold',   'task-gold-002', 'Spice Sachet Craft',             14),
-    done(7, 'gold',   'task-gold-003', 'Olive Oil Extraction',            8),
   ],
   updatedAt: minsAgo(5),
 };
@@ -368,6 +361,15 @@ async function resetEmulator(): Promise<void> {
   await deleteCollection(pub('events'));
   await deleteCollection(pub('leaderboard'));
   await deleteCollection(codes());
+  // Transient runtime collections — clear so matchmaking/flash/SOS state from a
+  // prior run can't leak into the next (e.g. a re-queued loser lingering as 'waiting').
+  await deleteCollection(pub('matchQueue'));
+  await deleteCollection(pub('matches'));
+  await deleteCollection(pub('flashMissions'));
+  await deleteCollection(pub('adminAlerts'));
+  await deleteCollection(pub('announcements'));
+  await deleteCollection(pub('teamLocations'));
+  await deleteCollection(`artifacts/${APP_ID}/auditLogs`);
 
   // Private collections for each mock team
   for (const uid of ALL_UIDS) {
@@ -417,7 +419,10 @@ async function seedAuthUsers(): Promise<void> {
 async function seedTasks(): Promise<void> {
   const batch = db.batch();
   for (const task of TASKS) {
-    batch.set(db.doc(pubDoc('tasks', task.id)), task, { merge: !RESET });
+    // Operational defaults (Phase 3): every station starts 'active' and gets a
+    // safety cap of ~2× its target time before the operator is warned.
+    const withOps = { status: 'active', maxDurationMinutes: task.estimatedMinutes * 2, ...task };
+    batch.set(db.doc(pubDoc('tasks', task.id)), withOps, { merge: !RESET });
   }
   await batch.commit();
 
@@ -451,8 +456,8 @@ async function seedLeaderboard(): Promise<void> {
     frozen:   false,
     updatedAt: now(),
     rankings: [
-      { rank: 1, teamId: TEAMS.D.uid, teamName: TEAMS.D.name, score: 2104, completedSlots: 8, finishedAt: minsAgo(5), durationSeconds: 95 * 60 },
-      { rank: 2, teamId: TEAMS.C.uid, teamName: TEAMS.C.name, score: 550,  completedSlots: 5 },
+      { rank: 1, teamId: TEAMS.D.uid, teamName: TEAMS.D.name, score: 2104, completedSlots: 6, finishedAt: minsAgo(5), durationSeconds: 95 * 60 },
+      { rank: 2, teamId: TEAMS.C.uid, teamName: TEAMS.C.name, score: 450,  completedSlots: 5 },
       { rank: 3, teamId: TEAMS.B.uid, teamName: TEAMS.B.name, score: 100,  completedSlots: 1 },
       { rank: 4, teamId: TEAMS.A.uid, teamName: TEAMS.A.name, score: 0,    completedSlots: 0 },
     ],

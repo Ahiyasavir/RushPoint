@@ -15,7 +15,8 @@ functions/lib/
 functions/serviceAccount.json
 # Note: .firebaserc is committed — it contains project aliases, no secrets.
 # The actual Firebase project ID is also in .env files (gitignored).
-.firebase/              # emulator export/import data directory
+# emulator export/import data directory
+.firebase/
 
 # OS
 .DS_Store

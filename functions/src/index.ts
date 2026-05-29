@@ -7,6 +7,7 @@ import {
   clampScore,
   MAX_DESIGN_SCORE,
   MAX_PRESENTATION_SCORE,
+  TENE_PRODUCTS,
 } from './scoring/teneProducts';
 import { calculateTaskScore } from './scoring/taskScore';
 import {
@@ -14,6 +15,8 @@ import {
   computeSprintPenalty,
   applyZScoreBonus,
   completionBonus,
+  computeTieMetrics,
+  compareForRanking,
 } from './scoring/calculateScore';
 
 // â”€â”€â”€ Path + auth helpers for the judge flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -22,6 +25,30 @@ const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 
 const userPath = (teamId: string) => `artifacts/${APP_ID}/users/${teamId}`;
 const taskPath = (taskId: string) => `artifacts/${APP_ID}/public/data/tasks/${taskId}`;
+
+// ─── Audit trail helper ───────────────────────────────────────────────────────
+// Immutable record of every administrative action, for live dispute resolution.
+// Written by Cloud Functions only (Admin SDK) at artifacts/{appId}/auditLogs/{id}.
+interface AuditEntry {
+  teamId: string;
+  teamName?: string;
+  operatorId: string;
+  actionType: 'fine' | 'score_override' | 'manual_unlock' | 'evacuation' | 'skip';
+  previousValue?: number | string | null;
+  newValue?: number | string | null;
+  reason?: string;
+}
+
+async function writeAuditLog(entry: AuditEntry): Promise<void> {
+  await db.collection(`artifacts/${APP_ID}/auditLogs`).add({
+    ...entry,
+    teamName:      entry.teamName ?? null,
+    previousValue: entry.previousValue ?? null,
+    newValue:      entry.newValue ?? null,
+    reason:        entry.reason ?? '',
+    timestamp:     new Date().toISOString(),
+  });
+}
 
 /**
  * Gate judge-only callables. In production a judge must carry the
@@ -130,7 +157,32 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
     );
   }
 
-  return assignNextTask(teamId, { lat, lng }, completedTaskIds, resolvedTarget, skillRatio);
+  const result = await assignNextTask(teamId, { lat, lng }, completedTaskIds, resolvedTarget, skillRatio);
+
+  // Write the assigned taskId + taskTitle back into the active slot so the mobile
+  // onSnapshot mirror reflects it immediately (clients cannot write gameState).
+  if (result.taskId) {
+    const gsRef   = db.doc(`${userPath(teamId)}/gameState/current`);
+    const gsSnap  = await gsRef.get();
+    if (gsSnap.exists) {
+      const gs = gsSnap.data() as { slots: JudgeSlot[] };
+      const activeIdx = gs.slots.findIndex((s) => s.status === 'active');
+      if (activeIdx >= 0 && !gs.slots[activeIdx].taskId) {
+        const taskSnap = await db.doc(taskPath(result.taskId)).get();
+        const taskTitle = taskSnap.exists
+          ? (taskSnap.data() as { title?: string }).title
+          : undefined;
+        const updatedSlots = gs.slots.map((s, i) =>
+          i === activeIdx
+            ? { ...s, taskId: result.taskId, ...(taskTitle ? { taskTitle } : {}) }
+            : s,
+        );
+        await gsRef.update({ slots: updatedSlots, updatedAt: new Date().toISOString() });
+      }
+    }
+  }
+
+  return result;
 });
 
 // â”€â”€â”€ checkOutTask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -365,6 +417,18 @@ export const skipTask = functions.https.onCall(async (data, context) => {
     await batch.commit();
   }
 
+  // Audit: a skip is a manual operator override of a team's progression.
+  const profForLog = await db.doc(`${userPath(teamId)}/profile/team`).get();
+  await writeAuditLog({
+    teamId,
+    teamName:      profForLog.exists ? (profForLog.data() as { name?: string }).name : undefined,
+    operatorId:    context.auth!.uid,
+    actionType:    'skip',
+    previousValue: newScore - awarded,
+    newValue:      newScore,
+    reason:        `Skipped slot ${skippedIndex} (awarded average ${awarded})`,
+  });
+
   return { success: true, skippedIndex, allDone, awardedScore: awarded, newScore };
 });
 
@@ -434,22 +498,32 @@ export const listPendingArrivals = functions.https.onCall(async (_data, context)
 
   const arrivals = await Promise.all(
     snap.docs.map(async (d) => {
-      const ci = d.data() as { teamId: string; taskId: string; timestamp?: string; arrivedAt?: string };
+      const ci = d.data() as { teamId: string; taskId: string; taskTitle?: string; timestamp?: string; arrivedAt?: string };
 
-      const [profSnap, taskSnap] = await Promise.all([
+      const [profSnap, taskSnap, gsSnap] = await Promise.all([
         db.doc(`${userPath(ci.teamId)}/profile/team`).get(),
         db.doc(taskPath(ci.taskId)).get(),
+        db.doc(`${userPath(ci.teamId)}/gameState/current`).get(),
       ]);
+
+      const prof = profSnap.exists
+        ? (profSnap.data() as { name: string; code?: string; memberNames?: string[]; captainPhone?: string })
+        : null;
 
       return {
         checkInId: d.id,
         teamId:    ci.teamId,
-        teamName:  profSnap.exists ? (profSnap.data() as { name: string }).name : ci.teamId,
-        teamCode:  profSnap.exists ? (profSnap.data() as { code?: string }).code ?? '' : '',
+        teamName:  prof?.name ?? ci.teamId,
+        teamCode:  prof?.code ?? '',
+        memberNames:  prof?.memberNames ?? [],
+        captainPhone: prof?.captainPhone ?? '',
         taskId:    ci.taskId,
-        taskTitle: taskSnap.exists ? (taskSnap.data() as { title: string }).title : ci.taskId,
+        taskTitle: taskSnap.exists ? (taskSnap.data() as { title: string }).title : (ci.taskTitle ?? ci.taskId),
         timestamp: ci.timestamp ?? null,
         arrivedAt: ci.arrivedAt ?? null,
+        teneSelection: gsSnap.exists ? ((gsSnap.data() as { teneSelection?: string[] }).teneSelection ?? []) : [],
+        maxDurationMinutes: taskSnap.exists ? ((taskSnap.data() as { maxDurationMinutes?: number }).maxDurationMinutes ?? null) : null,
+        stationStatus: taskSnap.exists ? ((taskSnap.data() as { status?: string }).status ?? 'active') : null,
       };
     }),
   );
@@ -544,7 +618,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
   const cohesionPenalty = missing * COHESION_PENALTY_PER_MEMBER;
   const nowIso       = new Date().toISOString();
 
-  return db.runTransaction(async (tx) => {
+  const txResult = await db.runTransaction(async (tx) => {
     const gsRef   = db.doc(`${userPath(teamId)}/gameState/current`);
     const ciRef   = db.doc(`${userPath(teamId)}/checkIns/${checkInId}`);
     const profRef = db.doc(`${userPath(teamId)}/profile/team`);
@@ -567,7 +641,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
 
     // Idempotent: slot already scored (e.g. double submit) â€” return current state.
     if (slots[target].status === 'completed') {
-      return { newScore: gs.score, total: slots[target].earnedScore ?? 0, alreadyFinalized: true };
+      return { newScore: gs.score, total: slots[target].earnedScore ?? 0, alreadyFinalized: true, releaseTaskId: undefined };
     }
 
     const ci = ciSnap.exists ? (ciSnap.data() as { taskId?: string; taskTitle?: string }) : {};
@@ -635,8 +709,16 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
       tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
     }
 
-    return { newScore, total, breakdown, allDone, alreadyFinalized: false };
+    return { newScore, total, breakdown, allDone, alreadyFinalized: false, releaseTaskId: resolvedTaskId };
   });
+
+  // Release the station counter this team was occupying so the routing
+  // algorithm doesn't keep "ghost" load on a station the team already left.
+  if (!txResult.alreadyFinalized && txResult.releaseTaskId) {
+    await releaseTask(txResult.releaseTaskId, teamId);
+  }
+
+  return txResult;
 });
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -646,18 +728,22 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
 // the Admin SDK (clients cannot write gameState â€” see firestore.rules).
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-// Initial 8-slot layout. startedAt must be a concrete value (Firestore forbids
-// serverTimestamp() sentinels inside array elements) â€” server clock is authoritative.
+// Team-size rules (event constraint): min 4, max 7 participants.
+const MIN_TEAM_SIZE = 4;
+const MAX_TEAM_SIZE = 7;
+
+// Initial 6-slot layout: 0-2 green (field missions), 3 gate (matchmaking),
+// 4 orange (find the Tene), 5 gold (fill the Tene + judging). startedAt must be a
+// concrete value (Firestore forbids serverTimestamp() sentinels inside array
+// elements) â€” server clock is authoritative.
 function buildInitialSlots(nowIso: string): JudgeSlot[] {
   return [
     { index: 0, type: 'green',  status: 'active', startedAt: nowIso, taskId: 'task-green-001', taskTitle: 'Jerusalem Landmarks Photo Hunt' },
     { index: 1, type: 'green',  status: 'locked' },
     { index: 2, type: 'green',  status: 'locked' },
-    { index: 3, type: 'green',  status: 'locked' },
+    { index: 3, type: 'gate',   status: 'locked' },
     { index: 4, type: 'orange', status: 'locked' },
     { index: 5, type: 'gold',   status: 'locked' },
-    { index: 6, type: 'gold',   status: 'locked' },
-    { index: 7, type: 'gold',   status: 'locked' },
   ];
 }
 
@@ -695,8 +781,11 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
   if (!phone) {
     throw new functions.https.HttpsError('invalid-argument', "Captain's phone number is required");
   }
-  if (validParticipants.length < 1) {
-    throw new functions.https.HttpsError('invalid-argument', 'At least one participant is required');
+  if (validParticipants.length < MIN_TEAM_SIZE) {
+    throw new functions.https.HttpsError('invalid-argument', `A team needs at least ${MIN_TEAM_SIZE} participants`);
+  }
+  if (validParticipants.length > MAX_TEAM_SIZE) {
+    throw new functions.https.HttpsError('invalid-argument', `A team can have at most ${MAX_TEAM_SIZE} participants`);
   }
   if (!waiverAccepted) {
     throw new functions.https.HttpsError('failed-precondition', 'The liability waiver must be accepted');
@@ -753,13 +842,53 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
   });
 });
 
+// â”€â”€â”€ joinTeam â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// A SECOND device joining an already-claimed access code. Anonymous auth gives
+// each device a distinct uid, so the second phone cannot read the original team's
+// owner-scoped data. We mint a custom token for the original team's uid so the
+// second device signs in AS the same team (same account, two devices) â€” after
+// which onSnapshot + Firestore rules work transparently.
+export const joinTeam = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Sign-in required before joining');
+  }
+  const normalizedCode = ((data as { code?: string })?.code ?? '').trim().toUpperCase();
+  if (!normalizedCode) {
+    throw new functions.https.HttpsError('invalid-argument', 'Access code is required');
+  }
+
+  const codeSnap = await db.doc(`artifacts/${APP_ID}/accessCodes/${normalizedCode}`).get();
+  if (!codeSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  }
+  const cd = codeSnap.data() as { claimed?: boolean; teamId?: string | null };
+  if (!cd.claimed || !cd.teamId) {
+    throw new functions.https.HttpsError('failed-precondition', 'This code has not been registered yet');
+  }
+
+  const teamId   = cd.teamId;
+  const profSnap = await db.doc(`${userPath(teamId)}/profile/team`).get();
+  const prof     = profSnap.exists
+    ? (profSnap.data() as { name?: string; memberNames?: string[] })
+    : {};
+
+  const token = await admin.auth().createCustomToken(teamId);
+  return {
+    token,
+    teamId,
+    teamName:    prof.name ?? '',
+    memberNames: prof.memberNames ?? [],
+  };
+});
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PHASE 3 — GATE SPRINT · BASKET ZONES · CRAFTING · MATCHMAKING · LEADERBOARD
 // ═══════════════════════════════════════════════════════════════════════════
 
-const GATE_SLOT_INDEX    = 4;
-const BASKET_SLOT_INDEX  = 5;
+const SLOT_COUNT         = 6;
+const GATE_SLOT_INDEX    = 3;
+const BASKET_SLOT_INDEX  = 4;
 
 /**
  * Marks the gate slot (4) as completed and activates the basket slot (5).
@@ -972,11 +1101,19 @@ export const joinMatchQueue = functions.https.onCall(async (_data, context) => {
   ]);
   if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found');
 
-  const teamScore = (gsSnap.data() as { score?: number }).score ?? 0;
+  const gs        = gsSnap.data() as { score?: number; matchStatus?: string };
+  const teamScore = gs.score ?? 0;
   const teamName  = (profSnap.data() as { name?: string })?.name ?? teamId;
 
   const queueColl  = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
   const matchColl  = db.collection(`artifacts/${APP_ID}/public/data/matches`);
+
+  // Idempotent: if the team is already in an unresolved match, don't create a
+  // second one (guards against rapid double-taps on the join button).
+  if (gs.matchStatus === 'matched') {
+    const ownQueue = (await queueColl.doc(teamId).get()).data() as { matchId?: string } | undefined;
+    return { matched: true, matchId: ownQueue?.matchId, alreadyInMatch: true };
+  }
 
   const waitingSnap = await queueColl.where('status', '==', 'waiting').get();
   const opponent = waitingSnap.docs
@@ -1007,7 +1144,9 @@ export const joinMatchQueue = functions.https.onCall(async (_data, context) => {
 });
 
 // ─── resolveMatch ─────────────────────────────────────────────────────────────
-// Judge records the 1v1 outcome. Winner: +150 pts. Loser: matchStatus = 'lost'.
+// Judge records the 1v1 outcome. Only the WINNER advances past the gate (+150 pts
+// and the gate slot completes → find-the-Tene unlocks). The LOSER is sent back to
+// the matchmaking queue (status 'waiting') to be paired again until they win.
 export const resolveMatch = functions.https.onCall(async (data, context) => {
   assertJudge(context);
   const { matchId, winnerId } = data as { matchId: string; winnerId: string };
@@ -1027,38 +1166,45 @@ export const resolveMatch = functions.https.onCall(async (data, context) => {
   const winnerRef = db.doc(`${userPath(winnerId)}/gameState/current`);
   const winnerGs  = (await winnerRef.get()).data() as { score?: number } | undefined;
 
+  const [loserName] = await Promise.all([
+    db.doc(`${userPath(loserId)}/profile/team`).get().then((s) => (s.exists ? (s.data() as { name?: string }).name ?? loserId : loserId)),
+  ]);
+  const loserScore = ((await db.doc(`${userPath(loserId)}/gameState/current`).get()).data() as { score?: number } | undefined)?.score ?? 0;
+
+  const queueColl = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
+
   const batch = db.batch();
   batch.update(matchRef, { winnerId, loserId, resolvedAt: nowIso });
+  // Winner: bonus + advance.
   batch.update(winnerRef, {
     score: (winnerGs?.score ?? 0) + MATCH_WIN_BONUS,
     matchStatus: 'won',
     updatedAt: nowIso,
   });
-  batch.set(db.doc(`${userPath(loserId)}/gameState/current`), { matchStatus: 'lost', updatedAt: nowIso }, { merge: true });
-
-  const queueColl = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
   batch.set(queueColl.doc(winnerId), { status: 'resolved' }, { merge: true });
-  batch.set(queueColl.doc(loserId),  { status: 'resolved' }, { merge: true });
+  // Loser: mark 'lost' (for the mobile "waiting for a new opponent" UI) and
+  // re-enter the queue so they can be matched again.
+  batch.set(db.doc(`${userPath(loserId)}/gameState/current`), { matchStatus: 'lost', updatedAt: nowIso }, { merge: true });
+  batch.set(queueColl.doc(loserId), { teamId: loserId, teamName: loserName, score: loserScore, joinedAt: nowIso, status: 'waiting', matchId: null }, { merge: true });
   await batch.commit();
 
-  // Complete the gate slot for both teams → activates basket slot (5).
-  await Promise.all([
-    completeGateSlot(winnerId, nowIso),
-    completeGateSlot(loserId,  nowIso),
-  ]);
+  // Only the winner clears the gate → activates find-the-Tene (orange slot 4).
+  await completeGateSlot(winnerId, nowIso);
 
   return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS };
 });
 
 // ─── bypassMatchmaking ────────────────────────────────────────────────────────
 // Team (or judge) skips the matchmaking step. Completes gate slot immediately.
+// Deprecated: teams MUST win a matchmaking duel to advance past the gate — there
+// is no skip path. Retained only so existing clients fail loudly instead of
+// silently calling a missing function.
 export const bypassMatchmaking = functions.https.onCall(async (_data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
-  const teamId = context.auth.uid;
-  const nowIso = new Date().toISOString();
-  await db.doc(`${userPath(teamId)}/gameState/current`).set({ matchStatus: 'bypassed', updatedAt: nowIso }, { merge: true });
-  await completeGateSlot(teamId, nowIso);
-  return { success: true };
+  throw new functions.https.HttpsError(
+    'failed-precondition',
+    'Matchmaking cannot be bypassed — you must win a duel to advance.',
+  );
 });
 
 // ─── finalizeLeaderboard ──────────────────────────────────────────────────────
@@ -1110,6 +1256,7 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     completedSlots: number;
     finishedAt?: string;
     durationMinutes?: number;
+    metrics: ReturnType<typeof computeTieMetrics>;
   }
 
   const results: TeamResult[] = Object.keys(profMap).map((teamId) => {
@@ -1117,7 +1264,7 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     const gs   = gsMap[teamId];
     if (!gs) return null;
     const completedSlots = gs.slots.filter((s) => s.status === 'completed' || s.status === 'skipped').length;
-    const allDone        = completedSlots === 8;
+    const allDone        = completedSlots === SLOT_COUNT;
     let durationMinutes: number | undefined;
     if (allDone && prof.startedAt) {
       const endProxy  = gs.craftingStartedAt ?? nowIso;
@@ -1125,7 +1272,8 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     }
     const bonus    = allDone ? 500 : 0;
     const rawScore = Math.max(0, gs.score + bonus - (gs.bonusPenalty ?? 0));
-    return { teamId, teamName: prof.name, rawScore, finalScore: rawScore, completedSlots, finishedAt: prof.finishedAt, durationMinutes };
+    const metrics  = computeTieMetrics(gs.slots, gs.bonusPenalty ?? 0);
+    return { teamId, teamName: prof.name, rawScore, finalScore: rawScore, completedSlots, finishedAt: prof.finishedAt, durationMinutes, metrics };
   }).filter(Boolean) as TeamResult[];
 
   // Apply Z-Score to finished teams.
@@ -1136,13 +1284,16 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     }
   }
 
-  // Sort: finished teams first, then by finalScore desc.
+  // Sort: finished teams first; then finalScore desc with strict tie-breakers
+  // (penalties → combined green-task time → transit time) via compareForRanking.
   results.sort((a, b) => {
     const aF = a.durationMinutes != null ? 1 : 0;
     const bF = b.durationMinutes != null ? 1 : 0;
     if (aF !== bF) return bF - aF;
-    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
-    return b.completedSlots - a.completedSlots;
+    return compareForRanking(
+      { finalScore: a.finalScore, metrics: a.metrics },
+      { finalScore: b.finalScore, metrics: b.metrics },
+    );
   });
 
   const rankings = results.map((r, i) => ({
@@ -1154,6 +1305,7 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     completedSlots:  r.completedSlots,
     finishedAt:      r.finishedAt ?? null,
     durationMinutes: r.durationMinutes ?? null,
+    tieBreak:        { penalties: r.metrics.penalties, fieldTaskMs: r.metrics.fieldTaskMs, transitMs: r.metrics.transitMs },
   }));
 
   const lbRef = db.doc(`artifacts/${APP_ID}/public/data/leaderboard/current`);
@@ -1245,4 +1397,210 @@ export const requestClueHint = functions.https.onCall(async (_data, context) => 
     tx.update(gsRef, { bonusPenalty: newPenalty, updatedAt: new Date().toISOString() });
     return { bonusPenalty: newPenalty, penaltyApplied: CLUE_HINT_PENALTY };
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TENE SELECTION (crafting menu — Slot 5)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── saveTeneSelection ────────────────────────────────────────────────────────
+// During the 20-minute crafting window the team picks which Tene products they
+// prepared. The selection is stored server-authoritatively on gameState so it
+// pre-fills the judge's checklist (the judge still verifies against the real
+// basket). Product ids are validated against the catalog; unknown ids dropped.
+export const saveTeneSelection = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  }
+  const uid = context.auth.uid;
+  const raw = (data as { productIds?: unknown })?.productIds;
+  if (!Array.isArray(raw)) {
+    throw new functions.https.HttpsError('invalid-argument', 'productIds must be an array');
+  }
+  const valid = new Set(TENE_PRODUCTS.map((p) => p.id));
+  const productIds = Array.from(new Set(raw.filter((id): id is string => typeof id === 'string' && valid.has(id))));
+
+  await db.doc(`${userPath(uid)}/gameState/current`).set(
+    { teneSelection: productIds, updatedAt: new Date().toISOString() },
+    { merge: true },
+  );
+  return { teneSelection: productIds };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ADVANCED OPERATIONAL FEATURES (Phase 3) — station mgmt, broadcast, audit, geo
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── setStationStatus ─────────────────────────────────────────────────────────
+// Event Manager toggles a station 'active' | 'paused' | 'closed'. Paused/closed
+// stations are excluded from routing (see routing/assignNextTask.ts).
+export const setStationStatus = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { taskId, status } = data as { taskId?: string; status?: 'active' | 'paused' | 'closed' };
+  if (!taskId || !['active', 'paused', 'closed'].includes(status ?? '')) {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId and a valid status are required');
+  }
+  await db.doc(taskPath(taskId)).update({ status });
+  return { success: true, taskId, status };
+});
+
+// ─── evacuateStation ──────────────────────────────────────────────────────────
+// Force-majeure: a station closes while teams are on it. Releases every team whose
+// active slot is this task back to the routing pool WITHOUT penalty: clears the
+// slot's task assignment (restamping the clock), decrements the station counter,
+// flags gameState.evacuatedFrom so the mobile can explain the change, and audits it.
+export const evacuateStation = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { taskId } = data as { taskId?: string };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
+
+  const nowIso = new Date().toISOString();
+  const taskSnap = await db.doc(taskPath(taskId)).get();
+  const stationTitle = taskSnap.exists ? ((taskSnap.data() as { title?: string }).title ?? taskId) : taskId;
+
+  // Find every team whose active slot is this station.
+  const gsSnap = await db.collectionGroup('gameState').get();
+  const evacuated: string[] = [];
+
+  for (const d of gsSnap.docs) {
+    const gs = d.data() as { slots?: JudgeSlot[] };
+    const slots = (gs.slots ?? []).map((s) => ({ ...s }));
+    const idx = slots.findIndex((s) => s.status === 'active' && s.taskId === taskId);
+    if (idx < 0) continue;
+
+    const parts = d.ref.path.split('/');
+    const teamId = parts[parts.indexOf('users') + 1];
+
+    // Clear the assignment but keep the slot active (back to "assigning").
+    slots[idx] = { ...slots[idx], taskId: undefined, taskTitle: undefined, startedAt: nowIso };
+    await d.ref.update({ slots, evacuatedFrom: stationTitle, updatedAt: nowIso });
+
+    await releaseTask(taskId, teamId);
+
+    const profSnap = await db.doc(`${userPath(teamId)}/profile/team`).get();
+    await writeAuditLog({
+      teamId,
+      teamName:   profSnap.exists ? (profSnap.data() as { name?: string }).name : undefined,
+      operatorId: context.auth!.uid,
+      actionType: 'evacuation',
+      previousValue: taskId,
+      newValue:   null,
+      reason:     `Evacuated from "${stationTitle}"`,
+    });
+    evacuated.push(teamId);
+  }
+
+  return { success: true, taskId, evacuatedCount: evacuated.length, evacuated };
+});
+
+// ─── pushAnnouncement / deactivateAnnouncement ────────────────────────────────
+// Global administrative broadcast (distinct from gamified flash missions). Persists
+// until the admin deactivates it; teams dismiss locally per-device.
+export const pushAnnouncement = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { message, messageHe, level } = data as {
+    message?: string; messageHe?: string; level?: 'info' | 'warning' | 'critical';
+  };
+  if (!message || typeof message !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'message is required');
+  }
+  const lvl = ['info', 'warning', 'critical'].includes(level ?? '') ? level : 'info';
+  const ref = await db.collection(`artifacts/${APP_ID}/public/data/announcements`).add({
+    message,
+    messageHe:  messageHe ?? message,
+    level:      lvl,
+    active:     true,
+    createdAt:  new Date().toISOString(),
+    operatorId: context.auth!.uid,
+  });
+  return { id: ref.id };
+});
+
+export const deactivateAnnouncement = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { id } = data as { id?: string };
+  if (!id) throw new functions.https.HttpsError('invalid-argument', 'id is required');
+  await db.doc(`artifacts/${APP_ID}/public/data/announcements/${id}`).update({ active: false });
+  return { success: true };
+});
+
+// ─── adjustTeamScore ──────────────────────────────────────────────────────────
+// Event Manager applies a manual fine (delta, usually negative) or a hard score
+// override (setTo). Either way the previous + new values are audit-logged.
+export const adjustTeamScore = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { teamId, kind, delta, setTo, reason } = data as {
+    teamId?: string;
+    kind?: 'fine' | 'score_override';
+    delta?: number;
+    setTo?: number;
+    reason?: string;
+  };
+  if (!teamId || (kind !== 'fine' && kind !== 'score_override')) {
+    throw new functions.https.HttpsError('invalid-argument', 'teamId and kind (fine|score_override) are required');
+  }
+
+  const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gsRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found for team');
+    const gs = snap.data() as { score?: number };
+    const prev = gs.score ?? 0;
+    let next: number;
+    if (kind === 'score_override') {
+      next = Math.max(0, Math.round(Number(setTo) || 0));
+    } else {
+      next = Math.max(0, prev + Math.round(Number(delta) || 0));
+    }
+    tx.update(gsRef, { score: next, updatedAt: new Date().toISOString() });
+    return { prev, next };
+  });
+
+  const profSnap = await db.doc(`${userPath(teamId)}/profile/team`).get();
+  await writeAuditLog({
+    teamId,
+    teamName:      profSnap.exists ? (profSnap.data() as { name?: string }).name : undefined,
+    operatorId:    context.auth!.uid,
+    actionType:    kind,
+    previousValue: result.prev,
+    newValue:      result.next,
+    reason:        reason ?? '',
+  });
+
+  return { success: true, previousScore: result.prev, newScore: result.next };
+});
+
+// ─── listAuditLogs ────────────────────────────────────────────────────────────
+// Event-Manager-only view of the immutable action log (newest first).
+export const listAuditLogs = functions.https.onCall(async (_data, context) => {
+  assertJudge(context);
+  const snap = await db.collection(`artifacts/${APP_ID}/auditLogs`).get();
+  const ts = (x: Record<string, unknown>) => String(x.timestamp ?? '');
+  const logs = snap.docs
+    .map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as Record<string, unknown>)
+    .sort((a, b) => ts(b).localeCompare(ts(a)));
+  return { logs };
+});
+
+// ─── updateLocation ───────────────────────────────────────────────────────────
+// LEAN per-team location ping (called every 15–30s in transit). A single upsert,
+// no extra reads/queries, so high call volume stays cheap. The admin heatmap reads
+// artifacts/{appId}/public/data/teamLocations live.
+export const updateLocation = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const { lat, lng, teamName, slotType } = data as {
+    lat?: number; lng?: number; teamName?: string; slotType?: string;
+  };
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    throw new functions.https.HttpsError('invalid-argument', 'lat and lng must be numbers');
+  }
+  await db.doc(`artifacts/${APP_ID}/public/data/teamLocations/${context.auth.uid}`).set({
+    teamId:    context.auth.uid,
+    teamName:  teamName ?? null,
+    lat,
+    lng,
+    slotType:  slotType ?? null,
+    updatedAt: new Date().toISOString(),
+  });
+  return { ok: true };
 });

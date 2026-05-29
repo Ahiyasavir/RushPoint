@@ -18,19 +18,20 @@ export interface TeneProduct {
   labelHe: string;
   tier: ProductTier;
   points: number;
+  estimatedMinutes: number; // suggested crafting time shown in the mobile menu
 }
 
 export const TENE_PRODUCTS: readonly TeneProduct[] = [
   // ── Basic (low value) ────────────────────────────────────────────────────────
-  { id: 'pitas',        label: 'Pitas',        labelHe: 'פיתות',     tier: 'basic',  points: 5  },
-  { id: 'grape-juice',  label: 'Grape Juice',  labelHe: 'מיץ ענבים', tier: 'basic',  points: 5  },
+  { id: 'pitas',        label: 'Pitas',        labelHe: 'פיתות',     tier: 'basic',  points: 5,  estimatedMinutes: 3  },
+  { id: 'grape-juice',  label: 'Grape Juice',  labelHe: 'מיץ ענבים', tier: 'basic',  points: 5,  estimatedMinutes: 3  },
   // ── Medium ───────────────────────────────────────────────────────────────────
-  { id: 'perfumes',     label: 'Perfumes',     labelHe: 'בשמים',     tier: 'medium', points: 10 },
-  { id: 'wheat',        label: 'Wheat',        labelHe: 'חיטה',      tier: 'medium', points: 10 },
-  { id: 'barley',       label: 'Barley',       labelHe: 'שעורה',     tier: 'medium', points: 10 },
+  { id: 'perfumes',     label: 'Perfumes',     labelHe: 'בשמים',     tier: 'medium', points: 10, estimatedMinutes: 5  },
+  { id: 'wheat',        label: 'Wheat',        labelHe: 'חיטה',      tier: 'medium', points: 10, estimatedMinutes: 5  },
+  { id: 'barley',       label: 'Barley',       labelHe: 'שעורה',     tier: 'medium', points: 10, estimatedMinutes: 5  },
   // ── Hard (high value) ────────────────────────────────────────────────────────
-  { id: 'olives',       label: 'Olives',       labelHe: 'זיתים',     tier: 'hard',   points: 20 },
-  { id: 'pomegranates', label: 'Pomegranates', labelHe: 'רימונים',   tier: 'hard',   points: 20 },
+  { id: 'olives',       label: 'Olives',       labelHe: 'זיתים',     tier: 'hard',   points: 20, estimatedMinutes: 8  },
+  { id: 'pomegranates', label: 'Pomegranates', labelHe: 'רימונים',   tier: 'hard',   points: 20, estimatedMinutes: 8  },
 ] as const;
 
 /** Max raw score reachable across each dimension — used for clamping + display. */
