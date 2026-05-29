@@ -35,3 +35,6 @@ packages/shared/dist/
 
 # Turborepo local cache
 .turbo/
+
+# local emulator log
+.emulator-log.txt
