@@ -157,7 +157,7 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ### Firebase Production
 - [ ] יצירת Firebase project בproduction (או וידוא `race-to-tzion-2026` מוגדר)
-- [ ] `firebase deploy --only functions` — פרישת כל 18 הפונקציות
+- [ ] `firebase deploy --only functions` — פרישת כל 21 הפונקציות
 - [ ] `firebase deploy --only firestore:rules` — חוקי אבטחה
 - [ ] `firebase deploy --only storage` — חוקי Storage
 - [ ] אימות שה-Firestore indexes (`firestore.indexes.json`) מועלים

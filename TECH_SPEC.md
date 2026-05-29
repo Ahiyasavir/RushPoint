@@ -1,6 +1,9 @@
 # RushPoint — Master Technical Specification
 > Upload this file at the start of every coding session to restore full project context.
-> Last updated: 2026-05-24 | Phase: 1 (MVP) — UI coding starts next session.
+> Last updated: 2026-05-29 | **Phases 1–3 feature-complete** on the emulator (e2e 28/28).
+> This file is the architecture reference; for the live build status read **STATUS.md**.
+> Note: sections below describe the original plan — some figures evolved during build (e.g. scoring
+> moved to the sigmoid/Z-Score model in §"Scoring", routing to the Φ/transit/Ω model). Code wins.
 
 ---
 
@@ -312,16 +315,17 @@ Copy from `*.env.example` files in each directory.
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| **Phase 1 — MVP** | 🔨 In progress | Auth gate, 8-slot dashboard UI, local state, judge scoring panel, mock map |
-| **Phase 2 — Backend** | ⬜ Planned | Firestore sync, routing algorithm live, offline queue, admin heatmap, audio |
-| **Phase 3 — Gamification** | ⬜ Planned | Leaderboard freeze, SOS, flash missions, Wrapped cards, social sharing |
+| **Phase 1 — MVP** | ✅ Done | Auth gate, 8-slot dashboard, judge scoring, atomic UI kit |
+| **Phase 2 — Core Math & Backend** | ✅ Done | Sigmoid scoring, Φ/transit/Ω routing, live Firestore sync, offline, heatmap, audio, EN/HE |
+| **Phase 3 — Gamification** | ✅ Done | Gate matchmaking, basket zones, crafting/sprint penalties, leaderboard freeze + Z-Score + reveal, flash missions, SOS, clue-hints, team cohesion, Final Run |
+| **Remaining** | ⬜ | Wrapped/summary cards (deferred) + **production deploy** |
 
-### Phase 1 remaining tasks
-- [ ] Atomic UI component kit (Button, Card, Typography, Badge, Input, Toast)
-- [ ] Wire `DashboardScreen` to Firestore `gameState` (read-only listener)
-- [ ] Judge scoring panel (`apps/admin` — `JudgePage.tsx` → real Firestore write)
-- [ ] Basic map screen with mock coordinates (`app/map.tsx`)
-- [ ] Firebase Auth anonymous sign-in tested end-to-end against emulator
+### Next steps (production readiness — see STATUS.md → "הכנה לפרישה")
+- [ ] Firebase production project: `deploy` functions + firestore:rules + storage + indexes
+- [ ] Admin auth via custom claim `{ role: 'admin' }` (replace emulator-relaxed anonymous gate)
+- [ ] Real event content: station coordinates, bilingual task copy, basket zones, access codes
+- [ ] Mobile EAS build (iOS + Android) + app icons/splash; device testing
+- [ ] Load + offline e2e with 10+ concurrent teams
 
 ---
 

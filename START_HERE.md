@@ -1,6 +1,8 @@
 # RushPoint — START HERE
-> TECH_SPEC.md is the full reference. This file was the original tracer-bullet briefing.
-> For the **current** state, dev workflow, and data model, read **CLAUDE.md** first.
+> ⚠️ **HISTORICAL — original Phase-1 tracer-bullet briefing (2026-05).** The project is now
+> **feature-complete through Phase 3**. The "DO NOT BUILD" list below is obsolete (map, SOS,
+> flash missions, leaderboard, routing, etc. are all built). For the **current** state and next
+> steps read **STATUS.md**; for architecture + dev workflow read **CLAUDE.md**. Kept for history.
 
 ---
 
