@@ -19,6 +19,27 @@ interface TeamRow {
   startedAt: string | null;
   score: number;
   completedSlots: number;
+  stageIndex: number | null;
+  stageType: 'green' | 'gate' | 'orange' | 'gold' | null;
+  judging: boolean;
+  crafting: boolean;
+  finished: boolean;
+}
+
+// Map a team's live stage to a short bilingual label + accent colour.
+function stageLabel(team: TeamRow, t: (k: string, v?: Record<string, string | number>) => string): { text: string; cls: string } {
+  if (team.finished) return { text: t('teams.stageFinished'), cls: 'bg-neon-green/10 text-neon-green border-neon-green/30' };
+  if (team.judging)  return { text: t('teams.stageJudging'),  cls: 'bg-neon-blue/10 text-neon-blue border-neon-blue/30' };
+  if (team.crafting) return { text: t('teams.stageCrafting'), cls: 'bg-neon-gold/10 text-neon-gold border-neon-gold/30' };
+  if (team.stageType == null) return { text: '—', cls: 'bg-zinc-800 text-zinc-400 border-zinc-700' };
+  const accent: Record<string, string> = {
+    green:  'bg-neon-green/10 text-neon-green border-neon-green/30',
+    gate:   'bg-neon-blue/10 text-neon-blue border-neon-blue/30',
+    orange: 'bg-neon-orange/10 text-neon-orange border-neon-orange/30',
+    gold:   'bg-neon-gold/10 text-neon-gold border-neon-gold/30',
+  };
+  const n = (team.stageIndex ?? 0) + 1;
+  return { text: t('teams.stageOf', { n, name: t(`slot.${team.stageType}`) }), cls: accent[team.stageType] ?? 'bg-zinc-800 text-zinc-400 border-zinc-700' };
 }
 
 const listTeamsFn = httpsCallable<void, { teams: TeamRow[] }>(functions, 'listTeams');
@@ -118,6 +139,7 @@ export default function TeamsPage() {
               <th className="text-start px-4 py-3">{t('teams.colTeam')}</th>
               <th className="text-start px-4 py-3">{t('teams.colCode')}</th>
               <th className="text-start px-4 py-3">{t('teams.colStatus')}</th>
+              <th className="text-start px-4 py-3">{t('teams.colStage')}</th>
               <th className="text-end px-4 py-3">{t('teams.colSlots')}</th>
               <th className="text-end px-4 py-3">{t('teams.colScore')}</th>
               <th className="text-end px-4 py-3">{t('teams.colAction')}</th>
@@ -126,13 +148,13 @@ export default function TeamsPage() {
           <tbody>
             {loading && teams.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
                   {t('teams.loadingRow')}
                 </td>
               </tr>
             ) : teams.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
                   {t('teams.empty')}
                 </td>
               </tr>
@@ -156,6 +178,16 @@ export default function TeamsPage() {
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[team.status] ?? 'bg-zinc-800 text-zinc-400'}`}>
                         {t(`status.${team.status}`)}
                       </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const s = stageLabel(team, t);
+                        return (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${s.cls}`}>
+                            {s.text}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-end font-mono text-zinc-400">
                       {team.completedSlots}/6

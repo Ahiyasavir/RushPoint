@@ -246,16 +246,38 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
     db.collectionGroup('gameState').get(),
   ]);
 
-  // Build a map of userId → gameState for O(1) join
-  const scoreMap: Record<string, { score: number; completedSlots: number }> = {};
+  // Build a map of userId → gameState for O(1) join, deriving the live stage.
+  interface TeamProgress {
+    score: number;
+    completedSlots: number;
+    stageIndex: number | null;   // active slot index, or null when finished
+    stageType: string | null;    // active slot type: green | gate | orange | gold
+    judging: boolean;            // clock frozen at a judge
+    crafting: boolean;           // inside the 20-min Tene crafting window
+    finished: boolean;           // all slots terminal
+  }
+  const scoreMap: Record<string, TeamProgress> = {};
   for (const doc of gsSnap.docs) {
     const parts = doc.ref.path.split('/');
     // path: artifacts/{appId}/users/{userId}/gameState/{docId}
     const userId = parts[parts.indexOf('users') + 1];
-    const gs = doc.data() as { score?: number; slots?: { status: string }[] };
+    const gs = doc.data() as {
+      score?: number;
+      slots?: { index: number; type: string; status: string }[];
+      judging?: unknown;
+      craftingStartedAt?: unknown;
+    };
+    const slots = gs.slots ?? [];
+    const active = slots.find((s) => s.status === 'active') ?? null;
+    const finished = slots.length > 0 && slots.every((s) => s.status === 'completed' || s.status === 'skipped');
     scoreMap[userId] = {
       score: gs.score ?? 0,
-      completedSlots: (gs.slots ?? []).filter((s) => s.status === 'completed').length,
+      completedSlots: slots.filter((s) => s.status === 'completed').length,
+      stageIndex: active?.index ?? null,
+      stageType:  active?.type ?? null,
+      judging:    gs.judging != null,
+      crafting:   gs.craftingStartedAt != null && active?.type === 'gold',
+      finished,
     };
   }
 
@@ -277,6 +299,11 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
         startedAt:      profile.startedAt ?? null,
         score:          scoreMap[userId]?.score ?? 0,
         completedSlots: scoreMap[userId]?.completedSlots ?? 0,
+        stageIndex:     scoreMap[userId]?.stageIndex ?? null,
+        stageType:      scoreMap[userId]?.stageType ?? null,
+        judging:        scoreMap[userId]?.judging ?? false,
+        crafting:       scoreMap[userId]?.crafting ?? false,
+        finished:       scoreMap[userId]?.finished ?? false,
       };
     })
     .sort((a, b) => b.score - a.score);          // highest score first
