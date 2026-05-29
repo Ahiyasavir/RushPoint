@@ -292,11 +292,13 @@ export interface AdminAlert {
   id: string;
   type: AlertType;
   teamId: string;
+  teamName?: string;
   taskId?: string;
   location?: GeoPoint;
   message: string;
   timestamp: string;    // ISO 8601
   acknowledged: boolean;
+  acknowledgedAt?: string;
 }
 
 export interface SosEvent {

@@ -109,6 +109,20 @@ const en: Dict = {
   'flash.bonus': '+{bonus} pts',
   'flash.expiresIn': 'Ends in {sec}s',
   'flash.dismiss': 'Got it',
+
+  // SOS
+  'sos.open': 'SOS',
+  'sos.title': 'Emergency',
+  'sos.subtitle': 'Send an alert to the event staff. Only use this in a real emergency.',
+  'sos.tapToArm': 'Tap to\nrequest help',
+  'sos.confirmPrompt': 'Are you sure? This alerts the staff immediately.',
+  'sos.sendNow': 'SEND SOS',
+  'sos.cancel': 'Cancel',
+  'sos.sending': 'Sending alert…',
+  'sos.sent': 'Alert sent — help is on the way.',
+  'sos.confirmed': 'Help requested',
+  'sos.staySafe': 'Stay where you are. Staff have been notified.',
+  'sos.error': 'Could not send alert. Try again.',
 };
 
 const he: Dict = {
@@ -213,6 +227,20 @@ const he: Dict = {
   'flash.bonus': '+{bonus} נק׳',
   'flash.expiresIn': 'מסתיים בעוד {sec} שנ׳',
   'flash.dismiss': 'הבנתי',
+
+  // SOS
+  'sos.open': 'מצוקה',
+  'sos.title': 'חירום',
+  'sos.subtitle': 'שלחו התראה לצוות האירוע. השתמשו בזה רק במצב חירום אמיתי.',
+  'sos.tapToArm': 'הקישו\nלבקשת עזרה',
+  'sos.confirmPrompt': 'בטוחים? פעולה זו תתריע לצוות מיד.',
+  'sos.sendNow': 'שלח מצוקה',
+  'sos.cancel': 'ביטול',
+  'sos.sending': 'שולח התראה…',
+  'sos.sent': 'ההתראה נשלחה — עזרה בדרך.',
+  'sos.confirmed': 'בקשת העזרה נשלחה',
+  'sos.staySafe': 'הישארו במקום. הצוות קיבל התראה.',
+  'sos.error': 'לא ניתן לשלוח התראה. נסו שוב.',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

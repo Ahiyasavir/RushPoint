@@ -141,13 +141,22 @@ export default function DashboardScreen() {
         style={{ paddingTop: insets.top + 8 }}
       >
         <View className="flex-row justify-between items-center mb-3">
-          <Pressable
-            onPress={() => router.push('/map')}
-            hitSlop={8}
-            className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20"
-          >
-            <Text variant="caption" className="text-neon-green font-mono">🗺  {t('map.open')}</Text>
-          </Pressable>
+          <View className="flex-row items-center gap-2">
+            <Pressable
+              onPress={() => router.push('/map')}
+              hitSlop={8}
+              className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20"
+            >
+              <Text variant="caption" className="text-neon-green font-mono">🗺  {t('map.open')}</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => router.push('/sos')}
+              hitSlop={8}
+              className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20"
+            >
+              <Text variant="caption" className="text-neon-red font-mono">🆘 {t('sos.open')}</Text>
+            </Pressable>
+          </View>
           <LanguageToggle />
         </View>
 

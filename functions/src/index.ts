@@ -1153,3 +1153,53 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
 
   return { success: true, count: rankings.length, rankings };
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SOS / ADMIN ALERTS (Phase 3)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── triggerSOS ───────────────────────────────────────────────────────────────
+// Any authenticated team can raise an emergency alert. The team identity is taken
+// from the auth token (never trusted from the client). Writes an AdminAlert that
+// the admin dashboard surfaces live. Optional GPS coordinates help locate them.
+export const triggerSOS = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  }
+  const uid = context.auth.uid;
+  const { lat, lng, message } = (data ?? {}) as { lat?: number; lng?: number; message?: string };
+
+  const profSnap = await db.doc(`${userPath(uid)}/profile/team`).get();
+  const teamName = profSnap.exists ? (profSnap.data()?.name ?? uid) : uid;
+
+  const nowIso = new Date().toISOString();
+  const alert: Record<string, unknown> = {
+    type:         'sos',
+    teamId:       uid,
+    teamName,
+    message:      (message ?? '').trim() || `🆘 ${teamName} needs help`,
+    timestamp:    nowIso,
+    acknowledged: false,
+  };
+  if (typeof lat === 'number' && typeof lng === 'number') {
+    alert.location = { lat, lng };
+  }
+
+  const ref = await db.collection(`artifacts/${APP_ID}/public/data/adminAlerts`).add(alert);
+  return { id: ref.id, timestamp: nowIso };
+});
+
+// ─── acknowledgeAlert ─────────────────────────────────────────────────────────
+// Judge/admin marks an alert as handled so it drops off the live list.
+export const acknowledgeAlert = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { alertId } = (data ?? {}) as { alertId?: string };
+  if (!alertId) {
+    throw new functions.https.HttpsError('invalid-argument', 'alertId is required');
+  }
+  await db.doc(`artifacts/${APP_ID}/public/data/adminAlerts/${alertId}`).update({
+    acknowledged:   true,
+    acknowledgedAt: new Date().toISOString(),
+  });
+  return { success: true };
+});

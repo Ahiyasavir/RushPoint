@@ -114,6 +114,11 @@ const en: Dict = {
   'flash.error': 'Could not send flash mission.',
   'flash.titleRequired': 'A title is required.',
 
+  // Alerts / SOS
+  'alerts.ack': 'Acknowledge',
+  'alerts.acking': 'Saving…',
+  'alerts.unknownTeam': 'Unknown team',
+
   // Check-ins
   'checkins.title': 'Check-in Review',
   'checkins.subtitle': 'Teams waiting to be graded. Use the Judge tab to score them.',
@@ -267,6 +272,11 @@ const he: Dict = {
   'flash.sent': '⚡ משימת הברק שודרה לכל הקבוצות.',
   'flash.error': 'לא ניתן לשלוח משימת ברק.',
   'flash.titleRequired': 'נדרשת כותרת.',
+
+  // Alerts / SOS
+  'alerts.ack': 'טופל',
+  'alerts.acking': 'שומר…',
+  'alerts.unknownTeam': 'קבוצה לא ידועה',
 
   // Check-ins
   'checkins.title': 'בדיקת צ׳ק-אין',
