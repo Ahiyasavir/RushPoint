@@ -44,6 +44,7 @@ const en: Dict = {
   'dash.team': 'Team',
   'dash.score': 'Score',
   'dash.pts': 'pts',
+  'dash.penalty': 'penalty',
   'dash.slotsCompleted': '{n} of 8 slots completed',
   'dash.currentMission': 'Current Mission',
   'dash.loadError': 'Could not load game state. Check your connection.',
@@ -123,6 +124,14 @@ const en: Dict = {
   'sos.confirmed': 'Help requested',
   'sos.staySafe': 'Stay where you are. Staff have been notified.',
   'sos.error': 'Could not send alert. Try again.',
+
+  // Clue hint
+  'hint.ask': 'Need a hint?',
+  'hint.cost': '−50 pts',
+  'hint.confirm': 'Use hint (−50)',
+  'hint.cancel': 'Cancel',
+  'hint.applied': 'Hint unlocked — 50 pts deducted.',
+  'hint.error': 'Could not request a hint.',
 };
 
 const he: Dict = {
@@ -162,6 +171,7 @@ const he: Dict = {
   'dash.team': 'קבוצה',
   'dash.score': 'ניקוד',
   'dash.pts': 'נק׳',
+  'dash.penalty': 'קנס',
   'dash.slotsCompleted': '{n} מתוך 8 משבצות הושלמו',
   'dash.currentMission': 'המשימה הנוכחית',
   'dash.loadError': 'לא ניתן לטעון את מצב המשחק. בדקו את החיבור.',
@@ -241,6 +251,14 @@ const he: Dict = {
   'sos.confirmed': 'בקשת העזרה נשלחה',
   'sos.staySafe': 'הישארו במקום. הצוות קיבל התראה.',
   'sos.error': 'לא ניתן לשלוח התראה. נסו שוב.',
+
+  // Clue hint
+  'hint.ask': 'צריכים רמז?',
+  'hint.cost': '−50 נק׳',
+  'hint.confirm': 'השתמש ברמז (−50)',
+  'hint.cancel': 'ביטול',
+  'hint.applied': 'הרמז נפתח — נוכו 50 נק׳.',
+  'hint.error': 'לא ניתן לבקש רמז.',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

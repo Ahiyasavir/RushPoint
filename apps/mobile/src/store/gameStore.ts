@@ -39,6 +39,7 @@ export type MatchStatus = 'waiting' | 'matched' | 'won' | 'lost' | 'bypassed';
 export interface LiveGame {
   slots: LiveSlot[];
   score: number;
+  bonusPenalty?: number;
   judging?: LiveJudging | null;
   // Phase 3
   gateArrivedAt?: unknown;

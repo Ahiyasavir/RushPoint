@@ -1110,7 +1110,7 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
       durationMinutes = (new Date(endProxy).getTime() - new Date(prof.startedAt).getTime()) / 60_000;
     }
     const bonus    = allDone ? 500 : 0;
-    const rawScore = gs.score + bonus;
+    const rawScore = Math.max(0, gs.score + bonus - (gs.bonusPenalty ?? 0));
     return { teamId, teamName: prof.name, rawScore, finalScore: rawScore, completedSlots, finishedAt: prof.finishedAt, durationMinutes };
   }).filter(Boolean) as TeamResult[];
 
@@ -1202,4 +1202,33 @@ export const acknowledgeAlert = functions.https.onCall(async (data, context) => 
     acknowledgedAt: new Date().toISOString(),
   });
   return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLUE HINTS (Phase 3)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CLUE_HINT_PENALTY = 50;
+
+// ─── requestClueHint ──────────────────────────────────────────────────────────
+// A team trades points for a hint on their active task. Each hint adds a fixed
+// penalty to gameState.bonusPenalty (server-authoritative — deducted from the
+// final score). Runs in a transaction so rapid double-taps each count cleanly.
+export const requestClueHint = functions.https.onCall(async (_data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  }
+  const uid   = context.auth.uid;
+  const gsRef = db.doc(`${userPath(uid)}/gameState/current`);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(gsRef);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError('failed-precondition', 'No active game');
+    }
+    const gs = snap.data() as { bonusPenalty?: number };
+    const newPenalty = (gs.bonusPenalty ?? 0) + CLUE_HINT_PENALTY;
+    tx.update(gsRef, { bonusPenalty: newPenalty, updatedAt: new Date().toISOString() });
+    return { bonusPenalty: newPenalty, penaltyApplied: CLUE_HINT_PENALTY };
+  });
 });

@@ -12,6 +12,7 @@ import { Badge } from '../src/components/Badge';
 import { Button } from '../src/components/Button';
 import type { BadgeProps } from '../src/components/Badge';
 import { LanguageToggle } from '../src/components/LanguageToggle';
+import { useToast } from '../src/components/Toast';
 import { useOfflineToast } from '../src/hooks/useOfflineToast';
 import { useFlashMissions } from '../src/hooks/useFlashMissions';
 import { FlashMissionBanner, useDismissableFlash } from '../src/components/FlashMissionBanner';
@@ -103,6 +104,8 @@ export default function DashboardScreen() {
   const activeSlot      = gameState?.slots.find((s) => s.status === 'active') ?? null;
   const completedCount  = gameState?.slots.filter((s) => s.status === 'completed').length ?? 0;
   const score           = gameState?.score ?? 0;
+  const penalty         = gameState?.bonusPenalty ?? 0;
+  const effectiveScore  = Math.max(0, score - penalty);
 
   // Phase 3 derived state
   function toMs(v: unknown): number | null {
@@ -169,9 +172,13 @@ export default function DashboardScreen() {
           <View className="items-end">
             <Text variant="label" className="text-zinc-600">{t('dash.score')}</Text>
             <Text variant="display" className="text-neon-green leading-tight font-brand" style={GLOW.green}>
-              {score}
+              {effectiveScore}
             </Text>
-            <Text variant="label" className="text-zinc-700">{t('dash.pts')}</Text>
+            {penalty > 0 ? (
+              <Text variant="caption" className="text-neon-red font-mono">−{penalty} {t('dash.penalty')}</Text>
+            ) : (
+              <Text variant="label" className="text-zinc-700">{t('dash.pts')}</Text>
+            )}
           </View>
         </View>
 
@@ -297,7 +304,58 @@ function ActiveTaskCard({
           {frozen && <Badge label={t('dash.beingJudged')} variant="info" />}
         </View>
       )}
+
+      {/* Clue hint — costs points, only while actively working the task */}
+      {!frozen && slot.taskId && <ClueHintButton />}
     </Card>
+  );
+}
+
+// ─── Clue hint button (two-step confirm) ──────────────────────────────────────
+
+function ClueHintButton() {
+  const { t } = useTranslation();
+  const { show } = useToast();
+  const [armed, setArmed]   = useState(false);
+  const [busy, setBusy]     = useState(false);
+
+  async function request() {
+    setBusy(true);
+    try {
+      await httpsCallable(functions, 'requestClueHint')({});
+      show(t('hint.applied'), 'info');
+    } catch {
+      show(t('hint.error'), 'error');
+    } finally {
+      setBusy(false);
+      setArmed(false);
+    }
+  }
+
+  return (
+    <View className="border-t border-zinc-800 mt-4 pt-4">
+      {!armed ? (
+        <Pressable onPress={() => setArmed(true)} hitSlop={6} className="flex-row items-center justify-between">
+          <Text variant="bodySmall" className="text-neon-gold">💡 {t('hint.ask')}</Text>
+          <Text variant="caption" className="text-zinc-600">{t('hint.cost')}</Text>
+        </Pressable>
+      ) : (
+        <View className="flex-row items-center gap-2">
+          <Pressable
+            onPress={() => void request()}
+            disabled={busy}
+            className="flex-1 py-2.5 rounded-xl bg-neon-gold/10 border border-neon-gold/30 items-center active:bg-neon-gold/20"
+          >
+            <Text variant="bodySmall" className="text-neon-gold font-semibold">
+              {busy ? '…' : t('hint.confirm')}
+            </Text>
+          </Pressable>
+          <Pressable onPress={() => setArmed(false)} hitSlop={6} className="px-3 py-2.5">
+            <Text variant="bodySmall" className="text-zinc-500">{t('hint.cancel')}</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
   );
 }
 
