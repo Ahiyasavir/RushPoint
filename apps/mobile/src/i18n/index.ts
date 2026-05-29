@@ -125,6 +125,9 @@ const en: Dict = {
   'craft.minShort': 'min',
   'craft.estTime': 'Est. time: {min} min',
   'craft.potentialPts': 'Potential: +{pts} pts',
+  'craft.goToJudge': 'Go to the judge',
+  'craft.goToJudgeEarly': 'Leave now and you keep your remaining time + 90s to reach the judging queue.',
+  'craft.goToJudgeLate': 'Sprint! Only {sec}s left to reach the judging queue.',
 
   // Flash mission
   'flash.label': 'FLASH MISSION',
@@ -295,6 +298,9 @@ const he: Dict = {
   'craft.minShort': 'דק׳',
   'craft.estTime': 'זמן מוערך: {min} דק׳',
   'craft.potentialPts': 'פוטנציאל: +{pts} נק׳',
+  'craft.goToJudge': 'ללכת לשופט',
+  'craft.goToJudgeEarly': 'אם תצאו עכשיו, נשאר לכם הזמן שנותר + 90 שניות להגיע לתור השיפוט.',
+  'craft.goToJudgeLate': 'ספרינט! נותרו רק {sec} שניות להגיע לתור השיפוט.',
 
   // Flash mission
   'flash.label': 'משימת ברק',

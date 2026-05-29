@@ -40,6 +40,8 @@ interface FinalizeResult {
     total: number;
     missingMembers?: number;
     cohesionPenalty?: number;
+    sprintSecondsLate?: number;
+    sprintPenalty?: number;
   };
   allDone: boolean;
 }
@@ -546,6 +548,9 @@ function ResultCard({
         <Row label={t('judge.rowPresentation')}    value={b.presentationScore} />
         {b.cohesionPenalty ? (
           <Row label={t('judge.rowCohesion')} value={-b.cohesionPenalty} penalty />
+        ) : null}
+        {b.sprintPenalty ? (
+          <Row label={t('judge.rowSprint', { sec: b.sprintSecondsLate ?? 0 })} value={-b.sprintPenalty} penalty />
         ) : null}
         <Row label={t('judge.rowBasketTotal')}     value={b.total} strong />
         <Row label={t('judge.rowNewScore')}        value={result.newScore} strong accent />

@@ -192,6 +192,17 @@ export default function BasketZoneScreen() {
               {t('craft.potentialPts', { pts: pickedTotalPoints })}
             </Text>
           </View>
+
+          {/* ── Go to the judge (available once the Tene is found) ───────── */}
+          <Pressable
+            onPress={() => router.push('/dashboard')}
+            className="mt-6 rounded-2xl bg-neon-green/10 border border-neon-green/40 p-4 items-center active:opacity-80"
+          >
+            <Text variant="subheading" className="text-neon-green">🏃 {t('craft.goToJudge')}</Text>
+            <Text variant="caption" className="text-zinc-400 text-center mt-1">
+              {craftingDone ? t('craft.goToJudgeLate', { sec: sprintLeft }) : t('craft.goToJudgeEarly')}
+            </Text>
+          </Pressable>
         </ScrollView>
       </View>
     );

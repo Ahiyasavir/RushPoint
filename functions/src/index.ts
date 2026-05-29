@@ -83,6 +83,8 @@ interface JudgeSlot {
     total: number;
     missingMembers?: number;
     cohesionPenalty?: number;
+    sprintSecondsLate?: number;
+    sprintPenalty?: number;
   };
 }
 
@@ -608,6 +610,10 @@ export const checkInArrival = functions.https.onCall(async (data, context) => {
 // Atomic write that scores the basket, completes the slot, unfreezes the clock,
 // and transitions the team to their next objective.
 const COHESION_PENALTY_PER_MEMBER = 100;
+// Tene crafting window (20 min) + sprint-to-judge budget (90 s). The hard
+// arrival deadline is craftingStart + CRAFTING + SPRINT (see finalize sprint penalty).
+const CRAFTING_DURATION_MS = 20 * 60 * 1000;
+const SPRINT_BUDGET_MS     = 90 * 1000;
 
 export const finalizeJudgeEvaluation = functions.https.onCall(async (data, context) => {
   assertJudge(context);
@@ -656,7 +662,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
       throw new functions.https.HttpsError('not-found', 'Game state not found for team');
     }
 
-    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score: number; bonusPenalty?: number; judging?: JudgingState | null };
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score: number; bonusPenalty?: number; judging?: JudgingState | null; craftingStartedAt?: string };
     const slots = gs.slots.map((s) => ({ ...s }));
 
     // Target = the slot that was checked in, else lowest active slot.
@@ -672,7 +678,22 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
       return { newScore: gs.score, total: slots[target].earnedScore ?? 0, alreadyFinalized: true, releaseTaskId: undefined };
     }
 
-    const ci = ciSnap.exists ? (ciSnap.data() as { taskId?: string; taskTitle?: string }) : {};
+    const ci = ciSnap.exists ? (ciSnap.data() as { taskId?: string; taskTitle?: string; timestamp?: string }) : {};
+
+    // Sprint penalty (gold slot only): the team must reach the judging queue by
+    // craftingStart + 20min + 90s. Leaving early just carries the unused crafting
+    // time as travel budget — the hard deadline is the same. Lateness is measured
+    // from when they declared arrival (the check-in timestamp).
+    let sprintPenalty = 0;
+    let secondsLate = 0;
+    if (slots[target].type === 'gold' && gs.craftingStartedAt) {
+      const deadlineMs = new Date(gs.craftingStartedAt).getTime() + (CRAFTING_DURATION_MS + SPRINT_BUDGET_MS);
+      const arrivalMs  = ci.timestamp ? new Date(ci.timestamp).getTime()
+        : gs.judging?.arrivedAt ? new Date(gs.judging.arrivedAt).getTime()
+        : Date.now();
+      secondsLate   = Math.max(0, Math.round((arrivalMs - deadlineMs) / 1000));
+      sprintPenalty = computeSprintPenalty(secondsLate);
+    }
 
     // Sigmoid task score: read task difficulty + timing from Firestore
     let taskScore = 0;
@@ -697,6 +718,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     const breakdown = {
       products, productScore, designScore: design, presentationScore: presentation,
       taskScore, total, missingMembers: missing, cohesionPenalty,
+      sprintSecondsLate: secondsLate, sprintPenalty,
     };
 
     slots[target] = {
@@ -713,7 +735,7 @@ export const finalizeJudgeEvaluation = functions.https.onCall(async (data, conte
     unlockNext(slots, target, nowIso);
 
     const newScore     = (gs.score ?? 0) + total;
-    const newPenalty   = (gs.bonusPenalty ?? 0) + cohesionPenalty;
+    const newPenalty   = (gs.bonusPenalty ?? 0) + cohesionPenalty + sprintPenalty;
     // A team is done when no slot is still pending — completed or skipped both count as terminal.
     const allDone   = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
 
