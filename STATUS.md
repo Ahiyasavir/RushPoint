@@ -10,10 +10,10 @@
 | Phase 1 — MVP | ✅ הושלם | Auth, רישום, dashboard, שיפוט, component kit |
 | Phase 2 — Core Math & Routing | ✅ הושלם | Sigmoid scoring, smart routing (Φ/transit/Ω), skill ratio, Z-Score |
 | Phase 2 — Backend & Maps | ✅ הושלם | Firestore sync, מפות, offline, EN/HE |
-| Phase 3 — Gamification | ✅ הושלם (ליבה) | Gate/matchmaking, basket zones, leaderboard, Flash, SOS, Clue-hint, Final Run |
+| Phase 3 — Gamification | ✅ הושלם | Gate/matchmaking, basket zones, leaderboard, Flash, SOS, Clue-hint, Final Run, Cohesion |
 | UI Overhaul | ✅ הושלם | Dark neon theme, glassmorphism, Inter+Outfit+JetBrains Mono |
 
-> **רק Wrapped Cards (סיכום אירוע) ופרישה ל-production נשארו.** ראו למטה.
+> **כל הפיצ'רים מהבלופרינט הושלמו ואומתו (e2e 28/28).** רק Wrapped Cards (סיכום אירוע) ופרישה ל-production נשארו.
 
 ---
 
@@ -36,8 +36,9 @@
 | Sprint 90 שנ׳ — עונש מעריכי | `computeSprintPenalty()` | ✅ |
 | Z-Score normalization | `applyZScoreBonus()` | ✅ |
 | חשיפה הדרגתית last→first | `LeaderboardPage` reveal mode | ✅ |
+| Team Cohesion Rule (עונש על חברים חסרים) | `finalizeJudgeEvaluation` + JudgePage stepper | ✅ |
 
-⚠️ **טרם ממומש מהבלופרינט:** *Team Cohesion Rule* (עונש על חברי צוות חסרים בשלב היצירה) — דורש קלט שופט ידני. מועמד לסשן הבא.
+✅ **כל הבלופרינט ממומש.** אומת end-to-end מול האמולטור (`node scripts/e2e-verify.mjs` — 28/28 PASS).
 
 ---
 
@@ -137,10 +138,13 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ---
 
-## 🔶 מה עוד נשאר
+### 6. Team Cohesion Rule ✅
+`finalizeJudgeEvaluation` מקבל `missingMembers` → קנס 100 נק׳ לכל חבר חסר נכנס ל-bonusPenalty
+(server-authoritative). JudgePage: stepper "ד. בדיקת לכידות צוות" + שורת קנס ב-total וב-result card.
 
-### Team Cohesion Rule (מהבלופרינט) ⬜
-עונש על חברי צוות חסרים בשלב היצירה — דורש קלט שופט ידני ב-JudgePage + שדה ב-finalize. לא ממומש.
+---
+
+## 🔶 מה עוד נשאר
 
 ### Wrapped Cards / Event Summary ⬜ נדחה
 כרטיסי סיכום אחרי האירוע — לא דחוף לפרישה.
@@ -191,9 +195,8 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
   Flash Missions · SOS · Clue-hint penalty · Final Run · fanfare סינתטי
 
 סשן הבא (פיצ׳רים אופציונליים):
-  1. Team Cohesion Rule (קלט שופט + עונש ב-finalize)
-  2. Wrapped Cards / סיכום אירוע
-  3. (אופציונלי) קבצי mp3 אמיתיים במקום סינתזה
+  1. Wrapped Cards / סיכום אירוע
+  2. (אופציונלי) קבצי mp3 אמיתיים במקום סינתזה
 
 הכנה לפרישה (לפני האירוע) — העיקר עכשיו:
   4. Production Firebase deploy (functions + rules + storage + indexes)
