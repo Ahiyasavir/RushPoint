@@ -82,6 +82,14 @@ export function stationCoord(taskId: string): GeoPoint | undefined {
 // The mobile mission map is a STATIC image. To overlay a live GPS dot accurately
 // we render the image with a KNOWN center+zoom (not auto-fit) and project the
 // device's lat/lng into pixel/percent coordinates against that exact frame.
+//
+// ⚠️ TILE_SIZE MUST be 512: MapTiler's Static Maps API uses a 512×512 tile pyramid
+// for its zoom convention (one level "further out" than the 256px Google/OSM
+// convention). Both fitRouteView (which produces the zoom we hand to MapTiler) and
+// projectToPixel (which places the GPS dot over the returned image) MUST use the
+// SAME tile size as MapTiler, or the map renders 2× too zoomed-in (route cropped)
+// and the dot lands in the wrong place.
+const TILE_SIZE = 512;
 
 /** Normalised world coordinates in [0,1] (Web Mercator). */
 function worldX(lng: number): number {
@@ -118,11 +126,11 @@ export function fitRouteView(width: number, height: number, pad = 0.12): MapView
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
 
-  // Zoom that fits the bbox (with padding) in both axes; 256px tiles.
+  // Zoom that fits the bbox (with padding) in both axes; 512px tiles (MapTiler).
   const spanX = Math.max(maxX - minX, 1e-9);
   const spanY = Math.max(maxY - minY, 1e-9);
   const fit = (px: number, span: number) =>
-    Math.log2((px * (1 - 2 * pad)) / (span * 256));
+    Math.log2((px * (1 - 2 * pad)) / (span * TILE_SIZE));
   let zoom = Math.min(fit(width, spanX), fit(height, spanY));
   zoom = Math.max(1, Math.min(18, zoom)); // clamp to sane range
 
@@ -137,7 +145,7 @@ export interface Projected {
 
 /** Project a lat/lng to percent-position over a width×height image at `view`. */
 export function projectToPixel(lat: number, lng: number, width: number, height: number, view: MapView): Projected {
-  const scale = 256 * Math.pow(2, view.zoom);
+  const scale = TILE_SIZE * Math.pow(2, view.zoom);
   const px = worldX(lng) * scale;
   const py = worldY(lat) * scale;
   const cx = worldX(view.centerLng) * scale;

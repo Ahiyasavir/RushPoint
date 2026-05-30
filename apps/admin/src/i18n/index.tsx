@@ -28,8 +28,6 @@ const en: Dict = {
   // Heatmap
   'heatmap.title': 'Live Team Map',
   'heatmap.subtitle': 'Station positions across the Jerusalem course',
-  'heatmap.placeholder': 'Mapbox integration — Phase 2',
-  'heatmap.noToken': 'Add a Mapbox token (VITE_MAPBOX_TOKEN) to apps/admin/.env to enable the live map.',
   'heatmap.noPhone': 'No captain phone on file',
   'heatmap.legendGreen': 'Field mission',
   'heatmap.legendGate': 'Matchmaking gate',
@@ -320,8 +318,6 @@ const he: Dict = {
   // Heatmap
   'heatmap.title': 'מפת קבוצות חיה',
   'heatmap.subtitle': 'מיקומי העמדות לאורך מסלול ירושלים',
-  'heatmap.placeholder': 'אינטגרציית Mapbox — שלב 2',
-  'heatmap.noToken': 'הוסיפו טוקן Mapbox‏ (VITE_MAPBOX_TOKEN) לקובץ apps/admin/.env כדי להפעיל את המפה החיה.',
   'heatmap.noPhone': 'אין טלפון קפטן רשום',
   'heatmap.legendGreen': 'משימת שדה',
   'heatmap.legendGate': 'שער זיווג',
