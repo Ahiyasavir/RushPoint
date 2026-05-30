@@ -17,9 +17,11 @@ interface ActiveAlert {
   captainPhone?: string;
   memberNames?: string[];
   message?: string;
-  lat: number;
-  lng: number;
+  lat?: number; // present only if the SOS payload carried GPS coords
+  lng?: number;
 }
+/** An alert resolved to a map position (own coords, or the team's last known). */
+type PositionedAlert = ActiveAlert & { lat: number; lng: number };
 
 /** Live team positions, pinged by the mobile app's adaptive-location hook. */
 function useLiveTeams(): LiveTeam[] {
@@ -38,7 +40,11 @@ function useLiveTeams(): LiveTeam[] {
   return teams;
 }
 
-/** Live, unacknowledged SOS/help alerts that carry a GPS location. */
+/**
+ * Live, unacknowledged SOS/help alerts. Keeps alerts even when the SOS payload
+ * had no GPS (denied/timed-out) — the component falls back to the team's last
+ * known position so the siren still renders.
+ */
 function useActiveAlerts(): ActiveAlert[] {
   const [alerts, setAlerts] = useState<ActiveAlert[]>([]);
   useEffect(() => {
@@ -48,20 +54,22 @@ function useActiveAlerts(): ActiveAlert[] {
         collection(db, `artifacts/${APP_ID}/public/data/adminAlerts`),
         (snap) => setAlerts(
           snap.docs
-            .map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }))
-            .filter((a) => a.type === 'sos' && !a.acknowledged && a.location &&
-              typeof (a.location as { lat?: number }).lat === 'number')
-            .map((a) => ({
-              id: a.id as string,
-              teamId: a.teamId as string,
-              teamName: a.teamName as string | undefined,
-              kind: (a.kind as 'emergency' | 'technical' | undefined) ?? 'emergency',
-              captainPhone: a.captainPhone as string | undefined,
-              memberNames: (a.memberNames as string[] | undefined) ?? [],
-              message: a.message as string | undefined,
-              lat: (a.location as { lat: number }).lat,
-              lng: (a.location as { lng: number }).lng,
-            })),
+            .map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
+            .filter(({ data }) => data.type === 'sos' && !data.acknowledged)
+            .map(({ id, data }) => {
+              const loc = data.location as { lat?: number; lng?: number } | undefined;
+              return {
+                id,
+                teamId: data.teamId as string,
+                teamName: data.teamName as string | undefined,
+                kind: (data.kind as 'emergency' | 'technical' | undefined) ?? 'emergency',
+                captainPhone: data.captainPhone as string | undefined,
+                memberNames: (data.memberNames as string[] | undefined) ?? [],
+                message: data.message as string | undefined,
+                lat: typeof loc?.lat === 'number' ? loc.lat : undefined,
+                lng: typeof loc?.lng === 'number' ? loc.lng : undefined,
+              };
+            }),
         ),
         () => setAlerts([]),
       );
@@ -75,11 +83,24 @@ export default function HeatmapPage() {
   const { t } = useI18n();
   const liveTeams = useLiveTeams();
   const alerts = useActiveAlerts();
-  const [selected, setSelected] = useState<ActiveAlert | null>(null);
+  const [selected, setSelected] = useState<PositionedAlert | null>(null);
 
   // A team with an active alert is shown as a flashing siren, not a normal dot.
   const alertedTeamIds = new Set(alerts.map((a) => a.teamId));
   const calmTeams = liveTeams.filter((tm) => !alertedTeamIds.has(tm.teamId));
+
+  // Resolve each alert to a map position: its own SOS coords, else the team's last
+  // known position from teamLocations (#1 — keeps the siren visible if GPS failed).
+  // NB: `Map` is the react-map-gl component here, so use a plain lookup object.
+  const lastPosByTeam: Record<string, LiveTeam> = {};
+  for (const tm of liveTeams) lastPosByTeam[tm.teamId] = tm;
+  const positionedAlerts: PositionedAlert[] = alerts
+    .map((a): PositionedAlert | null => {
+      if (typeof a.lat === 'number' && typeof a.lng === 'number') return { ...a, lat: a.lat, lng: a.lng };
+      const last = lastPosByTeam[a.teamId];
+      return last ? { ...a, lat: last.lat, lng: last.lng } : null;
+    })
+    .filter((a): a is PositionedAlert => a !== null);
 
   return (
     <div className="p-6 md:p-8 min-h-screen">
@@ -138,7 +159,7 @@ export default function HeatmapPage() {
           ))}
 
           {/* Active SOS / help alerts — flashing siren, click for captain phone */}
-          {alerts.map((a) => (
+          {positionedAlerts.map((a) => (
             <Marker
               key={a.id}
               longitude={a.lng}
@@ -195,14 +216,15 @@ export default function HeatmapPage() {
 
 function Legend() {
   const { t } = useI18n();
-  const items: { key: string; type: 'green' | 'orange' | 'gold' }[] = [
+  const dots: { key: string; type: 'green' | 'gate' | 'orange' | 'gold' }[] = [
     { key: 'heatmap.legendGreen', type: 'green' },
+    { key: 'heatmap.legendGate', type: 'gate' },
     { key: 'heatmap.legendOrange', type: 'orange' },
     { key: 'heatmap.legendGold', type: 'gold' },
   ];
   return (
-    <div className="flex gap-6 mt-5 text-sm text-zinc-400 flex-wrap">
-      {items.map(({ key, type }) => (
+    <div className="flex gap-x-6 gap-y-2 mt-5 text-sm text-zinc-400 flex-wrap items-center">
+      {dots.map(({ key, type }) => (
         <span key={key} className="flex items-center gap-2">
           <span
             className="w-3 h-3 rounded-full border border-white/40 shadow-[0_0_8px_2px_currentColor]"
@@ -211,6 +233,23 @@ function Legend() {
           {t(key)}
         </span>
       ))}
+      {/* Start / Finish / live team / SOS */}
+      <span className="flex items-center gap-2">
+        <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-white text-black border border-neon-green">▶</span>
+        {t('heatmap.legendStart')}
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-xs">🏁</span>
+        {t('heatmap.legendFinish')}
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full bg-white border border-neon-green shadow-[0_0_8px_2px_rgba(0,255,170,0.7)]" />
+        {t('heatmap.legendTeam')}
+      </span>
+      <span className="flex items-center gap-2">
+        <span className="text-xs">🚨</span>
+        {t('heatmap.legendSos')}
+      </span>
     </div>
   );
 }
