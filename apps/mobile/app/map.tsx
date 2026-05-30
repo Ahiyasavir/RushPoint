@@ -8,7 +8,8 @@ import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
 import { useTranslation } from '../src/i18n';
 import { useDeviceLocation } from '../src/hooks/useDeviceLocation';
-import { buildStaticMapUrl } from '../src/data/stations';
+import { useRaceConfig } from '../src/hooks/useRaceConfig';
+import { buildStaticMapUrl, framePoints } from '../src/data/stations';
 
 const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY;
 
@@ -21,10 +22,14 @@ export default function MapScreen() {
   const mapW = Math.min(Math.round(width - 32), 1280);
   const mapH = Math.round(mapW * 0.66);
 
+  // Live race geography (editable in the admin Race Builder) → drives both the
+  // static-map URL and the GPS-dot projection frame.
+  const { config, stations } = useRaceConfig();
+
   // Live device location → projected onto the static map's known frame so the
-  // "You Are Here" dot lines up. Same (mapW, mapH) as the URL → identical frame.
+  // "You Are Here" dot lines up. Same (mapW, mapH) AND same frame points as the URL.
   const coords = useDeviceLocation(!!MAPTILER_KEY);
-  const view = fitRouteView(mapW, mapH);
+  const view = fitRouteView(mapW, mapH, framePoints(config, stations));
   const me = coords ? projectToPixel(coords.lat, coords.lng, mapW, mapH, view) : null;
 
   return (
@@ -43,7 +48,7 @@ export default function MapScreen() {
             {/* expo-image caches to memory+disk: once the map loads at the start
                 (signal at Motza), it survives the Arazim-valley dead zones. */}
             <Image
-              source={{ uri: buildStaticMapUrl(MAPTILER_KEY, mapW, mapH) }}
+              source={{ uri: buildStaticMapUrl(MAPTILER_KEY, mapW, mapH, config, stations) }}
               style={{ width: mapW, height: mapH, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(0,255,170,0.15)' }}
               contentFit="cover"
               cachePolicy="memory-disk"

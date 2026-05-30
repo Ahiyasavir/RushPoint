@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import Map, { Marker, NavigationControl, Source, Layer, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { RACE_DEFAULT_ZOOM, RACE_START, RACE_FINISH, ROUTE_GEOJSON } from '@rushpoint/shared';
+import { routePathFor, routeGeoJSON, STATION_COLOR } from '@rushpoint/shared';
 import { db, APP_ID, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
-import { JERUSALEM, STATIONS, STATION_COLOR } from '../data/stations';
+import { useRaceConfig, useStations } from '../data/raceConfig';
 import { getMapStyle } from '../data/mapStyle';
 
 interface LiveTeam { teamId: string; teamName?: string; lat: number; lng: number; updatedAt?: string }
@@ -83,6 +83,9 @@ export default function HeatmapPage() {
   const { t } = useI18n();
   const liveTeams = useLiveTeams();
   const alerts = useActiveAlerts();
+  const raceConfig = useRaceConfig();
+  const stations = useStations();
+  const routeData = routeGeoJSON(routePathFor(raceConfig));
   const [selected, setSelected] = useState<PositionedAlert | null>(null);
 
   // A team with an active alert is shown as a flashing siren, not a normal dot.
@@ -109,14 +112,14 @@ export default function HeatmapPage() {
 
       <div className="rounded-2xl overflow-hidden border border-neon-green/20 shadow-glow-green h-[600px]">
         <Map
-          initialViewState={{ longitude: JERUSALEM.lng, latitude: JERUSALEM.lat, zoom: RACE_DEFAULT_ZOOM }}
+          initialViewState={{ longitude: raceConfig.center.lng, latitude: raceConfig.center.lat, zoom: raceConfig.zoom }}
           mapStyle={getMapStyle()}
           attributionControl={true}
         >
           <NavigationControl position="top-right" />
 
-          {/* Route line: Motza → Gan HaKipod */}
-          <Source id="route" type="geojson" data={ROUTE_GEOJSON}>
+          {/* Route line: start → waypoints → finish */}
+          <Source id="route" type="geojson" data={routeData}>
             <Layer
               id="route-line"
               type="line"
@@ -125,21 +128,24 @@ export default function HeatmapPage() {
             />
           </Source>
 
-          {/* Start (Motza) + Finish (Gan HaKipod) */}
-          <Marker longitude={RACE_START.lng} latitude={RACE_START.lat} anchor="bottom">
-            <div title="Start — Motza" className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-white text-black border border-neon-green shadow-lg">
+          {/* Start + Finish + Gate */}
+          <Marker longitude={raceConfig.start.lng} latitude={raceConfig.start.lat} anchor="bottom">
+            <div title="Start" className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-white text-black border border-neon-green shadow-lg">
               ▶ START
             </div>
           </Marker>
-          <Marker longitude={RACE_FINISH.lng} latitude={RACE_FINISH.lat} anchor="bottom">
+          <Marker longitude={raceConfig.finish.lng} latitude={raceConfig.finish.lat} anchor="bottom">
             <div title="Finish — Gan HaKipod" className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-neon-gold text-black border border-white shadow-lg">
               🏁 גן הקיפוד
             </div>
           </Marker>
+          <Marker longitude={raceConfig.gate.lng} latitude={raceConfig.gate.lat} anchor="center">
+            <div title="Gate — Matchmaking" className="w-4 h-4 rounded-full border-2 border-white shadow-lg" style={{ backgroundColor: STATION_COLOR.gate }} />
+          </Marker>
 
-          {/* Station markers */}
-          {STATIONS.map((s) => (
-            <Marker key={s.id} longitude={s.lng} latitude={s.lat} anchor="bottom">
+          {/* Station markers (live: green/gold tasks + orange Tene zones) */}
+          {stations.map((s) => (
+            <Marker key={`${s.kind}-${s.id}`} longitude={s.lng} latitude={s.lat} anchor="bottom">
               <div
                 title={s.label}
                 className="w-4 h-4 rounded-full border-2 border-white shadow-lg"

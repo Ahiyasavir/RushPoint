@@ -64,6 +64,50 @@ export const ROUTE_GEOJSON = {
   },
 };
 
+// ─── Editable race configuration ──────────────────────────────────────────────
+// The hardcoded geography above is now only the DEFAULT. The live race is stored
+// in Firestore (artifacts/{appId}/public/data/raceConfig/current) and edited via
+// the admin Race Builder. Stations themselves live in `tasks` (green/gold) and
+// `basketZones` (orange Tene spots); raceConfig holds the framing geometry.
+
+export interface RaceConfig {
+  start: GeoPoint;
+  finish: GeoPoint;
+  gate: GeoPoint;
+  center: GeoPoint;
+  zoom: number;
+  /** Optional spine points drawn between start and finish (default: [gate]). */
+  routeWaypoints?: GeoPoint[];
+  updatedAt?: string;
+}
+
+/** Default race config — derived from the hardcoded geography (offline fallback). */
+export const DEFAULT_RACE_CONFIG: RaceConfig = {
+  start:  RACE_START,
+  finish: RACE_FINISH,
+  gate:   { lat: 31.811, lng: 35.184 },
+  center: RACE_CENTER,
+  zoom:   RACE_DEFAULT_ZOOM,
+  routeWaypoints: [{ lat: 31.811, lng: 35.184 }],
+};
+
+/** Ordered route line for a config: start → waypoints → finish. */
+export function routePathFor(cfg: RaceConfig): GeoPoint[] {
+  return [cfg.start, ...(cfg.routeWaypoints ?? []), cfg.finish];
+}
+
+/** Build a GeoJSON LineString Feature from an ordered point list (lng,lat order). */
+export function routeGeoJSON(points: readonly GeoPoint[]) {
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: {
+      type: 'LineString' as const,
+      coordinates: points.map((p) => [p.lng, p.lat]),
+    },
+  };
+}
+
 /** Marker colours per station type (hex with '#', shared by both maps). */
 export const STATION_COLOR: Record<StationType, string> = {
   green:  '#10b981',
@@ -118,9 +162,15 @@ export interface MapView {
  * to build the static-map URL and to project the GPS dot — identical (w,h) in →
  * identical frame, so the dot lines up.
  */
-export function fitRouteView(width: number, height: number, pad = 0.12): MapView {
-  const xs = ROUTE_PATH.map((p) => worldX(p.lng));
-  const ys = ROUTE_PATH.map((p) => worldY(p.lat));
+export function fitRouteView(
+  width: number,
+  height: number,
+  points: readonly GeoPoint[] = ROUTE_PATH,
+  pad = 0.12,
+): MapView {
+  const pts = points.length > 0 ? points : ROUTE_PATH;
+  const xs = pts.map((p) => worldX(p.lng));
+  const ys = pts.map((p) => worldY(p.lat));
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const cx = (minX + maxX) / 2;

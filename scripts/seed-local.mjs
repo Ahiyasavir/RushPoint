@@ -72,6 +72,33 @@ async function main() {
   });
   console.log('[seed-local] Seeded tasks: task-green-001/002/003, task-gold-001');
 
+  // Race config (editable in the admin Race Builder; defaults match @rushpoint/shared).
+  await db.doc(`artifacts/${APP_ID}/public/data/raceConfig/current`).set({
+    start:  { lat: 31.7905, lng: 35.164 },
+    finish: { lat: 31.8155, lng: 35.1875 },
+    gate:   { lat: 31.811,  lng: 35.184 },
+    center: { lat: 31.803,  lng: 35.176 },
+    zoom:   13.5,
+    routeWaypoints: [{ lat: 31.811, lng: 35.184 }],
+    updatedAt: now,
+  });
+
+  // Orange "find the Tene" basket zones, placed in-area near the orange stage.
+  const zonesPath = `artifacts/${APP_ID}/public/data/basketZones`;
+  await db.doc(`${zonesPath}/zone-a`).set({
+    id: 'zone-a', name: 'Arazim Lookout', nameHe: 'מצפה ארזים',
+    riddle: 'Where the valley opens to the hills, find your Tene by the lookout stones.',
+    riddleHe: 'במקום שהעמק נפתח אל ההרים — מצאו את הטנא ליד אבני התצפית.',
+    coordinates: { lat: 31.8135, lng: 35.1855 }, currentTeamCount: 0, maxTeams: 3,
+  });
+  await db.doc(`${zonesPath}/zone-b`).set({
+    id: 'zone-b', name: 'Pine Grove', nameHe: 'חורשת האורנים',
+    riddle: 'Under the pines on the climb to Ramot, your basket waits in the shade.',
+    riddleHe: 'בין האורנים בעלייה לרמות — הסל מחכה בצל.',
+    coordinates: { lat: 31.8145, lng: 35.187 }, currentTeamCount: 0, maxTeams: 3,
+  });
+  console.log('[seed-local] Seeded raceConfig + basket zones (zone-a, zone-b).');
+
   // Access codes for the mobile registration flow.
   const codes = ['1234', 'LION01', 'BEAR02', 'WOLF03'];
   const cb = db.batch();
