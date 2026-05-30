@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
+import { SLOT_COUNT } from '@rushpoint/shared';
 import { functions, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 
@@ -190,7 +191,7 @@ export default function TeamsPage() {
                       })()}
                     </td>
                     <td className="px-4 py-3 text-end font-mono text-zinc-400">
-                      {team.completedSlots}/6
+                      {team.completedSlots}/{SLOT_COUNT}
                     </td>
                     <td className="px-4 py-3 text-end font-mono text-neon-green font-semibold tabular-nums">
                       {team.score.toLocaleString()}

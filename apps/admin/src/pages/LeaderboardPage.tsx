@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { onSnapshot, doc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { SLOT_COUNT } from '@rushpoint/shared';
 import { db, functions, APP_ID, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 
@@ -229,7 +230,7 @@ export default function LeaderboardPage() {
                     {entry.rawScore != null && entry.rawScore !== entry.score ? entry.rawScore : '—'}
                   </td>
                   <td className="px-4 py-3 text-end text-zinc-400 hidden md:table-cell">
-                    {entry.completedSlots}/8
+                    {entry.completedSlots}/{SLOT_COUNT}
                   </td>
                   <td className="px-4 py-3 text-end text-zinc-500 hidden md:table-cell">
                     {entry.durationMinutes != null

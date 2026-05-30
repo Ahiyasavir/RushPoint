@@ -10,6 +10,7 @@ import {
   TENE_PRODUCTS,
 } from './scoring/teneProducts';
 import { calculateTaskScore } from './scoring/taskScore';
+import { SLOT_COUNT } from '@rushpoint/shared';
 import {
   computeTransitPenalty,
   computeSprintPenalty,
@@ -274,7 +275,9 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
     const finished = slots.length > 0 && slots.every((s) => s.status === 'completed' || s.status === 'skipped');
     scoreMap[userId] = {
       score: gs.score ?? 0,
-      completedSlots: slots.filter((s) => s.status === 'completed').length,
+      // Skipped slots count as progress too — a skipped team has advanced past
+      // that stage, so it must not look "stuck" on the board (matches finalizeLeaderboard).
+      completedSlots: slots.filter((s) => s.status === 'completed' || s.status === 'skipped').length,
       stageIndex: active?.index ?? null,
       stageType:  active?.type ?? null,
       judging:    gs.judging != null,
@@ -338,6 +341,57 @@ async function averageTaskScore(
   return calculateTaskScore(difficulty, estimatedMinutes, estimatedMinutes);
 }
 
+// Average earned score across ALL teams' completed slots of a given stage TYPE.
+// Used as the skip baseline when the skipped slot has no Firestore task to read
+// (e.g. an unassigned green slot, or orange/gold before a station is claimed),
+// so the award is matched to the stage rather than silently 0.
+async function averageTypeScore(type: JudgeSlot['type'], fallback: number): Promise<number> {
+  const snap = await db.collectionGroup('gameState').get();
+  const scores: number[] = [];
+  for (const d of snap.docs) {
+    const gs = d.data() as { slots?: JudgeSlot[] };
+    for (const s of gs.slots ?? []) {
+      if (s.type === type && s.status === 'completed' && typeof s.earnedScore === 'number') {
+        scores.push(s.earnedScore);
+      }
+    }
+  }
+  if (scores.length > 0) {
+    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  }
+  return fallback;
+}
+
+// Fixed stage baselines for a skip when no completion data and no task doc exist.
+// Chosen to be fair and non-punitive: the gate equals winning the duel; orange
+// (find-the-Tene) and the green/gold on-target sigmoid are modest "average mission".
+const ORANGE_SKIP_BASELINE = 120;
+
+/**
+ * The points to award when an active slot is SKIPPED — smart and matched to the
+ * exact station/stage being skipped (fixes "255 once, then 0"):
+ *  • a slot with a real station task  → that task's average completion (or its
+ *    own on-target sigmoid baseline);
+ *  • gate (matchmaking, no task)      → the duel-win bonus (= winning the gate);
+ *  • orange/gold/green without a task → the field's average for that stage type,
+ *    falling back to a stage-appropriate baseline.
+ */
+async function skipAwardForSlot(slot: JudgeSlot): Promise<number> {
+  if (slot.taskId) {
+    const taskSnap = await db.doc(taskPath(slot.taskId)).get();
+    const task = taskSnap.exists
+      ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number })
+      : {};
+    return averageTaskScore(slot.taskId, task.difficulty ?? 5, task.estimatedMinutes ?? 15);
+  }
+  switch (slot.type) {
+    case 'gate':   return MATCH_WIN_BONUS;
+    case 'orange': return averageTypeScore('orange', ORANGE_SKIP_BASELINE);
+    case 'gold':   return averageTypeScore('gold', calculateTaskScore(5, 15, 15));
+    default:       return averageTypeScore('green', calculateTaskScore(4, 15, 15));
+  }
+}
+
 // ─── skipTask ──────────────────────────────────────────────────────────────────
 // Admin/judge escape hatch: skip a team's current task and advance them to the
 // next one. Rather than zeroing the slot, the team is AWARDED the average score
@@ -368,15 +422,10 @@ export const skipTask = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('failed-precondition', 'Team has no active task to skip');
   }
 
-  let awarded = 0;
-  const skipTaskId = preSlots[preTarget].taskId;
-  if (skipTaskId) {
-    const taskSnap = await db.doc(taskPath(skipTaskId)).get();
-    const task = taskSnap.exists
-      ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number })
-      : {};
-    awarded = await averageTaskScore(skipTaskId, task.difficulty ?? 5, task.estimatedMinutes ?? 15);
-  }
+  // Station-aware award: matched to the exact stage being skipped (never a flat
+  // 255 or a silent 0). See skipAwardForSlot.
+  const skippedSlot = preSlots[preTarget];
+  const awarded = await skipAwardForSlot(skippedSlot);
 
   const { skippedTaskId, skippedIndex, allDone, newScore } = await db.runTransaction(async (tx) => {
     const profRef = db.doc(`${userPath(teamId)}/profile/team`);
@@ -456,7 +505,7 @@ export const skipTask = functions.https.onCall(async (data, context) => {
     actionType:    'skip',
     previousValue: newScore - awarded,
     newValue:      newScore,
-    reason:        `Skipped slot ${skippedIndex} (awarded average ${awarded})`,
+    reason:        `Skipped ${skippedSlot.type} slot ${skippedIndex} (awarded ${awarded})`,
   });
 
   return { success: true, skippedIndex, allDone, awardedScore: awarded, newScore };
@@ -938,7 +987,7 @@ export const joinTeam = functions.https.onCall(async (data, context) => {
 // PHASE 3 — GATE SPRINT · BASKET ZONES · CRAFTING · MATCHMAKING · LEADERBOARD
 // ═══════════════════════════════════════════════════════════════════════════
 
-const SLOT_COUNT         = 6;
+// SLOT_COUNT is the shared single source of truth (imported from @rushpoint/shared).
 const GATE_SLOT_INDEX    = 3;
 const BASKET_SLOT_INDEX  = 4;
 

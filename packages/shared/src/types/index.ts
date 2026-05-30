@@ -66,6 +66,14 @@ export type EventStatus = 'pre' | 'live' | 'frozen' | 'ended';
 export type CheckInStatus = 'pending' | 'approved' | 'rejected';
 
 
+/**
+ * Number of slots on every team's board (the fixed game structure):
+ * 0–2 green · 3 gate · 4 orange · 5 gold. The pool of *stations* per stage can be
+ * arbitrarily large (routing spreads teams), but each team always plays 6 slots.
+ * Single source of truth — used by the leaderboard UI and the finalize logic.
+ */
+export const SLOT_COUNT = 6;
+
 // ─── Slot ─────────────────────────────────────────────────────────────────────
 // A single entry in the 6-slot task board.
 // Stored inside GameState (not as its own Firestore document).
