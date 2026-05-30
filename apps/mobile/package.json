@@ -19,6 +19,7 @@
     "expo-camera": "~15.0.0",
     "expo-file-system": "~18.0.0",
     "expo-haptics": "~14.0.0",
+    "expo-image": "~2.0.7",
     "expo-image-picker": "~15.0.0",
     "expo-location": "~18.0.0",
     "expo-network": "~6.0.0",

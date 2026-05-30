@@ -1,42 +1,32 @@
-// Mock station coordinates around Jerusalem for the Phase 2 mission map.
-export interface Station {
-  id: string;
-  type: 'green' | 'orange' | 'gold';
-  lat: number;
-  lng: number;
-}
-
-export const JERUSALEM = { lat: 31.7767, lng: 35.2345 };
-
-export const STATIONS: Station[] = [
-  { id: 'green-001', type: 'green', lat: 31.778, lng: 35.229 },
-  { id: 'green-002', type: 'green', lat: 31.774, lng: 35.241 },
-  { id: 'green-003', type: 'green', lat: 31.7812, lng: 35.236 },
-  { id: 'green-004', type: 'green', lat: 31.7705, lng: 35.23 },
-  { id: 'orange-001', type: 'orange', lat: 31.769, lng: 35.245 },
-  { id: 'gold-001', type: 'gold', lat: 31.7665, lng: 35.247 },
-  { id: 'gold-002', type: 'gold', lat: 31.768, lng: 35.249 },
-  { id: 'gold-003', type: 'gold', lat: 31.7655, lng: 35.2455 },
-];
-
-// Mapbox marker pin colours (hex without '#', per Static Images API).
-const PIN_COLOR: Record<Station['type'], string> = {
-  green: '10b981',
-  orange: 'f97316',
-  gold: 'f59e0b',
-};
+// Mobile mission map — a static topographic image (MapTiler "outdoor" style)
+// showing the Motza → Gan HaKipod route with the station markers. Geography comes
+// from @rushpoint/shared (single source of truth). Rendered in a plain <Image>,
+// so it works identically on web + native with no GL dependency.
+import { ROUTE_PATH, STATION_GEO, fitRouteView } from '@rushpoint/shared';
 
 /**
- * Builds a Mapbox Static Images API URL with a pin per station.
- * Works in <Image> on both web and native — no GL dependency required.
+ * Builds a MapTiler Static Maps API URL: topographic "outdoor" style, framed at a
+ * KNOWN center+zoom (via fitRouteView) so a live GPS dot can be projected on top
+ * accurately, with the route drawn as a line and a marker per station. Rendered in
+ * an <Image>, so it works on web + native with no GL dependency.
+ *
+ * NOTE: pass the SAME width/height here and to projectToPixel so the overlay dot
+ * lines up with the image frame.
+ *
+ * MapTiler free tier: 100k tiles/month, no credit card. Without a key the caller
+ * shows a friendly placeholder instead (see app/map.tsx), so a missing/invalid
+ * key can never crash the screen.
  */
-export function buildStaticMapUrl(token: string, width = 640, height = 420): string {
-  const overlays = STATIONS.map(
-    (s) => `pin-s+${PIN_COLOR[s.type]}(${s.lng},${s.lat})`,
-  ).join(',');
-  const center = `${JERUSALEM.lng},${JERUSALEM.lat},12.5,0`;
+export function buildStaticMapUrl(key: string, width = 640, height = 420): string {
+  const v = fitRouteView(width, height);
+  const center = `${v.centerLng.toFixed(5)},${v.centerLat.toFixed(5)},${v.zoom.toFixed(2)}`;
+  const stroke = encodeURIComponent('#00c389'); // route line colour (encoded '#')
+  const pathCoords = ROUTE_PATH.map((p) => `${p.lng},${p.lat}`).join('|');
+  const path = `stroke:${stroke}|width:4|fill:none|${pathCoords}`;
+  const markers = STATION_GEO.map((s) => `${s.lng},${s.lat}`).join('|');
+  const dims = `${Math.round(width)}x${Math.round(height)}@2x`;
   return (
-    `https://api.mapbox.com/styles/v1/mapbox/dark-v11/static/` +
-    `${overlays}/${center}/${width}x${height}@2x?access_token=${token}`
+    `https://api.maptiler.com/maps/outdoor-v2/static/${center}/${dims}.png` +
+    `?path=${path}&markers=${markers}&key=${key}`
   );
 }

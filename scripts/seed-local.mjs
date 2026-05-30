@@ -47,28 +47,28 @@ async function main() {
     description: 'Photograph all 5 specified Jerusalem landmarks as a team.',
     type: 'green', qrCode: 'QR-GREEN-001', maxConcurrentTeams: 3, currentTeamCount: 0,
     difficulty: 3, photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
-    status: 'active', maxDurationMinutes: 30,
+    status: 'active', maxDurationMinutes: 30, coordinates: { lat: 31.795, lng: 35.169 },
   });
   await db.doc(`${tasksPath}/task-green-002`).set({
     id: 'task-green-002', title: 'Blindfolded Trust Relay', titleHe: 'ריצת השליחות בעיניים עצומות',
     description: 'Guide a blindfolded teammate through a short course using only your voices.',
     type: 'green', qrCode: 'QR-GREEN-002', maxConcurrentTeams: 3, currentTeamCount: 0,
     difficulty: 5, photoRequired: true, pointValue: 100, estimatedMinutes: 20, isActive: true,
-    status: 'active', maxDurationMinutes: 40,
+    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.801, lng: 35.174 },
   });
   await db.doc(`${tasksPath}/task-green-003`).set({
     id: 'task-green-003', title: 'Bible Trivia Blitz', titleHe: 'חידון תנ"ך ירושלמי',
     description: 'Answer 10 Jerusalem-themed Bible trivia questions together.',
     type: 'green', qrCode: 'QR-GREEN-003', maxConcurrentTeams: 4, currentTeamCount: 0,
     difficulty: 4, photoRequired: false, pointValue: 100, estimatedMinutes: 12, isActive: true,
-    status: 'active', maxDurationMinutes: 24,
+    status: 'active', maxDurationMinutes: 24, coordinates: { lat: 31.807, lng: 35.18 },
   });
   await db.doc(`${tasksPath}/task-gold-001`).set({
     id: 'task-gold-001', title: 'Ancient Grape Press',
     description: 'Use the replica press to fill and seal a clay flask for your Tene.',
     type: 'gold', qrCode: 'QR-GOLD-001', maxConcurrentTeams: 2, currentTeamCount: 1,
     difficulty: 8, photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
-    status: 'active', maxDurationMinutes: 40,
+    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.8155, lng: 35.1875 },
   });
   console.log('[seed-local] Seeded tasks: task-green-001/002/003, task-gold-001');
 
@@ -111,7 +111,7 @@ async function main() {
   // The PENDING check-in is what makes the team appear in listPendingArrivals.
   await db.doc(`${userPath(DEMO_UID)}/checkIns/${CHECKIN_ID}`).set({
     id: CHECKIN_ID, teamId: DEMO_UID, taskId: 'task-gold-001',
-    status: 'pending', timestamp: minsAgo(3), location: { lat: 31.7718, lng: 35.2030 },
+    status: 'pending', timestamp: minsAgo(3), location: { lat: 31.8155, lng: 35.1875 },
   });
   console.log('[seed-local] Seeded demo team "The Lions" (LION1) with a PENDING check-in.');
 

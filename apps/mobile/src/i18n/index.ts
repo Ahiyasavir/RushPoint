@@ -89,8 +89,10 @@ const en: Dict = {
   'map.open': 'Mission Map',
   'map.title': 'Mission Map',
   'map.subtitle': 'Station locations across the Jerusalem course.',
-  'map.noToken': 'Add EXPO_PUBLIC_MAPBOX_TOKEN to apps/mobile/.env to show the live map.',
+  'map.noToken': 'Add EXPO_PUBLIC_MAPTILER_KEY to apps/mobile/.env to show the topographic map.',
   'map.back': '← Back',
+  'map.youAreHere': 'The blue dot is your live location.',
+  'map.offMap': "You're outside the race area",
 
   // Gate sprint (orange slot)
   'gate.title': 'Race to Bible Park!',
@@ -269,8 +271,10 @@ const he: Dict = {
   'map.open': 'מפת המשימות',
   'map.title': 'מפת המשימות',
   'map.subtitle': 'מיקומי העמדות לאורך מסלול ירושלים.',
-  'map.noToken': 'הוסיפו EXPO_PUBLIC_MAPBOX_TOKEN לקובץ apps/mobile/.env כדי להציג את המפה.',
+  'map.noToken': 'הוסיפו EXPO_PUBLIC_MAPTILER_KEY לקובץ apps/mobile/.env כדי להציג את המפה הטופוגרפית.',
   'map.back': '← חזרה',
+  'map.youAreHere': 'הנקודה הכחולה היא המיקום החי שלכם.',
+  'map.offMap': 'אתם מחוץ לאזור המרוץ',
 
   // Gate sprint (orange slot)
   'gate.title': 'רוצו לפארק התנ"ך!',

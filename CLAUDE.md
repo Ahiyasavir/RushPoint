@@ -110,7 +110,7 @@ rushpoint/
 │   │   │   ├── access-code.tsx # enter Access Code (validates against accessCodes)
 │   │   │   ├── register.tsx    # team form → calls registerTeam callable
 │   │   │   ├── dashboard.tsx   # 6 stages, score, gate/crafting/match, flash overlay, SOS+hint
-│   │   │   ├── map.tsx         # Mapbox static mission map
+│   │   │   ├── map.tsx         # MapTiler static topo mission map (Motza→Gan HaKipod route)
 │   │   │   ├── basket-zone.tsx # riddle + interactive Tene-fill menu + 20-min/sprint countdown
 │   │   │   ├── sos.tsx         # emergency alert (two-step confirm + GPS → triggerSOS)
 │   │   │   └── final-run.tsx   # race-complete celebration (animated trophy + synth fanfare)
@@ -300,7 +300,7 @@ vs `maxConcurrentTeams`; transit is haversine at ~5 km/h; skillMatch aligns the 
 |---|---|---|
 | **Phase 1 — MVP** | ✅ done | Access-code auth, dashboard, judge scoring slice, component kit |
 | **Phase 2 — Core Math & Routing** | ✅ done | Sigmoid task scoring, priority routing (load/transit/skill), `getRecommendedTasks`, real Teams list, **bilingual EN/HE UI**, admin skip-task |
-| **Phase 2 — Live & Maps** | ✅ done | Live Firestore sync (`useGameSync`), offline persistence + toast, slot audio cues (Web Audio), Mapbox admin heatmap + mobile mission map |
+| **Phase 2 — Live & Maps** | ✅ done | Live Firestore sync (`useGameSync`), offline persistence + toast, slot audio cues (Web Audio). **Topographic maps via MapLibre + MapTiler `outdoor`** (free, no card; keyless OpenTopoMap fallback): admin live heatmap + route line + start/finish, mobile static topo mission map. Canonical route/station geo in `@rushpoint/shared` (`geo.ts`) — Motza → Arazim Valley → Gan HaKipod (Ramot Bet) |
 | **Phase 3 — Gamification** | ✅ done | Gate matchmaking, basket zones, crafting/sprint penalties, leaderboard freeze + Z-Score + reveal, flash missions, SOS, clue-hints, team cohesion, Final Run |
 | **UI Overhaul** | ✅ done | Dark neon theme + glassmorphism (Inter/Outfit/JetBrains Mono) across both apps |
 | **Remaining** | ⬜ | Wrapped/summary cards (deferred) + **production deploy** (see STATUS.md → "הכנה לפרישה") |
@@ -324,8 +324,8 @@ vs `maxConcurrentTeams`; transit is haversine at ~5 km/h; skillMatch aligns the 
 
 ## Environment Files
 ```
-apps/mobile/.env   # EXPO_PUBLIC_FIREBASE_* (+ EXPO_PUBLIC_EMULATOR_HOST, EXPO_PUBLIC_MAPBOX_TOKEN)
-apps/admin/.env    # VITE_FIREBASE_* (+ VITE_RUSHPOINT_APP_ID, VITE_MAPBOX_TOKEN)
+apps/mobile/.env   # EXPO_PUBLIC_FIREBASE_* (+ EXPO_PUBLIC_EMULATOR_HOST, EXPO_PUBLIC_MAPTILER_KEY)
+apps/admin/.env    # VITE_FIREBASE_* (+ VITE_RUSHPOINT_APP_ID, VITE_MAPTILER_KEY)
 functions/.env     # RUSHPOINT_APP_ID, QR_SECRET (server-side only)
 ```
 All `.env` files are gitignored; emulator-safe defaults are baked into the client configs, so the
