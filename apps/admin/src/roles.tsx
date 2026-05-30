@@ -17,7 +17,7 @@ const STATION_KEY = 'rushpoint.admin.stationId';
 export const ROLE_ROUTES: Record<Role, string[]> = {
   // Event manager: full access to everything, including sensitive controls
   // (flash missions, leaderboard finalize, score overrides, station control).
-  manager:   ['/heatmap', '/teams', '/checkins', '/leaderboard', '/judge', '/matchmaking', '/manager'],
+  manager:   ['/heatmap', '/teams', '/checkins', '/leaderboard', '/judge', '/matchmaking', '/manager', '/builder'],
   // Tene judge: only the grading console.
   judge:     ['/judge'],
   // Station operator: only their per-station console.

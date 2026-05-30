@@ -47,6 +47,7 @@ export default function StationPage() {
   });
   const [teams, setTeams] = useState<StationTeam[]>([]);
   const [missing, setMissing] = useState<Record<string, number>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [helpArmed, setHelpArmed] = useState(false);
@@ -84,13 +85,18 @@ export default function StationPage() {
     try { localStorage.setItem(STATION_TASK_KEY, id); } catch { /* ignore */ }
   }
 
-  async function release(team: StationTeam, passed: boolean) {
+  async function release(team: StationTeam, outcome: 'passed' | 'failed' | 'left') {
     setBusyId(team.teamId);
     try {
       await ensureAuth();
-      await stationReleaseTeam({ teamId: team.teamId, taskId, missingMembers: missing[team.teamId] ?? 0, passed });
-      flash(passed ? t('station.passed', { team: team.teamName }) : t('station.failedMsg', { team: team.teamName }));
+      await stationReleaseTeam({
+        teamId: team.teamId, taskId, missingMembers: missing[team.teamId] ?? 0,
+        outcome, note: notes[team.teamId] ?? '',
+      });
+      const msg = outcome === 'passed' ? 'station.passed' : outcome === 'left' ? 'station.leftMsg' : 'station.failedMsg';
+      flash(t(msg, { team: team.teamName }));
       setMissing((m) => ({ ...m, [team.teamId]: 0 }));
+      setNotes((n) => ({ ...n, [team.teamId]: '' }));
       await loadTeams();
     } catch {
       flash(t('station.releaseError'));
@@ -196,15 +202,30 @@ export default function StationPage() {
                       {miss > 0 && <span className="text-xs font-mono text-neon-red ms-1">−{miss * 100}</span>}
                     </div>
 
-                    {/* Verdict */}
+                    {/* Operator note (stored on the slot + audit log) */}
+                    <div className="mt-3">
+                      <textarea
+                        rows={2}
+                        value={notes[team.teamId] ?? ''}
+                        onChange={(e) => setNotes((n) => ({ ...n, [team.teamId]: e.target.value }))}
+                        placeholder={t('station.notePlaceholder')}
+                        className="w-full px-3 py-2 rounded-lg bg-app-surface border border-glass-border text-white text-sm placeholder:text-zinc-600"
+                      />
+                    </div>
+
+                    {/* Verdict: finished (pass), failed, or left without finishing */}
                     <div className="flex items-center gap-2 mt-3">
-                      <button onClick={() => void release(team, true)} disabled={busy}
+                      <button onClick={() => void release(team, 'passed')} disabled={busy}
                         className="flex-1 py-2.5 rounded-xl bg-neon-green text-black font-bold text-sm hover:opacity-90 disabled:opacity-50">
                         {busy ? t('station.releasing') : t('station.pass')}
                       </button>
-                      <button onClick={() => void release(team, false)} disabled={busy}
+                      <button onClick={() => void release(team, 'failed')} disabled={busy}
                         className="px-4 py-2.5 rounded-xl border border-neon-red/40 text-neon-red text-sm font-semibold hover:bg-neon-red/10 disabled:opacity-50">
                         {t('station.fail')}
+                      </button>
+                      <button onClick={() => void release(team, 'left')} disabled={busy}
+                        className="px-4 py-2.5 rounded-xl border border-glass-border text-zinc-300 text-sm font-semibold hover:bg-white/5 disabled:opacity-50">
+                        {t('station.left')}
                       </button>
                     </div>
                   </div>

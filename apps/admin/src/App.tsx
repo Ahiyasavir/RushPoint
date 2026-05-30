@@ -7,6 +7,7 @@ import LeaderboardPage from './pages/LeaderboardPage';
 import JudgePage from './pages/JudgePage';
 import MatchmakingPage from './pages/MatchmakingPage';
 import ManagerPage from './pages/ManagerPage';
+import BuilderPage from './pages/BuilderPage';
 import StationPage from './pages/StationPage';
 import VolunteerPage from './pages/VolunteerPage';
 import RoleSelect from './components/RoleSelect';
@@ -23,6 +24,7 @@ const NAV_ITEMS = [
   { to: '/judge', key: 'nav.judge' },
   { to: '/matchmaking', key: 'nav.matchmaking' },
   { to: '/manager', key: 'nav.manager' },
+  { to: '/builder', key: 'nav.builder' },
   { to: '/station', key: 'nav.station' },
   { to: '/volunteer', key: 'nav.volunteer' },
 ];
@@ -96,6 +98,7 @@ export default function App() {
           <Route path="/judge" element={guard('/judge', <JudgePage />)} />
           <Route path="/matchmaking" element={guard('/matchmaking', <MatchmakingPage />)} />
           <Route path="/manager" element={guard('/manager', <ManagerPage />)} />
+          <Route path="/builder" element={guard('/builder', <BuilderPage />)} />
           <Route path="/station" element={guard('/station', <StationPage />)} />
           <Route path="/volunteer" element={guard('/volunteer', <VolunteerPage />)} />
           <Route path="*" element={<Navigate to={home} replace />} />

@@ -86,6 +86,8 @@ interface JudgeSlot {
     cohesionPenalty?: number;
     sprintSecondsLate?: number;
     sprintPenalty?: number;
+    note?: string;
+    outcome?: 'passed' | 'failed' | 'left';
   };
 }
 
@@ -1603,14 +1605,20 @@ export const getStationTeams = functions.https.onCall(async (data, context) => {
 const STATION_COHESION_PENALTY = 100;
 export const stationReleaseTeam = functions.https.onCall(async (data, context) => {
   assertJudge(context);
-  const { teamId, taskId, missingMembers = 0, passed = true } = data as {
+  const { teamId, taskId, missingMembers = 0, passed = true, outcome, note } = data as {
     teamId?: string; taskId?: string; missingMembers?: number; passed?: boolean;
+    outcome?: 'passed' | 'failed' | 'left'; note?: string;
   };
   if (!teamId || !taskId) {
     throw new functions.https.HttpsError('invalid-argument', 'teamId and taskId are required');
   }
+  // Outcome is explicit ('passed' | 'failed' | 'left') or derived from the legacy
+  // `passed` flag. Only a pass scores; failed/left advance the team with no award.
+  const finalOutcome: 'passed' | 'failed' | 'left' = outcome ?? (passed ? 'passed' : 'failed');
+  const didPass  = finalOutcome === 'passed';
+  const trimmedNote = typeof note === 'string' ? note.trim().slice(0, 500) : '';
   const missing  = Math.max(0, Math.floor(Number(missingMembers) || 0));
-  const cohesion = missing * STATION_COHESION_PENALTY;
+  const cohesion = didPass ? missing * STATION_COHESION_PENALTY : 0;
   const nowIso   = new Date().toISOString();
 
   // Pre-read task difficulty/timing target (outside the tx).
@@ -1633,7 +1641,7 @@ export const stationReleaseTeam = functions.https.onCall(async (data, context) =
     }
 
     let taskScore = 0;
-    if (passed) {
+    if (didPass) {
       const difficulty = task.difficulty ?? 5;
       const estMins    = task.estimatedMinutes ?? 15;
       const startMs    = slots[target].startedAt ? new Date(slots[target].startedAt!).getTime() : Date.now() - estMins * 60_000;
@@ -1643,12 +1651,13 @@ export const stationReleaseTeam = functions.https.onCall(async (data, context) =
 
     slots[target] = {
       ...slots[target],
-      status:      passed ? 'completed' : 'skipped',
+      status:      didPass ? 'completed' : 'skipped',
       completedAt: nowIso,
       earnedScore: taskScore,
       scoreBreakdown: {
         products: [], productScore: 0, designScore: 0, presentationScore: 0,
         taskScore, total: taskScore, missingMembers: missing, cohesionPenalty: cohesion,
+        outcome: finalOutcome, ...(trimmedNote ? { note: trimmedNote } : {}),
       },
     };
     unlockNext(slots, target, nowIso);
@@ -1673,7 +1682,21 @@ export const stationReleaseTeam = functions.https.onCall(async (data, context) =
   // Free the station counter the team was occupying.
   await releaseTask(taskId, teamId);
 
-  return { success: true, passed, ...result };
+  // Audit the operator's verdict (outcome + any note) for dispute resolution.
+  const profForLog = await db.doc(`${userPath(teamId)}/profile/team`).get();
+  await writeAuditLog({
+    teamId,
+    teamName:   profForLog.exists ? (profForLog.data() as { name?: string }).name : undefined,
+    operatorId: context.auth!.uid,
+    actionType: 'skip',
+    previousValue: result.newScore - result.taskScore,
+    newValue:   result.newScore,
+    reason: `Station ${taskId}: ${finalOutcome}` +
+      (missing ? `, ${missing} missing` : '') +
+      (trimmedNote ? ` — "${trimmedNote}"` : ''),
+  });
+
+  return { success: true, passed: didPass, outcome: finalOutcome, ...result };
 });
 
 // ─── stationCallHelp ──────────────────────────────────────────────────────────
@@ -1871,4 +1894,144 @@ export const updateLocation = functions.https.onCall(async (data, context) => {
     updatedAt: new Date().toISOString(),
   });
   return { ok: true };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RACE BUILDER (admin) — design the route + stations in-app, persisted to Firestore.
+// Stations reuse the tasks (green/gold) + basketZones (orange) collections; the
+// framing geometry lives in raceConfig/current. All gated to admins (assertJudge).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+interface GeoPointIn { lat?: unknown; lng?: unknown }
+function asGeoPoint(p: GeoPointIn | undefined, label: string): { lat: number; lng: number } {
+  if (!p || typeof p.lat !== 'number' || typeof p.lng !== 'number') {
+    throw new functions.https.HttpsError('invalid-argument', `${label} must be { lat, lng } numbers`);
+  }
+  return { lat: p.lat, lng: p.lng };
+}
+
+// ─── saveRaceConfig ───────────────────────────────────────────────────────────
+// Upsert the editable race framing: start/finish/gate/center/zoom + route waypoints.
+export const saveRaceConfig = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const d = (data ?? {}) as {
+    start?: GeoPointIn; finish?: GeoPointIn; gate?: GeoPointIn; center?: GeoPointIn;
+    zoom?: number; routeWaypoints?: GeoPointIn[];
+  };
+  const nowIso = new Date().toISOString();
+  const config = {
+    start:  asGeoPoint(d.start, 'start'),
+    finish: asGeoPoint(d.finish, 'finish'),
+    gate:   asGeoPoint(d.gate, 'gate'),
+    center: asGeoPoint(d.center, 'center'),
+    zoom:   typeof d.zoom === 'number' ? d.zoom : 13.5,
+    routeWaypoints: Array.isArray(d.routeWaypoints)
+      ? d.routeWaypoints.map((w, i) => asGeoPoint(w, `routeWaypoints[${i}]`))
+      : [],
+    updatedAt: nowIso,
+  };
+  await db.doc(`artifacts/${APP_ID}/public/data/raceConfig/current`).set(config, { merge: true });
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: 'Saved race config (Race Builder)',
+  });
+  return { success: true };
+});
+
+// ─── upsertStation ────────────────────────────────────────────────────────────
+// Create or update a station: a green/gold `task` or an orange `basketZone`. New
+// stations get a Firestore auto-id; counters default on create and are preserved
+// on update. Whitelists fields so the client can't write arbitrary data.
+export const upsertStation = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const d = (data ?? {}) as Record<string, unknown>;
+  const kind = d.kind === 'zone' ? 'zone' : d.kind === 'task' ? 'task' : null;
+  if (!kind) throw new functions.https.HttpsError('invalid-argument', "kind must be 'task' or 'zone'");
+
+  const col = kind === 'zone'
+    ? `artifacts/${APP_ID}/public/data/basketZones`
+    : `artifacts/${APP_ID}/public/data/tasks`;
+  const id = typeof d.id === 'string' && d.id ? d.id : db.collection(col).doc().id;
+  const ref = db.doc(`${col}/${id}`);
+  const existing = await ref.get();
+  const isNew = !existing.exists;
+  const coordinates = asGeoPoint(d.coordinates as GeoPointIn, 'coordinates');
+  const str = (v: unknown, fb = '') => (typeof v === 'string' ? v : fb);
+  const num = (v: unknown, fb: number) => (typeof v === 'number' && !Number.isNaN(v) ? v : fb);
+
+  if (kind === 'task') {
+    const type = d.type === 'gold' ? 'gold' : 'green';
+    const payload: Record<string, unknown> = {
+      id,
+      type,
+      title:        str(d.title, id),
+      titleHe:      str(d.titleHe),
+      description:  str(d.description),
+      descriptionHe: str(d.descriptionHe),
+      coordinates,
+      locationHint: str(d.locationHint),
+      difficulty:   num(d.difficulty, 5),
+      pointValue:   num(d.pointValue, 100),
+      estimatedMinutes: num(d.estimatedMinutes, 15),
+      maxConcurrentTeams: num(d.maxConcurrentTeams, 3),
+      maxDurationMinutes: num(d.maxDurationMinutes, 30),
+      photoRequired: d.photoRequired === true,
+      isActive:     d.isActive !== false,
+      status:       ['active', 'paused', 'closed'].includes(str(d.status)) ? str(d.status) : 'active',
+    };
+    if (isNew) { payload.currentTeamCount = 0; payload.qrCode = `QR-${id}`; }
+    await ref.set(payload, { merge: true });
+  } else {
+    const payload: Record<string, unknown> = {
+      id,
+      name:     str(d.title ?? d.name, id),
+      nameHe:   str(d.titleHe ?? d.nameHe),
+      riddle:   str(d.riddle),
+      riddleHe: str(d.riddleHe),
+      coordinates,
+      maxTeams: num(d.maxTeams, 3),
+    };
+    if (isNew) { payload.currentTeamCount = 0; }
+    await ref.set(payload, { merge: true });
+  }
+
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: `${isNew ? 'Created' : 'Updated'} ${kind} station ${id} (Race Builder)`,
+  });
+  return { success: true, id, kind };
+});
+
+// ─── deleteStation ────────────────────────────────────────────────────────────
+// Delete a station. Refuses if any team is actively on it (suggest evacuateStation).
+export const deleteStation = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { id, kind } = (data ?? {}) as { id?: string; kind?: 'task' | 'zone' };
+  if (!id || (kind !== 'task' && kind !== 'zone')) {
+    throw new functions.https.HttpsError('invalid-argument', "id and kind ('task'|'zone') are required");
+  }
+
+  if (kind === 'task') {
+    const gsSnap = await db.collectionGroup('gameState').get();
+    const inUse = gsSnap.docs.some((dc) => {
+      const gs = dc.data() as { slots?: JudgeSlot[] };
+      return (gs.slots ?? []).some((s) => s.status === 'active' && s.taskId === id);
+    });
+    if (inUse) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'A team is active on this station — evacuate it first, then delete.',
+      );
+    }
+  }
+
+  const col = kind === 'zone'
+    ? `artifacts/${APP_ID}/public/data/basketZones`
+    : `artifacts/${APP_ID}/public/data/tasks`;
+  await db.doc(`${col}/${id}`).delete();
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: `Deleted ${kind} station ${id} (Race Builder)`,
+  });
+  return { success: true };
 });

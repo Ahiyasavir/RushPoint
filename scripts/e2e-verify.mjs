@@ -92,6 +92,17 @@ async function main() {
       `slot ${activeIdx + 1} -> ${next?.status}`);
     check('  team score increases by the award', (after?.score ?? 0) === beforeScore + awarded,
       `score ${beforeScore} + ${awarded} -> ${after?.score}`);
+
+    // 2c. A SECOND consecutive skip must ALSO award (bug: "255 once, then 0").
+    const beforeScore2 = after?.score ?? 0;
+    const activeIdx2 = after?.slots?.findIndex((s) => s.status === 'active');
+    const res2 = await call('skipTask', { teamId: uid });
+    const awarded2 = res2?.awardedScore ?? 0;
+    const after2 = await readGameState(uid);
+    check('  second consecutive skip ALSO awards points (not 0)', awarded2 > 0,
+      `2nd awardedScore=${awarded2} (slot ${activeIdx2})`);
+    check('  second skip adds its award to the score', (after2?.score ?? 0) === beforeScore2 + awarded2,
+      `score ${beforeScore2} + ${awarded2} -> ${after2?.score}`);
   } catch (e) {
     check('skipTask succeeds', false, e.message);
   }
@@ -250,6 +261,11 @@ async function main() {
       participants: [{ name: 'Dee', age: '12' }, { name: 'Eli', age: '13' }, { name: 'Fox', age: '12' }, { name: 'Gil', age: '11' }], waiverAccepted: true,
     });
 
+    // Matchmaking pairs teams within 300 pts. The main team has accumulated score
+    // from earlier checks, so bring the opponent to parity before queueing.
+    const myScore = (await readGameState(uid))?.score ?? 0;
+    await call('adjustTeamScore', { teamId: oppUid, kind: 'score_override', setTo: myScore, reason: 'e2e match parity' });
+
     await call('joinMatchQueue', {});                                   // main team waits
     const matched = await httpsCallable(oppFns, 'joinMatchQueue')({}).then((r) => r.data); // opponent matches
     check('joinMatchQueue pairs two waiting teams', matched?.matched === true && !!matched?.matchId,
@@ -350,6 +366,38 @@ async function main() {
       `logs=${logs?.length}`);
   } catch (e) {
     check('evacuateStation succeeds', false, e.message);
+  }
+
+  // 15. Race Builder — saveRaceConfig + upsertStation (create→update) + deleteStation.
+  try {
+    await call('saveRaceConfig', {
+      start: { lat: 31.79, lng: 35.164 }, finish: { lat: 31.8155, lng: 35.1875 },
+      gate: { lat: 31.811, lng: 35.184 }, center: { lat: 31.803, lng: 35.176 }, zoom: 13.5,
+    });
+    const cfg = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/raceConfig/current`));
+    check('saveRaceConfig writes the race config', cfg.exists() && cfg.data().zoom === 13.5,
+      `zoom=${cfg.data()?.zoom}`);
+
+    const created = await call('upsertStation', {
+      kind: 'task', type: 'green', title: 'E2E Builder Station', coordinates: { lat: 31.8, lng: 35.17 },
+      difficulty: 6, pointValue: 120,
+    });
+    const newId = created?.id;
+    check('upsertStation creates a station with an id', !!newId, JSON.stringify(created));
+    const taskDoc = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/tasks/${newId}`));
+    check('  new station persisted with a generated QR code', taskDoc.exists() && taskDoc.data().qrCode === `QR-${newId}`,
+      `qrCode=${taskDoc.data()?.qrCode} count=${taskDoc.data()?.currentTeamCount}`);
+
+    await call('upsertStation', { kind: 'task', id: newId, type: 'green', title: 'E2E Renamed', coordinates: { lat: 31.8, lng: 35.17 } });
+    const updated = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/tasks/${newId}`));
+    check('  update preserves id + counter, changes title', updated.data()?.title === 'E2E Renamed' && updated.data()?.currentTeamCount === 0,
+      `title=${updated.data()?.title}`);
+
+    await call('deleteStation', { id: newId, kind: 'task' });
+    const gone = await getDoc(doc(fs, `artifacts/${APP_ID}/public/data/tasks/${newId}`));
+    check('  deleteStation removes the station', !gone.exists());
+  } catch (e) {
+    check('Race Builder callables succeed', false, e.message);
   }
 
   console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
