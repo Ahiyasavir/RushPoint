@@ -34,11 +34,12 @@
                     "//Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Dev data Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬":  "",
                     "seed":  "npm run seed      --workspace=scripts",
                     "seed:reset":  "npm run seed:reset --workspace=scripts",
+                    "sync":  "node scripts/sync-sheets.mjs",
                     "mobile:web":  "npm run dev --workspace=apps/mobile -- --web",
                     "emulator":  "node scripts/dev-emulator.mjs",
                     "predev:all":  "node scripts/free-ports.mjs",
                     "dev:all":  "concurrently --names EMU,SEED,MOBILE,ADMIN --prefix-colors blue,green,magenta,cyan \"npm:emulator\" \"npm:dev:seed\" \"npm:mobile:web\" \"npm:admin\"",
-                    "dev:seed":  "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 \u0026\u0026 node scripts/seed-local.mjs"
+                    "dev:seed":  "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 \u0026\u0026 node scripts/sync-sheets.mjs"
                 },
     "devDependencies":  {
                             "turbo":  "^2.0.0",
