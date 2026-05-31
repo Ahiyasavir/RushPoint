@@ -9,34 +9,11 @@
 // Idempotent: config is upserted (merge); runtime fields (live counters, claimed
 // codes, team scores/progress) are preserved across runs — never clobbered.
 // ─────────────────────────────────────────────────────────────────────────────
-import admin from 'firebase-admin';
-import { readFileSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
+import { db, auth } from './lib/firestore-admin.mjs';
 import { fetchRows, usingSheets } from './lib/sheets-source.mjs';
 import { DATASETS } from './lib/datasets.mjs';
-
-// Tiny .env loader (no dependency): loads scripts/.env then repo-root .env so you
-// can drop RUSHPOINT_SHEETS_ID in a file instead of exporting it each time.
-function loadEnv() {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  for (const file of [path.join(here, '.env'), path.join(here, '..', '.env')]) {
-    if (!existsSync(file)) continue;
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/i);
-      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '').trim();
-    }
-  }
-}
-loadEnv();
-
-const PROJECT_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
-process.env.FIRESTORE_EMULATOR_HOST     ??= '127.0.0.1:8080';
-process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
-
-admin.initializeApp({ projectId: PROJECT_ID });
-const db = admin.firestore();
-const auth = admin.auth();
+import { webhookConfigured } from './lib/sheets-writer.mjs';
+import { pushStatus } from './lib/mirror-core.mjs';
 
 async function applyCollection(ds, rows) {
   let created = 0;
@@ -81,6 +58,17 @@ async function main() {
     } catch (e) {
       console.error(`  ❌ ${ds.name}: ${e.message}`);
       throw e;
+    }
+  }
+
+  // Outbound: reflect the live standings back into the sheet's `status` tab (only
+  // when the Apps Script webhook is configured — see APPS_SCRIPT_SETUP.md).
+  if (webhookConfigured()) {
+    try {
+      await pushStatus(db);
+      console.info('  ↑ status   → Google Sheet (write-back)');
+    } catch (e) {
+      console.warn(`  ⚠ status write-back failed: ${e.message}`);
     }
   }
 

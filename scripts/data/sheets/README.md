@@ -5,6 +5,11 @@ the **single source of truth** for the app's config data. On every boot the sync
 step (`npm run sync`, also run automatically by `npm run dev:all`) reads them and
 upserts the data into Firestore — so **edit a file, re-run the app, and it updates.**
 
+> **Two-way with Google Sheets:** point the app at a Google Sheet (Option B below)
+> and it becomes a live, bidirectional database — config flows Sheet → app on every
+> run, and the app mirrors changes back (config edits + a live `status` standings
+> tab) via a tiny Apps Script. See **`APPS_SCRIPT_SETUP.md`** to switch write-back on.
+
 You can edit them two ways:
 
 ### Option A — edit the CSV files here (works out of the box, offline)
