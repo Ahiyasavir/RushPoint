@@ -28,6 +28,8 @@ const en: Dict = {
   // Heatmap
   'heatmap.title': 'Live Team Map',
   'heatmap.subtitle': 'Station positions across the Jerusalem course',
+  'heatmap.layerTopo': '🗺 Topo',
+  'heatmap.layerSatellite': '🛰 Satellite',
   'heatmap.noPhone': 'No captain phone on file',
   'heatmap.legendGreen': 'Field mission',
   'heatmap.legendGate': 'Matchmaking gate',
@@ -368,6 +370,8 @@ const he: Dict = {
   // Heatmap
   'heatmap.title': 'מפת קבוצות חיה',
   'heatmap.subtitle': 'מיקומי העמדות לאורך מסלול ירושלים',
+  'heatmap.layerTopo': '🗺 טופו',
+  'heatmap.layerSatellite': '🛰 לוויין',
   'heatmap.noPhone': 'אין טלפון קפטן רשום',
   'heatmap.legendGreen': 'משימת שדה',
   'heatmap.legendGate': 'שער זיווג',

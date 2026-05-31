@@ -142,7 +142,14 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
     for (const slot of completedSlots) {
       if (slot.taskId) completedTaskIds.push(slot.taskId);
     }
-    activeSlotType = gs.slots.find((s) => s.status === 'active')?.type;
+    const activeSlot = gs.slots.find((s) => s.status === 'active');
+    // Idempotent: if the active slot already holds a task (e.g. a double-tap or a
+    // retry after a dropped response), return it WITHOUT routing again — otherwise
+    // assignNextTask would increment another station's load counter for nothing.
+    if (activeSlot?.taskId) {
+      return { taskId: activeSlot.taskId, alreadyAssigned: true };
+    }
+    activeSlotType = activeSlot?.type;
     skillRatio = await computeSkillRatio(completedSlots);
   }
 
@@ -841,7 +848,10 @@ const MAX_TEAM_SIZE = 7;
 // (Firestore forbids serverTimestamp() sentinels inside array elements).
 function buildInitialSlots(nowIso: string): JudgeSlot[] {
   return [
-    { index: 0, type: 'green',  status: 'active', startedAt: nowIso, taskId: 'task-green-001', taskTitle: 'Jerusalem Landmarks Photo Hunt' },
+    // Slot 0 is active but UNASSIGNED — registerTeam routes it via assignNextTask
+    // (load-balanced from the race start) so 30 teams spread across green stations
+    // instead of all piling onto a hard-pinned task-green-001.
+    { index: 0, type: 'green',  status: 'active', startedAt: nowIso },
     { index: 1, type: 'green',  status: 'locked' },
     { index: 2, type: 'green',  status: 'locked' },
     { index: 3, type: 'gate',   status: 'locked' },
@@ -942,8 +952,43 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
     tx.update(codeRef, { claimed: true, teamId: uid });
 
     return { teamId: uid, teamName: name, alreadyRegistered: false };
+  }).then(async (result) => {
+    // Post-registration: load-balance the team's FIRST green mission across the
+    // station pool (flattens the opening rush). Best-effort — if no green station
+    // is free, slot 0 stays unassigned and the app's requestNextTask handles it.
+    if (!result.alreadyRegistered) await routeFirstGreen(uid, nowIso);
+    return result;
   });
 });
+
+/** Route slot 0 to the least-loaded green station near the race start. */
+async function routeFirstGreen(uid: string, nowIso: string): Promise<void> {
+  try {
+    const cfgSnap = await db.doc(`artifacts/${APP_ID}/public/data/raceConfig/current`).get();
+    const start = cfgSnap.exists ? (cfgSnap.data() as { start?: { lat?: number; lng?: number } }).start : undefined;
+    const loc = start && typeof start.lat === 'number' && typeof start.lng === 'number'
+      ? { lat: start.lat, lng: start.lng }
+      : { lat: 31.7905, lng: 35.164 };
+
+    const res = await assignNextTask(uid, loc, [], 'green', 0);
+    if (!res.taskId) return;
+
+    const taskSnap = await db.doc(taskPath(res.taskId)).get();
+    const taskTitle = taskSnap.exists ? (taskSnap.data() as { title?: string }).title : undefined;
+    const gsRef = db.doc(`${userPath(uid)}/gameState/current`);
+    const gsSnap = await gsRef.get();
+    if (!gsSnap.exists) return;
+    const gs = gsSnap.data() as { slots: JudgeSlot[] };
+    const slots = gs.slots.map((s) => ({ ...s }));
+    const idx = slots.findIndex((s) => s.status === 'active');
+    if (idx >= 0 && !slots[idx].taskId) {
+      slots[idx] = { ...slots[idx], taskId: res.taskId, ...(taskTitle ? { taskTitle } : {}) };
+      await gsRef.update({ slots, updatedAt: nowIso });
+    }
+  } catch {
+    /* no green station free at launch — slot 0 remains unassigned; requestNextTask will route it */
+  }
+}
 
 // â”€â”€â”€ joinTeam â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // A SECOND device joining an already-claimed access code. Anonymous auth gives
@@ -1295,6 +1340,47 @@ export const resolveMatch = functions.https.onCall(async (data, context) => {
   await completeGateSlot(winnerId, nowIso);
 
   return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS };
+});
+
+// ─── sweepMatchQueue (sanctioned solo-clear) ──────────────────────────────────
+// Any team left waiting at the gate longer than maxWaitSeconds (default 5 min)
+// with no opponent is auto-advanced past the gate — no manual judge step. Awards
+// the standard gate bonus so a lone team isn't penalised for the lack of a rival.
+// Idempotent and safe to run on a timer (admin UI / scheduler).
+export const sweepMatchQueue = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const maxWaitSeconds = Number((data ?? {}).maxWaitSeconds) > 0 ? Number((data as { maxWaitSeconds: number }).maxWaitSeconds) : 300;
+  const nowMs  = Date.now();
+  const nowIso = new Date().toISOString();
+  const queueColl = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
+  const waiting = await queueColl.where('status', '==', 'waiting').get();
+
+  const cleared: string[] = [];
+  for (const d of waiting.docs) {
+    const e = d.data() as { teamId?: string; joinedAt?: string };
+    const teamId = e.teamId || d.id;
+    const joinedMs = e.joinedAt ? new Date(e.joinedAt).getTime() : nowMs;
+    if (nowMs - joinedMs < maxWaitSeconds * 1000) continue; // not stranded long enough yet
+
+    const gsRef  = db.doc(`${userPath(teamId)}/gameState/current`);
+    const gsSnap = await gsRef.get();
+    if (!gsSnap.exists) { await queueColl.doc(teamId).set({ status: 'resolved' }, { merge: true }); continue; }
+    const gs = gsSnap.data() as { slots?: JudgeSlot[]; score?: number };
+    // Only solo-clear when the gate slot is genuinely the active objective.
+    if (gs.slots?.[GATE_SLOT_INDEX]?.status !== 'active') {
+      await queueColl.doc(teamId).set({ status: 'resolved' }, { merge: true });
+      continue;
+    }
+    await gsRef.update({ score: (gs.score ?? 0) + MATCH_WIN_BONUS, matchStatus: 'bypassed', updatedAt: nowIso });
+    await completeGateSlot(teamId, nowIso);
+    await queueColl.doc(teamId).set({ status: 'resolved' }, { merge: true });
+    await writeAuditLog({
+      teamId, operatorId: context.auth!.uid, actionType: 'manual_unlock',
+      reason: `Sanctioned solo-clear at gate (waited > ${maxWaitSeconds}s, no opponent)`,
+    });
+    cleared.push(teamId);
+  }
+  return { success: true, cleared, count: cleared.length };
 });
 
 // ─── bypassMatchmaking ────────────────────────────────────────────────────────

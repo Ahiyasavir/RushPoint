@@ -1,9 +1,12 @@
-// MapLibre style resolver. Prefers MapTiler's topographic "outdoor" style (free
-// tier, no credit card) when a key is configured; otherwise falls back to a
-// keyless OpenTopoMap raster style so the map is NEVER blank — both show terrain.
+// MapLibre style resolver. Two variants:
+//   • 'outdoor'   — topographic terrain (MapTiler outdoor-v2, keyless OpenTopoMap fallback)
+//   • 'satellite' — aerial/hybrid imagery (MapTiler hybrid, keyless ESRI World Imagery fallback)
+// Both fall back to a keyless raster so the map is NEVER blank.
 import type { StyleSpecification } from 'maplibre-gl';
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
+
+export type MapVariant = 'outdoor' | 'satellite';
 
 /** Keyless topographic fallback (OpenTopoMap raster — CC-BY-SA, OSM data). */
 const OPENTOPO_STYLE: StyleSpecification = {
@@ -25,10 +28,27 @@ const OPENTOPO_STYLE: StyleSpecification = {
   layers: [{ id: 'opentopo', type: 'raster', source: 'opentopo' }],
 };
 
-/** Returns the MapTiler outdoor style URL, or the keyless OpenTopoMap fallback. */
-export function getMapStyle(): string | StyleSpecification {
+/** Keyless satellite fallback (Esri World Imagery raster). */
+const ESRI_SATELLITE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    esri: {
+      type: 'raster',
+      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+    },
+  },
+  layers: [{ id: 'esri', type: 'raster', source: 'esri' }],
+};
+
+/** Returns the MapLibre style for the requested variant (MapTiler when keyed). */
+export function getMapStyle(variant: MapVariant = 'outdoor'): string | StyleSpecification {
   if (MAPTILER_KEY) {
-    return `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`;
+    return variant === 'satellite'
+      ? `https://api.maptiler.com/maps/hybrid/style.json?key=${MAPTILER_KEY}`
+      : `https://api.maptiler.com/maps/outdoor-v2/style.json?key=${MAPTILER_KEY}`;
   }
-  return OPENTOPO_STYLE;
+  return variant === 'satellite' ? ESRI_SATELLITE_STYLE : OPENTOPO_STYLE;
 }

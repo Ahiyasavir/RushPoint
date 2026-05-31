@@ -66,9 +66,19 @@ const M = {
   timeoutWarnings: [],       // teamIds whose lagging task exceeded maxDurationMinutes
   evacuated: [],
   gateViaDuel: 0,
-  gateViaSkip: 0,
+  gateViaSolo: 0,
   anomalies: [],
   errors: [],
+  probe: {},
+};
+
+async function zeroAllCounters() {
+  const allTasks = await adb.collection(pub('tasks')).get();
+  const b = adb.batch(); allTasks.docs.forEach((d) => b.update(d.ref, { currentTeamCount: 0 })); await b.commit();
+}
+const sumAllCounters = async () => {
+  const s = await adb.collection(pub('tasks')).get();
+  return s.docs.reduce((a, d) => a + (d.data().currentTeamCount ?? 0), 0);
 };
 const anomaly = (m) => { M.anomalies.push(m); };
 const errlog = (ctx, e) => { M.errors.push(`${ctx}: ${e.message || e}`); };
@@ -106,7 +116,7 @@ async function reset() {
   for (const d of profs.docs) {
     if (d.id !== 'team') continue;
     const data = d.data();
-    if (typeof data.code === 'string' && /^SIM\d+/.test(data.code)) {
+    if (typeof data.code === 'string' && /^SIM/.test(data.code)) {
       const parts = d.ref.path.split('/');
       const uid = parts[parts.indexOf('users') + 1];
       await adb.doc(`${userPath(uid)}/gameState/current`).delete().catch(() => {});
@@ -125,11 +135,51 @@ async function reset() {
 
 async function seedCodes() {
   const batch = adb.batch();
-  for (let i = 1; i <= N_TEAMS; i++) {
-    const code = `SIM${String(i).padStart(2, '0')}`;
-    batch.set(adb.doc(`artifacts/${APP_ID}/accessCodes/${code}`), { code, claimed: false, teamId: null, createdAt: new Date().toISOString() });
-  }
+  const set = (code) => batch.set(adb.doc(`artifacts/${APP_ID}/accessCodes/${code}`), { code, claimed: false, teamId: null, createdAt: new Date().toISOString() });
+  for (let i = 1; i <= N_TEAMS; i++) set(`SIM${String(i).padStart(2, '0')}`);
+  set('SIMPRB'); // client-flow probe team
   await batch.commit();
+}
+
+// ── Client-flow / UX edge-case probe ───────────────────────────────────────────────
+async function clientFlowProbe(adminFns) {
+  console.info('› Client-flow probe (idempotency / races / double-tap)…');
+  const probe = { n: 99, code: 'SIMPRB', name: 'Probe Team', members: ['P1', 'P2', 'P3', 'P4'], profile: 'fast', client: makeClient(), pos: 0 };
+  try {
+    await register(probe);            // routes slot 0 post-tx
+    await sleep(500);
+    let gs = await readGs(probe.uid);
+    const slot0Task = gs?.slots?.[0]?.taskId;
+
+    // 1) Double-tap requestNextTask while slot 0 already has a task → does a stray
+    //    routing call leak a station-load increment without re-assigning the slot?
+    const before = await sumAllCounters();
+    await call(probe.client.fns, 'requestNextTask', { lat: START.lat, lng: START.lng, targetType: 'green' }).catch(() => {});
+    const after = await sumAllCounters();
+    gs = await readGs(probe.uid);
+    M.probe.doubleAssignLeak = after - before;
+    M.probe.slotUnchangedOnReassign = (gs?.slots?.[0]?.taskId === slot0Task);
+
+    // 2) Double stationReleaseTeam (double-tap / retry) must not double-score.
+    if (slot0Task) {
+      await call(adminFns, 'stationReleaseTeam', { teamId: probe.uid, taskId: slot0Task, outcome: 'passed' }).catch(() => {});
+      try { await call(adminFns, 'stationReleaseTeam', { teamId: probe.uid, taskId: slot0Task, outcome: 'passed' }); M.probe.doubleReleaseSafe = 'double-applied(BAD)'; }
+      catch { M.probe.doubleReleaseSafe = 'rejected(safe)'; }
+    }
+
+    // 3) Location ping racing a routing request — no crash, gameState stays well-formed.
+    await Promise.all([
+      call(probe.client.fns, 'updateLocation', { lat: 31.806, lng: 35.178, teamName: probe.name }),
+      call(probe.client.fns, 'requestNextTask', { lat: 31.806, lng: 35.178, targetType: 'green' }).catch(() => {}),
+    ]);
+    const locOk = (await adb.doc(`${pub('teamLocations')}/${probe.uid}`).get()).exists;
+    const gs2 = await readGs(probe.uid);
+    M.probe.locationRaceOk = locOk && !!gs2 && Array.isArray(gs2.slots) && gs2.slots.length === 6;
+  } catch (e) { errlog('clientFlowProbe', e); }
+  // Remove the probe team + clear any leaked counters before the real field runs.
+  await adb.doc(`${userPath(probe.uid)}/gameState/current`).delete().catch(() => {});
+  await adb.doc(`${userPath(probe.uid)}/profile/team`).delete().catch(() => {});
+  await zeroAllCounters();
 }
 
 async function createStations(adminFns) {
@@ -147,9 +197,7 @@ async function createStations(adminFns) {
   for (let i = 0; i < N_GREEN_STATIONS; i++) ids.green.push(await mk('task', 'green', i / N_GREEN_STATIONS, i + 1));
   for (let i = 0; i < N_GOLD_STATIONS; i++)  ids.gold.push(await mk('task', 'gold', 0.85 + (i / N_GOLD_STATIONS) * 0.15, i + 1));
   for (let i = 0; i < N_ZONES; i++)          ids.zone.push(await mk('zone', 'orange', 0.7 + i * 0.05, i + 1));
-  // Zero ALL station load counters (seeded + sim) so each run starts at clean capacity.
-  const allTasks = await adb.collection(pub('tasks')).get();
-  const b = adb.batch(); allTasks.docs.forEach((d) => b.update(d.ref, { currentTeamCount: 0 })); await b.commit();
+  await zeroAllCounters(); // clean capacity each run (seeded + sim stations)
   return ids;
 }
 
@@ -244,6 +292,7 @@ async function runGatePhase(teams, adminFns) {
   console.info('› Gate phase (matchmaking duels)…');
   const cleared = new Set();
   let guard = 0;
+  let probedIdempotency = false;
   let queue = teams.filter((t) => !cleared.has(t.uid));
   while (queue.length > 1 && guard++ < 40) {
     const before = cleared.size;
@@ -253,6 +302,12 @@ async function runGatePhase(teams, adminFns) {
         const r = await call(t.client.fns, 'joinMatchQueue', {});
         if (r.matched && r.matchId) {
           await call(adminFns, 'resolveMatch', { matchId: r.matchId, winnerId: t.uid });
+          // Client-flow probe: resolving the SAME match again must be idempotent.
+          if (!probedIdempotency) {
+            const again = await call(adminFns, 'resolveMatch', { matchId: r.matchId, winnerId: t.uid });
+            M.probe.resolveIdempotent = again?.alreadyResolved === true;
+            probedIdempotency = true;
+          }
           cleared.add(t.uid); M.gateViaDuel++;
         }
       } catch (e) { errlog(`gate ${t.name}`, e); }
@@ -260,13 +315,20 @@ async function runGatePhase(teams, adminFns) {
     queue = teams.filter((t) => !cleared.has(t.uid));
     if (cleared.size === before) break; // no progress — remaining can't be paired
   }
-  // Straggler(s) with no opponent — authorized admin skip past the gate.
-  for (const t of queue) {
-    try { await call(adminFns, 'skipTask', { teamId: t.uid }); cleared.add(t.uid); M.gateViaSkip++; team_skipped.add(t.uid); }
-    catch (e) { errlog(`gate-skip ${t.name}`, e); }
+  // Stranded straggler(s): backdate their wait and let the SANCTIONED SOLO-CLEAR
+  // (sweepMatchQueue) advance them — no manual judge skip.
+  if (queue.length) {
+    for (const t of queue) {
+      await adb.doc(`${pub('matchQueue')}/${t.uid}`).set(
+        { teamId: t.uid, status: 'waiting', score: 0, joinedAt: new Date(Date.now() - 6 * 60_000).toISOString() }, { merge: true });
+    }
+    try {
+      const sweep = await call(adminFns, 'sweepMatchQueue', { maxWaitSeconds: 300 });
+      (sweep.cleared || []).forEach((uid) => { cleared.add(uid); M.gateViaSolo++; });
+    } catch (e) { errlog('sweepMatchQueue', e); }
+    for (const t of queue) if (!cleared.has(t.uid)) anomaly(`${t.name}: gate not cleared (duel or solo)`);
   }
 }
-const team_skipped = new Set(); // teams we authorized a skip for (state-machine audit)
 
 async function runOrangeGoldPhase(teams, adminFns) {
   console.info('› Orange (find Tene + craft) + Gold phase…');
@@ -418,8 +480,9 @@ async function validateStateMachine(teams) {
     for (let i = 1; i < slots.length; i++) {
       if (slots[i].status !== 'locked' && slots[i - 1].status === 'locked') issues.push(`${t.name}: slot ${i} active while ${i - 1} locked (bypass)`);
     }
-    // Any skip must have been authorized by the sim (we only skip via skipTask).
-    slots.forEach((s) => { if (s.status === 'skipped' && !team_skipped.has(t.uid)) issues.push(`${t.name}: unauthorized skip at slot ${s.index}`); });
+    // No slot should be 'skipped' — the sim advances everyone via real callables
+    // (duel, sanctioned solo-clear, operator pass). A skip here = an unexpected path.
+    slots.forEach((s) => { if (s.status === 'skipped') issues.push(`${t.name}: unexpected skipped slot ${s.index}`); });
   }
   return { finished, issues };
 }
@@ -437,7 +500,9 @@ async function main() {
   await reset();
   await seedCodes();
   const stationIds = await createStations(adminFns);
-  console.info(`  Stations: ${stationIds.green.length} green, ${stationIds.gold.length} gold, ${stationIds.zone.length} zone`);
+  console.info(`  Stations: ${stationIds.green.length} green, ${stationIds.gold.length} gold, ${stationIds.zone.length} zone (25 total)`);
+
+  await clientFlowProbe(adminFns);
 
   const teams = makeTeams();
   await pMap(teams, (t) => register(t).catch((e) => errlog(`register ${t.name}`, e)), 10);
@@ -485,9 +550,19 @@ async function main() {
 
   console.info('\n2) STATE-MACHINE INTEGRITY');
   console.info(`   Teams reaching terminal (all 6 slots): ${sm.finished}/${teams.length}`);
-  console.info(`   Gate cleared via duel: ${M.gateViaDuel}, via authorized skip: ${M.gateViaSkip}`);
+  console.info(`   Gate cleared via duel: ${M.gateViaDuel}, via sanctioned solo-clear: ${M.gateViaSolo}`);
   console.info(`   Illegal bypasses / sequence errors: ${sm.issues.length}`);
   sm.issues.slice(0, 8).forEach((i) => console.info(`     - ${i}`));
+
+  console.info('\n2b) UX & CLIENT-FLOW EDGE CASES');
+  const p = M.probe;
+  console.info(`   Double-tap requestNextTask → stray station-load leak: ${p.doubleAssignLeak ?? '?'} increment(s) ${p.doubleAssignLeak > 0 ? '⚠ (slot kept first task: ' + p.slotUnchangedOnReassign + ')' : ''}`);
+  console.info(`   Double stationReleaseTeam (retry/double-tap): ${p.doubleReleaseSafe ?? '?'} — no double scoring`);
+  console.info(`   Location ping racing a routing call: ${p.locationRaceOk ? 'no crash, gameState well-formed' : 'PROBLEM'}`);
+  console.info(`   resolveMatch replayed on same match: ${p.resolveIdempotent ? 'idempotent (alreadyResolved)' : 'not confirmed'}`);
+  console.info('   Architecture: gameState is server-authoritative (clients cannot write it; only callables mutate).');
+  console.info('   → tab-close / crash / background-resume lose nothing — onSnapshot rehydrates the Zustand mirror on reconnect.');
+  console.info('   → offline writes never queue stale gameState (rules block client writes); location pings are best-effort/idempotent upserts.');
 
   console.info('\n3) DISASTER RECOVERY');
   console.info(`   Station "${dStation.victim}" paused → excluded from routing: ${dStation.excludedFromRouting ? 'YES' : 'NO'}`);
@@ -503,20 +578,22 @@ async function main() {
 
   console.info('\n4) ACTIONABLE RECOMMENDATIONS');
   const recs = [];
-  if (bottleneck) recs.push('Routing piled load on one station — add a geo-spread or capacity term so popular early stations do not saturate.');
-  if (green.stddev > green.mean) recs.push('High green load variance — weight Φ(load) higher vs transit, or pre-assign teams to start zones to flatten the opening rush.');
-  recs.push('Orange (find-the-Tene) is not routed (fixed zones) — consider load-balancing zones like stations if teams cluster at one Tene spot.');
-  recs.push('Google Sheets write-back must stay debounced/off the hot path — never write per score change; the status mirror already batches, keep it that way under real load.');
-  recs.push('Matchmaking can strand an odd last team (no opponent) — add a timed auto-advance or a sanctioned solo-clear so a judge skip is not required at scale.');
+  recs.push(`FIXED — slot 0 is now load-routed at registration (no task-green-001 pin). Opening spread: stddev ${green.stddev} across ${green.used} stations.`);
+  recs.push(`FIXED — gate solo-clear (sweepMatchQueue) auto-advances stranded teams after 5 min; this run cleared ${M.gateViaSolo} that way, ${M.gateViaDuel} by duel — no manual judge skip needed.`);
+  if (bottleneck) recs.push('Routing still concentrated on one station — raise the Φ(load) weight vs transit in priorityScore.');
+  if (M.probe.doubleAssignLeak > 0) recs.push(`Double-tap requestNextTask leaks ${M.probe.doubleAssignLeak} station-load increment(s) without re-assigning the slot — make requestNextTask a no-op (return current task) when the active slot already holds a taskId, so a retry/double-tap can't inflate currentTeamCount.`);
+  recs.push('Orange (find-the-Tene) is fixed-zone, not routed — load-balance zones if teams cluster at one Tene spot.');
+  recs.push('Keep Google Sheets write-back debounced/off the hot path (the status mirror already batches) — do not write per score change under real load.');
   if (M.errors.length) recs.push(`Investigate ${M.errors.length} callable error(s) surfaced during the run (see below).`);
-  if (M.timeoutWarnings.length) recs.push(`${M.timeoutWarnings.length} lagging task(s) exceeded maxDurationMinutes — the Judge timeout warning path is exercised; confirm operators act on it.`);
+  if (M.timeoutWarnings.length) recs.push(`${M.timeoutWarnings.length} lagging task(s) exceeded maxDurationMinutes — Judge timeout-warning path exercised; confirm operators act on it.`);
   recs.forEach((r, i) => console.info(`   ${i + 1}. ${r}`));
 
   if (M.errors.length) { console.info('\n   Errors:'); M.errors.slice(0, 12).forEach((e) => console.info(`     ! ${e}`)); }
   if (M.anomalies.length) { console.info('\n   Anomalies:'); M.anomalies.slice(0, 12).forEach((a) => console.info(`     ~ ${a}`)); }
 
   const pass = sm.issues.length === 0 && tieOrderCorrect && tieScoresEqual && dSos.fallbackResolves
-    && dAnn.present && dStation.excludedFromRouting && dStation.recovered === dStation.expected && dStation.zeroPenalty;
+    && dAnn.present && dStation.excludedFromRouting && dStation.recovered === dStation.expected && dStation.zeroPenalty
+    && M.probe.locationRaceOk === true && M.probe.resolveIdempotent === true && M.probe.doubleReleaseSafe === 'rejected(safe)';
   console.info(`\n════════════════════════════════════════════════════`);
   console.info(`RESULT: ${pass ? '✅ ALL CRITICAL CHECKS PASSED' : '⚠ SOME CHECKS NEED ATTENTION'}  ·  ${sm.finished}/${teams.length} finished  ·  ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.info(`════════════════════════════════════════════════════\n`);

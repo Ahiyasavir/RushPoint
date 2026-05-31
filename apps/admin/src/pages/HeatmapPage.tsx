@@ -6,7 +6,7 @@ import { routePathFor, routeGeoJSON, STATION_COLOR } from '@rushpoint/shared';
 import { db, APP_ID, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 import { useRaceConfig, useStations } from '../data/raceConfig';
-import { getMapStyle } from '../data/mapStyle';
+import { getMapStyle, type MapVariant } from '../data/mapStyle';
 
 interface LiveTeam { teamId: string; teamName?: string; lat: number; lng: number; updatedAt?: string }
 interface ActiveAlert {
@@ -87,6 +87,11 @@ export default function HeatmapPage() {
   const stations = useStations();
   const routeData = routeGeoJSON(routePathFor(raceConfig));
   const [selected, setSelected] = useState<PositionedAlert | null>(null);
+  // Map base-layer variant. Switching only swaps the GL style — the live-team and
+  // alert onSnapshot listeners live in React state (useLiveTeams/useActiveAlerts),
+  // so they are untouched, and Markers + the route Source/Layer are re-applied by
+  // react-map-gl on styledata. No listener re-init, no marker loss.
+  const [mapVariant, setMapVariant] = useState<MapVariant>('outdoor');
 
   // A team with an active alert is shown as a flashing siren, not a normal dot.
   const alertedTeamIds = new Set(alerts.map((a) => a.teamId));
@@ -110,10 +115,24 @@ export default function HeatmapPage() {
       <h1 className="font-brand text-2xl font-bold text-white mb-1">{t('heatmap.title')}</h1>
       <p className="text-zinc-500 text-sm mb-6">{t('heatmap.subtitle')}</p>
 
-      <div className="rounded-2xl overflow-hidden border border-neon-green/20 shadow-glow-green h-[600px]">
+      <div className="relative rounded-2xl overflow-hidden border border-neon-green/20 shadow-glow-green h-[600px]">
+        {/* Base-layer toggle: topographic ⇄ satellite/hybrid */}
+        <div className="absolute top-3 left-3 z-10 flex rounded-lg overflow-hidden border border-white/20 shadow-lg backdrop-blur-sm">
+          {(['outdoor', 'satellite'] as MapVariant[]).map((v) => (
+            <button
+              key={v}
+              onClick={() => setMapVariant(v)}
+              className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
+                mapVariant === v ? 'bg-neon-green text-black' : 'bg-app-surface/80 text-zinc-300 hover:text-white'
+              }`}
+            >
+              {v === 'outdoor' ? t('heatmap.layerTopo') : t('heatmap.layerSatellite')}
+            </button>
+          ))}
+        </div>
         <Map
           initialViewState={{ longitude: raceConfig.center.lng, latitude: raceConfig.center.lat, zoom: raceConfig.zoom }}
-          mapStyle={getMapStyle()}
+          mapStyle={getMapStyle(mapVariant)}
           attributionControl={true}
         >
           <NavigationControl position="top-right" />
