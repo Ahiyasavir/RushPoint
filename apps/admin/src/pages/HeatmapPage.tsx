@@ -143,7 +143,7 @@ export default function HeatmapPage() {
               id="route-line"
               type="line"
               layout={{ 'line-join': 'round', 'line-cap': 'round' }}
-              paint={{ 'line-color': '#00ffaa', 'line-width': 4, 'line-opacity': 0.85 }}
+              paint={{ 'line-color': '#3d6152', 'line-width': 4, 'line-opacity': 0.85 }}
             />
           </Source>
 

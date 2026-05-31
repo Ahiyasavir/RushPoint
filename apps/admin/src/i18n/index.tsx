@@ -302,6 +302,9 @@ const en: Dict = {
   'checkins.empty': 'No pending check-ins',
   'checkins.checkedIn': 'Checked in',
   'checkins.waiting': 'Waiting',
+  'checkins.remove': 'Remove',
+  'checkins.removeConfirm': 'Remove this team from the queue?',
+  'checkins.removeError': 'Could not remove the check-in. Try again.',
 
   // Judge
   'judge.title': 'Judge Station',
@@ -644,6 +647,9 @@ const he: Dict = {
   'checkins.empty': 'אין צ׳ק-אין ממתינים',
   'checkins.checkedIn': 'נרשמה הגעה',
   'checkins.waiting': 'ממתינה',
+  'checkins.remove': 'הסרה',
+  'checkins.removeConfirm': 'להסיר את הקבוצה מהתור?',
+  'checkins.removeError': 'לא ניתן להסיר את הצ׳ק-אין. נסה שוב.',
 
   // Judge
   'judge.title': 'עמדת שיפוט',

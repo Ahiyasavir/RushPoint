@@ -179,6 +179,14 @@ export interface Task {
   difficulty: number;        // 1–10 task difficulty rating (sigmoid scoring)
   pointValue: number;
   estimatedMinutes: number;
+  /**
+   * Difficulty baseline for the Dynamic Time-Bonus algorithm (minutes).
+   * Per-task expected duration (e.g. Easy green ≈10, Hard green ≈18). Summed
+   * across a team's 6 assigned slots → their personal Route Target (T_expected),
+   * which finalizeLeaderboard compares to actual race time for a fairness bonus.
+   * Optional for back-compat; callers fall back to `estimatedMinutes`.
+   */
+  expectedDurationMinutes?: number;
 
   isActive: boolean;    // admin can toggle off without deleting
 

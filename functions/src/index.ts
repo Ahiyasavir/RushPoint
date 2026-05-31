@@ -18,6 +18,7 @@ import {
   completionBonus,
   computeTieMetrics,
   compareForRanking,
+  computeTimeBonus,
 } from './scoring/calculateScore';
 
 // â”€â”€â”€ Path + auth helpers for the judge flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -34,7 +35,7 @@ interface AuditEntry {
   teamId: string;
   teamName?: string;
   operatorId: string;
-  actionType: 'fine' | 'score_override' | 'manual_unlock' | 'evacuation' | 'skip';
+  actionType: 'fine' | 'score_override' | 'manual_unlock' | 'evacuation' | 'skip' | 'cancel_checkin';
   previousValue?: number | string | null;
   newValue?: number | string | null;
   reason?: string;
@@ -662,6 +663,56 @@ export const checkInArrival = functions.https.onCall(async (data, context) => {
 
     return { slotIndex, arrivedAt: nowIso, alreadyCheckedIn: false };
   });
+});
+
+// â”€â”€â”€ cancelCheckIn â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Volunteer/judge removes a team from the arrival queue (mistaken or duplicate
+// check-in, team left, etc.). Marks the pending check-in rejected and unfreezes
+// the team's mobile clock if this check-in was the one being judged. Idempotent.
+export const cancelCheckIn = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+
+  const { teamId, checkInId, reason } = data as { teamId?: string; checkInId?: string; reason?: string };
+  if (!teamId || !checkInId) {
+    throw new functions.https.HttpsError('invalid-argument', 'teamId and checkInId are required');
+  }
+
+  const nowIso = new Date().toISOString();
+
+  const result = await db.runTransaction(async (tx) => {
+    const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+    const ciRef = db.doc(`${userPath(teamId)}/checkIns/${checkInId}`);
+
+    const ciSnap = await tx.get(ciRef);
+    if (!ciSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Check-in not found');
+    }
+    const ci = ciSnap.data() as { status?: string };
+
+    const gsSnap = await tx.get(gsRef);
+    const gs = gsSnap.exists ? (gsSnap.data() as { judging?: JudgingState | null }) : null;
+    const wasJudging = !!gs?.judging && gs.judging.checkInId === checkInId;
+
+    // Mark the check-in rejected (kept for history rather than hard-deleted).
+    if (ci.status !== 'rejected') {
+      tx.update(ciRef, { status: 'rejected', cancelledAt: nowIso });
+    }
+    // Unfreeze the mobile clock only if THIS check-in held the freeze.
+    if (wasJudging) {
+      tx.update(gsRef, { judging: null, updatedAt: nowIso });
+    }
+
+    return { wasJudging };
+  });
+
+  await writeAuditLog({
+    teamId,
+    operatorId: context.auth?.uid ?? 'unknown',
+    actionType: 'cancel_checkin',
+    reason: reason ?? '',
+  });
+
+  return { ok: true, ...result };
 });
 
 // â”€â”€â”€ finalizeJudgeEvaluation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1445,7 +1496,27 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     completedSlots: number;
     finishedAt?: string;
     durationMinutes?: number;
+    routeTargetMinutes?: number; // T_expected — sum of assigned slots' expected durations
+    timeBonus: number;
     metrics: ReturnType<typeof computeTieMetrics>;
+  }
+
+  // ── Route Target (T_expected): per team, sum the expected duration of each of
+  // the 6 assigned slots. Fetch every referenced task once and build a duration
+  // map (expectedDurationMinutes, falling back to estimatedMinutes).
+  const allTaskIds = new Set<string>();
+  for (const gs of Object.values(gsMap)) {
+    for (const s of gs.slots) if (s.taskId) allTaskIds.add(s.taskId);
+  }
+  const taskDurationMap: Record<string, number> = {};
+  if (allTaskIds.size > 0) {
+    const refs = [...allTaskIds].map((id) => db.doc(taskPath(id)));
+    const snaps = await db.getAll(...refs);
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const td = snap.data() as { expectedDurationMinutes?: number; estimatedMinutes?: number };
+      taskDurationMap[snap.id] = td.expectedDurationMinutes ?? td.estimatedMinutes ?? 0;
+    }
   }
 
   const results: TeamResult[] = Object.keys(profMap).map((teamId) => {
@@ -1459,17 +1530,28 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
       const endProxy  = gs.craftingStartedAt ?? nowIso;
       durationMinutes = (new Date(endProxy).getTime() - new Date(prof.startedAt).getTime()) / 60_000;
     }
+    // T_expected — personal route baseline (only meaningful once finished).
+    const routeTargetMinutes = gs.slots.reduce(
+      (sum, s) => sum + (s.taskId ? (taskDurationMap[s.taskId] ?? 0) : 0),
+      0,
+    );
+    // Dynamic difficulty-adjusted time bonus (capped, never negative).
+    const timeBonus = allDone && durationMinutes != null && routeTargetMinutes > 0
+      ? computeTimeBonus(routeTargetMinutes, durationMinutes)
+      : 0;
     const bonus    = allDone ? 500 : 0;
     const rawScore = Math.max(0, gs.score + bonus - (gs.bonusPenalty ?? 0));
     const metrics  = computeTieMetrics(gs.slots, gs.bonusPenalty ?? 0);
-    return { teamId, teamName: prof.name, rawScore, finalScore: rawScore, completedSlots, finishedAt: prof.finishedAt, durationMinutes, metrics };
+    return { teamId, teamName: prof.name, rawScore, finalScore: rawScore, completedSlots, finishedAt: prof.finishedAt, durationMinutes, routeTargetMinutes, timeBonus, metrics };
   }).filter(Boolean) as TeamResult[];
 
   // Apply Z-Score to finished teams.
   const finishedDurations = results.filter((r) => r.durationMinutes != null).map((r) => r.durationMinutes as number);
   for (const r of results) {
     if (r.durationMinutes != null) {
-      r.finalScore = applyZScoreBonus(r.rawScore, r.durationMinutes, finishedDurations);
+      // Z-Score normalises against the field; the difficulty-adjusted time bonus
+      // is added on top so a team on a harder route isn't disadvantaged.
+      r.finalScore = applyZScoreBonus(r.rawScore, r.durationMinutes, finishedDurations) + r.timeBonus;
     }
   }
 
@@ -1494,6 +1576,8 @@ export const finalizeLeaderboard = functions.https.onCall(async (_data, context)
     completedSlots:  r.completedSlots,
     finishedAt:      r.finishedAt ?? null,
     durationMinutes: r.durationMinutes ?? null,
+    routeTargetMinutes: r.routeTargetMinutes ?? null, // T_expected (difficulty baseline)
+    timeBonus:       r.timeBonus,                      // difficulty-adjusted fairness bonus
     tieBreak:        { penalties: r.metrics.penalties, fieldTaskMs: r.metrics.fieldTaskMs, transitMs: r.metrics.transitMs },
   }));
 
@@ -1623,11 +1707,23 @@ export const saveTeneSelection = functions.https.onCall(async (data, context) =>
   const valid = new Set(TENE_PRODUCTS.map((p) => p.id));
   const productIds = Array.from(new Set(raw.filter((id): id is string => typeof id === 'string' && valid.has(id))));
 
-  await db.doc(`${userPath(uid)}/gameState/current`).set(
-    { teneSelection: productIds, updatedAt: new Date().toISOString() },
-    { merge: true },
-  );
-  return { teneSelection: productIds };
+  // Basket lock: once a judge has checked the team in (judging active), the Tene
+  // contents are frozen — the team can no longer add/remove products. The judge
+  // grades against the physical basket as presented at check-in.
+  const gsRef = db.doc(`${userPath(uid)}/gameState/current`);
+  const saved = await db.runTransaction(async (tx) => {
+    const gsSnap = await tx.get(gsRef);
+    const gs = gsSnap.data() as { judging?: JudgingState | null } | undefined;
+    if (gs?.judging) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'Basket is locked — the judge has already checked you in.',
+      );
+    }
+    tx.set(gsRef, { teneSelection: productIds, updatedAt: new Date().toISOString() }, { merge: true });
+    return productIds;
+  });
+  return { teneSelection: saved };
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

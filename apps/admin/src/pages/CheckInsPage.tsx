@@ -16,12 +16,14 @@ interface Arrival {
 }
 
 const listPendingArrivals = httpsCallable(functions, 'listPendingArrivals');
+const cancelCheckIn = httpsCallable(functions, 'cancelCheckIn');
 
 export default function CheckInsPage() {
   const { t } = useI18n();
   const [arrivals, setArrivals] = useState<Arrival[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,6 +41,22 @@ export default function CheckInsPage() {
   }, [t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const remove = useCallback(async (a: Arrival) => {
+    if (!window.confirm(t('checkins.removeConfirm'))) return;
+    setRemovingId(a.checkInId);
+    setError('');
+    try {
+      await ensureAuth();
+      await cancelCheckIn({ teamId: a.teamId, checkInId: a.checkInId });
+      setArrivals((prev) => prev.filter((x) => x.checkInId !== a.checkInId));
+    } catch (e) {
+      setError(t('checkins.removeError'));
+      console.error('[checkins] cancelCheckIn failed:', e);
+    } finally {
+      setRemovingId(null);
+    }
+  }, [t]);
 
   return (
     <div className="p-6 md:p-8 max-w-2xl mx-auto">
@@ -88,13 +106,22 @@ export default function CheckInsPage() {
                 </div>
                 <p className="text-sm text-zinc-500 mt-0.5">{a.taskTitle}</p>
               </div>
-              <span className={
-                a.arrivedAt
-                  ? 'text-xs px-2.5 py-1 rounded-full border bg-neon-blue/10 border-neon-blue/30 text-neon-blue'
-                  : 'text-xs px-2.5 py-1 rounded-full border bg-neon-gold/10 border-neon-gold/30 text-neon-gold'
-              }>
-                {a.arrivedAt ? t('checkins.checkedIn') : t('checkins.waiting')}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={
+                  a.arrivedAt
+                    ? 'text-xs px-2.5 py-1 rounded-full border bg-neon-blue/10 border-neon-blue/30 text-neon-blue'
+                    : 'text-xs px-2.5 py-1 rounded-full border bg-neon-gold/10 border-neon-gold/30 text-neon-gold'
+                }>
+                  {a.arrivedAt ? t('checkins.checkedIn') : t('checkins.waiting')}
+                </span>
+                <button
+                  onClick={() => void remove(a)}
+                  disabled={removingId === a.checkInId}
+                  className="text-xs px-2.5 py-1 rounded-full border border-red-500/30 text-red-300 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                >
+                  {removingId === a.checkInId ? t('common.loading') : t('checkins.remove')}
+                </button>
+              </div>
             </div>
           ))}
         </div>
