@@ -277,7 +277,7 @@ export default function DashboardScreen() {
         ) : activeSlot?.type === 'gate' ? (
           <GateCard matchStatus={gameState?.matchStatus} />
         ) : activeSlot ? (
-          <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} />
+          <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} craftingActive={craftingActive} />
         ) : (
           <Card className="p-6 items-center">
             <Text variant="bodySmall" className="text-zinc-500 text-center">
@@ -333,11 +333,12 @@ export default function DashboardScreen() {
 // ─── Active task card ─────────────────────────────────────────────────────────
 
 function ActiveTaskCard({
-  slot, judging, nowMs,
+  slot, judging, nowMs, craftingActive,
 }: {
   slot: FirestoreSlot;
   judging: JudgingState | null;
   nowMs: number;
+  craftingActive: boolean;
 }) {
   const { t } = useTranslation();
   const frozen  = !!judging && judging.slotIndex === slot.index;
@@ -381,8 +382,11 @@ function ActiveTaskCard({
         </View>
       )}
 
-      {/* Arrived at the judge → enter the pending queue for grading */}
-      {!frozen && (slot.type === 'green' || slot.type === 'gold') && (
+      {/* Arrived at the judge → enter the pending queue for grading. ONLY for the
+          gold stage, and ONLY once crafting has started (team has the Tene + the
+          20-min fill timer). Green field missions are graded by the station
+          operator, so they must NOT expose a self-serve "arrived at judge" button. */}
+      {!frozen && slot.type === 'gold' && craftingActive && (
         <RequestCheckInButton slot={slot} />
       )}
 
