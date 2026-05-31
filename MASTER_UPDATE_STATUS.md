@@ -73,17 +73,21 @@ Confirmed by reading the real source:
 - **Verified**: functions build exit 0; admin `tsc --noEmit` exit 0. Live click-through
   deferred (needs emulator + a seeded pending check-in).
 
-## ⬜ Remaining work (precise targets for next session)
-> index.ts is ~2150 lines and large-file `Read` GARBLES late in a session. Re-Read in
-> ≤120-line ranges AND cross-check with `grep -n` before any Edit, or `old_string`
-> matching will fail. Trust build/test EXIT CODES over a suspicious Read.
+## ✅ ALL master-update items complete (this session series)
+> Every §1–§5 item below is implemented, typechecked, and committed/pushed on
+> `topographic-maps`. The ONLY thing not done in-session is the **live** emulator run
+> of the 30-team sim (deliberately deferred — see §5). index.ts is ~2200 lines and
+> large-file `Read` GARBLES late in a session: re-Read in ≤120-line ranges + cross-check
+> with `grep -n` before any Edit. Trust build/test EXIT CODES over a suspicious Read.
 
-### §1 Tene discovery — manual check-in + beep + 20-min timer
-- New callable (e.g. `teneCheckIn` / reuse `startCraftingTimer`) called by a
-  **Tene Distributor** volunteer; it stamps `craftingStartedAt` server-side.
-- Mobile (`dashboard.tsx` / `basket-zone.tsx`): on `craftingStartedAt` appearing, play a
-  beep (there's already `useSlotSound` / Web Audio in the kit) and start the 20-min client
-  countdown synced to the server stamp.
+### §1 Tene discovery — manual check-in + beep + 20-min timer — ✅ DONE
+- `startCraftingForTeam` callable (volunteer-triggered, `assertJudge`, idempotent) stamps
+  `craftingStartedAt` server-side and advances the basket slot — same effect as the
+  self-serve `startCraftingTimer`.
+- Mobile beep: `useGameSync` plays the gold chime the moment `craftingStartedAt` first
+  appears; the 20-min countdown was already driven off that server stamp.
+- Volunteer trigger UI: new **Tene Hub** page (`/tene`, `TenePage.tsx`) — pick 1 of 3 hubs,
+  list basket-stage teams, **Start 20-min clock** button → `startCraftingForTeam`.
 
 ### §1 Judge routing + freeze bug + basket lock — ✅ DONE
 - Judge CTA mis-routing: **already fixed** by commit `8f7322f` — the mobile dashboard only
@@ -99,30 +103,44 @@ Confirmed by reading the real source:
   (see the section above). `VolunteerPage.tsx` can reuse the same `cancelCheckIn` callable
   if/when its own queue view is built.
 
-### §1 Progressive mobile map reveal
-- `apps/mobile/app/map.tsx` (368 lines, currently static): render only completed-slot
-  station coords + current target; reveal all product stations once `craftingStartedAt`
-  is set. Drive off `gameState.slots[].status` + the station list.
+### §1 Progressive mobile map reveal — ✅ DONE
+- `apps/mobile/app/map.tsx`: reads `live` from the game store and filters the station list
+  by progress (by station TYPE — markers carry no per-task id): green always; orange once
+  the team reaches the basket leg; gold/all once `craftingStartedAt` is set. The same
+  filtered list feeds BOTH the static-map URL and the GPS-dot frame, so "You Are Here" stays
+  aligned. Falls back to all stations before the first sync.
 
-### §2 Role refactor
-- `apps/admin/src/roles.tsx`: extend `Role` to add `duelModerator`, `arrivalApprover`,
-  `teneDistributor`; add `ROLE_ROUTES` entries. `RoleSelect.tsx` UI for the new roles.
-- **Station Operator**: `StationPage.tsx` — collapse Station Name + Number into a single
-  **Station Number** input (and the role-select station prompt).
-- **Tene Distributor**: pick 1 of 3 hubs, filter dashboard to teams routed to that hub.
-- **Global search + fines** (`VolunteerPage.tsx`, 643 lines — already has team list):
-  add a search box (name / member / code) and an instant-fine button → `adjustTeamScore`.
+### §2 Role refactor — ✅ DONE
+- `apps/admin/src/roles.tsx`: added `duelModerator` (→ `/matchmaking`), `arrivalApprover`
+  (→ `/checkins`), `teneDistributor` (→ `/tene`) to `Role`, `ALL_ROLES`, `ROLE_ROUTES`.
+  `RoleSelect.tsx` meta added (auto-renders from `ALL_ROLES`). EN/HE i18n for all.
+- **Station Operator**: already number-only — `RoleSelect` operator picker is a numeric
+  station select (1–25) and `StationPage` shows "Station {n}"; the dropdown there picks the
+  *mission* that runs at the station (a separate concept). No regression introduced.
+- **Tene Distributor**: new `TenePage.tsx` (`/tene`) — pick 1 of 3 hubs + start each team's
+  crafting clock (also satisfies the §1 volunteer trigger). Hub→team routing is demo-simple
+  (lists all basket-stage teams; teams carry no hub field yet).
+- **Global search + fines** (`VolunteerPage.tsx`): added a search box (name / code / member)
+  filtering the teams table; the instant cohesion-fine button (`adjustTeamScore`) already
+  existed.
 
-### §3 Admin route builder dynamic line
-- `BuilderPage.tsx` (366 lines): make the green route `Source`/`Layer` `data` derive from
-  the live coordinate state so the line updates as points are added/moved (no refresh).
+### §3 Admin route builder dynamic line — ✅ DONE
+- `BuilderPage.tsx`: route line now derives from live state — `start → green stations
+  (nearest-neighbour ordered) → gate → finish` — and recomputes instantly as any point is
+  dragged or a green station is added/removed. **Save Route** persists the derived mid-nodes;
+  green-station edits flag the route dirty. Removed the now-unused `routePathFor` import.
 
-### §5 Reset & 30-team / 25-station simulation
-- Base script exists: **`scripts/simulate-tournament.mjs`** — extend it to:
-  wipe collections, seed **25 stations** Motza→Gan HaKipod, launch **30 teams**, run to
-  completion, emit a health report (routing spread, state-sync friction, final standings).
-- Run procedure: `npm run dev:all` (emulator up), then `node scripts/simulate-tournament.mjs`.
-  Stop the emulator with **Ctrl+C** to persist (`--export-on-exit`).
+### §5 Reset & 30-team / 25-station simulation — ✅ DONE (script); ⬜ live run deferred
+- `scripts/simulate-tournament.mjs` already wipes sim data, seeds **25 stations** (18 green +
+  5 gold + 2 zones) Motza→Gan HaKipod, registers **30 teams**, runs the full lifecycle
+  (routing → duels/solo-clear → craft → operator pass), injects disruptions (station
+  breakdown+evacuate, GPS-less SOS, announcement, forced tie), finalizes, and prints a
+  PASS/FAIL health report. **Extended this session** to also exercise the new
+  `startCraftingForTeam` (half the field via the Tene Distributor path) and to report the §4
+  difficulty time-bonus spread. `node --check` passes.
+- **To run live** (deliberately NOT done in-session per the token-budget call): `npm run
+  dev:all` (emulator up), then `npm run simulate`. Stop with **Ctrl+C** to persist
+  (`--export-on-exit`).
 
 ## ⚠️ Environment gotchas hit this session (don't re-learn these)
 - **Parallel Bash batches cancel-cascade**: one failing call cancels every sibling. Run

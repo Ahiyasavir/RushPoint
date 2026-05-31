@@ -63,6 +63,8 @@ const M = {
   greenAssignments: {},      // taskId -> count
   goldAssignments: {},
   hintsUsed: 0,
+  craftingViaVolunteer: 0,   // crafting started by a Tene Distributor (startCraftingForTeam)
+  craftingViaSelf: 0,        // crafting started self-serve (startCraftingTimer)
   timeoutWarnings: [],       // teamIds whose lagging task exceeded maxDurationMinutes
   evacuated: [],
   gateViaDuel: 0,
@@ -334,9 +336,18 @@ async function runOrangeGoldPhase(teams, adminFns) {
   console.info('› Orange (find Tene + craft) + Gold phase…');
   await pMap(teams, async (team) => {
     // Orange: assign a zone + start the crafting clock (completes orange, unlocks gold).
+    // Half the field is started by a Tene Distributor volunteer (startCraftingForTeam,
+    // the new manual check-in), the other half self-serve (startCraftingTimer) — both
+    // paths must stamp craftingStartedAt and advance the slot identically.
     try {
       const z = await call(team.client.fns, 'getBasketZone', {});
-      await call(team.client.fns, 'startCraftingTimer', { zoneId: z?.zoneId ?? z?.id });
+      if (team.n % 2 === 0) {
+        await call(adminFns, 'startCraftingForTeam', { teamId: team.uid });
+        M.craftingViaVolunteer++;
+      } else {
+        await call(team.client.fns, 'startCraftingTimer', { zoneId: z?.zoneId ?? z?.id });
+        M.craftingViaSelf++;
+      }
     } catch (e) { errlog(`orange ${team.name}`, e); }
     // Gold: routed station + operator completion.
     try { await doRoutedSlot(team, adminFns, 'gold', 18); }
@@ -547,6 +558,14 @@ async function main() {
   console.info(`   Bottleneck detected: ${bottleneck ? 'YES — ' + green.max + ' on ' + (hottest[0] ? hottest[0][0] : '?') : 'no — load spread within 2× mean'}`);
   if (pinned) console.info(`   ⚠ Every team's first mission is hard-pinned to task-green-001 by registerTeam (not routed).`);
   console.info(`   Hints purchased (penalty path): ${M.hintsUsed}`);
+  console.info(`   Crafting start path: ${M.craftingViaVolunteer} via Tene Distributor (startCraftingForTeam), ${M.craftingViaSelf} self-serve`);
+
+  // §4 difficulty-adjusted time bonus (finalizeLeaderboard now returns timeBonus + routeTargetMinutes).
+  const bonuses = rankings.map((r) => r.timeBonus ?? 0);
+  const earned = bonuses.filter((b) => b > 0);
+  const bStats = stats(Object.fromEntries(rankings.map((r, i) => [i, r.timeBonus ?? 0])));
+  console.info(`   §4 time bonus: ${earned.length}/${rankings.length} teams earned > 0` +
+    ` (min=${bStats.min} max=${bStats.max} mean=${bStats.mean}, cap 200) — faster-than-target routes rewarded`);
 
   console.info('\n2) STATE-MACHINE INTEGRITY');
   console.info(`   Teams reaching terminal (all 6 slots): ${sm.finished}/${teams.length}`);
