@@ -144,6 +144,8 @@ export interface GameState {
   craftingStartedAt?: string;   // stamped when team scans basket QR (20-min clock starts)
   finalSprintStartedAt?: string; // stamped when 20-min crafting ends
   matchStatus?: MatchStatus;
+  gateCooldownUntil?: string | null; // ISO — after a duel loss, the team waits out a
+                                     // 90s cooldown before they may re-enter the gate queue
   teneSelection?: string[];     // product ids the team selected during crafting (slot 5)
   evacuatedFrom?: string | null; // station title the team was force-evacuated from (transient)
 }

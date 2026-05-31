@@ -922,12 +922,14 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
     captainPhone,
     participants = [],
     waiverAccepted,
+    waiverVersion,
   } = data as {
     code: string;
     teamName: string;
     captainPhone: string;
     participants: { name: string; age: string }[];
     waiverAccepted?: boolean;
+    waiverVersion?: string;
   };
 
   // â”€â”€ Validate input â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -987,9 +989,13 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
       captainPhone:   phone,
       participants:   validParticipants,
       memberNames,
-      waiverAccepted: true,
-      status:         'registered',
-      createdAt:      nowIso,
+      waiverAccepted:   true,
+      // Record which waiver version was accepted + when — consent trail for a
+      // real event. Falls back to 'unversioned' for older clients.
+      waiverVersion:    (waiverVersion ?? '').trim() || 'unversioned',
+      waiverAcceptedAt: nowIso,
+      status:           'registered',
+      createdAt:        nowIso,
     });
 
     tx.set(gsRef, {
@@ -1163,6 +1169,10 @@ const TARGET_TRANSIT_MINUTES = 20;
 const CRAFTING_DURATION_SECONDS = 20 * 60;
 const SPRINT_BUDGET_SECONDS = 90;
 const MATCH_WIN_BONUS = 150;
+// After losing a duel a team waits out this cooldown before re-entering the gate
+// queue (gives them a breather + lets fresh opponents accumulate). The mobile
+// GateCard shows the countdown and auto-rejoins when it elapses.
+const GATE_COOLDOWN_SECONDS = 90;
 
 // ─── checkInGate ──────────────────────────────────────────────────────────────
 // Called when a team scans the Bible Park gate QR.
@@ -1345,7 +1355,7 @@ export const joinMatchQueue = functions.https.onCall(async (_data, context) => {
   ]);
   if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found');
 
-  const gs        = gsSnap.data() as { score?: number; matchStatus?: string };
+  const gs        = gsSnap.data() as { score?: number; matchStatus?: string; gateCooldownUntil?: string | null };
   const teamScore = gs.score ?? 0;
   const teamName  = (profSnap.data() as { name?: string })?.name ?? teamId;
 
@@ -1357,6 +1367,16 @@ export const joinMatchQueue = functions.https.onCall(async (_data, context) => {
   if (gs.matchStatus === 'matched') {
     const ownQueue = (await queueColl.doc(teamId).get()).data() as { matchId?: string } | undefined;
     return { matched: true, matchId: ownQueue?.matchId, alreadyInMatch: true };
+  }
+
+  // Post-loss cooldown: a team that just lost must wait out GATE_COOLDOWN_SECONDS
+  // before re-entering the queue. Tell the client how long is left so it can
+  // count down and retry automatically.
+  if (gs.gateCooldownUntil) {
+    const remainingMs = new Date(gs.gateCooldownUntil).getTime() - Date.now();
+    if (remainingMs > 0) {
+      return { matched: false, status: 'cooldown', cooldownUntil: gs.gateCooldownUntil, cooldownSeconds: Math.ceil(remainingMs / 1000) };
+    }
   }
 
   const waitingSnap = await queueColl.where('status', '==', 'waiting').get();
@@ -1376,14 +1396,14 @@ export const joinMatchQueue = functions.https.onCall(async (_data, context) => {
     });
     batch.set(queueColl.doc(teamId),   { teamId, teamName, score: teamScore, joinedAt: nowIso, status: 'matched', matchId: matchRef.id });
     batch.update(opponent.ref, { status: 'matched', matchId: matchRef.id });
-    batch.set(db.doc(`${userPath(teamId)}/gameState/current`),   { matchStatus: 'matched', updatedAt: nowIso }, { merge: true });
-    batch.set(db.doc(`${userPath(opponent.id)}/gameState/current`), { matchStatus: 'matched', updatedAt: nowIso }, { merge: true });
+    batch.set(db.doc(`${userPath(teamId)}/gameState/current`),   { matchStatus: 'matched', gateCooldownUntil: null, updatedAt: nowIso }, { merge: true });
+    batch.set(db.doc(`${userPath(opponent.id)}/gameState/current`), { matchStatus: 'matched', gateCooldownUntil: null, updatedAt: nowIso }, { merge: true });
     await batch.commit();
     return { matched: true, matchId: matchRef.id, opponentName: oppData.teamName, opponentScore: oppData.score };
   }
 
   await queueColl.doc(teamId).set({ teamId, teamName, score: teamScore, joinedAt: nowIso, status: 'waiting' });
-  await db.doc(`${userPath(teamId)}/gameState/current`).update({ matchStatus: 'waiting', updatedAt: nowIso });
+  await db.doc(`${userPath(teamId)}/gameState/current`).update({ matchStatus: 'waiting', gateCooldownUntil: null, updatedAt: nowIso });
   return { matched: false, status: 'waiting' };
 });
 
@@ -1417,6 +1437,13 @@ export const resolveMatch = functions.https.onCall(async (data, context) => {
 
   const queueColl = db.collection(`artifacts/${APP_ID}/public/data/matchQueue`);
 
+  // Is the loser the LAST team still at the gate? If nobody else could ever pair
+  // with them (no other team is actively at the gate slot), make them solo-clear
+  // instead of looping in an empty queue forever.
+  const loserIsLast = await isLastAtGate(loserId);
+
+  const cooldownUntil = new Date(Date.now() + GATE_COOLDOWN_SECONDS * 1000).toISOString();
+
   const batch = db.batch();
   batch.update(matchRef, { winnerId, loserId, resolvedAt: nowIso });
   // Winner: bonus + advance.
@@ -1426,17 +1453,57 @@ export const resolveMatch = functions.https.onCall(async (data, context) => {
     updatedAt: nowIso,
   });
   batch.set(queueColl.doc(winnerId), { status: 'resolved' }, { merge: true });
-  // Loser: mark 'lost' (for the mobile "waiting for a new opponent" UI) and
-  // re-enter the queue so they can be matched again.
-  batch.set(db.doc(`${userPath(loserId)}/gameState/current`), { matchStatus: 'lost', updatedAt: nowIso }, { merge: true });
-  batch.set(queueColl.doc(loserId), { teamId: loserId, teamName: loserName, score: loserScore, joinedAt: nowIso, status: 'waiting', matchId: null }, { merge: true });
+
+  if (loserIsLast) {
+    // Sanctioned solo-clear: the loser is the only team left at the gate, so there
+    // is no one to rematch against. Award the gate bonus and advance them too.
+    batch.set(db.doc(`${userPath(loserId)}/gameState/current`), {
+      score: loserScore + MATCH_WIN_BONUS, matchStatus: 'bypassed', gateCooldownUntil: null, updatedAt: nowIso,
+    }, { merge: true });
+    batch.set(queueColl.doc(loserId), { status: 'resolved' }, { merge: true });
+    await batch.commit();
+    await completeGateSlot(winnerId, nowIso);
+    await completeGateSlot(loserId, nowIso);
+    await writeAuditLog({
+      teamId: loserId, teamName: loserName, operatorId: context.auth!.uid,
+      actionType: 'manual_unlock', reason: 'Sanctioned solo-clear (last team at gate, lost duel — no rematch possible)',
+    });
+    return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS, loserSoloCleared: true };
+  }
+
+  // Loser: 90-second cooldown, THEN they may re-enter the queue. We stamp
+  // gateCooldownUntil and leave them OUT of the waiting queue for now; the mobile
+  // GateCard counts down and calls joinMatchQueue when it elapses, and
+  // sweepMatchQueue is the server-side safety net.
+  batch.set(db.doc(`${userPath(loserId)}/gameState/current`), {
+    matchStatus: 'lost', gateCooldownUntil: cooldownUntil, updatedAt: nowIso,
+  }, { merge: true });
+  batch.set(queueColl.doc(loserId), { status: 'cooldown', cooldownUntil }, { merge: true });
   await batch.commit();
 
   // Only the winner clears the gate → activates find-the-Tene (orange slot 4).
   await completeGateSlot(winnerId, nowIso);
 
-  return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS };
+  return { success: true, winnerId, loserId, bonusAwarded: MATCH_WIN_BONUS, loserCooldownUntil: cooldownUntil };
 });
+
+/**
+ * True when `teamId` is the only team whose gate (matchmaking) slot is still the
+ * active objective — i.e. there is no possible opponent left to duel. Used to
+ * auto-pass the last team through the gate instead of looping them in an empty queue.
+ */
+async function isLastAtGate(teamId: string): Promise<boolean> {
+  const gsSnap = await db.collectionGroup('gameState').get();
+  for (const doc of gsSnap.docs) {
+    const parts = doc.ref.path.split('/');
+    const uid = parts[parts.indexOf('users') + 1];
+    if (uid === teamId) continue;
+    const gs = doc.data() as { slots?: JudgeSlot[] };
+    // Another team is also at the gate → a rematch is possible, not the last.
+    if (gs.slots?.[GATE_SLOT_INDEX]?.status === 'active') return false;
+  }
+  return true;
+}
 
 // ─── sweepMatchQueue (sanctioned solo-clear) ──────────────────────────────────
 // Any team left waiting at the gate longer than maxWaitSeconds (default 5 min)
@@ -2124,6 +2191,170 @@ export const updateLocation = functions.https.onCall(async (data, context) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ADMIN TEAM MANAGEMENT — create / delete teams from the admin Teams page.
+// Lets an organiser pre-create a team (with its own access code + Auth identity +
+// seeded gameState) and remove a team entirely (profile, gameState, check-ins,
+// access-code release, Auth user, and any public traces). Admin-gated.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Generate a short, human-friendly access code (e.g. "TEAM7Q"). Avoids easily
+ *  confused chars (0/O, 1/I). Caller ensures uniqueness against accessCodes. */
+function randomCode(len = 6): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
+
+async function uniqueAccessCode(): Promise<string> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const code = randomCode();
+    const snap = await db.doc(`artifacts/${APP_ID}/accessCodes/${code}`).get();
+    if (!snap.exists) return code;
+  }
+  // Extremely unlikely — fall back to a timestamp-salted code.
+  return randomCode(8);
+}
+
+// ─── adminCreateTeam ──────────────────────────────────────────────────────────
+// Pre-create a team as an admin. Mints an Auth user (so the team has a real uid),
+// writes profile/team + a fresh gameState (slot 0 active, load-balanced green),
+// and registers a claimed access code. Returns the new code so staff can hand it
+// to the team. If `code` is omitted a unique one is generated.
+export const adminCreateTeam = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const {
+    teamName,
+    code: requestedCode,
+    memberNames = [],
+    captainPhone = '',
+  } = data as {
+    teamName?: string;
+    code?: string;
+    memberNames?: string[];
+    captainPhone?: string;
+  };
+
+  const name = (teamName ?? '').trim();
+  if (!name) throw new functions.https.HttpsError('invalid-argument', 'Team name is required');
+
+  // Resolve the access code (validate uniqueness if caller supplied one).
+  let code = (requestedCode ?? '').trim().toUpperCase();
+  if (code) {
+    const existing = await db.doc(`artifacts/${APP_ID}/accessCodes/${code}`).get();
+    if (existing.exists && (existing.data() as { claimed?: boolean }).claimed) {
+      throw new functions.https.HttpsError('already-exists', `Access code ${code} is already claimed`);
+    }
+  } else {
+    code = await uniqueAccessCode();
+  }
+
+  const members = (memberNames ?? []).map((m) => String(m).trim()).filter(Boolean);
+  const nowIso = new Date().toISOString();
+
+  // Mint a dedicated Auth identity so the team can later sign in via joinTeam.
+  const userRecord = await admin.auth().createUser({ displayName: name });
+  const uid = userRecord.uid;
+
+  const batch = db.batch();
+  batch.set(db.doc(`${userPath(uid)}/profile/team`), {
+    id: uid,
+    name,
+    code,
+    captainPhone,
+    memberNames: members,
+    participants: members.map((m) => ({ name: m, age: '' })),
+    waiverAccepted: true,
+    status: 'registered',
+    createdAt: nowIso,
+  });
+  batch.set(db.doc(`${userPath(uid)}/gameState/current`), {
+    teamId: uid,
+    slots: buildInitialSlots(nowIso),
+    score: 0,
+    bonusPenalty: 0,
+    updatedAt: nowIso,
+  });
+  batch.set(db.doc(`artifacts/${APP_ID}/accessCodes/${code}`), {
+    code, claimed: true, teamId: uid, createdAt: nowIso,
+  });
+  await batch.commit();
+
+  // Load-balance the opening green mission (best-effort; same as registerTeam).
+  await routeFirstGreen(uid, nowIso);
+
+  await writeAuditLog({
+    teamId: uid, teamName: name, operatorId: context.auth!.uid,
+    actionType: 'manual_unlock', reason: `Admin created team "${name}" (code ${code})`,
+  });
+
+  return { success: true, teamId: uid, code, teamName: name };
+});
+
+// ─── adminDeleteTeam ──────────────────────────────────────────────────────────
+// Remove a team entirely: private docs (profile/gameState/checkIns/assignments),
+// public traces (teamLocations, matchQueue), release its access code, and delete
+// the Auth user. Idempotent — missing pieces are skipped.
+export const adminDeleteTeam = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { teamId } = data as { teamId?: string };
+  if (!teamId) throw new functions.https.HttpsError('invalid-argument', 'teamId is required');
+
+  // Capture identity (name + code) before deletion for the audit log + code release.
+  const profSnap = await db.doc(`${userPath(teamId)}/profile/team`).get();
+  const prof = profSnap.exists ? (profSnap.data() as { name?: string; code?: string }) : {};
+
+  // Delete private sub-collections.
+  for (const col of ['profile', 'gameState', 'checkIns', 'assignments']) {
+    const snap = await db.collection(`${userPath(teamId)}/${col}`).get();
+    if (!snap.empty) {
+      const batch = db.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+
+  // Public traces keyed by teamId.
+  await db.doc(`artifacts/${APP_ID}/public/data/teamLocations/${teamId}`).delete().catch(() => {});
+  await db.doc(`artifacts/${APP_ID}/public/data/matchQueue/${teamId}`).delete().catch(() => {});
+
+  // Prune the team from the precomputed leaderboard so the deletion shows up
+  // immediately — the board is a snapshot written by finalize/freeze and would
+  // otherwise keep listing a deleted team until the next finalize.
+  const lbRef = db.doc(`artifacts/${APP_ID}/public/data/leaderboard/current`);
+  await lbRef.get().then((snap) => {
+    if (!snap.exists) return;
+    const data = snap.data() as { rankings?: { teamId: string }[] };
+    const current = data.rankings ?? [];
+    if (!current.some((r) => r.teamId === teamId)) return;
+    // Drop the entry and re-number ranks 1..N (entries stay in their order).
+    const rankings = current
+      .filter((r) => r.teamId !== teamId)
+      .map((r, i) => ({ ...r, rank: i + 1 }));
+    return lbRef.set(
+      { rankings, updatedAt: new Date().toISOString() },
+      { merge: true },
+    );
+  }).catch(() => {});
+
+  // Release the access code so it can be reused.
+  if (prof.code) {
+    await db.doc(`artifacts/${APP_ID}/accessCodes/${prof.code}`)
+      .set({ claimed: false, teamId: null }, { merge: true }).catch(() => {});
+  }
+
+  // Delete the Auth user (anonymous or minted).
+  await admin.auth().deleteUser(teamId).catch(() => {});
+
+  await writeAuditLog({
+    teamId, teamName: prof.name, operatorId: context.auth!.uid,
+    actionType: 'manual_unlock', reason: `Admin deleted team "${prof.name ?? teamId}"`,
+  });
+
+  return { success: true, teamId, releasedCode: prof.code ?? null };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // RACE BUILDER (admin) — design the route + stations in-app, persisted to Firestore.
 // Stations reuse the tasks (green/gold) + basketZones (orange) collections; the
 // framing geometry lives in raceConfig/current. All gated to admins (assertJudge).
@@ -2261,4 +2492,77 @@ export const deleteStation = functions.https.onCall(async (data, context) => {
     reason: `Deleted ${kind} station ${id} (Race Builder)`,
   });
   return { success: true };
+});
+
+// ─── Admin role provisioning (custom claims) ────────────────────────────────────
+// Production judges/admins carry a Firebase Auth custom claim { role: 'admin' };
+// firestore.rules and assertJudge both key off it. This callable grants/revokes
+// that claim so the relaxed-on-emulator gate can be tightened for the real event.
+//
+// Authorization (first match wins):
+//   • emulator                      → allowed (demo convenience)
+//   • caller already has role:admin → allowed (an admin can mint more admins)
+//   • caller is in the bootstrap allowlist → allowed (seeds the very first admin)
+//
+// Bootstrap allowlist comes from the RUSHPOINT_ADMIN_BOOTSTRAP env var
+// (comma-separated UIDs and/or emails) — set it in functions/.env for the real
+// project, then have the seed admin sign in once and call this to promote others.
+const BOOTSTRAP_ADMINS = (process.env.RUSHPOINT_ADMIN_BOOTSTRAP ?? '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
+export const setAdminRole = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  }
+
+  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
+  const callerEmail = (context.auth.token.email ?? '').toLowerCase();
+  const callerIsAdmin = context.auth.token.role === 'admin';
+  const callerBootstrapped =
+    BOOTSTRAP_ADMINS.includes(context.auth.uid.toLowerCase()) ||
+    (!!callerEmail && BOOTSTRAP_ADMINS.includes(callerEmail));
+
+  if (!isEmulator && !callerIsAdmin && !callerBootstrapped) {
+    throw new functions.https.HttpsError('permission-denied', 'Admins only');
+  }
+
+  const { targetUid, email, makeAdmin = true } = (data ?? {}) as {
+    targetUid?: string;
+    email?: string;
+    makeAdmin?: boolean;
+  };
+  if (!targetUid && !email) {
+    throw new functions.https.HttpsError('invalid-argument', 'targetUid or email is required');
+  }
+
+  // Resolve the target user (by uid or email).
+  let userRecord: admin.auth.UserRecord;
+  try {
+    userRecord = targetUid
+      ? await admin.auth().getUser(targetUid)
+      : await admin.auth().getUserByEmail(email!);
+  } catch {
+    throw new functions.https.HttpsError('not-found', 'Target user not found');
+  }
+
+  // Merge so we don't clobber any unrelated claims; clear role on revoke.
+  const claims = { ...(userRecord.customClaims ?? {}) } as Record<string, unknown>;
+  if (makeAdmin) claims.role = 'admin';
+  else delete claims.role;
+  await admin.auth().setCustomUserClaims(userRecord.uid, claims);
+
+  await writeAuditLog({
+    teamId: '',
+    operatorId: context.auth.uid,
+    actionType: 'manual_unlock',
+    previousValue: (userRecord.customClaims?.role as string) ?? null,
+    newValue: makeAdmin ? 'admin' : null,
+    reason: `${makeAdmin ? 'Granted' : 'Revoked'} admin role for ${userRecord.uid}`,
+  });
+
+  // The target must refresh their ID token (re-login or getIdToken(true)) before
+  // the new claim takes effect on the client.
+  return { success: true, uid: userRecord.uid, role: makeAdmin ? 'admin' : null };
 });

@@ -33,8 +33,37 @@ const en: Dict = {
   'register.waiverTitle': 'Liability & Health Waiver',
   'register.waiverBody':
     'I confirm all participants are in good health and fit to participate in this physical outdoor activity. I release the organizers from any liability for personal injuries or accidents during the event.',
-  'register.waiverAccept': 'I accept all terms and conditions',
+  'register.waiverAccept': 'I have read and accept the full waiver and terms',
+  'register.waiverReadFull': 'Read the full waiver & terms →',
   'register.start': 'Start the Race →',
+
+  // Full waiver / onboarding document (app/waiver.tsx)
+  'waiver.docTitle': 'Participation Waiver & Terms',
+  'waiver.lastUpdated': 'Version {v} · Last updated {date}',
+  'waiver.placeholderNotice':
+    '⚠️ TEMPLATE — this is placeholder text. Replace every section with wording approved by the event organizer’s legal counsel before the live event.',
+  'waiver.s1Title': '1. Assumption of Risk',
+  'waiver.s1Body':
+    'The Race to Tzion is a physical outdoor activity that takes place across open terrain in and around Jerusalem. Participation involves walking, navigating, and physical effort over uneven ground and in variable weather. I understand these risks and choose to participate voluntarily.',
+  'waiver.s2Title': '2. Health Declaration',
+  'waiver.s2Body':
+    'I confirm that every member of my team is in good general health and medically fit for sustained physical activity. We will stop and seek help if any participant feels unwell, and we accept responsibility for managing any pre-existing medical conditions during the event.',
+  'waiver.s3Title': '3. Release of Liability',
+  'waiver.s3Body':
+    'To the fullest extent permitted by law, I release the organizers, volunteers, and partners from liability for personal injury, loss, or property damage arising from ordinary participation, except where caused by gross negligence or willful misconduct.',
+  'waiver.s4Title': '4. Conduct & Safety',
+  'waiver.s4Body':
+    'We will follow all instructions from organizers and station staff, obey traffic and park rules, respect other participants and the public, and respond immediately to any safety or evacuation instruction sent through the app.',
+  'waiver.s5Title': '5. Media Release',
+  'waiver.s5Body':
+    'I grant the organizer permission to capture and use photos and video taken during the event for documentation and promotion. Contact the organizer if any participant must be excluded from media use.',
+  'waiver.s6Title': '6. Data & Privacy',
+  'waiver.s6Body':
+    'During the event the app records team progress and approximate live location to operate the race, run the leaderboard, and respond to emergencies. Location is collected only while the app is in use. See the organizer’s privacy notice for retention and contact details.',
+  'waiver.s7Title': '7. Minors & Guardian Consent',
+  'waiver.s7Body':
+    'For participants under 18, the team captain confirms that a parent or legal guardian has consented to their participation under these terms.',
+  'waiver.back': 'Back to registration',
   'register.errTeamName': 'Team name is required.',
   'register.errPhone': "Captain's phone number is required.",
   'register.errParticipants': 'Add at least one participant name.',
@@ -110,6 +139,8 @@ const en: Dict = {
   'match.lost': '😤 You lost — {delay}s delay',
   'match.lostTitle': '😤 You lost this duel',
   'match.rematchWaiting': 'Waiting for a new opponent — only the winner advances.',
+  'match.cooldown': 'Cooldown before your rematch — you’ll rejoin the queue automatically.',
+  'match.soloClear': '✅ Last team at the gate — you advance automatically!',
   'match.bypassed': 'No match — proceed to basket.',
   'match.mustDuel': 'You must win a duel to advance. Enter the queue when ready.',
   'match.joinQueue': 'Enter Match Queue',
@@ -129,6 +160,8 @@ const en: Dict = {
   'craft.sprintWindow': 'Sprint window',
   'craft.sprintLeft': '{sec}s to reach the judge',
   'craft.sprintExpired': 'Late — exponential penalty accumulating!',
+  'craft.paused': 'Clock paused',
+  'craft.waitingJudge': 'Arrival recorded — waiting for a judge. Your time is locked.',
   'craft.menuTitle': 'Fill your Tene',
   'craft.menuHint': 'Tap each product you prepare — the judge sees your picks.',
   'craft.minShort': 'min',
@@ -215,8 +248,37 @@ const he: Dict = {
   'register.waiverTitle': 'הצהרת בריאות ואחריות',
   'register.waiverBody':
     'אני מאשר/ת שכל המשתתפים בריאים וכשירים להשתתף בפעילות גופנית חיצונית זו. אני משחרר/ת את המארגנים מכל אחריות לפציעות אישיות או תאונות במהלך האירוע.',
-  'register.waiverAccept': 'אני מקבל/ת את כל התנאים וההגבלות',
+  'register.waiverAccept': 'קראתי ואני מקבל/ת את ההצהרה והתקנון המלאים',
+  'register.waiverReadFull': 'קראו את ההצהרה והתקנון המלאים →',
   'register.start': 'התחלת המירוץ →',
+
+  // Full waiver / onboarding document (app/waiver.tsx)
+  'waiver.docTitle': 'הצהרת השתתפות ותקנון',
+  'waiver.lastUpdated': 'גרסה {v} · עודכן לאחרונה {date}',
+  'waiver.placeholderNotice':
+    '⚠️ תבנית — זהו טקסט ממלא מקום. החליפו כל סעיף בנוסח שאושר על ידי היועץ המשפטי של מארגן האירוע לפני האירוע עצמו.',
+  'waiver.s1Title': '1. נטילת סיכון',
+  'waiver.s1Body':
+    'המירוץ לציון הוא פעילות גופנית חיצונית המתקיימת בשטח פתוח בירושלים וסביבתה. ההשתתפות כוללת הליכה, ניווט ומאמץ גופני בשטח לא אחיד ובמזג אוויר משתנה. אני מבין/ה את הסיכונים ובוחר/ת להשתתף מרצוני החופשי.',
+  'waiver.s2Title': '2. הצהרת בריאות',
+  'waiver.s2Body':
+    'אני מאשר/ת שכל חברי הקבוצה בריאים וכשירים מבחינה רפואית לפעילות גופנית ממושכת. נעצור ונפנה לעזרה אם מי מהמשתתפים יחוש ברע, ואנו אחראים לניהול כל מצב רפואי קיים במהלך האירוע.',
+  'waiver.s3Title': '3. שחרור מאחריות',
+  'waiver.s3Body':
+    'במידה המרבית המותרת בחוק, אני משחרר/ת את המארגנים, המתנדבים והשותפים מאחריות לפציעה אישית, אובדן או נזק לרכוש הנובעים מהשתתפות רגילה, למעט במקרים של רשלנות חמורה או מעשה מכוון.',
+  'waiver.s4Title': '4. התנהגות ובטיחות',
+  'waiver.s4Body':
+    'נפעל לפי כל הנחיות המארגנים וצוות התחנות, נציית לחוקי התנועה והפארק, נכבד משתתפים אחרים ואת הציבור, ונגיב מיד לכל הנחיית בטיחות או פינוי שתישלח דרך האפליקציה.',
+  'waiver.s5Title': '5. שימוש בתמונות ובווידאו',
+  'waiver.s5Body':
+    'אני מעניק/ה למארגן רשות לצלם ולהשתמש בתמונות ובווידאו שצולמו במהלך האירוע לצורכי תיעוד וקידום. פנו למארגן אם יש להחריג משתתף כלשהו משימוש בתקשורת.',
+  'waiver.s6Title': '6. נתונים ופרטיות',
+  'waiver.s6Body':
+    'במהלך האירוע האפליקציה רושמת את התקדמות הקבוצה ומיקום חי משוער כדי להפעיל את המירוץ, את טבלת המובילים ולהגיב למקרי חירום. המיקום נאסף רק בזמן שימוש באפליקציה. ראו את הודעת הפרטיות של המארגן לפרטי שמירה ויצירת קשר.',
+  'waiver.s7Title': '7. קטינים והסכמת אפוטרופוס',
+  'waiver.s7Body':
+    'עבור משתתפים מתחת לגיל 18, קפטן הקבוצה מאשר שהורה או אפוטרופוס חוקי נתן הסכמה להשתתפותם בכפוף לתנאים אלה.',
+  'waiver.back': 'חזרה לרישום',
   'register.errTeamName': 'שם הקבוצה הוא שדה חובה.',
   'register.errPhone': 'מספר הטלפון של הקפטן הוא שדה חובה.',
   'register.errParticipants': 'הוסיפו לפחות שם משתתף אחד.',
@@ -292,6 +354,8 @@ const he: Dict = {
   'match.lost': '😤 הפסדתם — עיכוב {delay} שנ׳',
   'match.lostTitle': '😤 הפסדתם בדו-קרב',
   'match.rematchWaiting': 'ממתינים ליריב חדש — רק המנצח ממשיך.',
+  'match.cooldown': 'המתנה לפני הדו-קרב הבא — תחזרו לתור אוטומטית.',
+  'match.soloClear': '✅ הקבוצה האחרונה בשער — אתם ממשיכים אוטומטית!',
   'match.bypassed': 'אין זיווג — המשיכו לסל.',
   'match.mustDuel': 'חובה לנצח בדו-קרב כדי להתקדם. היכנסו לתור כשאתם מוכנים.',
   'match.joinQueue': 'כניסה לתור הזיווג',
@@ -310,6 +374,8 @@ const he: Dict = {
   'craft.expired': 'הזמן נגמר — רוצו לשופט!',
   'craft.sprintWindow': 'חלון ריצה',
   'craft.sprintLeft': '{sec} שנ׳ להגיע לשופט',
+  'craft.paused': 'השעון מושהה',
+  'craft.waitingJudge': 'ההגעה נרשמה — ממתינים לשופט. הזמן שלכם ננעל.',
   'craft.sprintExpired': 'איחור — עונש מצטבר!',
   'craft.menuTitle': 'מלאו את הטנא',
   'craft.menuHint': 'סמנו כל מוצר שהכנתם — הבחירות מוצגות לשופט.',

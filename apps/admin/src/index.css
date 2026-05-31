@@ -4,36 +4,33 @@
 @tailwind utilities;
 
 :root {
-  /* "Topographic Expedition" — warm parchment, forest ink, trail-marker blaze. */
-  color-scheme: light;
+  /* Dark tech theme — matches tailwind.config.js (app-bg/neon-*) so backgrounds
+     and text stay consistent app-wide. (The "Topographic Expedition" light theme
+     needs a full page-level migration before the body can go light — until then
+     a light body under white text is unreadable, so we keep the dark base.) */
+  color-scheme: dark;
+  color: #e4e4e7;
+  background-color: #050508;
 
-  --rp-bg: #f5f0e6; /* parchment — warm paper */
-  --rp-bg-elevated: #ebe3d3; /* deeper paper (sidebar, wells) */
-  --rp-surface: #fffdf8; /* cards */
-  --rp-surface-light: #ece4d4; /* recessed surfaces */
-  --rp-primary: #e8743b; /* orange blaze — primary accent/CTA */
-  --rp-primary-glow: #f2935f; /* lighter blaze (hover) */
-  --rp-secondary: #2d4a3e; /* deep forest green */
-  --rp-accent: #c73e3e; /* trail-marker red */
-  --rp-accent-gold: #c9a227; /* gold (scoring) */
-  --rp-success: #4a7c4e;
-  --rp-warning: #d89b3d;
-  --rp-danger: #c73e3e;
-  --rp-info: #4a6d8c;
-  --rp-text-primary: #1a2620; /* near-black green ink */
-  --rp-text-secondary: #4a5b52; /* muted body text */
-  --rp-text-muted: #6e7b72; /* faint labels */
-  --rp-border: #ddd2bc; /* contour line on paper */
-  --rp-glass-bg: rgba(255, 253, 248, 0.78);
-  --rp-glass-border: rgba(26, 38, 32, 0.08);
-  /* Elevation sequence (data viz — low → high) */
-  --rp-elev-1: #e8e3d8;
-  --rp-elev-2: #c9d4b0;
-  --rp-elev-3: #9db87e;
-  --rp-elev-4: #6b8e5a;
-  --rp-elev-5: #3d6152;
-  --rp-forest-900: #1a2e23;
-  --rp-forest-700: #2d4a3e;
+  --rp-bg: #050508;
+  --rp-bg-elevated: #0a0a10;
+  --rp-surface: #0f0f18;
+  --rp-surface-light: #141420;
+  --rp-primary: #00ffaa;
+  --rp-primary-glow: #00ccff;
+  --rp-secondary: #00aaff;
+  --rp-accent: #ff6b00;
+  --rp-accent-gold: #ffd700;
+  --rp-success: #00ffaa;
+  --rp-warning: #ffb800;
+  --rp-danger: #ff3d00;
+  --rp-info: #00aaff;
+  --rp-text-primary: #ffffff;
+  --rp-text-secondary: #a0aabf;
+  --rp-text-muted: #6b7694;
+  --rp-border: rgba(255, 255, 255, 0.08);
+  --rp-glass-bg: rgba(255, 255, 255, 0.04);
+  --rp-glass-border: rgba(255, 255, 255, 0.08);
   --rp-radius: 14px;
   --rp-radius-lg: 20px;
   --rp-font-display: 'Outfit', 'Inter', sans-serif;
@@ -42,20 +39,19 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
-  background-color: #f5f0e6;
-  color: #1a2620;
+  background-color: #050508;
+  color: #e4e4e7;
   margin: 0;
-  /* Faint contour-grid motif on parchment (map paper texture). */
-  background-image: linear-gradient(rgba(45,74,62,0.04) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(45,74,62,0.04) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #ece4d4; }
-::-webkit-scrollbar-thumb { background: rgba(26,38,32,0.18); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(232,116,59,0.55); }
+::-webkit-scrollbar-track { background: #0a0a10; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,255,170,0.3); }
 
 /* Text selection */
-::selection { background: rgba(232,116,59,0.22); color: #c73e3e; }
+::selection { background: rgba(0,255,170,0.2); color: #00ffaa; }

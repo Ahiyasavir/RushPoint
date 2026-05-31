@@ -48,6 +48,14 @@ const skipTaskFn = httpsCallable<
   { teamId: string },
   { success: boolean; allDone: boolean; awardedScore: number; newScore: number }
 >(functions, 'skipTask');
+const createTeamFn = httpsCallable<
+  { teamName: string; code?: string; memberNames?: string[]; captainPhone?: string },
+  { success: boolean; teamId: string; code: string; teamName: string }
+>(functions, 'adminCreateTeam');
+const deleteTeamFn = httpsCallable<
+  { teamId: string },
+  { success: boolean; teamId: string; releasedCode: string | null }
+>(functions, 'adminDeleteTeam');
 
 export default function TeamsPage() {
   const { t } = useI18n();
@@ -60,6 +68,15 @@ export default function TeamsPage() {
   // Two-step skip: first click arms the confirm, second click executes.
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [skippingId, setSkippingId] = useState<string | null>(null);
+
+  // Add-team form + two-step delete.
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newCode, setNewCode] = useState('');
+  const [newMembers, setNewMembers] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [deleteArmId, setDeleteArmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchTeams = useCallback(async () => {
     try {
@@ -92,6 +109,47 @@ export default function TeamsPage() {
     }
   }, [t, fetchTeams]);
 
+  const handleCreate = useCallback(async () => {
+    const name = newName.trim();
+    if (!name) { setError(t('teams.nameRequired')); return; }
+    setCreating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await ensureAuth();
+      const members = newMembers.split(',').map((m) => m.trim()).filter(Boolean);
+      const res = await createTeamFn({
+        teamName: name,
+        code: newCode.trim() || undefined,
+        memberNames: members,
+      });
+      setNotice(t('teams.createDone', { team: res.data.teamName, code: res.data.code }));
+      setNewName(''); setNewCode(''); setNewMembers(''); setShowAdd(false);
+      await fetchTeams();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('teams.createError'));
+    } finally {
+      setCreating(false);
+    }
+  }, [newName, newCode, newMembers, t, fetchTeams]);
+
+  const handleDelete = useCallback(async (teamId: string) => {
+    setDeletingId(teamId);
+    setDeleteArmId(null);
+    setError(null);
+    setNotice(null);
+    try {
+      await ensureAuth();
+      const res = await deleteTeamFn({ teamId });
+      setNotice(t('teams.deleteDone', { code: res.data.releasedCode ?? '—' }));
+      await fetchTeams();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('teams.deleteError'));
+    } finally {
+      setDeletingId(null);
+    }
+  }, [t, fetchTeams]);
+
   useEffect(() => {
     void fetchTeams();
     const interval = setInterval(() => void fetchTeams(), 30_000);
@@ -112,14 +170,65 @@ export default function TeamsPage() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => { setLoading(true); void fetchTeams(); }}
-          disabled={loading}
-          className="px-3 py-1.5 text-sm rounded-xl border border-glass-border text-zinc-300 hover:bg-white/5 hover:text-white disabled:opacity-40 transition-all backdrop-blur-sm"
-        >
-          {loading ? t('teams.refreshing') : t('common.refresh')}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setShowAdd((v) => !v); setError(null); setNotice(null); }}
+            className="px-3 py-1.5 text-sm rounded-xl border border-neon-green/40 text-neon-green hover:bg-neon-green/10 transition-all backdrop-blur-sm"
+          >
+            {showAdd ? t('teams.addCancel') : `+ ${t('teams.add')}`}
+          </button>
+          <button
+            onClick={() => { setLoading(true); void fetchTeams(); }}
+            disabled={loading}
+            className="px-3 py-1.5 text-sm rounded-xl border border-glass-border text-zinc-300 hover:bg-white/5 hover:text-white disabled:opacity-40 transition-all backdrop-blur-sm"
+          >
+            {loading ? t('teams.refreshing') : t('common.refresh')}
+          </button>
+        </div>
       </div>
+
+      {showAdd && (
+        <div className="mb-4 p-4 rounded-2xl border border-neon-green/30 bg-neon-green/5 backdrop-blur-sm">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldName')}</label>
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={t('teams.fieldNamePlaceholder')}
+                className="w-full px-3 py-2 rounded-lg bg-app-surface border border-glass-border text-white text-sm focus:border-neon-green/50 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldCode')}</label>
+              <input
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value.toUpperCase())}
+                placeholder={t('teams.fieldCodePlaceholder')}
+                className="w-full px-3 py-2 rounded-lg bg-app-surface border border-glass-border text-white text-sm font-mono focus:border-neon-green/50 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldMembers')}</label>
+              <input
+                value={newMembers}
+                onChange={(e) => setNewMembers(e.target.value)}
+                placeholder={t('teams.fieldMembersPlaceholder')}
+                className="w-full px-3 py-2 rounded-lg bg-app-surface border border-glass-border text-white text-sm focus:border-neon-green/50 outline-none"
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex justify-end">
+            <button
+              onClick={() => void handleCreate()}
+              disabled={creating || !newName.trim()}
+              className="px-4 py-2 text-sm rounded-xl bg-neon-green/10 border border-neon-green/40 text-neon-green hover:bg-neon-green/20 disabled:opacity-40 transition-all"
+            >
+              {creating ? t('teams.creating') : t('teams.createBtn')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 px-4 py-3 rounded-xl bg-red-950/50 border border-red-500/30 text-red-300 text-sm">
@@ -197,26 +306,46 @@ export default function TeamsPage() {
                       {team.score.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-end">
-                      {!finished && (
+                      <div className="flex items-center justify-end gap-2">
+                        {!finished && (
+                          <button
+                            onClick={() =>
+                              isConfirming ? void handleSkip(team.id) : setConfirmId(team.id)
+                            }
+                            onBlur={() => isConfirming && setConfirmId(null)}
+                            disabled={isSkipping}
+                            className={`px-3 py-1 text-xs border transition-all disabled:opacity-40 ${
+                              isConfirming
+                                ? 'bg-neon-orange/10 border-neon-orange/30 text-neon-orange hover:bg-neon-orange/20 rounded-lg'
+                                : 'border-glass-border text-zinc-500 hover:text-white hover:bg-white/5 rounded-lg'
+                            }`}
+                          >
+                            {isSkipping
+                              ? t('teams.skipping')
+                              : isConfirming
+                                ? t('teams.confirmSkip')
+                                : t('teams.skip')}
+                          </button>
+                        )}
                         <button
                           onClick={() =>
-                            isConfirming ? void handleSkip(team.id) : setConfirmId(team.id)
+                            deleteArmId === team.id ? void handleDelete(team.id) : setDeleteArmId(team.id)
                           }
-                          onBlur={() => isConfirming && setConfirmId(null)}
-                          disabled={isSkipping}
-                          className={`px-3 py-1 text-xs border transition-all disabled:opacity-40 ${
-                            isConfirming
-                              ? 'bg-neon-orange/10 border-neon-orange/30 text-neon-orange hover:bg-neon-orange/20 rounded-lg'
-                              : 'border-glass-border text-zinc-500 hover:text-white hover:bg-white/5 rounded-lg'
+                          onBlur={() => deleteArmId === team.id && setDeleteArmId(null)}
+                          disabled={deletingId === team.id}
+                          className={`px-3 py-1 text-xs border rounded-lg transition-all disabled:opacity-40 ${
+                            deleteArmId === team.id
+                              ? 'bg-red-500/15 border-red-500/40 text-red-300 hover:bg-red-500/25'
+                              : 'border-glass-border text-zinc-500 hover:text-red-300 hover:border-red-500/30'
                           }`}
                         >
-                          {isSkipping
-                            ? t('teams.skipping')
-                            : isConfirming
-                              ? t('teams.confirmSkip')
-                              : t('teams.skip')}
+                          {deletingId === team.id
+                            ? t('teams.deleting')
+                            : deleteArmId === team.id
+                              ? t('teams.confirmDelete')
+                              : t('teams.delete')}
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );

@@ -1,5 +1,12 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
+  type Firestore,
+} from 'firebase/firestore';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
@@ -17,7 +24,22 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
-export const db        = getFirestore(app);
+// Offline persistence: back Firestore with IndexedDB so the judge/admin dashboard
+// survives a dropped connection (Jerusalem dead zones) and resyncs on reconnect.
+// persistentMultipleTabManager lets several admin tabs share one cache. Falls back
+// to the already-initialised instance under Vite HMR re-evaluation.
+function initDb(): Firestore {
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    // Already initialised (Fast Refresh) — reuse it.
+    return getFirestore(app);
+  }
+}
+
+export const db        = initDb();
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
 

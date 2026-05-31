@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import Map, { Marker, NavigationControl, Source, Layer, Popup } from 'react-map-gl/maplibre';
+import React, { useEffect, useRef, useState } from 'react';
+import Map, { Marker, NavigationControl, Source, Layer, Popup, type MapRef } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { routePathFor, routeGeoJSON, STATION_COLOR } from '@rushpoint/shared';
@@ -87,6 +87,25 @@ export default function HeatmapPage() {
   const stations = useStations();
   const routeData = routeGeoJSON(routePathFor(raceConfig));
   const [selected, setSelected] = useState<PositionedAlert | null>(null);
+
+  // initialViewState only applies ONCE at mount — and the map mounts before
+  // Firestore delivers the saved raceConfig, so the camera would otherwise stay
+  // on the hardcoded default (old Gan HaKipod). Re-center the live map whenever
+  // the saved center/zoom changes (e.g. after editing the finish in the Builder).
+  const mapRef = useRef<MapRef | null>(null);
+  const lastCenterRef = useRef<string>('');
+  useEffect(() => {
+    const key = `${raceConfig.center.lat},${raceConfig.center.lng},${raceConfig.zoom}`;
+    if (key === lastCenterRef.current) return;
+    lastCenterRef.current = key;
+    const map = mapRef.current;
+    if (!map) return;
+    map.easeTo({
+      center: [raceConfig.center.lng, raceConfig.center.lat],
+      zoom: raceConfig.zoom,
+      duration: 600,
+    });
+  }, [raceConfig.center.lat, raceConfig.center.lng, raceConfig.zoom]);
   // Map base-layer variant. Switching only swaps the GL style — the live-team and
   // alert onSnapshot listeners live in React state (useLiveTeams/useActiveAlerts),
   // so they are untouched, and Markers + the route Source/Layer are re-applied by
@@ -131,6 +150,7 @@ export default function HeatmapPage() {
           ))}
         </div>
         <Map
+          ref={mapRef}
           initialViewState={{ longitude: raceConfig.center.lng, latitude: raceConfig.center.lat, zoom: raceConfig.zoom }}
           mapStyle={getMapStyle(mapVariant)}
           attributionControl={true}

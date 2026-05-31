@@ -1,0 +1,21 @@
+{
+  "name": "RushPoint Admin — Race to Tzion",
+  "short_name": "RushPoint",
+  "description": "Judge & operations dashboard for the Race to Tzion event.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050508",
+  "theme_color": "#050508",
+  "lang": "en",
+  "dir": "auto",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

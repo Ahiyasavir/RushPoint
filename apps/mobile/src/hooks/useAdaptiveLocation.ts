@@ -2,19 +2,23 @@ import { useEffect } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../services/firebase.config';
 import { useGameStore } from '../store/gameStore';
+import { createGeoSmoother, type Fix } from '../lib/geoSmooth';
 
 // Adaptive polling cadence (ms). Slow while stationary (checked in / crafting) to
 // save battery; fast while in transit so the heatmap stays current.
 const FAST_MS = 20_000;   // in transit — routing to a station / searching for the Tene
 const SLOW_MS = 240_000;  // stationary — checked in (clock frozen) or crafting
 
-function getCoords(): Promise<{ lat: number; lng: number } | null> {
+function getCoords(): Promise<Fix | null> {
   const geo = (globalThis as unknown as { navigator?: { geolocation?: Geolocation } }).navigator?.geolocation;
   if (!geo) return Promise.resolve(null);
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), 8000);
     geo.getCurrentPosition(
-      (pos) => { clearTimeout(timer); resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }); },
+      (pos) => {
+        clearTimeout(timer);
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+      },
       () => { clearTimeout(timer); resolve(null); },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 10_000 },
     );
@@ -36,6 +40,9 @@ export function useAdaptiveLocation(teamId: string | null): void {
     let timer: ReturnType<typeof setTimeout>;
 
     const ping = httpsCallable(functions, 'updateLocation');
+    // Per-mount GPS jitter filter — rejects spikes and smooths wobble so the
+    // heatmap marker doesn't flicker (see lib/geoSmooth).
+    const smooth = createGeoSmoother();
 
     function intervalForState(): number {
       const s = useGameStore.getState();
@@ -45,13 +52,14 @@ export function useAdaptiveLocation(teamId: string | null): void {
     }
 
     async function tick() {
-      const coords = await getCoords();
+      const raw = await getCoords();
       if (cancelled) return;
-      if (coords) {
+      if (raw) {
+        const fix = smooth(raw, Date.now());
         const s = useGameStore.getState();
         const slotType = s.live?.slots.find((sl) => sl.status === 'active')?.type;
         try {
-          await ping({ ...coords, teamName: s.teamName, slotType });
+          await ping({ lat: fix.lat, lng: fix.lng, teamName: s.teamName, slotType });
         } catch { /* transient — retried on next tick */ }
       }
       if (cancelled) return;

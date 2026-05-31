@@ -13,6 +13,7 @@ import { Button } from '../src/components/Button';
 import { Card } from '../src/components/Card';
 import { useToast } from '../src/components/Toast';
 import { useTranslation } from '../src/i18n';
+import { WAIVER_VERSION } from './waiver';
 
 interface Participant {
   name: string;
@@ -109,6 +110,7 @@ export default function RegisterScreen() {
         captainPhone:   captainPhone.trim(),
         participants:   validParticipants,
         waiverAccepted: true,
+        waiverVersion:  WAIVER_VERSION,
       });
       const { teamId } = res.data as { teamId: string };
       initTeam(teamId, teamName.trim(), memberNames);
@@ -224,9 +226,14 @@ export default function RegisterScreen() {
         {/* ── Liability Waiver ──────────────────────────────────────────── */}
         <Card className="p-4 mb-2">
           <Text variant="label" className="mb-2">{t('register.waiverTitle')}</Text>
-          <Text variant="caption" className="text-zinc-400 leading-relaxed mb-4">
+          <Text variant="caption" className="text-zinc-400 leading-relaxed mb-3">
             {t('register.waiverBody')}
           </Text>
+          <Pressable onPress={() => router.push('/waiver')} className="mb-4 active:opacity-70">
+            <Text variant="bodySmall" className="text-neon-green">
+              {t('register.waiverReadFull')}
+            </Text>
+          </Pressable>
           <View className="flex-row items-center justify-between">
             <Text variant="bodySmall" className="text-zinc-300 flex-1 me-4">
               {t('register.waiverAccept')}

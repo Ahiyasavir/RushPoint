@@ -46,6 +46,7 @@ export interface LiveGame {
   craftingStartedAt?: unknown;
   finalSprintStartedAt?: unknown;
   matchStatus?: MatchStatus;
+  gateCooldownUntil?: string | null; // ISO — post-loss 90s cooldown before re-queue
   teneSelection?: string[];
 }
 

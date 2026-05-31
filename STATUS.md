@@ -222,6 +222,20 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ---
 
+## 🛡️ קשיחות לפרודקשן — הושלם בסשן זה (קוד בלבד, רץ על Emulator)
+
+- ✅ **Firestore + Storage Security Rules** — deny-all כברירת מחדל, `gameState`/`score` חסומים ללקוח, gating לפי custom claim, ולידציית פרופיל, audit logs לקריאת אדמין בלבד, העלאות Storage מוגבלות לתמונות עד 10MB לכל קבוצה.
+- ✅ **Offline persistence (admin)** — `persistentLocalCache` + multi-tab ב-`apps/admin/src/services/firebase.ts` (אומת חי: IndexedDB cache פעיל).
+- ✅ **React Error Boundaries** — בשתי האפליקציות, עם funnel ל-telemetry.
+- ✅ **Wake Lock** — `useWakeLock` בלוח המחוונים של המובייל (המסך לא נכבה במהלך המירוץ).
+- ✅ **GPS smoothing** — `lib/geoSmooth.ts` (accuracy gate + דחיית קפיצות + מיזוג משוקלל) ב-`useAdaptiveLocation`.
+- ✅ **PWA (admin)** — manifest + icon + service worker (app-shell, prod-only; טראפיק Firestore/auth עוקף).
+- ✅ **Admin custom-claims** — callable `setAdminRole` (מעניק/מסיר `{role:'admin'}`, gating לאדמין קיים + allowlist דרך `RUSHPOINT_ADMIN_BOOTSTRAP`, מקל ב-emulator, נרשם ל-audit log). *דורש restart ל-emulator כדי להיטען.*
+- ✅ **Crash-reporting seam** — `services/telemetry.ts` בשתי האפליקציות (Sentry נכנס דרך `setCrashReporter`; מופעל כש-DSN מוגדר).
+- ✅ **מסך Waiver/onboarding רשמי** — `app/waiver.tsx` (מסמך מלא קריא, EN/HE, טקסט תבנית למילוי משפטי), מקושר מהרישום; גרסת ה-Waiver נרשמת ב-`profile/team` (`waiverVersion` + `waiverAcceptedAt`).
+
+---
+
 ## 🚀 הכנה לפרישה (Production)
 
 אלו הדברים שנדרשים **לפני יום האירוע** — כרגע הכל רץ רק על Emulator:
@@ -235,8 +249,8 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ### Admin Auth (Production)
 - [ ] כרגע Admin רץ עם anonymous sign-in (עובד ב-emulator בגלל `FUNCTIONS_EMULATOR`)
-- [ ] בproduction: להגדיר `custom claim { role: "admin" }` ל-UIDs השופטים
-- [ ] או: להוסיף email/password auth לadmin ולבדוק custom claim בפונקציות
+- [x] קיימת callable `setAdminRole` להענקת/הסרת `{role:'admin'}` (gating לאדמין קיים + `RUSHPOINT_ADMIN_BOOTSTRAP`)
+- [ ] בproduction: להוסיף email/password auth לאדמין, להגדיר את ה-UID/email הראשון ב-`RUSHPOINT_ADMIN_BOOTSTRAP`, ואז להריץ `setAdminRole` כדי לקדם שופטים
 
 ### תוכן האירוע
 - [ ] קואורדינטות אמיתיות של עמדות בירושלים ב-Firestore tasks

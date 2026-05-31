@@ -7,10 +7,17 @@ export interface DeviceCoords {
 }
 
 /**
- * Live device location for the "You Are Here" map dot. Uses expo-location, which
- * works on both web (browser Geolocation API) and native. Returns null until a fix
- * is available (or if permission is denied / unavailable), so callers simply don't
- * render the dot in that case — it never crashes.
+ * Live device location for the "You Are Here" map dot (NATIVE).
+ *
+ * Web uses the sibling `useDeviceLocation.web.ts` (browser Geolocation API).
+ * That split is deliberate: importing `expo-location` on web installs a
+ * geolocation polyfill whose subscription cleanup calls the removed
+ * `LocationEventEmitter.removeSubscription`, crashing the app on unmount — so we
+ * must keep `expo-location` out of the web bundle entirely. Metro resolves the
+ * `.web.ts` variant for web and this file for iOS/Android.
+ *
+ * Returns null until a fix is available (or if permission is denied), so callers
+ * simply don't render the dot — it never crashes.
  */
 export function useDeviceLocation(active = true): DeviceCoords | null {
   const [coords, setCoords] = useState<DeviceCoords | null>(null);
@@ -37,7 +44,11 @@ export function useDeviceLocation(active = true): DeviceCoords | null {
 
     return () => {
       cancelled = true;
-      sub?.remove();
+      try {
+        sub?.remove();
+      } catch {
+        /* defensive: some RN/expo versions throw in subscription cleanup */
+      }
     };
   }, [active]);
 

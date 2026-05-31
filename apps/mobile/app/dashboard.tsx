@@ -3,13 +3,14 @@ import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-nat
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { httpsCallable } from 'firebase/functions';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { functions, db } from '../src/services/firebase.config';
 
 const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
 import { useGameStore, type LiveSlot, type LiveJudging, type MatchStatus } from '../src/store/gameStore';
 import { useGameSync } from '../src/hooks/useGameSync';
 import { useAdaptiveLocation } from '../src/hooks/useAdaptiveLocation';
+import { useWakeLock } from '../src/hooks/useWakeLock';
 import { useAnnouncements } from '../src/hooks/useAnnouncements';
 import { AnnouncementBanner } from '../src/components/AnnouncementBanner';
 import { Text } from '../src/components/Text';
@@ -97,6 +98,8 @@ export default function DashboardScreen() {
   useOfflineToast();
   // Battery-aware location pings (fast in transit, slow when stationary).
   useAdaptiveLocation(teamId);
+  // Keep the screen awake while racing — teams glance at this scoreboard for hours.
+  useWakeLock(true);
 
   // Live flash-mission broadcast (admin-pushed), with local dismissal.
   const flashMission = useFlashMissions();
@@ -104,6 +107,29 @@ export default function DashboardScreen() {
 
   // Operational announcements (persistent marquee until dismissed per-device).
   const announcements = useAnnouncements();
+
+  // Declared-arrival freeze: once the team taps "arrived at the judge" it creates
+  // a pending check-in and joins the queue. The server already locks the sprint
+  // penalty to that check-in timestamp, so the displayed crafting/sprint clocks
+  // must freeze there too — otherwise they keep ticking (and flash "LATE") while
+  // the team waits for a judge, which doesn't match the score and causes panic.
+  const [declaredArrivalMs, setDeclaredArrivalMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!teamId) { setDeclaredArrivalMs(null); return; }
+    const q = query(
+      collection(db, `artifacts/${APP_ID}/users/${teamId}/checkIns`),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      let earliest: number | null = null;
+      snap.forEach((d) => {
+        const ts = toMillis((d.data() as { timestamp?: unknown }).timestamp);
+        if (ts != null && (earliest == null || ts < earliest)) earliest = ts;
+      });
+      setDeclaredArrivalMs(earliest);
+    }, () => setDeclaredArrivalMs(null));
+    return unsub;
+  }, [teamId]);
 
   // Auto-request task assignment when a green slot becomes active without a taskId.
   // requestNextTask writes the result back to gameState (server-authoritative),
@@ -191,7 +217,12 @@ export default function DashboardScreen() {
 
   const craftingStartMs = toMs(gameState?.craftingStartedAt);
   const craftingActive  = craftingStartMs != null;
-  const craftingElapsed = craftingActive ? Math.max(0, Math.floor((nowMs - craftingStartMs!) / 1000)) : 0;
+  // Freeze the clock once arrival is declared (pending check-in) or a judge has
+  // taken the team (gameState.judging) — matches the server's penalty basis.
+  const arrivalFreezeMs = toMillis(gameState?.judging?.arrivedAt) ?? declaredArrivalMs;
+  const craftingClockMs = arrivalFreezeMs ?? nowMs;
+  const craftingFrozen  = arrivalFreezeMs != null;
+  const craftingElapsed = craftingActive ? Math.max(0, Math.floor((craftingClockMs - craftingStartMs!) / 1000)) : 0;
   const craftingLeft    = Math.max(0, CRAFTING_DURATION_SECS - craftingElapsed);
   const craftingDone    = craftingElapsed >= CRAFTING_DURATION_SECS;
   const sprintElapsed   = craftingDone ? Math.max(0, craftingElapsed - CRAFTING_DURATION_SECS) : 0;
@@ -275,7 +306,7 @@ export default function DashboardScreen() {
             </Text>
           </Card>
         ) : activeSlot?.type === 'gate' ? (
-          <GateCard matchStatus={gameState?.matchStatus} />
+          <GateCard matchStatus={gameState?.matchStatus} gateCooldownUntil={gameState?.gateCooldownUntil ?? null} nowMs={nowMs} />
         ) : activeSlot ? (
           <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} craftingActive={craftingActive} />
         ) : (
@@ -294,6 +325,7 @@ export default function DashboardScreen() {
               craftingDone={craftingDone}
               sprintLeft={sprintLeft}
               sprintExpired={sprintElapsed > SPRINT_BUDGET_SECS}
+              frozen={craftingFrozen}
             />
           </View>
         )}
@@ -555,12 +587,13 @@ function StageRow({ slot, greenIndex, isLast }: { slot: FirestoreSlot; greenInde
 // ─── Crafting countdown card ──────────────────────────────────────────────────
 
 function CraftingCountdownCard({
-  craftingLeft, craftingDone, sprintLeft, sprintExpired,
+  craftingLeft, craftingDone, sprintLeft, sprintExpired, frozen,
 }: {
   craftingLeft: number;
   craftingDone: boolean;
   sprintLeft: number;
   sprintExpired: boolean;
+  frozen: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -569,7 +602,19 @@ function CraftingCountdownCard({
         <Badge label={t('craft.title')} variant="gold" />
         <Text variant="mono" className="text-zinc-600">🧺</Text>
       </View>
-      {!craftingDone ? (
+      {/* Arrival declared / judge engaged → clock is paused. Show a calm "waiting"
+          state instead of a ticking or LATE timer (the score is already locked). */}
+      {frozen ? (
+        <View className="items-center">
+          <Text variant="label" className="text-neon-blue mb-1">{t('craft.paused')}</Text>
+          <Text variant="mono" className="text-3xl font-bold text-neon-blue">
+            {craftingDone ? formatElapsed(Math.max(0, sprintLeft)) : formatElapsed(craftingLeft)}
+          </Text>
+          <Text variant="caption" className="text-zinc-500 mt-1 text-center">
+            {t('craft.waitingJudge')}
+          </Text>
+        </View>
+      ) : !craftingDone ? (
         <View className="items-center">
           <Text variant="label" className="text-zinc-500 mb-1">{t('craft.timeLeft')}</Text>
           <Text
@@ -604,10 +649,19 @@ function CraftingCountdownCard({
 
 // ─── Gate card (matchmaking filter) ──────────────────────────────────────────
 
-function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
+function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
+  matchStatus?: MatchStatus;
+  gateCooldownUntil?: string | null;
+  nowMs: number;
+}) {
   const { t } = useTranslation();
   const [joining, setJoining]     = useState(false);
-  const rejoinedAfterLoss = useRef(false);
+  const rejoinedAfterCooldown = useRef(false);
+
+  // Seconds left on the post-loss cooldown (0 when none / elapsed).
+  const cooldownLeft = gateCooldownUntil
+    ? Math.max(0, Math.ceil((new Date(gateCooldownUntil).getTime() - nowMs) / 1000))
+    : 0;
 
   async function handleJoin() {
     setJoining(true);
@@ -625,17 +679,17 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
     }
   }
 
-  // After a loss the team must face a new opponent. Re-enter the queue once
-  // (the server keeps them 'waiting'); reset the guard when they leave 'lost'.
+  // After a loss the team waits out a 90s cooldown, THEN auto re-enters the queue
+  // exactly once. The guard resets whenever they leave the 'lost' state.
   useEffect(() => {
-    if (matchStatus === 'lost' && !rejoinedAfterLoss.current) {
-      rejoinedAfterLoss.current = true;
+    if (matchStatus === 'lost' && cooldownLeft === 0 && !rejoinedAfterCooldown.current) {
+      rejoinedAfterCooldown.current = true;
       void handleJoin();
     } else if (matchStatus !== 'lost') {
-      rejoinedAfterLoss.current = false;
+      rejoinedAfterCooldown.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchStatus]);
+  }, [matchStatus, cooldownLeft]);
 
   return (
     <Card glowColor="orange" className="p-5">
@@ -667,10 +721,28 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
       ) : matchStatus === 'lost' ? (
         <View className="items-center py-2">
           <Text variant="subheading" className="text-neon-red mb-1 text-center">{t('match.lostTitle')}</Text>
-          <Text variant="bodySmall" className="text-neon-blue text-center animate-pulse-neon">
-            {t('match.rematchWaiting')}
-          </Text>
+          {cooldownLeft > 0 ? (
+            <>
+              <Text variant="mono" className="text-neon-orange text-2xl text-center mb-1">
+                {Math.floor(cooldownLeft / 60)}:{String(cooldownLeft % 60).padStart(2, '0')}
+              </Text>
+              <Text variant="bodySmall" className="text-zinc-400 text-center">
+                {t('match.cooldown')}
+              </Text>
+            </>
+          ) : (
+            <Text variant="bodySmall" className="text-neon-blue text-center animate-pulse-neon">
+              {t('match.rematchWaiting')}
+            </Text>
+          )}
         </View>
+      ) : matchStatus === 'bypassed' ? (
+        <>
+          <Text variant="bodySmall" className="text-neon-green mb-4">{t('match.soloClear')}</Text>
+          <Button onPress={() => router.push('/basket-zone')} fullWidth>
+            {t('basket.title')} →
+          </Button>
+        </>
       ) : null}
     </Card>
   );
