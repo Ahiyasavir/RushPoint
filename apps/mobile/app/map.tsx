@@ -9,6 +9,7 @@ import { Card } from '../src/components/Card';
 import { useTranslation } from '../src/i18n';
 import { useDeviceLocation } from '../src/hooks/useDeviceLocation';
 import { useRaceConfig } from '../src/hooks/useRaceConfig';
+import { useGameStore } from '../src/store/gameStore';
 import { buildStaticMapUrl, framePoints } from '../src/data/stations';
 
 const MAPTILER_KEY = process.env.EXPO_PUBLIC_MAPTILER_KEY;
@@ -26,10 +27,27 @@ export default function MapScreen() {
   // static-map URL and the GPS-dot projection frame.
   const { config, stations } = useRaceConfig();
 
+  // Progressive reveal: the map only shows the stations the team has unlocked, so
+  // they can't "scout ahead". Granularity is per station TYPE (the mission map
+  // markers carry no per-task id) — green field stations are always shown; the
+  // orange Tene-finding stations appear once the team reaches the basket leg; the
+  // gold crafting/judge stations appear only once the 20-min clock has started.
+  const live = useGameStore((s) => s.live);
+  const activeType = live?.slots?.find((s) => s.status === 'active')?.type ?? null;
+  const craftingStarted = live?.craftingStartedAt != null;
+  const reachedBasket = craftingStarted || activeType === 'orange' || activeType === 'gold';
+  const visibleStations = live
+    ? stations.filter((s) =>
+        s.type === 'green' ||
+        (s.type === 'orange' && reachedBasket) ||
+        (s.type === 'gold' && craftingStarted),
+      )
+    : stations; // no live state yet (e.g. opened map before sync) → show all
+
   // Live device location → projected onto the static map's known frame so the
   // "You Are Here" dot lines up. Same (mapW, mapH) AND same frame points as the URL.
   const coords = useDeviceLocation(!!MAPTILER_KEY);
-  const view = fitRouteView(mapW, mapH, framePoints(config, stations));
+  const view = fitRouteView(mapW, mapH, framePoints(config, visibleStations));
   const me = coords ? projectToPixel(coords.lat, coords.lng, mapW, mapH, view) : null;
 
   return (
@@ -48,7 +66,7 @@ export default function MapScreen() {
             {/* expo-image caches to memory+disk: once the map loads at the start
                 (signal at Motza), it survives the Arazim-valley dead zones. */}
             <Image
-              source={{ uri: buildStaticMapUrl(MAPTILER_KEY, mapW, mapH, config, stations) }}
+              source={{ uri: buildStaticMapUrl(MAPTILER_KEY, mapW, mapH, config, visibleStations) }}
               style={{ width: mapW, height: mapH, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(0,255,170,0.15)' }}
               contentFit="cover"
               cachePolicy="memory-disk"

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Map, { Marker, NavigationControl, Source, Layer, type MapLayerMouseEvent, type MarkerDragEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { httpsCallable } from 'firebase/functions';
-import { routePathFor, routeGeoJSON, STATION_COLOR, type RaceConfig, type StationType } from '@rushpoint/shared';
+import { routeGeoJSON, STATION_COLOR, type RaceConfig, type StationType } from '@rushpoint/shared';
 import { functions, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 import { useRaceConfig, useStations, type BuilderStation } from '../data/raceConfig';
@@ -20,6 +20,27 @@ const ADD_TYPES: { type: StationType; kind: 'task' | 'zone'; key: string }[] = [
 ];
 
 type Draft = Partial<BuilderStation> & { kind: 'task' | 'zone'; type: StationType; lat: number; lng: number; id?: string };
+
+type LL = { lat: number; lng: number };
+// Greedy nearest-neighbour chain from `origin` through `pts` — gives a sensible,
+// non-zig-zagging route order along the valley without a full TSP solve. Pure,
+// so the route line can recompute live as stations are added/dragged.
+function orderByNearest(origin: LL, pts: readonly LL[]): LL[] {
+  const remaining = pts.map((p) => ({ lat: p.lat, lng: p.lng }));
+  const out: LL[] = [];
+  let cur: LL = origin;
+  const d2 = (a: LL, b: LL) => (a.lat - b.lat) ** 2 + (a.lng - b.lng) ** 2;
+  while (remaining.length) {
+    let bi = 0;
+    for (let i = 1; i < remaining.length; i++) {
+      if (d2(cur, remaining[i]) < d2(cur, remaining[bi])) bi = i;
+    }
+    cur = remaining[bi];
+    out.push(cur);
+    remaining.splice(bi, 1);
+  }
+  return out;
+}
 
 function blankDraft(type: StationType, lat: number, lng: number): Draft {
   const kind = type === 'orange' ? 'zone' : 'task';
@@ -55,7 +76,18 @@ export default function BuilderPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const flash = (m: string) => { setNotice(m); window.setTimeout(() => setNotice(null), 3500); };
 
-  const routeData = useMemo(() => routeGeoJSON(routePathFor(cfg)), [cfg]);
+  // The route line derives from the LIVE coordinate state: start → green field
+  // stations (nearest-neighbour ordered) → gate → finish. Recomputes the moment
+  // any of those points is dragged or a green station is added/removed — no save
+  // or refresh needed. Saving persists exactly these mid-nodes (below).
+  const routeMidNodes = useMemo(
+    () => [...orderByNearest(cfg.start, stations.filter((s) => s.type === 'green')), cfg.gate],
+    [cfg.start, cfg.gate, stations],
+  );
+  const routeData = useMemo(
+    () => routeGeoJSON([cfg.start, ...routeMidNodes, cfg.finish]),
+    [cfg.start, cfg.finish, routeMidNodes],
+  );
 
   // ── Config marker drag ───────────────────────────────────────────────────────
   const moveConfigPoint = (key: 'start' | 'finish' | 'gate', e: MarkerDragEvent) => {
@@ -69,7 +101,7 @@ export default function BuilderPage() {
       await ensureAuth();
       await saveRaceConfigFn({
         start: cfg.start, finish: cfg.finish, gate: cfg.gate,
-        center: cfg.center, zoom: cfg.zoom, routeWaypoints: cfg.routeWaypoints ?? [cfg.gate],
+        center: cfg.center, zoom: cfg.zoom, routeWaypoints: routeMidNodes,
       });
       setCfgDirty(false);
       flash(t('builder.savedRoute'));
@@ -97,6 +129,8 @@ export default function BuilderPage() {
       const res = await upsertStationFn(payloadFromDraft(d));
       const id = (res.data as { id: string }).id;
       setDraft({ ...d, id });
+      // A green station change reshapes the route line → prompt a route re-save.
+      if (d.type === 'green') setCfgDirty(true);
       flash(t('builder.savedStation'));
     } catch { flash(t('builder.saveError')); } finally { setBusy(false); }
   }
