@@ -358,6 +358,8 @@ async function resetEmulator(): Promise<void> {
 
   // Public collections
   await deleteCollection(pub('tasks'));
+  await deleteCollection(pub('basketZones'));
+  await deleteCollection(pub('raceConfig'));
   await deleteCollection(pub('events'));
   await deleteCollection(pub('leaderboard'));
   await deleteCollection(codes());
@@ -430,6 +432,35 @@ async function seedTasks(): Promise<void> {
   const orange = TASKS.filter((t) => t.type === 'orange').length;
   const gold   = TASKS.filter((t) => t.type === 'gold').length;
   console.info(`  ✅ Tasks seeded: ${TASKS.length} total  (${green}× green | ${orange}× orange | ${gold}× gold)`);
+}
+
+async function seedRaceConfig(): Promise<void> {
+  // Editable race framing (Race Builder) — defaults match @rushpoint/shared.
+  await db.doc(pubDoc('raceConfig', 'current')).set({
+    start:  { lat: 31.7905, lng: 35.164 },
+    finish: { lat: 31.8155, lng: 35.1875 },
+    gate:   { lat: 31.811,  lng: 35.184 },
+    center: { lat: 31.803,  lng: 35.176 },
+    zoom:   13.5,
+    routeWaypoints: [{ lat: 31.811, lng: 35.184 }],
+    updatedAt: now(),
+  }, { merge: !RESET });
+
+  // Orange "find the Tene" basket zones, placed in-area near the orange stage.
+  const zones = [
+    { id: 'zone-a', name: 'Arazim Lookout', nameHe: 'מצפה ארזים',
+      riddle: 'Where the valley opens to the hills, find your Tene by the lookout stones.',
+      riddleHe: 'במקום שהעמק נפתח אל ההרים — מצאו את הטנא ליד אבני התצפית.',
+      coordinates: { lat: 31.8135, lng: 35.1855 }, currentTeamCount: 0, maxTeams: 3 },
+    { id: 'zone-b', name: 'Pine Grove', nameHe: 'חורשת האורנים',
+      riddle: 'Under the pines on the climb to Ramot, your basket waits in the shade.',
+      riddleHe: 'בין האורנים בעלייה לרמות — הסל מחכה בצל.',
+      coordinates: { lat: 31.8145, lng: 35.187 }, currentTeamCount: 0, maxTeams: 3 },
+  ];
+  const batch = db.batch();
+  for (const z of zones) batch.set(db.doc(pubDoc('basketZones', z.id)), z, { merge: !RESET });
+  await batch.commit();
+  console.info(`  ✅ Race config + ${zones.length} basket zones seeded`);
 }
 
 async function seedEvent(): Promise<void> {
@@ -535,6 +566,7 @@ async function main(): Promise<void> {
 
   console.info('🌱 Seeding tasks & event...');
   await seedTasks();
+  await seedRaceConfig();
   await seedEvent();
   await seedLeaderboard();
   await seedAccessCodes();
