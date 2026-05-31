@@ -75,7 +75,7 @@ const TASKS = [
     titleHe: 'ציד תמונות אתרי ירושלים',
     description: 'Photograph all 5 specified Jerusalem landmarks as a team. Each member must appear in at least one photo.',
     type: 'green',
-    coordinates: { lat: 31.795, lng: 35.169 },
+    coordinates: { lat: 31.797, lng: 35.172 },
     locationHint: 'Begin near Jaffa Gate in the Old City.',
     qrCode: 'QR-GREEN-001',
     difficulty: 3,
@@ -92,7 +92,7 @@ const TASKS = [
     titleHe: 'ריצת השליחות בעיניים עצומות',
     description: 'One team member is blindfolded. The rest must guide them through a 50-metre course using verbal instructions only.',
     type: 'green',
-    coordinates: { lat: 31.801, lng: 35.174 },
+    coordinates: { lat: 31.801, lng: 35.18 },
     locationHint: 'Open plaza near the Tower of David.',
     qrCode: 'QR-GREEN-002',
     difficulty: 5,
@@ -109,7 +109,7 @@ const TASKS = [
     titleHe: 'חידון תנ"ך ירושלמי',
     description: 'Answer 10 Jerusalem-themed Bible trivia questions together. Submit one collective answer per question.',
     type: 'green',
-    coordinates: { lat: 31.807, lng: 35.18 },
+    coordinates: { lat: 31.805, lng: 35.186 },
     locationHint: 'Near the Cardo ruins in the Jewish Quarter.',
     qrCode: 'QR-GREEN-003',
     difficulty: 4,
@@ -126,7 +126,7 @@ const TASKS = [
     titleHe: 'קשר אנושי',
     description: 'All team members join hands in a tangled circle. Work together to untangle the knot without releasing hands.',
     type: 'green',
-    coordinates: { lat: 31.804, lng: 35.177 },
+    coordinates: { lat: 31.803, lng: 35.183 },
     locationHint: 'Open area near the Jewish Quarter centre.',
     qrCode: 'QR-GREEN-004',
     difficulty: 2,
@@ -146,7 +146,7 @@ const TASKS = [
       'Navigate to the Bible Lands Museum park using the in-app map and physical clues hidden along the route. '
       + "Find and retrieve your team's Tene (wicker basket) hidden in the park.",
     type: 'orange',
-    coordinates: { lat: 31.814, lng: 35.1865 },
+    coordinates: { lat: 31.808361, lng: 35.191167 },
     locationHint: 'Park entrance faces the Israel Museum. Look for the olive tree grove.',
     qrCode: 'QR-ORANGE-001',
     difficulty: 6,
@@ -164,7 +164,7 @@ const TASKS = [
     titleHe: 'גת עתיקה — סחיטת ענבים',
     description: 'Use the replica ancient grape press to squeeze fresh juice. Fill and seal the clay flask provided.',
     type: 'gold',
-    coordinates: { lat: 31.8155, lng: 35.1875 },
+    coordinates: { lat: 31.808885, lng: 35.193833 },
     locationHint: 'Near the agricultural stations inside the park.',
     qrCode: 'QR-GOLD-001',
     difficulty: 7,
@@ -181,7 +181,7 @@ const TASKS = [
     titleHe: 'הכנת שקיק תבלינים',
     description: 'Blend three traditional spices and sew them into a linen sachet to place in your Tene.',
     type: 'gold',
-    coordinates: { lat: 31.816, lng: 35.188 },
+    coordinates: { lat: 31.80857, lng: 35.19265 },
     locationHint: 'Craft tent near the park\'s southern entrance.',
     qrCode: 'QR-GOLD-002',
     difficulty: 8,
@@ -198,7 +198,7 @@ const TASKS = [
     titleHe: 'כבישת שמן זית',
     description: 'Use the traditional stone press to extract olive oil. Fill the small vial provided for your Tene.',
     type: 'gold',
-    coordinates: { lat: 31.815, lng: 35.186 },
+    coordinates: { lat: 31.8089, lng: 35.1945 },
     locationHint: 'Stone press station — marked with an olive branch sign.',
     qrCode: 'QR-GOLD-003',
     difficulty: 8,
@@ -437,12 +437,18 @@ async function seedTasks(): Promise<void> {
 async function seedRaceConfig(): Promise<void> {
   // Editable race framing (Race Builder) — defaults match @rushpoint/shared.
   await db.doc(pubDoc('raceConfig', 'current')).set({
-    start:  { lat: 31.7905, lng: 35.164 },
-    finish: { lat: 31.8155, lng: 35.1875 },
-    gate:   { lat: 31.811,  lng: 35.184 },
-    center: { lat: 31.803,  lng: 35.176 },
+    start:  { lat: 31.79326,  lng: 35.165684 },  // Motza
+    finish: { lat: 31.808885, lng: 35.193833 },  // Gan HaKipod
+    gate:   { lat: 31.807,    lng: 35.189 },
+    center: { lat: 31.8011,   lng: 35.1798 },
     zoom:   13.5,
-    routeWaypoints: [{ lat: 31.811, lng: 35.184 }],
+    routeWaypoints: [
+      { lat: 31.797,    lng: 35.172    },
+      { lat: 31.801,    lng: 35.18     },
+      { lat: 31.805,    lng: 35.186    },
+      { lat: 31.807,    lng: 35.189    },
+      { lat: 31.808361, lng: 35.191167 },  // Bible Park (gat)
+    ],
     updatedAt: now(),
   }, { merge: !RESET });
 
@@ -451,11 +457,11 @@ async function seedRaceConfig(): Promise<void> {
     { id: 'zone-a', name: 'Arazim Lookout', nameHe: 'מצפה ארזים',
       riddle: 'Where the valley opens to the hills, find your Tene by the lookout stones.',
       riddleHe: 'במקום שהעמק נפתח אל ההרים — מצאו את הטנא ליד אבני התצפית.',
-      coordinates: { lat: 31.8135, lng: 35.1855 }, currentTeamCount: 0, maxTeams: 3 },
+      coordinates: { lat: 31.808361, lng: 35.191167 }, currentTeamCount: 0, maxTeams: 3 },
     { id: 'zone-b', name: 'Pine Grove', nameHe: 'חורשת האורנים',
       riddle: 'Under the pines on the climb to Ramot, your basket waits in the shade.',
       riddleHe: 'בין האורנים בעלייה לרמות — הסל מחכה בצל.',
-      coordinates: { lat: 31.8145, lng: 35.187 }, currentTeamCount: 0, maxTeams: 3 },
+      coordinates: { lat: 31.80857, lng: 35.19265 }, currentTeamCount: 0, maxTeams: 3 },
   ];
   const batch = db.batch();
   for (const z of zones) batch.set(db.doc(pubDoc('basketZones', z.id)), z, { merge: !RESET });

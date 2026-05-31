@@ -47,39 +47,45 @@ async function main() {
     description: 'Photograph all 5 specified Jerusalem landmarks as a team.',
     type: 'green', qrCode: 'QR-GREEN-001', maxConcurrentTeams: 3, currentTeamCount: 0,
     difficulty: 3, photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
-    status: 'active', maxDurationMinutes: 30, coordinates: { lat: 31.795, lng: 35.169 },
+    status: 'active', maxDurationMinutes: 30, coordinates: { lat: 31.797, lng: 35.172 },
   });
   await db.doc(`${tasksPath}/task-green-002`).set({
     id: 'task-green-002', title: 'Blindfolded Trust Relay', titleHe: 'ריצת השליחות בעיניים עצומות',
     description: 'Guide a blindfolded teammate through a short course using only your voices.',
     type: 'green', qrCode: 'QR-GREEN-002', maxConcurrentTeams: 3, currentTeamCount: 0,
     difficulty: 5, photoRequired: true, pointValue: 100, estimatedMinutes: 20, isActive: true,
-    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.801, lng: 35.174 },
+    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.801, lng: 35.18 },
   });
   await db.doc(`${tasksPath}/task-green-003`).set({
     id: 'task-green-003', title: 'Bible Trivia Blitz', titleHe: 'חידון תנ"ך ירושלמי',
     description: 'Answer 10 Jerusalem-themed Bible trivia questions together.',
     type: 'green', qrCode: 'QR-GREEN-003', maxConcurrentTeams: 4, currentTeamCount: 0,
     difficulty: 4, photoRequired: false, pointValue: 100, estimatedMinutes: 12, isActive: true,
-    status: 'active', maxDurationMinutes: 24, coordinates: { lat: 31.807, lng: 35.18 },
+    status: 'active', maxDurationMinutes: 24, coordinates: { lat: 31.805, lng: 35.186 },
   });
   await db.doc(`${tasksPath}/task-gold-001`).set({
     id: 'task-gold-001', title: 'Ancient Grape Press',
     description: 'Use the replica press to fill and seal a clay flask for your Tene.',
     type: 'gold', qrCode: 'QR-GOLD-001', maxConcurrentTeams: 2, currentTeamCount: 1,
     difficulty: 8, photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
-    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.8155, lng: 35.1875 },
+    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.808885, lng: 35.193833 },
   });
   console.log('[seed-local] Seeded tasks: task-green-001/002/003, task-gold-001');
 
   // Race config (editable in the admin Race Builder; defaults match @rushpoint/shared).
   await db.doc(`artifacts/${APP_ID}/public/data/raceConfig/current`).set({
-    start:  { lat: 31.7905, lng: 35.164 },
-    finish: { lat: 31.8155, lng: 35.1875 },
-    gate:   { lat: 31.811,  lng: 35.184 },
-    center: { lat: 31.803,  lng: 35.176 },
+    start:  { lat: 31.79326,   lng: 35.165684 },  // Motza
+    finish: { lat: 31.808885,  lng: 35.193833 },  // Gan HaKipod
+    gate:   { lat: 31.807,     lng: 35.189 },
+    center: { lat: 31.8011,    lng: 35.1798 },
     zoom:   13.5,
-    routeWaypoints: [{ lat: 31.811, lng: 35.184 }],
+    routeWaypoints: [
+      { lat: 31.797,    lng: 35.172    },
+      { lat: 31.801,    lng: 35.18     },
+      { lat: 31.805,    lng: 35.186    },
+      { lat: 31.807,    lng: 35.189    },
+      { lat: 31.808361, lng: 35.191167 },  // Bible Park (gat)
+    ],
     updatedAt: now,
   });
 
@@ -89,13 +95,13 @@ async function main() {
     id: 'zone-a', name: 'Arazim Lookout', nameHe: 'מצפה ארזים',
     riddle: 'Where the valley opens to the hills, find your Tene by the lookout stones.',
     riddleHe: 'במקום שהעמק נפתח אל ההרים — מצאו את הטנא ליד אבני התצפית.',
-    coordinates: { lat: 31.8135, lng: 35.1855 }, currentTeamCount: 0, maxTeams: 3,
+    coordinates: { lat: 31.808361, lng: 35.191167 }, currentTeamCount: 0, maxTeams: 3,
   });
   await db.doc(`${zonesPath}/zone-b`).set({
     id: 'zone-b', name: 'Pine Grove', nameHe: 'חורשת האורנים',
     riddle: 'Under the pines on the climb to Ramot, your basket waits in the shade.',
     riddleHe: 'בין האורנים בעלייה לרמות — הסל מחכה בצל.',
-    coordinates: { lat: 31.8145, lng: 35.187 }, currentTeamCount: 0, maxTeams: 3,
+    coordinates: { lat: 31.80857, lng: 35.19265 }, currentTeamCount: 0, maxTeams: 3,
   });
   console.log('[seed-local] Seeded raceConfig + basket zones (zone-a, zone-b).');
 
@@ -138,7 +144,7 @@ async function main() {
   // The PENDING check-in is what makes the team appear in listPendingArrivals.
   await db.doc(`${userPath(DEMO_UID)}/checkIns/${CHECKIN_ID}`).set({
     id: CHECKIN_ID, teamId: DEMO_UID, taskId: 'task-gold-001',
-    status: 'pending', timestamp: minsAgo(3), location: { lat: 31.8155, lng: 35.1875 },
+    status: 'pending', timestamp: minsAgo(3), location: { lat: 31.808885, lng: 35.193833 },
   });
   console.log('[seed-local] Seeded demo team "The Lions" (LION1) with a PENDING check-in.');
 

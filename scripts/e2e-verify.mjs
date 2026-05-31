@@ -354,13 +354,18 @@ async function main() {
       code: 'WOLF03', teamName: 'E2E Evac', captainPhone: '0500000002',
       participants: [{ name: 'Fae', age: '12' }, { name: 'Gus', age: '13' }, { name: 'Hal', age: '12' }, { name: 'Ivy', age: '11' }], waiverAccepted: true,
     });
-    // Fresh team starts active on slot 0 = task-green-001.
-    const res = await call('evacuateStation', { taskId: 'task-green-001' });
+    // Slot 0 is load-balance-routed at registration, so read the station the team
+    // actually landed on (not a hardcoded id) and evacuate that.
+    const preGs = await getDoc(doc(evFs, `artifacts/${APP_ID}/users/${evUid}/gameState/current`)).then((s) => (s.exists() ? s.data() : null));
+    const evTaskId = preGs?.slots?.find((s) => s.status === 'active')?.taskId;
+    check('fresh team was routed to a green station', !!evTaskId, `taskId=${evTaskId}`);
+    const res = await call('evacuateStation', { taskId: evTaskId });
     const { evacuatedCount } = res;
     check('evacuateStation releases at least the fresh team', (evacuatedCount ?? 0) >= 1, `count=${evacuatedCount}`);
     const evGs = await getDoc(doc(evFs, `artifacts/${APP_ID}/users/${evUid}/gameState/current`)).then((s) => (s.exists() ? s.data() : null));
-    check('  evacuated team flagged + slot cleared', evGs?.evacuatedFrom != null && evGs?.slots?.[0]?.taskId == null,
-      `evacuatedFrom=${evGs?.evacuatedFrom} slot0Task=${evGs?.slots?.[0]?.taskId}`);
+    const evActiveTask = evGs?.slots?.find((s) => s.status === 'active')?.taskId;
+    check('  evacuated team flagged + slot cleared', evGs?.evacuatedFrom != null && evActiveTask == null,
+      `evacuatedFrom=${evGs?.evacuatedFrom} activeTask=${evActiveTask}`);
     const { logs } = await call('listAuditLogs', {});
     check('  evacuation recorded in audit log', (logs ?? []).some((l) => l.teamId === evUid && l.actionType === 'evacuation'),
       `logs=${logs?.length}`);

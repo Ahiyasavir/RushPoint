@@ -19,11 +19,12 @@ const view = fitRouteView(W, H);
 
 // 1. View frames the route at a sane Jerusalem-area zoom.
 check('zoom is in a sane range for a ~3km route', view.zoom > 11 && view.zoom < 17, `zoom=${view.zoom.toFixed(2)}`);
-// 1b. Tile-size convention guard: MapTiler static maps use 512px tiles. A regression
-//     to the 256px convention would push this fit-zoom a full level higher (~13.9),
-//     so the rendered map would be 2× too zoomed-in and crop the route.
-check('fit zoom matches MapTiler 512px tile convention (not 256px)', view.zoom < 13.4, `zoom=${view.zoom.toFixed(2)}`);
-check('center near the route midpoint', Math.abs(view.centerLat - 31.803) < 0.02 && Math.abs(view.centerLng - 35.176) < 0.02,
+// 1b. Tile-size convention guard: MapTiler static maps use 512px tiles. For the real
+//     Motza→Gan HaKipod route the 512 fit-zoom is ~13.6; a regression to the 256px
+//     convention would push it a level higher (~14.6), rendering 2× too zoomed-in
+//     and cropping the route. The < 14.0 bound cleanly separates the two.
+check('fit zoom matches MapTiler 512px tile convention (not 256px)', view.zoom < 14.0, `zoom=${view.zoom.toFixed(2)}`);
+check('center near the route midpoint', Math.abs(view.centerLat - 31.8011) < 0.02 && Math.abs(view.centerLng - 35.1798) < 0.02,
   `center=${view.centerLat.toFixed(4)},${view.centerLng.toFixed(4)}`);
 
 // 2. Every route point projects INSIDE the image frame (with padding).

@@ -5,23 +5,28 @@
 // Park, to Gan HaKipod (Ramot, Derech HaHoresh — beside Ramot Forest). ~200m of
 // climb, which is why the maps use a topographic style (the hills are the point).
 //
-// ⚠️ These coordinates are RESEARCHED APPROXIMATIONS — verify each one on the
-// ground (GPS walk) before the event and adjust. The 6-stage flow maps onto the
-// route: 3 green field missions → gate (matchmaking) → orange (find the Tene) →
-// gold (craft + judge, the finish at Gan HaKipod).
+// Real anchors (provided by the organiser):
+//   • Start (Motza)            31.793260, 35.165684
+//   • Bible Park "gat" (orange) 31.808361, 35.191167  (DMS 31°48'30.1"N 35°11'28.2"E)
+//   • Gan HaKipod (finish/gold) 31.808885, 35.193833
+// The route mostly follows the Arazim-valley bike path (שביל האופניים) NE from
+// Motza up to Ramot. The 3 green stations + gate are distributed along that
+// corridor (refine each on the ground / in the Race Builder). The 6-stage flow:
+// 3 green field missions → gate (matchmaking) → orange (find the Tene at the gat)
+// → gold (craft + judge at Gan HaKipod).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import type { GeoPoint } from './types';
 
-/** Map default center — frames the whole Motza→Gan HaKipod route at ~zoom 13.5. */
-export const RACE_CENTER: GeoPoint = { lat: 31.803, lng: 35.176 };
+/** Map default center — frames the whole Motza→Gan HaKipod route. */
+export const RACE_CENTER: GeoPoint = { lat: 31.8011, lng: 35.1798 };
 export const RACE_DEFAULT_ZOOM = 13.5;
 
-/** The starting point of the race (Motza / Arazim valley floor). */
-export const RACE_START: GeoPoint = { lat: 31.7905, lng: 35.164 };
+/** The starting point of the race (Motza). */
+export const RACE_START: GeoPoint = { lat: 31.79326, lng: 35.165684 };
 
-/** Gan HaKipod — the finish (Ramot, Derech HaHoresh). */
-export const RACE_FINISH: GeoPoint = { lat: 31.8155, lng: 35.1875 };
+/** Gan HaKipod — the finish (Ramot, Derech HaHoresh / Yig'al Alon St). */
+export const RACE_FINISH: GeoPoint = { lat: 31.808885, lng: 35.193833 };
 
 export type StationType = 'green' | 'gate' | 'orange' | 'gold';
 
@@ -35,14 +40,14 @@ export interface StationGeo {
   lng: number;
 }
 
-/** Ordered stations along the route (Motza → Gan HaKipod). */
+/** Ordered stations along the Motza → Gan HaKipod bike-path corridor. */
 export const STATION_GEO: readonly StationGeo[] = [
-  { id: 'task-green-001',  type: 'green',  slot: 0, lat: 31.795,  lng: 35.169  },
-  { id: 'task-green-002',  type: 'green',  slot: 1, lat: 31.801,  lng: 35.174  },
-  { id: 'task-green-003',  type: 'green',  slot: 2, lat: 31.807,  lng: 35.18   },
-  { id: 'gate',            type: 'gate',   slot: 3, lat: 31.811,  lng: 35.184  },
-  { id: 'task-orange-001', type: 'orange', slot: 4, lat: 31.814,  lng: 35.1865 },
-  { id: 'task-gold-001',   type: 'gold',   slot: 5, lat: 31.8155, lng: 35.1875 },
+  { id: 'task-green-001',  type: 'green',  slot: 0, lat: 31.797,    lng: 35.172    },
+  { id: 'task-green-002',  type: 'green',  slot: 1, lat: 31.801,    lng: 35.180    },
+  { id: 'task-green-003',  type: 'green',  slot: 2, lat: 31.805,    lng: 35.186    },
+  { id: 'gate',            type: 'gate',   slot: 3, lat: 31.807,    lng: 35.189    },
+  { id: 'task-orange-001', type: 'orange', slot: 4, lat: 31.808361, lng: 35.191167 }, // Bible Park (gat)
+  { id: 'task-gold-001',   type: 'gold',   slot: 5, lat: 31.808885, lng: 35.193833 }, // Gan HaKipod
 ] as const;
 
 /**
@@ -81,14 +86,21 @@ export interface RaceConfig {
   updatedAt?: string;
 }
 
-/** Default race config — derived from the hardcoded geography (offline fallback). */
+/** Default race config — derived from the real geography (offline fallback). */
 export const DEFAULT_RACE_CONFIG: RaceConfig = {
   start:  RACE_START,
   finish: RACE_FINISH,
-  gate:   { lat: 31.811, lng: 35.184 },
+  gate:   { lat: 31.807, lng: 35.189 },
   center: RACE_CENTER,
   zoom:   RACE_DEFAULT_ZOOM,
-  routeWaypoints: [{ lat: 31.811, lng: 35.184 }],
+  // Spine traced through the stations up the valley → a realistic route line.
+  routeWaypoints: [
+    { lat: 31.797,    lng: 35.172    },
+    { lat: 31.801,    lng: 35.180    },
+    { lat: 31.805,    lng: 35.186    },
+    { lat: 31.807,    lng: 35.189    },
+    { lat: 31.808361, lng: 35.191167 },
+  ],
 };
 
 /** Ordered route line for a config: start → waypoints → finish. */
