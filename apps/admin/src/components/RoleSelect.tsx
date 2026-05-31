@@ -10,6 +10,9 @@ const ROLE_META: Record<Role, { icon: string; titleKey: string; descKey: string;
   judge:     { icon: '⚖️', titleKey: 'role.judge',     descKey: 'role.judgeDesc',     accent: 'border-neon-gold/40 hover:bg-neon-gold/10' },
   operator:  { icon: '📍', titleKey: 'role.operator',  descKey: 'role.operatorDesc',  accent: 'border-neon-blue/40 hover:bg-neon-blue/10' },
   volunteer: { icon: '🤝', titleKey: 'role.volunteer', descKey: 'role.volunteerDesc', accent: 'border-neon-orange/40 hover:bg-neon-orange/10' },
+  duelModerator:   { icon: '⚔️', titleKey: 'role.duelModerator',   descKey: 'role.duelModeratorDesc',   accent: 'border-neon-blue/40 hover:bg-neon-blue/10' },
+  arrivalApprover: { icon: '🏁', titleKey: 'role.arrivalApprover', descKey: 'role.arrivalApproverDesc', accent: 'border-neon-gold/40 hover:bg-neon-gold/10' },
+  teneDistributor: { icon: '🧺', titleKey: 'role.teneDistributor', descKey: 'role.teneDistributorDesc', accent: 'border-neon-orange/40 hover:bg-neon-orange/10' },
 };
 
 export default function RoleSelect() {

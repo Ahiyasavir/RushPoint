@@ -1286,6 +1286,51 @@ export const startCraftingTimer = functions.https.onCall(async (data, context) =
   return result;
 });
 
+// ─── startCraftingForTeam ─────────────────────────────────────────────────────
+// Tene Distributor (volunteer) hands a team their basket and starts the 20-minute
+// crafting clock for THEM — no QR scan. Same effect as startCraftingTimer but the
+// caller is the volunteer (assertJudge) and the team is named explicitly. The
+// mobile client beeps + starts the countdown the moment craftingStartedAt appears.
+// Idempotent: returns the existing deadline if crafting already started.
+export const startCraftingForTeam = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { teamId } = data as { teamId?: string };
+  if (!teamId) {
+    throw new functions.https.HttpsError('invalid-argument', 'teamId is required');
+  }
+  const nowIso = new Date().toISOString();
+  const gsRef  = db.doc(`${userPath(teamId)}/gameState/current`);
+
+  return db.runTransaction(async (tx) => {
+    const gsSnap = await tx.get(gsRef);
+    if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found for team');
+    const gs = gsSnap.data() as { craftingStartedAt?: string; matchStatus?: string; slots: JudgeSlot[] };
+
+    if (gs.craftingStartedAt) {
+      const deadlineAt = new Date(new Date(gs.craftingStartedAt).getTime() + CRAFTING_DURATION_SECONDS * 1000).toISOString();
+      return { alreadyStarted: true, craftingStartedAt: gs.craftingStartedAt, deadlineAt };
+    }
+
+    const slots = gs.slots.map((s) => ({ ...s }));
+    if (slots[BASKET_SLOT_INDEX]?.status === 'active') {
+      slots[BASKET_SLOT_INDEX] = { ...slots[BASKET_SLOT_INDEX], status: 'completed', completedAt: nowIso };
+      unlockNext(slots, BASKET_SLOT_INDEX, nowIso);
+    }
+
+    tx.update(gsRef, {
+      slots,
+      craftingStartedAt: nowIso,
+      matchStatus: gs.matchStatus === 'waiting' ? 'bypassed' : (gs.matchStatus ?? 'bypassed'),
+      updatedAt: nowIso,
+    });
+    tx.set(db.doc(`${userPath(teamId)}/profile/team`), { status: 'crafting' }, { merge: true });
+
+    const deadlineAt       = new Date(new Date(nowIso).getTime() + CRAFTING_DURATION_SECONDS * 1000).toISOString();
+    const sprintDeadlineAt = new Date(new Date(deadlineAt).getTime() + SPRINT_BUDGET_SECONDS * 1000).toISOString();
+    return { alreadyStarted: false, craftingStartedAt: nowIso, deadlineAt, sprintDeadlineAt };
+  });
+});
+
 // ─── joinMatchQueue ───────────────────────────────────────────────────────────
 // Team enters the matchmaking queue at the gate.
 // Immediately matched if an opponent within 300 pts is already waiting.

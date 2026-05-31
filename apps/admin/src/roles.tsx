@@ -5,9 +5,24 @@ import React, { createContext, useCallback, useContext, useState } from 'react';
 // load; the choice is persisted locally and decides which admin pages/tabs are
 // visible. There is no server-enforced claim here — see CLAUDE.md (assertJudge
 // is already relaxed on the emulator). Swap for custom claims for production.
-export type Role = 'manager' | 'judge' | 'operator' | 'volunteer';
+export type Role =
+  | 'manager'
+  | 'judge'
+  | 'operator'
+  | 'volunteer'
+  | 'duelModerator'
+  | 'arrivalApprover'
+  | 'teneDistributor';
 
-export const ALL_ROLES: Role[] = ['manager', 'judge', 'operator', 'volunteer'];
+export const ALL_ROLES: Role[] = [
+  'manager',
+  'judge',
+  'operator',
+  'volunteer',
+  'duelModerator',
+  'arrivalApprover',
+  'teneDistributor',
+];
 
 const ROLE_KEY    = 'rushpoint.admin.role';
 const STATION_KEY = 'rushpoint.admin.stationId';
@@ -25,6 +40,13 @@ export const ROLE_ROUTES: Record<Role, string[]> = {
   // Volunteer (roaming / queue marshal): all-teams view with info, fines,
   // and the live emergency/help feed.
   volunteer: ['/volunteer'],
+  // Duel moderator: runs the gate 1v1 matchmaking console only.
+  duelModerator: ['/matchmaking'],
+  // Arrival approver: manages the judge-arrival queue (check in / remove).
+  arrivalApprover: ['/checkins'],
+  // Tene distributor: per-hub console to hand baskets out and start the
+  // 20-minute crafting clock for each team at their hub.
+  teneDistributor: ['/tene'],
 };
 
 export function defaultRouteFor(role: Role): string {

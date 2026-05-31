@@ -19,11 +19,13 @@ export function useGameSync(teamId: string | null): void {
   const setSyncState = useGameStore((s) => s.setSyncState);
   const { playUnlock } = useSlotSound();
   const prevSlots = useRef<LiveSlot[] | null>(null);
+  const prevCrafting = useRef<boolean>(false);
 
   useEffect(() => {
     if (!teamId) return;
     setSyncState('loading');
     prevSlots.current = null;
+    prevCrafting.current = false;
 
     const ref = doc(db, `artifacts/${APP_ID}/users/${teamId}/gameState/current`);
     const unsub = onSnapshot(
@@ -44,6 +46,14 @@ export function useGameSync(teamId: string | null): void {
           }
         }
         prevSlots.current = data.slots;
+
+        // Crafting beep: the Tene Distributor just started the 20-min clock
+        // (craftingStartedAt newly stamped) — alert the team with the gold chime.
+        const craftingNow = data.craftingStartedAt != null;
+        if (prev && craftingNow && !prevCrafting.current) {
+          playUnlock('gold');
+        }
+        prevCrafting.current = craftingNow;
 
         applyLiveGame(data, snap.metadata.fromCache);
       },

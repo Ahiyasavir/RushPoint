@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
 import { functions, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
@@ -58,6 +58,18 @@ export default function VolunteerPage() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [fineArmed, setFineArmed] = useState<string | null>(null);
   const [finingId, setFiningId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  // Global search across team name, access code, and member names.
+  const filteredTeams = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return teams;
+    return teams.filter((tm) =>
+      tm.name.toLowerCase().includes(q) ||
+      tm.code.toLowerCase().includes(q) ||
+      tm.memberNames.some((m) => m.toLowerCase().includes(q)),
+    );
+  }, [teams, query]);
 
   const flash = (msg: string, isErr = false) => {
     (isErr ? setError : setNotice)(msg);
@@ -168,6 +180,13 @@ export default function VolunteerPage() {
       <section>
         <h2 className="text-white font-semibold text-lg">{t('vol.teamsTitle')}</h2>
         <p className="text-zinc-500 text-sm mb-4">{t('vol.teamsHint')}</p>
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t('vol.searchPlaceholder')}
+          className="mb-4 w-full px-4 py-2.5 rounded-xl bg-app-card border border-glass-border text-white text-sm placeholder:text-zinc-600 focus:border-neon-green/40 focus:outline-none"
+        />
         <div className="rounded-2xl border border-glass-border overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-app-surface text-zinc-500 text-xs uppercase tracking-widest">
@@ -182,10 +201,10 @@ export default function VolunteerPage() {
             <tbody>
               {loading && teams.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">{t('common.loading')}</td></tr>
-              ) : teams.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">{t('teams.empty')}</td></tr>
+              ) : filteredTeams.length === 0 ? (
+                <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600">{query ? t('vol.searchEmpty') : t('teams.empty')}</td></tr>
               ) : (
-                teams.map((team) => (
+                filteredTeams.map((team) => (
                   <tr key={team.id} className="bg-app-card hover:bg-app-raised transition-colors border-b border-glass-border">
                     <td className="px-4 py-3">
                       <div className="font-semibold text-white">{team.name}</div>
