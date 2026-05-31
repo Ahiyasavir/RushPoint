@@ -36,6 +36,7 @@
                     "seed:reset":  "npm run seed:reset --workspace=scripts",
                     "sync":  "node scripts/sync-sheets.mjs",
                     "push:sheet":  "node scripts/push-sheet.mjs",
+                    "simulate":  "node scripts/simulate-tournament.mjs",
                     "mirror":  "node scripts/mirror.mjs",
                     "dev:mirror":  "wait-on tcp:127.0.0.1:8080 && node scripts/mirror.mjs",
                     "mobile:web":  "npm run dev --workspace=apps/mobile -- --web",
