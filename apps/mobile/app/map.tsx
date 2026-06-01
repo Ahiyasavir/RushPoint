@@ -24,20 +24,18 @@ export default function MapScreen() {
 
   // Progressive reveal: the map only shows the stations the team has unlocked, so
   // they can't "scout ahead". Granularity is per station TYPE (the mission map
-  // markers carry no per-task id) — green field stations are always shown; the
-  // orange Tene-finding stations appear once the team reaches the basket leg; the
-  // gold crafting/judge stations appear only once the 20-min clock has started.
+  // markers carry no per-task id):
+  //   • green  — field missions, always shown.
+  //   • orange — the Tene hideouts are NEVER drawn on the map: teams must find
+  //     them from the riddle (smart-assigned), and a marker would both spoil the
+  //     search and let teams share the location with friends.
+  //   • gold   — the crafting/judge location, shown only once the 20-min clock
+  //     has started (i.e. after the Tene is in hand).
   const live = useGameStore((s) => s.live);
-  const activeType = live?.slots?.find((s) => s.status === 'active')?.type ?? null;
   const craftingStarted = live?.craftingStartedAt != null;
-  const reachedBasket = craftingStarted || activeType === 'orange' || activeType === 'gold';
-  const visibleStations = live
-    ? stations.filter((s) =>
-        s.type === 'green' ||
-        (s.type === 'orange' && reachedBasket) ||
-        (s.type === 'gold' && craftingStarted),
-      )
-    : stations; // no live state yet (e.g. opened map before sync) → show all
+  const visibleStations = stations.filter((s) =>
+    s.type === 'green' || (s.type === 'gold' && craftingStarted),
+  );
 
   // Live device location → projected onto the map frame so the "You Are Here"
   // dot lines up (TopoMap uses the same frame internally).

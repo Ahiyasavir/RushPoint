@@ -149,8 +149,10 @@ const en: Dict = {
   'basket.title': 'Find Your Basket',
   'basket.riddleLabel': 'Your riddle:',
   'basket.zone': 'Zone: {name}',
-  'basket.scanPrompt': 'Scan the basket QR when you arrive.',
+  'basket.scanPrompt': 'Find it using the riddle — the Tene volunteer starts your clock.',
   'basket.startTimer': 'Start 20-min Timer',
+  'basket.waitTitle': 'Waiting for the Tene volunteer',
+  'basket.waitBody': 'Go to the spot in the riddle. When the Tene-warehouse volunteer hands you the basket and confirms, your 20-minute clock starts automatically — you don\'t start it yourself.',
   'basket.delay': 'Match penalty — wait {sec}s',
 
   // Crafting countdown
@@ -377,8 +379,10 @@ const he: Dict = {
   'basket.title': 'מצאו את הסל שלכם',
   'basket.riddleLabel': 'החידה שלכם:',
   'basket.zone': 'אזור: {name}',
-  'basket.scanPrompt': 'סרקו את ה-QR של הסל כשתגיעו.',
+  'basket.scanPrompt': 'מצאו אותו לפי החידה — אחראי הטנא יתחיל לכם את השעון.',
   'basket.startTimer': 'התחלת טיימר 20 דק׳',
+  'basket.waitTitle': 'ממתינים לאחראי הטנא',
+  'basket.waitBody': 'לכו למקום שבחידה. כשאחראי מחסן הטנא ימסור לכם את הסל ויאשר שקיבלתם, טיימר ה-20 דקות יתחיל אוטומטית — אתם לא מתחילים אותו בעצמכם.',
   'basket.delay': 'עונש דו-קרב — המתינו {sec} שנ׳',
 
   // Crafting countdown

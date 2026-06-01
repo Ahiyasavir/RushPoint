@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-native';
+import { View, ScrollView, ActivityIndicator, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { httpsCallable } from 'firebase/functions';
@@ -7,7 +7,6 @@ import { functions } from '../src/services/firebase.config';
 import { useGameStore } from '../src/store/gameStore';
 import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
-import { Button } from '../src/components/Button';
 import { useTranslation } from '../src/i18n';
 import { TENE_PRODUCTS } from '../src/data/teneProducts';
 
@@ -34,7 +33,6 @@ export default function BasketZoneScreen() {
 
   const [zone, setZone]         = useState<ZoneInfo | null>(null);
   const [loading, setLoading]   = useState(true);
-  const [starting, setStarting] = useState(false);
   const [error, setError]       = useState('');
 
   // Crafting timer state (derived from live.craftingStartedAt).
@@ -100,19 +98,11 @@ export default function BasketZoneScreen() {
       .catch(() => { setError('Could not load basket zone. Check connection.'); setLoading(false); });
   }, [craftingActive]);
 
-  async function handleStartTimer() {
-    if (!zone) return;
-    setStarting(true);
-    try {
-      const fn = httpsCallable(functions, 'startCraftingTimer');
-      await fn({ zoneId: zone.zoneId });
-      // gameStore will mirror the update via useGameSync
-    } catch {
-      Alert.alert('Error', 'Could not start the timer. Try again.');
-    } finally {
-      setStarting(false);
-    }
-  }
+  // The 20-min clock is NOT started by the team. They find the Tene from the
+  // riddle; the Tene-warehouse volunteer hands it over and confirms receipt
+  // (startCraftingForTeam, from the admin Tene page), which stamps
+  // craftingStartedAt — useGameSync mirrors it and this screen flips to the
+  // crafting view automatically. This prevents teams self-starting the clock.
 
   // ── Crafting countdown + Tene menu screen ──────────────────────────────────
   if (craftingActive) {
@@ -250,17 +240,14 @@ export default function BasketZoneScreen() {
               </Text>
             </Card>
 
-            <Text variant="bodySmall" className="text-zinc-500 text-center mb-6">
-              {t('basket.scanPrompt')}
-            </Text>
-
-            <Button
-              onPress={handleStartTimer}
-              disabled={starting}
-              fullWidth
-            >
-              {starting ? '…' : t('basket.startTimer')}
-            </Button>
+            {/* The team does NOT start the clock — the Tene-warehouse volunteer
+                confirms handover, which starts the 20-min timer automatically. */}
+            <Card className="p-5 border border-neon-blue/30 bg-neon-blue/5">
+              <Text variant="label" className="text-neon-blue mb-2">⏳ {t('basket.waitTitle')}</Text>
+              <Text variant="bodySmall" className="text-zinc-300 leading-relaxed">
+                {t('basket.waitBody')}
+              </Text>
+            </Card>
           </>
         )}
       </View>
