@@ -288,14 +288,14 @@ export default function DashboardScreen() {
             <Pressable
               onPress={() => router.push('/map')}
               hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20"
+              className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-green font-mono">🗺  {t('map.open')}</Text>
             </Pressable>
             <Pressable
               onPress={() => router.push('/sos')}
               hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20"
+              className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-red font-mono">📣 {t('staff.open')}</Text>
             </Pressable>
@@ -311,7 +311,8 @@ export default function DashboardScreen() {
 
           <View className="items-end">
             <Text variant="label" className="text-zinc-600">{t('dash.score')}</Text>
-            <Text variant="display" className="text-neon-green leading-tight font-brand" style={GLOW.green}>
+            {/* Telemetry — giant glanceable monospace numerals (readable mid-run) */}
+            <Text className="text-neon-green font-mono text-5xl font-extrabold tracking-wider leading-tight" style={GLOW.green}>
               {effectiveScore}
             </Text>
             {penalty > 0 ? (
@@ -377,7 +378,7 @@ export default function DashboardScreen() {
         {activeSlot?.type === 'orange' && !craftingActive && (
           <Pressable
             onPress={() => router.push('/basket-zone')}
-            className="mt-4 rounded-2xl border border-neon-orange/30 bg-neon-orange/5 p-4 active:opacity-70"
+            className="mt-4 rounded-2xl border border-neon-orange/30 bg-neon-orange/5 p-4 active:opacity-70 active:scale-95 transition-all duration-200"
           >
             <Text variant="label" className="text-neon-orange">🧺 {t('basket.title')}</Text>
             <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('basket.scanPrompt')}</Text>
@@ -528,7 +529,7 @@ function RequestCheckInButton({ slot }: { slot: FirestoreSlot }) {
       <Pressable
         onPress={() => void request()}
         disabled={busy}
-        className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20"
+        className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20 active:scale-95 transition-all duration-200"
       >
         <Text variant="bodySmall" className="text-neon-green font-semibold">
           {busy ? '…' : t('checkin.arrived')}
