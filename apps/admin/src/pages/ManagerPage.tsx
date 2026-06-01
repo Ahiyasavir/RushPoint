@@ -294,35 +294,28 @@ function AuditPanel({ onError }: { onError: (m: string) => void }) {
         </div>
       </div>
 
-      {/* Log table */}
+      {/* Terminal-style audit feed — a cascading mono log (premium amber prompt) */}
       {logs.length === 0 ? (
         <p className="text-zinc-600 text-sm">{t('mgr.auditEmpty')}</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-glass-border">
-          <table className="w-full text-sm">
-            <thead className="bg-app-surface text-zinc-500 text-xs">
-              <tr>
-                <th className="text-start px-3 py-2">{t('mgr.colTime')}</th>
-                <th className="text-start px-3 py-2">{t('mgr.colTeam')}</th>
-                <th className="text-start px-3 py-2">{t('mgr.colAction')}</th>
-                <th className="text-start px-3 py-2">{t('mgr.colChange')}</th>
-                <th className="text-start px-3 py-2">{t('mgr.colReason')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-glass-border">
-              {logs.map((l) => (
-                <tr key={l.id} className="text-zinc-300">
-                  <td className="px-3 py-2 text-zinc-500 whitespace-nowrap">{new Date(l.timestamp).toLocaleTimeString()}</td>
-                  <td className="px-3 py-2">{l.teamName ?? l.teamId.slice(0, 6)}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{l.actionType}</td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {l.previousValue ?? '—'} → {l.newValue ?? '—'}
-                  </td>
-                  <td className="px-3 py-2 text-zinc-400">{l.reason || '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="rounded-xl border border-glass-border bg-black/40 p-4 font-mono text-xs leading-relaxed max-h-80 overflow-y-auto shadow-inner">
+          {logs.map((l) => {
+            const hasChange = l.previousValue != null || l.newValue != null;
+            return (
+              <div key={l.id} className="flex flex-wrap items-baseline gap-x-2 py-1 border-b border-white/5 last:border-0">
+                <span className="text-zinc-600">{new Date(l.timestamp).toLocaleTimeString()}</span>
+                <span className="text-neon-gold">›</span>
+                <span className="text-neon-green font-semibold uppercase">{l.actionType}</span>
+                <span className="text-neon-cyan">{l.teamName ?? l.teamId.slice(0, 6)}</span>
+                {hasChange && (
+                  <span className="text-zinc-300">{l.previousValue ?? '—'} → {l.newValue ?? '—'}</span>
+                )}
+                {l.reason && <span className="text-zinc-500 flex-1 min-w-0">— {l.reason}</span>}
+              </div>
+            );
+          })}
+          {/* blinking terminal cursor */}
+          <div className="text-neon-green mt-1">_<span className="animate-pulse-neon">█</span></div>
         </div>
       )}
     </Section>

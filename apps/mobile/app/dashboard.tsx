@@ -25,6 +25,15 @@ import { useFlashMissions } from '../src/hooks/useFlashMissions';
 import { FlashMissionBanner, useDismissableFlash } from '../src/components/FlashMissionBanner';
 import { useTranslation } from '../src/i18n';
 import { GLOW } from '../src/components/tokens';
+import Animated, {
+  FadeInDown,
+  ZoomIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 
 // Slot shape is mirrored from the store (LiveSlot / LiveJudging).
 type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
@@ -596,7 +605,7 @@ function SlotBadge({ slot, index }: { slot: FirestoreSlot; index: number }) {
   const locked  = slot.status === 'locked';
 
   return (
-    <View className="flex-1 items-center">
+    <Animated.View entering={FadeInDown.delay(index * 45).duration(300)} className="flex-1 items-center">
       <View
         className={`w-full h-14 rounded-2xl items-center justify-center border ${
           active
@@ -619,7 +628,7 @@ function SlotBadge({ slot, index }: { slot: FirestoreSlot; index: number }) {
         )}
       </View>
       <Text className="text-[10px] mt-1 opacity-80">{SLOT_TYPE_GLYPH[slot.type]}</Text>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -686,6 +695,36 @@ function CraftingCountdownCard({
   );
 }
 
+// ─── Matchmaking radar (rotating sapphire sweep — UI-thread only) ─────────────
+
+function MatchRadar() {
+  const spin = useSharedValue(0);
+  useEffect(() => {
+    spin.value = withRepeat(withTiming(360, { duration: 2600, easing: Easing.linear }), -1, false);
+  }, [spin]);
+  const sweep = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value}deg` }] }));
+  const ring = (size: number) => ({
+    position: 'absolute' as const,
+    width: size, height: size, borderRadius: size / 2,
+    borderWidth: 1, borderColor: 'rgba(37,99,235,0.30)',
+  });
+  return (
+    <View className="items-center my-4">
+      <View style={{ width: 132, height: 132, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={ring(132)} />
+        <View style={ring(88)} />
+        <View style={ring(44)} />
+        {/* rotating arm — a blip orbits the rings */}
+        <Animated.View style={[sweep, { position: 'absolute', width: 132, height: 132, alignItems: 'center' }]}>
+          <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#2563EB', marginTop: 2 }} />
+        </Animated.View>
+        {/* center pulse */}
+        <View className="animate-pulse-neon" style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#2563EB' }} />
+      </View>
+    </View>
+  );
+}
+
 // ─── Gate card (matchmaking filter) ──────────────────────────────────────────
 
 function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
@@ -747,9 +786,23 @@ function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
           </Button>
         </>
       ) : matchStatus === 'waiting' ? (
-        <Text variant="bodySmall" className="text-neon-blue mb-2 animate-pulse-neon">{t('match.waiting')}</Text>
+        <View className="items-center">
+          <MatchRadar />
+          <Text variant="bodySmall" className="text-neon-cyan animate-pulse-neon">{t('match.waiting')}</Text>
+        </View>
       ) : matchStatus === 'matched' ? (
-        <Text variant="bodySmall" className="text-neon-blue">{t('match.matched', { opponent: '?' })}</Text>
+        <Animated.View entering={ZoomIn.duration(280)} className="items-center py-3">
+          <View className="flex-row items-center gap-4">
+            <View className="px-4 py-2 rounded-xl border border-neon-cyan/50 bg-neon-cyan/10">
+              <Text variant="label" className="text-neon-cyan">{t('dash.team')}</Text>
+            </View>
+            <Text className="text-neon-cyan font-mono font-black text-3xl tracking-tight">VS</Text>
+            <View className="px-4 py-2 rounded-xl border border-neon-red/50 bg-neon-red/10">
+              <Text variant="label" className="text-neon-red">{t('match.rival')}</Text>
+            </View>
+          </View>
+          <Text variant="bodySmall" className="text-neon-cyan mt-3 animate-pulse-neon">{t('match.matchedShort')}</Text>
+        </Animated.View>
       ) : matchStatus === 'won' ? (
         <>
           <Text variant="bodySmall" className="text-neon-green mb-4">{t('match.won', { bonus: '150' })}</Text>
@@ -762,9 +815,16 @@ function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
           <Text variant="subheading" className="text-neon-red mb-1 text-center">{t('match.lostTitle')}</Text>
           {cooldownLeft > 0 ? (
             <>
-              <Text variant="mono" className="text-neon-orange text-2xl text-center mb-1">
+              <Text variant="mono" className="text-neon-orange text-2xl text-center mb-2 font-black tracking-tight">
                 {Math.floor(cooldownLeft / 60)}:{String(cooldownLeft % 60).padStart(2, '0')}
               </Text>
+              {/* Depleting "energy shield" — drains each second toward re-queue */}
+              <View className="w-full h-2 rounded-full bg-app-raised overflow-hidden mb-2">
+                <View
+                  className="h-full rounded-full bg-neon-cyan"
+                  style={{ width: `${Math.min(100, Math.max(0, (cooldownLeft / 90) * 100))}%` }}
+                />
+              </View>
               <Text variant="bodySmall" className="text-zinc-400 text-center">
                 {t('match.cooldown')}
               </Text>

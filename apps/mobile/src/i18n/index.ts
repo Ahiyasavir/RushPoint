@@ -132,8 +132,10 @@ const en: Dict = {
 
   // Matchmaking
   'match.title': 'Gate Match',
-  'match.waiting': 'Waiting for opponent…',
+  'match.waiting': 'Scanning for an opponent…',
   'match.matched': 'Matched vs {opponent}!',
+  'match.matchedShort': 'Opponent found — duel on!',
+  'match.rival': 'Rival',
   'match.won': '🏆 You won! +{bonus} pts',
   'match.lost': '😤 You lost — {delay}s delay',
   'match.lostTitle': '😤 You lost this duel',
@@ -165,6 +167,8 @@ const en: Dict = {
   'craft.menuTitle': 'Fill your Tene',
   'craft.menuHint': 'Tap each product you prepare — the judge sees your picks.',
   'craft.minShort': 'min',
+  'craft.basketLoad': 'Basket load',
+  'craft.basketOver': 'Over the time budget — you may not finish all of these.',
   'craft.estTime': 'Est. time: {min} min',
   'craft.potentialPts': 'Potential: +{pts} pts',
   'craft.goToJudge': 'Go to the judge',
@@ -367,8 +371,10 @@ const he: Dict = {
 
   // Matchmaking
   'match.title': 'דו-קרב בשער',
-  'match.waiting': 'ממתינים ליריב…',
+  'match.waiting': 'סורקים אחר יריב…',
   'match.matched': 'זווגתם מול {opponent}!',
+  'match.matchedShort': 'נמצא יריב — הדו-קרב מתחיל!',
+  'match.rival': 'יריב',
   'match.won': '🏆 ניצחתם! +{bonus} נק׳',
   'match.lost': '😤 הפסדתם — עיכוב {delay} שנ׳',
   'match.lostTitle': '😤 הפסדתם בדו-קרב',
@@ -400,6 +406,8 @@ const he: Dict = {
   'craft.menuTitle': 'מלאו את הטנא',
   'craft.menuHint': 'סמנו כל מוצר שהכנתם — הבחירות מוצגות לשופט.',
   'craft.minShort': 'דק׳',
+  'craft.basketLoad': 'עומס הסל',
+  'craft.basketOver': 'מעבר לתקציב הזמן — ייתכן שלא תספיקו את כולם.',
   'craft.estTime': 'זמן מוערך: {min} דק׳',
   'craft.potentialPts': 'פוטנציאל: +{pts} נק׳',
   'craft.goToJudge': 'ללכת לשופט',
