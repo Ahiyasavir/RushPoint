@@ -1,0 +1,21 @@
+{
+  "name": "RushPoint — Race to Tzion",
+  "short_name": "RushPoint",
+  "description": "Your live team dashboard for the Race to Tzion adventure.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0F17",
+  "theme_color": "#0B0F17",
+  "lang": "en",
+  "dir": "auto",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
