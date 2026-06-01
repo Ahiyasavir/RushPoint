@@ -340,7 +340,7 @@ export default function DashboardScreen() {
 
         {loading ? (
           <View className="py-10 items-center">
-            <ActivityIndicator color="#00ffaa" />
+            <ActivityIndicator color="#39FF14" />
           </View>
         ) : snapError ? (
           <Card className="p-6 items-center">

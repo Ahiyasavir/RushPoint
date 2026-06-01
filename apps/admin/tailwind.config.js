@@ -9,35 +9,37 @@ export default {
         brand: ['Outfit', 'Inter', 'sans-serif'],
       },
       colors: {
-        // ── Base palette ──────────────────────────────────────────────────
-        'app-bg':       '#050508',
-        'app-surface':  '#0a0a10',
-        'app-card':     '#0f0f18',
-        'app-raised':   '#141420',
+        // ── Base palette — "Cyber-Biblical Neon" (deep pitch black) ────────
+        'app-bg':       '#030712',  // slate-950
+        'app-surface':  '#0b1220',
+        'app-card':     '#0f172a',  // slate-900
+        'app-raised':   '#1e293b',  // slate-800
         // ── Neon accents ──────────────────────────────────────────────────
-        'neon-green':   '#00ffaa',
-        'neon-cyan':    '#00ccff',
+        'neon-green':   '#39FF14',  // tasks / progression
+        'neon-cyan':    '#00F0FF',  // duels / matchmaking
         'neon-orange':  '#ff6b00',
-        'neon-red':     '#ff3d00',
-        'neon-gold':    '#ffd700',
+        'neon-red':     '#FF0055',  // SOS / urgency
+        'neon-gold':    '#FFD700',  // Tene / trophy
         'neon-blue':    '#00aaff',
         'neon-purple':  '#a855f7',
         // ── Slot type colours ─────────────────────────────────────────────
-        'slot-green':   '#00ffaa',
+        'slot-green':   '#39FF14',
         'slot-orange':  '#ff6b00',
-        'slot-gold':    '#ffd700',
+        'slot-gold':    '#FFD700',
         // ── Glass ─────────────────────────────────────────────────────────
-        'glass-bg':     'rgba(255,255,255,0.04)',
-        'glass-border': 'rgba(255,255,255,0.08)',
-        'glass-hover':  'rgba(255,255,255,0.08)',
+        'glass-bg':     'rgba(15,23,42,0.6)',
+        'glass-border': 'rgba(255,255,255,0.10)',
+        'glass-hover':  'rgba(255,255,255,0.14)',
       },
       boxShadow: {
-        'glow-green':   '0 0 24px 4px rgba(0,255,170,0.35)',
+        'glow-green':   '0 0 24px 4px rgba(57,255,20,0.35)',
         'glow-orange':  '0 0 24px 4px rgba(255,107,0,0.35)',
         'glow-gold':    '0 0 24px 4px rgba(255,215,0,0.35)',
+        'glow-cyan':    '0 0 24px 4px rgba(0,240,255,0.35)',
+        'glow-red':     '0 0 24px 4px rgba(255,0,85,0.35)',
         'glow-blue':    '0 0 24px 4px rgba(0,170,255,0.35)',
         'glow-purple':  '0 0 24px 4px rgba(168,85,247,0.35)',
-        'glow-cta':     '0 4px 28px 4px rgba(0,255,170,0.45)',
+        'glow-cta':     '0 4px 28px 4px rgba(57,255,20,0.45)',
         'inner-glow':   'inset 0 1px 0 0 rgba(255,255,255,0.06)',
       },
       backgroundImage: {
@@ -68,8 +70,8 @@ export default {
           '50%':      { transform: 'translateY(-6px)' },
         },
         'glow-pulse': {
-          '0%, 100%': { boxShadow: '0 0 20px 2px rgba(0,255,170,0.3)' },
-          '50%':      { boxShadow: '0 0 40px 8px rgba(0,255,170,0.5)' },
+          '0%, 100%': { boxShadow: '0 0 20px 2px rgba(57,255,20,0.3)' },
+          '50%':      { boxShadow: '0 0 40px 8px rgba(57,255,20,0.5)' },
         },
       },
     },

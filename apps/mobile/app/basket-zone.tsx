@@ -202,7 +202,7 @@ export default function BasketZoneScreen() {
   if (loading) {
     return (
       <View className="flex-1 bg-app-bg items-center justify-center">
-        <ActivityIndicator color="#00ffaa" />
+        <ActivityIndicator color="#39FF14" />
       </View>
     );
   }

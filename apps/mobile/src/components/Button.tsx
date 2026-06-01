@@ -86,7 +86,7 @@ export function Button({
       {isLoading ? (
         <ActivityIndicator
           size="small"
-          color={variant === 'ghost' ? '#00ffaa' : variant === 'primary' ? '#000000' : '#ffffff'}
+          color={variant === 'ghost' ? '#39FF14' : variant === 'primary' ? '#000000' : '#ffffff'}
         />
       ) : (
         <Text

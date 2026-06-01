@@ -76,7 +76,7 @@ export default function CallStaffScreen() {
           </Card>
         ) : sending ? (
           <View className="items-center py-6">
-            <ActivityIndicator size="large" color={sending === 'emergency' ? '#ff3d00' : '#ffb020'} />
+            <ActivityIndicator size="large" color={sending === 'emergency' ? '#FF0055' : '#ffb020'} />
             <Text variant="bodySmall" className="text-zinc-500 mt-3">{t('staff.sending')}</Text>
           </View>
         ) : (
@@ -85,7 +85,7 @@ export default function CallStaffScreen() {
             <Pressable
               onPress={() => void call('emergency')}
               className="w-full rounded-2xl bg-neon-red/15 border-2 border-neon-red/50 p-5 items-center active:bg-neon-red/25"
-              style={{ shadowColor: '#ff3d00', shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 0 }, elevation: 12 }}
+              style={{ shadowColor: '#FF0055', shadowOpacity: 0.4, shadowRadius: 20, shadowOffset: { width: 0, height: 0 }, elevation: 12 }}
             >
               <Text className="text-4xl mb-1">🆘</Text>
               <Text variant="subheading" className="text-neon-red text-center">{t('staff.emergency')}</Text>
