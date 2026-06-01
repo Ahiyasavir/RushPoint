@@ -17,6 +17,7 @@ interface Arrival {
 
 const listPendingArrivals = httpsCallable(functions, 'listPendingArrivals');
 const cancelCheckIn = httpsCallable(functions, 'cancelCheckIn');
+const checkInArrival = httpsCallable(functions, 'checkInArrival');
 
 export default function CheckInsPage() {
   const { t } = useI18n();
@@ -24,6 +25,7 @@ export default function CheckInsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +43,24 @@ export default function CheckInsPage() {
   }, [t]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Confirm the team physically arrived → freezes their clock and moves them into
+  // the judge's scoring queue. Until a volunteer does this, the team is NOT shown
+  // to the judges.
+  const confirm = useCallback(async (a: Arrival) => {
+    setConfirmingId(a.checkInId);
+    setError('');
+    try {
+      await ensureAuth();
+      await checkInArrival({ teamId: a.teamId, checkInId: a.checkInId });
+      setArrivals((prev) => prev.filter((x) => x.checkInId !== a.checkInId));
+    } catch (e) {
+      setError(t('checkins.confirmError'));
+      console.error('[checkins] checkInArrival failed:', e);
+    } finally {
+      setConfirmingId(null);
+    }
+  }, [t]);
 
   const remove = useCallback(async (a: Arrival) => {
     if (!window.confirm(t('checkins.removeConfirm'))) return;
@@ -107,16 +127,16 @@ export default function CheckInsPage() {
                 <p className="text-sm text-zinc-500 mt-0.5">{a.taskTitle}</p>
               </div>
               <div className="flex items-center gap-2">
-                <span className={
-                  a.arrivedAt
-                    ? 'text-xs px-2.5 py-1 rounded-full border bg-neon-blue/10 border-neon-blue/30 text-neon-blue'
-                    : 'text-xs px-2.5 py-1 rounded-full border bg-neon-gold/10 border-neon-gold/30 text-neon-gold'
-                }>
-                  {a.arrivedAt ? t('checkins.checkedIn') : t('checkins.waiting')}
-                </span>
+                <button
+                  onClick={() => void confirm(a)}
+                  disabled={confirmingId === a.checkInId || removingId === a.checkInId}
+                  className="text-sm px-4 py-2 rounded-xl bg-neon-green/10 border border-neon-green/40 text-neon-green font-semibold hover:bg-neon-green/20 transition-all disabled:opacity-40"
+                >
+                  {confirmingId === a.checkInId ? t('checkins.confirming') : t('checkins.confirmArrival')}
+                </button>
                 <button
                   onClick={() => void remove(a)}
-                  disabled={removingId === a.checkInId}
+                  disabled={removingId === a.checkInId || confirmingId === a.checkInId}
                   className="text-xs px-2.5 py-1 rounded-full border border-red-500/30 text-red-300 hover:bg-red-500/10 transition-all disabled:opacity-40"
                 >
                   {removingId === a.checkInId ? t('common.loading') : t('checkins.remove')}

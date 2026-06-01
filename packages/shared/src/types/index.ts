@@ -63,7 +63,10 @@ export type StationStatus = 'active' | 'paused' | 'closed';
 export type TeamStatus = 'registered' | 'active' | 'park' | 'crafting' | 'sprinting' | 'finished';
 export type MatchStatus = 'waiting' | 'matched' | 'won' | 'lost' | 'bypassed';
 export type EventStatus = 'pre' | 'live' | 'frozen' | 'ended';
-export type CheckInStatus = 'pending' | 'approved' | 'rejected';
+// pending  = team declared arrival, awaiting the arrival volunteer's confirmation
+// arrived  = arrival volunteer confirmed; now in the judge's scoring queue
+// approved = judge scored it (terminal); rejected = cancelled/removed
+export type CheckInStatus = 'pending' | 'arrived' | 'approved' | 'rejected';
 
 
 /**

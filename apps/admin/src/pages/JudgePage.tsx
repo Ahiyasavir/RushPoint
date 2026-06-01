@@ -51,7 +51,6 @@ const TIER_ORDER: ProductTier[] = ['basic', 'medium', 'hard'];
 // ─── Callables ────────────────────────────────────────────────────────────────
 
 const listPendingArrivals    = httpsCallable(functions, 'listPendingArrivals');
-const checkInArrival         = httpsCallable(functions, 'checkInArrival');
 const finalizeJudgeEvaluation = httpsCallable(functions, 'finalizeJudgeEvaluation');
 const skipTask               = httpsCallable(functions, 'skipTask');
 
@@ -65,9 +64,8 @@ export default function JudgePage() {
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
 
-  // The team currently being evaluated (already checked in), or null = list view.
+  // The team currently being evaluated, or null = list view.
   const [active, setActive]         = useState<Arrival | null>(null);
-  const [checkingInId, setCheckingInId] = useState<string | null>(null);
 
   // Evaluation form state
   const [picked, setPicked]             = useState<Set<string>>(new Set());
@@ -95,7 +93,8 @@ export default function JudgePage() {
     setError('');
     try {
       await ensureAuth();
-      const res = await listPendingArrivals();
+      // Only teams the arrival volunteer has CONFIRMED ('arrived') reach the judge.
+      const res = await listPendingArrivals({ status: 'arrived' });
       setArrivals((res.data as { arrivals: Arrival[] }).arrivals ?? []);
     } catch (err) {
       setError(t('judge.loadError'));
@@ -109,29 +108,19 @@ export default function JudgePage() {
     void loadArrivals();
   }, [loadArrivals]);
 
-  // ── Check-in (freezes the team's clock on mobile) ────────────────────────────
-  async function handleCheckIn(arrival: Arrival) {
-    setCheckingInId(arrival.checkInId);
-    setError('');
-    try {
-      await ensureAuth();
-      await checkInArrival({ teamId: arrival.teamId, checkInId: arrival.checkInId });
-      // Move into evaluation; pre-fill the checklist with the team's own picks
-      // (the judge verifies against the real basket and can adjust).
-      setActive(arrival);
-      setCheckedInAt(Date.now());
-      setWarnDismissed(false);
-      setPicked(new Set(arrival.teneSelection ?? []));
-      setDesign(0);
-      setPresentation(0);
-      setMissingMembers(0);
-      setNote('');
-    } catch (err) {
-      setError(t('judge.checkInError'));
-      console.error('[judge] checkInArrival failed:', err);
-    } finally {
-      setCheckingInId(null);
-    }
+  // ── Open the evaluation for a confirmed arrival ──────────────────────────────
+  // The clock was already frozen when the arrival volunteer confirmed; the judge
+  // just scores. Pre-fill the checklist with the team's own picks (the judge
+  // verifies against the real basket and can adjust).
+  function handleSelect(arrival: Arrival) {
+    setActive(arrival);
+    setCheckedInAt(Date.now());
+    setWarnDismissed(false);
+    setPicked(new Set(arrival.teneSelection ?? []));
+    setDesign(0);
+    setPresentation(0);
+    setMissingMembers(0);
+    setNote('');
   }
 
   // ── Live total ───────────────────────────────────────────────────────────────
@@ -262,8 +251,7 @@ export default function JudgePage() {
         <ArrivalList
           arrivals={arrivals}
           loading={loading}
-          checkingInId={checkingInId}
-          onCheckIn={(a) => void handleCheckIn(a)}
+          onSelect={(a) => handleSelect(a)}
         />
       )}
     </div>
@@ -273,12 +261,11 @@ export default function JudgePage() {
 // ─── Arrival list ─────────────────────────────────────────────────────────────
 
 function ArrivalList({
-  arrivals, loading, checkingInId, onCheckIn,
+  arrivals, loading, onSelect,
 }: {
   arrivals: Arrival[];
   loading: boolean;
-  checkingInId: string | null;
-  onCheckIn: (a: Arrival) => void;
+  onSelect: (a: Arrival) => void;
 }) {
   const { t } = useI18n();
   if (loading) {
@@ -314,11 +301,10 @@ function ArrivalList({
             <p className="text-sm text-zinc-500 mt-0.5">{a.taskTitle}</p>
           </div>
           <button
-            onClick={() => onCheckIn(a)}
-            disabled={checkingInId !== null}
-            className="px-4 py-2 rounded-xl bg-neon-green/10 border border-neon-green/30 hover:bg-neon-green/20 disabled:opacity-50 disabled:cursor-not-allowed text-neon-green text-sm font-semibold transition-all"
+            onClick={() => onSelect(a)}
+            className="px-4 py-2 rounded-xl bg-neon-green/10 border border-neon-green/30 hover:bg-neon-green/20 text-neon-green text-sm font-semibold transition-all"
           >
-            {checkingInId === a.checkInId ? t('judge.checkingIn') : t('judge.approve')}
+            {t('judge.score')}
           </button>
         </div>
       ))}

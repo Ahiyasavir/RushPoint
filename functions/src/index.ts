@@ -590,10 +590,17 @@ export const pushFlashMission = functions.https.onCall(async (data, context) => 
 // â”€â”€â”€ listPendingArrivals â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Returns every team with a 'pending' check-in, enriched with team + task names,
 // so the judge can pick who is standing at their station.
-export const listPendingArrivals = functions.https.onCall(async (_data, context) => {
+export const listPendingArrivals = functions.https.onCall(async (data, context) => {
   assertJudge(context);
 
-  const snap = await db.collectionGroup('checkIns').where('status', '==', 'pending').get();
+  // Two-stage check-in: the arrival volunteer works the 'pending' queue (teams
+  // that declared arrival), confirms each (→ 'arrived'), and only then does the
+  // team show up in the judge's 'arrived' queue for scoring. Default 'pending'
+  // keeps existing callers (the arrivals page) working.
+  const requested = (data as { status?: string } | undefined)?.status;
+  const status = requested === 'arrived' ? 'arrived' : 'pending';
+
+  const snap = await db.collectionGroup('checkIns').where('status', '==', status).get();
 
   const arrivals = await Promise.all(
     snap.docs.map(async (d) => {
@@ -631,9 +638,10 @@ export const listPendingArrivals = functions.https.onCall(async (_data, context)
 });
 
 // â”€â”€â”€ checkInArrival â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// Judge confirms the team physically arrived. Records arrival time and FREEZES
-// the elapsed clock for the active slot on the mobile client (gameState.judging).
-// Idempotent: re-running for the same check-in returns the existing freeze.
+// The ARRIVAL VOLUNTEER confirms the team physically arrived. Marks the check-in
+// 'arrived' (which moves it out of the arrivals queue and INTO the judge's queue),
+// records arrival time, and FREEZES the elapsed clock for the active slot on the
+// mobile client (gameState.judging). Idempotent: re-running returns the freeze.
 export const checkInArrival = functions.https.onCall(async (data, context) => {
   assertJudge(context);
 
@@ -669,7 +677,8 @@ export const checkInArrival = functions.https.onCall(async (data, context) => {
     const judging: JudgingState = { slotIndex, checkInId, arrivedAt: nowIso };
 
     tx.update(gsRef, { judging, updatedAt: nowIso });
-    tx.update(ciRef, { arrivedAt: nowIso });
+    // 'arrived' = confirmed by the arrival volunteer, now waiting for the judge.
+    tx.update(ciRef, { arrivedAt: nowIso, status: 'arrived' });
 
     return { slotIndex, arrivedAt: nowIso, alreadyCheckedIn: false };
   });
