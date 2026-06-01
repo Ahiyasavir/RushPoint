@@ -241,8 +241,8 @@ export default function RegisterScreen() {
             <Switch
               value={waiverAccepted}
               onValueChange={(v) => { setWaiverAccepted(v); setErrors((e) => ({ ...e, waiver: undefined })); }}
-              trackColor={{ false: '#1e293b', true: '#39FF14' }}
-              thumbColor={waiverAccepted ? '#030712' : '#52525b'}
+              trackColor={{ false: '#1e293b', true: '#F59E0B' }}
+              thumbColor={waiverAccepted ? '#0B0F17' : '#52525b'}
             />
           </View>
         </Card>

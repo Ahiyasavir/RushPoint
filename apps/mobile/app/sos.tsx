@@ -51,42 +51,33 @@ function HoldEmergencyButton({ onConfirm, label, hint }: { onConfirm: () => void
     progress.value = withTiming(0, { duration: 200 });
   };
 
-  // Rising fill clipped inside the circular button.
+  // Rising fill clipped inside the circular button (the only motion — no aura).
   const fillStyle = useAnimatedStyle(() => ({ height: progress.value * RING }));
-  const glowStyle = useAnimatedStyle(() => ({ opacity: 0.4 + progress.value * 0.6 }));
 
   return (
     <View className="items-center">
       <Pressable onPressIn={start} onPressOut={cancel} delayLongPress={HOLD_MS}>
-        <Animated.View
-          style={[
-            glowStyle,
-            {
-              width: RING,
-              height: RING,
-              borderRadius: RING / 2,
-              borderWidth: 3,
-              borderColor: '#FF0055',
-              overflow: 'hidden',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'rgba(255,0,85,0.12)',
-              shadowColor: '#FF0055',
-              shadowOpacity: 0.7,
-              shadowRadius: 28,
-              shadowOffset: { width: 0, height: 0 },
-              elevation: 16,
-            },
-          ]}
+        <View
+          style={{
+            width: RING,
+            height: RING,
+            borderRadius: RING / 2,
+            borderWidth: holding ? 2 : 1.5,
+            borderColor: '#EF4444',
+            overflow: 'hidden',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'transparent',
+          }}
         >
-          {/* Rising fill */}
+          {/* Smooth rising fill — the progress indicator */}
           <Animated.View
             pointerEvents="none"
-            style={[fillStyle, { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(255,0,85,0.5)' }]}
+            style={[fillStyle, { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(239,68,68,0.22)' }]}
           />
           <Text className="text-6xl mb-1">🆘</Text>
           <Text variant="subheading" className="text-neon-red text-center">{label}</Text>
-        </Animated.View>
+        </View>
       </Pressable>
       <Text variant="caption" className={`mt-4 text-center ${holding ? 'text-neon-red animate-pulse-neon' : 'text-zinc-500'}`}>
         {hint}
@@ -151,7 +142,7 @@ export default function CallStaffScreen() {
         </Text>
 
         {sent ? (
-          <Card className="p-6 w-full items-center" style={{ borderColor: 'rgba(57,255,20,0.3)', borderWidth: 1 }}>
+          <Card className="p-6 w-full items-center" style={{ borderColor: 'rgba(245,158,11,0.3)', borderWidth: 1 }}>
             <Text variant="subheading" className="text-neon-green mb-1 text-center">
               ✓ {sent === 'emergency' ? t('staff.sentEmergency') : t('staff.sentTechnical')}
             </Text>
@@ -159,7 +150,7 @@ export default function CallStaffScreen() {
           </Card>
         ) : sending ? (
           <View className="items-center py-6">
-            <ActivityIndicator size="large" color={sending === 'emergency' ? '#FF0055' : '#ffb020'} />
+            <ActivityIndicator size="large" color={sending === 'emergency' ? '#EF4444' : '#ffb020'} />
             <Text variant="bodySmall" className="text-zinc-500 mt-3">{t('staff.sending')}</Text>
           </View>
         ) : (

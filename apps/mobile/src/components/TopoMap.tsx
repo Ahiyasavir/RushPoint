@@ -75,9 +75,9 @@ export function TopoMap({ width, height, config, stations, coords, label }: Prop
 
   // Markers: start / finish / gate + every visible station, projected.
   const markers = [
-    { lat: config.start.lat, lng: config.start.lng, color: '#39FF14', ring: true },
-    { lat: config.finish.lat, lng: config.finish.lng, color: '#FFD700', ring: true },
-    { lat: config.gate.lat, lng: config.gate.lng, color: '#00F0FF', ring: false },
+    { lat: config.start.lat, lng: config.start.lng, color: '#F59E0B', ring: true },
+    { lat: config.finish.lat, lng: config.finish.lng, color: '#D4AF37', ring: true },
+    { lat: config.gate.lat, lng: config.gate.lng, color: '#2563EB', ring: false },
     ...stations.map((s) => ({ lat: s.lat, lng: s.lng, color: STATION_COLOR[s.type], ring: false })),
   ].map((m) => ({ ...m, p: projectToPixel(m.lat, m.lng, width, height, view) }));
 
@@ -90,9 +90,9 @@ export function TopoMap({ width, height, config, stations, coords, label }: Prop
         height,
         borderRadius: 24,
         borderWidth: 1,
-        borderColor: 'rgba(57,255,20,0.25)',
+        borderColor: 'rgba(245,158,11,0.25)',
         overflow: 'hidden',
-        backgroundColor: '#0b1220',
+        backgroundColor: '#111827',
       }}
     >
       {/* Base tiles */}
@@ -116,7 +116,7 @@ export function TopoMap({ width, height, config, stations, coords, label }: Prop
         <View
           className="animate-pulse-neon"
           pointerEvents="none"
-          style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1220' }}
+          style={{ position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#111827' }}
         >
           <Text className="text-5xl mb-2">🗺️</Text>
           <Text variant="caption" className="text-neon-green/70 font-mono tracking-widest">LOADING TERRAIN…</Text>
@@ -135,7 +135,7 @@ export function TopoMap({ width, height, config, stations, coords, label }: Prop
             width: s.len,
             height: 4,
             borderRadius: 2,
-            backgroundColor: '#39FF14',
+            backgroundColor: '#F59E0B',
             opacity: 0.9,
             transform: [{ rotate: `${s.angle}deg` }],
           }}
@@ -183,10 +183,10 @@ export function TopoMap({ width, height, config, stations, coords, label }: Prop
             width: 18,
             height: 18,
             borderRadius: 9,
-            backgroundColor: '#00F0FF',
+            backgroundColor: '#2563EB',
             borderWidth: 3,
             borderColor: '#ffffff',
-            shadowColor: '#00F0FF',
+            shadowColor: '#2563EB',
             shadowOpacity: 0.9,
             shadowRadius: 10,
             shadowOffset: { width: 0, height: 0 },

@@ -73,13 +73,6 @@ const SLOT_GLOW_COLOR: Record<SlotType, 'green' | 'orange' | 'gold'> = {
   gold:   'gold',
 };
 
-const DOT_COLOR: Record<SlotType, Record<SlotStatus, string>> = {
-  green:  { completed: 'bg-neon-green',  active: 'bg-neon-green',  locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-  gate:   { completed: 'bg-neon-blue',   active: 'bg-neon-blue',   locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-  orange: { completed: 'bg-neon-orange', active: 'bg-neon-orange', locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-  gold:   { completed: 'bg-neon-gold',   active: 'bg-neon-gold',   locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-};
-
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
@@ -341,7 +334,7 @@ export default function DashboardScreen() {
 
         {loading ? (
           <View className="py-10 items-center">
-            <ActivityIndicator color="#39FF14" />
+            <ActivityIndicator color="#F59E0B" />
           </View>
         ) : snapError ? (
           <Card className="p-6 items-center">
@@ -385,18 +378,13 @@ export default function DashboardScreen() {
           </Pressable>
         )}
 
-        {/* ── Race progress — labeled stage tracker ─────────────────── */}
+        {/* ── Race progress — 6-slot structural badge board ─────────── */}
         {gameState && (
           <View className="mt-10">
             <Text variant="label" className="mb-3">{t('dash.raceProgress')}</Text>
-            <View className="rounded-2xl border border-glass-border bg-app-card/40 overflow-hidden">
+            <View className="flex-row gap-2">
               {gameState.slots.map((s, i) => (
-                <StageRow
-                  key={s.index}
-                  slot={s}
-                  greenIndex={gameState.slots.slice(0, i + 1).filter((x) => x.type === 'green').length}
-                  isLast={i === gameState.slots.length - 1}
-                />
+                <SlotBadge key={s.index} slot={s} index={i} />
               ))}
             </View>
           </View>
@@ -591,39 +579,46 @@ function ClueHintButton() {
 // One labeled row per stage: status marker + stage name + status chip. Replaces
 // the old anonymous colour dots so a participant can read exactly where they are.
 
-const STATUS_CHIP: Record<SlotStatus, { key: string; cls: string }> = {
-  completed: { key: 'stage.done',    cls: 'text-neon-green' },
-  active:    { key: 'stage.current', cls: 'text-white' },
-  locked:    { key: 'stage.locked',  cls: 'text-zinc-600' },
-  skipped:   { key: 'stage.skipped', cls: 'text-zinc-500' },
+// Stage-type identity glyph for the progress board badges.
+const SLOT_TYPE_GLYPH: Record<SlotType, string> = {
+  green: '⛳', gate: '⚔️', orange: '🧺', gold: '🏆',
 };
 
-function StageRow({ slot, greenIndex, isLast }: { slot: FirestoreSlot; greenIndex: number; isLast: boolean }) {
-  const { t } = useTranslation();
-  const dotColor = DOT_COLOR[slot.type][slot.status];
-  const isActive = slot.status === 'active';
-  const done     = slot.status === 'completed';
-  const chip     = STATUS_CHIP[slot.status];
-
-  // Green stages are numbered (Field Mission 1/2/3); others use their stage name.
-  const label = slot.type === 'green'
-    ? t('slot.greenN', { n: greenIndex })
-    : t(`slot.${slot.type}`);
+/**
+ * One structural progress-board badge. Locked → dark & clean; active → sharp
+ * amber border + bright number; completed → solid slate with a subtle gold ✓;
+ * skipped → muted dash. No glow — crisp borders only (premium look).
+ */
+function SlotBadge({ slot, index }: { slot: FirestoreSlot; index: number }) {
+  const active  = slot.status === 'active';
+  const done    = slot.status === 'completed';
+  const skipped = slot.status === 'skipped';
+  const locked  = slot.status === 'locked';
 
   return (
-    <View className={`flex-row items-center gap-3 px-4 py-3 ${isLast ? '' : 'border-b border-glass-border'} ${isActive ? 'bg-white/5' : ''}`}>
+    <View className="flex-1 items-center">
       <View
-        className={`w-6 h-6 rounded-full items-center justify-center ${done || isActive ? dotColor : 'bg-app-raised'} ${isActive ? 'animate-pulse-neon' : ''}`}
+        className={`w-full h-14 rounded-2xl items-center justify-center border ${
+          active
+            ? 'border-2 border-neon-green bg-neon-green/10'
+            : done
+              ? 'border border-glass-border bg-app-raised'
+              : 'border border-glass-border bg-app-card/40'
+        } ${active ? 'animate-pulse-neon' : ''}`}
       >
-        {done && <Text className="text-black text-xs font-bold">✓</Text>}
-        {isActive && <View className="w-2 h-2 rounded-full bg-black/60" />}
+        {done ? (
+          <Text className="text-neon-gold text-lg font-bold">✓</Text>
+        ) : skipped ? (
+          <Text className="text-zinc-600 text-base">–</Text>
+        ) : locked ? (
+          <Text className="text-zinc-600 text-xs">🔒</Text>
+        ) : (
+          <Text className={`font-mono font-black text-base ${active ? 'text-neon-green' : 'text-zinc-400'}`}>
+            {index + 1}
+          </Text>
+        )}
       </View>
-      <Text variant="bodySmall" className={`flex-1 ${slot.status === 'locked' ? 'text-zinc-600' : 'text-zinc-200'}`} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text variant="caption" className={`${chip.cls} font-mono uppercase tracking-wide`}>
-        {t(chip.key)}
-      </Text>
+      <Text className="text-[10px] mt-1 opacity-80">{SLOT_TYPE_GLYPH[slot.type]}</Text>
     </View>
   );
 }

@@ -37,7 +37,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
         <View
           style={{
             flex: 1,
-            backgroundColor: '#030712',
+            backgroundColor: '#0B0F17',
             alignItems: 'center',
             justifyContent: 'center',
             padding: 24,
