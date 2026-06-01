@@ -96,6 +96,14 @@ export default function FinalRunScreen() {
       </Text>
 
       <Pressable
+        onPress={() => router.push('/wrapped')}
+        hitSlop={8}
+        className="px-6 py-3 rounded-xl border border-neon-gold/40 bg-neon-gold/10 active:bg-neon-gold/20 mb-3"
+      >
+        <Text variant="bodySmall" className="text-neon-gold font-semibold">{t('final.viewSummary')}</Text>
+      </Pressable>
+
+      <Pressable
         onPress={() => router.replace('/dashboard')}
         hitSlop={8}
         className="px-5 py-2.5 rounded-xl border border-glass-border active:bg-white/5"

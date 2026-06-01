@@ -220,6 +220,19 @@ const en: Dict = {
   'final.finalScore': 'Your final score',
   'final.awaitReveal': 'Results are revealed live at the finish line — last place to first. Good luck!',
   'final.backToDash': 'Back to dashboard',
+  'final.viewSummary': '✨ See your race summary',
+
+  // Wrapped / event summary (app/wrapped.tsx)
+  'wrapped.label': 'RACE WRAPPED',
+  'wrapped.title': 'Your Race',
+  'wrapped.finalScore': 'Final score',
+  'wrapped.totalTime': 'Total time',
+  'wrapped.stagesDone': 'Stages done',
+  'wrapped.teneItems': 'Tene items',
+  'wrapped.fastest': 'Fastest stage',
+  'wrapped.breakdown': 'Stage by stage',
+  'wrapped.notDone': 'not done',
+  'wrapped.back': 'Back',
 };
 
 const he: Dict = {
@@ -435,6 +448,19 @@ const he: Dict = {
   'final.finalScore': 'הניקוד הסופי שלכם',
   'final.awaitReveal': 'התוצאות נחשפות בשידור חי בקו הסיום — מהמקום האחרון לראשון. בהצלחה!',
   'final.backToDash': 'חזרה ללוח',
+  'final.viewSummary': '✨ צפו בסיכום המירוץ שלכם',
+
+  // Wrapped / event summary (app/wrapped.tsx)
+  'wrapped.label': 'סיכום המירוץ',
+  'wrapped.title': 'המירוץ שלכם',
+  'wrapped.finalScore': 'ניקוד סופי',
+  'wrapped.totalTime': 'זמן כולל',
+  'wrapped.stagesDone': 'שלבים הושלמו',
+  'wrapped.teneItems': 'פריטי טנא',
+  'wrapped.fastest': 'השלב המהיר ביותר',
+  'wrapped.breakdown': 'שלב אחר שלב',
+  'wrapped.notDone': 'לא הושלם',
+  'wrapped.back': 'חזרה',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

@@ -217,8 +217,10 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 
 ## 🔶 מה עוד נשאר
 
-### Wrapped Cards / Event Summary ⬜ נדחה
-כרטיסי סיכום אחרי האירוע — לא דחוף לפרישה.
+### Wrapped Cards / Event Summary ✅ הושלם
+מסך "סיכום המירוץ" האישי לכל קבוצה ([app/wrapped.tsx](apps/mobile/app/wrapped.tsx)) — ניקוד
+סופי, זמן כולל, שלבים שהושלמו, משך כל שלב והשלב המהיר ביותר. נגיש מ-Final Run. EN/HE.
+מכוון: **לא** מציג דירוג/מיקום — חשיפת טבלת המובילים מבוימת ע"י האדמין (אחרון→ראשון).
 
 ---
 
