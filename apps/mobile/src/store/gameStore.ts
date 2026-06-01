@@ -40,6 +40,10 @@ export interface LiveGame {
   slots: LiveSlot[];
   score: number;
   bonusPenalty?: number;
+  // Staged start: false while the team waits to be launched by the admin.
+  // Absent (legacy/seed) counts as launched. launchAt drives the 10→0 countdown.
+  launched?: boolean;
+  launchAt?: unknown;
   judging?: LiveJudging | null;
   // Phase 3
   gateArrivedAt?: unknown;

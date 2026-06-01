@@ -134,8 +134,12 @@ export default function DashboardScreen() {
   // Auto-request task assignment when a green slot becomes active without a taskId.
   // requestNextTask writes the result back to gameState (server-authoritative),
   // so useGameSync picks it up via onSnapshot — no local state needed.
+  // Only request a mission once the race is live for this team (post-launch).
+  const launchedForAssign = gameState ? gameState.launched !== false : true;
+  const launchAtMsForAssign = toMillis(gameState?.launchAt);
+  const raceLiveForAssign = launchedForAssign && !(launchAtMsForAssign != null && launchAtMsForAssign > nowMs);
   const activeSlotForAssignment = gameState?.slots.find((s) => s.status === 'active');
-  const needsAssignment = activeSlotForAssignment?.type === 'green' && !activeSlotForAssignment?.taskId;
+  const needsAssignment = raceLiveForAssign && activeSlotForAssignment?.type === 'green' && !activeSlotForAssignment?.taskId;
   const assignmentKey   = `${activeSlotForAssignment?.index ?? -1}-${activeSlotForAssignment?.taskId ?? 'none'}`;
   useEffect(() => {
     if (!needsAssignment || !teamId) return;
@@ -203,6 +207,15 @@ export default function DashboardScreen() {
   const penalty         = gameState?.bonusPenalty ?? 0;
   const effectiveScore  = Math.max(0, score - penalty);
 
+  // Staged start: a team stands by after registering until the admin launches it,
+  // then a short countdown, then the race goes live. Absent `launched` (legacy /
+  // seeded teams) counts as live, so this only gates freshly-registered teams.
+  const launched      = gameState ? gameState.launched !== false : true;
+  const launchAtMs    = toMillis(gameState?.launchAt);
+  const counting      = launched && launchAtMs != null && launchAtMs > nowMs;
+  const launchLeftSec = counting ? Math.max(0, Math.ceil((launchAtMs! - nowMs) / 1000)) : 0;
+  const raceLive      = launched && !counting;
+
   // Phase 3 derived state
   function toMs(v: unknown): number | null {
     if (!v) return null;
@@ -227,6 +240,36 @@ export default function DashboardScreen() {
   const craftingDone    = craftingElapsed >= CRAFTING_DURATION_SECS;
   const sprintElapsed   = craftingDone ? Math.max(0, craftingElapsed - CRAFTING_DURATION_SECS) : 0;
   const sprintLeft      = Math.max(0, SPRINT_BUDGET_SECS - sprintElapsed);
+
+  // Standby / countdown: until the admin launches this team, replace the whole
+  // dashboard with a calm "waiting for the start" screen; then a 10→0 countdown.
+  if (gameState && !raceLive) {
+    return (
+      <View className="flex-1 bg-app-bg items-center justify-center px-8" style={{ paddingTop: insets.top }}>
+        <View className="absolute top-0 left-0 right-0 flex-row justify-end px-5" style={{ paddingTop: insets.top + 8 }}>
+          <LanguageToggle />
+        </View>
+        <Text variant="label" className="text-zinc-500 mb-2">{teamName || '—'}</Text>
+        {counting ? (
+          <>
+            <Text variant="label" className="text-neon-green tracking-[0.3em] mb-3">{t('launch.getReady')}</Text>
+            <Text variant="display" className="font-brand text-neon-green" style={[GLOW.green, { fontSize: 96, lineHeight: 104 }]}>
+              {launchLeftSec}
+            </Text>
+            <Text variant="bodySmall" className="text-zinc-400 mt-3 text-center">{t('launch.countdownHint')}</Text>
+          </>
+        ) : (
+          <>
+            <Text className="text-6xl mb-5">⏳</Text>
+            <Text variant="heading" className="text-white text-center mb-2">{t('launch.waitTitle')}</Text>
+            <Text variant="bodySmall" className="text-zinc-400 text-center leading-relaxed">
+              {t('launch.waitBody')}
+            </Text>
+          </>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-app-bg">

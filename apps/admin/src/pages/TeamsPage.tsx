@@ -25,10 +25,23 @@ interface TeamRow {
   judging: boolean;
   crafting: boolean;
   finished: boolean;
+  launched: boolean;
+  launchAt: string | null;
+}
+
+// A team that has registered but not yet been launched by the admin.
+function isWaiting(team: TeamRow): boolean {
+  return team.launched === false;
+}
+// A launched team whose countdown is still running.
+function isLaunching(team: TeamRow): boolean {
+  return team.launched && !!team.launchAt && new Date(team.launchAt).getTime() > Date.now();
 }
 
 // Map a team's live stage to a short bilingual label + accent colour.
 function stageLabel(team: TeamRow, t: (k: string, v?: Record<string, string | number>) => string): { text: string; cls: string } {
+  if (isWaiting(team))   return { text: t('teams.statusWaiting'),   cls: 'bg-zinc-800 text-zinc-300 border-zinc-600' };
+  if (isLaunching(team)) return { text: t('teams.statusLaunching'), cls: 'bg-neon-green/10 text-neon-green border-neon-green/30' };
   if (team.finished) return { text: t('teams.stageFinished'), cls: 'bg-neon-green/10 text-neon-green border-neon-green/30' };
   if (team.judging)  return { text: t('teams.stageJudging'),  cls: 'bg-neon-blue/10 text-neon-blue border-neon-blue/30' };
   if (team.crafting) return { text: t('teams.stageCrafting'), cls: 'bg-neon-gold/10 text-neon-gold border-neon-gold/30' };
@@ -48,14 +61,18 @@ const skipTaskFn = httpsCallable<
   { teamId: string },
   { success: boolean; allDone: boolean; awardedScore: number; newScore: number }
 >(functions, 'skipTask');
-const createTeamFn = httpsCallable<
-  { teamName: string; code?: string; memberNames?: string[]; captainPhone?: string },
-  { success: boolean; teamId: string; code: string; teamName: string }
->(functions, 'adminCreateTeam');
+const createCodeFn = httpsCallable<
+  { code?: string; label?: string },
+  { success: boolean; code: string; label: string | null }
+>(functions, 'adminCreateCode');
 const deleteTeamFn = httpsCallable<
   { teamId: string },
   { success: boolean; teamId: string; releasedCode: string | null }
 >(functions, 'adminDeleteTeam');
+const launchTeamsFn = httpsCallable<
+  { teamIds: string[] },
+  { success: boolean; count: number; launchAt: string }
+>(functions, 'launchTeams');
 
 export default function TeamsPage() {
   const { t } = useI18n();
@@ -69,14 +86,17 @@ export default function TeamsPage() {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [skippingId, setSkippingId] = useState<string | null>(null);
 
-  // Add-team form + two-step delete.
+  // Create-code form + two-step delete.
   const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
-  const [newMembers, setNewMembers] = useState('');
+  const [newLabel, setNewLabel] = useState('');
   const [creating, setCreating] = useState(false);
   const [deleteArmId, setDeleteArmId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Launch selection.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [launching, setLaunching] = useState(false);
 
   const fetchTeams = useCallback(async () => {
     try {
@@ -109,29 +129,25 @@ export default function TeamsPage() {
     }
   }, [t, fetchTeams]);
 
-  const handleCreate = useCallback(async () => {
-    const name = newName.trim();
-    if (!name) { setError(t('teams.nameRequired')); return; }
+  const handleCreateCode = useCallback(async () => {
     setCreating(true);
     setError(null);
     setNotice(null);
     try {
       await ensureAuth();
-      const members = newMembers.split(',').map((m) => m.trim()).filter(Boolean);
-      const res = await createTeamFn({
-        teamName: name,
+      const res = await createCodeFn({
         code: newCode.trim() || undefined,
-        memberNames: members,
+        label: newLabel.trim() || undefined,
       });
-      setNotice(t('teams.createDone', { team: res.data.teamName, code: res.data.code }));
-      setNewName(''); setNewCode(''); setNewMembers(''); setShowAdd(false);
+      setNotice(t('teams.codeCreated', { code: res.data.code }));
+      setNewCode(''); setNewLabel(''); setShowAdd(false);
       await fetchTeams();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t('teams.createError'));
+      setError(err instanceof Error ? err.message : t('teams.codeCreateError'));
     } finally {
       setCreating(false);
     }
-  }, [newName, newCode, newMembers, t, fetchTeams]);
+  }, [newCode, newLabel, t, fetchTeams]);
 
   const handleDelete = useCallback(async (teamId: string) => {
     setDeletingId(teamId);
@@ -142,6 +158,7 @@ export default function TeamsPage() {
       await ensureAuth();
       const res = await deleteTeamFn({ teamId });
       setNotice(t('teams.deleteDone', { code: res.data.releasedCode ?? '—' }));
+      setSelected((prev) => { const n = new Set(prev); n.delete(teamId); return n; });
       await fetchTeams();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('teams.deleteError'));
@@ -150,11 +167,40 @@ export default function TeamsPage() {
     }
   }, [t, fetchTeams]);
 
+  const toggleSelect = useCallback((teamId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(teamId)) next.delete(teamId); else next.add(teamId);
+      return next;
+    });
+  }, []);
+
+  const handleLaunch = useCallback(async () => {
+    const teamIds = [...selected];
+    if (teamIds.length === 0) return;
+    setLaunching(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await ensureAuth();
+      const res = await launchTeamsFn({ teamIds });
+      setNotice(t('teams.launchDone', { n: res.data.count }));
+      setSelected(new Set());
+      await fetchTeams();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : t('teams.launchError'));
+    } finally {
+      setLaunching(false);
+    }
+  }, [selected, t, fetchTeams]);
+
   useEffect(() => {
     void fetchTeams();
     const interval = setInterval(() => void fetchTeams(), 30_000);
     return () => clearInterval(interval);
   }, [fetchTeams]);
+
+  const waitingCount = teams.filter(isWaiting).length;
 
   return (
     <div className="p-6 md:p-8">
@@ -171,11 +217,20 @@ export default function TeamsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button
+              onClick={() => void handleLaunch()}
+              disabled={launching}
+              className="px-3 py-1.5 text-sm rounded-xl border border-neon-green/50 bg-neon-green/10 text-neon-green hover:bg-neon-green/20 disabled:opacity-40 transition-all"
+            >
+              {launching ? t('teams.launching') : t('teams.launchSelected', { n: selected.size })}
+            </button>
+          )}
           <button
             onClick={() => { setShowAdd((v) => !v); setError(null); setNotice(null); }}
             className="px-3 py-1.5 text-sm rounded-xl border border-neon-green/40 text-neon-green hover:bg-neon-green/10 transition-all backdrop-blur-sm"
           >
-            {showAdd ? t('teams.addCancel') : `+ ${t('teams.add')}`}
+            {showAdd ? t('teams.addCancel') : `+ ${t('teams.createCode')}`}
           </button>
           <button
             onClick={() => { setLoading(true); void fetchTeams(); }}
@@ -189,16 +244,8 @@ export default function TeamsPage() {
 
       {showAdd && (
         <div className="mb-4 p-4 rounded-2xl border border-neon-green/30 bg-neon-green/5 backdrop-blur-sm">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldName')}</label>
-              <input
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder={t('teams.fieldNamePlaceholder')}
-                className="w-full px-3 py-2 rounded-lg bg-app-surface border border-glass-border text-white text-sm focus:border-neon-green/50 outline-none"
-              />
-            </div>
+          <p className="text-xs text-zinc-400 mb-3">{t('teams.createCodeHint')}</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldCode')}</label>
               <input
@@ -209,24 +256,30 @@ export default function TeamsPage() {
               />
             </div>
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldMembers')}</label>
+              <label className="block text-xs text-zinc-400 mb-1">{t('teams.fieldLabel')}</label>
               <input
-                value={newMembers}
-                onChange={(e) => setNewMembers(e.target.value)}
-                placeholder={t('teams.fieldMembersPlaceholder')}
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                placeholder={t('teams.fieldLabelPlaceholder')}
                 className="w-full px-3 py-2 rounded-lg bg-app-surface border border-glass-border text-white text-sm focus:border-neon-green/50 outline-none"
               />
             </div>
           </div>
           <div className="mt-3 flex justify-end">
             <button
-              onClick={() => void handleCreate()}
-              disabled={creating || !newName.trim()}
+              onClick={() => void handleCreateCode()}
+              disabled={creating}
               className="px-4 py-2 text-sm rounded-xl bg-neon-green/10 border border-neon-green/40 text-neon-green hover:bg-neon-green/20 disabled:opacity-40 transition-all"
             >
-              {creating ? t('teams.creating') : t('teams.createBtn')}
+              {creating ? t('teams.creating') : t('teams.createCodeBtn')}
             </button>
           </div>
+        </div>
+      )}
+
+      {waitingCount > 0 && (
+        <div className="mb-4 px-4 py-2 rounded-xl bg-neon-green/5 border border-neon-green/20 text-zinc-400 text-xs">
+          {t('teams.selectHint')}
         </div>
       )}
 
@@ -246,6 +299,7 @@ export default function TeamsPage() {
         <table className="w-full text-sm">
           <thead className="bg-app-surface text-zinc-500 text-xs uppercase tracking-widest">
             <tr>
+              <th className="px-3 py-3 w-8"></th>
               <th className="text-start px-4 py-3">{t('teams.colTeam')}</th>
               <th className="text-start px-4 py-3">{t('teams.colCode')}</th>
               <th className="text-start px-4 py-3">{t('teams.colStatus')}</th>
@@ -258,13 +312,13 @@ export default function TeamsPage() {
           <tbody>
             {loading && teams.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={8} className="px-4 py-8 text-center text-zinc-600">
                   {t('teams.loadingRow')}
                 </td>
               </tr>
             ) : teams.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={8} className="px-4 py-8 text-center text-zinc-600">
                   {t('teams.empty')}
                 </td>
               </tr>
@@ -273,8 +327,20 @@ export default function TeamsPage() {
                 const finished = team.status === 'finished';
                 const isSkipping = skippingId === team.id;
                 const isConfirming = confirmId === team.id;
+                const waiting = isWaiting(team);
                 return (
                   <tr key={team.id} className="bg-app-card hover:bg-app-raised transition-colors border-b border-glass-border">
+                    <td className="px-3 py-3 text-center">
+                      {waiting && (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(team.id)}
+                          onChange={() => toggleSelect(team.id)}
+                          className="accent-neon-green w-4 h-4 cursor-pointer"
+                          aria-label={t('teams.launch')}
+                        />
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-semibold text-white">{team.name}</div>
                       {team.memberNames.length > 0 && (
@@ -307,7 +373,7 @@ export default function TeamsPage() {
                     </td>
                     <td className="px-4 py-3 text-end">
                       <div className="flex items-center justify-end gap-2">
-                        {!finished && (
+                        {!finished && !waiting && (
                           <button
                             onClick={() =>
                               isConfirming ? void handleSkip(team.id) : setConfirmId(team.id)

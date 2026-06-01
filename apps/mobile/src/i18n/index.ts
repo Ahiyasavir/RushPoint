@@ -235,6 +235,12 @@ const en: Dict = {
   'wrapped.breakdown': 'Stage by stage',
   'wrapped.notDone': 'not done',
   'wrapped.back': 'Back',
+
+  // Staged start (dashboard standby + countdown)
+  'launch.waitTitle': 'Get ready to race',
+  'launch.waitBody': 'You\'re registered! Wait for the start signal — the organizers will launch your team, and your first mission appears right after a short countdown.',
+  'launch.getReady': 'GET READY',
+  'launch.countdownHint': 'Your first mission is moments away…',
 };
 
 const he: Dict = {
@@ -465,6 +471,12 @@ const he: Dict = {
   'wrapped.breakdown': 'שלב אחר שלב',
   'wrapped.notDone': 'לא הושלם',
   'wrapped.back': 'חזרה',
+
+  // Staged start (dashboard standby + countdown)
+  'launch.waitTitle': 'התכוננו למירוץ',
+  'launch.waitBody': 'נרשמתם! המתינו לאות הזינוק — המארגנים ישגרו את הקבוצה שלכם, והמשימה הראשונה תופיע מיד אחרי ספירה לאחור קצרה.',
+  'launch.getReady': 'היכונו',
+  'launch.countdownHint': 'המשימה הראשונה שלכם עוד רגע…',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

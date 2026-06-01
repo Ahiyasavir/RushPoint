@@ -268,6 +268,8 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
     judging: boolean;            // clock frozen at a judge
     crafting: boolean;           // inside the 20-min Tene crafting window
     finished: boolean;           // all slots terminal
+    launched: boolean;           // race started for this team (false = still waiting)
+    launchAt: string | null;     // ISO countdown target when launched
   }
   const scoreMap: Record<string, TeamProgress> = {};
   for (const doc of gsSnap.docs) {
@@ -279,6 +281,8 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
       slots?: { index: number; type: string; status: string }[];
       judging?: unknown;
       craftingStartedAt?: unknown;
+      launched?: boolean;
+      launchAt?: string;
     };
     const slots = gs.slots ?? [];
     const active = slots.find((s) => s.status === 'active') ?? null;
@@ -293,6 +297,10 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
       judging:    gs.judging != null,
       crafting:   gs.craftingStartedAt != null && active?.type === 'gold',
       finished,
+      // Backward-compatible: a gameState with no `launched` field (seed/legacy)
+      // counts as already launched, so only teams explicitly seeded false wait.
+      launched:   gs.launched !== false,
+      launchAt:   gs.launchAt ?? null,
     };
   }
 
@@ -320,6 +328,8 @@ export const listTeams = functions.https.onCall(async (_data, context) => {
         judging:        scoreMap[userId]?.judging ?? false,
         crafting:       scoreMap[userId]?.crafting ?? false,
         finished:       scoreMap[userId]?.finished ?? false,
+        launched:       scoreMap[userId]?.launched ?? true,
+        launchAt:       scoreMap[userId]?.launchAt ?? null,
       };
     })
     .sort((a, b) => b.score - a.score);          // highest score first
@@ -1003,19 +1013,19 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
       slots:        buildInitialSlots(nowIso),
       score:        0,
       bonusPenalty: 0,
+      // Teams WAIT after registering — the admin launches them (with a countdown),
+      // which assigns the first mission. Until then the dashboard shows a standby
+      // screen and no mission is routed. (launchTeams flips this to true.)
+      launched:     false,
       updatedAt:    nowIso,
     });
 
     tx.update(codeRef, { claimed: true, teamId: uid });
 
     return { teamId: uid, teamName: name, alreadyRegistered: false };
-  }).then(async (result) => {
-    // Post-registration: load-balance the team's FIRST green mission across the
-    // station pool (flattens the opening rush). Best-effort — if no green station
-    // is free, slot 0 stays unassigned and the app's requestNextTask handles it.
-    if (!result.alreadyRegistered) await routeFirstGreen(uid, nowIso);
-    return result;
   });
+  // NOTE: the first green mission is NOT routed here anymore — it's assigned by
+  // launchTeams when the admin starts the team, so registered teams stand by.
 });
 
 /** Route slot 0 to the least-loaded green station near the race start. */
@@ -2352,6 +2362,97 @@ export const adminDeleteTeam = functions.https.onCall(async (data, context) => {
   });
 
   return { success: true, teamId, releasedCode: prof.code ?? null };
+});
+
+// ─── adminCreateCode ──────────────────────────────────────────────────────────
+// Pre-generate an access code WITHOUT creating a team. The team registers itself
+// when it enters the code in the mobile app (registerTeam claims + seeds it).
+// Optional `label` (e.g. a team name hint) is stored on the code for the admin's
+// reference; `code` lets the admin pick a custom code, else one is generated.
+export const adminCreateCode = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { code: requested, label } = (data ?? {}) as { code?: string; label?: string };
+
+  let code = (requested ?? '').trim().toUpperCase();
+  if (code) {
+    const existing = await db.doc(`artifacts/${APP_ID}/accessCodes/${code}`).get();
+    if (existing.exists) {
+      throw new functions.https.HttpsError('already-exists', `Access code ${code} already exists`);
+    }
+  } else {
+    code = await uniqueAccessCode();
+  }
+
+  const nowIso = new Date().toISOString();
+  await db.doc(`artifacts/${APP_ID}/accessCodes/${code}`).set({
+    code,
+    claimed: false,
+    teamId: null,
+    label: (label ?? '').trim() || null,
+    createdAt: nowIso,
+  });
+
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: `Created access code ${code}${label ? ` (${label})` : ''}`,
+  });
+
+  return { success: true, code, label: (label ?? '').trim() || null };
+});
+
+// ─── launchTeams ──────────────────────────────────────────────────────────────
+// Staged start: registered teams stand by until the admin launches them. Launching
+// stamps a `launchAt` (now + countdownSeconds) and flips `launched:true`; the
+// mobile app shows a 10→0 countdown to launchAt and then reveals the first mission
+// (assigned here via routeFirstGreen, with the elapsed clock starting at launchAt
+// so every launched team's race begins at the same moment). Idempotent per team:
+// a team already launched is skipped.
+const LAUNCH_COUNTDOWN_SECONDS = 10;
+
+export const launchTeams = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { teamIds, countdownSeconds } = (data ?? {}) as {
+    teamIds?: string[];
+    countdownSeconds?: number;
+  };
+  if (!Array.isArray(teamIds) || teamIds.length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'teamIds (non-empty array) is required');
+  }
+  const countdown = Math.max(0, Math.min(120, Math.round(Number(countdownSeconds) || LAUNCH_COUNTDOWN_SECONDS)));
+  const nowMs    = Date.now();
+  const launchAt = new Date(nowMs + countdown * 1000).toISOString();
+
+  const launched: string[] = [];
+  for (const teamId of teamIds) {
+    const gsRef = db.doc(`${userPath(teamId)}/gameState/current`);
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(gsRef);
+      if (!snap.exists) return false;
+      const gs = snap.data() as { launched?: boolean; slots?: JudgeSlot[] };
+      if (gs.launched === true) return false; // already launched — skip
+      const slots = (gs.slots ?? []).map((s) => ({ ...s }));
+      // The race clock for slot 0 starts when the countdown ends, so leaving
+      // early/late before launch doesn't affect timing — all teams start fair.
+      const activeIdx = slots.findIndex((s) => s.status === 'active');
+      if (activeIdx >= 0) slots[activeIdx] = { ...slots[activeIdx], startedAt: launchAt };
+      tx.update(gsRef, { launched: true, launchAt, slots, updatedAt: new Date(nowMs).toISOString() });
+      return true;
+    });
+    if (ok) {
+      launched.push(teamId);
+      // Assign the opening green mission during the countdown so it's ready at 0.
+      // eslint-disable-next-line no-await-in-loop
+      await routeFirstGreen(teamId, launchAt);
+    }
+  }
+
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: `Launched ${launched.length} team(s) with a ${countdown}s countdown`,
+  });
+
+  return { success: true, launched, count: launched.length, launchAt, countdownSeconds: countdown };
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
