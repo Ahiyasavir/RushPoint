@@ -116,10 +116,11 @@ rushpoint/
 │   │   │   └── final-run.tsx   # race-complete celebration (animated trophy + synth fanfare)
 │   │   └── src/
 │   │       ├── components/      # Tier 1 kit: Text, Button, Card, Badge, Input, Toast, tokens.ts
-│   │       │                    # + SlotCard, ProgressBar, LanguageToggle, FlashMissionBanner,
-│   │       │                    # AnnouncementBanner (persistent operational marquee)
+│   │       │                    # + LanguageToggle, FlashMissionBanner, AnnouncementBanner,
+│   │       │                    # ErrorBoundary, TopoMap (keyless OpenTopoMap mission map)
 │   │       ├── hooks/           # useGameSync, useOfflineToast, useFlashMissions, useSlotSound,
-│   │       │                    # useAnnouncements, useAdaptiveLocation (geo-throttled pings)
+│   │       │                    # useAnnouncements, useAdaptiveLocation (geo pings), useWakeLock,
+│   │       │                    # useDeviceLocation(.web), useRaceConfig
 │   │       ├── data/            # teneProducts.ts (crafting-menu mirror of the catalog)
 │   │       ├── services/        # firebase.config.ts (emulator-wired, 127.0.0.1, AsyncStorage auth)
 │   │       └── store/           # gameStore (Zustand mirror of gameState)
@@ -228,10 +229,24 @@ The full set is exercised by `node scripts/e2e-verify.mjs` against the emulator.
 
 ## UI Component Kit (mobile, Tier 1)
 
-`Text · Button · Card · Badge · Input · Toast · LanguageToggle · SlotCard · ProgressBar ·
-FlashMissionBanner` + `tokens.ts` (GLOW, GLASS, GRADIENTS, BG — dark neon theme).
+`Text · Button · Card · Badge · Input · Toast · LanguageToggle · FlashMissionBanner ·
+AnnouncementBanner · ErrorBoundary · TopoMap` + `tokens.ts` (GLOW, GLASS, GRADIENTS, BG —
+dark neon theme; **see "Theming / reskin surface" below** before the UI overhaul).
 `<ToastProvider>` is mounted in `app/_layout.tsx`; use `useToast()` for non-blocking messages.
 Follow NativeWind rules: static class strings only (no dynamic `bg-${x}`), native shadows via `style`.
+
+### Theming / reskin surface (where the visual language lives)
+A reskin (e.g. the planned light "Topographic Expedition" theme — see
+[DESIGN_IMPORT_NOTES.md](DESIGN_IMPORT_NOTES.md)) is almost entirely a **config-level** edit,
+because screens use semantic class names (`bg-app-bg`, `text-neon-green`, `border-glass-border`)
+rather than inline colors. Change the palette in these four places:
+1. `apps/mobile/tailwind.config.js` — color tokens (`app-bg/surface/card/raised`, `neon-*`, `glass-*`).
+2. `apps/admin/tailwind.config.js`  — the same token names (keep them in sync).
+3. `apps/mobile/src/components/tokens.ts` — `GLOW/GLASS/GRADIENTS/BG` (soften shadows for a light theme).
+4. `apps/admin/src/index.css` — admin global styles.
+Remaining inline hex is small and localized: `TopoMap.tsx` (map marker/route colors),
+`ErrorBoundary.tsx` (both apps), and a few `style`-prop values (Switch/ActivityIndicator) in
+`register/sos/dashboard/basket-zone/final-run`. Grep `#[0-9a-fA-F]\{6\}` to find them.
 
 ## Internationalisation (English / Hebrew) 🌐
 

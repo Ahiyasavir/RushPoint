@@ -75,10 +75,10 @@ rushpoint/
 │   │       │   ├── Input.tsx           ✅  Tier 1 — labelled input + inline error
 │   │       │   ├── Toast.tsx           ✅  Tier 1 — ToastProvider + useToast()
 │   │       │   ├── LanguageToggle.tsx  ✅  EN/HE toggle pill
-│   │       │   ├── SlotCard.tsx        ✅  Animated slot tile (Reanimated + NativeWind)
-│   │       │   ├── ProgressBar.tsx     ✅  Spring-animated progress bar
 │   │       │   ├── FlashMissionBanner.tsx  ✅  Neon overlay for admin-pushed flash missions
-│   │       │   └── AnnouncementBanner.tsx  ✅  Persistent operational marquee (per-device dismiss)
+│   │       │   ├── AnnouncementBanner.tsx  ✅  Persistent operational marquee (per-device dismiss)
+│   │       │   ├── ErrorBoundary.tsx   ✅  App-wide crash guard → telemetry
+│   │       │   └── TopoMap.tsx         ✅  Keyless OpenTopoMap mission map (tiles + route + markers)
 │   │       │
 │   │       ├── hooks/
 │   │       │   ├── useSlotSound.ts        ✅  Web Audio synth chimes + playFanfare (no mp3 assets)
