@@ -1,0 +1,38 @@
+{
+  "selected": {
+    "id": "F-CTRL",
+    "title": "Control-room \"needs attention\" dashboard for organizers",
+    "goal": "admin",
+    "dims": { "userImpact": 2, "adminImpact": 5, "reliability": 5, "productRisk": 4, "cleanupValue": 0 },
+    "risk": 3,
+    "effort": 3,
+    "rationale": "On event day the organizer has no single place to see what is going wrong right now — they must hop between the Manager, Check-ins, Station and Matchmaking pages to notice an active SOS, a team stuck past its station cap, a paused/closed station, or a backlog of pending judge reviews. A prioritized live 'needs attention' view turns scattered polling into one glanceable triage screen, directly improving organizer control and event-day reliability. It composes data from callables that already exist, so risk is bounded and it preserves all current pages.",
+    "whyBeatAlternatives": "It is the highest-scored candidate (57) and uniquely improves real-time organizer control on event day, whereas H-REG/H-OFFLINE/H-DASH each polish one player edge case; the control room reduces the chance the whole event goes sideways unnoticed.",
+    "visibleValue": "An organizer opens one screen and immediately sees, ranked by urgency, every active SOS alert, every team past its station time cap, every paused/closed station, and the count of pending judge reviews — with deep links to act on each.",
+    "safeToContinue": true,
+    "acceptanceCriteria": [
+      "A new admin route (e.g. /control) is reachable from the top nav and gated to the manager/admin role via roles.tsx canAccess",
+      "The page shows distinct prioritized sections: Active SOS alerts, Teams over their station time cap, Paused/closed stations, and Pending judge reviews count",
+      "Each row deep-links or routes to the relevant existing page (Manager for SOS/stations, Judge/Check-ins for reviews) so the organizer can act",
+      "The view auto-refreshes (usePoll, ~10-15s) and renders clean empty states ('All clear') when a section has nothing",
+      "Sections collapse/hide gracefully and the whole screen has loading + error states; existing pages are unchanged",
+      "All new copy is bilingual EN/HE via the admin i18n dictionary and uses logical RTL classes"
+    ],
+    "implementationHints": [
+      "Add apps/admin/src/pages/ControlRoomPage.tsx; register the route in apps/admin/src/App.tsx and add a NAV_ITEMS entry + i18n key",
+      "Gate access in apps/admin/src/roles.tsx (ROLE_ROUTES) for manager/admin; consider making it the manager default home",
+      "Reuse callable<>() from services/api.ts and usePoll from hooks/usePoll.ts; do NOT hand-roll httpsCallable",
+      "SOS alerts + station status come from the same sources ManagerPage already reads; time-cap logic mirrors JudgePage's Task.maxDurationMinutes warning; pending reviews from listPendingArrivals / StationReviewPage",
+      "Import shared callable-result types from @rushpoint/shared (TeamSummary, PendingArrival, StationTeamRow) — don't redeclare",
+      "Add EN/HE strings to apps/admin/src/i18n and keep tokens/glass theme consistent with other pages"
+    ],
+    "downgradedFrom": null
+  },
+  "newBacklog": [
+    { "id": "T-0012", "title": "Smart station auto-flag: surface stations whose load exceeds maxConcurrentTeams as routing hotspots in admin", "goal": "stations", "dims": {"userImpact":2,"adminImpact":4,"reliability":4,"productRisk":3,"cleanupValue":0}, "risk": 3, "effort": 3, "notes": "Builds on currentTeamCount/maxConcurrentTeams already tracked; feeds control room." },
+    { "id": "T-0013", "title": "Access-code batch generator + printable QR sheet in admin", "goal": "access", "dims": {"userImpact":3,"adminImpact":5,"reliability":3,"productRisk":3,"cleanupValue":0}, "risk": 3, "effort": 3, "notes": "Extends AccessCodesPage; speeds pre-event setup." },
+    { "id": "T-0014", "title": "Game builder station editor: drag-order slots + edit task geo/skill/difficulty inline", "goal": "builder", "dims": {"userImpact":2,"adminImpact":5,"reliability":3,"productRisk":3,"cleanupValue":0}, "risk": 4, "effort": 4, "notes": "Extends BuilderPage; core game-creation flow." },
+    { "id": "T-0015", "title": "Player live ETA / queue indicator: show team how busy their next station is before they arrive", "goal": "player", "dims": {"userImpact":4,"adminImpact":1,"reliability":2,"productRisk":2,"cleanupValue":0}, "risk": 3, "effort": 3, "notes": "Uses getRecommendedTasks load data; reduces clustering." },
+    { "id": "T-0016", "title": "Shareable team result card from Final Run (opt-in image export)", "goal": "social", "dims": {"userImpact":4,"adminImpact":1,"reliability":1,"productRisk":2,"cleanupValue":0}, "risk": 2, "effort": 3, "notes": "Pairs with H-WRAP; fair opt-in sharing only." }
+  ]
+}
