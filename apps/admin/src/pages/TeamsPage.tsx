@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { SLOT_COUNT } from '@rushpoint/shared';
-import { functions, ensureAuth } from '../services/firebase';
+import React, { useCallback, useState } from 'react';
+import { SLOT_COUNT, type TeamSummary as TeamRow } from '@rushpoint/shared';
+import { callable } from '../services/api';
+import { usePoll } from '../hooks/usePoll';
 import { useI18n } from '../i18n';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -10,24 +10,6 @@ const STATUS_COLORS: Record<string, string> = {
   park: 'bg-neon-orange/10 text-neon-orange border border-neon-orange/30',
   finished: 'bg-neon-green/10 text-neon-green border border-neon-green/30',
 };
-
-interface TeamRow {
-  id: string;
-  name: string;
-  code: string;
-  status: string;
-  memberNames: string[];
-  startedAt: string | null;
-  score: number;
-  completedSlots: number;
-  stageIndex: number | null;
-  stageType: 'green' | 'gate' | 'orange' | 'gold' | null;
-  judging: boolean;
-  crafting: boolean;
-  finished: boolean;
-  launched: boolean;
-  launchAt: string | null;
-}
 
 // A team that has registered but not yet been launched by the admin.
 function isWaiting(team: TeamRow): boolean {
@@ -56,23 +38,23 @@ function stageLabel(team: TeamRow, t: (k: string, v?: Record<string, string | nu
   return { text: t('teams.stageOf', { n, name: t(`slot.${team.stageType}`) }), cls: accent[team.stageType] ?? 'bg-zinc-800 text-zinc-400 border-zinc-700' };
 }
 
-const listTeamsFn = httpsCallable<void, { teams: TeamRow[] }>(functions, 'listTeams');
-const skipTaskFn = httpsCallable<
+const listTeamsFn = callable<void, { teams: TeamRow[] }>('listTeams');
+const skipTaskFn = callable<
   { teamId: string },
   { success: boolean; allDone: boolean; awardedScore: number; newScore: number }
->(functions, 'skipTask');
-const createCodeFn = httpsCallable<
+>('skipTask');
+const createCodeFn = callable<
   { code?: string; label?: string },
   { success: boolean; code: string; label: string | null }
->(functions, 'adminCreateCode');
-const deleteTeamFn = httpsCallable<
+>('adminCreateCode');
+const deleteTeamFn = callable<
   { teamId: string },
   { success: boolean; teamId: string; releasedCode: string | null }
->(functions, 'adminDeleteTeam');
-const launchTeamsFn = httpsCallable<
+>('adminDeleteTeam');
+const launchTeamsFn = callable<
   { teamIds: string[] },
   { success: boolean; count: number; launchAt: string }
->(functions, 'launchTeams');
+>('launchTeams');
 
 export default function TeamsPage() {
   const { t } = useI18n();
@@ -100,9 +82,8 @@ export default function TeamsPage() {
 
   const fetchTeams = useCallback(async () => {
     try {
-      await ensureAuth();
       const result = await listTeamsFn();
-      setTeams(result.data.teams);
+      setTeams(result.teams);
       setLastRefreshed(new Date());
       setError(null);
     } catch (err: unknown) {
@@ -118,9 +99,8 @@ export default function TeamsPage() {
     setError(null);
     setNotice(null);
     try {
-      await ensureAuth();
       const res = await skipTaskFn({ teamId });
-      setNotice(t('teams.skipDone', { score: res.data.awardedScore }));
+      setNotice(t('teams.skipDone', { score: res.awardedScore }));
       await fetchTeams();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t('teams.skipError'));
@@ -134,12 +114,11 @@ export default function TeamsPage() {
     setError(null);
     setNotice(null);
     try {
-      await ensureAuth();
       const res = await createCodeFn({
         code: newCode.trim() || undefined,
         label: newLabel.trim() || undefined,
       });
-      setNotice(t('teams.codeCreated', { code: res.data.code }));
+      setNotice(t('teams.codeCreated', { code: res.code }));
       setNewCode(''); setNewLabel(''); setShowAdd(false);
       await fetchTeams();
     } catch (err: unknown) {
@@ -155,9 +134,8 @@ export default function TeamsPage() {
     setError(null);
     setNotice(null);
     try {
-      await ensureAuth();
       const res = await deleteTeamFn({ teamId });
-      setNotice(t('teams.deleteDone', { code: res.data.releasedCode ?? '—' }));
+      setNotice(t('teams.deleteDone', { code: res.releasedCode ?? '—' }));
       setSelected((prev) => { const n = new Set(prev); n.delete(teamId); return n; });
       await fetchTeams();
     } catch (err: unknown) {
@@ -182,9 +160,8 @@ export default function TeamsPage() {
     setError(null);
     setNotice(null);
     try {
-      await ensureAuth();
       const res = await launchTeamsFn({ teamIds });
-      setNotice(t('teams.launchDone', { n: res.data.count }));
+      setNotice(t('teams.launchDone', { n: res.count }));
       setSelected(new Set());
       await fetchTeams();
     } catch (err: unknown) {
@@ -194,11 +171,7 @@ export default function TeamsPage() {
     }
   }, [selected, t, fetchTeams]);
 
-  useEffect(() => {
-    void fetchTeams();
-    const interval = setInterval(() => void fetchTeams(), 30_000);
-    return () => clearInterval(interval);
-  }, [fetchTeams]);
+  usePoll(fetchTeams, 30_000);
 
   const waitingCount = teams.filter(isWaiting).length;
 

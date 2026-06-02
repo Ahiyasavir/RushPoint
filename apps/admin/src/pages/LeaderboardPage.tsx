@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { onSnapshot, doc } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import { SLOT_COUNT } from '@rushpoint/shared';
-import { db, functions, APP_ID, ensureAuth } from '../services/firebase';
+import { db, APP_ID, ensureAuth } from '../services/firebase';
+import { callable } from '../services/api';
 import { useI18n } from '../i18n';
+
+const triggerLeaderboardFreeze = callable<{ freeze: boolean }>('triggerLeaderboardFreeze');
+const finalizeLeaderboard      = callable<Record<string, never>, { count: number }>('finalizeLeaderboard');
 
 interface RankingEntry {
   rank: number;
@@ -66,9 +69,7 @@ export default function LeaderboardPage() {
     setFreezing(true);
     setError('');
     try {
-      await ensureAuth();
-      const fn = httpsCallable(functions, 'triggerLeaderboardFreeze');
-      await fn({ freeze });
+      await triggerLeaderboardFreeze({ freeze });
       showToast(freeze ? '🔒 Leaderboard frozen.' : '🔓 Leaderboard unfrozen.');
     } catch {
       setError('freeze-error');
@@ -81,10 +82,7 @@ export default function LeaderboardPage() {
     setFinalizing(true);
     setError('');
     try {
-      await ensureAuth();
-      const fn = httpsCallable(functions, 'finalizeLeaderboard');
-      const res = await fn({});
-      const data = res.data as { count: number };
+      const data = await finalizeLeaderboard({});
       showToast(`✅ Finalized — ${data.count} teams ranked.`);
       setRevealIndex(null);
     } catch {

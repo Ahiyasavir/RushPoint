@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions, ensureAuth } from '../services/firebase';
+import type { PendingArrival as Arrival } from '@rushpoint/shared';
+import { callable } from '../services/api';
 import { useI18n } from '../i18n';
 import {
   TENE_PRODUCTS,
@@ -12,21 +12,6 @@ import {
 } from '../data/teneProducts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface Arrival {
-  checkInId: string;
-  teamId:    string;
-  teamName:  string;
-  teamCode:  string;
-  memberNames?: string[];
-  captainPhone?: string;
-  taskId:    string;
-  taskTitle: string;
-  timestamp: string | null;
-  arrivedAt: string | null;
-  teneSelection?: string[];
-  maxDurationMinutes?: number | null;
-}
 
 interface FinalizeResult {
   newScore: number;
@@ -50,9 +35,12 @@ const TIER_ORDER: ProductTier[] = ['basic', 'medium', 'hard'];
 
 // ─── Callables ────────────────────────────────────────────────────────────────
 
-const listPendingArrivals    = httpsCallable(functions, 'listPendingArrivals');
-const finalizeJudgeEvaluation = httpsCallable(functions, 'finalizeJudgeEvaluation');
-const skipTask               = httpsCallable(functions, 'skipTask');
+const listPendingArrivals    = callable<{ status?: string }, { arrivals: Arrival[] }>('listPendingArrivals');
+const finalizeJudgeEvaluation = callable<{
+  teamId: string; checkInId: string; products: string[];
+  designScore: number; presentationScore: number; missingMembers: number; judgeNote: string;
+}, FinalizeResult>('finalizeJudgeEvaluation');
+const skipTask               = callable<{ teamId: string }>('skipTask');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Judge Page
@@ -92,10 +80,9 @@ export default function JudgePage() {
     setLoading(true);
     setError('');
     try {
-      await ensureAuth();
       // Only teams the arrival volunteer has CONFIRMED ('arrived') reach the judge.
       const res = await listPendingArrivals({ status: 'arrived' });
-      setArrivals((res.data as { arrivals: Arrival[] }).arrivals ?? []);
+      setArrivals(res.arrivals ?? []);
     } catch (err) {
       setError(t('judge.loadError'));
       console.error('[judge] listPendingArrivals failed:', err);
@@ -145,7 +132,6 @@ export default function JudgePage() {
     setSubmitting(true);
     setError('');
     try {
-      await ensureAuth();
       await skipTask({ teamId: active.teamId });
       setActive(null);
       setCheckedInAt(null);
@@ -164,8 +150,7 @@ export default function JudgePage() {
     setSubmitting(true);
     setError('');
     try {
-      await ensureAuth();
-      const res = await finalizeJudgeEvaluation({
+      const data = await finalizeJudgeEvaluation({
         teamId:            active.teamId,
         checkInId:         active.checkInId,
         products:          Array.from(picked),
@@ -174,7 +159,6 @@ export default function JudgePage() {
         missingMembers,
         judgeNote:         note.trim(),
       });
-      const data = res.data as FinalizeResult;
       setResult({ ...data, teamName: active.teamName });
       setActive(null);
       void loadArrivals();

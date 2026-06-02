@@ -1,23 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions, ensureAuth } from '../services/firebase';
+import type { PendingArrival as Arrival } from '@rushpoint/shared';
+import { callable } from '../services/api';
 import { useI18n } from '../i18n';
 import AlertsBanner from '../components/AlertsBanner';
 
-interface Arrival {
-  checkInId: string;
-  teamId: string;
-  teamName: string;
-  teamCode: string;
-  taskId: string;
-  taskTitle: string;
-  timestamp: string | null;
-  arrivedAt: string | null;
-}
-
-const listPendingArrivals = httpsCallable(functions, 'listPendingArrivals');
-const cancelCheckIn = httpsCallable(functions, 'cancelCheckIn');
-const checkInArrival = httpsCallable(functions, 'checkInArrival');
+const listPendingArrivals = callable<void, { arrivals: Arrival[] }>('listPendingArrivals');
+const cancelCheckIn = callable<{ teamId: string; checkInId: string }>('cancelCheckIn');
+const checkInArrival = callable<{ teamId: string; checkInId: string }>('checkInArrival');
 
 export default function CheckInsPage() {
   const { t } = useI18n();
@@ -31,9 +20,8 @@ export default function CheckInsPage() {
     setLoading(true);
     setError('');
     try {
-      await ensureAuth();
       const res = await listPendingArrivals();
-      setArrivals((res.data as { arrivals: Arrival[] }).arrivals ?? []);
+      setArrivals(res.arrivals ?? []);
     } catch (e) {
       setError(t('checkins.loadError'));
       console.error('[checkins] listPendingArrivals failed:', e);
@@ -51,7 +39,6 @@ export default function CheckInsPage() {
     setConfirmingId(a.checkInId);
     setError('');
     try {
-      await ensureAuth();
       await checkInArrival({ teamId: a.teamId, checkInId: a.checkInId });
       setArrivals((prev) => prev.filter((x) => x.checkInId !== a.checkInId));
     } catch (e) {
@@ -67,7 +54,6 @@ export default function CheckInsPage() {
     setRemovingId(a.checkInId);
     setError('');
     try {
-      await ensureAuth();
       await cancelCheckIn({ teamId: a.teamId, checkInId: a.checkInId });
       setArrivals((prev) => prev.filter((x) => x.checkInId !== a.checkInId));
     } catch (e) {

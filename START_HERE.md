@@ -37,7 +37,7 @@ Build in this order. Stop and fix before moving to the next step.
               ↓
 [Mobile] 2. Register
               Enter team name + members → write profile doc to Firestore
-              artifacts/race-to-tzion-2026/users/{uid}/profile/team
+              artifacts/rushpoint-pwa-7daaa/users/{uid}/profile/team
               ↓
 [Mobile] 3. Dashboard
               onSnapshot listener on gameState/current

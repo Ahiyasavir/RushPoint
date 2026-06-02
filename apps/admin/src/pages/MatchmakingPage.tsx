@@ -1,8 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { onSnapshot, collection } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions, APP_ID, ensureAuth } from '../services/firebase';
+import { db, APP_ID, ensureAuth } from '../services/firebase';
+import { callable } from '../services/api';
 import { useI18n } from '../i18n';
+
+const resolveMatch = callable<{ matchId: string; winnerId: string }>('resolveMatch');
+const pushFlashMission = callable<{
+  title: string; titleHe: string; description: string;
+  bonusPoints: number; ttlSeconds: number;
+}>('pushFlashMission');
 
 interface QueueEntry {
   teamId: string;
@@ -69,9 +75,7 @@ export default function MatchmakingPage() {
   async function handleResolve(matchId: string, winnerId: string, winnerName: string) {
     setResolving(matchId + winnerId);
     try {
-      await ensureAuth();
-      const fn = httpsCallable(functions, 'resolveMatch');
-      await fn({ matchId, winnerId });
+      await resolveMatch({ matchId, winnerId });
       showToast(t('match.resolved', { winner: winnerName, bonus: '150' }));
     } catch {
       showToast(t('match.resolveError'));
@@ -84,9 +88,7 @@ export default function MatchmakingPage() {
     if (!flashTitle.trim()) { showToast(t('flash.titleRequired')); return; }
     setFlashSending(true);
     try {
-      await ensureAuth();
-      const fn = httpsCallable(functions, 'pushFlashMission');
-      await fn({
+      await pushFlashMission({
         title:       flashTitle.trim(),
         titleHe:     flashTitleHe.trim() || flashTitle.trim(),
         description: flashDesc.trim(),

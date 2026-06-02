@@ -9,7 +9,7 @@ import {
 } from '@rushpoint/shared';
 import { db } from '../services/firebase.config';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 const pub = (col: string) => `artifacts/${APP_ID}/public/data/${col}`;
 
 export interface MapStation extends GeoPoint {

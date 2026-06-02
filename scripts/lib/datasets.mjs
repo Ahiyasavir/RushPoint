@@ -16,7 +16,7 @@
 // clobbers runtime state (live team counts, claimed codes, scores, progress).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 export const pub      = (col) => `artifacts/${APP_ID}/public/data/${col}`;
 export const priv     = (uid, col) => `artifacts/${APP_ID}/users/${uid}/${col}`;
 export const codesCol = () => `artifacts/${APP_ID}/accessCodes`;

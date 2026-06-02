@@ -48,6 +48,15 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
 
+      // ── STATION SECRETS ────────────────────────────────────────────────────
+      //    Path: artifacts/{appId}/stationSecrets/{taskId}
+      //    Smart-station answer codes (expectedCode). NEVER exposed to clients —
+      //    only the verification Cloud Functions read them (Admin SDK bypasses
+      //    rules). Explicit deny here documents that intent.
+      match /stationSecrets/{taskId} {
+        allow read, write: if false;
+      }
+
       // ── PUBLIC DATA ────────────────────────────────────────────────────────
       //    Path: artifacts/{appId}/public/data/{collection}/{docId}
       //

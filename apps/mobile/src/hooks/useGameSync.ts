@@ -4,7 +4,7 @@ import { db } from '../services/firebase.config';
 import { useGameStore, type LiveGame, type LiveSlot } from '../store/gameStore';
 import { useSlotSound } from './useSlotSound';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 
 /**
  * Phase 2 live sync: subscribes to the authoritative `gameState/current`

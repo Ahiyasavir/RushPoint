@@ -13,7 +13,7 @@ import { useToast } from '../src/components/Toast';
 import { LanguageToggle } from '../src/components/LanguageToggle';
 import { useTranslation } from '../src/i18n';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 
 export default function AccessCodeScreen() {
   const initTeam = useGameStore((s) => s.initTeam);

@@ -2,7 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../firebase';
 import type { Task, GeoPoint, TaskRecommendation } from '@rushpoint/shared';
 
-const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 const tasksCol = () => `artifacts/${APP_ID}/public/data/tasks`;
 
 // ─── Geo ──────────────────────────────────────────────────────────────────────

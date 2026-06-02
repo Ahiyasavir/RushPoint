@@ -1,37 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions, ensureAuth } from '../services/firebase';
+import React, { useCallback, useMemo, useState } from 'react';
+import type { TeamSummary as TeamRow, PendingArrival as Arrival } from '@rushpoint/shared';
+import { callable } from '../services/api';
+import { usePoll } from '../hooks/usePoll';
 import { useI18n } from '../i18n';
 import AlertsBanner from '../components/AlertsBanner';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface TeamRow {
-  id: string;
-  name: string;
-  code: string;
-  memberNames: string[];
-  captainPhone: string;
-  score: number;
-  stageIndex: number | null;
-  stageType: 'green' | 'gate' | 'orange' | 'gold' | null;
-  judging: boolean;
-  crafting: boolean;
-  finished: boolean;
-}
-interface Arrival {
-  checkInId: string;
-  teamId: string;
-  teamName: string;
-  teamCode: string;
-  memberNames?: string[];
-  taskTitle: string;
-  arrivedAt: string | null;
-}
-
-const listTeams           = httpsCallable<void, { teams: TeamRow[] }>(functions, 'listTeams');
-const listPendingArrivals = httpsCallable<void, { arrivals: Arrival[] }>(functions, 'listPendingArrivals');
-const checkInArrival      = httpsCallable(functions, 'checkInArrival');
-const adjustTeamScore     = httpsCallable(functions, 'adjustTeamScore');
+const listTeams           = callable<void, { teams: TeamRow[] }>('listTeams');
+const listPendingArrivals = callable<void, { arrivals: Arrival[] }>('listPendingArrivals');
+const checkInArrival      = callable<{ teamId: string; checkInId: string }>('checkInArrival');
+const adjustTeamScore     = callable<{ teamId: string; kind: string; delta: number; reason: string }>('adjustTeamScore');
 
 const COHESION_FINE = 100;
 
@@ -78,11 +55,10 @@ export default function VolunteerPage() {
 
   const load = useCallback(async () => {
     try {
-      await ensureAuth();
       const [teamRes, arrRes] = await Promise.all([listTeams(), listPendingArrivals()]);
-      setTeams(teamRes.data.teams ?? []);
+      setTeams(teamRes.teams ?? []);
       // Queue = teams that requested judging but haven't been confirmed yet.
-      setArrivals((arrRes.data.arrivals ?? []).filter((a) => !a.arrivedAt));
+      setArrivals((arrRes.arrivals ?? []).filter((a) => !a.arrivedAt));
     } catch {
       flash(t('teams.loadError'), true);
     } finally {
@@ -90,16 +66,11 @@ export default function VolunteerPage() {
     }
   }, [t]);
 
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), 20_000);
-    return () => clearInterval(id);
-  }, [load]);
+  usePoll(load, 20_000);
 
   async function confirmArrival(a: Arrival) {
     setConfirmingId(a.checkInId);
     try {
-      await ensureAuth();
       await checkInArrival({ teamId: a.teamId, checkInId: a.checkInId });
       flash(t('vol.arrivedDone', { team: a.teamName }));
       await load();
@@ -115,7 +86,6 @@ export default function VolunteerPage() {
     setFineArmed(null);
     setFiningId(team.id);
     try {
-      await ensureAuth();
       await adjustTeamScore({ teamId: team.id, kind: 'fine', delta: -COHESION_FINE, reason: 'cohesion (team not together)' });
       flash(t('vol.fineDone', { team: team.name, pts: COHESION_FINE }));
       await load();

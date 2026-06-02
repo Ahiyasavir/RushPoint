@@ -10,12 +10,20 @@
     "source": "functions",
     "runtime": "nodejs20"
   },
-  "hosting": {
-    "target": "admin",
-    "public": "apps/admin/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
-  },
+  "hosting": [
+    {
+      "target": "admin",
+      "public": "apps/admin/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    },
+    {
+      "target": "mobile",
+      "public": "apps/mobile/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    }
+  ],
   "emulators": {
     "singleProjectMode": true,
     "auth":      { "port": 9099 },

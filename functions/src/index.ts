@@ -23,7 +23,7 @@ import {
 
 // â”€â”€â”€ Path + auth helpers for the judge flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 
 const userPath = (teamId: string) => `artifacts/${APP_ID}/users/${teamId}`;
 const taskPath = (taskId: string) => `artifacts/${APP_ID}/public/data/tasks/${taskId}`;
@@ -97,6 +97,28 @@ interface JudgingState {
   checkInId: string;
   arrivedAt: string;
 }
+
+// ─── Station occupancy index (denormalized activeTaskId) ────────────────────────
+// `getStationTeams` needs "which teams are currently ON station X". Rather than
+// scanning every team's gameState on each operator poll (O(teams) per call), we
+// keep a top-level `activeTaskId` mirror of the active slot's taskId on each
+// gameState doc, maintained by this single onWrite trigger — so NO existing
+// write path has to know about it. getStationTeams then queries the field
+// directly. Loop-safe: it only writes when the derived value actually changed,
+// so the self-triggered re-run is a no-op. Eventually consistent, which is fine
+// for the operator's 15-second poll view.
+export const syncActiveTaskId = functions.firestore
+  .document('artifacts/{appId}/users/{userId}/gameState/{docId}')
+  .onWrite(async (change) => {
+    const after = change.after;
+    if (!after.exists) return; // doc deleted — nothing to mirror
+    const data = after.data() as { slots?: JudgeSlot[]; activeTaskId?: string | null };
+    const active = (data.slots ?? []).find((s) => s.status === 'active');
+    const desired = active?.taskId ?? null;
+    const current = data.activeTaskId ?? null;
+    if (desired === current) return; // unchanged → skip write → breaks the loop
+    await after.ref.update({ activeTaskId: desired });
+  });
 
 /**
  * Apply the slot unlock rules after a slot completes, stamping startedAt on any
@@ -1029,7 +1051,11 @@ export const registerTeam = functions.https.onCall(async (data, context) => {
       updatedAt:    nowIso,
     });
 
-    tx.update(codeRef, { claimed: true, teamId: uid });
+    // Claim the code: canonical `status` lifecycle + legacy `claimed`/`teamId`.
+    tx.update(codeRef, {
+      claimed: true, teamId: uid,
+      status: 'used', assignedTeamId: uid, usedAt: nowIso,
+    });
 
     return { teamId: uid, teamName: name, alreadyRegistered: false };
   });
@@ -1874,7 +1900,9 @@ export const getStationTeams = functions.https.onCall(async (data, context) => {
   }
 
   const [gsSnap, taskSnap] = await Promise.all([
-    db.collectionGroup('gameState').get(),
+    // Indexed lookup via the activeTaskId mirror (maintained by syncActiveTaskId),
+    // instead of scanning every team's gameState on each poll.
+    db.collectionGroup('gameState').where('activeTaskId', '==', taskId).get(),
     db.doc(taskPath(taskId)).get(),
   ]);
 
@@ -1884,6 +1912,7 @@ export const getStationTeams = functions.https.onCall(async (data, context) => {
       const userId = parts[parts.indexOf('users') + 1];
       const gs     = doc.data() as { slots?: JudgeSlot[] };
       const active = (gs.slots ?? []).find((s) => s.status === 'active');
+      // Guard against a stale index (team moved off before the mirror caught up).
       if (!active || active.taskId !== taskId) return null;
 
       const prof = (await db.doc(`${userPath(userId)}/profile/team`).get()).data() as
@@ -2303,9 +2332,25 @@ export const adminDeleteTeam = functions.https.onCall(async (data, context) => {
 // when it enters the code in the mobile app (registerTeam claims + seeds it).
 // Optional `label` (e.g. a team name hint) is stored on the code for the admin's
 // reference; `code` lets the admin pick a custom code, else one is generated.
+// Build the canonical fields for a fresh, unused access code.
+function newCodeDoc(code: string, label: string | null, gameId: string | null, createdBy: string) {
+  return {
+    code,
+    status: 'unused' as const,
+    gameId: gameId || null,
+    label: label || null,
+    claimed: false,        // legacy mirror of status === 'used'
+    teamId: null,          // legacy
+    assignedTeamId: null,
+    usedAt: null,
+    createdBy,
+    createdAt: new Date().toISOString(),
+  };
+}
+
 export const adminCreateCode = functions.https.onCall(async (data, context) => {
   assertJudge(context);
-  const { code: requested, label } = (data ?? {}) as { code?: string; label?: string };
+  const { code: requested, label, gameId } = (data ?? {}) as { code?: string; label?: string; gameId?: string };
 
   let code = (requested ?? '').trim().toUpperCase();
   if (code) {
@@ -2317,21 +2362,97 @@ export const adminCreateCode = functions.https.onCall(async (data, context) => {
     code = await uniqueAccessCode();
   }
 
-  const nowIso = new Date().toISOString();
-  await db.doc(`artifacts/${APP_ID}/accessCodes/${code}`).set({
-    code,
-    claimed: false,
-    teamId: null,
-    label: (label ?? '').trim() || null,
-    createdAt: nowIso,
-  });
+  const doc = newCodeDoc(code, (label ?? '').trim() || null, (gameId ?? '').trim() || null, context.auth!.uid);
+  await db.doc(`artifacts/${APP_ID}/accessCodes/${code}`).set(doc);
 
   await writeAuditLog({
     teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
     reason: `Created access code ${code}${label ? ` (${label})` : ''}`,
   });
 
-  return { success: true, code, label: (label ?? '').trim() || null };
+  return { success: true, code, label: doc.label };
+});
+
+// ─── listAccessCodes ──────────────────────────────────────────────────────────
+// Admin: every access code with its lifecycle status, for the management table.
+export const listAccessCodes = functions.https.onCall(async (_data, context) => {
+  assertJudge(context);
+  const snap = await db.collection(`artifacts/${APP_ID}/accessCodes`).get();
+  const codes = snap.docs.map((d) => {
+    const c = d.data() as Record<string, unknown>;
+    // Derive status for legacy docs that predate the `status` field.
+    const status = (c.status as string) ?? (c.claimed ? 'used' : 'unused');
+    return {
+      code:           (c.code as string) ?? d.id,
+      status,
+      gameId:         (c.gameId as string) ?? null,
+      label:          (c.label as string) ?? null,
+      assignedTeamId: (c.assignedTeamId as string) ?? (c.teamId as string) ?? null,
+      createdAt:      (c.createdAt as string) ?? null,
+      usedAt:         (c.usedAt as string) ?? null,
+      createdBy:      (c.createdBy as string) ?? null,
+    };
+  }).sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+  return { codes };
+});
+
+// ─── adminBulkCreateCodes ─────────────────────────────────────────────────────
+// Admin: generate N unique codes at once (no duplicates), optionally for a game.
+export const adminBulkCreateCodes = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { count, gameId, label } = (data ?? {}) as { count?: number; gameId?: string; label?: string };
+  const n = Math.max(1, Math.min(200, Math.round(Number(count) || 0)));
+  if (!n) throw new functions.https.HttpsError('invalid-argument', 'count (1–200) is required');
+
+  const created: string[] = [];
+  const seen = new Set<string>();
+  const batch = db.batch();
+  for (let i = 0; i < n; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    let code = await uniqueAccessCode();
+    while (seen.has(code)) { code = randomCode(8); } // guard intra-batch collisions
+    seen.add(code);
+    batch.set(
+      db.doc(`artifacts/${APP_ID}/accessCodes/${code}`),
+      newCodeDoc(code, (label ?? '').trim() || null, (gameId ?? '').trim() || null, context.auth!.uid),
+    );
+    created.push(code);
+  }
+  await batch.commit();
+
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: `Bulk-created ${created.length} access codes${gameId ? ` for game ${gameId}` : ''}`,
+  });
+  return { success: true, count: created.length, codes: created };
+});
+
+// ─── adminRevokeCode ──────────────────────────────────────────────────────────
+// Admin: revoke or delete an UNUSED code. `delete:true` removes the doc; otherwise
+// the code is marked 'revoked' (kept for the audit trail). Used codes are refused.
+export const adminRevokeCode = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { code: raw, delete: hardDelete } = (data ?? {}) as { code?: string; delete?: boolean };
+  const code = (raw ?? '').trim().toUpperCase();
+  if (!code) throw new functions.https.HttpsError('invalid-argument', 'code is required');
+
+  const ref = db.doc(`artifacts/${APP_ID}/accessCodes/${code}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', `Access code ${code} not found`);
+  const c = snap.data() as { status?: string; claimed?: boolean };
+  const status = c.status ?? (c.claimed ? 'used' : 'unused');
+  if (status === 'used') {
+    throw new functions.https.HttpsError('failed-precondition', 'A used code cannot be revoked or deleted');
+  }
+
+  if (hardDelete) await ref.delete();
+  else await ref.update({ status: 'revoked' });
+
+  await writeAuditLog({
+    teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
+    reason: `${hardDelete ? 'Deleted' : 'Revoked'} access code ${code}`,
+  });
+  return { success: true, code, deleted: hardDelete === true };
 });
 
 // ─── launchTeams ──────────────────────────────────────────────────────────────
@@ -2472,6 +2593,17 @@ export const upsertStation = functions.https.onCall(async (data, context) => {
       isActive:     d.isActive !== false,
       status:       ['active', 'paused', 'closed'].includes(str(d.status)) ? str(d.status) : 'active',
     };
+    // Smart-station config: sanitize client input, persist the secret code
+    // separately (never on the public task doc), and store the safe rest.
+    const { config: smart, expectedCode } = sanitizeSmartConfig(d.smart);
+    if (smart) {
+      payload.smart = smart;
+      await db.doc(`artifacts/${APP_ID}/stationSecrets/${id}`).set(
+        { expectedCode: expectedCode ?? null, taskId: id }, { merge: true },
+      );
+    } else {
+      payload.smart = admin.firestore.FieldValue.delete(); // demote back to a plain station
+    }
     if (isNew) { payload.currentTeamCount = 0; payload.qrCode = `QR-${id}`; }
     await ref.set(payload, { merge: true });
   } else {
@@ -2522,11 +2654,209 @@ export const deleteStation = functions.https.onCall(async (data, context) => {
     ? `artifacts/${APP_ID}/public/data/basketZones`
     : `artifacts/${APP_ID}/public/data/tasks`;
   await db.doc(`${col}/${id}`).delete();
+  await db.doc(`artifacts/${APP_ID}/stationSecrets/${id}`).delete().catch(() => undefined);
   await writeAuditLog({
     teamId: '', operatorId: context.auth!.uid, actionType: 'manual_unlock',
     reason: `Deleted ${kind} station ${id} (Race Builder)`,
   });
   return { success: true };
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SMART STATIONS — self-running stations with rich config + verification modes.
+// A smart station is a normal `task` carrying a `smart` config; the secret
+// `expectedCode` lives in stationSecrets/{taskId} (server-only), never on the
+// public task doc. Teams complete via code_verification / photo_upload /
+// manual_judge; the last two queue into stationReviews for admin approval.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Sanitize builder input into a client-safe smart config + the secret code.
+// Returns { config: null } when the input is not an enabled smart config (so the
+// station is treated as a plain station / demoted).
+function sanitizeSmartConfig(input: unknown): {
+  config: Record<string, unknown> | null;
+  expectedCode: string | null;
+} {
+  if (!input || typeof input !== 'object') return { config: null, expectedCode: null };
+  const s = input as Record<string, unknown>;
+  if (s.enabled !== true) return { config: null, expectedCode: null };
+  const vt = ['manual_judge', 'code_verification', 'photo_upload'].includes(String(s.verificationType))
+    ? String(s.verificationType) : 'manual_judge';
+  const str  = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
+  const numU = (v: unknown) => (typeof v === 'number' && !Number.isNaN(v) ? v : undefined);
+  const boolU = (v: unknown) => (typeof v === 'boolean' ? v : undefined);
+  const expectedCode = vt === 'code_verification' ? (str(s.expectedCode)?.trim() ?? null) : null;
+  const config: Record<string, unknown> = {
+    enabled: true,
+    verificationType: vt,
+    longInstructions:   str(s.longInstructions),
+    longInstructionsHe: str(s.longInstructionsHe),
+    extraInfo:          str(s.extraInfo),
+    mediaUrl:           str(s.mediaUrl),
+    imageUrl:           str(s.imageUrl),
+    adminNotes:         str(s.adminNotes),
+    timeLimitSeconds:   numU(s.timeLimitSeconds),
+    canSkip:            boolU(s.canSkip),
+    codeInputLabel:     str(s.codeInputLabel),
+    hasCode:            vt === 'code_verification' ? !!expectedCode : undefined,
+    autoCompleteOnSuccess: boolU(s.autoCompleteOnSuccess),
+    attemptLimit:       numU(s.attemptLimit),
+    hintCount:          numU(s.hintCount),
+    photoReviewRequired: boolU(s.photoReviewRequired),
+    needsAdminApproval:  boolU(s.needsAdminApproval),
+    allowRetry:          boolU(s.allowRetry),
+    showIntroScreen:         boolU(s.showIntroScreen),
+    showSuccessScreen:       boolU(s.showSuccessScreen),
+    showFailureScreen:       boolU(s.showFailureScreen),
+    showPendingReviewScreen: boolU(s.showPendingReviewScreen),
+    showHintsOverTime:       boolU(s.showHintsOverTime),
+  };
+  Object.keys(config).forEach((k) => config[k] === undefined && delete config[k]);
+  return { config, expectedCode };
+}
+
+// Complete the team's currently-active slot for `taskId` (sigmoid task score +
+// advance + release counter) — the smart-station equivalent of a station "pass".
+// Mirrors stationReleaseTeam's success path.
+async function completeSmartStation(teamId: string, taskId: string): Promise<{ taskScore: number; allDone: boolean }> {
+  const taskSnap = await db.doc(taskPath(taskId)).get();
+  const task = taskSnap.exists ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number }) : {};
+  const nowIso = new Date().toISOString();
+  const result = await db.runTransaction(async (tx) => {
+    const gsRef   = db.doc(`${userPath(teamId)}/gameState/current`);
+    const profRef = db.doc(`${userPath(teamId)}/profile/team`);
+    const gsSnap  = await tx.get(gsRef);
+    if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found for team');
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number };
+    const slots = gs.slots.map((s) => ({ ...s }));
+    const target = slots.findIndex((s) => s.status === 'active' && s.taskId === taskId);
+    if (target < 0) throw new functions.https.HttpsError('failed-precondition', 'Team is not active at this station');
+
+    const difficulty = task.difficulty ?? 5;
+    const estMins    = task.estimatedMinutes ?? 15;
+    const startMs    = slots[target].startedAt ? new Date(slots[target].startedAt!).getTime() : Date.now() - estMins * 60_000;
+    const actualMins = (Date.now() - startMs) / 60_000;
+    const taskScore  = calculateTaskScore(difficulty, actualMins, estMins);
+
+    slots[target] = {
+      ...slots[target], status: 'completed', completedAt: nowIso, earnedScore: taskScore,
+      scoreBreakdown: { products: [], productScore: 0, designScore: 0, presentationScore: 0, taskScore, total: taskScore },
+    };
+    unlockNext(slots, target, nowIso);
+    const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+    tx.update(gsRef, { slots, score: (gs.score ?? 0) + taskScore, updatedAt: nowIso });
+    if (allDone) tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
+    return { taskScore, allDone };
+  });
+  await releaseTask(taskId, teamId);
+  return result;
+}
+
+// ─── submitStationCode (team) ─────────────────────────────────────────────────
+// Validates the team's entered code against the server-only secret. The correct
+// code is NEVER returned. Auto-completes the station on success when configured.
+export const submitStationCode = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const teamId = context.auth.uid;
+  const { taskId, code } = (data ?? {}) as { taskId?: string; code?: string };
+  if (!taskId || typeof code !== 'string') {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId and code are required');
+  }
+  const [taskSnap, secretSnap] = await Promise.all([
+    db.doc(taskPath(taskId)).get(),
+    db.doc(`artifacts/${APP_ID}/stationSecrets/${taskId}`).get(),
+  ]);
+  const smart = taskSnap.exists
+    ? (taskSnap.data() as { smart?: { verificationType?: string; autoCompleteOnSuccess?: boolean } }).smart
+    : undefined;
+  if (!smart || smart.verificationType !== 'code_verification') {
+    throw new functions.https.HttpsError('failed-precondition', 'This station does not use code verification');
+  }
+  const expected = secretSnap.exists ? String((secretSnap.data() as { expectedCode?: string }).expectedCode ?? '') : '';
+  const correct  = expected.trim().length > 0 && code.trim().toLowerCase() === expected.trim().toLowerCase();
+
+  if (correct && smart.autoCompleteOnSuccess !== false) {
+    const res = await completeSmartStation(teamId, taskId);
+    return { correct: true, completed: true, ...res };
+  }
+  return { correct, completed: false };
+});
+
+// ─── requestStationReview (team) ──────────────────────────────────────────────
+// photo_upload / manual_judge: queue a pending submission for admin review.
+export const requestStationReview = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const teamId = context.auth.uid;
+  const { taskId, photoUrl } = (data ?? {}) as { taskId?: string; photoUrl?: string };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
+
+  const [taskSnap, profSnap] = await Promise.all([
+    db.doc(taskPath(taskId)).get(),
+    db.doc(`${userPath(teamId)}/profile/team`).get(),
+  ]);
+  const taskData = taskSnap.exists ? (taskSnap.data() as { title?: string; smart?: { verificationType?: string } }) : {};
+  const vt = taskData.smart?.verificationType;
+  if (vt !== 'photo_upload' && vt !== 'manual_judge') {
+    throw new functions.https.HttpsError('failed-precondition', 'This station does not use review-based verification');
+  }
+  const nowIso = new Date().toISOString();
+  const ref = db.collection(`artifacts/${APP_ID}/public/data/stationReviews`).doc();
+  await ref.set({
+    id: ref.id, teamId,
+    teamName:  profSnap.exists ? ((profSnap.data() as { name?: string }).name ?? null) : null,
+    taskId,    taskTitle: taskData.title ?? null,
+    verificationType: vt, status: 'pending',
+    photoUrl: typeof photoUrl === 'string' && photoUrl ? photoUrl : null,
+    submittedAt: nowIso,
+  });
+  return { success: true, submissionId: ref.id };
+});
+
+// ─── reviewStationSubmission (admin) ──────────────────────────────────────────
+// Approve → completes the station for the team (scores + advances). Reject →
+// marks rejected (the mobile app lets the team retry when allowRetry is set).
+export const reviewStationSubmission = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { submissionId, approve, rejectionReason } = (data ?? {}) as {
+    submissionId?: string; approve?: boolean; rejectionReason?: string;
+  };
+  if (!submissionId) throw new functions.https.HttpsError('invalid-argument', 'submissionId is required');
+  const ref  = db.doc(`artifacts/${APP_ID}/public/data/stationReviews/${submissionId}`);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Submission not found');
+  const sub = snap.data() as { teamId: string; taskId: string; status: string };
+  if (sub.status !== 'pending') throw new functions.https.HttpsError('failed-precondition', 'Submission already reviewed');
+  const nowIso = new Date().toISOString();
+
+  if (approve) {
+    const res = await completeSmartStation(sub.teamId, sub.taskId);
+    await ref.update({ status: 'approved', reviewedAt: nowIso, reviewedBy: context.auth!.uid });
+    await writeAuditLog({
+      teamId: sub.teamId, operatorId: context.auth!.uid, actionType: 'manual_unlock',
+      reason: `Approved smart-station submission for ${sub.taskId}`,
+    });
+    return { success: true, approved: true, ...res };
+  }
+  await ref.update({
+    status: 'rejected', reviewedAt: nowIso, reviewedBy: context.auth!.uid,
+    rejectionReason: (rejectionReason ?? '').trim() || null,
+  });
+  return { success: true, approved: false };
+});
+
+// ─── listStationReviews (admin) ───────────────────────────────────────────────
+export const listStationReviews = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { status } = (data ?? {}) as { status?: string };
+  let q: admin.firestore.Query = db.collection(`artifacts/${APP_ID}/public/data/stationReviews`);
+  if (status === 'pending' || status === 'approved' || status === 'rejected') {
+    q = q.where('status', '==', status);
+  }
+  const snap = await q.get();
+  const reviews = snap.docs
+    .map((d) => d.data())
+    .sort((a, b) => String(b.submittedAt ?? '').localeCompare(String(a.submittedAt ?? '')));
+  return { reviews };
 });
 
 // ─── Admin role provisioning (custom claims) ────────────────────────────────────

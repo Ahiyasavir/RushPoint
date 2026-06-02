@@ -9,5 +9,13 @@
       ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "gameState",
+      "fieldPath": "activeTaskId",
+      "indexes": [
+        { "queryScope": "COLLECTION_GROUP", "order": "ASCENDING" }
+      ]
+    }
+  ]
 }

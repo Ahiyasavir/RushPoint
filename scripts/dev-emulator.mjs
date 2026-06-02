@@ -17,7 +17,7 @@ import process from 'node:process';
 
 const ROOT       = process.cwd();
 const DATA_DIR   = join(ROOT, '.firebase', 'emulator-data');
-const PROJECT_ID = 'race-to-tzion-2026';
+const PROJECT_ID = 'rushpoint-pwa-7daaa';
 const isWin      = process.platform === 'win32';
 const MIN_JAVA   = 21;
 

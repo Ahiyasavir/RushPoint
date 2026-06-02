@@ -129,10 +129,14 @@ rushpoint/
 │           ├── data/
 │           │   └── teneProducts.ts     ✅  UI mirror of the Tene scoring catalog (display only)
 │           │
+│           ├── hooks/
+│           │   └── usePoll.ts          ✅  Interval refresh hook (replaces useEffect+setInterval)
+│           │
 │           ├── vite-env.d.ts       ✅  Vite client type augmentation (import.meta.env)
 │           │
 │           └── services/
-│               └── firebase.ts         ✅  Firebase init + emulator wiring + ensureAuth (anonymous)
+│               ├── firebase.ts         ✅  Firebase init + emulator/tunnel wiring + ensureAuth
+│               └── api.ts              ✅  callable<Req,Res>(name): httpsCallable + ensureAuth + .data
 │
 │
 ├── functions/                          Firebase Cloud Functions (Node 20)

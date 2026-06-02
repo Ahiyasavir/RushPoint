@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db, APP_ID, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 import { ALL_ROLES, useRole, type Role } from '../roles';
 
-// Number of physical stations at the event (operators pick theirs).
-const STATION_COUNT = 25;
+interface StationOption { id: string; title: string }
 
 const ROLE_META: Record<Role, { icon: string; titleKey: string; descKey: string; accent: string }> = {
   manager:   { icon: '🎛️', titleKey: 'role.manager',   descKey: 'role.managerDesc',   accent: 'border-neon-green/40 hover:bg-neon-green/10' },
@@ -18,9 +19,24 @@ const ROLE_META: Record<Role, { icon: string; titleKey: string; descKey: string;
 export default function RoleSelect() {
   const { t } = useI18n();
   const { setRole } = useRole();
-  // Operator must pick a station before entering.
+  // Operator must bind to one real station (a task) before entering — picked
+  // once here, so the Station console needs no second selection.
   const [pendingOperator, setPendingOperator] = useState(false);
-  const [station, setStation] = useState('1');
+  const [stations, setStations] = useState<StationOption[] | null>(null); // null = still loading
+  const [station, setStation] = useState('');
+
+  // Load the real station list (tasks) when the operator sub-screen opens.
+  useEffect(() => {
+    if (!pendingOperator) return;
+    void ensureAuth().then(async () => {
+      const snap = await getDocs(collection(db, `artifacts/${APP_ID}/public/data/tasks`));
+      const opts = snap.docs
+        .map((d) => ({ id: d.id, title: (d.data() as { title?: string }).title ?? d.id }))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      setStations(opts);
+      setStation((cur) => cur || opts[0]?.id || '');
+    });
+  }, [pendingOperator]);
 
   function choose(role: Role) {
     if (role === 'operator') { setPendingOperator(true); return; }
@@ -40,15 +56,21 @@ export default function RoleSelect() {
             <select
               value={station}
               onChange={(e) => setStation(e.target.value)}
-              className="flex-1 px-4 py-3 rounded-xl bg-app-card border border-glass-border text-white text-lg"
+              disabled={!stations || stations.length === 0}
+              className="flex-1 px-4 py-3 rounded-xl bg-app-card border border-glass-border text-white text-lg disabled:opacity-50"
             >
-              {Array.from({ length: STATION_COUNT }, (_, i) => String(i + 1)).map((n) => (
-                <option key={n} value={n}>{t('role.stationN', { n })}</option>
-              ))}
+              {stations === null ? (
+                <option value="">{t('role.loadingStations')}</option>
+              ) : stations.length === 0 ? (
+                <option value="">{t('role.noStations')}</option>
+              ) : (
+                stations.map((s) => <option key={s.id} value={s.id}>{s.title} ({s.id})</option>)
+              )}
             </select>
             <button
               onClick={() => setRole('operator', station)}
-              className="px-6 py-3 rounded-xl bg-neon-green text-black font-bold hover:opacity-90"
+              disabled={!station}
+              className="px-6 py-3 rounded-xl bg-neon-green text-black font-bold hover:opacity-90 disabled:opacity-50"
             >
               {t('role.enter')}
             </button>

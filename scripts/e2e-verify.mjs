@@ -7,7 +7,7 @@ import { getFirestore, connectFirestoreEmulator, doc, getDoc, collection, getDoc
 
 const app = initializeApp({
   apiKey: 'emulator-key',
-  projectId: 'race-to-tzion-2026',
+  projectId: 'rushpoint-pwa-7daaa',
   appId: 'emulator-app-id',
 });
 const auth = getAuth(app);
@@ -16,7 +16,7 @@ const fs = getFirestore(app);
 connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 connectFirestoreEmulator(fs, '127.0.0.1', 8080);
-const APP_ID = 'race-to-tzion-2026';
+const APP_ID = 'rushpoint-pwa-7daaa';
 const readGameState = (uid) =>
   getDoc(doc(fs, `artifacts/${APP_ID}/users/${uid}/gameState/current`)).then((s) =>
     s.exists() ? s.data() : null,
@@ -232,7 +232,7 @@ async function main() {
   // 10. joinTeam — a SECOND device joins the same (already-claimed) code and
   //     receives a custom token for the original team uid.
   try {
-    const app2  = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' }, 'device2');
+    const app2  = initializeApp({ apiKey: 'emulator-key', projectId: 'rushpoint-pwa-7daaa', appId: 'emulator-app-id' }, 'device2');
     const auth2 = getAuth(app2);
     const fns2  = getFunctions(app2);
     connectAuthEmulator(auth2, 'http://127.0.0.1:9099', { disableWarnings: true });
@@ -247,7 +247,7 @@ async function main() {
 
   // 11. Matchmaking — only the winner advances; the loser is re-queued ('waiting').
   try {
-    const oppApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' }, 'opponent');
+    const oppApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'rushpoint-pwa-7daaa', appId: 'emulator-app-id' }, 'opponent');
     const oppAuth = getAuth(oppApp);
     const oppFns  = getFunctions(oppApp);
     const oppFs   = getFirestore(oppApp);
@@ -341,7 +341,7 @@ async function main() {
 
   // 14. evacuateStation releases a team off a station (fresh team on task-green-001).
   try {
-    const evApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' }, 'evacteam');
+    const evApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'rushpoint-pwa-7daaa', appId: 'emulator-app-id' }, 'evacteam');
     const evAuth = getAuth(evApp);
     const evFns  = getFunctions(evApp);
     const evFs   = getFirestore(evApp);

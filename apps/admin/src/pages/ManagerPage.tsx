@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions, ensureAuth, APP_ID } from '../services/firebase';
+import type { TeamSummary as TeamRow } from '@rushpoint/shared';
+import { db, ensureAuth, APP_ID } from '../services/firebase';
+import { callable } from '../services/api';
 import { useI18n } from '../i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -29,15 +30,16 @@ interface AuditLog {
   newValue?: number | string | null;
   reason?: string;
 }
-interface TeamRow { id: string; name: string; score: number }
-
-const setStationStatus  = httpsCallable(functions, 'setStationStatus');
-const evacuateStation   = httpsCallable(functions, 'evacuateStation');
-const pushAnnouncement  = httpsCallable(functions, 'pushAnnouncement');
-const deactivateAnn     = httpsCallable(functions, 'deactivateAnnouncement');
-const listAuditLogs     = httpsCallable(functions, 'listAuditLogs');
-const listTeams         = httpsCallable(functions, 'listTeams');
-const adjustTeamScore   = httpsCallable(functions, 'adjustTeamScore');
+const setStationStatus  = callable<{ taskId: string; status: 'active' | 'paused' | 'closed' }>('setStationStatus');
+const evacuateStation   = callable<{ taskId: string }, { evacuatedCount: number }>('evacuateStation');
+const pushAnnouncement  = callable<{ message: string; messageHe?: string; level: string }>('pushAnnouncement');
+const deactivateAnn     = callable<{ id: string }>('deactivateAnnouncement');
+const listAuditLogs     = callable<Record<string, never>, { logs: AuditLog[] }>('listAuditLogs');
+const listTeams         = callable<Record<string, never>, { teams: TeamRow[] }>('listTeams');
+const adjustTeamScore   = callable<
+  { teamId: string; kind: string; delta?: number; setTo?: number; reason: string },
+  { previousScore: number; newScore: number }
+>('adjustTeamScore');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function ManagerPage() {
@@ -83,7 +85,7 @@ function StationsPanel({ onError }: { onError: (m: string) => void }) {
 
   async function setStatus(taskId: string, status: 'active' | 'paused' | 'closed') {
     setBusy(taskId);
-    try { await ensureAuth(); await setStationStatus({ taskId, status }); }
+    try { await setStationStatus({ taskId, status }); }
     catch { onError(t('mgr.actionError')); }
     finally { setBusy(null); }
   }
@@ -94,9 +96,7 @@ function StationsPanel({ onError }: { onError: (m: string) => void }) {
     setArmedEvac(null);
     setBusy(taskId);
     try {
-      await ensureAuth();
-      const res = await evacuateStation({ taskId });
-      const { evacuatedCount } = res.data as { evacuatedCount: number };
+      const { evacuatedCount } = await evacuateStation({ taskId });
       onError(t('mgr.evacuated', { n: evacuatedCount, station: taskId }));
     } catch { onError(t('mgr.actionError')); }
     finally { setBusy(null); }
@@ -174,7 +174,6 @@ function BroadcastPanel({ onError }: { onError: (m: string) => void }) {
     if (!msg.trim()) return;
     setSending(true);
     try {
-      await ensureAuth();
       await pushAnnouncement({ message: msg.trim(), messageHe: msgHe.trim() || undefined, level });
       setMsg(''); setMsgHe('');
     } catch { onError(t('mgr.actionError')); }
@@ -182,7 +181,7 @@ function BroadcastPanel({ onError }: { onError: (m: string) => void }) {
   }
 
   async function deactivate(id: string) {
-    try { await ensureAuth(); await deactivateAnn({ id }); }
+    try { await deactivateAnn({ id }); }
     catch { onError(t('mgr.actionError')); }
   }
 
@@ -240,10 +239,9 @@ function AuditPanel({ onError }: { onError: (m: string) => void }) {
 
   const load = useCallback(async () => {
     try {
-      await ensureAuth();
       const [logRes, teamRes] = await Promise.all([listAuditLogs({}), listTeams({})]);
-      setLogs((logRes.data as { logs: AuditLog[] }).logs ?? []);
-      setTeams((teamRes.data as { teams: TeamRow[] }).teams ?? []);
+      setLogs(logRes.logs ?? []);
+      setTeams(teamRes.teams ?? []);
     } catch { onError(t('mgr.loadError')); }
   }, [t, onError]);
 
@@ -253,12 +251,10 @@ function AuditPanel({ onError }: { onError: (m: string) => void }) {
     if (!teamId) return;
     setBusy(true);
     try {
-      await ensureAuth();
       const payload = kind === 'fine'
         ? { teamId, kind, delta: Number(value) || 0, reason: reason.trim() }
         : { teamId, kind, setTo: Number(value) || 0, reason: reason.trim() };
-      const res = await adjustTeamScore(payload);
-      const { previousScore, newScore } = res.data as { previousScore: number; newScore: number };
+      const { previousScore, newScore } = await adjustTeamScore(payload);
       onError(t('mgr.adjustDone', { prev: previousScore, next: newScore }));
       setValue(''); setReason('');
       await load();

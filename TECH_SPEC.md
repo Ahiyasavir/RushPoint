@@ -71,18 +71,18 @@ PUBLIC shared data   →  artifacts/{appId}/public/data/{collection}/{docId}
 PRIVATE user data    →  artifacts/{appId}/users/{userId}/{collection}/{docId}
 ```
 
-**`appId`** = env var `RUSHPOINT_APP_ID` (default: `"race-to-tzion-2026"`)  
+**`appId`** = env var `RUSHPOINT_APP_ID` (default: `"rushpoint-pwa-7daaa"`)  
 Must match across mobile (`.env` `EXPO_PUBLIC_RUSHPOINT_APP_ID`), admin (`VITE_RUSHPOINT_APP_ID`), and functions (`RUSHPOINT_APP_ID`).
 
 **Path builder helpers** (from `@rushpoint/shared`):
 ```ts
 import { FIRESTORE_PATHS } from '@rushpoint/shared';
 
-FIRESTORE_PATHS.public('race-to-tzion-2026', 'tasks')
-// → "artifacts/race-to-tzion-2026/public/data/tasks"
+FIRESTORE_PATHS.public('rushpoint-pwa-7daaa', 'tasks')
+// → "artifacts/rushpoint-pwa-7daaa/public/data/tasks"
 
-FIRESTORE_PATHS.private('race-to-tzion-2026', userId, 'gameState')
-// → "artifacts/race-to-tzion-2026/users/{userId}/gameState"
+FIRESTORE_PATHS.private('rushpoint-pwa-7daaa', userId, 'gameState')
+// → "artifacts/rushpoint-pwa-7daaa/users/{userId}/gameState"
 ```
 
 **Collection name constants** (`COLLECTIONS` from `@rushpoint/shared`):
@@ -790,7 +790,7 @@ Run: npm run emulator (terminal 1) | npm run seed:reset (terminal 2)
 □ 2. REGISTRATION
      Action:  Enter team name "Test Team" + 2 member names. Tap Start.
      Verify:  Firestore emulator contains a new doc at:
-              artifacts/race-to-tzion-2026/users/{uid}/profile/team
+              artifacts/rushpoint-pwa-7daaa/users/{uid}/profile/team
               with correct name, memberNames, status: 'registered'.
      Verify:  App navigates to /dashboard.
      Fail if: Doc written to wrong path. Missing fields. No navigation.

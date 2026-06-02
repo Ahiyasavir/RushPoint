@@ -244,6 +244,47 @@ const en: Dict = {
   'launch.waitBody': 'You\'re registered! Wait for the start signal — the organizers will launch your team, and your first mission appears right after a short countdown.',
   'launch.getReady': 'GET READY',
   'launch.countdownHint': 'Your first mission is moments away…',
+
+  // Smart station (mobile play screen)
+  'station.open': 'Open Station',
+  'station.openHint': 'This stop has special instructions — tap to begin.',
+  'station.title': 'Smart Station',
+  'station.loading': 'Loading station…',
+  'station.noConfig': 'This station has no interactive task right now.',
+  'station.start': 'Start →',
+  'station.extraInfoLabel': 'Good to know',
+  'station.viewMedia': 'Open media / video →',
+  'station.codeTitle': 'Enter the code',
+  'station.codeDefaultLabel': 'Enter code',
+  'station.codePlaceholder': 'Type the code…',
+  'station.submit': 'Submit',
+  'station.checking': 'Checking…',
+  'station.attemptsLeft': '{n} attempts left',
+  'station.noAttempts': 'No attempts remaining.',
+  'station.wrongCode': 'That code is not correct.',
+  'station.codeError': 'Could not submit the code. Check your connection.',
+  'station.photoTitle': 'Upload a photo',
+  'station.photoIntro': 'Take or choose a photo as proof — a judge will review it.',
+  'station.choosePhoto': '📷 Take / choose photo',
+  'station.retakePhoto': '🔄 Choose a different photo',
+  'station.uploading': 'Uploading…',
+  'station.submitForReview': 'Submit for review',
+  'station.photoNeeded': 'Please add a photo first.',
+  'station.uploadError': 'Upload failed. Try again.',
+  'station.permissionDenied': 'Photo permission is required to continue.',
+  'station.manualTitle': 'Call the judge',
+  'station.manualIntro': 'When your team is ready, mark yourselves ready and a judge will come to verify.',
+  'station.markReady': '✋ Call judge / Mark ready',
+  'station.reviewError': 'Could not submit. Check your connection.',
+  'station.successTitle': 'Station complete!',
+  'station.successBody': 'Great work — you have advanced to the next stage.',
+  'station.successBack': 'Back to dashboard →',
+  'station.failTitle': 'Not quite',
+  'station.failBody': 'That attempt did not pass. Try again.',
+  'station.retry': 'Try again',
+  'station.pendingTitle': 'Awaiting review',
+  'station.pendingBody': 'A judge is reviewing your submission. Your dashboard will update automatically when it is approved.',
+  'station.pendingBack': 'Back to dashboard',
 };
 
 const he: Dict = {
@@ -483,6 +524,47 @@ const he: Dict = {
   'launch.waitBody': 'נרשמתם! המתינו לאות הזינוק — המארגנים ישגרו את הקבוצה שלכם, והמשימה הראשונה תופיע מיד אחרי ספירה לאחור קצרה.',
   'launch.getReady': 'היכונו',
   'launch.countdownHint': 'המשימה הראשונה שלכם עוד רגע…',
+
+  // Smart station (mobile play screen)
+  'station.open': 'פתיחת התחנה',
+  'station.openHint': 'בתחנה הזו יש הוראות מיוחדות — הקישו כדי להתחיל.',
+  'station.title': 'תחנה חכמה',
+  'station.loading': 'טוען תחנה…',
+  'station.noConfig': 'אין כרגע משימה אינטראקטיבית בתחנה הזו.',
+  'station.start': 'התחלה ←',
+  'station.extraInfoLabel': 'כדאי לדעת',
+  'station.viewMedia': 'פתיחת מדיה / סרטון ←',
+  'station.codeTitle': 'הזינו את הקוד',
+  'station.codeDefaultLabel': 'הזינו קוד',
+  'station.codePlaceholder': 'הקלידו את הקוד…',
+  'station.submit': 'שליחה',
+  'station.checking': 'בודק…',
+  'station.attemptsLeft': 'נותרו {n} ניסיונות',
+  'station.noAttempts': 'לא נותרו ניסיונות.',
+  'station.wrongCode': 'הקוד אינו נכון.',
+  'station.codeError': 'לא ניתן לשלוח את הקוד. בדקו את החיבור.',
+  'station.photoTitle': 'העלאת תמונה',
+  'station.photoIntro': 'צלמו או בחרו תמונה כהוכחה — שופט יבדוק אותה.',
+  'station.choosePhoto': '📷 צילום / בחירת תמונה',
+  'station.retakePhoto': '🔄 בחירת תמונה אחרת',
+  'station.uploading': 'מעלה…',
+  'station.submitForReview': 'שליחה לבדיקה',
+  'station.photoNeeded': 'נא להוסיף תמונה תחילה.',
+  'station.uploadError': 'ההעלאה נכשלה. נסו שוב.',
+  'station.permissionDenied': 'נדרשת הרשאת גישה לתמונות כדי להמשיך.',
+  'station.manualTitle': 'קריאה לשופט',
+  'station.manualIntro': 'כשהקבוצה מוכנה, סמנו מוכנים ושופט יגיע לאמת.',
+  'station.markReady': '✋ קריאה לשופט / מוכנים',
+  'station.reviewError': 'לא ניתן לשלוח. בדקו את החיבור.',
+  'station.successTitle': 'התחנה הושלמה!',
+  'station.successBody': 'כל הכבוד — התקדמתם לשלב הבא.',
+  'station.successBack': 'חזרה ללוח ←',
+  'station.failTitle': 'כמעט',
+  'station.failBody': 'הניסיון לא עבר. נסו שוב.',
+  'station.retry': 'ניסיון נוסף',
+  'station.pendingTitle': 'ממתין לבדיקה',
+  'station.pendingBody': 'שופט בודק את ההגשה שלכם. הלוח יתעדכן אוטומטית עם האישור.',
+  'station.pendingBack': 'חזרה ללוח',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };
@@ -496,7 +578,8 @@ function readInitialLang(): Lang {
   } catch {
     /* storage unavailable */
   }
-  return 'en';
+  // Hebrew by default — the event runs in Jerusalem for a Hebrew-speaking crowd.
+  return 'he';
 }
 
 function applySideEffects(lang: Lang): void {

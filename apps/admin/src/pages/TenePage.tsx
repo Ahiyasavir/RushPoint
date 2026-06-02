@@ -1,20 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
-import { functions, ensureAuth } from '../services/firebase';
+import type { TeamSummary as Team } from '@rushpoint/shared';
+import { callable } from '../services/api';
 import { useI18n } from '../i18n';
 import AlertsBanner from '../components/AlertsBanner';
 
-interface Team {
-  id: string;
-  name: string;
-  code: string;
-  memberNames: string[];
-  stageType: string | null;
-  crafting: boolean;
-}
-
-const listTeams = httpsCallable(functions, 'listTeams');
-const startCraftingForTeam = httpsCallable(functions, 'startCraftingForTeam');
+const listTeams = callable<void, { teams: Team[] }>('listTeams');
+const startCraftingForTeam = callable<{ teamId: string }>('startCraftingForTeam');
 
 // Three Tene hubs (basket-crafting zones). The distributor picks the one they
 // are staffing; it scopes the help text and which counter the start affects.
@@ -32,9 +23,8 @@ export default function TenePage() {
     setLoading(true);
     setError('');
     try {
-      await ensureAuth();
       const res = await listTeams();
-      setTeams((res.data as { teams: Team[] }).teams ?? []);
+      setTeams(res.teams ?? []);
     } catch (e) {
       setError(t('tene.loadError'));
       console.error('[tene] listTeams failed:', e);
@@ -56,7 +46,6 @@ export default function TenePage() {
     setBusyId(tm.id);
     setError('');
     try {
-      await ensureAuth();
       await startCraftingForTeam({ teamId: tm.id });
       // Reflect locally so the row drops out of the queue immediately.
       setTeams((prev) => prev.map((x) => (x.id === tm.id ? { ...x, crafting: true } : x)));

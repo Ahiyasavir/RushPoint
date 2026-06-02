@@ -243,7 +243,7 @@ Admin רואה התראות live ב-CheckInsPage (`acknowledgeAlert` + קישו�
 אלו הדברים שנדרשים **לפני יום האירוע** — כרגע הכל רץ רק על Emulator:
 
 ### Firebase Production
-- [ ] יצירת Firebase project בproduction (או וידוא `race-to-tzion-2026` מוגדר)
+- [ ] יצירת Firebase project בproduction (או וידוא `rushpoint-pwa-7daaa` מוגדר)
 - [ ] `firebase deploy --only functions` — פרישת כל 33 הפונקציות
 - [ ] `firebase deploy --only firestore:rules` — חוקי אבטחה
 - [ ] `firebase deploy --only storage` — חוקי Storage
@@ -308,9 +308,9 @@ boot: npm run dev:all
 
 **Firestore paths:**
 ```
-PUBLIC  → artifacts/race-to-tzion-2026/public/data/{collection}/{docId}
-PRIVATE → artifacts/race-to-tzion-2026/users/{userId}/{collection}/{docId}
-CODES   → artifacts/race-to-tzion-2026/accessCodes/{code}
+PUBLIC  → artifacts/rushpoint-pwa-7daaa/public/data/{collection}/{docId}
+PRIVATE → artifacts/rushpoint-pwa-7daaa/users/{userId}/{collection}/{docId}
+CODES   → artifacts/rushpoint-pwa-7daaa/accessCodes/{code}
 ```
 
 **Score formula:**

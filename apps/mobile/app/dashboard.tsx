@@ -6,7 +6,7 @@ import { httpsCallable } from 'firebase/functions';
 import { addDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { functions, db } from '../src/services/firebase.config';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 import { useGameStore, type LiveSlot, type LiveJudging, type MatchStatus } from '../src/store/gameStore';
 import { useGameSync } from '../src/hooks/useGameSync';
 import { useAdaptiveLocation } from '../src/hooks/useAdaptiveLocation';
@@ -374,6 +374,17 @@ export default function DashboardScreen() {
               frozen={craftingFrozen}
             />
           </View>
+        )}
+
+        {/* ── Smart station: interactive task on the active slot ──────── */}
+        {(activeSlot as (LiveSlot & { smart?: { enabled?: boolean } }) | null)?.smart?.enabled && (
+          <Pressable
+            onPress={() => router.push('/smart-station')}
+            className="mt-4 rounded-2xl border border-neon-gold/30 bg-neon-gold/5 p-4 active:opacity-70 active:scale-95 transition-all duration-200"
+          >
+            <Text variant="label" className="text-neon-gold">🎯 {t('station.open')}</Text>
+            <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('station.openHint')}</Text>
+          </Pressable>
         )}
 
         {/* ── Phase 3: Basket zone link ─────────────────────────────── */}

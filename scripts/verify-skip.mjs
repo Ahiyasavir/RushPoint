@@ -7,12 +7,12 @@ import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
 
-const app = initializeApp({ apiKey: 'emulator-key', projectId: 'race-to-tzion-2026', appId: 'emulator-app-id' });
+const app = initializeApp({ apiKey: 'emulator-key', projectId: 'rushpoint-pwa-7daaa', appId: 'emulator-app-id' });
 const auth = getAuth(app); const functions = getFunctions(app); const fs = getFirestore(app);
 connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
 connectFunctionsEmulator(functions, '127.0.0.1', 5001);
 connectFirestoreEmulator(fs, '127.0.0.1', 8080);
-const APP_ID = 'race-to-tzion-2026';
+const APP_ID = 'rushpoint-pwa-7daaa';
 const call = (n, d) => httpsCallable(functions, n)(d).then((r) => r.data);
 const readGS = (uid) => getDoc(doc(fs, `artifacts/${APP_ID}/users/${uid}/gameState/current`)).then((s) => s.data());
 

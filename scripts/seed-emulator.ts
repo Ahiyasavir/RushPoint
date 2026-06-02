@@ -26,10 +26,10 @@ import * as admin from 'firebase-admin';
 process.env.FIRESTORE_EMULATOR_HOST     = process.env.FIRESTORE_EMULATOR_HOST     ?? '127.0.0.1:8080';
 process.env.FIREBASE_AUTH_EMULATOR_HOST = process.env.FIREBASE_AUTH_EMULATOR_HOST ?? '127.0.0.1:9099';
 
-const APP_ID     = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID     = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 // Firebase project id — must match .firebaserc default and the client configs so
 // the seed writes into the same emulator namespace the apps read from.
-const PROJECT_ID = process.env.GCLOUD_PROJECT   ?? 'race-to-tzion-2026';
+const PROJECT_ID = process.env.GCLOUD_PROJECT   ?? 'rushpoint-pwa-7daaa';
 const RESET      = process.argv.includes('--reset');
 
 admin.initializeApp({ projectId: PROJECT_ID });

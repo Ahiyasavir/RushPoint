@@ -11,6 +11,8 @@ import BuilderPage from './pages/BuilderPage';
 import StationPage from './pages/StationPage';
 import VolunteerPage from './pages/VolunteerPage';
 import TenePage from './pages/TenePage';
+import AccessCodesPage from './pages/AccessCodesPage';
+import StationReviewPage from './pages/StationReviewPage';
 import RoleSelect from './components/RoleSelect';
 import { useI18n } from './i18n';
 import { useRole, canAccess, defaultRouteFor } from './roles';
@@ -29,6 +31,8 @@ const NAV_ITEMS = [
   { to: '/station', key: 'nav.station' },
   { to: '/volunteer', key: 'nav.volunteer' },
   { to: '/tene', key: 'nav.tene' },
+  { to: '/access-codes', key: 'nav.codes' },
+  { to: '/station-reviews', key: 'nav.review' },
 ];
 
 export default function App() {
@@ -104,6 +108,8 @@ export default function App() {
           <Route path="/station" element={guard('/station', <StationPage />)} />
           <Route path="/volunteer" element={guard('/volunteer', <VolunteerPage />)} />
           <Route path="/tene" element={guard('/tene', <TenePage />)} />
+          <Route path="/access-codes" element={guard('/access-codes', <AccessCodesPage />)} />
+          <Route path="/station-reviews" element={guard('/station-reviews', <StationReviewPage />)} />
           <Route path="*" element={<Navigate to={home} replace />} />
         </Routes>
       </main>

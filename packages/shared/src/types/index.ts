@@ -198,6 +198,100 @@ export interface Task {
   // Operational controls (Phase 3)
   status?: StationStatus;     // missing = 'active'. 'paused'/'closed' excluded from routing
   maxDurationMinutes?: number; // safety cap: operator is warned past this once a team checks in
+
+  // Smart station (optional) — rich, self-running station config. A task with
+  // `smart` set renders the smart play flow on mobile and is verified per
+  // `smart.verificationType`. Absent ⇒ a plain station (unchanged behaviour).
+  smart?: SmartStationConfig;
+}
+
+// ─── Smart stations ─────────────────────────────────────────────────────────
+// How a smart station is completed:
+//  - manual_judge:     waits in the admin review queue until an admin approves.
+//  - code_verification: team enters a code; validated server-side against the
+//                       secret in stationSecrets/{taskId} (NEVER sent to client).
+//  - photo_upload:      team uploads a photo → pending review → admin approves/rejects.
+export type VerificationType = 'manual_judge' | 'code_verification' | 'photo_upload';
+
+/**
+ * Client-safe smart-station config persisted on the public task doc. The secret
+ * `expectedCode` is NOT here — it lives in stationSecrets/{taskId} (server-only)
+ * and `hasCode` just flags that a code is configured.
+ */
+export interface SmartStationConfig {
+  enabled: true;
+  verificationType: VerificationType;
+
+  // Content shown to the team
+  longInstructions?: string;
+  longInstructionsHe?: string;
+  extraInfo?: string;
+  mediaUrl?: string;        // video / rich media
+  imageUrl?: string;
+  adminNotes?: string;      // internal, not shown to teams
+
+  // Timing / flow
+  timeLimitSeconds?: number;
+  canSkip?: boolean;
+
+  // code_verification
+  codeInputLabel?: string;
+  hasCode?: boolean;        // true ⇒ an expectedCode is stored server-side
+  autoCompleteOnSuccess?: boolean;
+  attemptLimit?: number;    // 0 / undefined = unlimited
+  hintCount?: number;
+
+  // photo_upload / manual_judge
+  photoReviewRequired?: boolean;
+  needsAdminApproval?: boolean;
+  allowRetry?: boolean;
+
+  // Screen toggles
+  showIntroScreen?: boolean;
+  showSuccessScreen?: boolean;
+  showFailureScreen?: boolean;
+  showPendingReviewScreen?: boolean;
+  showHintsOverTime?: boolean;
+}
+
+export type StationSubmissionStatus = 'pending' | 'approved' | 'rejected';
+
+/**
+ * A team's attempt at a smart station that needs admin review (photo_upload /
+ * manual_judge). Stored at artifacts/{appId}/public/data/stationReviews/{id}
+ * so the admin queue can read across all teams. Function-written only.
+ */
+export interface StationSubmission {
+  id: string;
+  teamId: string;
+  teamName?: string;
+  taskId: string;
+  taskTitle?: string;
+  verificationType: VerificationType;
+  status: StationSubmissionStatus;
+  photoUrl?: string;        // photo_upload only
+  submittedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  rejectionReason?: string;
+}
+
+// ─── Access codes ───────────────────────────────────────────────────────────
+// artifacts/{appId}/accessCodes/{code}. `claimed`/`teamId` are kept for
+// back-compat with the registration flow; `status` is the canonical lifecycle.
+export type AccessCodeStatus = 'unused' | 'used' | 'revoked';
+
+export interface AccessCode {
+  code: string;
+  status: AccessCodeStatus;
+  gameId?: string;          // which game/event this code is for
+  label?: string | null;
+  claimed: boolean;         // legacy mirror of status === 'used'
+  teamId?: string | null;   // legacy
+  assignedTeamId?: string | null;
+  createdAt: string;
+  usedAt?: string | null;
+  createdBy?: string | null;
 }
 
 
@@ -490,4 +584,58 @@ export interface Match {
   resolvedAt?: string;
   winnerId?: string;
   penaltySeconds: number; // delay applied to the loser before they can access basket
+}
+
+// ─── Admin console contract rows ────────────────────────────────────────────
+// Canonical shapes returned by the admin callables, shared by the Cloud Function
+// that produces them and every admin page that consumes them — so the contract
+// can't silently drift. (Pages may read a subset of these fields.)
+
+/** One row of `listTeams` — a team's live progress for the admin tables. */
+export interface TeamSummary {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+  memberNames: string[];
+  captainPhone: string;
+  startedAt: string | null;
+  score: number;
+  completedSlots: number;
+  stageIndex: number | null;
+  stageType: SlotType | null;
+  judging: boolean;
+  crafting: boolean;
+  finished: boolean;
+  launched: boolean;
+  launchAt: string | null;
+}
+
+/** One row of `listPendingArrivals` — a team waiting in / confirmed at the judge queue. */
+export interface PendingArrival {
+  checkInId: string;
+  teamId: string;
+  teamName: string;
+  teamCode: string;
+  memberNames?: string[];
+  captainPhone?: string;
+  taskId: string;
+  taskTitle: string;
+  timestamp: string | null;
+  arrivedAt: string | null;
+  teneSelection?: string[];
+  maxDurationMinutes?: number | null;
+  stationStatus?: string | null;
+}
+
+/** One row of `getStationTeams` — a team currently on a station operator's task. */
+export interface StationTeamRow {
+  teamId: string;
+  teamName: string;
+  teamCode: string;
+  memberNames: string[];
+  memberCount: number;
+  captainPhone: string;
+  slotIndex: number;
+  startedAt: string | null;
 }

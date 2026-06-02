@@ -1,16 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Map, { Marker, NavigationControl, Source, Layer, type MapLayerMouseEvent, type MarkerDragEvent } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { httpsCallable } from 'firebase/functions';
-import { routeGeoJSON, STATION_COLOR, type RaceConfig, type StationType } from '@rushpoint/shared';
-import { functions, ensureAuth } from '../services/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { routeGeoJSON, STATION_COLOR, type RaceConfig, type StationType, type SmartStationConfig, type VerificationType } from '@rushpoint/shared';
+import { callable } from '../services/api';
+import { db, APP_ID, ensureAuth } from '../services/firebase';
 import { useI18n } from '../i18n';
 import { useRaceConfig, useStations, type BuilderStation } from '../data/raceConfig';
 import { getMapStyle } from '../data/mapStyle';
 
-const saveRaceConfigFn = httpsCallable(functions, 'saveRaceConfig');
-const upsertStationFn  = httpsCallable(functions, 'upsertStation');
-const deleteStationFn  = httpsCallable(functions, 'deleteStation');
+const saveRaceConfigFn = callable<object>('saveRaceConfig');
+const upsertStationFn  = callable<object, { id: string }>('upsertStation');
+const deleteStationFn  = callable<{ id: string; kind: 'task' | 'zone' }>('deleteStation');
 
 // What a green/gold task vs an orange zone needs. `kind` is derived from `type`.
 const ADD_TYPES: { type: StationType; kind: 'task' | 'zone'; key: string }[] = [
@@ -19,7 +20,34 @@ const ADD_TYPES: { type: StationType; kind: 'task' | 'zone'; key: string }[] = [
   { type: 'orange', kind: 'zone', key: 'builder.addOrange' },
 ];
 
-type Draft = Partial<BuilderStation> & { kind: 'task' | 'zone'; type: StationType; lat: number; lng: number; id?: string };
+// The client-editable smart config (everything in SmartStationConfig except the
+// always-true `enabled` flag) plus the write-only secret `expectedCode`. Kept as a
+// flat block on the Draft so the guided panel can bind directly to it.
+type SmartDraft = Omit<SmartStationConfig, 'enabled'> & { expectedCode?: string };
+
+type Draft = Partial<BuilderStation> & {
+  kind: 'task' | 'zone'; type: StationType; lat: number; lng: number; id?: string;
+  // Smart-station authoring state (task stations only). `smartEnabled` toggles the
+  // guided panel; `smart` holds the config. Loaded lazily from Firestore on edit.
+  smartEnabled?: boolean;
+  smart?: SmartDraft;
+};
+
+function blankSmart(): SmartDraft {
+  return {
+    verificationType: 'manual_judge',
+    canSkip: false,
+    autoCompleteOnSuccess: true,
+    needsAdminApproval: true,
+    photoReviewRequired: true,
+    allowRetry: true,
+    showIntroScreen: true,
+    showSuccessScreen: true,
+    showFailureScreen: true,
+    showPendingReviewScreen: true,
+    showHintsOverTime: false,
+  };
+}
 
 type LL = { lat: number; lng: number };
 // Greedy nearest-neighbour chain from `origin` through `pts` — gives a sensible,
@@ -76,6 +104,28 @@ export default function BuilderPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const flash = (m: string) => { setNotice(m); window.setTimeout(() => setNotice(null), 3500); };
 
+  // Open an existing station in the side panel. For task stations we lazily fetch
+  // the persisted `smart` config from Firestore (BuilderStation doesn't carry it),
+  // so editing a smart station shows its current settings. `expectedCode` is never
+  // returned (server secret) — that input stays blank and is only sent if re-typed.
+  function pickStation(s: BuilderStation) {
+    setAddType(null);
+    setDraft({ ...s });
+    if (s.kind !== 'task' || !s.id) return;
+    void ensureAuth()
+      .then(() => getDoc(doc(db, `artifacts/${APP_ID}/public/data/tasks/${s.id}`)))
+      .then((snap) => {
+        const data = snap.data() as { smart?: SmartStationConfig } | undefined;
+        const sc = data?.smart;
+        if (!sc?.enabled) return;
+        const { enabled: _enabled, ...rest } = sc;
+        setDraft((cur) => (cur && cur.id === s.id
+          ? { ...cur, smartEnabled: true, smart: { ...blankSmart(), ...rest } }
+          : cur));
+      })
+      .catch(() => { /* non-fatal — panel just opens without preloaded smart config */ });
+  }
+
   // The route line derives from the LIVE coordinate state: start → green field
   // stations (nearest-neighbour ordered) → gate → finish. Recomputes the moment
   // any of those points is dragged or a green station is added/removed — no save
@@ -98,7 +148,6 @@ export default function BuilderPage() {
   async function saveConfig() {
     setBusy(true);
     try {
-      await ensureAuth();
       await saveRaceConfigFn({
         start: cfg.start, finish: cfg.finish, gate: cfg.gate,
         center: cfg.center, zoom: cfg.zoom, routeWaypoints: routeMidNodes,
@@ -114,20 +163,56 @@ export default function BuilderPage() {
     if (d.kind === 'zone') {
       return { ...base, title: d.title, titleHe: d.titleHe, riddle: d.riddle, riddleHe: d.riddleHe, maxTeams: d.maxTeams };
     }
+    // When the smart toggle is on, attach a sanitized smart config. We drop blank
+    // strings and only send `expectedCode` when the admin typed one (it's stripped
+    // into a server-side secret store). When off, we send `smart: null` so the
+    // server clears any previously-stored smart config (plain task again).
+    const smart = d.smartEnabled ? buildSmartPayload(d.smart) : null;
     return {
       ...base, title: d.title, titleHe: d.titleHe, description: d.description, descriptionHe: d.descriptionHe,
       locationHint: d.locationHint, difficulty: d.difficulty, pointValue: d.pointValue,
       estimatedMinutes: d.estimatedMinutes, maxConcurrentTeams: d.maxConcurrentTeams,
       maxDurationMinutes: d.maxDurationMinutes, status: d.status, isActive: d.isActive !== false,
+      smart,
     };
+  }
+
+  // Assemble the `smart` object sent to upsertStation. `enabled:true` is always set;
+  // empty strings are pruned so we don't persist blanks; `expectedCode` rides along
+  // only when present (the server moves it into the secret store).
+  function buildSmartPayload(s: SmartDraft | undefined): Record<string, unknown> {
+    const src = s ?? blankSmart();
+    const out: Record<string, unknown> = { enabled: true, verificationType: src.verificationType };
+    const strKeys: (keyof SmartDraft)[] = [
+      'longInstructions', 'longInstructionsHe', 'extraInfo', 'mediaUrl', 'imageUrl', 'adminNotes', 'codeInputLabel',
+    ];
+    for (const k of strKeys) {
+      const v = src[k];
+      if (typeof v === 'string' && v.trim() !== '') out[k] = v.trim();
+    }
+    const numKeys: (keyof SmartDraft)[] = ['timeLimitSeconds', 'attemptLimit', 'hintCount'];
+    for (const k of numKeys) {
+      const v = src[k];
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+    }
+    const boolKeys: (keyof SmartDraft)[] = [
+      'canSkip', 'autoCompleteOnSuccess', 'photoReviewRequired', 'needsAdminApproval', 'allowRetry',
+      'showIntroScreen', 'showSuccessScreen', 'showFailureScreen', 'showPendingReviewScreen', 'showHintsOverTime',
+    ];
+    for (const k of boolKeys) {
+      const v = src[k];
+      if (typeof v === 'boolean') out[k] = v;
+    }
+    if (src.verificationType === 'code_verification' && typeof src.expectedCode === 'string' && src.expectedCode.trim() !== '') {
+      out.expectedCode = src.expectedCode.trim();
+    }
+    return out;
   }
 
   async function saveStation(d: Draft) {
     setBusy(true);
     try {
-      await ensureAuth();
-      const res = await upsertStationFn(payloadFromDraft(d));
-      const id = (res.data as { id: string }).id;
+      const { id } = await upsertStationFn(payloadFromDraft(d));
       setDraft({ ...d, id });
       // A green station change reshapes the route line → prompt a route re-save.
       if (d.type === 'green') setCfgDirty(true);
@@ -145,7 +230,6 @@ export default function BuilderPage() {
     if (!d.id) { setDraft(null); return; }
     setBusy(true);
     try {
-      await ensureAuth();
       await deleteStationFn({ id: d.id, kind: d.kind });
       setDraft(null);
       flash(t('builder.deletedStation'));
@@ -239,7 +323,7 @@ export default function BuilderPage() {
             {stations.map((s) => (
               <Marker key={`${s.kind}-${s.id}`} longitude={s.lng} latitude={s.lat} anchor="center" draggable
                 onDragEnd={(e) => void moveStation(s, e)}
-                onClick={(e) => { e.originalEvent.stopPropagation(); setDraft({ ...s }); setAddType(null); }}>
+                onClick={(e) => { e.originalEvent.stopPropagation(); pickStation(s); }}>
                 <div
                   title={s.label}
                   className={`w-4 h-4 rounded-full border-2 shadow-lg cursor-pointer ${draft?.id === s.id ? 'border-white ring-2 ring-white' : 'border-white/70'}`}
@@ -269,7 +353,7 @@ export default function BuilderPage() {
               onClose={() => setDraft(null)}
             />
           ) : (
-            <StationList grouped={grouped} onPick={(s) => setDraft({ ...s })} />
+            <StationList grouped={grouped} onPick={pickStation} />
           )}
         </div>
       </div>
@@ -406,6 +490,8 @@ function StationForm({ draft, busy, onChange, onSave, onDelete, onClose }: {
               </select>
             </div>
           </div>
+
+          <SmartStationPanel draft={draft} set={set} field={field} label={label} />
         </>
       )}
 
@@ -422,5 +508,152 @@ function StationForm({ draft, busy, onChange, onSave, onDelete, onClose }: {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Smart-station guided config panel ───────────────────────────────────────
+// Renders inside the task StationForm. A "Make this a smart station" toggle flips
+// `smartEnabled`; when on, a grouped builder (Basics / Content & Media /
+// Verification / Screens) exposes the SmartStationConfig fields. `expectedCode`
+// only shows for code_verification.
+const VERIFICATION_TYPES: { value: VerificationType; key: string }[] = [
+  { value: 'manual_judge',     key: 'builder.smartVerifyManual' },
+  { value: 'code_verification', key: 'builder.smartVerifyCode' },
+  { value: 'photo_upload',     key: 'builder.smartVerifyPhoto' },
+];
+
+function SmartStationPanel({ draft, set, field, label }: {
+  draft: Draft;
+  set: (patch: Partial<Draft>) => void;
+  field: string;
+  label: string;
+}) {
+  const { t } = useI18n();
+  const enabled = draft.smartEnabled === true;
+  const sc = draft.smart ?? blankSmart();
+  const setSmart = (patch: Partial<SmartDraft>) => set({ smart: { ...sc, ...patch } });
+
+  const toggle = (on: boolean) =>
+    set(on ? { smartEnabled: true, smart: draft.smart ?? blankSmart() } : { smartEnabled: false });
+
+  const section = 'text-[11px] uppercase tracking-wider text-neon-green/80 font-semibold pt-1';
+  const help = 'text-[11px] text-zinc-500';
+
+  return (
+    <div className="rounded-xl border border-neon-green/25 bg-neon-green/5 p-3 space-y-3 mt-1">
+      <label className="flex items-center justify-between cursor-pointer">
+        <span className="text-white text-sm font-semibold">{t('builder.smartToggle')}</span>
+        <input type="checkbox" className="w-4 h-4 accent-neon-green" checked={enabled} onChange={(e) => toggle(e.target.checked)} />
+      </label>
+      <p className={help}>{t('builder.smartToggleHelp')}</p>
+
+      {enabled && (
+        <div className="space-y-3 pt-1">
+          {/* ── Verification (drives the rest) ── */}
+          <div className={section}>{t('builder.smartSecVerify')}</div>
+          <div>
+            <label className={label}>{t('builder.smartVerifyType')}</label>
+            <select className={field} value={sc.verificationType}
+              onChange={(e) => setSmart({ verificationType: e.target.value as VerificationType })}>
+              {VERIFICATION_TYPES.map((v) => (
+                <option key={v.value} value={v.value}>{t(v.key)}</option>
+              ))}
+            </select>
+            <p className={help}>{t('builder.smartVerifyTypeHelp')}</p>
+          </div>
+
+          {sc.verificationType === 'code_verification' && (
+            <>
+              <div>
+                <label className={label}>{t('builder.smartExpectedCode')}</label>
+                <input className={field} value={sc.expectedCode ?? ''} placeholder={draft.id ? t('builder.smartExpectedCodePlaceholder') : ''}
+                  onChange={(e) => setSmart({ expectedCode: e.target.value })} />
+                <p className={help}>{t('builder.smartExpectedCodeHelp')}</p>
+              </div>
+              <div>
+                <label className={label}>{t('builder.smartCodeLabel')}</label>
+                <input className={field} value={sc.codeInputLabel ?? ''} onChange={(e) => setSmart({ codeInputLabel: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={label}>{t('builder.smartAttemptLimit')}</label>
+                  <input type="number" min={0} className={field} value={sc.attemptLimit ?? 0} onChange={(e) => setSmart({ attemptLimit: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className={label}>{t('builder.smartHintCount')}</label>
+                  <input type="number" min={0} className={field} value={sc.hintCount ?? 0} onChange={(e) => setSmart({ hintCount: Number(e.target.value) })} />
+                </div>
+              </div>
+              <SmartCheck label={t('builder.smartAutoComplete')} checked={sc.autoCompleteOnSuccess !== false} onChange={(v) => setSmart({ autoCompleteOnSuccess: v })} />
+            </>
+          )}
+
+          {sc.verificationType === 'photo_upload' && (
+            <>
+              <SmartCheck label={t('builder.smartPhotoReview')} checked={sc.photoReviewRequired !== false} onChange={(v) => setSmart({ photoReviewRequired: v })} />
+              <SmartCheck label={t('builder.smartAllowRetry')} checked={sc.allowRetry !== false} onChange={(v) => setSmart({ allowRetry: v })} />
+            </>
+          )}
+
+          {sc.verificationType === 'manual_judge' && (
+            <SmartCheck label={t('builder.smartNeedsApproval')} checked={sc.needsAdminApproval !== false} onChange={(v) => setSmart({ needsAdminApproval: v })} />
+          )}
+
+          {/* ── Content & Media ── */}
+          <div className={section}>{t('builder.smartSecContent')}</div>
+          <div>
+            <label className={label}>{t('builder.smartLongInstr')}</label>
+            <textarea rows={2} className={field} value={sc.longInstructions ?? ''} onChange={(e) => setSmart({ longInstructions: e.target.value })} />
+          </div>
+          <div>
+            <label className={label}>{t('builder.smartLongInstrHe')}</label>
+            <textarea rows={2} className={field} dir="rtl" value={sc.longInstructionsHe ?? ''} onChange={(e) => setSmart({ longInstructionsHe: e.target.value })} />
+          </div>
+          <div>
+            <label className={label}>{t('builder.smartExtraInfo')}</label>
+            <textarea rows={2} className={field} value={sc.extraInfo ?? ''} onChange={(e) => setSmart({ extraInfo: e.target.value })} />
+          </div>
+          <div>
+            <label className={label}>{t('builder.smartImageUrl')}</label>
+            <input className={field} value={sc.imageUrl ?? ''} onChange={(e) => setSmart({ imageUrl: e.target.value })} />
+          </div>
+          <div>
+            <label className={label}>{t('builder.smartMediaUrl')}</label>
+            <input className={field} value={sc.mediaUrl ?? ''} onChange={(e) => setSmart({ mediaUrl: e.target.value })} />
+          </div>
+          <div>
+            <label className={label}>{t('builder.smartAdminNotes')}</label>
+            <textarea rows={2} className={field} value={sc.adminNotes ?? ''} onChange={(e) => setSmart({ adminNotes: e.target.value })} />
+            <p className={help}>{t('builder.smartAdminNotesHelp')}</p>
+          </div>
+
+          {/* ── Basics (timing / flow) ── */}
+          <div className={section}>{t('builder.smartSecBasics')}</div>
+          <div>
+            <label className={label}>{t('builder.smartTimeLimit')}</label>
+            <input type="number" min={0} className={field} value={sc.timeLimitSeconds ?? 0} onChange={(e) => setSmart({ timeLimitSeconds: Number(e.target.value) })} />
+            <p className={help}>{t('builder.smartTimeLimitHelp')}</p>
+          </div>
+          <SmartCheck label={t('builder.smartCanSkip')} checked={sc.canSkip === true} onChange={(v) => setSmart({ canSkip: v })} />
+
+          {/* ── Screens ── */}
+          <div className={section}>{t('builder.smartSecScreens')}</div>
+          <SmartCheck label={t('builder.smartShowIntro')} checked={sc.showIntroScreen !== false} onChange={(v) => setSmart({ showIntroScreen: v })} />
+          <SmartCheck label={t('builder.smartShowSuccess')} checked={sc.showSuccessScreen !== false} onChange={(v) => setSmart({ showSuccessScreen: v })} />
+          <SmartCheck label={t('builder.smartShowFailure')} checked={sc.showFailureScreen !== false} onChange={(v) => setSmart({ showFailureScreen: v })} />
+          <SmartCheck label={t('builder.smartShowPending')} checked={sc.showPendingReviewScreen !== false} onChange={(v) => setSmart({ showPendingReviewScreen: v })} />
+          <SmartCheck label={t('builder.smartShowHints')} checked={sc.showHintsOverTime === true} onChange={(v) => setSmart({ showHintsOverTime: v })} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SmartCheck({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center justify-between cursor-pointer py-0.5">
+      <span className="text-white text-sm">{label}</span>
+      <input type="checkbox" className="w-4 h-4 accent-neon-green" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+    </label>
   );
 }

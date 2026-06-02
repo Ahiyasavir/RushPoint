@@ -7,7 +7,7 @@ import { db } from './lib/firestore-admin.mjs';
 import { webhookConfigured } from './lib/sheets-writer.mjs';
 import { pushStatus, pushTasks, pushZones, pushRaceConfig } from './lib/mirror-core.mjs';
 
-const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 const pub = (col) => `artifacts/${APP_ID}/public/data/${col}`;
 
 if (!webhookConfigured()) {

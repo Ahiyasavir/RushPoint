@@ -1,29 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { db, functions, APP_ID, ensureAuth } from '../services/firebase';
+import React, { useCallback, useState } from 'react';
+import type { StationTeamRow as StationTeam } from '@rushpoint/shared';
+import { callable } from '../services/api';
+import { usePoll } from '../hooks/usePoll';
 import { useI18n } from '../i18n';
 import { useRole } from '../roles';
 import AlertsBanner from '../components/AlertsBanner';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface StationTask { id: string; title: string }
-interface StationTeam {
-  teamId: string;
-  teamName: string;
-  teamCode: string;
-  memberNames: string[];
-  memberCount: number;
-  captainPhone: string;
-  slotIndex: number;
-  startedAt: string | null;
-}
-
-const getStationTeams   = httpsCallable<{ taskId: string }, { taskTitle: string; teams: StationTeam[] }>(functions, 'getStationTeams');
-const stationReleaseTeam = httpsCallable(functions, 'stationReleaseTeam');
-const stationCallHelp    = httpsCallable(functions, 'stationCallHelp');
-
-const STATION_TASK_KEY = 'rushpoint.admin.stationTaskId';
+const getStationTeams    = callable<{ taskId: string }, { taskTitle: string; teams: StationTeam[] }>('getStationTeams');
+const stationReleaseTeam = callable<{
+  teamId: string; taskId: string | null; missingMembers: number;
+  outcome: 'passed' | 'failed' | 'left'; note: string;
+}>('stationReleaseTeam');
+const stationCallHelp    = callable<{ taskId: string | null; station?: string }>('stationCallHelp');
 
 function minutesSince(iso: string | null): number | null {
   if (!iso) return null;
@@ -39,12 +27,10 @@ function minutesSince(iso: string | null): number | null {
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function StationPage() {
   const { t } = useI18n();
-  const { stationId } = useRole();
+  // The operator already bound to their station (taskId) at role-select.
+  const { stationId: taskId } = useRole();
 
-  const [tasks, setTasks] = useState<StationTask[]>([]);
-  const [taskId, setTaskId] = useState<string>(() => {
-    try { return localStorage.getItem(STATION_TASK_KEY) ?? ''; } catch { return ''; }
-  });
+  const [taskTitle, setTaskTitle] = useState<string>('');
   const [teams, setTeams] = useState<StationTeam[]>([]);
   const [missing, setMissing] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -54,41 +40,22 @@ export default function StationPage() {
 
   const flash = (m: string) => { setNotice(m); window.setTimeout(() => setNotice(null), 4000); };
 
-  // Load the station (task) list once so the operator can bind to theirs.
-  useEffect(() => {
-    void ensureAuth().then(async () => {
-      const snap = await getDocs(collection(db, `artifacts/${APP_ID}/public/data/tasks`));
-      setTasks(snap.docs.map((d) => ({ id: d.id, title: (d.data() as { title?: string }).title ?? d.id }))
-        .sort((a, b) => a.id.localeCompare(b.id)));
-    });
-  }, []);
-
   const loadTeams = useCallback(async () => {
     if (!taskId) { setTeams([]); return; }
     try {
-      await ensureAuth();
-      const res = await getStationTeams({ taskId });
-      setTeams(res.data.teams ?? []);
+      const data = await getStationTeams({ taskId });
+      setTeams(data.teams ?? []);
+      setTaskTitle(data.taskTitle ?? taskId);
     } catch {
       setTeams([]);
     }
   }, [taskId]);
 
-  useEffect(() => {
-    void loadTeams();
-    const id = setInterval(() => void loadTeams(), 15_000);
-    return () => clearInterval(id);
-  }, [loadTeams]);
-
-  function pickTask(id: string) {
-    setTaskId(id);
-    try { localStorage.setItem(STATION_TASK_KEY, id); } catch { /* ignore */ }
-  }
+  usePoll(loadTeams, 15_000);
 
   async function release(team: StationTeam, outcome: 'passed' | 'failed' | 'left') {
     setBusyId(team.teamId);
     try {
-      await ensureAuth();
       await stationReleaseTeam({
         teamId: team.teamId, taskId, missingMembers: missing[team.teamId] ?? 0,
         outcome, note: notes[team.teamId] ?? '',
@@ -109,8 +76,7 @@ export default function StationPage() {
     if (!helpArmed) { setHelpArmed(true); return; }
     setHelpArmed(false);
     try {
-      await ensureAuth();
-      await stationCallHelp({ taskId, station: stationId ?? undefined });
+      await stationCallHelp({ taskId, station: taskTitle || taskId || undefined });
       flash(t('station.helpSent'));
     } catch {
       flash(t('station.releaseError'));
@@ -121,7 +87,7 @@ export default function StationPage() {
     <div className="max-w-3xl mx-auto p-6 md:p-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="font-brand text-2xl font-bold text-white mb-1">{t('station.title', { n: stationId ?? '—' })}</h1>
+          <h1 className="font-brand text-2xl font-bold text-white mb-1">{taskTitle || taskId || '—'}</h1>
           <p className="text-zinc-500 text-sm">{t('station.subtitle')}</p>
         </div>
         <button
@@ -142,19 +108,6 @@ export default function StationPage() {
       {notice && (
         <div className="rounded-xl bg-neon-green/5 border border-neon-green/30 px-4 py-3 text-neon-green text-sm">{notice}</div>
       )}
-
-      {/* Station (task) binding */}
-      <div className="rounded-xl bg-app-card border border-glass-border p-4">
-        <label className="text-xs uppercase tracking-wider text-zinc-500">{t('station.pickStation')}</label>
-        <select
-          value={taskId}
-          onChange={(e) => pickTask(e.target.value)}
-          className="mt-2 w-full px-4 py-2.5 rounded-xl bg-app-surface border border-glass-border text-white text-sm"
-        >
-          <option value="">{t('station.selectPlaceholder')}</option>
-          {tasks.map((tk) => <option key={tk.id} value={tk.id}>{tk.title} ({tk.id})</option>)}
-        </select>
-      </div>
 
       {/* Teams currently at this station */}
       {!taskId ? (

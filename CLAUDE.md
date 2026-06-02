@@ -47,7 +47,7 @@ The whole stack boots with a single command (`npm run dev:all`). See **Local Dev
 **Backend**: Firebase (Firestore, Auth (anonymous), Cloud Functions, Storage) — local Emulator Suite.
 **State (mobile)**: Zustand. **Styling**: NativeWind v4 (mobile) / Tailwind (admin).
 
-**Project ID** (`race-to-tzion-2026`) is used consistently as **both** the Firebase project id
+**Project ID** (`rushpoint-pwa-7daaa`) is used consistently as **both** the Firebase project id
 (`.firebaserc`, client configs, seed) **and** the Firestore `appId` path segment. Keep them aligned.
 
 ---
@@ -131,10 +131,11 @@ rushpoint/
 │           │                    # MatchmakingPage, HeatmapPage (+ live team markers),
 │           │                    # ManagerPage (stations + evacuate, broadcast, audit log)
 │           ├── data/            # teneProducts.ts (UI mirror of the scoring catalog)
-│           └── services/        # firebase.ts (emulator-wired + ensureAuth anonymous)
+│           ├── hooks/           # usePoll.ts (interval refresh; replaces setInterval boilerplate)
+│           └── services/        # firebase.ts (emulator/tunnel-wired) + api.ts (callable() factory)
 ├── functions/
 │   └── src/
-│       ├── index.ts            # 33 callables — see the Cloud Functions table below
+│       ├── index.ts            # 33 callables + syncActiveTaskId trigger — see the Cloud Functions table
 │       ├── firebase.ts          # Admin SDK init (ignoreUndefinedProperties enabled)
 │       ├── routing/assignNextTask.ts   # Phase 2 — priority routing (load/transit/skill) ✅
 │       └── scoring/
@@ -147,7 +148,9 @@ rushpoint/
     ├── free-ports.mjs          # predev port cleanup
     ├── seed-local.mjs          # seed-if-empty (minimal demo set)
     ├── seed-emulator.ts        # comprehensive seed (npm run seed / seed:reset)
-    ├── e2e-verify.mjs          # end-to-end callable check vs emulator (44/44)
+    ├── e2e-verify.mjs          # end-to-end callable check vs emulator
+    ├── backfill-active-task.mjs # one-time activeTaskId mirror backfill (station occupancy index)
+    ├── proxy.mjs               # reverse proxy → emulators (tunnel backend; see dev:all:tunnel)
     └── test-tiebreaker.ts      # tie-breaker unit test (npx tsx)
 ```
 
@@ -161,7 +164,7 @@ PRIVATE →  artifacts/{appId}/users/{userId}/{collection}/{docId}  # profile, g
 CODES   →  artifacts/{appId}/accessCodes/{code}                   # pre-generated event codes
 ```
 
-`{appId}` = `race-to-tzion-2026`. Always use the `FIRESTORE_PATHS` helpers from `@rushpoint/shared`
+`{appId}` = `rushpoint-pwa-7daaa`. Always use the `FIRESTORE_PATHS` helpers from `@rushpoint/shared`
 — never hardcode path strings. (The old flat `teams/` `tasks/` model in earlier docs is obsolete.)
 
 Key documents:
@@ -215,13 +218,32 @@ Key documents:
 | `adjustTeamScore` | Manager: apply a fine (delta) or score override — writes an audit entry with prev/new |
 | `listAuditLogs` | Manager: read the immutable action log (admin-only path `artifacts/{appId}/auditLogs`) |
 | `updateLocation` | Mobile: lean per-team location ping (foreground geo-throttling) → `public/data/teamLocations` for the live heatmap |
-| `getStationTeams` | Station operator: teams currently at a station (active slot taskId match) + roster/phone |
+| `getStationTeams` | Station operator: teams currently at a station — **indexed query** on the `activeTaskId` mirror (no full scan) + roster/phone |
 | `stationReleaseTeam` | Station operator: pass/fail a team's mission, apply missing-member cohesion penalty, advance + release the counter |
 | `stationCallHelp` | Station operator: summon roaming staff (writes a 'technical' admin alert tagged with the station) |
 
+### Firestore trigger (not a callable)
+- **`syncActiveTaskId`** — `onWrite` on `…/users/{uid}/gameState/{doc}`. Mirrors the active slot's
+  `taskId` into a top-level `gameState.activeTaskId` field so `getStationTeams` can query teams-on-a-station
+  directly instead of scanning every team's gameState each poll. Loop-safe (writes only when the derived
+  value changed). Eventually consistent — fine for the operator's 15-sec poll. **Backfill existing data once
+  with `node scripts/backfill-active-task.mjs`** (the live registration/assignment path populates it
+  automatically). Production needs the `activeTaskId` collection-group index (in `firestore.indexes.json`).
+
 > Note: `bypassMatchmaking` is retained but now **rejects** — teams must win a duel (no skip).
 > Role gating in the admin app is **client-side** (simple role selection, demo-grade); for
-> production swap for Firebase custom claims.
+> production swap for Firebase custom claims. The **station operator picks their real station
+> (a task) once** in `RoleSelect` (loaded from `public/data/tasks`); it's stored as `stationId`
+> (= the taskId) and drives the whole Station console — there is no second in-page selection.
+
+### Admin data-access layer (use these — don't hand-roll callables)
+- **`apps/admin/src/services/api.ts` → `callable<Req,Res>(name)`** wraps `httpsCallable` + `ensureAuth`
+  and returns `.data` directly. Every admin page uses it; never call `httpsCallable`/`ensureAuth` by hand.
+- **`apps/admin/src/hooks/usePoll.ts` → `usePoll(fn, ms)`** replaces the `useEffect`+`setInterval` refresh
+  boilerplate (real-time pages keep their `onSnapshot` listeners instead).
+- **Canonical callable-result types live in `@rushpoint/shared`**: `TeamSummary` (`listTeams`),
+  `PendingArrival` (`listPendingArrivals`), `StationTeamRow` (`getStationTeams`) — import them, don't
+  redeclare per page, so the contract can't drift.
 
 Judge/admin callables require an authenticated caller; the admin-claim check (`assertJudge`) is
 **relaxed on the emulator** (`FUNCTIONS_EMULATOR`) so the demo runs with a plain anonymous sign-in.
