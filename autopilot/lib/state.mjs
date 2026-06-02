@@ -27,34 +27,32 @@ export function seedBacklog() {
     effort, risk, deps: [],
     source: 'seed', status: 'backlog', createdCycle: 0, notes: notes || ''
   });
+  // CURATED for the `topographic-maps` branch (2026-06-02). That branch is ~feature-complete
+  // (smart-station verification, access-code mgmt, station builder, station reviews, Tene, topo
+  // maps, SOS hold-to-fire, wrapped — all ALREADY SHIPPED). So this backlog is deliberately scoped
+  // to (a) the ONE genuinely-missing feature verified absent on this branch, and (b) visible
+  // polish & hardening of EXISTING surfaces. Every task says "enhance existing X — do not rebuild".
   return [
-    // 1) Smart stations & autonomous task verification
-    t('P-001', 'stations', 'Autonomous station verification: scanning a station QR/code auto-validates the mission and advances the slot without a judge (server-authoritative, anti-cheat)', [5, 5, 4, 5, 0], 5, 4,
-      'Flagship "smart" feature. Large — selector should downgrade to a safe first slice (e.g. server-side QR validation callable behind a flag) and build up.'),
-    t('P-002', 'stations', 'Station operator console: live team queue with one-tap pass/fail + reason, reducing manual radio coordination on event day', [3, 5, 4, 4, 0], 4, 3,
-      'Builds on getStationTeams/stationReleaseTeam.'),
-    // 2) Access code management
-    t('P-003', 'access', 'Admin access-code management page: generate, list, search, and revoke event codes with live claim/team status', [2, 5, 4, 4, 0], 4, 3,
-      'Organizers currently have no UI to manage codes; seeded only via scripts.'),
-    // 3) Game builder & station editor UX
-    t('P-004', 'builder', 'Station/task editor in admin: create & edit stations (title/titleHe, location, difficulty, capacity, status) without seed scripts', [3, 5, 3, 4, 0], 5, 4,
-      'Foundational for self-service event setup. Downgrade to edit-existing before create-new if needed.'),
-    // 4) Admin control room & review queue
-    t('P-005', 'admin', 'Control-room "needs attention" dashboard: SOS, timed-out teams, stalled stations, and pending reviews in one prioritized live view', [2, 5, 5, 4, 0], 3, 3,
-      'Single pane of glass for the event manager.'),
-    t('P-006', 'review', 'Judge review queue upgrade: sort pending check-ins by wait time with SLA/timeout warnings and clear next action', [3, 5, 4, 3, 0], 3, 3, ''),
-    // 5) Social sharing & event reward
-    t('P-007', 'social', 'Opt-in, fair post-event share card (feature-flagged, no dark patterns, never gates gameplay) celebrating the team result', [4, 2, 1, 2, 0], 3, 3,
-      'Healthy visibility reward only; reviewer must reject anything manipulative.'),
-    // 6) Team flow, matchmaking, scoring, gameplay
-    t('P-008', 'gameplay', 'Harden matchmaking correctness: idempotent join, no double-match, correct loser re-queue, clear surfaced errors', [4, 3, 5, 4, 0], 3, 3, ''),
-    t('P-009', 'gameplay', 'Player dashboard clarity: explicit next-step guidance + robust loading/empty/error states so teams always know what to do', [5, 1, 3, 3, 0], 3, 2, ''),
-    t('P-010', 'gameplay', 'registerTeam robustness: validate input, handle duplicate/edge access codes, return clear typed error codes', [4, 3, 4, 3, 0], 3, 3, ''),
-    // 7) Reliability, recovery, event-day robustness
-    t('P-011', 'reliability', 'Mobile offline/recovery resilience: graceful reconnect + gameState resync after network loss during the event', [4, 2, 5, 4, 0], 4, 3, ''),
-    t('P-012', 'reliability', 'Event-day readiness check: a script/page that verifies seed integrity, callable health, and config before doors open', [1, 4, 5, 4, 0], 3, 2, ''),
-    // Cleanup — intentionally low-scoring; only chosen if it unblocks product work or fixes validation
-    t('C-001', 'structure', 'Remove committed debug logs (firebase-debug.log, firestore-debug.log, .emulator-log.txt) and ensure they are gitignored', [0, 0, 1, 0, 4], 1, 1,
+    // === The one genuinely-missing feature (verified: no control-room / needs-attention view on this branch) ===
+    t('F-CTRL', 'admin', 'Control-room "needs attention" dashboard: one prioritized live view of active SOS alerts, teams past their station time cap, paused/closed stations, and pending judge reviews', [2, 5, 5, 4, 0], 3, 3,
+      'VERIFIED ABSENT on topographic-maps (no control-room/triage page exists). New admin page + nav entry for the manager role. Read-ONLY aggregation of EXISTING live sources (adminAlerts snapshot, listPendingArrivals, listTeams, task status + maxDurationMinutes) — add NO new gameState/score writes, reuse the existing acknowledge action. Bilingual EN/HE + RTL logical classes + the premium theme.'),
+
+    // === Visible polish & hardening of EXISTING surfaces (low regression risk; enhance, never rebuild) ===
+    t('H-DASH', 'gameplay', 'Player dashboard clarity: add explicit next-step guidance + robust loading / empty / error states so a team always knows what to do', [5, 1, 3, 3, 0], 3, 2,
+      'POLISH the EXISTING apps/mobile/app/dashboard.tsx. Purely additive UI states; preserve every current behavior and the premium theme. EN/HE parity for any new strings.'),
+    t('H-WRAP', 'ui', 'Race Wrapped polish: finish/animate the EXISTING wrapped summary screen (per-team stats, clean shareable layout) without changing how it is reached', [4, 1, 1, 2, 0], 2, 2,
+      'apps/mobile/app/wrapped.tsx already exists (~187 lines) — ENHANCE it, do NOT rebuild. Keep it opt-in and non-manipulative.'),
+    t('H-REG', 'gameplay', 'registerTeam resilience: validate input and return clear, typed, bilingual error messages for duplicate / claimed / invalid access codes', [4, 3, 4, 3, 0], 3, 3,
+      'HARDEN the EXISTING registerTeam callable + the register/access-code screens. Preserve the atomic claim flow exactly; surface friendlier errors on the client.'),
+    t('H-OFFLINE', 'reliability', 'Mobile reconnect UX: clear "reconnecting / back online" indicator and a gameState resync nudge after a network drop during the event', [4, 2, 5, 4, 0], 3, 3,
+      'BUILD ON the existing offline persistence + useOfflineToast; add a VISIBLE connection-state indicator. Do not change Firestore wiring beyond what is needed for the indicator.'),
+    t('H-A11Y', 'ui', 'Accessibility + EN/HE parity audit on the core player screens (access-code, register, dashboard, sos): touch targets, contrast, missing translations, RTL logical classes', [3, 1, 2, 2, 0], 3, 2,
+      'Improve EXISTING screens only. Each cycle should ship a visible, checkable improvement (e.g. a fixed untranslated string or a corrected RTL layout), not a sweeping refactor.'),
+    t('H-READY', 'reliability', 'Event-day readiness page (admin): one screen that checks seed integrity, callable health, and config and shows a green/red go-live checklist before doors open', [1, 4, 5, 4, 0], 3, 2,
+      'New, self-contained admin page that READS existing data + pings existing callables. No changes to game logic.'),
+
+    // === Cleanup — intentionally low-scoring; only if it unblocks the above or fixes validation ===
+    t('C-001', 'structure', 'Remove any committed debug logs (firebase-debug.log, firestore-debug.log, .emulator-log.txt) and ensure they are gitignored', [0, 0, 1, 0, 4], 1, 1,
       'Pure cleanup; pick only when nothing product-facing is ready or it unblocks a product task.')
   ];
 }
