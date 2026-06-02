@@ -1,24 +1,19 @@
 {
-  "summary": "Added a new admin Control Room page (apps/admin/src/pages/ControlRoomPage.tsx) at route /control, registered it in App.tsx with a top-nav entry, gated it to manager/admin in roles.tsx (as the manager's default home), and added bilingual EN/HE i18n keys. The page composes data the existing pages already read (adminAlerts + tasks collections, listPendingArrivals callable) into four prioritized 'needs attention' sections.",
-  "appImpact": "Organizers gain a single glanceable triage screen showing active SOS/help alerts, teams over their station time cap, paused/closed stations, and the pending-judge-review backlog count — each row routes to the existing Manager or Judge page to act.",
-  "userImpactSummary": "On event day the manager can see everything going wrong right now in one auto-refreshing view instead of hopping between the Manager, Judge, Check-ins and Station pages.",
-  "nowLive": "A new 'Control Room' nav tab and /control route in the admin app, visible to the manager role and set as their landing page.",
-  "playerVisibleChange": "A manager opening the admin app now lands on Control Room: four prioritized sections with live counts; clicking any alert/station/over-cap/review row jumps to the Manager or Judge page where they can act. Empty sections show a green 'All clear'.",
+  "summary": "Applied the reviewer's revision-1 change: the Control-room SOS section now deep-links to /checkins (CheckInsPage, which renders the AlertsBanner ack UI) instead of /manager. Both the section action button and each SOS-alert row navigate to /checkins, and the action label switched from ctrl.openManager to a new ctrl.openCheckins key (EN 'Open Check-ins' / HE 'פתח צ׳ק-אין'). Stations section routing to /manager was left unchanged as instructed.",
+  "appImpact": "From the Control-room triage view, an organizer who clicks an active SOS row or the SOS section's 'Open Check-ins →' button lands on the Check-ins page where the AlertsBanner lets them actually acknowledge/clear the alert — previously it dropped them on the Manager page with no ack control.",
+  "userImpactSummary": "Organizers can now acknowledge an SOS alert directly from the Control-room deep-link instead of hopping to a page without the ack UI.",
+  "nowLive": "Control-room SOS rows and the SOS section button route to /checkins (the AlertsBanner ack surface); new bilingual 'Open Check-ins' action label.",
+  "playerVisibleChange": "Clicking an active SOS alert (or the SOS section button) in /control opens the Check-ins page with the acknowledge controls, not the Manager page.",
   "filesChanged": [
     "apps/admin/src/pages/ControlRoomPage.tsx",
-    "apps/admin/src/App.tsx",
-    "apps/admin/src/roles.tsx",
     "apps/admin/src/i18n/index.tsx"
   ],
   "committed": true,
-  "selfCheck": "npm run typecheck passed for all 5 packages (admin ran fresh, not cached). Reused callable<>() and usePoll per conventions, imported PendingArrival from @rushpoint/shared, used logical RTL classes (ms-/text-start), and added matching EN/HE keys. No existing pages were modified beyond additive route/nav/role/i18n wiring.",
+  "selfCheck": "npm run typecheck passed (5/5 tasks successful, admin executed fresh). Verified /checkins route exists in App.tsx and CheckInsPage renders <AlertsBanner /> which provides the ack UI. Stations section still routes to /manager as required.",
   "acceptanceMet": [
-    "New /control route reachable from top nav and gated to manager/admin via ROLE_ROUTES + canAccess",
-    "Four distinct prioritized sections: Active SOS alerts, Teams over station time cap, Paused/closed stations, Pending judge reviews count",
-    "Each row routes to the relevant existing page (Manager for SOS/stations, Judge for reviews/over-cap)",
-    "Auto-refreshes via usePoll (~12s) with 'All clear' empty states per section",
-    "Loading + error states present; sections render gracefully when empty; existing pages unchanged",
-    "All new copy bilingual EN/HE via the admin i18n dictionary with logical RTL classes"
+    "Each row deep-links to the relevant page where the organizer can act — SOS now correctly targets the page with the ack UI (/checkins)",
+    "All new copy is bilingual EN/HE (ctrl.openCheckins added to both dictionaries)",
+    "Existing pages unchanged; stations routing to /manager preserved"
   ],
-  "notes": "Time-cap detection mirrors JudgePage: it uses listPendingArrivals(status:'arrived') and flags teams whose elapsed time since arrivedAt exceeds Task.maxDurationMinutes, so it only catches teams already confirmed at the judge queue (the same scope as the existing JudgePage warning), not field-station dwell time. SOS alerts and stations are read with getDocs inside the poll (not onSnapshot) to keep one consistent ~12s refresh as the acceptance criteria specified; this is near-real-time rather than instant. SOS rows route to /manager per the task spec even though the live ack UI (AlertsBanner) currently lives on /checkins, /station, /tene and /volunteer."
+  "notes": "Minimal targeted revision only — no other sections or behavior touched. Stations vs SOS distinction preserved: paused/closed stations still route to /manager (correct), only emergency/technical SOS alerts now route to /checkins."
 }
