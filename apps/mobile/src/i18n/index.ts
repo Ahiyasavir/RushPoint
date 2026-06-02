@@ -71,6 +71,12 @@ const en: Dict = {
   'register.errMaxParticipants': 'A team can have at most {max} participants.',
   'register.errWaiver': 'You must accept the waiver to continue.',
   'register.errSubmit': 'Registration failed — check your connection and try again.',
+  // Server-mapped registration errors (keyed off the HttpsError code)
+  'register.errCodeInvalid': "That access code isn't valid. Re-check the code on your card and try again.",
+  'register.errCodeClaimed': 'This access code has already been used by another team. Ask a judge for help.',
+  'register.errInvalidInput': 'Some team details are missing or invalid. Check the name, phone and participants, then try again.',
+  'register.errWaiverRequired': 'The liability waiver must be accepted to register. Please accept it and try again.',
+  'register.errAuth': 'Your session expired. Reload the app and try again.',
 
   // Dashboard
   'dash.team': 'Team',
@@ -351,6 +357,12 @@ const he: Dict = {
   'register.errMaxParticipants': 'בקבוצה יכולים להיות עד {max} משתתפים.',
   'register.errWaiver': 'יש לאשר את ההצהרה כדי להמשיך.',
   'register.errSubmit': 'הרישום נכשל — בדקו את החיבור ונסו שוב.',
+  // שגיאות רישום ממופות מהשרת (לפי קוד ה-HttpsError)
+  'register.errCodeInvalid': 'קוד הגישה אינו תקין. בדקו שוב את הקוד על הכרטיס ונסו שנית.',
+  'register.errCodeClaimed': 'קוד הגישה הזה כבר נוצל על ידי קבוצה אחרת. פנו לשופט לעזרה.',
+  'register.errInvalidInput': 'חלק מפרטי הקבוצה חסרים או שגויים. בדקו את השם, הטלפון והמשתתפים ונסו שוב.',
+  'register.errWaiverRequired': 'יש לאשר את הצהרת האחריות כדי להירשם. אשרו אותה ונסו שוב.',
+  'register.errAuth': 'תוקף ההתחברות פג. טענו מחדש את האפליקציה ונסו שוב.',
 
   // Dashboard
   'dash.team': 'קבוצה',

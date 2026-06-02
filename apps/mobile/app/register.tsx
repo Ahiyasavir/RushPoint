@@ -33,6 +33,21 @@ const registerTeam = httpsCallable(functions, 'registerTeam');
 const MIN_PARTICIPANTS = 4;
 const MAX_PARTICIPANTS = 7;
 
+// Maps the registerTeam HttpsError code → a localized, actionable message.
+// Firebase callable errors arrive as `functions/<code>`; strip the prefix first.
+function mapRegisterError(err: unknown, t: (k: string) => string): string {
+  const raw = (err as { code?: string }).code ?? '';
+  const code = raw.replace(/^functions\//, '');
+  switch (code) {
+    case 'not-found':           return t('register.errCodeInvalid');
+    case 'already-exists':      return t('register.errCodeClaimed');
+    case 'invalid-argument':    return t('register.errInvalidInput');
+    case 'failed-precondition': return t('register.errWaiverRequired');
+    case 'unauthenticated':     return t('register.errAuth');
+    default:                    return t('register.errSubmit');
+  }
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function RegisterScreen() {
@@ -116,9 +131,7 @@ export default function RegisterScreen() {
       initTeam(teamId, teamName.trim(), memberNames);
       router.replace('/dashboard');
     } catch (err) {
-      const message =
-        (err as { message?: string }).message ?? t('register.errSubmit');
-      showToast(message, 'error');
+      showToast(mapRegisterError(err, t), 'error');
     }
   }
 
