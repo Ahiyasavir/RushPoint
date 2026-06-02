@@ -503,21 +503,34 @@ function pidAlive(pid) {
   catch (e) { return e.code === 'EPERM'; }          // EPERM = exists but not ours; ESRCH = gone
 }
 
-// Single-instance guard: refuse to start a 2nd supervisor on the same repo (two running = a git
-// race that corrupts cycles — we hit this once). Returns true if the lock was acquired.
+// Single-instance guard: refuse to start a 2nd supervisor on the same repo (two running = a git race
+// that corrupts cycles — we hit this once, hard). Uses ATOMIC exclusive file creation (flag 'wx'),
+// so even two supervisors started in the same instant cannot both win the lock — exactly one
+// createFile succeeds; the loser sees EEXIST and refuses (or reclaims a provably-dead lock).
 async function acquireLock() {
-  if (existsSync(LOCK_PATH)) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const prev = JSON.parse(await readFile(LOCK_PATH, 'utf8'));
+      // O_EXCL: fails if the file already exists. This is the atomic primitive that closes the race.
+      await writeFile(LOCK_PATH, JSON.stringify({ pid: process.pid, started: nowIso() }), { flag: 'wx' });
+      break; // acquired
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let prev = {};
+      try { prev = JSON.parse(await readFile(LOCK_PATH, 'utf8')); } catch { /* unreadable */ }
       if (prev.pid && prev.pid !== process.pid && pidAlive(prev.pid)) {
         log(`REFUSING TO START: another supervisor is already running (pid ${prev.pid}, since ${prev.started}).`);
-        log('Stop it first, or delete autopilot/state/supervisor.lock if you are sure it is dead.');
+        log('Only ONE supervisor may run per repo. Stop it first, or delete autopilot/state/supervisor.lock if you are certain it is dead.');
         return false;
       }
-      log(`Found a stale lock (pid ${prev.pid} is not running) — taking over.`);
-    } catch { /* unreadable lock → overwrite */ }
+      // Lock exists but its owner is gone (or it is ours) → reclaim it and retry the atomic create.
+      log(`Found a stale lock (pid ${prev.pid ?? '?'} not running) — reclaiming.`);
+      try { rmSync(LOCK_PATH); } catch { /* ignore */ }
+      if (attempt === 1) { // couldn't reclaim after one retry — refuse rather than risk a double-run
+        log('Could not acquire the lock safely — refusing to start.');
+        return false;
+      }
+    }
   }
-  await writeFile(LOCK_PATH, JSON.stringify({ pid: process.pid, started: nowIso() }), 'utf8');
   const release = () => {
     try {
       if (existsSync(LOCK_PATH)) {
