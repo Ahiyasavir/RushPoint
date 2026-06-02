@@ -72,6 +72,15 @@ async function main() {
   });
   console.log('[seed-local] Seeded tasks: task-green-001/002/003, task-gold-001');
 
+  // Green-station self check-in codes — server-only (stationSecrets/{taskId}); NEVER
+  // on the public task doc. Teams type these at the station to auto-confirm a green
+  // mission via the `selfVerifyStation` callable (kept in sync with seed-emulator.ts).
+  const greenCodes = { 'task-green-001': 'LANDMARK', 'task-green-002': 'RELAY', 'task-green-003': 'TRIVIA' };
+  for (const [taskId, expectedCode] of Object.entries(greenCodes)) {
+    await db.doc(`artifacts/${APP_ID}/stationSecrets/${taskId}`).set({ expectedCode, updatedAt: now });
+  }
+  console.log('[seed-local] Seeded green-station self check-in codes (stationSecrets).');
+
   // Race config (editable in the admin Race Builder; defaults match @rushpoint/shared).
   await db.doc(`artifacts/${APP_ID}/public/data/raceConfig/current`).set({
     start:  { lat: 31.79326,   lng: 35.165684 },  // Motza

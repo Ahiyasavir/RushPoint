@@ -156,10 +156,13 @@ async function runCycle(state) {
   if (weakBacklog) log('Backlog is weak on product value — selector will generate stronger product tasks.');
 
   const weakNote = weakBacklog
-    ? `\n## BACKLOG IS WEAK (only ${Math.round(share * 100)}% product, ${productCount} product tasks)\n` +
-      `Before selecting, you MUST add several strong, concrete, product-facing tasks to "newBacklog" ` +
-      `(smart stations, admin/control-room, access codes, game builder, review queue, social, gameplay, ` +
-      `reliability) so at least 70% of the backlog is product work. Then select the best product task.\n`
+    ? `\n## BACKLOG IS RUNNING LOW\n` +
+      `The app is FEATURE-COMPLETE, so do NOT invent new features to fill the backlog. Instead add a ` +
+      `few concrete **polish / hardening** tasks that each refine an EXISTING screen or flow — e.g. ` +
+      `clearer loading/empty/error states, EN/HE translation gaps, accessibility, animation/feedback, ` +
+      `edge-case robustness, offline/reconnect UX. For each one, FIRST Grep/Read to confirm the exact ` +
+      `existing file you would improve, and name it in implementationHints. Never propose a feature ` +
+      `that already exists (smart-station verify, builder, access codes, control-room all EXIST).\n`
     : '';
 
   // 1) SELECT --------------------------------------------------------------

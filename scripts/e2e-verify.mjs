@@ -405,6 +405,73 @@ async function main() {
     check('Race Builder callables succeed', false, e.message);
   }
 
+  // 16. selfVerifyStation — a team self-confirms its ACTIVE green slot by entering
+  //     the station code (mirrors the seed's server-only codes). Wrong code → no
+  //     state change; correct code → slot scored + advanced (judge-pass parity).
+  try {
+    // Same green codes the seed writes to stationSecrets/{taskId} (server-only).
+    const GREEN_CODES = {
+      'task-green-001': 'LANDMARK', 'task-green-002': 'RELAY',
+      'task-green-003': 'TRIVIA',   'task-green-004': 'KNOT',
+    };
+    const svApp  = initializeApp({ apiKey: 'emulator-key', projectId: 'rushpoint-pwa-7daaa', appId: 'emulator-app-id' }, 'selfverify');
+    const svAuth = getAuth(svApp);
+    const svFns  = getFunctions(svApp);
+    const svFs   = getFirestore(svApp);
+    connectAuthEmulator(svAuth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFunctionsEmulator(svFns, '127.0.0.1', 5001);
+    connectFirestoreEmulator(svFs, '127.0.0.1', 8080);
+    const svCred = await signInAnonymously(svAuth);
+    const svUid  = svCred.user.uid;
+    const svCall = (name, data) => httpsCallable(svFns, name)(data).then((r) => r.data);
+    const svGameState = () =>
+      getDoc(doc(svFs, `artifacts/${APP_ID}/users/${svUid}/gameState/current`)).then((s) => (s.exists() ? s.data() : null));
+
+    await svCall('registerTeam', {
+      code: 'EAGLE4', teamName: 'E2E Self-Verify', captainPhone: '0500000003',
+      participants: [{ name: 'Jo', age: '12' }, { name: 'Kai', age: '13' }, { name: 'Lee', age: '12' }, { name: 'Mo', age: '11' }],
+      waiverAccepted: true,
+    });
+    const gs0 = await svGameState();
+    const activeSlot = gs0?.slots?.find((s) => s.status === 'active');
+    const greenTaskId = activeSlot?.type === 'green' ? activeSlot.taskId : undefined;
+    check('self-verify: fresh team is active on a green station', !!greenTaskId,
+      `taskId=${greenTaskId} type=${activeSlot?.type}`);
+
+    if (greenTaskId) {
+      // Wrong code → correct:false, slot stays active, score unchanged.
+      const beforeScore = gs0?.score ?? 0;
+      const wrong = await svCall('selfVerifyStation', { taskId: greenTaskId, answer: 'definitely-wrong' });
+      const gsWrong = await svGameState();
+      const stillActive = gsWrong?.slots?.find((s) => s.status === 'active')?.taskId === greenTaskId;
+      check('  wrong code returns correct:false', wrong?.correct === false && wrong?.completed !== true,
+        JSON.stringify(wrong));
+      check('  wrong code leaves the slot active + score unchanged', stillActive && (gsWrong?.score ?? 0) === beforeScore,
+        `active=${stillActive} score=${gsWrong?.score}`);
+
+      // Ineligible: self-verify a station the team is NOT active on → rejected.
+      let rejected = false;
+      try { await svCall('selfVerifyStation', { taskId: 'task-gold-001', answer: 'x' }); }
+      catch { rejected = true; }
+      check('  self-verify rejected when not active at that station', rejected);
+
+      // Correct code → slot completes, next unlocks, score increases (judge parity).
+      const slotIdx = activeSlot.index;
+      const correct = await svCall('selfVerifyStation', { taskId: greenTaskId, answer: GREEN_CODES[greenTaskId].toLowerCase() });
+      const gsDone = await svGameState();
+      const doneSlot = gsDone?.slots?.[slotIdx];
+      const nextSlot = gsDone?.slots?.[slotIdx + 1];
+      check('  correct code completes the slot (judge-pass parity)', correct?.completed === true && correct?.taskScore > 0,
+        JSON.stringify(correct));
+      check('  completed slot stores the sigmoid task score', doneSlot?.status === 'completed' && (doneSlot?.earnedScore ?? 0) === correct.taskScore,
+        `status=${doneSlot?.status} earned=${doneSlot?.earnedScore}`);
+      check('  next slot unlocks + score increases by the award', nextSlot?.status === 'active' && (gsDone?.score ?? 0) === beforeScore + correct.taskScore,
+        `next=${nextSlot?.status} score ${beforeScore}+${correct.taskScore}->${gsDone?.score}`);
+    }
+  } catch (e) {
+    check('selfVerifyStation flow succeeds', false, e.message);
+  }
+
   console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`);
   process.exit(failures === 0 ? 0 : 1);
 }

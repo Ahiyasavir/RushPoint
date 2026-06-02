@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { useCallback, useEffect, useRef } from 'react';
+import { doc, onSnapshot, getDocFromServer, type DocumentReference } from 'firebase/firestore';
 import { db } from '../services/firebase.config';
 import { useGameStore, type LiveGame, type LiveSlot } from '../store/gameStore';
 import { useSlotSound } from './useSlotSound';
