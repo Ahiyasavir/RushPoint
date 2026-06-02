@@ -2,8 +2,8 @@
   "version": 1,
   "startedAt": "2026-06-02T20:18:17.482Z",
   "deadlineAt": "2026-06-07T20:18:17.484Z",
-  "lastUpdated": "2026-06-02T20:19:47.520Z",
-  "cycle": 1,
+  "lastUpdated": "2026-06-02T20:38:49.957Z",
+  "cycle": 2,
   "status": "running",
   "goalPhase": "structure",
   "rateLimit": {
@@ -11,49 +11,48 @@
     "consecutiveHits": 0
   },
   "current": {
-    "id": "F-CTRL",
-    "goal": "admin",
-    "title": "Control-room \"needs attention\" dashboard: one prioritized live view of active SOS alerts, teams past their station time cap, paused/closed stations, and pending judge reviews",
+    "id": "T-0013",
+    "goal": "access",
+    "title": "Access-code batch generator + printable QR sheet in admin",
     "dims": {
-      "userImpact": 2,
+      "userImpact": 3,
       "adminImpact": 5,
-      "reliability": 5,
-      "productRisk": 4,
+      "reliability": 3,
+      "productRisk": 3,
       "cleanupValue": 0
     },
-    "effort": 3,
     "risk": 3,
+    "effort": 3,
     "deps": [],
-    "source": "seed",
+    "source": "selector",
     "status": "in-progress",
-    "createdCycle": 0,
-    "notes": "VERIFIED ABSENT on topographic-maps (no control-room/triage page exists). New admin page + nav entry for the manager role. Read-ONLY aggregation of EXISTING live sources (adminAlerts snapshot, listPendingArrivals, listTeams, task status + maxDurationMinutes) — add NO new gameState/score writes, reuse the existing acknowledge action. Bilingual EN/HE + RTL logical classes + the premium theme.",
+    "createdCycle": 1,
+    "notes": "Extends AccessCodesPage; speeds pre-event setup.",
     "acceptanceCriteria": [
-      "A new admin route (e.g. /control) is reachable from the top nav and gated to the manager/admin role via roles.tsx canAccess",
-      "The page shows distinct prioritized sections: Active SOS alerts, Teams over their station time cap, Paused/closed stations, and Pending judge reviews count",
-      "Each row deep-links or routes to the relevant existing page (Manager for SOS/stations, Judge/Check-ins for reviews) so the organizer can act",
-      "The view auto-refreshes (usePoll, ~10-15s) and renders clean empty states ('All clear') when a section has nothing",
-      "Sections collapse/hide gracefully and the whole screen has loading + error states; existing pages are unchanged",
-      "All new copy is bilingual EN/HE via the admin i18n dictionary and uses logical RTL classes"
+      "A 'Print QR sheet' button appears on the Access Codes page (apps/admin) near the existing create/bulk controls.",
+      "Clicking it opens a print-optimized view rendering the currently-filtered codes (respect the active all/unused/used/revoked filter) as a QR grid.",
+      "Each cell shows a scannable QR encoding the access code string, the code text below it, and the label/game if present.",
+      "A print-only stylesheet hides the app chrome (nav/sidebar) so window.print() / browser print produces a clean sheet with multiple codes per page.",
+      "Both EN and HE strings are wired through the existing i18n dictionary (codes.* namespace) with RTL-safe logical classes.",
+      "Existing create/bulk/revoke/table behavior is unchanged."
     ],
     "implementationHints": [
-      "Add apps/admin/src/pages/ControlRoomPage.tsx; register the route in apps/admin/src/App.tsx and add a NAV_ITEMS entry + i18n key",
-      "Gate access in apps/admin/src/roles.tsx (ROLE_ROUTES) for manager/admin; consider making it the manager default home",
-      "Reuse callable<>() from services/api.ts and usePoll from hooks/usePoll.ts; do NOT hand-roll httpsCallable",
-      "SOS alerts + station status come from the same sources ManagerPage already reads; time-cap logic mirrors JudgePage's Task.maxDurationMinutes warning; pending reviews from listPendingArrivals / StationReviewPage",
-      "Import shared callable-result types from @rushpoint/shared (TeamSummary, PendingArrival, StationTeamRow) — don't redeclare",
-      "Add EN/HE strings to apps/admin/src/i18n and keep tokens/glass theme consistent with other pages"
+      "Edit apps/admin/src/pages/AccessCodesPage.tsx; add new i18n keys to apps/admin/src/i18n/index.tsx under the codes.* namespace.",
+      "Add a small QR dependency to apps/admin (e.g. 'qrcode' to render to data URLs, or 'qrcode.react' component) — pure JS, no native deps; render code string as the QR payload.",
+      "Use a print-only CSS approach (@media print) or a dedicated printable container; can reuse APP_ID + existing CodeRow rows already loaded via onSnapshot — no new callables needed.",
+      "Keep neon/glass theme tokens for screen view but ensure print view is high-contrast (dark text on white) so QR codes scan.",
+      "Do not modify mobile scanning — encoding the code string is sufficient; scanning wiring is out of scope."
     ],
-    "rationale": "On event day the organizer has no single place to see what is going wrong right now — they must hop between the Manager, Check-ins, Station and Matchmaking pages to notice an active SOS, a team stuck past its station cap, a paused/closed station, or a backlog of pending judge reviews. A prioritized live 'needs attention' view turns scattered polling into one glanceable triage screen, directly improving organizer control and event-day reliability. It composes data from callables that already exist, so risk is bounded and it preserves all current pages.",
-    "whyBeatAlternatives": "It is the highest-scored candidate (57) and uniquely improves real-time organizer control on event day, whereas H-REG/H-OFFLINE/H-DASH each polish one player edge case; the control room reduces the chance the whole event goes sideways unnoticed.",
-    "visibleValue": "An organizer opens one screen and immediately sees, ranked by urgency, every active SOS alert, every team past its station time cap, every paused/closed station, and the count of pending judge reviews — with deep links to act on each.",
+    "rationale": "AccessCodesPage already has the full batch generator (create-one, bulk-create, live table, revoke/delete), so the only genuinely-new, high-value slice of T-0013 is the printable QR sheet. Organizers need a physical hand-out of codes on event day; a print-optimized QR grid turns the existing code list into something they can actually print and distribute. This is the highest-ranked candidate and a safe, additive, single-cycle deliverable that does not change any existing flow.",
+    "whyBeatAlternatives": "It is the top-scored candidate (54) and ships concrete event-day organizer value, while H-REG/H-OFFLINE/H-DASH are player-side reliability polish that is lower-impact this cycle; it also avoids re-doing the batch generator that already exists.",
+    "visibleValue": "An organizer clicks 'Print QR sheet' on the Access Codes page and gets a clean, print-ready grid of QR codes (each encoding its access code, with the code text + optional label/game beneath) that prints one-per-cell across pages.",
     "safeToContinue": true,
-    "downgradedFrom": null,
-    "score": 57,
+    "downgradedFrom": "T-0013 (full batch generator + QR sheet) — batch generator already shipped in AccessCodesPage; scope narrowed to the missing printable QR sheet slice",
+    "score": 54,
     "implementerModel": "claude-opus-4-8",
     "implementerTier": "opus",
-    "implementerReason": "goal \"admin\" is product-facing",
-    "baseSha": "857de2af4d758537757863ba72a70a960ba739a3"
+    "implementerReason": "goal \"access\" is product-facing",
+    "baseSha": "a0dfc98748edbc87e1aa984263328dfbc7e23bbe"
   },
   "queues": {
     "backlog": [
@@ -210,25 +209,6 @@
         "notes": "Builds on currentTeamCount/maxConcurrentTeams already tracked; feeds control room."
       },
       {
-        "id": "T-0013",
-        "goal": "access",
-        "title": "Access-code batch generator + printable QR sheet in admin",
-        "dims": {
-          "userImpact": 3,
-          "adminImpact": 5,
-          "reliability": 3,
-          "productRisk": 3,
-          "cleanupValue": 0
-        },
-        "risk": 3,
-        "effort": 3,
-        "deps": [],
-        "source": "selector",
-        "status": "backlog",
-        "createdCycle": 1,
-        "notes": "Extends AccessCodesPage; speeds pre-event setup."
-      },
-      {
         "id": "T-0014",
         "goal": "builder",
         "title": "Game builder station editor: drag-order slots + edit task geo/skill/difficulty inline",
@@ -284,17 +264,110 @@
         "status": "backlog",
         "createdCycle": 1,
         "notes": "Pairs with H-WRAP; fair opt-in sharing only."
+      },
+      {
+        "id": "T-0017",
+        "goal": "access",
+        "title": "Mobile: scan access-code QR to auto-fill the code on access-code screen",
+        "dims": {
+          "userImpact": 4,
+          "adminImpact": 1,
+          "reliability": 2,
+          "productRisk": 2,
+          "cleanupValue": 0
+        },
+        "risk": 3,
+        "effort": 3,
+        "deps": [],
+        "source": "selector",
+        "status": "backlog",
+        "createdCycle": 2,
+        "notes": "Pairs with the printable QR sheet — let players scan instead of typing; expo-camera is already a dep."
+      },
+      {
+        "id": "T-0018",
+        "goal": "access",
+        "title": "Admin: export filtered access codes to CSV",
+        "dims": {
+          "userImpact": 1,
+          "adminImpact": 4,
+          "reliability": 2,
+          "productRisk": 2,
+          "cleanupValue": 0
+        },
+        "risk": 2,
+        "effort": 2,
+        "deps": [],
+        "source": "selector",
+        "status": "backlog",
+        "createdCycle": 2,
+        "notes": "Organizer-visible companion to the QR sheet for spreadsheet tracking/assignment."
       }
     ],
-    "done": [],
+    "done": [
+      {
+        "id": "F-CTRL",
+        "goal": "admin",
+        "title": "Control-room \"needs attention\" dashboard: one prioritized live view of active SOS alerts, teams past their station time cap, paused/closed stations, and pending judge reviews",
+        "dims": {
+          "userImpact": 2,
+          "adminImpact": 5,
+          "reliability": 5,
+          "productRisk": 4,
+          "cleanupValue": 0
+        },
+        "effort": 3,
+        "risk": 3,
+        "deps": [],
+        "source": "seed",
+        "status": "done",
+        "createdCycle": 0,
+        "notes": "VERIFIED ABSENT on topographic-maps (no control-room/triage page exists). New admin page + nav entry for the manager role. Read-ONLY aggregation of EXISTING live sources (adminAlerts snapshot, listPendingArrivals, listTeams, task status + maxDurationMinutes) — add NO new gameState/score writes, reuse the existing acknowledge action. Bilingual EN/HE + RTL logical classes + the premium theme.",
+        "acceptanceCriteria": [
+          "A new admin route (e.g. /control) is reachable from the top nav and gated to the manager/admin role via roles.tsx canAccess",
+          "The page shows distinct prioritized sections: Active SOS alerts, Teams over their station time cap, Paused/closed stations, and Pending judge reviews count",
+          "Each row deep-links or routes to the relevant existing page (Manager for SOS/stations, Judge/Check-ins for reviews) so the organizer can act",
+          "The view auto-refreshes (usePoll, ~10-15s) and renders clean empty states ('All clear') when a section has nothing",
+          "Sections collapse/hide gracefully and the whole screen has loading + error states; existing pages are unchanged",
+          "All new copy is bilingual EN/HE via the admin i18n dictionary and uses logical RTL classes"
+        ],
+        "implementationHints": [
+          "Add apps/admin/src/pages/ControlRoomPage.tsx; register the route in apps/admin/src/App.tsx and add a NAV_ITEMS entry + i18n key",
+          "Gate access in apps/admin/src/roles.tsx (ROLE_ROUTES) for manager/admin; consider making it the manager default home",
+          "Reuse callable<>() from services/api.ts and usePoll from hooks/usePoll.ts; do NOT hand-roll httpsCallable",
+          "SOS alerts + station status come from the same sources ManagerPage already reads; time-cap logic mirrors JudgePage's Task.maxDurationMinutes warning; pending reviews from listPendingArrivals / StationReviewPage",
+          "Import shared callable-result types from @rushpoint/shared (TeamSummary, PendingArrival, StationTeamRow) — don't redeclare",
+          "Add EN/HE strings to apps/admin/src/i18n and keep tokens/glass theme consistent with other pages"
+        ],
+        "rationale": "On event day the organizer has no single place to see what is going wrong right now — they must hop between the Manager, Check-ins, Station and Matchmaking pages to notice an active SOS, a team stuck past its station cap, a paused/closed station, or a backlog of pending judge reviews. A prioritized live 'needs attention' view turns scattered polling into one glanceable triage screen, directly improving organizer control and event-day reliability. It composes data from callables that already exist, so risk is bounded and it preserves all current pages.",
+        "whyBeatAlternatives": "It is the highest-scored candidate (57) and uniquely improves real-time organizer control on event day, whereas H-REG/H-OFFLINE/H-DASH each polish one player edge case; the control room reduces the chance the whole event goes sideways unnoticed.",
+        "visibleValue": "An organizer opens one screen and immediately sees, ranked by urgency, every active SOS alert, every team past its station time cap, every paused/closed station, and the count of pending judge reviews — with deep links to act on each.",
+        "safeToContinue": true,
+        "downgradedFrom": null,
+        "score": 57,
+        "implementerModel": "claude-opus-4-8",
+        "implementerTier": "opus",
+        "implementerReason": "goal \"admin\" is product-facing",
+        "baseSha": "857de2af4d758537757863ba72a70a960ba739a3",
+        "doneCycle": 1
+      }
+    ],
     "blocked": []
   },
   "stats": {
-    "cyclesRun": 1,
-    "completed": 0,
+    "cyclesRun": 2,
+    "completed": 1,
     "blocked": 0,
-    "revisions": 0,
+    "revisions": 1,
     "rateLimitPauses": 0
   },
-  "history": []
+  "history": [
+    {
+      "cycle": 1,
+      "taskId": "F-CTRL",
+      "title": "Control-room \"needs attention\" dashboard: one prioritized live view of active SOS alerts, teams past their station time cap, paused/closed stations, and pending judge reviews",
+      "outcome": "merged",
+      "ts": "2026-06-02T20:32:48.255Z"
+    }
+  ]
 }
