@@ -7,6 +7,7 @@ import LeaderboardPage from './pages/LeaderboardPage';
 import JudgePage from './pages/JudgePage';
 import MatchmakingPage from './pages/MatchmakingPage';
 import ManagerPage from './pages/ManagerPage';
+import ControlRoomPage from './pages/ControlRoomPage';
 import BuilderPage from './pages/BuilderPage';
 import StationPage from './pages/StationPage';
 import VolunteerPage from './pages/VolunteerPage';
@@ -20,6 +21,7 @@ import { useRole, canAccess, defaultRouteFor } from './roles';
 // Master nav list. Each item is shown only if the active role may access its
 // route (see ROLE_ROUTES in roles.tsx).
 const NAV_ITEMS = [
+  { to: '/control', key: 'nav.control' },
   { to: '/heatmap', key: 'nav.liveMap' },
   { to: '/teams', key: 'nav.teams' },
   { to: '/checkins', key: 'nav.checkins' },
@@ -103,6 +105,7 @@ export default function App() {
           <Route path="/leaderboard" element={guard('/leaderboard', <LeaderboardPage />)} />
           <Route path="/judge" element={guard('/judge', <JudgePage />)} />
           <Route path="/matchmaking" element={guard('/matchmaking', <MatchmakingPage />)} />
+          <Route path="/control" element={guard('/control', <ControlRoomPage />)} />
           <Route path="/manager" element={guard('/manager', <ManagerPage />)} />
           <Route path="/builder" element={guard('/builder', <BuilderPage />)} />
           <Route path="/station" element={guard('/station', <StationPage />)} />

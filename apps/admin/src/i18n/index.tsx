@@ -11,6 +11,7 @@ type Dict = Record<string, string>;
 const en: Dict = {
   // App shell / nav
   'app.brandSuffix': 'Admin',
+  'nav.control': 'Control Room',
   'nav.liveMap': 'Live Map',
   'nav.teams': 'Teams',
   'nav.checkins': 'Check-ins',
@@ -366,6 +367,21 @@ const en: Dict = {
   'vol.fineDone': 'Fined {team} −{pts}.',
   'vol.fineError': 'Could not apply the fine. Try again.',
 
+  // Control Room (needs-attention triage)
+  'ctrl.title': 'Control Room',
+  'ctrl.subtitle': 'Everything that needs attention right now, in one place.',
+  'ctrl.loading': 'Loading control room…',
+  'ctrl.loadError': 'Could not load control room data. Is the emulator running?',
+  'ctrl.allClear': 'All clear',
+  'ctrl.sosTitle': 'Active SOS alerts',
+  'ctrl.capTitle': 'Teams over station time cap',
+  'ctrl.capElapsed': '{elapsed}/{max} min',
+  'ctrl.stationsTitle': 'Paused / closed stations',
+  'ctrl.reviewsTitle': 'Pending judge reviews',
+  'ctrl.reviewsCount': '{n} team(s) awaiting judging',
+  'ctrl.openManager': 'Open Manager',
+  'ctrl.openJudge': 'Open Judge',
+
   // Event Manager console
   'mgr.title': 'Event Manager',
   'mgr.subtitle': 'Live operational control — stations, broadcasts, and the audit trail.',
@@ -516,6 +532,7 @@ const en: Dict = {
 const he: Dict = {
   // App shell / nav
   'app.brandSuffix': 'ניהול',
+  'nav.control': 'חדר בקרה',
   'nav.liveMap': 'מפה חיה',
   'nav.teams': 'קבוצות',
   'nav.checkins': 'צ׳ק-אין',
@@ -868,6 +885,21 @@ const he: Dict = {
   'vol.fining': 'מחיל…',
   'vol.fineDone': 'נקנסה {team} ב־{pts}-.',
   'vol.fineError': 'לא ניתן להחיל קנס. נסו שוב.',
+
+  // Control Room (needs-attention triage)
+  'ctrl.title': 'חדר בקרה',
+  'ctrl.subtitle': 'כל מה שדורש טיפול עכשיו, במקום אחד.',
+  'ctrl.loading': 'טוען את חדר הבקרה…',
+  'ctrl.loadError': 'לא ניתן לטעון את נתוני חדר הבקרה. האם האמולטור פועל?',
+  'ctrl.allClear': 'הכול תקין',
+  'ctrl.sosTitle': 'התראות מצוקה פעילות',
+  'ctrl.capTitle': 'קבוצות בחריגת זמן בתחנה',
+  'ctrl.capElapsed': '{elapsed}/{max} דק׳',
+  'ctrl.stationsTitle': 'תחנות מושהות / סגורות',
+  'ctrl.reviewsTitle': 'שיפוטים ממתינים',
+  'ctrl.reviewsCount': '{n} קבוצות ממתינות לשיפוט',
+  'ctrl.openManager': 'פתח ניהול',
+  'ctrl.openJudge': 'פתח שיפוט',
 
   // Event Manager console
   'mgr.title': 'מנהל האירוע',
