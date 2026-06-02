@@ -1,19 +1,25 @@
 {
-  "summary": "Applied the reviewer's revision-1 change: the Control-room SOS section now deep-links to /checkins (CheckInsPage, which renders the AlertsBanner ack UI) instead of /manager. Both the section action button and each SOS-alert row navigate to /checkins, and the action label switched from ctrl.openManager to a new ctrl.openCheckins key (EN 'Open Check-ins' / HE 'פתח צ׳ק-אין'). Stations section routing to /manager was left unchanged as instructed.",
-  "appImpact": "From the Control-room triage view, an organizer who clicks an active SOS row or the SOS section's 'Open Check-ins →' button lands on the Check-ins page where the AlertsBanner lets them actually acknowledge/clear the alert — previously it dropped them on the Manager page with no ack control.",
-  "userImpactSummary": "Organizers can now acknowledge an SOS alert directly from the Control-room deep-link instead of hopping to a page without the ack UI.",
-  "nowLive": "Control-room SOS rows and the SOS section button route to /checkins (the AlertsBanner ack surface); new bilingual 'Open Check-ins' action label.",
-  "playerVisibleChange": "Clicking an active SOS alert (or the SOS section button) in /control opens the Check-ins page with the acknowledge controls, not the Manager page.",
+  "summary": "Added a 'Print QR sheet' button to the Access Codes admin page next to the existing create/bulk controls. It calls window.print() to render a print-only QR grid of the currently-filtered codes. Added the qrcode.react dependency, a print-only stylesheet in index.css that hides the app chrome and renders a high-contrast (black-on-white) grid, and EN/HE i18n keys under the codes.* namespace.",
+  "appImpact": "Organizers on the Access Codes page can now click 'Print QR sheet' and the browser print dialog produces a clean multi-code-per-page sheet of scannable QR codes (one per access code) with the code text and label/game beneath each — respecting the active all/unused/used/revoked filter.",
+  "userImpactSummary": "Organizers can print a physical hand-out of scannable access-code QR codes to distribute to teams on event day.",
+  "nowLive": "A printable QR-code sheet for access codes is now available in the admin app; previously the codes existed only as an on-screen table.",
+  "playerVisibleChange": "An admin sees a new 'Print QR sheet' button on the Access Codes page; clicking it opens a print preview showing a grid of QR codes (encoding each access code string) with the code and its label/game, ready to print.",
   "filesChanged": [
-    "apps/admin/src/pages/ControlRoomPage.tsx",
-    "apps/admin/src/i18n/index.tsx"
+    "apps/admin/src/pages/AccessCodesPage.tsx",
+    "apps/admin/src/i18n/index.tsx",
+    "apps/admin/src/index.css",
+    "apps/admin/package.json",
+    "package-lock.json"
   ],
   "committed": true,
-  "selfCheck": "npm run typecheck passed (5/5 tasks successful, admin executed fresh). Verified /checkins route exists in App.tsx and CheckInsPage renders <AlertsBanner /> which provides the ack UI. Stations section still routes to /manager as required.",
+  "selfCheck": "Ran `npx tsc --noEmit` in apps/admin — passes with no errors. QRCodeSVG is imported from qrcode.react (v4 named export). The print sheet uses .print-sheet (display:none on screen) and an @media print block that hides body chrome via visibility and reveals only the sheet, so window.print() yields a clean sheet. Button is disabled when no codes are visible.",
   "acceptanceMet": [
-    "Each row deep-links to the relevant page where the organizer can act — SOS now correctly targets the page with the ack UI (/checkins)",
-    "All new copy is bilingual EN/HE (ctrl.openCheckins added to both dictionaries)",
-    "Existing pages unchanged; stations routing to /manager preserved"
+    "Print QR sheet button added near create/bulk controls on the Access Codes page",
+    "Clicking it triggers window.print() over a print-optimized view of the currently-filtered codes (respects active filter via the shared `visible` memo)",
+    "Each cell renders a scannable QR encoding the code string, the code text below, and label/game when present",
+    "Print-only @media print stylesheet hides nav/header chrome and lays out a 3-per-row grid (page-break-inside avoided) for multiple codes per page",
+    "EN and HE strings wired through codes.printSheet / codes.printHeading; print sheet uses logical inset properties for RTL safety",
+    "No changes to create/bulk/revoke/table logic — addition is purely additive"
   ],
-  "notes": "Minimal targeted revision only — no other sections or behavior touched. Stations vs SOS distinction preserved: paused/closed stations still route to /manager (correct), only emergency/technical SOS alerts now route to /checkins."
+  "notes": "Added qrcode.react@^4.2.0 (pure JS, no native deps) to apps/admin and updated package-lock.json via npm install. QR encodes the raw access-code string only; mobile scanning wiring was intentionally left out of scope. Print layout fixed at 3 columns; could be made configurable later if organizers want larger/smaller cells."
 }

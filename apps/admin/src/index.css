@@ -55,3 +55,55 @@ body {
 
 /* Text selection */
 ::selection { background: rgba(0,255,170,0.2); color: #00ffaa; }
+
+/* Printable QR sheet (Access Codes). Hidden on screen; on print we hide the app
+   chrome (header/nav) and render only the high-contrast QR grid so the sheet scans. */
+.print-sheet { display: none; }
+
+@media print {
+  body { background: #fff !important; background-image: none !important; }
+  /* Hide everything, then re-reveal only the print sheet (and its descendants). */
+  body * { visibility: hidden; }
+  .print-sheet, .print-sheet * { visibility: visible; }
+  .print-sheet {
+    display: block;
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    width: 100%;
+    padding: 16px;
+    background: #fff;
+    color: #000;
+  }
+  .print-sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid #000;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+  .print-sheet-header h2 { font-size: 20px; font-weight: 700; margin: 0; }
+  .print-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .print-cell {
+    border: 1px solid #000;
+    border-radius: 8px;
+    padding: 10px 8px;
+    text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-cell svg { display: block; margin: 0 auto; }
+  .print-code {
+    font-family: var(--rp-font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-top: 6px;
+  }
+  .print-meta { font-size: 11px; color: #333; margin-top: 2px; }
+}

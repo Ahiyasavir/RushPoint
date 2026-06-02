@@ -180,6 +180,8 @@ const en: Dict = {
   'codes.confirmRevoke': 'Confirm revoke',
   'codes.delete': 'Delete',
   'codes.confirmDelete': 'Confirm delete',
+  'codes.printSheet': 'Print QR sheet',
+  'codes.printHeading': 'Access Code QR Sheet',
   // Smart station builder (F2)
   'builder.smartToggle': 'Make this a smart station',
   'builder.smartToggleHelp': "Smart stations run themselves on the team's phone and verify completion automatically or via review.",
@@ -702,6 +704,8 @@ const he: Dict = {
   'codes.confirmRevoke': 'אישור ביטול',
   'codes.delete': 'מחק',
   'codes.confirmDelete': 'אישור מחיקה',
+  'codes.printSheet': 'הדפסת דף QR',
+  'codes.printHeading': 'דף קודי גישה QR',
   // Smart station builder (F2)
   'builder.smartToggle': 'הפוך לתחנה חכמה',
   'builder.smartToggleHelp': 'תחנות חכמות פועלות באופן עצמאי בטלפון של הקבוצה ומאמתות השלמה אוטומטית או באמצעות בדיקה.',

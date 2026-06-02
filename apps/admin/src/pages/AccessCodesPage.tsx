@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { QRCodeSVG } from 'qrcode.react';
 import type { AccessCodeStatus } from '@rushpoint/shared';
 import { callable } from '../services/api';
 import { db, APP_ID } from '../services/firebase';
@@ -205,6 +206,13 @@ export default function AccessCodesPage() {
             className="px-3 py-1.5 text-sm rounded-xl border border-neon-blue/40 text-neon-blue hover:bg-neon-blue/10 transition-all backdrop-blur-sm"
           >
             {showBulk ? t('codes.cancel') : t('codes.createBulk')}
+          </button>
+          <button
+            onClick={() => window.print()}
+            disabled={visible.length === 0}
+            className="px-3 py-1.5 text-sm rounded-xl border border-glass-border text-zinc-300 hover:text-white hover:bg-white/5 disabled:opacity-40 transition-all backdrop-blur-sm"
+          >
+            {t('codes.printSheet')}
           </button>
         </div>
       </div>
@@ -418,6 +426,28 @@ export default function AccessCodesPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Print-only QR sheet — renders the currently-filtered codes. Hidden on
+          screen via .print-sheet; the @media print rules in index.css hide the
+          app chrome and reveal only this high-contrast grid. */}
+      <div className="print-sheet">
+        <div className="print-sheet-header">
+          <h2>{t('codes.printHeading')}</h2>
+          <span>{t(`codes.filter.${filter}`)} · {visible.length}</span>
+        </div>
+        <div className="print-grid">
+          {visible.map((row) => {
+            const meta = [row.label, row.gameId].filter(Boolean).join(' · ');
+            return (
+              <div key={row.code} className="print-cell">
+                <QRCodeSVG value={row.code} size={120} level="M" />
+                <div className="print-code">{row.code}</div>
+                {meta && <div className="print-meta">{meta}</div>}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
