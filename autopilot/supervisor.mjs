@@ -10,6 +10,7 @@
 
 import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,6 +34,8 @@ const STATE_PATH = path.join(STATE_DIR, 'state.json');
 const PROMPT_DIR = path.join(__dirname, 'prompts');
 const INBOX_DIR = path.join(__dirname, 'inbox');
 const LOCK_PATH = path.join(STATE_DIR, 'supervisor.lock');
+const WD_LOCK_PATH = path.join(STATE_DIR, 'watchdog.lock');
+const STOP_FLAG = path.join(STATE_DIR, 'STOP');
 
 const config = JSON.parse(await readFile(path.join(__dirname, 'config.json'), 'utf8'));
 
@@ -71,15 +74,39 @@ function fmtRanked(ranked, max = 12) {
   ).join('\n');
 }
 
+// Extract the first COMPLETE top-level JSON object from text, ignoring ```json fences and any prose
+// before/after (a model sometimes appends "I've written the file. }"). Brace-balanced + string-aware
+// so a `}` inside a string value or trailing prose can't truncate or over-extend the parse.
+function extractJsonObject(text) {
+  if (!text) return null;
+  const s = text.indexOf('{');
+  if (s < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = s; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return text.slice(s, i + 1); }
+  }
+  return null; // unbalanced — incomplete object
+}
+
 async function readHandoff(file) {
   const p = path.join(HANDOFF_DIR, file);
   if (!existsSync(p)) return null;
   try {
     const raw = await readFile(p, 'utf8');
-    const start = raw.indexOf('{');
-    const end = raw.lastIndexOf('}');
-    if (start < 0 || end < 0) return null;
-    return JSON.parse(raw.slice(start, end + 1));
+    // 1) strict whole-file parse  2) fenced/embedded balanced object  3) fall back to slice
+    try { return JSON.parse(raw.trim()); } catch { /* try extraction */ }
+    const obj = extractJsonObject(raw);
+    if (obj) { try { return JSON.parse(obj); } catch { /* fall through */ } }
+    const start = raw.indexOf('{'), end = raw.lastIndexOf('}');
+    if (start >= 0 && end > start) return JSON.parse(raw.slice(start, end + 1));
+    return null;
   } catch { return null; }
 }
 
@@ -139,8 +166,10 @@ async function runCycle(state) {
   await invokeRole('selector', {
     CANDIDATES: fmtRanked(ranked) || '(backlog empty)',
     WEAK_BACKLOG: weakNote,
-    DONE: fmtTasks(state.queues.done),
-    BLOCKED: fmtTasks(state.queues.blocked),
+    // Pass the FULL done/blocked history (titles only) so the selector never re-proposes an old
+    // feature once the lists grow past a few dozen items over a long run.
+    DONE: fmtTasks(state.queues.done, 300),
+    BLOCKED: fmtTasks(state.queues.blocked, 300),
     NEXT_ID: nextTaskId(state),
     HANDOFF_PATH: path.join('autopilot', 'state', 'handoff', 'selection.json').replaceAll('\\', '/')
   });
@@ -563,6 +592,7 @@ async function cmdRun() {
   await recover(state);
 
   while (!isPastDeadline(state) && !stopping) {
+    if (existsSync(STOP_FLAG)) { log('STOP flag detected — exiting at cycle boundary.'); break; }
     try {
       await runCycle(state);
     } catch (err) {
@@ -614,6 +644,39 @@ async function cmdAdd() {
   }
 }
 
+// Stop the whole thing cleanly: raise the STOP flag (so the watchdog exits and does NOT restart),
+// then terminate the running watchdog + supervisor. Resume later with `run` (or the watchdog/service).
+async function cmdStop() {
+  await ensureDirs([STATE_DIR]);
+  await writeFile(STOP_FLAG, nowIso(), 'utf8');
+  log('STOP flag raised — the watchdog will not restart the supervisor.');
+  for (const [name, lock] of [['watchdog', WD_LOCK_PATH], ['supervisor', LOCK_PATH]]) {
+    if (existsSync(lock)) {
+      try {
+        const { pid } = JSON.parse(readFileSync(lock, 'utf8'));
+        if (pid && pidAlive(pid)) { process.kill(pid); log(`stopped ${name} (pid ${pid}).`); }
+      } catch { /* ignore */ }
+    }
+  }
+  log('Autopilot stopped. Restart anytime with: node autopilot/watchdog.mjs  (or supervisor.mjs run)');
+}
+
+// Turn the autopilot back ON after a stop: clear the STOP flag and launch the watchdog DETACHED
+// (keeps running after this command returns / the terminal closes). The watchdog then keeps the
+// supervisor alive forever.
+async function cmdStart() {
+  await ensureDirs([STATE_DIR]);
+  if (existsSync(STOP_FLAG)) { rmSync(STOP_FLAG); log('Cleared STOP flag.'); }
+  if (existsSync(WD_LOCK_PATH)) {
+    try { const { pid } = JSON.parse(readFileSync(WD_LOCK_PATH, 'utf8')); if (pid && pidAlive(pid)) { log(`Watchdog already running (pid ${pid}).`); return; } } catch { /* stale */ }
+  }
+  const wd = path.join(__dirname, 'watchdog.mjs');
+  const child = spawn(process.execPath, [wd], { cwd: REPO_ROOT, detached: true, stdio: 'ignore' });
+  child.unref();
+  log(`Watchdog started (detached, pid ${child.pid}). The autopilot will now run continuously.`);
+  log('Stop anytime with: node autopilot/supervisor.mjs stop');
+}
+
 // ---------- entry ----------
 const cmd = process.argv[2] || 'run';
 try {
@@ -622,8 +685,10 @@ try {
   else if (cmd === 'route') await cmdRoute();
   else if (cmd === 'reprioritize') await cmdReprioritize();
   else if (cmd === 'add') await cmdAdd();
+  else if (cmd === 'stop') await cmdStop();
+  else if (cmd === 'start') await cmdStart();
   else if (cmd === 'run' || cmd === 'resume') await cmdRun();
-  else { log(`Unknown command "${cmd}". Use: init | run | status | add "task" | route | reprioritize`); process.exit(1); }
+  else { log(`Unknown command "${cmd}". Use: start | stop | status | add "task" | run | init | route | reprioritize`); process.exit(1); }
 } catch (err) {
   log('Fatal:', err.stack || err.message);
   process.exit(1);

@@ -34,7 +34,7 @@
     "minProductTasks": 5,
     "maxAttemptsBeforeBlock": 3
   },
-  "durationDays": 5,
+  "durationDays": 3650,
   "cli": {
     "bin": "claude",
     "outputFormat": "json",

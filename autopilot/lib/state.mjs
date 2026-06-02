@@ -1,5 +1,5 @@
 // state.mjs — single source of truth (state.json): load, atomic save, init, recovery.
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, copyFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
@@ -82,16 +82,42 @@ export async function ensureDirs(dirs) {
   for (const d of dirs) if (!existsSync(d)) await mkdir(d, { recursive: true });
 }
 
+// Load state, tolerating a corrupt/truncated file: fall back to the last-good .bak so a single bad
+// write (or a kill mid-rename on some FS) can never brick the loop into a crash-restart spiral.
 export async function loadState(statePath) {
-  const raw = await readFile(statePath, 'utf8');
-  return JSON.parse(raw);
+  const tryParse = async (p) => {
+    const raw = await readFile(p, 'utf8');
+    if (!raw || !raw.trim()) throw new Error('empty');
+    return JSON.parse(raw);
+  };
+  try {
+    return await tryParse(statePath);
+  } catch (e) {
+    const bak = statePath + '.bak';
+    if (existsSync(bak)) {
+      try {
+        const recovered = await tryParse(bak);
+        // promote the backup back to the primary so the next save chain is sane
+        await writeFile(statePath, JSON.stringify(recovered, null, 2), 'utf8').catch(() => {});
+        return recovered;
+      } catch { /* fall through */ }
+    }
+    throw new Error(`state.json is unreadable and no usable backup exists (${e.message})`);
+  }
 }
 
-// Atomic write: tmp file + rename, so a crash mid-write can't corrupt state.json.
+// Atomic write: tmp file + rename, so a crash mid-write can't corrupt state.json. Also keep the
+// previous good copy as state.json.bak (rolled forward only on a successful parse-able save) so
+// loadState can always recover.
 export async function saveState(statePath, state) {
   state.lastUpdated = nowIso();
   const tmp = statePath + '.tmp';
-  await writeFile(tmp, JSON.stringify(state, null, 2), 'utf8');
+  const data = JSON.stringify(state, null, 2);
+  // snapshot the current good file to .bak BEFORE we overwrite it
+  if (existsSync(statePath)) {
+    try { await copyFile(statePath, statePath + '.bak'); } catch { /* best effort */ }
+  }
+  await writeFile(tmp, data, 'utf8');
   await rename(tmp, statePath);
 }
 
