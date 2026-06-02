@@ -38,3 +38,7 @@ packages/shared/dist/
 
 # local emulator log
 .emulator-log.txt
+
+# Autopilot runtime state + processed inbox (regenerated; never source)
+autopilot/state/
+autopilot/inbox/processed/
