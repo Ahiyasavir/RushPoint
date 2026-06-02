@@ -116,8 +116,8 @@ export default function ControlRoomPage() {
       <Section
         title={t('ctrl.sosTitle')}
         count={alerts.length}
-        action={t('ctrl.openManager')}
-        onAction={() => navigate('/manager')}
+        action={t('ctrl.openCheckins')}
+        onAction={() => navigate('/checkins')}
         tone="red"
       >
         {alerts.length === 0 ? (
@@ -127,7 +127,7 @@ export default function ControlRoomPage() {
             {alerts.map((a) => {
               const emergency = (a.kind ?? 'emergency') === 'emergency';
               return (
-                <Row key={a.id} onClick={() => navigate('/manager')} tone={emergency ? 'red' : 'orange'}>
+                <Row key={a.id} onClick={() => navigate('/checkins')} tone={emergency ? 'red' : 'orange'}>
                   <span className="text-lg">{emergency ? '🆘' : '🛠️'}</span>
                   <span className="font-semibold text-white truncate">{a.teamName ?? t('alerts.unknownTeam')}</span>
                   <span className="text-xs font-mono uppercase opacity-70">

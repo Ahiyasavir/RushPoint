@@ -381,6 +381,7 @@ const en: Dict = {
   'ctrl.reviewsCount': '{n} team(s) awaiting judging',
   'ctrl.openManager': 'Open Manager',
   'ctrl.openJudge': 'Open Judge',
+  'ctrl.openCheckins': 'Open Check-ins',
 
   // Event Manager console
   'mgr.title': 'Event Manager',
@@ -900,6 +901,7 @@ const he: Dict = {
   'ctrl.reviewsCount': '{n} קבוצות ממתינות לשיפוט',
   'ctrl.openManager': 'פתח ניהול',
   'ctrl.openJudge': 'פתח שיפוט',
+  'ctrl.openCheckins': 'פתח צ׳ק-אין',
 
   // Event Manager console
   'mgr.title': 'מנהל האירוע',
