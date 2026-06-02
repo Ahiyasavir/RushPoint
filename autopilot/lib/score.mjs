@@ -25,7 +25,11 @@ export function scoreTask(task, config) {
   };
   // Category-priority bonus: smart stations > builder/admin tools > player flow > social > reliability.
   const catBonus = (config.scoring.categoryBonus || {})[task.goal] || 0;
-  const total = Object.values(contrib).reduce((a, b) => a + b, 0) + catBonus;
+  // USER-REQUESTED override: anything the user dropped in the inbox outranks every auto-generated
+  // task by a flat, wide margin. (Ordering AMONG user tasks is by insertion seq and is enforced in
+  // rankBacklog, not here, so a high category bonus can't reshuffle the user's intended order.)
+  const userBoost = task.userRequested ? 100000 : 0;
+  const total = Object.values(contrib).reduce((a, b) => a + b, 0) + catBonus + userBoost;
   // One-line reason = the dimension contributing the most weighted points.
   const top = Object.entries(contrib).sort((a, b) => b[1] - a[1])[0][0];
   const dims = `U${clamp(d.userImpact)} A${clamp(d.adminImpact)} R${clamp(d.reliability)} P${clamp(d.productRisk)} C${clamp(d.cleanupValue)}`;
@@ -44,16 +48,25 @@ export function isProduct(task) {
   return !isCleanup(task);
 }
 
-// Rank backlog by total score; tie-break toward the better player/organizer experience, then lower effort.
+// Rank backlog. USER-requested tasks ALWAYS come first, ordered by insertion sequence (the order the
+// user added them), independent of score — so category bonuses can never reshuffle the user's intent.
+// Everything else ranks by total score; tie-break toward the better experience, then lower effort.
 export function rankBacklog(tasks, config) {
   return tasks
     .map((t) => ({ task: t, ...scoreTask(t, config), cleanup: isCleanup(t) }))
-    .sort((a, b) =>
-      b.total - a.total ||
-      clamp(b.task.dims?.userImpact) - clamp(a.task.dims?.userImpact) ||
-      clamp(b.task.dims?.adminImpact) - clamp(a.task.dims?.adminImpact) ||
-      (a.task.effort ?? 3) - (b.task.effort ?? 3)
-    );
+    .sort((a, b) => {
+      const au = a.task.userRequested ? 1 : 0;
+      const bu = b.task.userRequested ? 1 : 0;
+      if (au !== bu) return bu - au;                                   // user tasks first
+      if (au && bu) {                                                  // among user tasks: earliest first
+        return (a.task.userTaskSeq ?? Infinity) - (b.task.userTaskSeq ?? Infinity) ||
+               String(a.task.id).localeCompare(String(b.task.id));
+      }
+      return b.total - a.total ||
+        clamp(b.task.dims?.userImpact) - clamp(a.task.dims?.userImpact) ||
+        clamp(b.task.dims?.adminImpact) - clamp(a.task.dims?.adminImpact) ||
+        (a.task.effort ?? 3) - (b.task.effort ?? 3);
+    });
 }
 
 export function productShare(tasks) {

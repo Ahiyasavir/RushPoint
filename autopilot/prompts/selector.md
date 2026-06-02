@@ -43,8 +43,14 @@ Blocked (avoid unless you can downgrade into a safe subtask):
 {{BLOCKED}}
 
 ## Selection rules
-1. **Pick the highest product-value task** — normally the top-ranked candidate. If two are close,
-   ALWAYS prefer the one that improves the real experience of players or organizers.
+0. **USER REQUESTS COME FIRST (absolute).** If ANY candidate is marked `★[USER REQUEST — MUST PICK
+   FIRST]` (its id starts with `U-`), you MUST select that task this cycle — the highest-ranked one
+   if there are several. Do not pick anything else while a user request is pending. Treat the user's
+   wording as the source of truth: expand it into concrete `acceptanceCriteria` and
+   `implementationHints` that faithfully deliver what they asked, scoped to a safe single cycle
+   (downgrade to a first visible slice if it is large, but never substitute a different task).
+1. **Otherwise pick the highest product-value task** — normally the top-ranked candidate. If two are
+   close, ALWAYS prefer the one that improves the real experience of players or organizers.
 2. **Cleanup** (hardcoded-path replacement, docs polish, minor refactors, constant extraction) may be
    chosen ONLY when it (a) unblocks a product task, (b) is required to fix failing validation, or
    (c) is a tiny safe fix that won't delay product work. Otherwise do not pick it.

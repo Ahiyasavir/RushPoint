@@ -9,7 +9,7 @@
 //   node autopilot/supervisor.mjs status   # print a snapshot without touching the loop
 
 import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +23,7 @@ import { rankBacklog, scoreTask, isCleanup, isProduct, productShare } from './li
 import * as git from './lib/git.mjs';
 import { runValidation } from './lib/validate.mjs';
 import { writeMirrors, appendDecision, ensureDecisionLogHeader } from './lib/files.mjs';
+import { ingestInbox, addInboxTask, ensureInbox } from './lib/inbox.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -30,6 +31,8 @@ const STATE_DIR = path.join(__dirname, 'state');
 const HANDOFF_DIR = path.join(STATE_DIR, 'handoff');
 const STATE_PATH = path.join(STATE_DIR, 'state.json');
 const PROMPT_DIR = path.join(__dirname, 'prompts');
+const INBOX_DIR = path.join(__dirname, 'inbox');
+const LOCK_PATH = path.join(STATE_DIR, 'supervisor.lock');
 
 const config = JSON.parse(await readFile(path.join(__dirname, 'config.json'), 'utf8'));
 
@@ -63,8 +66,8 @@ function normDims(d) {
 // Ranked candidate list (with scores + one-line reasons) for the cycle log and the selector prompt.
 function fmtRanked(ranked, max = 12) {
   return ranked.slice(0, max).map((x, i) =>
-    `${i + 1}. ${x.task.id} [${x.cleanup ? 'cleanup' : 'product'}] score=${x.total} — ${x.task.title}\n` +
-    `     why: ${x.reason}` + (x.task.risk ? ` · risk ${x.task.risk}/5 effort ${x.task.effort}/5` : '')
+    `${i + 1}. ${x.task.id} ${x.task.userRequested ? '★[USER REQUEST — MUST PICK FIRST]' : `[${x.cleanup ? 'cleanup' : 'product'}]`} score=${x.total} — ${x.task.title}\n` +
+    `     why: ${x.task.userRequested ? 'the user explicitly asked for this' : x.reason}` + (x.task.risk ? ` · risk ${x.task.risk}/5 effort ${x.task.effort}/5` : '')
   ).join('\n');
 }
 
@@ -101,6 +104,20 @@ async function runCycle(state) {
   state.stats.cyclesRun += 1;
   await clearHandoff();
   log(`===== Cycle ${state.cycle} =====`);
+
+  // INBOX: pull in any tasks the user dropped since last cycle. They go to the FRONT of the backlog
+  // and (via score.mjs userBoost) outrank everything, so a user request is always picked next.
+  const userTasks = await ingestInbox(INBOX_DIR, state, state.cycle).catch((e) => { log('inbox read error:', e.message); return []; });
+  if (userTasks.length) {
+    for (const ut of userTasks) {
+      const dup = [...state.queues.backlog, ...state.queues.done, ...state.queues.blocked].some((t) => t.id === ut.id);
+      if (!dup) state.queues.backlog.unshift(ut);
+    }
+    state.stats.userTasksIngested = (state.stats.userTasksIngested || 0) + userTasks.length;
+    log(`📥 Ingested ${userTasks.length} USER task(s) from inbox — they take priority:`);
+    for (const ut of userTasks) log(`   • ${ut.id} [${ut.goal}] ${ut.title}`);
+    await saveState(STATE_PATH, state);
+  }
 
   // Rank the backlog with the product-first scoring model and PRINT the top 5 candidates.
   const ranked = rankBacklog(state.queues.backlog, config);
@@ -157,6 +174,32 @@ async function runCycle(state) {
       dims: normDims(sel.dims), risk: sel.risk ?? 3, effort: sel.effort ?? 3, deps: [],
       source: 'selector', status: 'backlog', createdCycle: state.cycle, notes: '' };
   }
+
+  // HARD GUARANTEE: if the user has pending inbox tasks, one of them is ALWAYS worked on next —
+  // even if the selector ignored it. Pick the earliest pending user task and (if the selector's
+  // spec was for a different task) synthesize the spec from the user's own description.
+  const pendingUser = state.queues.backlog
+    .filter((t) => t.userRequested)
+    .sort((a, b) => (a.userTaskSeq || 0) - (b.userTaskSeq || 0) || String(a.id).localeCompare(String(b.id)));
+  if (pendingUser.length && !task.userRequested) {
+    const forced = pendingUser[0];
+    log(`⚑ Overriding selector — pending USER task ${forced.id} takes priority over ${task.id}.`);
+    if (sel.id !== forced.id && sel.title !== forced.title) {
+      // selector didn't spec this one → carry the user's request straight through as the spec
+      sel.acceptanceCriteria = forced.acceptanceCriteria || [];
+      sel.implementationHints = forced.implementationHints || [];
+      sel.rationale = `User-requested via inbox. ${forced.notes || ''}`.trim();
+      sel.whyBeatAlternatives = 'Direct user request — always takes priority.';
+      sel.visibleValue = forced.title;
+      sel.dims = forced.dims;
+      sel.goal = forced.goal;
+      sel.risk = forced.risk;
+      sel.effort = forced.effort;
+      sel.downgradedFrom = null;
+    }
+    task = forced;
+  }
+
   // enrich with this cycle's spec
   task.goal = sel.goal || task.goal;
   if (sel.dims) task.dims = normDims(sel.dims);
@@ -441,13 +484,59 @@ async function cmdStatus() {
   log(`status=${s.status} cycle=${s.cycle} phase=${s.goalPhase}`);
   log(`deadline=${s.deadlineAt} (${isPastDeadline(s) ? 'PASSED' : 'active'})`);
   log(`queues: backlog=${s.queues.backlog.length} done=${s.queues.done.length} blocked=${s.queues.blocked.length}`);
+  const userPending = s.queues.backlog.filter((t) => t.userRequested);
+  if (userPending.length) {
+    log(`★ ${userPending.length} USER task(s) pending (built before auto tasks):`);
+    for (const t of userPending) log(`   • ${t.id} ${t.title}`);
+  }
+  if (s.current?.userRequested) log(`★ currently building USER task ${s.current.id}: ${s.current.title}`);
   log(`stats:`, JSON.stringify(s.stats));
+  const running = existsSync(LOCK_PATH) && pidAlive((() => { try { return JSON.parse(readFileSync(LOCK_PATH, 'utf8')).pid; } catch { return 0; } })());
+  log(`supervisor process: ${running ? 'RUNNING' : 'not running'}`);
   if (s.rateLimit.pausedUntil) log(`rate-limit paused until ${s.rateLimit.pausedUntil}`);
+}
+
+// True if a process with this pid is currently alive.
+function pidAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; }      // no signal sent; just checks existence
+  catch (e) { return e.code === 'EPERM'; }          // EPERM = exists but not ours; ESRCH = gone
+}
+
+// Single-instance guard: refuse to start a 2nd supervisor on the same repo (two running = a git
+// race that corrupts cycles — we hit this once). Returns true if the lock was acquired.
+async function acquireLock() {
+  if (existsSync(LOCK_PATH)) {
+    try {
+      const prev = JSON.parse(await readFile(LOCK_PATH, 'utf8'));
+      if (prev.pid && prev.pid !== process.pid && pidAlive(prev.pid)) {
+        log(`REFUSING TO START: another supervisor is already running (pid ${prev.pid}, since ${prev.started}).`);
+        log('Stop it first, or delete autopilot/state/supervisor.lock if you are sure it is dead.');
+        return false;
+      }
+      log(`Found a stale lock (pid ${prev.pid} is not running) — taking over.`);
+    } catch { /* unreadable lock → overwrite */ }
+  }
+  await writeFile(LOCK_PATH, JSON.stringify({ pid: process.pid, started: nowIso() }), 'utf8');
+  const release = () => {
+    try {
+      if (existsSync(LOCK_PATH)) {
+        const l = JSON.parse(readFileSync(LOCK_PATH, 'utf8'));
+        if (l.pid === process.pid) rmSync(LOCK_PATH);
+      }
+    } catch { /* ignore */ }
+  };
+  process.on('exit', release);
+  process.on('SIGINT', release);
+  process.on('SIGTERM', release);
+  return true;
 }
 
 async function cmdRun() {
   if (!existsSync(STATE_PATH)) { log('No state. Run init first.'); return; }
   await ensureDirs([STATE_DIR, HANDOFF_DIR]);
+  await ensureInbox(INBOX_DIR);
+  if (!(await acquireLock())) return;
   let state = await loadState(STATE_PATH);
 
   // graceful shutdown — state is already flushed each step, this just records intent
@@ -492,6 +581,26 @@ async function cmdRun() {
   log(isPastDeadline(state) ? '5-day deadline reached. Run complete.' : 'Stopped. Resume with: node autopilot/supervisor.mjs run');
 }
 
+// Drop a task into the inbox from the CLI (works while the loop is running — picked up next cycle).
+//   node autopilot/supervisor.mjs add "make the leaderboard pulse when a team is overtaken"
+async function cmdAdd() {
+  const text = process.argv.slice(3).join(' ').trim();
+  if (!text) {
+    log('Usage: node autopilot/supervisor.mjs add "<what you want built>"');
+    log('  Optional first lines inside a longer task:  goal: ui   risk: 2   effort: 2');
+    process.exit(1);
+  }
+  await ensureInbox(INBOX_DIR);
+  const file = await addInboxTask(INBOX_DIR, text);
+  log(`📥 Queued user task → ${path.relative(REPO_ROOT, file)}`);
+  log('It will be picked up at the start of the next cycle and built before any auto task.');
+  if (existsSync(LOCK_PATH) && pidAlive(JSON.parse(readFileSync(LOCK_PATH, 'utf8')).pid || 0)) {
+    log('A supervisor is running — it will ingest this automatically.');
+  } else {
+    log('No supervisor running — start it with:  node autopilot/supervisor.mjs run');
+  }
+}
+
 // ---------- entry ----------
 const cmd = process.argv[2] || 'run';
 try {
@@ -499,8 +608,9 @@ try {
   else if (cmd === 'status') await cmdStatus();
   else if (cmd === 'route') await cmdRoute();
   else if (cmd === 'reprioritize') await cmdReprioritize();
+  else if (cmd === 'add') await cmdAdd();
   else if (cmd === 'run' || cmd === 'resume') await cmdRun();
-  else { log(`Unknown command "${cmd}". Use: init | run | status | route | reprioritize`); process.exit(1); }
+  else { log(`Unknown command "${cmd}". Use: init | run | status | add "task" | route | reprioritize`); process.exit(1); }
 } catch (err) {
   log('Fatal:', err.stack || err.message);
   process.exit(1);
