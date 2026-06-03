@@ -1843,6 +1843,63 @@ export const requestClueHint = functions.https.onCall(async (_data, context) => 
   });
 });
 
+// Smart-station hints are narrower scope than the dashboard clue hint, so they cost less.
+const STATION_HINT_PENALTY = 25;
+
+// ─── requestStationHint (team) ────────────────────────────────────────────────
+// Pay-per-hint for a smart station. Charges STATION_HINT_PENALTY to bonusPenalty
+// exactly once per (uid, taskId, hintIndex) via a transaction (idempotent — a
+// re-request returns the same hint without re-charging). Hint texts live only in
+// stationSecrets/{taskId}.hints[] (never on the public task doc).
+export const requestStationHint = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
+  const uid = context.auth.uid;
+  const { taskId, hintIndex, lang } = (data ?? {}) as { taskId?: string; hintIndex?: number; lang?: string };
+  if (!taskId || typeof hintIndex !== 'number' || !Number.isInteger(hintIndex) || hintIndex < 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId and a valid hintIndex are required');
+  }
+
+  const [taskSnap, secretSnap] = await Promise.all([
+    db.doc(taskPath(taskId)).get(),
+    db.doc(`artifacts/${APP_ID}/stationSecrets/${taskId}`).get(),
+  ]);
+  const smart = taskSnap.exists ? (taskSnap.data() as { smart?: { hintCount?: number } }).smart : undefined;
+  const hintCount = typeof smart?.hintCount === 'number' ? Math.floor(smart.hintCount) : 0;
+  if (hintCount <= 0 || hintIndex >= hintCount) {
+    throw new functions.https.HttpsError('out-of-range', 'No such hint for this station');
+  }
+  const hints = secretSnap.exists
+    ? ((secretSnap.data() as { hints?: { en?: string; he?: string }[] }).hints ?? [])
+    : [];
+  const hint = hints[hintIndex] ?? {};
+  const hintText = lang === 'he' ? (hint.he || hint.en || '') : (hint.en || hint.he || '');
+
+  const gsRef = db.doc(`${userPath(uid)}/gameState/current`);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(gsRef);
+    if (!snap.exists) throw new functions.https.HttpsError('failed-precondition', 'No active game');
+    const gs = snap.data() as {
+      slots?: JudgeSlot[];
+      bonusPenalty?: number;
+      stationHintsUsed?: Record<string, number[]>;
+    };
+    const active = (gs.slots ?? []).some((s) => s.status === 'active' && s.taskId === taskId);
+    if (!active) throw new functions.https.HttpsError('failed-precondition', 'This station is not your active task');
+
+    const used = { ...(gs.stationHintsUsed ?? {}) };
+    const usedForTask = used[taskId] ?? [];
+    if (!usedForTask.includes(hintIndex)) {
+      used[taskId] = [...usedForTask, hintIndex];
+      tx.update(gsRef, {
+        bonusPenalty: (gs.bonusPenalty ?? 0) + STATION_HINT_PENALTY,
+        stationHintsUsed: used,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    return { hintText, hintsUsed: used[taskId] ?? usedForTask, hintCount };
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TENE SELECTION (crafting menu — Slot 5)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2595,11 +2652,11 @@ export const upsertStation = functions.https.onCall(async (data, context) => {
     };
     // Smart-station config: sanitize client input, persist the secret code
     // separately (never on the public task doc), and store the safe rest.
-    const { config: smart, expectedCode } = sanitizeSmartConfig(d.smart);
+    const { config: smart, expectedCode, hints } = sanitizeSmartConfig(d.smart);
     if (smart) {
       payload.smart = smart;
       await db.doc(`artifacts/${APP_ID}/stationSecrets/${id}`).set(
-        { expectedCode: expectedCode ?? null, taskId: id }, { merge: true },
+        { expectedCode: expectedCode ?? null, taskId: id, hints }, { merge: true },
       );
     } else {
       payload.smart = admin.firestore.FieldValue.delete(); // demote back to a plain station
@@ -2685,10 +2742,11 @@ const STREAK_MULTIPLIER = 1.5;
 function sanitizeSmartConfig(input: unknown): {
   config: Record<string, unknown> | null;
   expectedCode: string | null;
+  hints: { en: string; he: string }[];
 } {
-  if (!input || typeof input !== 'object') return { config: null, expectedCode: null };
+  if (!input || typeof input !== 'object') return { config: null, expectedCode: null, hints: [] };
   const s = input as Record<string, unknown>;
-  if (s.enabled !== true) return { config: null, expectedCode: null };
+  if (s.enabled !== true) return { config: null, expectedCode: null, hints: [] };
   const vt = ['manual_judge', 'code_verification', 'photo_upload'].includes(String(s.verificationType))
     ? String(s.verificationType) : 'manual_judge';
   const str  = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
@@ -2722,7 +2780,17 @@ function sanitizeSmartConfig(input: unknown): {
     showHintsOverTime:       boolU(s.showHintsOverTime),
   };
   Object.keys(config).forEach((k) => config[k] === undefined && delete config[k]);
-  return { config, expectedCode };
+  // Hint texts are SECRET — never placed on the public config; stored in stationSecrets only.
+  const hintCount = typeof config.hintCount === 'number' ? Math.max(0, Math.floor(config.hintCount as number)) : 0;
+  const rawHints = Array.isArray(s.hints) ? s.hints : [];
+  const hints = rawHints.slice(0, hintCount).map((h) => {
+    const o = (h ?? {}) as Record<string, unknown>;
+    return {
+      en: typeof o.en === 'string' ? o.en.trim() : '',
+      he: typeof o.he === 'string' ? o.he.trim() : '',
+    };
+  });
+  return { config, expectedCode, hints };
 }
 
 // Complete the team's currently-active slot for `taskId` (sigmoid task score +

@@ -23,7 +23,10 @@ const ADD_TYPES: { type: StationType; kind: 'task' | 'zone'; key: string }[] = [
 // The client-editable smart config (everything in SmartStationConfig except the
 // always-true `enabled` flag) plus the write-only secret `expectedCode`. Kept as a
 // flat block on the Draft so the guided panel can bind directly to it.
-type SmartDraft = Omit<SmartStationConfig, 'enabled'> & { expectedCode?: string };
+type SmartDraft = Omit<SmartStationConfig, 'enabled'> & {
+  expectedCode?: string;
+  hints?: { en: string; he: string }[]; // secret hint texts (server stores in stationSecrets, never returned)
+};
 
 type Draft = Partial<BuilderStation> & {
   kind: 'task' | 'zone'; type: StationType; lat: number; lng: number; id?: string;
@@ -205,6 +208,10 @@ export default function BuilderPage() {
     }
     if (src.verificationType === 'code_verification' && typeof src.expectedCode === 'string' && src.expectedCode.trim() !== '') {
       out.expectedCode = src.expectedCode.trim();
+    }
+    const n = typeof src.hintCount === 'number' ? Math.max(0, Math.floor(src.hintCount)) : 0;
+    if (src.verificationType === 'code_verification' && n > 0 && Array.isArray(src.hints)) {
+      out.hints = src.hints.slice(0, n).map((h) => ({ en: (h?.en ?? '').trim(), he: (h?.he ?? '').trim() }));
     }
     return out;
   }
@@ -532,6 +539,12 @@ function SmartStationPanel({ draft, set, field, label }: {
   const enabled = draft.smartEnabled === true;
   const sc = draft.smart ?? blankSmart();
   const setSmart = (patch: Partial<SmartDraft>) => set({ smart: { ...sc, ...patch } });
+  const setHint = (i: number, key: 'en' | 'he', value: string) => {
+    const hints = [...(sc.hints ?? [])];
+    while (hints.length <= i) hints.push({ en: '', he: '' });
+    hints[i] = { ...hints[i], [key]: value };
+    setSmart({ hints });
+  };
 
   const toggle = (on: boolean) =>
     set(on ? { smartEnabled: true, smart: draft.smart ?? blankSmart() } : { smartEnabled: false });
@@ -584,6 +597,20 @@ function SmartStationPanel({ draft, set, field, label }: {
                   <input type="number" min={0} className={field} value={sc.hintCount ?? 0} onChange={(e) => setSmart({ hintCount: Number(e.target.value) })} />
                 </div>
               </div>
+              {(sc.hintCount ?? 0) > 0 && (
+                <div className="space-y-2">
+                  <label className={label}>{t('builder.smartHintTexts')}</label>
+                  {Array.from({ length: Math.min(Math.floor(sc.hintCount ?? 0), 10) }).map((_, i) => (
+                    <div key={i} className="grid grid-cols-2 gap-2">
+                      <input className={field} placeholder={`${t('builder.smartHintEn')} ${i + 1}`}
+                        value={sc.hints?.[i]?.en ?? ''} onChange={(e) => setHint(i, 'en', e.target.value)} />
+                      <input className={field} dir="rtl" placeholder={`${t('builder.smartHintHe')} ${i + 1}`}
+                        value={sc.hints?.[i]?.he ?? ''} onChange={(e) => setHint(i, 'he', e.target.value)} />
+                    </div>
+                  ))}
+                  <p className={help}>{t('builder.smartHintTextsHelp')}</p>
+                </div>
+              )}
               <SmartCheck label={t('builder.smartAutoComplete')} checked={sc.autoCompleteOnSuccess !== false} onChange={(v) => setSmart({ autoCompleteOnSuccess: v })} />
             </>
           )}

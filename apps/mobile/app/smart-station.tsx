@@ -394,12 +394,96 @@ export default function SmartStationScreen() {
             </Button>
           </Card>
         )}
+
+        {smart.hintCount != null && smart.hintCount > 0 && (
+          <HintSection
+            taskId={taskId}
+            hintCount={Math.floor(smart.hintCount)}
+            disabled={locked || submitting || busy}
+          />
+        )}
       </ScrollView>
     </View>
   );
 }
 
 // ─── Shared sub-components ─────────────────────────────────────────────────────
+
+// Pay-per-hint: each hint is a locked card with a two-step confirm. On confirm we
+// call requestStationHint (server charges 25 pts once per index, idempotently) and
+// keep the revealed text in local state for the rest of the session.
+function HintSection({ taskId, hintCount, disabled }: { taskId: string; hintCount: number; disabled: boolean }) {
+  const { t, isRtl } = useTranslation();
+  const { show } = useToast();
+  const [revealed, setRevealed] = useState<Record<number, string>>({});
+  const [armed, setArmed] = useState<number | null>(null);
+  const [busyIndex, setBusyIndex] = useState<number | null>(null);
+
+  async function reveal(i: number) {
+    setBusyIndex(i);
+    try {
+      const fn = httpsCallable<
+        { taskId: string; hintIndex: number; lang: string },
+        { hintText: string; hintsUsed: number[]; hintCount: number }
+      >(functions, 'requestStationHint');
+      const { data } = await fn({ taskId, hintIndex: i, lang: isRtl ? 'he' : 'en' });
+      setRevealed((r) => ({ ...r, [i]: data.hintText }));
+    } catch {
+      show(t('station.hint.error'), 'error');
+    } finally {
+      setBusyIndex(null);
+      setArmed(null);
+    }
+  }
+
+  return (
+    <Card className="p-5 mt-4">
+      <Text variant="subheading" className="text-white mb-3">💡 {t('station.hint.title')}</Text>
+      <View className="gap-2">
+        {Array.from({ length: hintCount }).map((_, i) => {
+          const text = revealed[i];
+          if (text !== undefined) {
+            return (
+              <View key={i} className="p-3 rounded-2xl border border-neon-gold/30 bg-neon-gold/5">
+                <Text variant="caption" className="text-neon-gold mb-1 text-start">{t('station.hint.revealed', { n: i + 1 })}</Text>
+                <Text variant="bodySmall" className="text-white text-start leading-relaxed">{text}</Text>
+              </View>
+            );
+          }
+          const isArmed = armed === i;
+          const isBusy = busyIndex === i;
+          return (
+            <View key={i} className="p-3 rounded-2xl border border-zinc-800 bg-zinc-900/40">
+              {!isArmed ? (
+                <Pressable
+                  onPress={() => setArmed(i)}
+                  disabled={disabled || busyIndex !== null}
+                  className="flex-row items-center justify-between active:opacity-70"
+                >
+                  <Text variant="bodySmall" className="text-zinc-300 text-start">🔒 {t('station.hint.reveal', { n: i + 1 })}</Text>
+                  <Text variant="caption" className="text-zinc-600">{t('station.hint.cost')}</Text>
+                </Pressable>
+              ) : (
+                <View className="flex-row items-center gap-2">
+                  <Pressable
+                    onPress={() => void reveal(i)}
+                    disabled={isBusy}
+                    className="flex-1 py-2 rounded-xl bg-neon-gold/10 border border-neon-gold/30 items-center active:bg-neon-gold/20"
+                  >
+                    <Text variant="bodySmall" className="text-neon-gold font-semibold">{isBusy ? '…' : t('station.hint.confirm')}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setArmed(null)} hitSlop={6} className="px-3 py-2">
+                    <Text variant="caption" className="text-zinc-500">{t('station.hint.cancel')}</Text>
+                  </Pressable>
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    </Card>
+  );
+}
 
 function Header({ onBack, backLabel, title }: { onBack: () => void; backLabel: string; title: string }) {
   return (

@@ -308,6 +308,15 @@ const en: Dict = {
   'station.pendingTitle': 'Awaiting review',
   'station.pendingBody': 'A judge is reviewing your submission. Your dashboard will update automatically when it is approved.',
   'station.pendingBack': 'Back to dashboard',
+  // Smart-station pay-per-hint
+  'station.hint.title': 'Stuck? Hints',
+  'station.hint.locked': 'Hint {n}',
+  'station.hint.reveal': 'Reveal hint {n}',
+  'station.hint.cost': '−25 pts',
+  'station.hint.confirm': 'Reveal (−25)',
+  'station.hint.cancel': 'Cancel',
+  'station.hint.revealed': 'Hint {n}',
+  'station.hint.error': 'Could not load the hint. Try again.',
 };
 
 const he: Dict = {
@@ -611,6 +620,15 @@ const he: Dict = {
   'station.pendingTitle': 'ממתין לבדיקה',
   'station.pendingBody': 'שופט בודק את ההגשה שלכם. הלוח יתעדכן אוטומטית עם האישור.',
   'station.pendingBack': 'חזרה ללוח',
+  // Smart-station pay-per-hint
+  'station.hint.title': 'תקועים? רמזים',
+  'station.hint.locked': 'רמז {n}',
+  'station.hint.reveal': 'חשפו רמז {n}',
+  'station.hint.cost': '−25 נק׳',
+  'station.hint.confirm': 'חשיפה (−25)',
+  'station.hint.cancel': 'ביטול',
+  'station.hint.revealed': 'רמז {n}',
+  'station.hint.error': 'לא ניתן לטעון את הרמז. נסו שוב.',
 };
 
 const DICTS: Record<Lang, Dict> = { en, he };

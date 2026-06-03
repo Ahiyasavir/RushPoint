@@ -153,6 +153,7 @@ export interface GameState {
   evacuatedFrom?: string | null; // station title the team was force-evacuated from (transient)
   smartStreak?: number;          // consecutive fast smart-station completions (default 0)
   streakMultiplier?: number;     // active smart-station task-score multiplier (default 1.0; 1.5 once streak ≥ 3)
+  stationHintsUsed?: Record<string, number[]>; // taskId → hint indices already paid for (idempotent pay-per-hint)
 }
 
 
