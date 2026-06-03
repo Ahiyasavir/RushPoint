@@ -3,6 +3,7 @@ import {
   View, ScrollView, KeyboardAvoidingView, Platform,
   Pressable, Switch,
 } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { router, useLocalSearchParams } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../src/services/firebase.config';
@@ -11,6 +12,7 @@ import { Text } from '../src/components/Text';
 import { Input } from '../src/components/Input';
 import { Button } from '../src/components/Button';
 import { Card } from '../src/components/Card';
+import { PressableScale } from '../src/components/PressableScale';
 import { useToast } from '../src/components/Toast';
 import { useTranslation } from '../src/i18n';
 import { WAIVER_VERSION } from './waiver';
@@ -148,7 +150,7 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
-        <View className="mb-8">
+        <Animated.View entering={FadeInDown.duration(420)} className="mb-8">
           <View className="flex-row items-center gap-2 mb-3">
             <View className="px-2.5 py-1 rounded-full bg-neon-green/10 border border-neon-green/20">
               <Text variant="caption" className="text-neon-green font-mono tracking-widest">
@@ -161,30 +163,34 @@ export default function RegisterScreen() {
           <Text variant="bodySmall" className="text-zinc-500 mt-1">
             {t('register.subtitle')}
           </Text>
-        </View>
+        </Animated.View>
 
         {/* ── Team Name ─────────────────────────────────────────────────── */}
-        <Input
-          label={t('register.teamName')}
-          value={teamName}
-          onChangeText={(v) => { setTeamName(v); setErrors((e) => ({ ...e, teamName: undefined })); }}
-          placeholder={t('register.teamNamePlaceholder')}
-          maxLength={40}
-          autoCapitalize="words"
-          error={errors.teamName}
-          className="mb-5"
-        />
+        <Animated.View entering={FadeInDown.delay(90).duration(440)}>
+          <Input
+            label={t('register.teamName')}
+            value={teamName}
+            onChangeText={(v) => { setTeamName(v); setErrors((e) => ({ ...e, teamName: undefined })); }}
+            placeholder={t('register.teamNamePlaceholder')}
+            maxLength={40}
+            autoCapitalize="words"
+            error={errors.teamName}
+            className="mb-5"
+          />
+        </Animated.View>
 
         {/* ── Captain Phone ─────────────────────────────────────────────── */}
-        <Input
-          label={t('register.captainPhone')}
-          value={captainPhone}
-          onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
-          placeholder={t('register.phonePlaceholder')}
-          keyboardType="phone-pad"
-          error={errors.captainPhone}
-          className="mb-6"
-        />
+        <Animated.View entering={FadeInDown.delay(160).duration(440)}>
+          <Input
+            label={t('register.captainPhone')}
+            value={captainPhone}
+            onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
+            placeholder={t('register.phonePlaceholder')}
+            keyboardType="phone-pad"
+            error={errors.captainPhone}
+            className="mb-6"
+          />
+        </Animated.View>
 
         {/* ── Participants ──────────────────────────────────────────────── */}
         <Text variant="label" className="mb-1">{t('register.participants')}</Text>
@@ -265,9 +271,11 @@ export default function RegisterScreen() {
         ) : <View className="mb-4" />}
 
         {/* ── Submit ────────────────────────────────────────────────────── */}
-        <Button onPress={handleSubmit} fullWidth disabled={!waiverAccepted}>
-          {t('register.start')}
-        </Button>
+        <PressableScale className="w-full" disabled={!waiverAccepted}>
+          <Button onPress={handleSubmit} fullWidth disabled={!waiverAccepted}>
+            {t('register.start')}
+          </Button>
+        </PressableScale>
       </ScrollView>
     </KeyboardAvoidingView>
   );

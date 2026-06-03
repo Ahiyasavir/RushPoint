@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { router } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -11,6 +12,7 @@ import { Input } from '../src/components/Input';
 import { Button } from '../src/components/Button';
 import { useToast } from '../src/components/Toast';
 import { LanguageToggle } from '../src/components/LanguageToggle';
+import { PressableScale } from '../src/components/PressableScale';
 import { useTranslation } from '../src/i18n';
 
 const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
@@ -84,12 +86,18 @@ export default function AccessCodeScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* ── Language toggle ───────────────────────────────────────────── */}
-        <View className="flex-row justify-end mt-12">
+        <Animated.View
+          entering={FadeInDown.duration(400)}
+          className="flex-row justify-end mt-12"
+        >
           <LanguageToggle />
-        </View>
+        </Animated.View>
 
         {/* ── Branding ──────────────────────────────────────────────────── */}
-        <View className="mt-10 mb-14">
+        <Animated.View
+          entering={FadeInDown.delay(80).duration(460)}
+          className="mt-10 mb-14"
+        >
           <Text variant="label" className="text-zinc-500 mb-2 tracking-widest uppercase text-xs">
             {t('brand.tagline')}
           </Text>
@@ -101,24 +109,30 @@ export default function AccessCodeScreen() {
           <Text variant="bodySmall" className="text-zinc-500 leading-relaxed">
             {t('access.intro')}
           </Text>
-        </View>
+        </Animated.View>
 
         {/* ── Code input ────────────────────────────────────────────────── */}
-        <Input
-          label={t('access.codeLabel')}
-          value={code}
-          onChangeText={(v) => { setCode(v); setCodeError(''); }}
-          placeholder={t('access.codePlaceholder')}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={10}
-          error={codeError}
-          className="mb-6"
-        />
+        <Animated.View entering={FadeInDown.delay(180).duration(460)}>
+          <Input
+            label={t('access.codeLabel')}
+            value={code}
+            onChangeText={(v) => { setCode(v); setCodeError(''); }}
+            placeholder={t('access.codePlaceholder')}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={10}
+            error={codeError}
+            className="mb-6"
+          />
+        </Animated.View>
 
-        <Button onPress={handleSubmit} fullWidth size="lg">
-          {t('access.enter')}
-        </Button>
+        <Animated.View entering={FadeInDown.delay(260).duration(460)}>
+          <PressableScale className="w-full">
+            <Button onPress={handleSubmit} fullWidth size="lg">
+              {t('access.enter')}
+            </Button>
+          </PressableScale>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
