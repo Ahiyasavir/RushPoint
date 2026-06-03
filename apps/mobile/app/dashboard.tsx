@@ -42,6 +42,8 @@ type JudgingState  = LiveJudging;
 
 const CRAFTING_DURATION_SECS = 20 * 60;
 const SPRINT_BUDGET_SECS     = 90;
+// Smart-station speed streak: 3 fast completions in a row latch a 1.5x multiplier.
+const STREAK_THRESHOLD       = 3;
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -182,6 +184,18 @@ export default function DashboardScreen() {
     }
     if (!evacuatedFrom) lastEvacRef.current = null;
   }, [evacuatedFrom, showToast, t]);
+
+  // Smart-station speed streak (server-authoritative). Fire a celebration toast
+  // exactly once on the 2→3 transition; the badge itself is rendered in the header.
+  const smartStreak = gameState?.smartStreak ?? 0;
+  const onFire = smartStreak >= STREAK_THRESHOLD;
+  const prevStreakRef = useRef(smartStreak);
+  useEffect(() => {
+    if (prevStreakRef.current < STREAK_THRESHOLD && smartStreak >= STREAK_THRESHOLD) {
+      showToast(t('dash.comboToast'), 'success');
+    }
+    prevStreakRef.current = smartStreak;
+  }, [smartStreak, showToast, t]);
 
   // Tick once per second to drive the live elapsed-time clock.
   useEffect(() => {
@@ -340,6 +354,8 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        {onFire && <OnFireBadge label={t('dash.onFire')} />}
+
         <Text variant="caption" className="text-zinc-600 mt-2">
           {t('dash.slotsCompleted', { n: completedCount })}
         </Text>
@@ -471,6 +487,32 @@ function NextStepHint({
     <Text variant="bodySmall" className="text-zinc-400 mb-3">
       📍 {t(key)}
     </Text>
+  );
+}
+
+// ─── "ON FIRE" speed-streak badge (subtle pulse — UI-thread only) ─────────────
+
+function OnFireBadge({ label }: { label: string }) {
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+  }, [pulse]);
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.78 + pulse.value * 0.22,
+    transform: [{ scale: 1 + pulse.value * 0.03 }],
+  }));
+  return (
+    <Animated.View
+      entering={ZoomIn.duration(300)}
+      style={style}
+      className="mt-3 self-start flex-row items-center px-3 py-1.5 rounded-full border border-neon-orange/50 bg-neon-orange/10"
+    >
+      <Text variant="caption" className="text-neon-orange font-mono font-bold">{label}</Text>
+    </Animated.View>
   );
 }
 

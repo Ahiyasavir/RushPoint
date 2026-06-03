@@ -52,6 +52,7 @@ export interface LiveGame {
   matchStatus?: MatchStatus;
   gateCooldownUntil?: string | null; // ISO — post-loss 90s cooldown before re-queue
   teneSelection?: string[];
+  smartStreak?: number; // consecutive fast smart-station completions (≥3 ⇒ 1.5x "ON FIRE")
 }
 
 export type SyncState = 'loading' | 'live' | 'error';
