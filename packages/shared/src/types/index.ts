@@ -151,6 +151,8 @@ export interface GameState {
                                      // 90s cooldown before they may re-enter the gate queue
   teneSelection?: string[];     // product ids the team selected during crafting (slot 5)
   evacuatedFrom?: string | null; // station title the team was force-evacuated from (transient)
+  smartStreak?: number;          // consecutive fast smart-station completions (default 0)
+  streakMultiplier?: number;     // active smart-station task-score multiplier (default 1.0; 1.5 once streak ≥ 3)
 }
 
 

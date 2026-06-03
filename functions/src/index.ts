@@ -2670,6 +2670,15 @@ export const deleteStation = functions.https.onCall(async (data, context) => {
 // manual_judge; the last two queue into stationReviews for admin approval.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// SPEED STREAK — consecutive "fast" smart-station completions grant a task-score
+// multiplier. A completion is "fast" when actualMinutes < FAST_COMPLETION_RATIO ×
+// estimatedMinutes; the streak resets on a slow one. Once it reaches STREAK_THRESHOLD
+// the multiplier latches at STREAK_MULTIPLIER and applies to every subsequent fast
+// completion (it only drops back to 1.0 on a slow completion).
+const FAST_COMPLETION_RATIO = 0.60;
+const STREAK_THRESHOLD = 3;
+const STREAK_MULTIPLIER = 1.5;
+
 // Sanitize builder input into a client-safe smart config + the secret code.
 // Returns { config: null } when the input is not an enabled smart config (so the
 // station is treated as a plain station / demoted).
@@ -2719,7 +2728,10 @@ function sanitizeSmartConfig(input: unknown): {
 // Complete the team's currently-active slot for `taskId` (sigmoid task score +
 // advance + release counter) — the smart-station equivalent of a station "pass".
 // Mirrors stationReleaseTeam's success path.
-async function completeSmartStation(teamId: string, taskId: string): Promise<{ taskScore: number; allDone: boolean }> {
+async function completeSmartStation(
+  teamId: string,
+  taskId: string,
+): Promise<{ taskScore: number; allDone: boolean; streak: number; streakMultiplier: number; streakBroken: boolean }> {
   const taskSnap = await db.doc(taskPath(taskId)).get();
   const task = taskSnap.exists ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number }) : {};
   const nowIso = new Date().toISOString();
@@ -2728,7 +2740,7 @@ async function completeSmartStation(teamId: string, taskId: string): Promise<{ t
     const profRef = db.doc(`${userPath(teamId)}/profile/team`);
     const gsSnap  = await tx.get(gsRef);
     if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found for team');
-    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number };
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number; smartStreak?: number };
     const slots = gs.slots.map((s) => ({ ...s }));
     const target = slots.findIndex((s) => s.status === 'active' && s.taskId === taskId);
     if (target < 0) throw new functions.https.HttpsError('failed-precondition', 'Team is not active at this station');
@@ -2737,7 +2749,16 @@ async function completeSmartStation(teamId: string, taskId: string): Promise<{ t
     const estMins    = task.estimatedMinutes ?? 15;
     const startMs    = slots[target].startedAt ? new Date(slots[target].startedAt!).getTime() : Date.now() - estMins * 60_000;
     const actualMins = (Date.now() - startMs) / 60_000;
-    const taskScore  = calculateTaskScore(difficulty, actualMins, estMins);
+
+    // SPEED STREAK: increment on a fast completion, reset on a slow one. The
+    // multiplier latches at STREAK_MULTIPLIER once the streak reaches the threshold
+    // and applies to this (and every subsequent) fast completion's task score.
+    const prevStreak = typeof gs.smartStreak === 'number' && gs.smartStreak > 0 ? gs.smartStreak : 0;
+    const isFast = actualMins < FAST_COMPLETION_RATIO * estMins;
+    const smartStreak = isFast ? prevStreak + 1 : 0;
+    const streakBroken = !isFast && prevStreak >= STREAK_THRESHOLD;
+    const streakMultiplier = smartStreak >= STREAK_THRESHOLD ? STREAK_MULTIPLIER : 1.0;
+    const taskScore = Math.round(calculateTaskScore(difficulty, actualMins, estMins) * streakMultiplier);
 
     slots[target] = {
       ...slots[target], status: 'completed', completedAt: nowIso, earnedScore: taskScore,
@@ -2745,9 +2766,12 @@ async function completeSmartStation(teamId: string, taskId: string): Promise<{ t
     };
     unlockNext(slots, target, nowIso);
     const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
-    tx.update(gsRef, { slots, score: (gs.score ?? 0) + taskScore, updatedAt: nowIso });
+    tx.update(gsRef, {
+      slots, score: (gs.score ?? 0) + taskScore,
+      smartStreak, streakMultiplier, updatedAt: nowIso,
+    });
     if (allDone) tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
-    return { taskScore, allDone };
+    return { taskScore, allDone, streak: smartStreak, streakMultiplier, streakBroken };
   });
   await releaseTask(taskId, teamId);
   return result;
