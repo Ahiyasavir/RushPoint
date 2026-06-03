@@ -120,6 +120,8 @@ const en: Dict = {
   // Connectivity
   'offline.lost': "You're offline — progress is saved and will sync when you reconnect.",
   'offline.restored': 'Back online — syncing your progress.',
+  'offline.reconnecting': 'Reconnecting…',
+  'offline.backOnline': 'Back online',
 
   // Map
   'map.open': 'Mission Map',
@@ -407,6 +409,8 @@ const he: Dict = {
   // Connectivity
   'offline.lost': 'אין חיבור — ההתקדמות נשמרת ותסונכרן כשהחיבור יחזור.',
   'offline.restored': 'החיבור חזר — מסנכרן את ההתקדמות.',
+  'offline.reconnecting': 'מתחבר מחדש…',
+  'offline.backOnline': 'חזרת לרשת',
 
   // Map
   'map.open': 'מפת המשימות',

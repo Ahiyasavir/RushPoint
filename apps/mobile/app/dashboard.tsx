@@ -90,6 +90,7 @@ export default function DashboardScreen() {
   const teamName = useGameStore((s) => s.teamName);
   const gameState = useGameStore((s) => s.live);
   const syncState = useGameStore((s) => s.syncState);
+  const isOnline  = useGameStore((s) => s.isOnline);
 
   const [nowMs, setNowMs] = useState(Date.now());
   const { show: showToast } = useToast();
@@ -199,6 +200,21 @@ export default function DashboardScreen() {
       router.push('/final-run');
     }
   }, [gameState?.slots]);
+
+  // Reconnect banner: show a brief "Back online" confirmation for ~2s after the
+  // connection is restored, then auto-dismiss. Tracks the previous online state
+  // so the green flash only fires on an offline→online transition.
+  const [showRestored, setShowRestored] = useState(false);
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    if (!wasOnlineRef.current && isOnline) {
+      setShowRestored(true);
+      const id = setTimeout(() => setShowRestored(false), 2000);
+      wasOnlineRef.current = isOnline;
+      return () => clearTimeout(id);
+    }
+    wasOnlineRef.current = isOnline;
+  }, [isOnline]);
 
   const loading         = syncState === 'loading' && !gameState;
   const snapError       = syncState === 'error' && !gameState;
@@ -331,6 +347,22 @@ export default function DashboardScreen() {
 
       {/* ── Operational announcement (persistent, until dismissed) ────── */}
       <AnnouncementBanner announcements={announcements} />
+
+      {/* ── Reconnect strip: sticky, non-blocking, slim (<36px). Only when
+          cached state is available; otherwise the loading spinner shows. ─ */}
+      {gameState && !isOnline ? (
+        <View className="bg-yellow-500/20 border-b border-yellow-500/40 px-4 py-2">
+          <Text variant="caption" className="text-yellow-300 font-mono text-start">
+            ⟳ {t('offline.reconnecting')}
+          </Text>
+        </View>
+      ) : gameState && showRestored ? (
+        <View className="bg-green-500/20 border-b border-green-500/40 px-4 py-2">
+          <Text variant="caption" className="text-green-300 font-mono text-start">
+            ✓ {t('offline.backOnline')}
+          </Text>
+        </View>
+      ) : null}
 
       {/* ── Body ─────────────────────────────────────────────────────── */}
       <ScrollView
