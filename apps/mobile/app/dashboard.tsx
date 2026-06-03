@@ -389,7 +389,7 @@ export default function DashboardScreen() {
         ) : (
           <Card className="p-6 items-center">
             <Text variant="bodySmall" className="text-zinc-500 text-center">
-              {t('dash.noMission')}
+              {completedCount === 6 ? t('dash.noMission.done') : t('dash.noMission.waiting')}
             </Text>
           </Card>
         )}
@@ -426,6 +426,7 @@ export default function DashboardScreen() {
           >
             <Text variant="label" className="text-neon-orange">🧺 {t('basket.title')}</Text>
             <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('basket.scanPrompt')}</Text>
+            <Text variant="caption" className="text-zinc-500 mt-2">{t('dash.hint.orange')}</Text>
           </Pressable>
         )}
 
@@ -442,6 +443,34 @@ export default function DashboardScreen() {
         )}
       </ScrollView>
     </View>
+  );
+}
+
+// ─── Contextual next-step hint (what to physically DO on the active slot) ──────
+
+function NextStepHint({
+  slot, judging, craftingActive,
+}: {
+  slot: FirestoreSlot;
+  judging: JudgingState | null;
+  craftingActive: boolean;
+}) {
+  const { t } = useTranslation();
+  const frozen = !!judging && judging.slotIndex === slot.index;
+
+  let key: string | null = null;
+  if (slot.type === 'green') {
+    key = slot.taskId ? 'dash.hint.greenTask' : 'dash.hint.greenAssigning';
+  } else if (slot.type === 'gold') {
+    if (frozen) key = 'dash.hint.goldFrozen';
+    else if (craftingActive) key = 'dash.hint.goldCrafting';
+  }
+  if (!key) return null;
+
+  return (
+    <Text variant="bodySmall" className="text-zinc-400 mb-3">
+      📍 {t(key)}
+    </Text>
   );
 }
 
@@ -473,6 +502,9 @@ function ActiveTaskCard({
       <Text variant="subheading" className="mb-2">
         {slot.taskTitle ?? t('dash.activeMission')}
       </Text>
+
+      {/* Contextual next-step guidance so the team knows what to physically do. */}
+      <NextStepHint slot={slot} judging={judging} craftingActive={craftingActive} />
 
       {/* Only surface the friendly "assigning" hint when no task is set yet —
           never the raw task id (the title + badge already name the mission). */}
@@ -885,6 +917,20 @@ function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
           </Button>
         </>
       ) : null}
+
+      <GateNextStepHint matchStatus={matchStatus} />
     </Card>
+  );
+}
+
+// ─── Gate next-step hint (physical prompt, only while waiting / matched) ───────
+
+function GateNextStepHint({ matchStatus }: { matchStatus?: MatchStatus }) {
+  const { t } = useTranslation();
+  if (matchStatus !== 'waiting' && matchStatus !== 'matched') return null;
+  return (
+    <Text variant="caption" className="text-zinc-500 mt-3 text-center">
+      📍 {t('dash.hint.gate')}
+    </Text>
   );
 }
