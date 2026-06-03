@@ -234,6 +234,10 @@ export interface SmartStationConfig {
   timeLimitSeconds?: number;
   canSkip?: boolean;
 
+  // Geofence — reject station-code submissions made too far from the station.
+  // metres; undefined or 0 = disabled (GPS not required).
+  geofenceRadiusMeters?: number;
+
   // code_verification
   codeInputLabel?: string;
   hasCode?: boolean;        // true ⇒ an expectedCode is stored server-side

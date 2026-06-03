@@ -2697,6 +2697,7 @@ function sanitizeSmartConfig(input: unknown): {
     adminNotes:         str(s.adminNotes),
     timeLimitSeconds:   numU(s.timeLimitSeconds),
     canSkip:            boolU(s.canSkip),
+    geofenceRadiusMeters: numU(s.geofenceRadiusMeters),
     codeInputLabel:     str(s.codeInputLabel),
     hasCode:            vt === 'code_verification' ? !!expectedCode : undefined,
     autoCompleteOnSuccess: boolU(s.autoCompleteOnSuccess),
@@ -2755,10 +2756,22 @@ async function completeSmartStation(teamId: string, taskId: string): Promise<{ t
 // ─── submitStationCode (team) ─────────────────────────────────────────────────
 // Validates the team's entered code against the server-only secret. The correct
 // code is NEVER returned. Auto-completes the station on success when configured.
+
+// Haversine distance (km) between two lat/lng points — mirrors routing/assignNextTask.ts.
+function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(h));
+}
+
 export const submitStationCode = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const teamId = context.auth.uid;
-  const { taskId, code } = (data ?? {}) as { taskId?: string; code?: string };
+  const { taskId, code, lat, lng } = (data ?? {}) as { taskId?: string; code?: string; lat?: number; lng?: number };
   if (!taskId || typeof code !== 'string') {
     throw new functions.https.HttpsError('invalid-argument', 'taskId and code are required');
   }
@@ -2766,11 +2779,32 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
     db.doc(taskPath(taskId)).get(),
     db.doc(`artifacts/${APP_ID}/stationSecrets/${taskId}`).get(),
   ]);
-  const smart = taskSnap.exists
-    ? (taskSnap.data() as { smart?: { verificationType?: string; autoCompleteOnSuccess?: boolean } }).smart
+  const taskData = taskSnap.exists
+    ? (taskSnap.data() as {
+        smart?: { verificationType?: string; autoCompleteOnSuccess?: boolean; geofenceRadiusMeters?: number };
+        coordinates?: { latitude: number; longitude: number };
+      })
     : undefined;
+  const smart = taskData?.smart;
   if (!smart || smart.verificationType !== 'code_verification') {
     throw new functions.https.HttpsError('failed-precondition', 'This station does not use code verification');
+  }
+
+  // Geofence enforcement: when a radius is configured and the station has coordinates,
+  // require the caller's GPS and reject submissions made outside the radius.
+  const radiusMetres = smart.geofenceRadiusMeters;
+  if (typeof radiusMetres === 'number' && radiusMetres > 0 && taskData?.coordinates) {
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      throw new functions.https.HttpsError('failed-precondition', 'Location required', { code: 'location-required' });
+    }
+    const distKm = haversineKm(lat, lng, taskData.coordinates.latitude, taskData.coordinates.longitude);
+    if (distKm * 1000 > radiusMetres) {
+      throw new functions.https.HttpsError('failed-precondition', 'Too far from the station', {
+        code: 'too-far',
+        distanceMetres: Math.round(distKm * 1000),
+        radiusMetres,
+      });
+    }
   }
   const expected = secretSnap.exists ? String((secretSnap.data() as { expectedCode?: string }).expectedCode ?? '') : '';
   const correct  = expected.trim().length > 0 && code.trim().toLowerCase() === expected.trim().toLowerCase();
