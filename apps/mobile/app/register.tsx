@@ -180,7 +180,7 @@ export default function RegisterScreen() {
           label={t('register.captainPhone')}
           value={captainPhone}
           onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
-          placeholder="+972 50 000 0000"
+          placeholder={t('register.phonePlaceholder')}
           keyboardType="phone-pad"
           error={errors.captainPhone}
           className="mb-6"
