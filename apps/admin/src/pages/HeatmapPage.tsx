@@ -179,7 +179,7 @@ export default function HeatmapPage() {
             </div>
           </Marker>
           <Marker longitude={raceConfig.gate.lng} latitude={raceConfig.gate.lat} anchor="center">
-            <div title="Gate — Matchmaking" className="w-4 h-4 rounded-full border-2 border-white shadow-lg" style={{ backgroundColor: STATION_COLOR.gate }} />
+            <div title="Gate — Showdown" className="w-4 h-4 rounded-full border-2 border-white shadow-lg" style={{ backgroundColor: STATION_COLOR.gate }} />
           </Marker>
 
           {/* Station markers (live: green/gold tasks + orange Tene zones) */}

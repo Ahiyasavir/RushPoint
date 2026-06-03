@@ -105,7 +105,7 @@ const en: Dict = {
   'dash.beingJudged': 'Being judged',
   'slot.green': 'Open Field Mission',
   'slot.greenN': 'Field Mission {n}',
-  'slot.gate': 'Matchmaking Duel',
+  'slot.gate': 'Showdown',
   'slot.orange': 'Find the Tene',
   'slot.gold': 'Craft & Judge',
 
@@ -404,7 +404,7 @@ const he: Dict = {
   'dash.beingJudged': 'בשיפוט',
   'slot.green': 'משימת שטח פתוח',
   'slot.greenN': 'משימת שדה {n}',
-  'slot.gate': 'דו-קרב זיווג',
+  'slot.gate': 'דו-קרב',
   'slot.orange': 'מצאו את הטנא',
   'slot.gold': 'יצירה ושיפוט',
 
@@ -458,9 +458,9 @@ const he: Dict = {
   'match.rematchWaiting': 'ממתינים ליריב חדש — רק המנצח ממשיך.',
   'match.cooldown': 'המתנה לפני הדו-קרב הבא — תחזרו לתור אוטומטית.',
   'match.soloClear': '✅ הקבוצה האחרונה בשער — אתם ממשיכים אוטומטית!',
-  'match.bypassed': 'אין זיווג — המשיכו לסל.',
+  'match.bypassed': 'אין דו-קרב — המשיכו לסל.',
   'match.mustDuel': 'חובה לנצח בדו-קרב כדי להתקדם. היכנסו לתור כשאתם מוכנים.',
-  'match.joinQueue': 'כניסה לתור הזיווג',
+  'match.joinQueue': 'כניסה לתור הדו-קרב',
 
   // Basket zone
   'basket.title': 'מצאו את הסל שלכם',
