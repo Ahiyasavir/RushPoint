@@ -14,6 +14,7 @@ import { Button } from '../src/components/Button';
 import { Input } from '../src/components/Input';
 import { useToast } from '../src/components/Toast';
 import { useTranslation } from '../src/i18n';
+import { getOneShotLocation } from '../src/hooks/oneShotLocation';
 
 // The slot mirrors a client-safe `smart` config from the task doc onto the
 // active slot. We read it straight off gameState (no extra Firestore round-trip).
@@ -111,11 +112,19 @@ export default function SmartStationScreen() {
     if (!taskId || !code.trim() || submitting || locked) return;
     setSubmitting(true);
     try {
-      const fn = httpsCallable<{ taskId: string; code: string }, { correct: boolean; completed: boolean }>(
-        functions,
-        'submitStationCode',
-      );
-      const { data } = await fn({ taskId, code: code.trim() });
+      // Geofenced stations need a GPS fix; request a one-shot position. Non-geofenced
+      // stations never trigger a location prompt. A denied/unavailable fix leaves
+      // lat/lng undefined — the server then returns 'location-required' if it enforces.
+      let coords: { lat: number; lng: number } | null = null;
+      const radius = smart!.geofenceRadiusMeters;
+      if (typeof radius === 'number' && radius > 0) {
+        coords = await getOneShotLocation();
+      }
+      const fn = httpsCallable<
+        { taskId: string; code: string; lat?: number; lng?: number },
+        { correct: boolean; completed: boolean }
+      >(functions, 'submitStationCode');
+      const { data } = await fn({ taskId, code: code.trim(), lat: coords?.lat, lng: coords?.lng });
       if (data.correct && data.completed) {
         setWrongAttempts(0);
         setPhase('success');
@@ -133,8 +142,21 @@ export default function SmartStationScreen() {
           show(t('station.wrongCode'), 'error');
         }
       }
-    } catch {
-      show(t('station.codeError'), 'error');
+    } catch (err) {
+      const details = (err as { details?: { code?: string; distanceMetres?: number; radiusMetres?: number } })?.details;
+      if (details?.code === 'location-required') {
+        show(t('station.locationRequired'), 'error');
+      } else if (details?.code === 'too-far') {
+        show(
+          t('station.tooFar', {
+            distance: details.distanceMetres ?? 0,
+            radius: details.radiusMetres ?? 0,
+          }),
+          'error',
+        );
+      } else {
+        show(t('station.codeError'), 'error');
+      }
     } finally {
       setSubmitting(false);
     }
