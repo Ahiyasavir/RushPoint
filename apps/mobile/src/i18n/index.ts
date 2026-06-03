@@ -159,9 +159,9 @@ const en: Dict = {
   'match.rematchWaiting': 'Waiting for a new opponent — only the winner advances.',
   'match.cooldown': 'Cooldown before your rematch — you’ll rejoin the queue automatically.',
   'match.soloClear': '✅ Last team at the gate — you advance automatically!',
-  'match.bypassed': 'No match — proceed to basket.',
+  'match.bypassed': 'No Showdown — proceed to basket.',
   'match.mustDuel': 'You must win a duel to advance. Enter the queue when ready.',
-  'match.joinQueue': 'Enter Match Queue',
+  'match.joinQueue': 'Enter Showdown Queue',
 
   // Basket zone
   'basket.title': 'Find Your Basket',
