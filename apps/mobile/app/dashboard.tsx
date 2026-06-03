@@ -37,7 +37,6 @@ import Animated, {
 
 // Slot shape is mirrored from the store (LiveSlot / LiveJudging).
 type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
-type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 type FirestoreSlot = LiveSlot;
 type JudgingState  = LiveJudging;
 
