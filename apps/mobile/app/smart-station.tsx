@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, ScrollView, ActivityIndicator, Pressable, Image, Linking } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,6 +51,28 @@ export default function SmartStationScreen() {
   const [attempts, setAttempts] = useState(0);
   const [submitting, setSubmitting] = useState(false);
 
+  // Brute-force cooldown: lock the field for 60s after 3 consecutive wrong codes.
+  const [wrongAttempts, setWrongAttempts] = useState(0);
+  const [lockedUntil, setLockedUntil] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const locked = lockedUntil != null && now < lockedUntil.getTime();
+  const lockSecondsLeft = locked ? Math.ceil((lockedUntil!.getTime() - now) / 1000) : 0;
+
+  // Tick once per second while locked so the countdown updates; auto-reset on expiry.
+  useEffect(() => {
+    if (lockedUntil == null) return;
+    const id = setInterval(() => {
+      const ts = Date.now();
+      if (ts >= lockedUntil.getTime()) {
+        setLockedUntil(null);
+        setWrongAttempts(0);
+        clearInterval(id);
+      }
+      setNow(ts);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [lockedUntil]);
+
   // photo_upload
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,7 +108,7 @@ export default function SmartStationScreen() {
 
   // ── Code verification ───────────────────────────────────────────────────
   async function submitCode() {
-    if (!taskId || !code.trim() || submitting) return;
+    if (!taskId || !code.trim() || submitting || locked) return;
     setSubmitting(true);
     try {
       const fn = httpsCallable<{ taskId: string; code: string }, { correct: boolean; completed: boolean }>(
@@ -95,12 +117,21 @@ export default function SmartStationScreen() {
       );
       const { data } = await fn({ taskId, code: code.trim() });
       if (data.correct && data.completed) {
+        setWrongAttempts(0);
         setPhase('success');
       } else {
         setAttempts((n) => n + 1);
         setCode('');
-        if (flag(smart!.showFailureScreen)) setPhase('failure');
-        else show(t('station.wrongCode'), 'error');
+        const nextWrong = wrongAttempts + 1;
+        setWrongAttempts(nextWrong);
+        if (nextWrong >= 3) {
+          setLockedUntil(new Date(Date.now() + 60_000));
+          setNow(Date.now());
+        } else if (flag(smart!.showFailureScreen)) {
+          setPhase('failure');
+        } else {
+          show(t('station.wrongCode'), 'error');
+        }
       }
     } catch {
       show(t('station.codeError'), 'error');
@@ -278,9 +309,19 @@ export default function SmartStationScreen() {
               placeholder={t('station.codePlaceholder')}
               autoCapitalize="characters"
               autoCorrect={false}
-              editable={!submitting && (attemptsLeft == null || attemptsLeft > 0)}
+              editable={!submitting && !locked && (attemptsLeft == null || attemptsLeft > 0)}
               className="mb-3"
             />
+            {locked && (
+              <View className="mb-3 p-3 rounded-2xl border border-neon-red/40 bg-neon-red/10">
+                <Text variant="caption" className="text-neon-red font-semibold text-start">
+                  {t('station.tooManyAttempts')}
+                </Text>
+                <Text variant="caption" className="text-neon-red mt-1 text-start">
+                  {t('station.tryAgainIn', { seconds: lockSecondsLeft })}
+                </Text>
+              </View>
+            )}
             {attemptsLeft != null && (
               <Text variant="caption" className={`mb-3 ${attemptsLeft <= 1 ? 'text-neon-red' : 'text-zinc-500'}`}>
                 {attemptsLeft > 0 ? t('station.attemptsLeft', { n: attemptsLeft }) : t('station.noAttempts')}
@@ -288,7 +329,7 @@ export default function SmartStationScreen() {
             )}
             <Button
               onPress={submitCode}
-              disabled={!code.trim() || submitting || (attemptsLeft != null && attemptsLeft <= 0)}
+              disabled={!code.trim() || submitting || locked || (attemptsLeft != null && attemptsLeft <= 0)}
               loading={submitting}
               fullWidth
             >
