@@ -148,10 +148,10 @@ const en: Dict = {
   'gate.penalty': 'Transit penalty: {pts} pts',
 
   // Matchmaking
-  'match.title': 'Gate Match',
+  'match.title': 'Showdown',
   'match.waiting': 'Scanning for an opponent…',
-  'match.matched': 'Matched vs {opponent}!',
-  'match.matchedShort': 'Opponent found — duel on!',
+  'match.matched': 'Showdown vs {opponent}!',
+  'match.matchedShort': 'Opponent found — Showdown on!',
   'match.rival': 'Rival',
   'match.won': '🏆 You won! +{bonus} pts',
   'match.lost': '😤 You lost — {delay}s delay',
