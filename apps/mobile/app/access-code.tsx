@@ -96,17 +96,17 @@ export default function AccessCodeScreen() {
         {/* ── Branding ──────────────────────────────────────────────────── */}
         <Animated.View
           entering={FadeInDown.delay(80).duration(460)}
-          className="mt-10 mb-14"
+          className="mt-12 mb-12"
         >
-          <Text variant="label" className="text-zinc-500 mb-2 tracking-widest uppercase text-xs">
+          <Text variant="label" className="text-zinc-500 mb-3 tracking-[0.25em] uppercase text-[11px]">
             {t('brand.tagline')}
           </Text>
-          <Text variant="display" className="font-brand text-white leading-none">Rush</Text>
-          <Text variant="display" className="font-brand text-neon-green leading-none animate-pulse-neon">
+          <Text variant="display" className="font-brand text-white leading-none text-5xl">Rush</Text>
+          <Text variant="display" className="font-brand text-neon-green leading-none text-5xl animate-pulse-neon">
             Point
           </Text>
-          <View className="w-16 h-px bg-neon-green mt-3 mb-4" style={{ opacity: 0.4 }} />
-          <Text variant="bodySmall" className="text-zinc-500 leading-relaxed">
+          <View className="w-16 h-px bg-neon-green mt-5 mb-5" style={{ opacity: 0.4 }} />
+          <Text variant="body" className="text-zinc-400 leading-relaxed">
             {t('access.intro')}
           </Text>
         </Animated.View>
@@ -122,7 +122,7 @@ export default function AccessCodeScreen() {
             autoCorrect={false}
             maxLength={10}
             error={codeError}
-            className="mb-6"
+            className="mb-8"
           />
         </Animated.View>
 

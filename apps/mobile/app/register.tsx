@@ -159,8 +159,8 @@ export default function RegisterScreen() {
             </View>
             <Text variant="caption" className="text-zinc-600">{t('register.codeLabel', { code: '' }).trim()}</Text>
           </View>
-          <Text variant="heading">{t('register.title')}</Text>
-          <Text variant="bodySmall" className="text-zinc-500 mt-1">
+          <Text variant="heading" className="text-3xl">{t('register.title')}</Text>
+          <Text variant="body" className="text-zinc-400 mt-1.5">
             {t('register.subtitle')}
           </Text>
         </Animated.View>
@@ -180,7 +180,7 @@ export default function RegisterScreen() {
         </Animated.View>
 
         {/* ── Captain Phone ─────────────────────────────────────────────── */}
-        <Animated.View entering={FadeInDown.delay(160).duration(440)}>
+        <Animated.View entering={FadeInDown.delay(160).duration(440)} className="mb-8">
           <Input
             label={t('register.captainPhone')}
             value={captainPhone}
@@ -188,13 +188,12 @@ export default function RegisterScreen() {
             placeholder={t('register.phonePlaceholder')}
             keyboardType="phone-pad"
             error={errors.captainPhone}
-            className="mb-6"
           />
         </Animated.View>
 
         {/* ── Participants ──────────────────────────────────────────────── */}
         <Text variant="label" className="mb-1">{t('register.participants')}</Text>
-        <Text variant="caption" className="text-zinc-600 mb-3">
+        <Text variant="caption" className="text-zinc-600 mb-4">
           {t('register.teamSizeHint', { min: MIN_PARTICIPANTS, max: MAX_PARTICIPANTS })}
         </Text>
 
