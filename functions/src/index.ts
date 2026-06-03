@@ -2782,7 +2782,7 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
   const taskData = taskSnap.exists
     ? (taskSnap.data() as {
         smart?: { verificationType?: string; autoCompleteOnSuccess?: boolean; geofenceRadiusMeters?: number };
-        coordinates?: { latitude: number; longitude: number };
+        coordinates?: { lat: number; lng: number };
       })
     : undefined;
   const smart = taskData?.smart;
@@ -2797,7 +2797,7 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
     if (typeof lat !== 'number' || typeof lng !== 'number') {
       throw new functions.https.HttpsError('failed-precondition', 'Location required', { code: 'location-required' });
     }
-    const distKm = haversineKm(lat, lng, taskData.coordinates.latitude, taskData.coordinates.longitude);
+    const distKm = haversineKm(lat, lng, taskData.coordinates.lat, taskData.coordinates.lng);
     if (distKm * 1000 > radiusMetres) {
       throw new functions.https.HttpsError('failed-precondition', 'Too far from the station', {
         code: 'too-far',
