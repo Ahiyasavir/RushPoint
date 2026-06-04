@@ -3019,7 +3019,17 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
       writeVerifyLog({ teamId, teamName, taskId, outcome: 'correct', codeProvided: maskedCode, streakCount: res.streak })
         .catch((e) => console.error('verifyLog write failed', e));
     }
-    return { correct: true, completed: true, ...res };
+    // Don't leak the internal `duplicate` flag into the callable response — return
+    // only the game-state fields so the client interface stays unchanged.
+    return {
+      correct: true,
+      completed: true,
+      taskScore: res.taskScore,
+      allDone: res.allDone,
+      streak: res.streak,
+      streakMultiplier: res.streakMultiplier,
+      streakBroken: res.streakBroken,
+    };
   }
 
   writeVerifyLog({ teamId, teamName, taskId, outcome: correct ? 'correct' : 'wrong', codeProvided: maskedCode, streakCount })
@@ -3095,7 +3105,9 @@ export const reviewStationSubmission = functions.https.onCall(async (data, conte
       teamId: sub.teamId, operatorId: context.auth!.uid, actionType: 'manual_unlock',
       reason: `Approved smart-station submission for ${sub.taskId}`,
     });
-    return { success: true, approved: true, ...res };
+    // Strip the internal `duplicate` flag — only surface the game-state updates.
+    const { duplicate: _duplicate, ...gameStateUpdates } = res;
+    return { success: true, approved: true, ...gameStateUpdates };
   }
   await ref.update({
     status: 'rejected', reviewedAt: nowIso, reviewedBy: context.auth!.uid,
