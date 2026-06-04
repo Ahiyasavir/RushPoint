@@ -14,6 +14,7 @@ import { isDuplicateStationCode, recordStationCode } from './scoring/stationVeri
 import { SLOT_COUNT, isValidCoord, INVALID_LOCATION } from '@rushpoint/shared';
 import {
   requireString,
+  requireNonNegativeInteger,
   optionalString,
   optionalNonNegativeNumber,
   optionalBoolean,
@@ -1900,10 +1901,12 @@ const STATION_HINT_PENALTY = 25;
 export const requestStationHint = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const uid = context.auth.uid;
-  const { taskId, hintIndex, lang } = (data ?? {}) as { taskId?: string; hintIndex?: number; lang?: string };
-  if (!taskId || typeof hintIndex !== 'number' || !Number.isInteger(hintIndex) || hintIndex < 0) {
-    throw new functions.https.HttpsError('invalid-argument', 'taskId and a valid hintIndex are required');
-  }
+  const raw = (data ?? {}) as { taskId?: unknown; hintIndex?: unknown; lang?: unknown };
+  const { taskId, hintIndex, lang } = validate(() => ({
+    taskId:    requireString(raw.taskId, 'taskId'),
+    hintIndex: requireNonNegativeInteger(raw.hintIndex, 'hintIndex'),
+    lang:      optionalString(raw.lang, 'lang', 8),
+  }));
 
   const [taskSnap, secretSnap] = await Promise.all([
     db.doc(taskPath(taskId)).get(),

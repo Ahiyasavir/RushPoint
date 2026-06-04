@@ -52,6 +52,18 @@ function validationCode(err: unknown): 'location-required' | 'too-far' | null {
   return c === 'location-required' || c === 'too-far' ? c : null;
 }
 
+// A strict payload-validation rejection (invalid-argument) from a hardened
+// callable carries a typed, bilingual `details.error` ({ field, message, messageHe }).
+// Surfacing it lets the player see exactly what was wrong with their input
+// (e.g. an over-long code) in their own language, instead of a generic failure.
+function validationDetail(err: unknown): { message: string; messageHe: string } | null {
+  const e = (err as { details?: { error?: { message?: unknown; messageHe?: unknown } } })?.details?.error;
+  if (e && typeof e.message === 'string' && typeof e.messageHe === 'string') {
+    return { message: e.message, messageHe: e.messageHe };
+  }
+  return null;
+}
+
 // True for transient network/latency failures that are safe to retry (offline,
 // timeout, server unavailable, or a raw fetch error with no Firebase code). A
 // definite server-logic error (unauthenticated/invalid-argument/…) is NOT retried,
@@ -240,6 +252,12 @@ export default function SmartStationScreen() {
           }),
           'error',
         );
+      } else if (validationDetail(err)) {
+        // Strict payload validation rejected the input (e.g. an over-long code) —
+        // show the server's typed, bilingual field-level reason, not a generic error.
+        setPending(null);
+        const vd = validationDetail(err)!;
+        show(isRtl ? vd.messageHe : vd.message, 'error');
       } else if (isRetriableError(err)) {
         // Transient network/latency error: queue + auto-retry, never a raw rejection.
         setPending(params);

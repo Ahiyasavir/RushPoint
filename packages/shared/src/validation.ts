@@ -80,6 +80,10 @@ const MESSAGES = {
     `${f} must be a finite number`,
     `השדה ${f} חייב להיות מספר תקין`,
   ],
+  integer: (f: string): [string, string] => [
+    `${f} must be a whole number`,
+    `השדה ${f} חייב להיות מספר שלם`,
+  ],
   nonNegative: (f: string): [string, string] => [
     `${f} must be zero or greater`,
     `השדה ${f} חייב להיות אפס או יותר`,
@@ -133,6 +137,15 @@ export function optionalString(
 export function optionalNonNegativeNumber(value: unknown, field: string): number | undefined {
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'number' || !Number.isFinite(value)) fail(field, 'type:number', MESSAGES.number(field));
+  if ((value as number) < 0) fail(field, 'nonNegative', MESSAGES.nonNegative(field));
+  return value as number;
+}
+
+/** Required finite, non-negative integer (e.g. a hint index). */
+export function requireNonNegativeInteger(value: unknown, field: string): number {
+  if (value === undefined || value === null) fail(field, 'required', MESSAGES.required(field));
+  if (typeof value !== 'number' || !Number.isFinite(value)) fail(field, 'type:number', MESSAGES.number(field));
+  if (!Number.isInteger(value as number)) fail(field, 'type:integer', MESSAGES.integer(field));
   if ((value as number) < 0) fail(field, 'nonNegative', MESSAGES.nonNegative(field));
   return value as number;
 }

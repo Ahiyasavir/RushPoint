@@ -181,6 +181,26 @@ async function main() {
     check('requestClueHint succeeds', false, e.message);
   }
 
+  // 6b. Strict payload validation — a malformed submitStationCode payload (over-long
+  // code) is rejected with a typed, bilingual invalid-argument error, never a crash.
+  try {
+    let rejected = false;
+    let detail = null;
+    try {
+      await call('submitStationCode', { taskId: 't1', code: 'x'.repeat(200) });
+    } catch (e) {
+      rejected = e?.code === 'functions/invalid-argument';
+      detail = e?.details?.error ?? null;
+    }
+    check('submitStationCode rejects an over-long code (invalid-argument)', rejected);
+    check('  validation error is typed + bilingual (field/message/messageHe)',
+      !!detail && typeof detail.field === 'string' &&
+      typeof detail.message === 'string' && typeof detail.messageHe === 'string',
+      JSON.stringify(detail));
+  } catch (e) {
+    check('submitStationCode payload validation runs without crashing', false, e.message);
+  }
+
   // 7. Flash mission — admin broadcast lands on the canonical public path.
   try {
     const res = await call('pushFlashMission', {
