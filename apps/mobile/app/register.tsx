@@ -218,7 +218,8 @@ export default function RegisterScreen() {
             {participants.length > 1 && (
               <Pressable
                 onPress={() => removeParticipant(i)}
-                className="w-10 h-[52px] rounded-xl bg-app-raised border border-glass-border items-center justify-center active:bg-app-card"
+                hitSlop={6}
+                className="w-[52px] h-[52px] rounded-xl bg-app-raised border border-glass-border items-center justify-center active:bg-app-card"
               >
                 <Text variant="subheading" className="text-zinc-400 leading-none">×</Text>
               </Pressable>
@@ -233,7 +234,7 @@ export default function RegisterScreen() {
         <View className="mb-6">
           <Button
             variant="ghost"
-            size="sm"
+            size="md"
             onPress={addParticipant}
             disabled={participants.length >= MAX_PARTICIPANTS}
           >
@@ -247,7 +248,7 @@ export default function RegisterScreen() {
           <Text variant="caption" className="text-zinc-400 leading-relaxed mb-3">
             {t('register.waiverBody')}
           </Text>
-          <Pressable onPress={() => router.push('/waiver')} className="mb-4 active:opacity-70">
+          <Pressable onPress={() => router.push('/waiver')} hitSlop={10} className="mb-4 active:opacity-70">
             <Text variant="bodySmall" className="text-neon-green">
               {t('register.waiverReadFull')}
             </Text>

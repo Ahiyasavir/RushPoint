@@ -164,6 +164,8 @@ const en: Dict = {
   'match.bypassed': 'No Showdown — proceed to basket.',
   'match.mustDuel': 'You must win a duel to advance. Enter the queue when ready.',
   'match.joinQueue': 'Enter Showdown Queue',
+  'match.errorTitle': 'Error',
+  'match.joinError': 'Could not join the duel queue. Try again.',
 
   // Basket zone
   'basket.title': 'Find Your Basket',
@@ -181,6 +183,7 @@ const en: Dict = {
   'craft.sprintWindow': 'Sprint window',
   'craft.sprintLeft': '{sec}s to reach the judge',
   'craft.sprintExpired': 'Late — exponential penalty accumulating!',
+  'craft.late': '⚠️ LATE',
   'craft.paused': 'Clock paused',
   'craft.waitingJudge': 'Arrival recorded — waiting for a judge. Your time is locked.',
   'craft.menuTitle': 'Fill your Tene',
@@ -477,6 +480,8 @@ const he: Dict = {
   'match.bypassed': 'אין דו-קרב — המשיכו לסל.',
   'match.mustDuel': 'חובה לנצח בדו-קרב כדי להתקדם. היכנסו לתור כשאתם מוכנים.',
   'match.joinQueue': 'כניסה לתור הדו-קרב',
+  'match.errorTitle': 'שגיאה',
+  'match.joinError': 'לא ניתן להצטרף לתור הדו-קרב. נסו שוב.',
 
   // Basket zone
   'basket.title': 'מצאו את הסל שלכם',
@@ -496,6 +501,7 @@ const he: Dict = {
   'craft.paused': 'השעון מושהה',
   'craft.waitingJudge': 'ההגעה נרשמה — ממתינים לשופט. הזמן שלכם ננעל.',
   'craft.sprintExpired': 'איחור — עונש מצטבר!',
+  'craft.late': '⚠️ איחור',
   'craft.menuTitle': 'מלאו את הטנא',
   'craft.menuHint': 'סמנו כל מוצר שהכנתם — הבחירות מוצגות לשופט.',
   'craft.minShort': 'דק׳',

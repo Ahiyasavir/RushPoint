@@ -318,15 +318,15 @@ export default function DashboardScreen() {
           <View className="flex-row items-center gap-2">
             <Pressable
               onPress={() => router.push('/map')}
-              hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20 active:scale-95 transition-all duration-200"
+              hitSlop={12}
+              className="px-3 py-2 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-green font-mono">🗺  {t('map.open')}</Text>
             </Pressable>
             <Pressable
               onPress={() => router.push('/sos')}
-              hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20 active:scale-95 transition-all duration-200"
+              hitSlop={12}
+              className="px-3 py-2 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-red font-mono">📣 {t('staff.open')}</Text>
             </Pressable>
@@ -647,6 +647,7 @@ function RequestCheckInButton({ slot }: { slot: FirestoreSlot }) {
       <Pressable
         onPress={() => void request()}
         disabled={busy}
+        hitSlop={8}
         className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20 active:scale-95 transition-all duration-200"
       >
         <Text variant="bodySmall" className="text-neon-green font-semibold">
@@ -690,6 +691,7 @@ function ClueHintButton() {
           <Pressable
             onPress={() => void request()}
             disabled={busy}
+            hitSlop={8}
             className="flex-1 py-2.5 rounded-xl bg-neon-gold/10 border border-neon-gold/30 items-center active:bg-neon-gold/20"
           >
             <Text variant="bodySmall" className="text-neon-gold font-semibold">
@@ -803,7 +805,7 @@ function CraftingCountdownCard({
             variant="mono"
             className={`text-3xl font-bold ${sprintExpired ? 'text-neon-red animate-pulse-neon' : 'text-neon-orange'}`}
           >
-            {sprintExpired ? '⚠️ LATE' : formatElapsed(sprintLeft)}
+            {sprintExpired ? t('craft.late') : formatElapsed(sprintLeft)}
           </Text>
           {!sprintExpired && (
             <Text variant="caption" className="text-zinc-500 mt-1 text-center">
@@ -873,7 +875,7 @@ function GateCard({ slot, matchStatus, gateCooldownUntil, nowMs }: {
         Alert.alert(t('match.title'), t('match.matched', { opponent: data.opponentName ?? '?' }));
       }
     } catch {
-      Alert.alert('Error', 'Could not join match queue. Try again.');
+      Alert.alert(t('match.errorTitle'), t('match.joinError'));
     } finally {
       setJoining(false);
     }
