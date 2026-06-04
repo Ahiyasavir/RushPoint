@@ -1,11 +1,14 @@
-import React, { useCallback, useState } from 'react';
-import type { StationSubmission, StationSubmissionStatus, VerificationType } from '@rushpoint/shared';
+import React, { useCallback, useEffect, useState } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import type { StationSubmission, StationSubmissionStatus, VerificationType, VerifyAttempt } from '@rushpoint/shared';
 import { callable } from '../services/api';
+import { db, APP_ID } from '../services/firebase';
 import { usePoll } from '../hooks/usePoll';
 import { useI18n } from '../i18n';
 
 const listStationReviews = callable<{ status?: string }, { reviews: StationSubmission[] }>('listStationReviews');
 const reviewStationSubmission = callable<{ submissionId: string; approve: boolean; rejectionReason?: string }>('reviewStationSubmission');
+const listStationVerifyLog = callable<{ taskId: string; limit?: number }, { attempts: VerifyAttempt[] }>('listStationVerifyLog');
 
 const FILTERS: StationSubmissionStatus[] = ['pending', 'approved', 'rejected'];
 
@@ -38,6 +41,23 @@ export default function StationReviewPage() {
   const [notice, setNotice] = useState('');
   const [actingId, setActingId] = useState<string | null>(null);
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  // Code-verification stations, for the live Verify Log panels.
+  const [codeStations, setCodeStations] = useState<{ id: string; title: string }[]>([]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const snap = await getDocs(collection(db, `artifacts/${APP_ID}/public/data/tasks`));
+        const opts = snap.docs
+          .filter((d) => (d.data() as { smart?: { verificationType?: string } }).smart?.verificationType === 'code_verification')
+          .map((d) => ({ id: d.id, title: (d.data() as { title?: string }).title ?? d.id }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+        setCodeStations(opts);
+      } catch (e) {
+        console.error('[review] load code stations failed:', e);
+      }
+    })();
+  }, []);
 
   const load = useCallback(async () => {
     setError('');
@@ -119,6 +139,104 @@ export default function StationReviewPage() {
               onReject={() => void act(s, false)}
             />
           ))}
+        </div>
+      )}
+
+      {codeStations.length > 0 && (
+        <section className="mt-8">
+          <h2 className="font-brand text-lg font-bold text-white mb-1">{t('verifyLog.title')}</h2>
+          <p className="text-zinc-500 text-sm mb-3">{t('verifyLog.subtitle')}</p>
+          <div className="space-y-2">
+            {codeStations.map((s) => (
+              <VerifyLogPanel key={s.id} taskId={s.id} title={s.title} />
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return '';
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.round(m / 60)}h`;
+}
+
+const OUTCOME_TONE: Record<VerifyAttempt['outcome'], string> = {
+  correct: 'text-neon-green border-neon-green/40',
+  wrong: 'text-neon-red border-neon-red/40',
+  'too-far': 'text-neon-orange border-neon-orange/40',
+  'limit-exceeded': 'text-neon-orange border-neon-orange/40',
+};
+
+// Collapsible live (10s poll) feed of every verification attempt for one station.
+function VerifyLogPanel({ taskId, title }: { taskId: string; title: string }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [attempts, setAttempts] = useState<VerifyAttempt[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const res = await listStationVerifyLog({ taskId, limit: 50 });
+      setAttempts(res.attempts ?? []);
+    } catch (e) {
+      setError(t('verifyLog.loadError'));
+      console.error('[review] listStationVerifyLog failed:', e);
+    } finally {
+      setLoaded(true);
+    }
+  }, [taskId, t]);
+
+  usePoll(load, 10_000, open);
+
+  return (
+    <div className="rounded-2xl border border-glass-border bg-app-card">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 text-start"
+      >
+        <span className="text-white font-semibold text-sm">{title}</span>
+        <span className="text-zinc-500 text-xs font-mono">{open ? '▾' : '▸'} {taskId}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4">
+          {error && <p className="text-neon-red text-xs mb-2">{error}</p>}
+          {!loaded ? (
+            <p className="text-zinc-500 text-sm">{t('review.loading')}</p>
+          ) : attempts.length === 0 ? (
+            <p className="text-zinc-500 text-sm">{t('verifyLog.empty')}</p>
+          ) : (
+            <ul className="space-y-1.5">
+              {attempts.map((a, i) => (
+                <li
+                  key={`${a.timestamp}-${i}`}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-app-surface px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="text-white text-sm truncate">{a.teamName || t('review.unknownTeam')}</p>
+                    <p className="text-[11px] text-zinc-500 font-mono">
+                      {t('verifyLog.code')}: {a.codeProvided} · {t('verifyLog.attempt', { n: a.attemptsCount })}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border ${OUTCOME_TONE[a.outcome]}`}>
+                      {t(`verifyLog.outcome.${a.outcome}`)}
+                    </span>
+                    <span className="text-[11px] text-zinc-500">{t('verifyLog.ago', { t: timeAgo(a.timestamp) })}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>

@@ -646,3 +646,18 @@ export interface StationTeamRow {
   slotIndex: number;
   startedAt: string | null;
 }
+
+/** One smart-station verification attempt — `listStationVerifyLog` / live monitoring feed. */
+export type VerifyOutcome = 'correct' | 'wrong' | 'too-far' | 'limit-exceeded';
+
+export interface VerifyAttempt {
+  taskId: string;
+  teamId: string;
+  teamName: string | null;
+  timestamp: string;
+  outcome: VerifyOutcome;
+  attemptsCount: number;
+  codeProvided: string;
+  distanceMetres?: number | null;
+  streakCount?: number | null;
+}

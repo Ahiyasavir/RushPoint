@@ -2860,6 +2860,47 @@ function haversineKm(aLat: number, aLng: number, bLat: number, bLng: number): nu
   return R * 2 * Math.asin(Math.sqrt(h));
 }
 
+// ─── Smart-station verify log (live monitoring) ───────────────────────────────
+// Records EVERY verification attempt to a public/data subcollection so the Control
+// Room can watch wrong guesses / repeated attempts in real time. Fire-and-forget:
+// callers must `.catch()` it and never await on the hot path. The running per-team
+// attempt count is kept in a counter doc and incremented in the same transaction.
+interface VerifyLogInput {
+  teamId: string;
+  teamName: string | null;
+  taskId: string;
+  outcome: 'correct' | 'wrong' | 'too-far' | 'limit-exceeded';
+  codeProvided: string;
+  distanceMetres?: number;
+  streakCount?: number;
+}
+
+async function writeVerifyLog(entry: VerifyLogInput): Promise<void> {
+  const base = `artifacts/${APP_ID}/public/data/stationVerifyLog/${entry.taskId}`;
+  const countsRef  = db.doc(`${base}/meta/counts`);
+  const attemptRef = db.collection(`${base}/attempts`).doc();
+  await db.runTransaction(async (tx) => {
+    const countsSnap = await tx.get(countsRef);
+    const byTeam = (countsSnap.exists ? (countsSnap.data() as { byTeam?: Record<string, number> }).byTeam : undefined) ?? {};
+    const attemptsCount = (byTeam[entry.teamId] ?? 0) + 1;
+    tx.set(countsRef, { byTeam: { ...byTeam, [entry.teamId]: attemptsCount } }, { merge: true });
+    tx.set(attemptRef, {
+      taskId:        entry.taskId,
+      teamId:        entry.teamId,
+      teamName:      entry.teamName ?? null,
+      timestamp:     new Date().toISOString(),
+      outcome:       entry.outcome,
+      attemptsCount,
+      codeProvided:  entry.codeProvided,
+      distanceMetres: entry.distanceMetres ?? null,
+      streakCount:    entry.streakCount ?? null,
+    });
+  });
+}
+
+// Mask a submitted code for the log: keep the first 2 chars, redact the rest.
+const maskCode = (c: string) => `${c.slice(0, 2)}***`;
+
 export const submitStationCode = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const teamId = context.auth.uid;
@@ -2867,10 +2908,16 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
   if (!taskId || typeof code !== 'string') {
     throw new functions.https.HttpsError('invalid-argument', 'taskId and code are required');
   }
-  const [taskSnap, secretSnap] = await Promise.all([
+  const [taskSnap, secretSnap, profSnap, gsSnap] = await Promise.all([
     db.doc(taskPath(taskId)).get(),
     db.doc(`artifacts/${APP_ID}/stationSecrets/${taskId}`).get(),
+    db.doc(`${userPath(teamId)}/profile/team`).get(),
+    db.doc(`${userPath(teamId)}/gameState/current`).get(),
   ]);
+  const teamName = profSnap.exists ? ((profSnap.data() as { name?: string }).name ?? null) : null;
+  const rawStreak = gsSnap.exists ? (gsSnap.data() as { smartStreak?: number }).smartStreak : undefined;
+  const streakCount = typeof rawStreak === 'number' ? rawStreak : undefined;
+  const maskedCode = maskCode(code);
   const taskData = taskSnap.exists
     ? (taskSnap.data() as {
         smart?: { verificationType?: string; autoCompleteOnSuccess?: boolean; geofenceRadiusMeters?: number };
@@ -2891,9 +2938,12 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
     }
     const distKm = haversineKm(lat, lng, taskData.coordinates.lat, taskData.coordinates.lng);
     if (distKm * 1000 > radiusMetres) {
+      const distanceMetres = Math.round(distKm * 1000);
+      writeVerifyLog({ teamId, teamName, taskId, outcome: 'too-far', codeProvided: maskedCode, distanceMetres, streakCount })
+        .catch((e) => console.error('verifyLog write failed', e));
       throw new functions.https.HttpsError('failed-precondition', 'Too far from the station', {
         code: 'too-far',
-        distanceMetres: Math.round(distKm * 1000),
+        distanceMetres,
         radiusMetres,
       });
     }
@@ -2901,11 +2951,29 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
   const expected = secretSnap.exists ? String((secretSnap.data() as { expectedCode?: string }).expectedCode ?? '') : '';
   const correct  = expected.trim().length > 0 && code.trim().toLowerCase() === expected.trim().toLowerCase();
 
+  writeVerifyLog({ teamId, teamName, taskId, outcome: correct ? 'correct' : 'wrong', codeProvided: maskedCode, streakCount })
+    .catch((e) => console.error('verifyLog write failed', e));
+
   if (correct && smart.autoCompleteOnSuccess !== false) {
     const res = await completeSmartStation(teamId, taskId);
     return { correct: true, completed: true, ...res };
   }
   return { correct, completed: false };
+});
+
+// ─── listStationVerifyLog (admin) ─────────────────────────────────────────────
+// Control Room: most-recent verification attempts for a station, newest-first.
+export const listStationVerifyLog = functions.https.onCall(async (data, context) => {
+  assertJudge(context);
+  const { taskId, limit } = (data ?? {}) as { taskId?: string; limit?: number };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
+  const max = typeof limit === 'number' && limit > 0 ? Math.min(limit, 200) : 50;
+  const snap = await db
+    .collection(`artifacts/${APP_ID}/public/data/stationVerifyLog/${taskId}/attempts`)
+    .orderBy('timestamp', 'desc')
+    .limit(max)
+    .get();
+  return { attempts: snap.docs.map((d) => d.data()) };
 });
 
 // ─── requestStationReview (team) ──────────────────────────────────────────────
