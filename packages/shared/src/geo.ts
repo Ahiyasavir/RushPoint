@@ -134,6 +134,57 @@ export function stationCoord(taskId: string): GeoPoint | undefined {
   return s ? { lat: s.lat, lng: s.lng } : undefined;
 }
 
+// ─── Coordinate validation & distance (GPS hardening) ─────────────────────────
+// Bad GPS fixes (NaN, Infinity, out-of-range lat/lng) must never crash routing or
+// the location heatmap. Validate at every boundary and surface a typed error
+// instead of letting a silent NaN propagate through the maths.
+
+/** Stable error code for malformed / out-of-range coordinates. */
+export const INVALID_LOCATION = 'INVALID_LOCATION' as const;
+
+/** True when lat/lng are finite numbers within valid geographic bounds. */
+export function isValidCoord(lat: unknown, lng: unknown): boolean {
+  return (
+    typeof lat === 'number' &&
+    typeof lng === 'number' &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180
+  );
+}
+
+/** Typed error for invalid coordinates (`code === INVALID_LOCATION`). */
+export class LocationError extends Error {
+  readonly code = INVALID_LOCATION;
+  constructor(message = 'Invalid coordinates') {
+    super(message);
+    this.name = 'LocationError';
+  }
+}
+
+/**
+ * Great-circle distance in kilometres between two points. Throws
+ * `LocationError(INVALID_LOCATION)` on malformed input instead of silently
+ * returning NaN/Infinity, so callers can handle bad GPS explicitly.
+ */
+export function haversineKm(a: GeoPoint, b: GeoPoint): number {
+  if (!a || !b || !isValidCoord(a.lat, a.lng) || !isValidCoord(b.lat, b.lng)) {
+    throw new LocationError();
+  }
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((a.lat * Math.PI) / 180) *
+      Math.cos((b.lat * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(h));
+}
+
 // ─── Web-Mercator projection (for the mobile "You Are Here" overlay) ──────────
 // The mobile mission map is a STATIC image. To overlay a live GPS dot accurately
 // we render the image with a KNOWN center+zoom (not auto-fit) and project the

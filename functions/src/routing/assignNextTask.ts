@@ -1,23 +1,10 @@
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../firebase';
+import { haversineKm, isValidCoord } from '@rushpoint/shared';
 import type { Task, GeoPoint, TaskRecommendation } from '@rushpoint/shared';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 const tasksCol = () => `artifacts/${APP_ID}/public/data/tasks`;
-
-// ─── Geo ──────────────────────────────────────────────────────────────────────
-
-function haversineKm(a: GeoPoint, b: GeoPoint): number {
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) *
-      Math.cos((b.lat * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.asin(Math.sqrt(h));
-}
 
 // ─── Priority sub-formulas ────────────────────────────────────────────────────
 
@@ -29,7 +16,7 @@ function loadFactor(task: Task): number {
 
 /** Transit time in minutes, assuming 5 km/h walking pace */
 function transitMinutes(teamLocation: GeoPoint, task: Task): number {
-  if (!task.coordinates) return 5;
+  if (!task.coordinates || !isValidCoord(task.coordinates.lat, task.coordinates.lng)) return 5;
   return haversineKm(teamLocation, task.coordinates) * 12;
 }
 
@@ -121,9 +108,10 @@ export async function buildRecommendations(
     .map((task) => ({
       task,
       priority: priorityScore(task, teamLocation, skillRatio),
-      distanceKm: task.coordinates
-        ? haversineKm(teamLocation, task.coordinates)
-        : 0,
+      distanceKm:
+        task.coordinates && isValidCoord(task.coordinates.lat, task.coordinates.lng)
+          ? haversineKm(teamLocation, task.coordinates)
+          : 0,
     }))
     .sort((a, b) => b.priority - a.priority)
     .slice(0, limit)

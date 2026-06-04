@@ -11,7 +11,7 @@ import {
 } from './scoring/teneProducts';
 import { calculateTaskScore } from './scoring/taskScore';
 import { isDuplicateStationCode, recordStationCode } from './scoring/stationVerification';
-import { SLOT_COUNT } from '@rushpoint/shared';
+import { SLOT_COUNT, isValidCoord, INVALID_LOCATION } from '@rushpoint/shared';
 import {
   computeTransitPenalty,
   computeSprintPenalty,
@@ -149,8 +149,8 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
     lng: number;
     targetType?: 'green' | 'gold';
   };
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    throw new functions.https.HttpsError('invalid-argument', 'lat and lng are required numbers');
+  if (!isValidCoord(lat, lng)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Location unavailable', { code: INVALID_LOCATION });
   }
   const teamId = context.auth.uid;
 
@@ -264,6 +264,9 @@ export const getRecommendedTasks = functions.https.onCall(async (data, context) 
     lng: number;
     targetType: 'green' | 'gold';
   };
+  if (!isValidCoord(lat, lng)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Location unavailable', { code: INVALID_LOCATION });
+  }
   const teamId = context.auth.uid;
 
   // Read game state server-side so completedTaskIds can't be spoofed
@@ -2312,8 +2315,8 @@ export const updateLocation = functions.https.onCall(async (data, context) => {
   const { lat, lng, teamName, slotType } = data as {
     lat?: number; lng?: number; teamName?: string; slotType?: string;
   };
-  if (typeof lat !== 'number' || typeof lng !== 'number') {
-    throw new functions.https.HttpsError('invalid-argument', 'lat and lng must be numbers');
+  if (!isValidCoord(lat, lng)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Location unavailable', { code: INVALID_LOCATION });
   }
   await db.doc(`artifacts/${APP_ID}/public/data/teamLocations/${context.auth.uid}`).set({
     teamId:    context.auth.uid,

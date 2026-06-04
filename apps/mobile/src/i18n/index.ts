@@ -140,6 +140,7 @@ const en: Dict = {
   'map.back': '← Back',
   'map.youAreHere': 'The blue dot is your live location.',
   'map.offMap': "You're outside the race area",
+  'location.unavailable': 'Location unavailable',
 
   // Gate sprint (orange slot)
   'gate.title': 'Race to Bible Park!',
@@ -458,6 +459,7 @@ const he: Dict = {
   'map.back': '← חזרה',
   'map.youAreHere': 'הנקודה הכחולה היא המיקום החי שלכם.',
   'map.offMap': 'אתם מחוץ לאזור המרוץ',
+  'location.unavailable': 'מיקום לא זמין',
 
   // Gate sprint (orange slot)
   'gate.title': 'רוצו לפארק התנ"ך!',
