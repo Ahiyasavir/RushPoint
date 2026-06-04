@@ -665,8 +665,13 @@ function ClueHintButton() {
   const { show } = useToast();
   const [armed, setArmed]   = useState(false);
   const [busy, setBusy]     = useState(false);
+  // Ref guard: a rapid double-tap can fire two onPress events before `busy`
+  // re-renders the disabled state, so block re-entry synchronously here too.
+  const inFlight = useRef(false);
 
   async function request() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await httpsCallable(functions, 'requestClueHint')({});
@@ -674,6 +679,7 @@ function ClueHintButton() {
     } catch {
       show(t('hint.error'), 'error');
     } finally {
+      inFlight.current = false;
       setBusy(false);
       setArmed(false);
     }

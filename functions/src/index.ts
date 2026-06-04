@@ -1843,7 +1843,9 @@ const CLUE_HINT_PENALTY = 50;
 // ─── requestClueHint ──────────────────────────────────────────────────────────
 // A team trades points for a hint on their active task. Each hint adds a fixed
 // penalty to gameState.bonusPenalty (server-authoritative — deducted from the
-// final score). Runs in a transaction so rapid double-taps each count cleanly.
+// final score). Runs in a transaction; a short dedup window collapses rapid
+// double-taps into a single charge (see CLUE_HINT_DEDUP_MS).
+const CLUE_HINT_DEDUP_MS = 2000;
 export const requestClueHint = functions.https.onCall(async (_data, context) => {
   if (!context.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Login required');
@@ -1856,9 +1858,18 @@ export const requestClueHint = functions.https.onCall(async (_data, context) => 
     if (!snap.exists) {
       throw new functions.https.HttpsError('failed-precondition', 'No active game');
     }
-    const gs = snap.data() as { bonusPenalty?: number };
+    const gs = snap.data() as { bonusPenalty?: number; lastClueHintAt?: string };
+    const now = Date.now();
+    // Idempotency: a duplicate request landing within the dedup window (e.g. a
+    // rapid double-tap or a retried call) returns the existing penalty without
+    // charging a second time.
+    const lastAt = gs.lastClueHintAt ? Date.parse(gs.lastClueHintAt) : NaN;
+    if (!Number.isNaN(lastAt) && now - lastAt < CLUE_HINT_DEDUP_MS) {
+      return { bonusPenalty: gs.bonusPenalty ?? 0, penaltyApplied: 0, deduped: true };
+    }
     const newPenalty = (gs.bonusPenalty ?? 0) + CLUE_HINT_PENALTY;
-    tx.update(gsRef, { bonusPenalty: newPenalty, updatedAt: new Date().toISOString() });
+    const nowIso = new Date(now).toISOString();
+    tx.update(gsRef, { bonusPenalty: newPenalty, lastClueHintAt: nowIso, updatedAt: nowIso });
     return { bonusPenalty: newPenalty, penaltyApplied: CLUE_HINT_PENALTY };
   });
 });
