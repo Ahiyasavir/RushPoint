@@ -57,6 +57,16 @@ export interface LiveGame {
 
 export type SyncState = 'loading' | 'live' | 'error';
 
+// A smart-station code submission awaiting a successful round-trip. Held here (not
+// in the screen) so it survives navigation away from smart-station.tsx and can be
+// auto-retried when connectivity returns. One station is active at a time → one slot.
+export interface PendingStationSubmission {
+  taskId: string;
+  code: string;
+  lat?: number;
+  lng?: number;
+}
+
 interface GameState {
   // Team
   teamId: string | null;
@@ -73,6 +83,9 @@ interface GameState {
   syncState: SyncState;
   fromCache: boolean;
 
+  // Smart-station submission awaiting retry (offline/latency); null when none.
+  pendingStationSubmission: PendingStationSubmission | null;
+
   // Actions
   initTeam: (teamId: string, teamName: string, members: string[]) => void;
   completeSlot: (index: number, taskTitle?: string) => void;
@@ -80,6 +93,7 @@ interface GameState {
   setOnline: (online: boolean) => void;
   applyLiveGame: (game: LiveGame, fromCache: boolean) => void;
   setSyncState: (state: SyncState) => void;
+  setPendingStationSubmission: (sub: PendingStationSubmission | null) => void;
   resetGame: () => void;
 }
 
@@ -123,6 +137,7 @@ export const useGameStore = create<GameState>((set) => ({
   live:        null,
   syncState:   'loading',
   fromCache:   false,
+  pendingStationSubmission: null,
 
   initTeam: (teamId, teamName, members) =>
     set({
@@ -139,6 +154,8 @@ export const useGameStore = create<GameState>((set) => ({
     set({ live: game, score: game.score, syncState: 'live', fromCache }),
 
   setSyncState: (state) => set({ syncState: state }),
+
+  setPendingStationSubmission: (sub) => set({ pendingStationSubmission: sub }),
 
   completeSlot: (index, taskTitle) =>
     set((state) => {
@@ -159,6 +176,7 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       teamId: null, teamName: '', memberNames: [], score: 0,
       slots: buildInitialSlots(), live: null, syncState: 'loading', fromCache: false,
+      pendingStationSubmission: null,
     }),
 }));
 

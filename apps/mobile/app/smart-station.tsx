@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, ScrollView, ActivityIndicator, Pressable, Image, Linking } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -45,11 +45,31 @@ function formatDistance(m: number): string {
   return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
 }
 
+// A server validation error the player can act on (vs a transient network error).
+// These carry a `details.code` set by the submitStationCode callable.
+function validationCode(err: unknown): 'location-required' | 'too-far' | null {
+  const c = (err as { details?: { code?: string } })?.details?.code;
+  return c === 'location-required' || c === 'too-far' ? c : null;
+}
+
+// True for transient network/latency failures that are safe to retry (offline,
+// timeout, server unavailable, or a raw fetch error with no Firebase code). A
+// definite server-logic error (unauthenticated/invalid-argument/…) is NOT retried,
+// so we never loop forever on a real rejection.
+function isRetriableError(err: unknown): boolean {
+  const code = (err as { code?: string })?.code;
+  if (!code) return true; // raw fetch/timeout error → treat as network
+  return /(?:^|\/)(unavailable|deadline-exceeded|internal|cancelled|unknown|aborted)$/.test(code);
+}
+
 export default function SmartStationScreen() {
   const insets = useSafeAreaInsets();
   const { t, isRtl } = useTranslation();
   const { show } = useToast();
   const live = useGameStore((s) => s.live);
+  const isOnline = useGameStore((s) => s.isOnline);
+  const pending = useGameStore((s) => s.pendingStationSubmission);
+  const setPending = useGameStore((s) => s.setPendingStationSubmission);
 
   // Read the active slot + its smart config from the live mirror.
   const activeSlot = useMemo(
@@ -68,6 +88,11 @@ export default function SmartStationScreen() {
   const [code, setCode] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  // Offline/latency queue: a non-null `pending` (in the store) drives the "will retry
+  // when connected" banner and survives navigation; `retryTick` bumps on each failed
+  // network attempt to re-arm the backoff timer.
+  const [retryTick, setRetryTick] = useState(0);
+  const queued = pending != null;
 
   // Brute-force cooldown: lock the field for 60s after 3 consecutive wrong codes.
   const [wrongAttempts, setWrongAttempts] = useState(0);
@@ -120,6 +145,20 @@ export default function SmartStationScreen() {
     };
   }, [showDistance, stationCoords?.lat, stationCoords?.lng]);
 
+  // ── Offline/latency auto-retry ─────────────────────────────────────────────
+  // A queued submission retries with exponential backoff while online; going
+  // offline parks the timer (effect returns early) and reconnecting re-runs the
+  // effect to schedule the next attempt. runSubmission is reached through a ref so
+  // the effect (declared here, above the guards, to satisfy the Rules of Hooks)
+  // always calls the latest closure without re-subscribing every render.
+  const runRef = useRef<(p: { taskId: string; code: string; lat?: number; lng?: number }) => void>(() => {});
+  useEffect(() => {
+    if (!pending || !isOnline) return;
+    const delay = Math.min(30_000, 1500 * 2 ** Math.min(retryTick, 5));
+    const id = setTimeout(() => { void runRef.current(pending); }, delay);
+    return () => clearTimeout(id);
+  }, [pending, isOnline, retryTick]);
+
   // ── Loading / guards ──────────────────────────────────────────────────────
   if (!live) {
     return (
@@ -150,23 +189,21 @@ export default function SmartStationScreen() {
   const attemptsLeft = attemptLimit != null ? Math.max(0, attemptLimit - attempts) : null;
 
   // ── Code verification ───────────────────────────────────────────────────
-  async function submitCode() {
-    if (!taskId || !code.trim() || submitting || locked) return;
+  // Runs one submission round-trip. A transient network/latency failure does NOT
+  // surface a raw rejection: the submission is parked in the store and re-tried
+  // automatically (see the retry effect below). Only real validation results —
+  // wrong code, too-far, location-required — are shown to the player. The server
+  // is idempotent on (taskId, completed slot), so a retry can never double-complete.
+  async function runSubmission(params: { taskId: string; code: string; lat?: number; lng?: number }) {
     setSubmitting(true);
     try {
-      // Geofenced stations need a GPS fix; request a one-shot position. Non-geofenced
-      // stations never trigger a location prompt. A denied/unavailable fix leaves
-      // lat/lng undefined — the server then returns 'location-required' if it enforces.
-      let coords: { lat: number; lng: number } | null = null;
-      const radius = smart!.geofenceRadiusMeters;
-      if (typeof radius === 'number' && radius > 0) {
-        coords = await getOneShotLocation();
-      }
       const fn = httpsCallable<
         { taskId: string; code: string; lat?: number; lng?: number },
         { correct: boolean; completed: boolean }
       >(functions, 'submitStationCode');
-      const { data } = await fn({ taskId, code: code.trim(), lat: coords?.lat, lng: coords?.lng });
+      const { data } = await fn(params);
+      // Round-trip succeeded — clear any queued retry, then act on the real result.
+      setPending(null);
       if (data.correct && data.completed) {
         setWrongAttempts(0);
         setPhase('success');
@@ -185,24 +222,49 @@ export default function SmartStationScreen() {
         }
       }
     } catch (err) {
-      const details = (err as { details?: { code?: string; distanceMetres?: number; radiusMetres?: number } })?.details;
-      if (details?.code === 'location-required') {
+      const vc = validationCode(err);
+      if (vc === 'location-required') {
+        setPending(null);
         show(t('station.locationRequired'), 'error');
-      } else if (details?.code === 'too-far') {
+      } else if (vc === 'too-far') {
+        setPending(null);
+        const details = (err as { details?: { distanceMetres?: number; radiusMetres?: number } })?.details;
         show(
           t('station.tooFar', {
-            distance: details.distanceMetres ?? 0,
-            radius: details.radiusMetres ?? 0,
+            distance: details?.distanceMetres ?? 0,
+            radius: details?.radiusMetres ?? 0,
           }),
           'error',
         );
+      } else if (isRetriableError(err)) {
+        // Transient network/latency error: queue + auto-retry, never a raw rejection.
+        setPending(params);
+        setRetryTick((n) => n + 1);
       } else {
+        setPending(null);
         show(t('station.codeError'), 'error');
       }
     } finally {
       setSubmitting(false);
     }
   }
+
+  async function submitCode() {
+    if (!taskId || !code.trim() || submitting || locked) return;
+    // Geofenced stations need a GPS fix; request a one-shot position. Non-geofenced
+    // stations never trigger a location prompt. A denied/unavailable fix leaves
+    // lat/lng undefined — the server then returns 'location-required' if it enforces.
+    let coords: { lat: number; lng: number } | null = null;
+    const radius = smart!.geofenceRadiusMeters;
+    if (typeof radius === 'number' && radius > 0) {
+      coords = await getOneShotLocation();
+    }
+    await runSubmission({ taskId, code: code.trim(), lat: coords?.lat, lng: coords?.lng });
+  }
+
+  // Keep the retry timer (declared above the guards to satisfy the Rules of Hooks)
+  // pointed at the latest closure without re-subscribing on every render.
+  runRef.current = runSubmission;
 
   // ── Photo upload ──────────────────────────────────────────────────────────
   async function pickPhoto() {
@@ -373,7 +435,7 @@ export default function SmartStationScreen() {
               placeholder={t('station.codePlaceholder')}
               autoCapitalize="characters"
               autoCorrect={false}
-              editable={!submitting && !locked && (attemptsLeft == null || attemptsLeft > 0)}
+              editable={!submitting && !queued && !locked && (attemptsLeft == null || attemptsLeft > 0)}
               className="mb-3"
             />
             {showDistance && distanceMeters != null && (
@@ -396,13 +458,21 @@ export default function SmartStationScreen() {
                 {attemptsLeft > 0 ? t('station.attemptsLeft', { n: attemptsLeft }) : t('station.noAttempts')}
               </Text>
             )}
+            {queued && (
+              <View className="mb-3 p-3 rounded-2xl border border-neon-blue/40 bg-neon-blue/10 flex-row items-center gap-2">
+                <ActivityIndicator color="#60A5FA" size="small" />
+                <Text variant="caption" className="text-neon-blue flex-1 text-start">
+                  {isOnline ? t('station.retrying') : t('station.queued')}
+                </Text>
+              </View>
+            )}
             <Button
               onPress={submitCode}
-              disabled={!code.trim() || submitting || locked || (attemptsLeft != null && attemptsLeft <= 0)}
-              loading={submitting}
+              disabled={!code.trim() || submitting || queued || locked || (attemptsLeft != null && attemptsLeft <= 0)}
+              loading={submitting || queued}
               fullWidth
             >
-              {submitting ? t('station.checking') : t('station.submit')}
+              {submitting || queued ? t('station.checking') : t('station.submit')}
             </Button>
           </Card>
         )}

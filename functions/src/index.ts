@@ -2948,6 +2948,18 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
     throw new functions.https.HttpsError('failed-precondition', 'This station does not use code verification');
   }
 
+  // Idempotency: if this station's slot is already completed for the team (e.g. a
+  // retried request after the first one already succeeded but its response was lost
+  // to a flaky network), return success without re-verifying, re-completing, or
+  // re-incrementing the streak. The completeSmartStation transaction is the hard
+  // guard; this just turns the duplicate into a clean success instead of an error.
+  const existingSlots = gsSnap.exists
+    ? (gsSnap.data() as { slots?: { taskId?: string; status?: string }[] }).slots
+    : undefined;
+  if (Array.isArray(existingSlots) && existingSlots.some((s) => s.taskId === taskId && s.status === 'completed')) {
+    return { correct: true, completed: true };
+  }
+
   // Geofence enforcement: when a radius is configured and the station has coordinates,
   // require the caller's GPS and reject submissions made outside the radius.
   const radiusMetres = smart.geofenceRadiusMeters;
