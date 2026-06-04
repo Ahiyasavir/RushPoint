@@ -462,6 +462,7 @@ const en: Dict = {
   // Judge — station timeout safety net
   'judge.timeoutWarn': '⏱ Over the {max}-min cap ({elapsed} min). Free the slot or extend.',
   'judge.extend': 'Extend',
+  'judge.elapsedLabel': '{elapsed} / {max} min',
 
   // Matchmaking
   'match.title': 'Showdown',
@@ -1017,6 +1018,7 @@ const he: Dict = {
   // Judge — station timeout safety net
   'judge.timeoutWarn': '⏱ חריגה מתקרת {max} דק׳ ({elapsed} דק׳). שחררו את העמדה או האריכו.',
   'judge.extend': 'הארכה',
+  'judge.elapsedLabel': '{elapsed} / {max} דק׳',
 
   // Matchmaking
   'match.title': 'דו-קרב',

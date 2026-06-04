@@ -298,6 +298,27 @@ function ArrivalList({
 
 // ─── Evaluation form ──────────────────────────────────────────────────────────
 
+function ElapsedProgressBar({ elapsedMin, maxMin }: { elapsedMin: number; maxMin: number }) {
+  const { t } = useI18n();
+  if (!maxMin) return null;
+  const pct = Math.min((elapsedMin / maxMin) * 100, 100);
+  const fillColor =
+    pct >= 85 ? 'bg-neon-red' : pct >= 60 ? 'bg-yellow-400' : 'bg-neon-green';
+  return (
+    <div className="mb-6">
+      <div className="h-2 rounded-full bg-white/10 overflow-hidden relative">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${fillColor}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="mt-1 text-end text-xs font-mono text-zinc-400">
+        {t('judge.elapsedLabel', { elapsed: elapsedMin, max: maxMin })}
+      </div>
+    </div>
+  );
+}
+
 function EvaluationForm({
   arrival, picked, onToggle,
   design, presentation, onDesign, onPresentation,
@@ -358,6 +379,9 @@ function EvaluationForm({
           ← {t('common.back')}
         </button>
       </div>
+
+      {/* Elapsed-time progress bar — green → amber → red as the team approaches the cap */}
+      <ElapsedProgressBar elapsedMin={elapsedMin} maxMin={maxMin} />
 
       {/* A. Tene product checklist */}
       <Section title={t('judge.sectionChecklist')} hint={t('judge.sectionChecklistHint')}>
