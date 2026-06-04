@@ -519,6 +519,7 @@ const en: Dict = {
   'checkins.confirmError': 'Could not confirm the arrival. Try again.',
   'checkins.remove': 'Remove',
   'checkins.removeConfirm': 'Remove this team from the queue?',
+  'checkins.removeConfirmShort': 'Confirm remove?',
   'checkins.removeError': 'Could not remove the check-in. Try again.',
 
   // Judge
@@ -1075,6 +1076,7 @@ const he: Dict = {
   'checkins.confirmError': 'לא ניתן לאשר את ההגעה. נסו שוב.',
   'checkins.remove': 'הסרה',
   'checkins.removeConfirm': 'להסיר את הקבוצה מהתור?',
+  'checkins.removeConfirmShort': 'לאשר הסרה?',
   'checkins.removeError': 'לא ניתן להסיר את הצ׳ק-אין. נסה שוב.',
 
   // Judge

@@ -15,10 +15,14 @@ export default function CheckInsPage() {
   const [error, setError] = useState('');
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  // Two-step inline confirm for the destructive "remove" action (replaces a blocking
+  // window.confirm): first click arms this id, second click actually removes.
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    setPendingRemoveId(null);
     try {
       const res = await listPendingArrivals();
       setArrivals(res.arrivals ?? []);
@@ -50,7 +54,7 @@ export default function CheckInsPage() {
   }, [t]);
 
   const remove = useCallback(async (a: Arrival) => {
-    if (!window.confirm(t('checkins.removeConfirm'))) return;
+    setPendingRemoveId(null);
     setRemovingId(a.checkInId);
     setError('');
     try {
@@ -63,6 +67,15 @@ export default function CheckInsPage() {
       setRemovingId(null);
     }
   }, [t]);
+
+  // First click arms the confirm; second click (while armed) performs the removal.
+  const onRemoveClick = useCallback((a: Arrival) => {
+    if (pendingRemoveId === a.checkInId) {
+      void remove(a);
+    } else {
+      setPendingRemoveId(a.checkInId);
+    }
+  }, [pendingRemoveId, remove]);
 
   return (
     <div className="p-6 md:p-8 max-w-2xl mx-auto">
@@ -121,11 +134,20 @@ export default function CheckInsPage() {
                   {confirmingId === a.checkInId ? t('checkins.confirming') : t('checkins.confirmArrival')}
                 </button>
                 <button
-                  onClick={() => void remove(a)}
+                  onClick={() => onRemoveClick(a)}
                   disabled={removingId === a.checkInId || confirmingId === a.checkInId}
-                  className="text-xs px-2.5 py-1 rounded-full border border-red-500/30 text-red-300 hover:bg-red-500/10 transition-all disabled:opacity-40"
+                  title={t('checkins.removeConfirm')}
+                  className={
+                    pendingRemoveId === a.checkInId
+                      ? 'text-xs px-2.5 py-1 rounded-full border border-red-500 bg-red-500/20 text-red-200 font-semibold hover:bg-red-500/30 transition-all disabled:opacity-40'
+                      : 'text-xs px-2.5 py-1 rounded-full border border-red-500/30 text-red-300 hover:bg-red-500/10 transition-all disabled:opacity-40'
+                  }
                 >
-                  {removingId === a.checkInId ? t('common.loading') : t('checkins.remove')}
+                  {removingId === a.checkInId
+                    ? t('common.loading')
+                    : pendingRemoveId === a.checkInId
+                      ? t('checkins.removeConfirmShort')
+                      : t('checkins.remove')}
                 </button>
               </div>
             </div>
