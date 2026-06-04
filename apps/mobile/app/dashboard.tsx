@@ -399,7 +399,7 @@ export default function DashboardScreen() {
             </Text>
           </Card>
         ) : activeSlot?.type === 'gate' ? (
-          <GateCard matchStatus={gameState?.matchStatus} gateCooldownUntil={gameState?.gateCooldownUntil ?? null} nowMs={nowMs} />
+          <GateCard slot={activeSlot} matchStatus={gameState?.matchStatus} gateCooldownUntil={gameState?.gateCooldownUntil ?? null} nowMs={nowMs} />
         ) : activeSlot ? (
           <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} craftingActive={craftingActive} />
         ) : (
@@ -465,11 +465,12 @@ export default function DashboardScreen() {
 // ─── Contextual next-step hint (what to physically DO on the active slot) ──────
 
 function NextStepHint({
-  slot, judging, craftingActive,
+  slot, judging, craftingActive, matchStatus,
 }: {
   slot: FirestoreSlot;
   judging: JudgingState | null;
   craftingActive: boolean;
+  matchStatus?: MatchStatus;
 }) {
   const { t } = useTranslation();
   const frozen = !!judging && judging.slotIndex === slot.index;
@@ -480,6 +481,11 @@ function NextStepHint({
   } else if (slot.type === 'gold') {
     if (frozen) key = 'dash.hint.goldFrozen';
     else if (craftingActive) key = 'dash.hint.goldCrafting';
+  } else if (slot.type === 'orange') {
+    key = 'dash.hint.orange';
+  } else if (slot.type === 'gate' && matchStatus !== 'waiting' && matchStatus !== 'matched') {
+    // GateNextStepHint covers the in-queue states; this is the approach/pre-queue fallback.
+    key = 'dash.hint.gate';
   }
   if (!key) return null;
 
@@ -843,7 +849,8 @@ function MatchRadar() {
 
 // ─── Gate card (matchmaking filter) ──────────────────────────────────────────
 
-function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
+function GateCard({ slot, matchStatus, gateCooldownUntil, nowMs }: {
+  slot: FirestoreSlot;
   matchStatus?: MatchStatus;
   gateCooldownUntil?: string | null;
   nowMs: number;
@@ -961,6 +968,7 @@ function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
       ) : null}
 
       <GateNextStepHint matchStatus={matchStatus} />
+      <NextStepHint slot={slot} judging={null} craftingActive={false} matchStatus={matchStatus} />
     </Card>
   );
 }
