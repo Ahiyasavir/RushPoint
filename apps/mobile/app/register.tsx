@@ -248,7 +248,7 @@ export default function RegisterScreen() {
           <Text variant="caption" className="text-zinc-400 leading-relaxed mb-3">
             {t('register.waiverBody')}
           </Text>
-          <Pressable onPress={() => router.push('/waiver')} hitSlop={10} className="mb-4 active:opacity-70">
+          <Pressable onPress={() => router.push('/waiver')} hitSlop={17} className="mb-4 active:opacity-70">
             <Text variant="bodySmall" className="text-neon-green">
               {t('register.waiverReadFull')}
             </Text>
