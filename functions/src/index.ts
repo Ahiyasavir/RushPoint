@@ -13,6 +13,18 @@ import { calculateTaskScore } from './scoring/taskScore';
 import { isDuplicateStationCode, recordStationCode } from './scoring/stationVerification';
 import { SLOT_COUNT, isValidCoord, INVALID_LOCATION } from '@rushpoint/shared';
 import {
+  requireString,
+  optionalString,
+  optionalNonNegativeNumber,
+  optionalBoolean,
+  optionalEnum,
+  optionalCoordinatePair,
+  MAX_CODE_LEN,
+  MAX_NOTE_LEN,
+  MAX_MESSAGE_LEN,
+} from '@rushpoint/shared';
+import { validate } from './validation';
+import {
   computeTransitPenalty,
   computeSprintPenalty,
   applyZScoreBonus,
@@ -1985,10 +1997,9 @@ export const saveTeneSelection = functions.https.onCall(async (data, context) =>
 // judge the mission and decide whether all members are present.
 export const getStationTeams = functions.https.onCall(async (data, context) => {
   assertJudge(context);
-  const { taskId } = data as { taskId?: string };
-  if (!taskId) {
-    throw new functions.https.HttpsError('invalid-argument', 'taskId is required');
-  }
+  const { taskId } = validate(() => ({
+    taskId: requireString((data ?? {}).taskId, 'taskId'),
+  }));
 
   const [gsSnap, taskSnap] = await Promise.all([
     // Indexed lookup via the activeTaskId mirror (maintained by syncActiveTaskId),
@@ -2038,13 +2049,18 @@ export const getStationTeams = functions.https.onCall(async (data, context) => {
 const STATION_COHESION_PENALTY = 100;
 export const stationReleaseTeam = functions.https.onCall(async (data, context) => {
   assertJudge(context);
-  const { teamId, taskId, missingMembers = 0, passed = true, outcome, note } = data as {
-    teamId?: string; taskId?: string; missingMembers?: number; passed?: boolean;
-    outcome?: 'passed' | 'failed' | 'left'; note?: string;
+  const raw = (data ?? {}) as {
+    teamId?: unknown; taskId?: unknown; missingMembers?: unknown; passed?: unknown;
+    outcome?: unknown; note?: unknown;
   };
-  if (!teamId || !taskId) {
-    throw new functions.https.HttpsError('invalid-argument', 'teamId and taskId are required');
-  }
+  const { teamId, taskId, missingMembers, passed, outcome, note } = validate(() => ({
+    teamId:         requireString(raw.teamId, 'teamId'),
+    taskId:         requireString(raw.taskId, 'taskId'),
+    missingMembers: optionalNonNegativeNumber(raw.missingMembers, 'missingMembers') ?? 0,
+    passed:         optionalBoolean(raw.passed, 'passed') ?? true,
+    outcome:        optionalEnum(raw.outcome, 'outcome', ['passed', 'failed', 'left'] as const),
+    note:           optionalString(raw.note, 'note', MAX_NOTE_LEN),
+  }));
   // Outcome is explicit ('passed' | 'failed' | 'left') or derived from the legacy
   // `passed` flag. Only a pass scores; failed/left advance the team with no award.
   const finalOutcome: 'passed' | 'failed' | 'left' = outcome ?? (passed ? 'passed' : 'failed');
@@ -2138,7 +2154,12 @@ export const stationReleaseTeam = functions.https.onCall(async (data, context) =
 // shared alerts feed (soft chime, not the emergency siren).
 export const stationCallHelp = functions.https.onCall(async (data, context) => {
   assertJudge(context);
-  const { taskId, station, message } = data as { taskId?: string; station?: string; message?: string };
+  const raw = (data ?? {}) as { taskId?: unknown; station?: unknown; message?: unknown };
+  const { taskId, station, message } = validate(() => ({
+    taskId:  optionalString(raw.taskId, 'taskId'),
+    station: optionalString(raw.station, 'station'),
+    message: optionalString(raw.message, 'message', MAX_MESSAGE_LEN),
+  }));
   const nowIso = new Date().toISOString();
   const label  = station ? `Station ${station}` : (taskId ?? 'A station');
   await db.collection(`artifacts/${APP_ID}/public/data/adminAlerts`).add({
@@ -2964,10 +2985,12 @@ const maskCode = (c: string) => `${c.slice(0, 2)}***`;
 export const submitStationCode = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Login required');
   const teamId = context.auth.uid;
-  const { taskId, code, lat, lng } = (data ?? {}) as { taskId?: string; code?: string; lat?: number; lng?: number };
-  if (!taskId || typeof code !== 'string') {
-    throw new functions.https.HttpsError('invalid-argument', 'taskId and code are required');
-  }
+  const raw = (data ?? {}) as { taskId?: unknown; code?: unknown; lat?: unknown; lng?: unknown };
+  const { taskId, code, lat, lng } = validate(() => ({
+    taskId: requireString(raw.taskId, 'taskId'),
+    code:   requireString(raw.code, 'code', MAX_CODE_LEN),
+    ...optionalCoordinatePair(raw.lat, raw.lng),
+  }));
   const [taskSnap, secretSnap, profSnap, gsSnap] = await Promise.all([
     db.doc(taskPath(taskId)).get(),
     db.doc(`artifacts/${APP_ID}/stationSecrets/${taskId}`).get(),
