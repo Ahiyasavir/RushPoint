@@ -88,6 +88,10 @@ export default function SmartStationScreen() {
   const [code, setCode] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  // Synchronous re-entry guard: `submitting` state updates on the next render, so a
+  // second tap fired during the pre-submit GPS await (geofenced stations) would slip
+  // past the state check and trigger a duplicate request. This ref blocks it instantly.
+  const submitInFlight = useRef(false);
   // Offline/latency queue: a non-null `pending` (in the store) drives the "will retry
   // when connected" banner and survives navigation; `retryTick` bumps on each failed
   // network attempt to re-arm the backoff timer.
@@ -250,16 +254,21 @@ export default function SmartStationScreen() {
   }
 
   async function submitCode() {
-    if (!taskId || !code.trim() || submitting || locked) return;
-    // Geofenced stations need a GPS fix; request a one-shot position. Non-geofenced
-    // stations never trigger a location prompt. A denied/unavailable fix leaves
-    // lat/lng undefined — the server then returns 'location-required' if it enforces.
-    let coords: { lat: number; lng: number } | null = null;
-    const radius = smart!.geofenceRadiusMeters;
-    if (typeof radius === 'number' && radius > 0) {
-      coords = await getOneShotLocation();
+    if (!taskId || !code.trim() || submitting || submitInFlight.current || locked) return;
+    submitInFlight.current = true;
+    try {
+      // Geofenced stations need a GPS fix; request a one-shot position. Non-geofenced
+      // stations never trigger a location prompt. A denied/unavailable fix leaves
+      // lat/lng undefined — the server then returns 'location-required' if it enforces.
+      let coords: { lat: number; lng: number } | null = null;
+      const radius = smart!.geofenceRadiusMeters;
+      if (typeof radius === 'number' && radius > 0) {
+        coords = await getOneShotLocation();
+      }
+      await runSubmission({ taskId, code: code.trim(), lat: coords?.lat, lng: coords?.lng });
+    } finally {
+      submitInFlight.current = false;
     }
-    await runSubmission({ taskId, code: code.trim(), lat: coords?.lat, lng: coords?.lng });
   }
 
   // Keep the retry timer (declared above the guards to satisfy the Rules of Hooks)

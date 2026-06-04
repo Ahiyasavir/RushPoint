@@ -10,6 +10,7 @@ import {
   TENE_PRODUCTS,
 } from './scoring/teneProducts';
 import { calculateTaskScore } from './scoring/taskScore';
+import { isDuplicateStationCode, recordStationCode } from './scoring/stationVerification';
 import { SLOT_COUNT } from '@rushpoint/shared';
 import {
   computeTransitPenalty,
@@ -2818,7 +2819,8 @@ function sanitizeSmartConfig(input: unknown): {
 async function completeSmartStation(
   teamId: string,
   taskId: string,
-): Promise<{ taskScore: number; allDone: boolean; streak: number; streakMultiplier: number; streakBroken: boolean }> {
+  acceptedCode?: string,
+): Promise<{ taskScore: number; allDone: boolean; streak: number; streakMultiplier: number; streakBroken: boolean; duplicate: boolean }> {
   const taskSnap = await db.doc(taskPath(taskId)).get();
   const task = taskSnap.exists ? (taskSnap.data() as { difficulty?: number; estimatedMinutes?: number }) : {};
   const nowIso = new Date().toISOString();
@@ -2827,8 +2829,27 @@ async function completeSmartStation(
     const profRef = db.doc(`${userPath(teamId)}/profile/team`);
     const gsSnap  = await tx.get(gsRef);
     if (!gsSnap.exists) throw new functions.https.HttpsError('not-found', 'Game state not found for team');
-    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number; smartStreak?: number };
+    const gs    = gsSnap.data() as { slots: JudgeSlot[]; score?: number; smartStreak?: number; streakMultiplier?: number; smartVerifications?: Record<string, string[]> };
     const slots = gs.slots.map((s) => ({ ...s }));
+
+    // Idempotency for rapid double-taps: when a code is supplied and this exact code
+    // was already accepted for this task, return the first result without re-scoring,
+    // re-incrementing the streak, or re-releasing the station counter. A concurrent
+    // duplicate transaction conflicts on the gameState write and Firestore retries it;
+    // on retry it observes the recorded code here and short-circuits.
+    if (acceptedCode != null && isDuplicateStationCode(gs.smartVerifications, taskId, acceptedCode)) {
+      const done = slots.find((s) => s.taskId === taskId && (s.status === 'completed' || s.status === 'skipped'));
+      const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
+      return {
+        taskScore: done?.earnedScore ?? 0,
+        allDone,
+        streak: typeof gs.smartStreak === 'number' ? gs.smartStreak : 0,
+        streakMultiplier: typeof gs.streakMultiplier === 'number' ? gs.streakMultiplier : 1.0,
+        streakBroken: false,
+        duplicate: true,
+      };
+    }
+
     const target = slots.findIndex((s) => s.status === 'active' && s.taskId === taskId);
     if (target < 0) throw new functions.https.HttpsError('failed-precondition', 'Team is not active at this station');
 
@@ -2853,14 +2874,20 @@ async function completeSmartStation(
     };
     unlockNext(slots, target, nowIso);
     const allDone = slots.every((s) => s.status === 'completed' || s.status === 'skipped');
-    tx.update(gsRef, {
+    const update: Record<string, unknown> = {
       slots, score: (gs.score ?? 0) + taskScore,
       smartStreak, streakMultiplier, updatedAt: nowIso,
-    });
+    };
+    // Record the accepted code so a duplicate tap short-circuits above on retry.
+    if (acceptedCode != null) {
+      update.smartVerifications = recordStationCode(gs.smartVerifications, taskId, acceptedCode);
+    }
+    tx.update(gsRef, update);
     if (allDone) tx.set(profRef, { status: 'finished', finishedAt: nowIso }, { merge: true });
-    return { taskScore, allDone, streak: smartStreak, streakMultiplier, streakBroken };
+    return { taskScore, allDone, streak: smartStreak, streakMultiplier, streakBroken, duplicate: false };
   });
-  await releaseTask(taskId, teamId);
+  // A duplicate short-circuit already ran on the winning request — don't release twice.
+  if (!result.duplicate) await releaseTask(taskId, teamId);
   return result;
 }
 
@@ -2982,13 +3009,21 @@ export const submitStationCode = functions.https.onCall(async (data, context) =>
   const expected = secretSnap.exists ? String((secretSnap.data() as { expectedCode?: string }).expectedCode ?? '') : '';
   const correct  = expected.trim().length > 0 && code.trim().toLowerCase() === expected.trim().toLowerCase();
 
-  writeVerifyLog({ teamId, teamName, taskId, outcome: correct ? 'correct' : 'wrong', codeProvided: maskedCode, streakCount })
-    .catch((e) => console.error('verifyLog write failed', e));
-
   if (correct && smart.autoCompleteOnSuccess !== false) {
-    const res = await completeSmartStation(teamId, taskId);
+    // The completion transaction is the atomic guard against double-scoring on rapid
+    // taps. It returns duplicate:true for a redundant submission of the same code —
+    // in that case we skip the verify-log write so the monitor shows ONE record per
+    // submission (no duplicate 'correct' entry from the losing concurrent request).
+    const res = await completeSmartStation(teamId, taskId, code);
+    if (!res.duplicate) {
+      writeVerifyLog({ teamId, teamName, taskId, outcome: 'correct', codeProvided: maskedCode, streakCount: res.streak })
+        .catch((e) => console.error('verifyLog write failed', e));
+    }
     return { correct: true, completed: true, ...res };
   }
+
+  writeVerifyLog({ teamId, teamName, taskId, outcome: correct ? 'correct' : 'wrong', codeProvided: maskedCode, streakCount })
+    .catch((e) => console.error('verifyLog write failed', e));
   return { correct, completed: false };
 });
 
