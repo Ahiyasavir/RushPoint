@@ -204,12 +204,31 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
       const activeIdx = gs.slots.findIndex((s) => s.status === 'active');
       if (activeIdx >= 0 && !gs.slots[activeIdx].taskId) {
         const taskSnap = await db.doc(taskPath(result.taskId)).get();
-        const taskTitle = taskSnap.exists
-          ? (taskSnap.data() as { title?: string }).title
+        const taskData = taskSnap.exists
+          ? (taskSnap.data() as {
+              title?: string;
+              coordinates?: { lat: number; lng: number };
+              smart?: Record<string, unknown>;
+            })
+          : undefined;
+        const taskTitle = taskData?.title;
+        // Mirror the client-safe smart config onto the slot, injecting the station's
+        // coordinates as `stationCoords` so the mobile play screen can render a live
+        // "distance away" badge (haversine vs the device GPS).
+        const smartForSlot = taskData?.smart
+          ? {
+              ...taskData.smart,
+              ...(taskData.coordinates ? { stationCoords: taskData.coordinates } : {}),
+            }
           : undefined;
         const updatedSlots = gs.slots.map((s, i) =>
           i === activeIdx
-            ? { ...s, taskId: result.taskId, ...(taskTitle ? { taskTitle } : {}) }
+            ? {
+                ...s,
+                taskId: result.taskId,
+                ...(taskTitle ? { taskTitle } : {}),
+                ...(smartForSlot ? { smart: smartForSlot } : {}),
+              }
             : s,
         );
         await gsRef.update({ slots: updatedSlots, updatedAt: new Date().toISOString() });

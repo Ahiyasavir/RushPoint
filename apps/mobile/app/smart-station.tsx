@@ -28,6 +28,23 @@ function flag(v: boolean | undefined): boolean {
   return v !== false;
 }
 
+// Great-circle distance between two GPS points, in metres.
+function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+// Whole metres below 1 km, one-decimal km above.
+function formatDistance(m: number): string {
+  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
 export default function SmartStationScreen() {
   const insets = useSafeAreaInsets();
   const { t, isRtl } = useTranslation();
@@ -77,6 +94,31 @@ export default function SmartStationScreen() {
   // photo_upload
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // ── Live distance to a geofenced station ──────────────────────────────────
+  // Once the play phase starts, sample the device GPS every 5s and show how far
+  // the team is from the station (haversine). Only geofenced stations carry
+  // stationCoords, so non-geofenced stations never trigger a location prompt.
+  const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
+  const stationCoords = smart?.stationCoords;
+  const geofenceRadius = smart?.geofenceRadiusMeters;
+  const showDistance =
+    phase === 'play' && !!stationCoords && typeof geofenceRadius === 'number' && geofenceRadius > 0;
+  useEffect(() => {
+    if (!showDistance || !stationCoords) return;
+    let cancelled = false;
+    const sample = async () => {
+      const coords = await getOneShotLocation();
+      if (cancelled || !coords) return;
+      setDistanceMeters(haversineMeters(coords, stationCoords));
+    };
+    void sample();
+    const id = setInterval(() => void sample(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [showDistance, stationCoords?.lat, stationCoords?.lng]);
 
   // ── Loading / guards ──────────────────────────────────────────────────────
   if (!live) {
@@ -334,6 +376,11 @@ export default function SmartStationScreen() {
               editable={!submitting && !locked && (attemptsLeft == null || attemptsLeft > 0)}
               className="mb-3"
             />
+            {showDistance && distanceMeters != null && (
+              <Text variant="caption" className="text-zinc-400 mb-3 text-start">
+                📍 {t('station.distanceAway', { dist: `~${formatDistance(distanceMeters)}` })}
+              </Text>
+            )}
             {locked && (
               <View className="mb-3 p-3 rounded-2xl border border-neon-red/40 bg-neon-red/10">
                 <Text variant="caption" className="text-neon-red font-semibold text-start">

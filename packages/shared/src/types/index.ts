@@ -240,6 +240,10 @@ export interface SmartStationConfig {
   // Geofence — reject station-code submissions made too far from the station.
   // metres; undefined or 0 = disabled (GPS not required).
   geofenceRadiusMeters?: number;
+  // Station location, mirrored from the task's `coordinates` onto the slot so the
+  // mobile play screen can show a live "distance away" badge. Only used (and only
+  // present) when geofenceRadiusMeters > 0.
+  stationCoords?: GeoPoint;
 
   // code_verification
   codeInputLabel?: string;
