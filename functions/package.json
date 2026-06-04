@@ -7,7 +7,8 @@
     "build": "npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=lib/index.js --external:firebase-admin --external:firebase-functions",
     "serve": "npm run build && npx firebase emulators:start --only functions,firestore,auth",
     "deploy": "npm run build && npx firebase deploy --only functions",
-    "typecheck": "npx tsc --noEmit"
+    "typecheck": "npx tsc --noEmit",
+    "test": "vitest run"
   },
   "engines": {
     "node": "20"
@@ -18,7 +19,8 @@
     "firebase-functions": "^5.0.0"
   },
   "devDependencies": {
+    "@types/node": "^20.0.0",
     "typescript": "^5.4.0",
-    "@types/node": "^20.0.0"
+    "vitest": "^4.1.8"
   }
 }

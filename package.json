@@ -15,6 +15,7 @@
         "build": "turbo run build",
         "typecheck": "turbo run typecheck",
         "lint": "turbo run lint",
+        "test": "turbo run test",
         "lint:fix": "turbo run lint -- --fix",
         "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
         "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,css}\"",
