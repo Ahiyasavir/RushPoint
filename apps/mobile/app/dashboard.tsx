@@ -442,7 +442,6 @@ export default function DashboardScreen() {
           >
             <Text variant="label" className="text-neon-orange">🧺 {t('basket.title')}</Text>
             <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('basket.scanPrompt')}</Text>
-            <Text variant="caption" className="text-zinc-500 mt-2">{t('dash.hint.orange')}</Text>
           </Pressable>
         )}
 
