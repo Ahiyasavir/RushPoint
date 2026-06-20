@@ -75,7 +75,7 @@ export default function JoinScreen({ onJoined }: { onJoined: (s: Session) => voi
   return (
     <Screen>
       <div className="mb-6">
-        <h1 className="font-brand text-2xl font-extrabold" style={{ color: info.branding?.primaryColor ?? '#22D3EE' }}>
+        <h1 className="font-brand text-2xl font-extrabold" style={{ color: info.branding?.primaryColor ?? '#F97316' }}>
           {info.branding?.name ?? info.title}
         </h1>
         {info.description && <p className="text-zinc-500 text-sm mt-1">{info.description}</p>}

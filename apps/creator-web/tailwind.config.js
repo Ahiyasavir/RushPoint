@@ -9,44 +9,58 @@ export default {
         brand: ['Outfit', 'Inter', 'sans-serif'],
       },
       colors: {
-        // ── "Jerusalem Stone & Sapphire" — premium matte dark ──────────────
-        'app-bg':       '#0B0F17',
-        'app-surface':  '#111827',
-        'app-card':     '#0F172A',  // slate-900
-        'app-raised':   '#1E293B',  // slate-800
-        // ── Accents ────────────────────────────────────────────────────────
-        'neon-green':   '#F59E0B',  // PRIMARY amber: active / progression / scores
-        'neon-cyan':    '#2563EB',  // SECONDARY sapphire: matchmaking / structure
-        'neon-orange':  '#D97706',
-        'neon-red':     '#EF4444',
-        'neon-gold':    '#D4AF37',  // metallic gold — Tene / trophy
+        // ── "Warm Trail" — light, airy & inviting ──────────────────────────
+        'app-bg':       '#FBF7F0',  // warm parchment
+        'app-surface':  '#FFFFFF',
+        'app-card':     '#FFFFFF',  // crisp white cards
+        'app-raised':   '#F3ECE0',  // warm sand — raised / hover surfaces
+        // ── Accents (warm, vivid; one primary) ─────────────────────────────
+        'neon-green':   '#F97316',  // PRIMARY electric-orange: active / progress / CTAs
+        'neon-cyan':    '#0D9488',  // SECONDARY teal: structure / routed pools
+        'neon-orange':  '#EA580C',
+        'neon-red':     '#E11D48',  // warm rose-red
+        'neon-gold':    '#CA8A04',  // amber gold — trophy / scores
         'neon-blue':    '#2563EB',
-        'neon-purple':  '#8b5cf6',
+        'neon-purple':  '#7C3AED',
         // ── Slot type colours ─────────────────────────────────────────────
-        'slot-green':   '#F59E0B',
-        'slot-orange':  '#D97706',
-        'slot-gold':    '#D4AF37',
-        // ── Surfaces / borders (flat, crisp — no glow) ─────────────────────
-        'glass-bg':     'rgba(15,23,42,0.9)',
-        'glass-border': 'rgba(255,255,255,0.06)',
-        'glass-hover':  'rgba(255,255,255,0.10)',
+        'slot-green':   '#F97316',
+        'slot-orange':  '#EA580C',
+        'slot-gold':    '#CA8A04',
+        // ── Surfaces / borders (soft warm) ─────────────────────────────────
+        'glass-bg':     'rgba(255,255,255,0.85)',
+        'glass-border': 'rgba(90,70,45,0.14)',
+        'glass-hover':  'rgba(90,70,45,0.06)',
+        // ── Text scale (reversed/warm so existing text-zinc-* reads dark) ──
+        zinc: {
+          50:  '#fafaf9',
+          100: '#1c1917',  // primary text
+          200: '#292524',
+          300: '#44403c',
+          400: '#57534e',  // secondary text
+          500: '#78716c',  // muted text
+          600: '#a8a29e',  // faint text
+          700: '#d6d3d1',
+          800: '#e7e5e4',
+          900: '#f5f5f4',
+        },
       },
       boxShadow: {
-        // No neon auras — crisp, realistic elevation.
-        'glow-green':   '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-orange':  '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-gold':    '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-cyan':    '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-red':     '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-blue':    '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-purple':  '0 10px 30px -12px rgba(0,0,0,0.7)',
-        'glow-cta':     '0 12px 32px -10px rgba(0,0,0,0.8)',
-        'inner-glow':   'inset 0 1px 0 0 rgba(255,255,255,0.05)',
+        // Soft, realistic light-theme elevation — no neon auras.
+        'soft':         '0 1px 2px rgba(60,45,25,0.06), 0 4px 12px -4px rgba(60,45,25,0.10)',
+        'glow-green':   '0 8px 24px -10px rgba(249,115,22,0.45)',
+        'glow-orange':  '0 8px 24px -10px rgba(234,88,12,0.45)',
+        'glow-gold':    '0 8px 24px -10px rgba(202,138,4,0.40)',
+        'glow-cyan':    '0 8px 24px -10px rgba(13,148,136,0.40)',
+        'glow-red':     '0 8px 24px -10px rgba(225,29,72,0.40)',
+        'glow-blue':    '0 8px 24px -10px rgba(37,99,235,0.40)',
+        'glow-purple':  '0 8px 24px -10px rgba(124,58,237,0.40)',
+        'glow-cta':     '0 10px 28px -8px rgba(249,115,22,0.50)',
+        'inner-glow':   'inset 0 1px 0 0 rgba(255,255,255,0.6)',
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(ellipse at center, var(--tw-gradient-stops))',
-        'grid-pattern': `linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                         linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)`,
+        'grid-pattern': `linear-gradient(rgba(90,70,45,0.05) 1px, transparent 1px),
+                         linear-gradient(90deg, rgba(90,70,45,0.05) 1px, transparent 1px)`,
       },
       backgroundSize: {
         'grid': '40px 40px',

@@ -34,7 +34,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
         <div className="min-h-screen flex items-center justify-center bg-app-bg p-6">
           <div className="max-w-md w-full bg-app-surface/80 backdrop-blur-xl border border-glass-border rounded-2xl p-8 text-center">
             <div className="text-4xl mb-3">⚠️</div>
-            <h1 className="font-brand text-xl font-bold text-white mb-2">
+            <h1 className="font-brand text-xl font-bold text-zinc-100 mb-2">
               Something went wrong
             </h1>
             <p className="text-zinc-400 text-sm mb-6">
@@ -53,7 +53,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-white rounded-lg px-4 py-2 text-sm transition-all"
+                className="border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-zinc-100 rounded-lg px-4 py-2 text-sm transition-all"
               >
                 Reload
               </button>

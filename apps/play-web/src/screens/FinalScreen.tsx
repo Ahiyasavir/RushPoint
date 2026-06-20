@@ -3,7 +3,7 @@ import { Button, Card, Screen } from '../components/ui';
 
 export default function FinalScreen({ state, onLeave }: { state: MyTeamState; onLeave: () => void }) {
   const { team, run, game } = state;
-  const accent = game.branding?.primaryColor ?? '#22D3EE';
+  const accent = game.branding?.primaryColor ?? '#F97316';
   const myEntry = run.leaderboard?.rankings.find((r) => r.teamId === team.id);
   const myRank = myEntry?.rank;
   // Once finalized, the official score includes completion + time bonuses; before

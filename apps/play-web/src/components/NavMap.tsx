@@ -1,10 +1,11 @@
 // Live navigation map for participants — a central element, not a side tab (§13א).
 // Shows the active stage's task location(s) and the participant's live GPS dot,
 // framed together so "where am I vs. where do I go" is always visible.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import MapModeToggle from './MapModeToggle';
 
 export interface NavTarget {
   id: string;
@@ -17,7 +18,7 @@ export interface NavTarget {
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
 export default function NavMap({
-  targets, me, accent = '#22D3EE', className = '',
+  targets, me, accent = '#F97316', className = '',
 }: {
   targets: NavTarget[];
   me?: { lat: number; lng: number } | null;
@@ -29,6 +30,7 @@ export default function NavMap({
   const markers = useRef<maplibregl.Marker[]>([]);
   const meMarker = useRef<maplibregl.Marker | null>(null);
   const fitted = useRef(false);
+  const [mode, setMode] = useState<MapMode>('topo');
 
   const valid = targets.filter((t) => isValidCoord(t.lat, t.lng) && (t.lat !== 0 || t.lng !== 0));
 
@@ -51,6 +53,11 @@ export default function NavMap({
     return () => { map.current?.remove(); map.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switch tile style on mode change (HTML markers persist across setStyle).
+  useEffect(() => {
+    map.current?.setStyle(resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string);
+  }, [mode]);
 
   // Sync target markers.
   useEffect(() => {
@@ -110,5 +117,10 @@ export default function NavMap({
     );
   }
 
-  return <div ref={ref} className={`rounded-2xl overflow-hidden border border-glass-border ${className}`} />;
+  return (
+    <div className={`relative rounded-2xl overflow-hidden border border-glass-border ${className}`}>
+      <div ref={ref} className="w-full h-full" />
+      <MapModeToggle mode={mode} onChange={setMode} />
+    </div>
+  );
 }

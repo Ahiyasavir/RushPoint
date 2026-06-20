@@ -1,10 +1,11 @@
 // Map-based location picker for the Builder (§13ב — "מיקום על מפה").
 // Click anywhere to place the task; drag the marker to fine-tune. Numeric
 // lat/lng stay available alongside it for precision.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import MapModeToggle from './MapModeToggle';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 // Sensible default view when a task has no coordinates yet (central Israel).
@@ -21,6 +22,7 @@ export default function LocationPicker({
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
+  const [mode, setMode] = useState<MapMode>('topo');
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -47,6 +49,11 @@ export default function LocationPicker({
     return () => { map.current?.remove(); map.current = null; marker.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switch tile style on mode change (the draggable marker persists).
+  useEffect(() => {
+    map.current?.setStyle(resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string);
+  }, [mode]);
 
   // Reflect external numeric edits onto the marker/center.
   useEffect(() => {
@@ -76,6 +83,7 @@ export default function LocationPicker({
   return (
     <div className="relative">
       <div ref={ref} className={`rounded-lg overflow-hidden border border-glass-border ${className}`} />
+      <MapModeToggle mode={mode} onChange={setMode} />
       {!hasCoord && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-bg/80 text-zinc-300 text-xs px-3 py-1.5 rounded-full">

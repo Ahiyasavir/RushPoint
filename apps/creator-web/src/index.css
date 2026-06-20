@@ -4,33 +4,31 @@
 @tailwind utilities;
 
 :root {
-  /* Dark tech theme — matches tailwind.config.js (app-bg/neon-*) so backgrounds
-     and text stay consistent app-wide. (The "Topographic Expedition" light theme
-     needs a full page-level migration before the body can go light — until then
-     a light body under white text is unreadable, so we keep the dark base.) */
-  color-scheme: dark;
-  color: #e4e4e7;
-  background-color: #050508;
+  /* "Warm Trail" — light, airy & inviting. Matches tailwind.config.js
+     (app-bg/neon-*) so backgrounds and text stay consistent app-wide. */
+  color-scheme: light;
+  color: #1c1917;
+  background-color: #FBF7F0;
 
-  --rp-bg: #050508;
-  --rp-bg-elevated: #0a0a10;
-  --rp-surface: #0f0f18;
-  --rp-surface-light: #141420;
-  --rp-primary: #00ffaa;
-  --rp-primary-glow: #00ccff;
-  --rp-secondary: #00aaff;
-  --rp-accent: #ff6b00;
-  --rp-accent-gold: #ffd700;
-  --rp-success: #00ffaa;
-  --rp-warning: #ffb800;
-  --rp-danger: #ff3d00;
-  --rp-info: #00aaff;
-  --rp-text-primary: #ffffff;
-  --rp-text-secondary: #a0aabf;
-  --rp-text-muted: #6b7694;
-  --rp-border: rgba(255, 255, 255, 0.08);
-  --rp-glass-bg: rgba(255, 255, 255, 0.04);
-  --rp-glass-border: rgba(255, 255, 255, 0.08);
+  --rp-bg: #FBF7F0;
+  --rp-bg-elevated: #FFFFFF;
+  --rp-surface: #FFFFFF;
+  --rp-surface-light: #F3ECE0;
+  --rp-primary: #F97316;
+  --rp-primary-glow: #EA580C;
+  --rp-secondary: #0D9488;
+  --rp-accent: #EA580C;
+  --rp-accent-gold: #CA8A04;
+  --rp-success: #16A34A;
+  --rp-warning: #D97706;
+  --rp-danger: #E11D48;
+  --rp-info: #2563EB;
+  --rp-text-primary: #1c1917;
+  --rp-text-secondary: #57534e;
+  --rp-text-muted: #78716c;
+  --rp-border: rgba(90, 70, 45, 0.14);
+  --rp-glass-bg: rgba(255, 255, 255, 0.85);
+  --rp-glass-border: rgba(90, 70, 45, 0.14);
   --rp-radius: 14px;
   --rp-radius-lg: 20px;
   --rp-font-display: 'Outfit', 'Inter', sans-serif;
@@ -39,22 +37,22 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
-  background-color: #050508;
-  color: #e4e4e7;
+  background-color: #FBF7F0;
+  color: #1c1917;
   margin: 0;
-  background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-                    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-image: linear-gradient(rgba(90,70,45,0.04) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(90,70,45,0.04) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
 /* Custom scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #0a0a10; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(0,255,170,0.3); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #F3ECE0; }
+::-webkit-scrollbar-thumb { background: rgba(90,70,45,0.20); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(249,115,22,0.5); }
 
 /* Text selection */
-::selection { background: rgba(0,255,170,0.2); color: #00ffaa; }
+::selection { background: rgba(249,115,22,0.22); color: #9A3412; }
 
 /* Printable QR sheet (Access Codes). Hidden on screen; on print we hide the app
    chrome (header/nav) and render only the high-contrast QR grid so the sheet scans. */

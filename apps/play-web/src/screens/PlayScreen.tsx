@@ -64,7 +64,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }
 
   const { team, game } = state;
-  const accent = game.branding?.primaryColor ?? '#22D3EE';
+  const accent = game.branding?.primaryColor ?? '#F97316';
   const completedStages = team.stages.filter((s) => s.status === 'completed').length;
 
   if (team.status === 'finished') {

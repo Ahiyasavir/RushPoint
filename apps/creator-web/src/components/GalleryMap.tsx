@@ -1,10 +1,11 @@
 // Gallery map view (§10) — every public game with an approxLocation as a marker.
 // Clicking a marker selects that game (the page scrolls/highlights its card).
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { PublicGame } from '@rushpoint/shared';
-import { resolveMapStyle, isValidCoord } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import MapModeToggle from './MapModeToggle';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
@@ -18,6 +19,7 @@ export default function GalleryMap({
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
+  const [mode, setMode] = useState<MapMode>('topo');
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -38,6 +40,11 @@ export default function GalleryMap({
     return () => { map.current?.remove(); map.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Switch tile style on mode change (HTML markers persist across setStyle).
+  useEffect(() => {
+    map.current?.setStyle(resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string);
+  }, [mode]);
 
   useEffect(() => {
     if (!map.current) return;
@@ -79,6 +86,7 @@ export default function GalleryMap({
   return (
     <div className="relative">
       <div ref={ref} className={`rounded-xl overflow-hidden border border-glass-border ${className}`} />
+      <MapModeToggle mode={mode} onChange={setMode} />
       {located.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-bg/80 text-zinc-400 text-xs px-3 py-1.5 rounded-full">
