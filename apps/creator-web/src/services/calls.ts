@@ -44,6 +44,7 @@ export interface RunTeamRow {
 // ── Gallery ──
 export const searchGallery     = callable<{ query?: string; tags?: string[]; limit?: number }, { games: PublicGame[] }>('searchGallery');
 export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; limit?: number }, { tasks: PublicTask[] }>('searchTaskLibrary');
+export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: boolean }>('incrementTaskCopyCount');
 
 // ── Wallet ──
 export const getWallet   = callable<void, { wallet: Wallet }>('getWallet');

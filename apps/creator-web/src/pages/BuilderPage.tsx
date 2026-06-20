@@ -7,6 +7,8 @@ import { PRESET_LABELS } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import LocationPicker from '../components/LocationPicker';
+import TaskLibrary from '../components/TaskLibrary';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -201,6 +203,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 
 // ── Step 2: Stages & Tasks ──
 function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void }) {
+  const [libraryFor, setLibraryFor] = useState<string | null>(null);
   function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
   function addStage() { setStages([...game.stages, blankStage(game.stages.length)]); }
   function updateStage(id: string, p: Partial<Stage>) {
@@ -208,6 +211,13 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
   }
   function removeStage(id: string) {
     setStages(game.stages.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i })));
+  }
+  function insertFromLibrary(stageId: string, task: Task) {
+    const stage = game.stages.find((s) => s.id === stageId);
+    if (!stage) return;
+    // A blank, untouched first task is replaced rather than appended.
+    const blankOnly = stage.tasks.length === 1 && !stage.tasks[0].title && stage.tasks[0].coordinates.lat === 0;
+    updateStage(stageId, { tasks: blankOnly ? [task] : [...stage.tasks, task] });
   }
 
   return (
@@ -236,13 +246,25 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
             ))}
           </div>
 
-          <Button variant="ghost" className="mt-3 text-xs"
-            onClick={() => updateStage(stage.id, { tasks: [...stage.tasks, blankTask()] })}>
-            + Add another task (enables smart routing)
-          </Button>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <Button variant="ghost" className="text-xs"
+              onClick={() => updateStage(stage.id, { tasks: [...stage.tasks, blankTask()] })}>
+              + Add another task (enables smart routing)
+            </Button>
+            <Button variant="ghost" className="text-xs" onClick={() => setLibraryFor(stage.id)}>
+              ⌕ Insert from library
+            </Button>
+          </div>
         </Card>
       ))}
       <Button variant="subtle" onClick={addStage}>+ Add stage</Button>
+
+      {libraryFor && (
+        <TaskLibrary
+          onInsert={(task) => insertFromLibrary(libraryFor, task)}
+          onClose={() => setLibraryFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -258,6 +280,16 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       <div className="flex gap-2 items-center">
         <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder="Task title" className="flex-1" />
         {onRemove && <button className="text-neon-red text-sm" onClick={onRemove}>✕</button>}
+      </div>
+
+      <div>
+        <Label>Location</Label>
+        <LocationPicker
+          lat={task.coordinates.lat}
+          lng={task.coordinates.lng}
+          onChange={(lat, lng) => set({ coordinates: { lat, lng } })}
+          className="h-44"
+        />
       </div>
       <div className="grid grid-cols-3 gap-2">
         <div>

@@ -4,14 +4,22 @@ import type { PublicGame, PublicTask } from '@rushpoint/shared';
 import { searchGallery, searchTaskLibrary, duplicateGame } from '../services/calls';
 import { Badge, Button, Card, Input, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import GalleryMap from '../components/GalleryMap';
 
 export default function GalleryPage() {
   const nav = useNavigate();
   const [tab, setTab] = useState<'games' | 'tasks'>('games');
+  const [view, setView] = useState<'list' | 'map'>('list');
   const [q, setQ] = useState('');
   const [games, setGames] = useState<PublicGame[] | null>(null);
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [focusId, setFocusId] = useState<string | null>(null);
+
+  function focusGame(id: string) {
+    setFocusId(id);
+    document.getElementById(`game-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   async function run() {
     if (tab === 'games') { const { games } = await searchGallery({ query: q }); setGames(games); }
@@ -33,13 +41,23 @@ export default function GalleryPage() {
       <h1 className="text-2xl font-bold mb-1">Gallery</h1>
       <p className="text-zinc-500 text-sm mb-5">Discover public adventures and reusable tasks. Copy any into your account.</p>
 
-      <div className="flex gap-2 mb-4">
+      <div className="flex gap-2 mb-4 items-center">
         {(['games', 'tasks'] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={`px-3 py-1.5 rounded-lg text-sm capitalize ${tab === t ? 'bg-app-raised text-zinc-100' : 'text-zinc-400'}`}>
             {t === 'games' ? 'Public games' : 'Task library'}
           </button>
         ))}
+        {tab === 'games' && (
+          <div className="ms-auto flex gap-1 bg-app-raised rounded-lg p-0.5">
+            {(['list', 'map'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-3 py-1 rounded-md text-xs capitalize ${view === v ? 'bg-neon-green/15 text-neon-green' : 'text-zinc-400'}`}>
+                {v}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 mb-5">
@@ -47,11 +65,15 @@ export default function GalleryPage() {
         <Button onClick={run}>Search</Button>
       </div>
 
+      {tab === 'games' && view === 'map' && games && games.length > 0 && (
+        <div className="mb-4"><GalleryMap games={games} onSelect={focusGame} className="h-72" /></div>
+      )}
+
       {tab === 'games' && (!games ? <Spinner /> : games.length === 0 ? <Empty /> : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((g) => (
-            <Card key={g.id} className="p-4 flex flex-col gap-2">
-              <div className="flex items-start justify-between">
+            <Card key={g.id} className={`p-4 flex flex-col gap-2 scroll-mt-20 transition ${focusId === g.id ? 'ring-2 ring-neon-green' : ''}`}>
+              <div id={`game-${g.id}`} className="flex items-start justify-between">
                 <h3 className="font-semibold">{g.title}</h3>
                 <Badge color="cyan">{g.mode}</Badge>
               </div>

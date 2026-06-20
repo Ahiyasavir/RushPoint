@@ -4,11 +4,13 @@ import { clearSession, type Session } from '../store';
 import { Button, Progress, Screen } from '../components/ui';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
+import NavMap, { type NavTarget } from '../components/NavMap';
 import FinalScreen from './FinalScreen';
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const [state, setState] = useState<MyTeamState | null>(null);
   const [err, setErr] = useState('');
+  const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
 
   const refresh = useCallback(async () => {
@@ -25,6 +27,17 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     timer.current = window.setInterval(refresh, 4000);
     return () => window.clearInterval(timer.current);
   }, [refresh]);
+
+  // Track the participant's live position for the navigation map.
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition(
+      (p) => setMe({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      () => undefined,
+      { enableHighAccuracy: true, maximumAge: 10_000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, []);
 
   async function leave() {
     if (await dialog.confirm('Leave this race? You can rejoin with the same code.')) { clearSession(); onLeave(); }
@@ -74,10 +87,27 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   const activeStage = team.stages.find((s) => s.status === 'active');
 
+  // Build map targets from the active stage's not-yet-completed tasks, joining
+  // each run-record to its sanitized coordinates. The assigned task is "active".
+  const targets: NavTarget[] = activeStage
+    ? activeStage.tasks
+        .filter((t) => t.status !== 'completed' && t.status !== 'skipped')
+        .map((rec) => {
+          const content = state.activeStageTasks.find((c) => c.id === rec.taskId);
+          const coords = content?.smart?.stationCoords ?? content?.coordinates;
+          return coords
+            ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Task', active: rec.status === 'assigned' }
+            : null;
+        })
+        .filter((t): t is NavTarget => t !== null)
+    : [];
+
   return (
     <Screen>
       <Header game={game} score={team.score} accent={accent} onLeave={leave} />
       <div className="my-4"><Progress done={completedStages} total={game.stageCount} /></div>
+
+      {activeStage && <NavMap targets={targets} me={me} accent={accent} className="h-52 mb-4" />}
 
       <div className="flex-1">
         {activeStage ? (
