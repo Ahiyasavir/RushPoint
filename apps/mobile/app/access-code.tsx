@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { router } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -11,6 +12,7 @@ import { Input } from '../src/components/Input';
 import { Button } from '../src/components/Button';
 import { useToast } from '../src/components/Toast';
 import { LanguageToggle } from '../src/components/LanguageToggle';
+import { PressableScale } from '../src/components/PressableScale';
 import { useTranslation } from '../src/i18n';
 
 const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
@@ -84,41 +86,53 @@ export default function AccessCodeScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* ── Language toggle ───────────────────────────────────────────── */}
-        <View className="flex-row justify-end mt-12">
+        <Animated.View
+          entering={FadeInDown.duration(400)}
+          className="flex-row justify-end mt-12"
+        >
           <LanguageToggle />
-        </View>
+        </Animated.View>
 
         {/* ── Branding ──────────────────────────────────────────────────── */}
-        <View className="mt-10 mb-14">
-          <Text variant="label" className="text-zinc-500 mb-2 tracking-widest uppercase text-xs">
+        <Animated.View
+          entering={FadeInDown.delay(80).duration(460)}
+          className="mt-12 mb-12"
+        >
+          <Text variant="label" className="text-zinc-500 mb-3 tracking-[0.25em] uppercase text-[11px]">
             {t('brand.tagline')}
           </Text>
-          <Text variant="display" className="font-brand text-white leading-none">Rush</Text>
-          <Text variant="display" className="font-brand text-neon-green leading-none animate-pulse-neon">
+          <Text variant="display" className="font-brand text-white leading-none text-5xl">Rush</Text>
+          <Text variant="display" className="font-brand text-neon-green leading-none text-5xl animate-pulse-neon">
             Point
           </Text>
-          <View className="w-16 h-px bg-neon-green mt-3 mb-4" style={{ opacity: 0.4 }} />
-          <Text variant="bodySmall" className="text-zinc-500 leading-relaxed">
+          <View className="w-16 h-px bg-neon-green mt-5 mb-5" style={{ opacity: 0.4 }} />
+          <Text variant="body" className="text-zinc-400 leading-relaxed">
             {t('access.intro')}
           </Text>
-        </View>
+        </Animated.View>
 
         {/* ── Code input ────────────────────────────────────────────────── */}
-        <Input
-          label={t('access.codeLabel')}
-          value={code}
-          onChangeText={(v) => { setCode(v); setCodeError(''); }}
-          placeholder={t('access.codePlaceholder')}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          maxLength={10}
-          error={codeError}
-          className="mb-6"
-        />
+        <Animated.View entering={FadeInDown.delay(180).duration(460)}>
+          <Input
+            label={t('access.codeLabel')}
+            value={code}
+            onChangeText={(v) => { setCode(v); setCodeError(''); }}
+            placeholder={t('access.codePlaceholder')}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={10}
+            error={codeError}
+            className="mb-8"
+          />
+        </Animated.View>
 
-        <Button onPress={handleSubmit} fullWidth size="lg">
-          {t('access.enter')}
-        </Button>
+        <Animated.View entering={FadeInDown.delay(260).duration(460)}>
+          <PressableScale className="w-full">
+            <Button onPress={handleSubmit} fullWidth size="lg">
+              {t('access.enter')}
+            </Button>
+          </PressableScale>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

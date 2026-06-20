@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, ScrollView, Pressable } from 'react-native';
+import React, { useRef, useMemo, useLayoutEffect } from 'react';
+import { View, ScrollView, Pressable, Animated, Easing } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../src/components/Text';
@@ -91,6 +91,37 @@ export default function WrappedScreen() {
 
   const { stages, completedCount, totalSec, fastest } = buildStats(live?.slots ?? []);
 
+  // ─── Entrance animation ──────────────────────────────────────────────────
+  // Values start at 1 (final/visible state) so the screen is fully readable if
+  // the layout effect never runs (e.g. JS animations skipped). useLayoutEffect
+  // resets them to 0 and animates back to 1 before paint, so there is no flash.
+  const row1 = useRef(new Animated.Value(1)).current;
+  const row2 = useRef(new Animated.Value(1)).current;
+  const fastestAnim = useRef(new Animated.Value(1)).current;
+  const stageAnims = useMemo(
+    () => Array.from({ length: stages.length }, () => new Animated.Value(1)),
+    [stages.length],
+  );
+
+  useLayoutEffect(() => {
+    const ease = Easing.out(Easing.cubic);
+    const fadeUp = (v: Animated.Value, delay: number) => {
+      v.setValue(0);
+      return Animated.timing(v, { toValue: 1, duration: 400, delay, easing: ease, useNativeDriver: true });
+    };
+    Animated.parallel([
+      fadeUp(row1, 100),
+      fadeUp(row2, 250),
+      fadeUp(fastestAnim, 450),
+      Animated.stagger(40, stageAnims.map((a) => fadeUp(a, 300))),
+    ]).start();
+  }, [row1, row2, fastestAnim, stageAnims]);
+
+  const fadeUpStyle = (v: Animated.Value) => ({
+    opacity: v,
+    transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+  });
+
   return (
     <View className="flex-1 bg-app-bg" style={{ paddingTop: insets.top }}>
       <ScrollView className="flex-1" contentContainerClassName="px-5 pt-8 pb-16">
@@ -104,71 +135,83 @@ export default function WrappedScreen() {
         </Text>
 
         {/* Headline stats */}
-        <View className="flex-row gap-3 mb-3">
-          <Card glowColor="gold" className="flex-1 p-4 items-center">
-            <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.finalScore')}</Text>
-            <Text variant="display" className="font-brand text-neon-gold text-4xl">{finalScore}</Text>
-            {penalty > 0 && (
-              <Text variant="caption" className="text-neon-red font-mono mt-1">−{penalty}</Text>
-            )}
-          </Card>
-          <Card className="flex-1 p-4 items-center">
-            <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.totalTime')}</Text>
-            <Text variant="mono" className="text-white text-3xl mt-1">
-              {totalSec != null ? fmtDuration(totalSec) : '—'}
-            </Text>
-          </Card>
-        </View>
+        <Animated.View style={fadeUpStyle(row1)}>
+          <View className="flex-row gap-3 mb-3">
+            <Card glowColor="gold" className="flex-1 p-4 items-center">
+              <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.finalScore')}</Text>
+              <Text variant="display" className="font-brand text-neon-gold text-4xl">{finalScore}</Text>
+              {penalty > 0 && (
+                <Text variant="caption" className="text-neon-red font-mono mt-1">−{penalty}</Text>
+              )}
+            </Card>
+            <Card className="flex-1 p-4 items-center">
+              <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.totalTime')}</Text>
+              <Text variant="mono" className="text-white text-3xl mt-1">
+                {totalSec != null ? fmtDuration(totalSec) : '—'}
+              </Text>
+            </Card>
+          </View>
+        </Animated.View>
 
-        <View className="flex-row gap-3 mb-6">
-          <Card className="flex-1 p-4 items-center">
-            <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.stagesDone')}</Text>
-            <Text variant="display" className="font-brand text-neon-green text-3xl">
-              {completedCount}/{stages.length}
-            </Text>
-          </Card>
-          <Card className="flex-1 p-4 items-center">
-            <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.teneItems')}</Text>
-            <Text variant="display" className="font-brand text-neon-orange text-3xl">{teneCount}</Text>
-          </Card>
-        </View>
+        <Animated.View style={fadeUpStyle(row2)}>
+          <View className="flex-row gap-3 mb-6">
+            <Card className="flex-1 p-4 items-center">
+              <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.stagesDone')}</Text>
+              <Text variant="display" className="font-brand text-neon-green text-3xl">
+                {completedCount}/{stages.length}
+              </Text>
+            </Card>
+            <Card className="flex-1 p-4 items-center">
+              <Text variant="label" className="text-zinc-500 mb-1">{t('wrapped.teneItems')}</Text>
+              <Text variant="display" className="font-brand text-neon-orange text-3xl">{teneCount}</Text>
+            </Card>
+          </View>
+        </Animated.View>
 
         {/* Fastest stage highlight */}
         {fastest && (
-          <Card glowColor="green" className="p-4 mb-6 flex-row items-center justify-between">
-            <View className="flex-1 me-3">
-              <Text variant="label" className="text-neon-green mb-1">⚡ {t('wrapped.fastest')}</Text>
-              <Text variant="bodySmall" className="text-zinc-300">{t(`slot.${fastest.type}`)}</Text>
-            </View>
-            <Text variant="mono" className="text-2xl text-neon-green">{fmtDuration(fastest.durationSec)}</Text>
-          </Card>
+          <Animated.View
+            style={{
+              opacity: fastestAnim,
+              transform: [{ scale: fastestAnim.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1] }) }],
+            }}
+          >
+            <Card glowColor="green" className="p-4 mb-6 flex-row items-center justify-between">
+              <View className="flex-1 me-3">
+                <Text variant="label" className="text-neon-green mb-1">⚡ {t('wrapped.fastest')}</Text>
+                <Text variant="bodySmall" className="text-zinc-300">{t(`slot.${fastest.type}`)}</Text>
+              </View>
+              <Text variant="mono" className="text-2xl text-neon-green">{fmtDuration(fastest.durationSec)}</Text>
+            </Card>
+          </Animated.View>
         )}
 
         {/* Per-stage breakdown */}
         <Text variant="label" className="mb-3">{t('wrapped.breakdown')}</Text>
         <View className="rounded-2xl border border-glass-border bg-app-card/40 overflow-hidden">
           {stages.map((s, i) => (
-            <View
-              key={s.index}
-              className={`flex-row items-center justify-between px-4 py-3 ${
-                i < stages.length - 1 ? 'border-b border-glass-border' : ''
-              }`}
-            >
-              <View className="flex-row items-center gap-3">
-                <Text variant="mono" className="text-zinc-600">{String(s.index + 1).padStart(2, '0')}</Text>
-                <Badge label={t(`slot.${s.type}`)} variant={SLOT_BADGE_VARIANT[s.type]} />
-              </View>
-              <Text
-                variant="mono"
-                className={
-                  fastest && s.index === fastest.index
-                    ? 'text-neon-green'
-                    : s.durationSec != null ? 'text-white' : 'text-zinc-600'
-                }
+            <Animated.View key={s.index} style={fadeUpStyle(stageAnims[i])}>
+              <View
+                className={`flex-row items-center justify-between px-4 py-3 ${
+                  i < stages.length - 1 ? 'border-b border-glass-border' : ''
+                }`}
               >
-                {s.durationSec != null ? fmtDuration(s.durationSec) : s.completed ? '—' : t('wrapped.notDone')}
-              </Text>
-            </View>
+                <View className="flex-row items-center gap-3">
+                  <Text variant="mono" className="text-zinc-600">{String(s.index + 1).padStart(2, '0')}</Text>
+                  <Badge label={t(`slot.${s.type}`)} variant={SLOT_BADGE_VARIANT[s.type]} />
+                </View>
+                <Text
+                  variant="mono"
+                  className={
+                    fastest && s.index === fastest.index
+                      ? 'text-neon-green'
+                      : s.durationSec != null ? 'text-white' : 'text-zinc-600'
+                  }
+                >
+                  {s.durationSec != null ? fmtDuration(s.durationSec) : s.completed ? '—' : t('wrapped.notDone')}
+                </Text>
+              </View>
+            </Animated.View>
           ))}
         </View>
 

@@ -1,7 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { httpsCallable } from 'firebase/functions';
+import { isValidCoord, INVALID_LOCATION } from '@rushpoint/shared';
 import { functions } from '../services/firebase.config';
 import { useGameStore } from '../store/gameStore';
+import { useToast } from '../components/Toast';
+import { useTranslation } from '../i18n';
 import { createGeoSmoother, type Fix } from '../lib/geoSmooth';
 
 // Adaptive polling cadence (ms). Slow while stationary (checked in / crafting) to
@@ -33,11 +36,33 @@ function getCoords(): Promise<Fix | null> {
  * (the demo target); on native this is the foreground equivalent of a background
  * task. No-ops cleanly when geolocation/permission is unavailable.
  */
+/** True when a callable rejected with our typed INVALID_LOCATION error. */
+function isInvalidLocationError(err: unknown): boolean {
+  const details = (err as { details?: { code?: string } } | null)?.details;
+  return details?.code === INVALID_LOCATION;
+}
+
 export function useAdaptiveLocation(teamId: string | null): void {
+  // Toast + translator are kept in refs so the polling effect isn't restarted
+  // every render (it only depends on teamId).
+  const { show } = useToast();
+  const { t } = useTranslation();
+  const showRef = useRef(show);
+  const tRef = useRef(t);
+  showRef.current = show;
+  tRef.current = t;
+
   useEffect(() => {
     if (!teamId) return;
     let cancelled = false;
+    let warnedInvalid = false; // surface "Location unavailable" at most once per mount
     let timer: ReturnType<typeof setTimeout>;
+
+    const warnOnce = () => {
+      if (warnedInvalid) return;
+      warnedInvalid = true;
+      showRef.current(tRef.current('location.unavailable'), 'error');
+    };
 
     const ping = httpsCallable(functions, 'updateLocation');
     // Per-mount GPS jitter filter — rejects spikes and smooths wobble so the
@@ -54,13 +79,23 @@ export function useAdaptiveLocation(teamId: string | null): void {
     async function tick() {
       const raw = await getCoords();
       if (cancelled) return;
-      if (raw) {
+      // Validate BEFORE sending: a malformed/out-of-range fix is dropped locally
+      // (no network call → no retry spam) and the player is told once.
+      if (raw && isValidCoord(raw.lat, raw.lng)) {
         const fix = smooth(raw, Date.now());
-        const s = useGameStore.getState();
-        const slotType = s.live?.slots.find((sl) => sl.status === 'active')?.type;
-        try {
-          await ping({ lat: fix.lat, lng: fix.lng, teamName: s.teamName, slotType });
-        } catch { /* transient — retried on next tick */ }
+        if (isValidCoord(fix.lat, fix.lng)) {
+          const s = useGameStore.getState();
+          const slotType = s.live?.slots.find((sl) => sl.status === 'active')?.type;
+          try {
+            await ping({ lat: fix.lat, lng: fix.lng, teamName: s.teamName, slotType });
+          } catch (err) {
+            // INVALID_LOCATION from the server → surface once, never retry-spam.
+            if (isInvalidLocationError(err)) warnOnce();
+            /* otherwise transient — retried on next tick */
+          }
+        }
+      } else if (raw) {
+        warnOnce();
       }
       if (cancelled) return;
       timer = setTimeout(() => void tick(), intervalForState());

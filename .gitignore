@@ -7,8 +7,10 @@ node_modules/
 apps/mobile/.expo/
 apps/mobile/dist/
 
-# Admin build
+# Web app builds
 apps/admin/dist/
+apps/creator-web/dist/
+apps/play-web/dist/
 
 # Firebase
 functions/lib/
@@ -39,7 +41,16 @@ packages/shared/dist/
 # local emulator log
 .emulator-log.txt
 
+<<<<<<< HEAD
 # Autopilot agent experiment (not part of the product)
 autopilot/
 .autopilot-tooling-snapshot/
 .claude/scheduled_tasks.lock
+=======
+# Autopilot runtime state + processed inbox (regenerated; never source)
+autopilot/state/
+autopilot/inbox/processed/
+
+# Autopilot tooling+state live ON DISK ONLY on this branch (immune to supervisor git ops).
+/autopilot/
+>>>>>>> autopilot/topo

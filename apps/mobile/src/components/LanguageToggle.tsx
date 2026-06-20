@@ -14,6 +14,7 @@ export function LanguageToggle({ className = '' }: { className?: string }) {
       onPress={toggle}
       accessibilityRole="button"
       accessibilityLabel="Toggle language"
+      hitSlop={12}
       className={`px-3.5 py-1.5 rounded-full border border-white/10 bg-white/[0.04] active:bg-white/[0.08] ${className}`}
     >
       <Text variant="caption" className="text-zinc-300 font-semibold">

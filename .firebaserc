@@ -6,11 +6,11 @@
   "targets": {
     "rushpoint-pwa-7daaa": {
       "hosting": {
-        "admin": [
-          "rushpoint-admin"
+        "creator": [
+          "rushpoint-creator"
         ],
-        "mobile": [
-          "rushpoint"
+        "play": [
+          "rushpoint-play"
         ]
       }
     }

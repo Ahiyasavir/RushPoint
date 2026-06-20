@@ -1,0 +1,861 @@
+// ─── Run management callables ─────────────────────────────────────────────────
+//
+// A Run is a live instance of a Game. The flow:
+//   Owner calls launchRun → gets accessCode
+//   Participants call joinRun(code) → registered as RunTeam
+//   Owner calls startRun → all launched:true, timers start
+//   As teams complete tasks → requestNextTask, verifyStationCode, etc.
+//   Owner calls finalizeRun → scores computed, leaderboard written
+
+import * as functions from 'firebase-functions';
+import { db } from '../firebase';
+import * as admin from 'firebase-admin';
+import {
+  type Game,
+  type Task,
+  type Run,
+  type RunTeam,
+  type RunStageRecord,
+  type RunTaskRecord,
+  type AccessCode,
+  type LeaderboardEntry,
+  type StageStatus,
+  FREE_PARTICIPANTS_PER_RUN,
+  PRICE_ILS_INDIVIDUAL,
+  PRICE_ILS_TEAM,
+} from '@rushpoint/shared';
+import {
+  scoreFixedPointsSpeed,
+  scoreSmartWeighted,
+  durationSeconds,
+  applyCompletionBonus,
+  applyPenalties,
+  applyZScoreBonus,
+  skipAward,
+  taskScoreFixed,
+  taskScoreSmart,
+  COMPLETION_BONUS,
+} from '@rushpoint/shared';
+import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
+
+function requireAuth(context: functions.https.CallableContext): string {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  return context.auth.uid;
+}
+
+function gamePath(ownerUid: string, gameId: string) {
+  return `users/${ownerUid}/games/${gameId}`;
+}
+function runPath(ownerUid: string, gameId: string, runId: string) {
+  return `users/${ownerUid}/games/${gameId}/runs/${runId}`;
+}
+function teamPath(ownerUid: string, gameId: string, runId: string, teamId: string) {
+  return `users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`;
+}
+function teamsCol(ownerUid: string, gameId: string, runId: string) {
+  return `users/${ownerUid}/games/${gameId}/runs/${runId}/teams`;
+}
+
+// ─── Code generation ──────────────────────────────────────────────────────────
+
+function generateCode(len = 6): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusable chars
+  let code = '';
+  for (let i = 0; i < len; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+async function uniqueCode(): Promise<string> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = generateCode();
+    const snap = await db.doc(`accessCodes/${code}`).get();
+    if (!snap.exists) return code;
+  }
+  throw new functions.https.HttpsError('internal', 'Could not generate unique code');
+}
+
+// ─── Build initial stage records from game template ───────────────────────────
+
+function buildInitialStages(game: Game): RunStageRecord[] {
+  return game.stages
+    .sort((a, b) => a.order - b.order)
+    .map((stage, idx) => ({
+      stageId: stage.id,
+      order: stage.order,
+      status: (idx === 0 ? 'active' : 'locked') as StageStatus,
+      tasks: stage.tasks.map((task, tIdx) => ({
+        taskId: task.id,
+        taskIndex: tIdx,
+        status: 'unassigned' as const,
+      })),
+    }));
+}
+
+// ─── launchRun ────────────────────────────────────────────────────────────────
+
+export const launchRun = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId } = data as { gameId: string };
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+
+  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
+  if (game.stages.length === 0) {
+    throw new functions.https.HttpsError('failed-precondition', 'Game has no stages — add at least one stage before launching');
+  }
+
+  const code = await uniqueCode();
+  const now = new Date().toISOString();
+  const runRef = db.collection(`users/${uid}/games/${gameId}/runs`).doc();
+
+  const run: Run = {
+    id: runRef.id,
+    gameId,
+    ownerUid: uid,
+    status: 'live',
+    accessCode: code,
+    freeParticipantsUsed: 0,
+    launchedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const accessCode: AccessCode = {
+    code,
+    ownerUid: uid,
+    gameId,
+    runId: runRef.id,
+    status: 'unused',
+    createdAt: now,
+  };
+
+  const batch = db.batch();
+  batch.set(runRef, run);
+  batch.set(db.doc(`accessCodes/${code}`), accessCode);
+  await batch.commit();
+
+  // Increment game.playCount
+  db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch(() => undefined);
+
+  return { runId: runRef.id, accessCode: code };
+});
+
+
+// ─── getJoinInfo ──────────────────────────────────────────────────────────────
+// Client-safe lookup before joining: given an access code, return the game's
+// title, branding, mode, and registration fields so the join form can render.
+
+export const getJoinInfo = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const { code } = data as { code: string };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const c = codeSnap.data() as AccessCode;
+  if (c.status === 'revoked') throw new functions.https.HttpsError('permission-denied', 'Code revoked');
+
+  const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
+  const run = runSnap.exists ? (runSnap.data() as Run) : null;
+
+  return {
+    context: { ownerUid: c.ownerUid, gameId: c.gameId, runId: c.runId },
+    title: game.title,
+    description: game.description ?? '',
+    mode: game.mode,
+    branding: game.branding ?? null,
+    registrationFields: game.registrationFields,
+    runStatus: run?.status ?? 'live',
+  };
+});
+
+
+// ─── joinRun ─────────────────────────────────────────────────────────────────
+
+export const joinRun = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const teamId = context.auth.uid;
+
+  const { code, displayName, registrationData = {}, memberNames = [] } = data as {
+    code: string;
+    displayName: string;
+    registrationData?: Record<string, unknown>;
+    memberNames?: string[];
+  };
+
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  if (!displayName?.trim()) throw new functions.https.HttpsError('invalid-argument', 'displayName required');
+
+  const normalizedCode = code.trim().toUpperCase();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const codeData = codeSnap.data() as AccessCode;
+  if (codeData.status === 'revoked') {
+    throw new functions.https.HttpsError('permission-denied', 'This code has been revoked');
+  }
+
+  const { ownerUid, gameId, runId } = codeData;
+  const runRef = db.doc(runPath(ownerUid, gameId, runId));
+  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+
+  // Idempotent: team already registered in this run
+  const existingTeam = await db.doc(teamPath(ownerUid, gameId, runId, teamId)).get();
+  if (existingTeam.exists) {
+    return { teamId, runId, gameId, ownerUid, alreadyJoined: true };
+  }
+
+  // Wallet check: if over the free limit, deduct from creator's wallet
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+
+  const isBillable = run.freeParticipantsUsed >= FREE_PARTICIPANTS_PER_RUN;
+  const price = game.mode === 'team' ? PRICE_ILS_TEAM : PRICE_ILS_INDIVIDUAL;
+
+  if (isBillable) {
+    const walletRef = db.doc(`wallets/${ownerUid}`);
+    const walletSnap = await walletRef.get();
+    const balance = walletSnap.exists ? ((walletSnap.data() as { balanceILS: number }).balanceILS ?? 0) : 0;
+    if (balance < price) {
+      throw new functions.https.HttpsError(
+        'resource-exhausted',
+        `Insufficient wallet balance. Top up your wallet to add more ${game.mode === 'team' ? 'teams' : 'participants'}.`,
+        { requiredILS: price, balanceILS: balance },
+      );
+    }
+    // Deduct
+    await walletRef.update({ balanceILS: admin.firestore.FieldValue.increment(-price) });
+    await db.collection(`wallets/${ownerUid}/transactions`).add({
+      type: 'charge',
+      amountILS: price,
+      description: `${game.title} — new ${game.mode === 'team' ? 'team' : 'participant'}`,
+      runId,
+      teamId,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  const now = new Date().toISOString();
+  const team: RunTeam = {
+    id: teamId,
+    runId,
+    gameId,
+    ownerUid,
+    displayName: displayName.trim(),
+    registrationData,
+    memberNames,
+    memberCount: game.mode === 'team' ? (memberNames.length || 1) : 1,
+    status: 'registered',
+    stages: buildInitialStages(game),
+    score: 0,
+    bonusPenalty: 0,
+    launched: false,
+    activeTaskId: null,
+    updatedAt: now,
+  };
+
+  const batch = db.batch();
+  batch.set(db.doc(teamPath(ownerUid, gameId, runId, teamId)), team);
+  batch.update(runRef, {
+    freeParticipantsUsed: admin.firestore.FieldValue.increment(1),
+    updatedAt: now,
+  });
+  await batch.commit();
+
+  return { teamId, runId, gameId, ownerUid, alreadyJoined: false };
+});
+
+
+// ─── startTeams ───────────────────────────────────────────────────────────────
+// Owner launches all (or specific) registered teams.
+
+export const startTeams = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, teamIds } = data as { gameId: string; runId: string; teamIds?: string[] };
+
+  if (!gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
+
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  const game = gameSnap.data() as Game;
+
+  const now = new Date().toISOString();
+  const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
+
+  const targets = teamsSnap.docs.filter((d) => {
+    const t = d.data() as RunTeam;
+    return !t.launched && (teamIds ? teamIds.includes(t.id) : true);
+  });
+
+  const batch = db.batch();
+  for (const doc of targets) {
+    const stages = (doc.data() as RunTeam).stages.map((s, i) => ({
+      ...s,
+      ...(i === 0 ? { startedAt: now } : {}),
+    }));
+    batch.update(doc.ref, { launched: true, startedAt: now, status: 'active', stages, updatedAt: now });
+  }
+  await batch.commit();
+
+  // Assign the first task of the active stage for each launched team. Delegated
+  // to assignNextInActiveStage so single- vs multi-task routing — and the
+  // full-array write that avoids array→map corruption — lives in one place.
+  if (game.stages.length > 0) {
+    for (const doc of targets) {
+      await assignNextInActiveStage(uid, gameId, runId, doc.id, { lat: 31.7905, lng: 35.164 }, now);
+    }
+  }
+
+  return { launched: targets.length };
+});
+
+
+// ─── completeTask ─────────────────────────────────────────────────────────────
+// Called (server-side, by verify/photo callables) when a task is verified.
+// Scores the task, advances the stage, unlocks the next stage if all tasks done.
+
+export async function completeTaskForTeam(
+  ownerUid: string,
+  gameId: string,
+  runId: string,
+  teamId: string,
+  taskId: string,
+  now: string,
+): Promise<void> {
+  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+  const game = gameSnap.data() as Game;
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+
+  await db.runTransaction(async (tx) => {
+    const teamSnap = await tx.get(teamRef);
+    if (!teamSnap.exists) return;
+    const team = teamSnap.data() as RunTeam;
+
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+
+    // Find the task
+    let stageIdx = -1, taskIdx = -1;
+    for (let si = 0; si < stages.length; si++) {
+      const ti = stages[si].tasks.findIndex((t) => t.taskId === taskId);
+      if (ti >= 0) { stageIdx = si; taskIdx = ti; break; }
+    }
+    if (stageIdx < 0) return;
+
+    const taskRec = stages[stageIdx].tasks[taskIdx];
+    if (taskRec.status === 'completed') return; // idempotent
+
+    const startedAt = taskRec.startedAt ?? team.startedAt ?? now;
+    const actualMinutes = (new Date(now).getTime() - new Date(startedAt).getTime()) / 60_000;
+
+    // Score this task
+    const gameTask = game.stages[stageIdx]?.tasks[taskIdx];
+    let earnedScore = 0;
+    if (gameTask) {
+      switch (game.scoringPreset) {
+        case 'time_only':
+          earnedScore = 0;
+          break;
+        case 'fixed_points_speed':
+          earnedScore = taskScoreFixed(gameTask);
+          break;
+        case 'smart_weighted':
+          earnedScore = taskScoreSmart(gameTask.difficulty, actualMinutes, gameTask.estimatedMinutes);
+          break;
+      }
+    }
+
+    taskRec.status = 'completed';
+    taskRec.completedAt = now;
+    taskRec.actualMinutes = actualMinutes;
+    taskRec.earnedScore = earnedScore;
+    taskRec.scoreBreakdown = { taskScore: earnedScore, total: earnedScore };
+
+    // Check if the whole stage is complete
+    const stageDone = stages[stageIdx].tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
+    if (stageDone) {
+      stages[stageIdx].status = 'completed';
+      stages[stageIdx].completedAt = now;
+      stages[stageIdx].earnedScore = stages[stageIdx].tasks.reduce((s, t) => s + (t.earnedScore ?? 0), 0);
+
+      // Check if final stage (triggers Final Run)
+      const isLastStage = game.stages.find((s) => s.id === stages[stageIdx].stageId)?.isFinal ?? (stageIdx === stages.length - 1);
+
+      // Unlock next stage if not final
+      if (!isLastStage && stageIdx + 1 < stages.length) {
+        stages[stageIdx + 1].status = 'active';
+        stages[stageIdx + 1].startedAt = now;
+      }
+    }
+
+    const allDone = stages.every((s) => s.status === 'completed');
+    const newScore = (team.score ?? 0) + earnedScore;
+
+    tx.update(teamRef, {
+      stages,
+      score: newScore,
+      ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+      activeTaskId: null,
+      updatedAt: now,
+    });
+  });
+}
+
+
+// ─── skipStage ────────────────────────────────────────────────────────────────
+
+export const skipStage = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, teamId } = data as { gameId: string; runId: string; teamId: string };
+
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  const game = gameSnap.data() as Game;
+  const teamRef = db.doc(teamPath(uid, gameId, runId, teamId));
+  const now = new Date().toISOString();
+
+  await db.runTransaction(async (tx) => {
+    const teamSnap = await tx.get(teamRef);
+    if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = teamSnap.data() as RunTeam;
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+
+    const activeIdx = stages.findIndex((s) => s.status === 'active');
+    if (activeIdx < 0) throw new functions.https.HttpsError('failed-precondition', 'No active stage');
+
+    // Skip all pending tasks with a fair award
+    let awardTotal = 0;
+    for (const taskRec of stages[activeIdx].tasks) {
+      if (taskRec.status !== 'completed') {
+        const gameTask = game.stages[activeIdx]?.tasks[taskRec.taskIndex];
+        const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
+        taskRec.status = 'skipped';
+        taskRec.completedAt = now;
+        taskRec.earnedScore = award;
+        awardTotal += award;
+      }
+    }
+    stages[activeIdx].status = 'completed';
+    stages[activeIdx].completedAt = now;
+    stages[activeIdx].earnedScore = (stages[activeIdx].earnedScore ?? 0) + awardTotal;
+
+    if (activeIdx + 1 < stages.length) {
+      stages[activeIdx + 1].status = 'active';
+      stages[activeIdx + 1].startedAt = now;
+    }
+    const allDone = stages.every((s) => s.status === 'completed');
+
+    tx.update(teamRef, {
+      stages,
+      score: (team.score ?? 0) + awardTotal,
+      ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+      activeTaskId: null,
+      updatedAt: now,
+    });
+  });
+
+  return { ok: true };
+});
+
+
+// ─── finalizeRun ─────────────────────────────────────────────────────────────
+// Owner ends the run. Scores all teams, applies Z-Score if preset ≠ time_only,
+// writes the leaderboard onto the Run doc.
+
+export const finalizeRun = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId: string; runId: string };
+
+  const runRef = db.doc(runPath(uid, gameId, runId));
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  const game = gameSnap.data() as Game;
+  const run = runSnap.data() as Run;
+
+  const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+  const now = new Date().toISOString();
+
+  type ScoredTeam = LeaderboardEntry & { durationMin: number };
+  const scored: ScoredTeam[] = teams.map((team) => {
+    let rawScore = 0;
+
+    switch (game.scoringPreset) {
+      case 'time_only':
+        rawScore = 0;
+        break;
+      case 'fixed_points_speed':
+        rawScore = scoreFixedPointsSpeed(team.stages, team.startedAt, team.finishedAt ?? now, game);
+        break;
+      case 'smart_weighted':
+        rawScore = scoreSmartWeighted(team.stages);
+        break;
+    }
+
+    rawScore = applyCompletionBonus(rawScore, team.stages);
+    rawScore = applyPenalties(rawScore, team.bonusPenalty);
+
+    const durSec = durationSeconds(team.startedAt, team.finishedAt ?? now);
+    return {
+      rank: 0,
+      teamId: team.id,
+      teamName: team.displayName,
+      score: rawScore,
+      completedStages: team.stages.filter((s) => s.status === 'completed').length,
+      finishedAt: team.finishedAt,
+      durationSeconds: durSec,
+      totalMinutes: durSec / 60,
+      durationMin: durSec / 60,
+    };
+  });
+
+  // Apply Z-Score for non-time presets
+  if (game.scoringPreset !== 'time_only' && scored.length >= 2) {
+    const finishedDurations = scored.filter((t) => t.finishedAt).map((t) => t.durationMin);
+    if (finishedDurations.length >= 2) {
+      for (const t of scored) {
+        if (t.finishedAt) {
+          t.score = applyZScoreBonus(t.score, t.durationMin, finishedDurations);
+        }
+      }
+    }
+  }
+
+  // Sort
+  scored.sort((a, b) => {
+    if (game.scoringPreset === 'time_only') {
+      return (a.durationSeconds ?? Infinity) - (b.durationSeconds ?? Infinity);
+    }
+    return b.score - a.score;
+  });
+
+  const rankings: LeaderboardEntry[] = scored.map((t, i) => ({
+    rank: i + 1,
+    teamId: t.teamId,
+    teamName: t.teamName,
+    score: t.score,
+    completedStages: t.completedStages,
+    finishedAt: t.finishedAt,
+    durationSeconds: t.durationSeconds,
+    totalMinutes: t.totalMinutes,
+  }));
+
+  await runRef.update({
+    status: 'finished',
+    finishedAt: now,
+    leaderboard: { rankings, frozen: false, updatedAt: now },
+    updatedAt: now,
+  });
+
+  return { rankings };
+});
+
+
+// ─── listRunTeams ─────────────────────────────────────────────────────────────
+
+export const listRunTeams = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId: string; runId: string };
+
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const snap = await db.collection(teamsCol(uid, gameId, runId)).get();
+  const teams = snap.docs.map((d) => {
+    const t = d.data() as RunTeam;
+    const activeStageOrder = t.stages.find((s) => s.status === 'active')?.order ?? null;
+    return {
+      id: t.id,
+      displayName: t.displayName,
+      memberNames: t.memberNames ?? [],
+      memberCount: t.memberCount ?? 1,
+      status: t.status,
+      score: t.score,
+      completedStages: t.stages.filter((s) => s.status === 'completed').length,
+      activeStageOrder,
+      finished: t.status === 'finished',
+      launched: t.launched,
+      startedAt: t.startedAt ?? null,
+      finishedAt: t.finishedAt ?? null,
+    };
+  });
+
+  return { teams };
+});
+
+
+// ─── Participant-facing task flow ──────────────────────────────────────────────
+// In v2 there are no judges: participants self-advance through tasks. Field /
+// self_report tasks are completed by the team itself; smart_station tasks are
+// completed by verifyStationCode / reviewStationSubmission (see index.ts), which
+// call completeTaskForTeam. After any completion, if the (possibly new) active
+// stage still has unassigned tasks, the next is assigned via the router.
+
+// Resolve the run path a participant belongs to from their access code. The
+// participant only knows the code; ownerUid/gameId/runId are read server-side.
+async function resolveTeamContext(teamId: string, ctx: {
+  ownerUid?: string; gameId?: string; runId?: string; code?: string;
+}): Promise<{ ownerUid: string; gameId: string; runId: string }> {
+  if (ctx.ownerUid && ctx.gameId && ctx.runId) {
+    return { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId };
+  }
+  if (ctx.code) {
+    const codeSnap = await db.doc(`accessCodes/${ctx.code.trim().toUpperCase()}`).get();
+    if (codeSnap.exists) {
+      const c = codeSnap.data() as AccessCode;
+      return { ownerUid: c.ownerUid, gameId: c.gameId, runId: c.runId };
+    }
+  }
+  throw new functions.https.HttpsError('invalid-argument', 'Cannot resolve run context (provide code or ownerUid/gameId/runId)');
+}
+
+// Assign the next unassigned task within the team's active stage. Single-task
+// stages assign directly; multi-task stages route by priority. No-op if none left.
+async function assignNextInActiveStage(
+  ownerUid: string, gameId: string, runId: string, teamId: string,
+  teamLocation: { lat: number; lng: number },
+  now: string,
+): Promise<{ taskId?: string }> {
+  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+  if (!gameSnap.exists) return {};
+  const game = gameSnap.data() as Game;
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  const teamSnap = await teamRef.get();
+  if (!teamSnap.exists) return {};
+  const team = teamSnap.data() as RunTeam;
+
+  const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
+  if (activeStageIdx < 0) return {};
+  const stageRec = team.stages[activeStageIdx];
+  const gameStage = game.stages.sort((a, b) => a.order - b.order)[activeStageIdx];
+  if (!gameStage) return {};
+
+  // Already have a task in flight in this stage? Don't double-assign.
+  const inFlight = stageRec.tasks.find((t) => t.status === 'assigned');
+  if (inFlight) return { taskId: inFlight.taskId };
+
+  const unassigned = stageRec.tasks.filter((t) => t.status === 'unassigned');
+  if (unassigned.length === 0) return {};
+
+  const completedTaskIds = team.stages
+    .flatMap((s) => s.tasks)
+    .filter((t) => t.status === 'completed')
+    .map((t) => t.taskId);
+
+  if (gameStage.tasks.length === 1) {
+    // Mutate the full stages array (never dotted-path into an array — Firestore
+    // would coerce `stages` into a map keyed "0", "1", … and break .findIndex).
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    stages[activeStageIdx].tasks[0].status = 'assigned';
+    stages[activeStageIdx].tasks[0].startedAt = now;
+    await teamRef.update({ stages, activeTaskId: gameStage.tasks[0].id, updatedAt: now });
+    return { taskId: gameStage.tasks[0].id };
+  }
+
+  // Multi-task: route among the still-unassigned tasks of this stage
+  const candidateTasks = gameStage.tasks.filter(
+    (gt) => stageRec.tasks.find((tr) => tr.taskId === gt.id)?.status === 'unassigned',
+  );
+  const skillRatio = await computeSkillRatio(
+    team.stages.flatMap((s) => s.tasks).filter((t) => t.status === 'completed').map((t) => ({
+      taskId: t.taskId, actualMinutes: t.actualMinutes, completedAt: t.completedAt, startedAt: t.startedAt,
+    })),
+    game.stages.flatMap((s) => s.tasks),
+  );
+  const result = await assignTask(teamLocation, candidateTasks, completedTaskIds, skillRatio, ownerUid, gameId, runId);
+  if (result.taskId) {
+    const localIdx = stageRec.tasks.findIndex((t) => t.taskId === result.taskId);
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    stages[activeStageIdx].tasks[localIdx].status = 'assigned';
+    stages[activeStageIdx].tasks[localIdx].startedAt = now;
+    await teamRef.update({ stages, activeTaskId: result.taskId, updatedAt: now });
+  }
+  return { taskId: result.taskId };
+}
+
+// ─── completeTask (participant self-report / field) ───────────────────────────
+
+export const completeTask = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { taskId, lat, lng, ownerUid, gameId, runId, code } = data as {
+    taskId: string;
+    lat?: number; lng?: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const now = new Date().toISOString();
+
+  await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+
+  const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+  const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+
+  return { ok: true, nextTaskId: next.taskId ?? null };
+});
+
+// ─── requestNextTask (assign a task in the active stage) ──────────────────────
+
+export const requestNextTask = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { lat, lng, ownerUid, gameId, runId, code } = data as {
+    lat?: number; lng?: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const now = new Date().toISOString();
+  const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+  const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+  return { taskId: next.taskId ?? null };
+});
+
+// ─── getRecommendedTasks (ranked list, no assignment) ─────────────────────────
+
+export const getRecommendedTasks = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { lat, lng, ownerUid, gameId, runId, code } = data as {
+    lat: number; lng: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  const game = gameSnap.data() as Game;
+  const teamSnap = await db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId)).get();
+  if (!teamSnap.exists) return { recommendations: [] };
+  const team = teamSnap.data() as RunTeam;
+
+  const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
+  if (activeStageIdx < 0) return { recommendations: [] };
+  const gameStage = game.stages.sort((a, b) => a.order - b.order)[activeStageIdx];
+  if (!gameStage) return { recommendations: [] };
+
+  const completedTaskIds = team.stages.flatMap((s) => s.tasks)
+    .filter((t) => t.status === 'completed').map((t) => t.taskId);
+  const skillRatio = await computeSkillRatio(
+    team.stages.flatMap((s) => s.tasks).filter((t) => t.status === 'completed').map((t) => ({
+      taskId: t.taskId, actualMinutes: t.actualMinutes, completedAt: t.completedAt, startedAt: t.startedAt,
+    })),
+    game.stages.flatMap((s) => s.tasks),
+  );
+
+  const recommendations = await buildRecommendations(
+    { lat, lng }, gameStage.tasks, completedTaskIds, skillRatio,
+    ctx.ownerUid, ctx.gameId, ctx.runId,
+  );
+  return { recommendations };
+});
+
+// ─── getMyTeamState (participant read: team + client-safe active task) ─────────
+// The game template is owner-only, so participants can't read task content
+// directly. This returns the team's live state plus the sanitized content of
+// their currently-assigned task(s) — secrets (codes) are stripped server-side.
+
+function sanitizeTaskForParticipant(task: Task) {
+  const { smart, ...rest } = task;
+  return {
+    ...rest,
+    smart: smart
+      ? {
+          enabled: smart.enabled,
+          verificationType: smart.verificationType,
+          longInstructions: smart.longInstructions,
+          longInstructionsHe: smart.longInstructionsHe,
+          extraInfo: smart.extraInfo,
+          mediaUrl: smart.mediaUrl,
+          imageUrl: smart.imageUrl,
+          codeInputLabel: smart.codeInputLabel,
+          hasCode: smart.hasCode,
+          geofenceRadiusMeters: smart.geofenceRadiusMeters,
+          stationCoords: smart.stationCoords,
+          timeLimitSeconds: smart.timeLimitSeconds,
+          autoApprove: smart.autoApprove,
+          attemptLimit: smart.attemptLimit,
+          // secretCode intentionally omitted
+        }
+      : undefined,
+  };
+}
+
+export const getMyTeamState = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const [teamSnap, gameSnap, runSnap] = await Promise.all([
+    db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId)).get(),
+    db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get(),
+    db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get(),
+  ]);
+  if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+  const team = teamSnap.data() as RunTeam;
+  const game = gameSnap.data() as Game;
+  const run = runSnap.data() as Run;
+
+  // Build a map of taskId → sanitized content for tasks in the active stage
+  const orderedStages = game.stages.slice().sort((a, b) => a.order - b.order);
+  const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
+  const activeStageTasks =
+    activeStageIdx >= 0 && orderedStages[activeStageIdx]
+      ? orderedStages[activeStageIdx].tasks.map(sanitizeTaskForParticipant)
+      : [];
+
+  return {
+    team,
+    run: { id: run.id, status: run.status, accessCode: run.accessCode, leaderboard: run.leaderboard ?? null },
+    game: {
+      id: game.id,
+      title: game.title,
+      mode: game.mode,
+      scoringPreset: game.scoringPreset,
+      branding: game.branding ?? null,
+      stageCount: orderedStages.length,
+    },
+    activeStageTasks,
+    context: ctx,
+  };
+});
+
+
+// ─── checkOutTask (release a station slot without completing) ─────────────────
+
+export const checkOutTask = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { taskId, ownerUid, gameId, runId, code } = data as {
+    taskId: string;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  return { ok: true };
+});

@@ -1,19 +1,21 @@
 rules_version = '2';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RushPoint — Firestore Security Rules
+// RushPoint Platform v2 — Firestore Security Rules (Multi-Tenant)
 //
-// PATH CONVENTION (enforced below, never deviate):
+// MODEL:
+//   users/{uid}                                         creator profile + wallet ref
+//   users/{uid}/games/{gameId}                          private game template (owner only)
+//   users/{uid}/games/{gameId}/runs/{runId}             live run (owner only; CF-written)
+//   …/runs/{runId}/teams/{teamId}                       a participating team/individual
+//   …/runs/{runId}/{announcements|flashMissions}        live-ops broadcasts (read: any auth)
+//   publicGames/{gameId}, publicTasks/{taskId}          denormalized gallery (read: any)
+//   wallets/{uid}, wallets/{uid}/transactions/{txId}    credit ledger (owner read only)
+//   accessCodes/{code}                                  join codes (any auth read)
+//   auditLogs/{id}                                      immutable trail (CF only)
 //
-//   PUBLIC shared data  →  artifacts/{appId}/public/data/{collection}/{docId}
-//   PRIVATE user data   →  artifacts/{appId}/users/{userId}/{collection}/{docId}
-//
-// Admin identity: Firebase Auth custom claim  { role: "admin" }
-//   Set via Cloud Functions / Firebase Admin SDK — never store in Firestore docs.
-//
-// All write operations from the mobile app go through Cloud Functions
-// (which use the Admin SDK and bypass these rules). Client writes are
-// intentionally narrow: teams may only write their own private data.
+// All score/run/team mutations go through Cloud Functions (Admin SDK bypasses
+// these rules). Client writes are intentionally narrow.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 service cloud.firestore {
@@ -24,125 +26,108 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /artifacts/{appId} {
+    // ── CREATOR PROFILE ──────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read:  if isOwner(uid);
+      allow write: if isOwner(uid);
 
-      // ── AUDIT LOGS ─────────────────────────────────────────────────────────
-      //    Path: artifacts/{appId}/auditLogs/{id}
-      //    Immutable dispute-resolution trail. Written ONLY by Cloud Functions
-      //    (Admin SDK); readable only by an Event Manager (admin claim). Clients
-      //    never write, and non-admins never read.
-      match /auditLogs/{logId} {
-        allow read:  if isAdmin();
+      // ── GAME TEMPLATES ─────────────────────────────────────────────────────
+      //    Owner-only for both read and write. The builder edits via the
+      //    createGame/updateGame callables (Admin SDK) but direct owner writes
+      //    are also permitted for responsiveness. publicGames is the read path
+      //    for everyone else.
+      match /games/{gameId} {
+        allow read:  if isOwner(uid);
+        allow write: if isOwner(uid);
+
+        // ── RUNS ─────────────────────────────────────────────────────────────
+        //    Live instances. Owner reads everything; all writes are CF-only
+        //    (score/leaderboard integrity).
+        match /runs/{runId} {
+          allow read:  if isOwner(uid);
+          allow write: if false;
+
+          // ── TEAMS ──────────────────────────────────────────────────────────
+          //    A participant (anonymous uid == teamId) reads ONLY their own team
+          //    doc for live sync. The owner reads all teams. Writes are CF-only.
+          match /teams/{teamId} {
+            allow read:  if isOwner(uid) || isOwner(teamId);
+            allow write: if false;
+          }
+
+          // ── LIVE-OPS BROADCASTS ────────────────────────────────────────────
+          //    Announcements + flash missions are readable by any authenticated
+          //    participant in the run; written by Staff via Cloud Functions.
+          match /announcements/{docId} {
+            allow read:  if isAuthenticated();
+            allow write: if false;
+          }
+          match /flashMissions/{docId} {
+            allow read:  if isAuthenticated();
+            allow write: if false;
+          }
+
+          // ── OPERATIONAL (alerts, locations, staffInvites) ──────────────────
+          //    Owner reads; all writes + staff/participant reads go through CFs.
+          match /alerts/{docId} {
+            allow read:  if isOwner(uid);
+            allow write: if false;
+          }
+          match /teamLocations/{docId} {
+            allow read:  if isOwner(uid);
+            allow write: if false;
+          }
+          match /staffInvites/{docId} {
+            allow read:  if isOwner(uid);
+            allow write: if false;
+          }
+        }
+      }
+    }
+
+    // ── PUBLIC GALLERY (denormalized, read-only to clients) ──────────────────
+    match /publicGames/{gameId} {
+      allow read:  if true;
+      allow write: if false;
+    }
+    match /publicTasks/{taskId} {
+      allow read:  if true;
+      allow write: if false;
+    }
+
+    // ── WALLETS ──────────────────────────────────────────────────────────────
+    match /wallets/{uid} {
+      allow read:  if isOwner(uid);
+      allow write: if false;
+      match /transactions/{txId} {
+        allow read:  if isOwner(uid);
         allow write: if false;
       }
+    }
 
-      // ── ACCESS CODES ───────────────────────────────────────────────────────
-      //    Path: artifacts/{appId}/accessCodes/{code}
-      //
-      //    Pre-generated event codes handed to teams. Clients READ to check a
-      //    code's validity / claimed state before registering. The claim itself
-      //    (claimed: true + teamId) is written exclusively by the registerTeam
-      //    Cloud Function via the Admin SDK — never directly by a client.
-      match /accessCodes/{code} {
-        allow read, get: if true;
-        allow write: if isAdmin();
-      }
+    // ── ACCESS CODES ─────────────────────────────────────────────────────────
+    //    Any authenticated user may read to validate a code before joining.
+    //    The pointer doc ({ownerUid, gameId, runId}) carries no secrets.
+    match /accessCodes/{code} {
+      allow read:  if isAuthenticated();
+      allow write: if false;
+    }
 
-      // ── STATION SECRETS ────────────────────────────────────────────────────
-      //    Path: artifacts/{appId}/stationSecrets/{taskId}
-      //    Smart-station answer codes (expectedCode). NEVER exposed to clients —
-      //    only the verification Cloud Functions read them (Admin SDK bypasses
-      //    rules). Explicit deny here documents that intent.
-      match /stationSecrets/{taskId} {
-        allow read, write: if false;
-      }
-
-      // ── PUBLIC DATA ────────────────────────────────────────────────────────
-      //    Path: artifacts/{appId}/public/data/{collection}/{docId}
-      //
-      //    Contains: tasks, events, leaderboard, flashMissions
-      //    Read  → any authenticated user (teams, judges, spectators)
-      //    Write → admins only (via custom claim); all other writes go through
-      //            Cloud Functions with the Admin SDK
-
-      match /public/data/{collection}/{docId} {
-        allow read:  if isAuthenticated();
-        allow write: if isAdmin();
-      }
-
-      // Catch subcollections inside public docs (e.g. task/checkIns)
-      match /public/data/{collection}/{docId}/{rest=**} {
-        allow read:  if isAuthenticated();
-        allow write: if isAdmin();
-      }
-
-
-      // ── PRIVATE USER DATA ──────────────────────────────────────────────────
-      //    Path: artifacts/{appId}/users/{userId}/{collection}/{docId}
-      //
-      //    Contains: profile, gameState, checkIns, assignments
-      //
-      //    Read  → the owner (userId == auth.uid) OR an admin
-      //    Write → owner writes are scoped per collection (see below)
-      //            Admins can write anything
-
-      match /users/{userId}/{collection}/{docId} {
-
-        allow read: if isOwner(userId) || isAdmin();
-
-        // ── profile ──────────────────────────────────────────────────────────
-        //    Team name, member list. Created once on registration; no updates.
-        allow create: if collection == 'profile'
-                      && isOwner(userId)
-                      && isValidProfile(request.resource.data);
-
-        // gameState write is handled exclusively by Cloud Functions
-        // (registerTeam seeds it; checkInArrival / finalizeJudgeEvaluation mutate
-        // it). Teams must NEVER write their own score or slot status — the
-        // exclusion below keeps this path closed to all client writes.
-        allow write: if collection != 'profile'
-                     && collection != 'gameState'
-                     && isOwner(userId);
-
-        // Admins can write anything (scoring, overrides)
-        allow write: if isAdmin();
-      }
-
-      // Catch subcollections under user docs
-      match /users/{userId}/{collection}/{docId}/{rest=**} {
-        allow read: if isOwner(userId) || isAdmin();
-        allow write: if isAdmin();
-      }
+    // ── AUDIT LOGS ───────────────────────────────────────────────────────────
+    //    Read only via the listAuditLogs callable (Admin SDK). Closed to clients.
+    match /auditLogs/{logId} {
+      allow read, write: if false;
     }
 
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Helper functions
+    // Helpers
     // ═════════════════════════════════════════════════════════════════════════
-
     function isAuthenticated() {
       return request.auth != null;
     }
-
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
-    }
-
-    // Admin role is set as a Firebase Auth custom claim — no document reads needed.
-    function isAdmin() {
-      return request.auth != null
-          && request.auth.token.get('role', '') == 'admin';
-    }
-
-    // Basic profile shape validation — prevents malformed documents
-    function isValidProfile(data) {
-      return data.keys().hasAll(['name', 'memberNames', 'createdAt'])
-          && data.name is string
-          && data.name.size() >= 1
-          && data.name.size() <= 40
-          && data.memberNames is list
-          && data.memberNames.size() >= 2
-          && data.memberNames.size() <= 8;
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
     }
   }
 }

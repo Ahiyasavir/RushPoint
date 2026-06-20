@@ -12,14 +12,14 @@
   },
   "hosting": [
     {
-      "target": "admin",
-      "public": "apps/admin/dist",
+      "target": "creator",
+      "public": "apps/creator-web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
       "rewrites": [{ "source": "**", "destination": "/index.html" }]
     },
     {
-      "target": "mobile",
-      "public": "apps/mobile/dist",
+      "target": "play",
+      "public": "apps/play-web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
       "rewrites": [{ "source": "**", "destination": "/index.html" }]
     }

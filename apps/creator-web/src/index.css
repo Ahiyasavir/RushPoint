@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Dark tech theme — matches tailwind.config.js (app-bg/neon-*) so backgrounds
+     and text stay consistent app-wide. (The "Topographic Expedition" light theme
+     needs a full page-level migration before the body can go light — until then
+     a light body under white text is unreadable, so we keep the dark base.) */
+  color-scheme: dark;
+  color: #e4e4e7;
+  background-color: #050508;
+
+  --rp-bg: #050508;
+  --rp-bg-elevated: #0a0a10;
+  --rp-surface: #0f0f18;
+  --rp-surface-light: #141420;
+  --rp-primary: #00ffaa;
+  --rp-primary-glow: #00ccff;
+  --rp-secondary: #00aaff;
+  --rp-accent: #ff6b00;
+  --rp-accent-gold: #ffd700;
+  --rp-success: #00ffaa;
+  --rp-warning: #ffb800;
+  --rp-danger: #ff3d00;
+  --rp-info: #00aaff;
+  --rp-text-primary: #ffffff;
+  --rp-text-secondary: #a0aabf;
+  --rp-text-muted: #6b7694;
+  --rp-border: rgba(255, 255, 255, 0.08);
+  --rp-glass-bg: rgba(255, 255, 255, 0.04);
+  --rp-glass-border: rgba(255, 255, 255, 0.08);
+  --rp-radius: 14px;
+  --rp-radius-lg: 20px;
+  --rp-font-display: 'Outfit', 'Inter', sans-serif;
+  --rp-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #050508;
+  color: #e4e4e7;
+  margin: 0;
+  background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a0a10; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0,255,170,0.3); }
+
+/* Text selection */
+::selection { background: rgba(0,255,170,0.2); color: #00ffaa; }
+
+/* Printable QR sheet (Access Codes). Hidden on screen; on print we hide the app
+   chrome (header/nav) and render only the high-contrast QR grid so the sheet scans. */
+.print-sheet { display: none; }
+
+@media print {
+  body { background: #fff !important; background-image: none !important; }
+  /* Hide everything, then re-reveal only the print sheet (and its descendants). */
+  body * { visibility: hidden; }
+  .print-sheet, .print-sheet * { visibility: visible; }
+  .print-sheet {
+    display: block;
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline-start: 0;
+    width: 100%;
+    padding: 16px;
+    background: #fff;
+    color: #000;
+  }
+  .print-sheet-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 2px solid #000;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+  .print-sheet-header h2 { font-size: 20px; font-weight: 700; margin: 0; }
+  .print-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+  .print-cell {
+    border: 1px solid #000;
+    border-radius: 8px;
+    padding: 10px 8px;
+    text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-cell svg { display: block; margin: 0 auto; }
+  .print-code {
+    font-family: var(--rp-font-mono);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-top: 6px;
+  }
+  .print-meta { font-size: 11px; color: #333; margin-top: 2px; }
+}

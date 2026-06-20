@@ -1,7 +1,14 @@
+// ─── RushPoint v2 — local emulator seed (seed-if-empty) ───────────────────────
+// Seeds one demo Creator with a sample multi-stage Game, publishes it to the
+// public gallery, and launches a live Run with a join code — so play-web has
+// something to join on first boot and creator-web has a game to manage.
+//
+//   Creator login:  creator@rushpoint.dev / test1234
+//   Join codes:     PLAY01  (and 1234)
+
 import admin from 'firebase-admin';
 
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
-const APP_ID     = 'rushpoint-pwa-7daaa';
 
 process.env.FIRESTORE_EMULATOR_HOST     ??= '127.0.0.1:8080';
 process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
@@ -10,149 +17,144 @@ admin.initializeApp({ projectId: PROJECT_ID });
 const db   = admin.firestore();
 const auth = admin.auth();
 
-const codesPath = `artifacts/${APP_ID}/accessCodes`;
-const tasksPath = `artifacts/${APP_ID}/public/data/tasks`;
-const lbPath    = `artifacts/${APP_ID}/public/data/leaderboard/current`;
-const userPath  = (uid) => `artifacts/${APP_ID}/users/${uid}`;
-
-const DEMO_UID   = 'demo-team-lions';
-const CHECKIN_ID = 'checkin-demo-lions-gold-001';
+const OWNER_UID = 'demo-creator';
+const GAME_ID   = 'demo-game-oldcity';
+const RUN_ID    = 'demo-run-001';
+const CODES      = ['PLAY01', '1234'];
 
 async function ensureUser(uid, email, displayName) {
   try {
     await auth.createUser({ uid, email, password: 'test1234', displayName });
-    console.log(`[seed-local] Created auth user ${uid}`);
+    console.log(`[seed] Created auth user ${email}`);
   } catch (e) {
     const code = e?.errorInfo?.code ?? e?.code;
     if (code === 'auth/uid-already-exists' || code === 'auth/email-already-exists') {
-      console.log(`[seed-local] Auth user ${uid} already exists - skipped.`);
-    } else { throw e; }
+      console.log(`[seed] Auth user ${email} already exists — skipped.`);
+    } else throw e;
   }
+}
+
+// ── Sample game template ──────────────────────────────────────────────────────
+function buildGame(now) {
+  const stages = [
+    {
+      id: 'stage-1', order: 0, title: 'Warm-up at the Gate',
+      tasks: [
+        {
+          id: 'task-1', title: 'Reach Jaffa Gate', description: 'Walk to Jaffa Gate and check in.',
+          type: 'field', coordinates: { lat: 31.7767, lng: 35.2275 },
+          difficulty: 2, estimatedMinutes: 10, pointValue: 100, maxConcurrentTeams: 5, tags: ['outdoor'],
+        },
+      ],
+    },
+    {
+      id: 'stage-2', order: 1, title: 'The Market Challenge',
+      tasks: [
+        {
+          id: 'task-2a', title: 'Spice Stall Code', description: 'Find the spice stall and enter its code.',
+          type: 'smart_station', coordinates: { lat: 31.7780, lng: 35.2300 },
+          difficulty: 5, estimatedMinutes: 15, pointValue: 150, maxConcurrentTeams: 3, tags: ['puzzle'],
+          smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'SAFFRON',
+                   codeInputLabel: 'Spice stall code', longInstructions: 'Ask the vendor for today’s spice of the day.' },
+        },
+        {
+          id: 'task-2b', title: 'Street Musician Selfie', description: 'Take a group selfie with a street performer.',
+          type: 'photo', coordinates: { lat: 31.7775, lng: 35.2290 },
+          difficulty: 3, estimatedMinutes: 12, pointValue: 120, maxConcurrentTeams: 4, tags: ['fun'],
+          smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true },
+        },
+      ],
+    },
+    {
+      id: 'stage-3', order: 2, title: 'The Final Climb', isFinal: true,
+      tasks: [
+        {
+          id: 'task-3', title: 'Summit the Tower of David', description: 'Reach the viewpoint and report in.',
+          type: 'self_report', coordinates: { lat: 31.7760, lng: 35.2280 },
+          difficulty: 4, estimatedMinutes: 15, pointValue: 200, maxConcurrentTeams: 10, tags: ['outdoor'],
+        },
+      ],
+    },
+  ];
+
+  return {
+    id: GAME_ID,
+    ownerUid: OWNER_UID,
+    title: 'Old City Treasure Hunt',
+    description: 'A bite-size race through Jerusalem’s Old City — gates, markets and a final climb.',
+    mode: 'team',
+    stages,
+    scoringPreset: 'fixed_points_speed',
+    registrationFields: [
+      { id: 'name', label: 'Name', type: 'text', required: true, level: 'member' },
+      { id: 'teamName', label: 'Team name', type: 'text', required: true, level: 'team' },
+    ],
+    visibility: 'public',
+    tags: ['outdoor', 'puzzle', 'family', 'jerusalem'],
+    approxLocation: { lat: 31.7767, lng: 35.2275, label: 'Jerusalem Old City' },
+    playCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 async function main() {
-  const existing = await db.collection(codesPath).limit(1).get();
+  const existing = await db.collection('accessCodes').limit(1).get();
   if (!existing.empty) {
-    console.log('[seed-local] Data already present - skipping seed.');
+    console.log('[seed] accessCodes already present — skipping seed.');
     return;
   }
-  console.log('[seed-local] Empty database detected - seeding demo data...');
+  console.log('[seed] Empty database — seeding v2 demo data…');
+  const now = new Date().toISOString();
 
-  const now     = new Date().toISOString();
-  const minsAgo = (n) => new Date(Date.now() - n * 60000).toISOString();
+  await ensureUser(OWNER_UID, 'creator@rushpoint.dev', 'Demo Creator');
 
-  // Tasks (green = mobile mission 01; gold = the basket the judge grades).
-  await db.doc(`${tasksPath}/task-green-001`).set({
-    id: 'task-green-001', title: 'Jerusalem Landmarks Photo Hunt',
-    description: 'Photograph all 5 specified Jerusalem landmarks as a team.',
-    type: 'green', qrCode: 'QR-GREEN-001', maxConcurrentTeams: 3, currentTeamCount: 0,
-    difficulty: 3, photoRequired: true, pointValue: 100, estimatedMinutes: 15, isActive: true,
-    status: 'active', maxDurationMinutes: 30, coordinates: { lat: 31.797, lng: 35.172 },
-  });
-  await db.doc(`${tasksPath}/task-green-002`).set({
-    id: 'task-green-002', title: 'Blindfolded Trust Relay', titleHe: 'ריצת השליחות בעיניים עצומות',
-    description: 'Guide a blindfolded teammate through a short course using only your voices.',
-    type: 'green', qrCode: 'QR-GREEN-002', maxConcurrentTeams: 3, currentTeamCount: 0,
-    difficulty: 5, photoRequired: true, pointValue: 100, estimatedMinutes: 20, isActive: true,
-    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.801, lng: 35.18 },
-  });
-  await db.doc(`${tasksPath}/task-green-003`).set({
-    id: 'task-green-003', title: 'Bible Trivia Blitz', titleHe: 'חידון תנ"ך ירושלמי',
-    description: 'Answer 10 Jerusalem-themed Bible trivia questions together.',
-    type: 'green', qrCode: 'QR-GREEN-003', maxConcurrentTeams: 4, currentTeamCount: 0,
-    difficulty: 4, photoRequired: false, pointValue: 100, estimatedMinutes: 12, isActive: true,
-    status: 'active', maxDurationMinutes: 24, coordinates: { lat: 31.805, lng: 35.186 },
-  });
-  await db.doc(`${tasksPath}/task-gold-001`).set({
-    id: 'task-gold-001', title: 'Ancient Grape Press',
-    description: 'Use the replica press to fill and seal a clay flask for your Tene.',
-    type: 'gold', qrCode: 'QR-GOLD-001', maxConcurrentTeams: 2, currentTeamCount: 1,
-    difficulty: 8, photoRequired: true, pointValue: 200, estimatedMinutes: 20, isActive: true,
-    status: 'active', maxDurationMinutes: 40, coordinates: { lat: 31.808885, lng: 35.193833 },
-  });
-  console.log('[seed-local] Seeded tasks: task-green-001/002/003, task-gold-001');
+  // ── Creator profile + wallet ──
+  await db.doc(`users/${OWNER_UID}`).set({ uid: OWNER_UID, displayName: 'Demo Creator', email: 'creator@rushpoint.dev', createdAt: now });
+  await db.doc(`wallets/${OWNER_UID}`).set({ uid: OWNER_UID, balanceILS: 300, updatedAt: now });
 
-  // Race config (editable in the admin Race Builder; defaults match @rushpoint/shared).
-  await db.doc(`artifacts/${APP_ID}/public/data/raceConfig/current`).set({
-    start:  { lat: 31.79326,   lng: 35.165684 },  // Motza
-    finish: { lat: 31.808885,  lng: 35.193833 },  // Gan HaKipod
-    gate:   { lat: 31.807,     lng: 35.189 },
-    center: { lat: 31.8011,    lng: 35.1798 },
-    zoom:   13.5,
-    routeWaypoints: [
-      { lat: 31.797,    lng: 35.172    },
-      { lat: 31.801,    lng: 35.18     },
-      { lat: 31.805,    lng: 35.186    },
-      { lat: 31.807,    lng: 35.189    },
-      { lat: 31.808361, lng: 35.191167 },  // Bible Park (gat)
-    ],
-    updatedAt: now,
-  });
+  // ── Game template ──
+  const game = buildGame(now);
+  await db.doc(`users/${OWNER_UID}/games/${GAME_ID}`).set(game);
+  console.log(`[seed] Seeded game "${game.title}" (${game.stages.length} stages).`);
 
-  // Orange "find the Tene" basket zones, placed in-area near the orange stage.
-  const zonesPath = `artifacts/${APP_ID}/public/data/basketZones`;
-  await db.doc(`${zonesPath}/zone-a`).set({
-    id: 'zone-a', name: 'Arazim Lookout', nameHe: 'מצפה ארזים',
-    riddle: 'Where the valley opens to the hills, find your Tene by the lookout stones.',
-    riddleHe: 'במקום שהעמק נפתח אל ההרים — מצאו את הטנא ליד אבני התצפית.',
-    coordinates: { lat: 31.808361, lng: 35.191167 }, currentTeamCount: 0, maxTeams: 3,
+  // ── Public gallery index (denormalized) ──
+  const allTasks = game.stages.flatMap((s) => s.tasks);
+  await db.doc(`publicGames/${GAME_ID}`).set({
+    id: GAME_ID, ownerUid: OWNER_UID, ownerDisplayName: 'Demo Creator',
+    title: game.title, description: game.description, mode: game.mode,
+    scoringPreset: game.scoringPreset, tags: game.tags, approxLocation: game.approxLocation,
+    playCount: 0, stageCount: game.stages.length, taskCount: allTasks.length,
+    estimatedTotalMinutes: allTasks.reduce((s, t) => s + t.estimatedMinutes, 0),
+    createdAt: now, updatedAt: now,
   });
-  await db.doc(`${zonesPath}/zone-b`).set({
-    id: 'zone-b', name: 'Pine Grove', nameHe: 'חורשת האורנים',
-    riddle: 'Under the pines on the climb to Ramot, your basket waits in the shade.',
-    riddleHe: 'בין האורנים בעלייה לרמות — הסל מחכה בצל.',
-    coordinates: { lat: 31.80857, lng: 35.19265 }, currentTeamCount: 0, maxTeams: 3,
-  });
-  console.log('[seed-local] Seeded raceConfig + basket zones (zone-a, zone-b).');
+  const pb = db.batch();
+  for (const t of allTasks) {
+    pb.set(db.doc(`publicTasks/${GAME_ID}_${t.id}`), {
+      id: `${GAME_ID}_${t.id}`, sourceGameId: GAME_ID, sourceGameTitle: game.title,
+      ownerUid: OWNER_UID, ownerDisplayName: 'Demo Creator',
+      title: t.title, description: t.description, type: t.type, coordinates: t.coordinates,
+      difficulty: t.difficulty, estimatedMinutes: t.estimatedMinutes, pointValue: t.pointValue,
+      tags: t.tags ?? [], copyCount: 0, createdAt: now,
+    });
+  }
+  await pb.commit();
+  console.log(`[seed] Published to gallery: 1 public game + ${allTasks.length} public tasks.`);
 
-  // Access codes for the mobile registration flow.
-  const codes = ['1234', 'LION01', 'BEAR02', 'WOLF03'];
+  // ── Live run + access codes ──
+  await db.doc(`users/${OWNER_UID}/games/${GAME_ID}/runs/${RUN_ID}`).set({
+    id: RUN_ID, gameId: GAME_ID, ownerUid: OWNER_UID, status: 'live',
+    accessCode: CODES[0], freeParticipantsUsed: 0, launchedAt: now, createdAt: now, updatedAt: now,
+  });
   const cb = db.batch();
-  for (const code of codes) cb.set(db.doc(`${codesPath}/${code}`), { code, claimed: false, teamId: null, createdAt: now });
+  for (const code of CODES) {
+    cb.set(db.doc(`accessCodes/${code}`), {
+      code, ownerUid: OWNER_UID, gameId: GAME_ID, runId: RUN_ID, status: 'unused', createdAt: now,
+    });
+  }
   await cb.commit();
-  console.log(`[seed-local] Seeded access codes: ${codes.join(', ')}`);
-
-  await ensureUser('test-user', 'test@rushpoint.dev', 'Test User');
-
-  // Complete demo team for the Admin Check-in / Judge panel.
-  await ensureUser(DEMO_UID, 'lions@rushpoint.dev', 'The Lions');
-
-  const done       = (i, type, taskId, taskTitle, mins) => ({ index: i, type, status: 'completed', taskId, taskTitle, completedAt: minsAgo(mins) });
-  const goldActive = (i) => ({ index: i, type: 'gold', status: 'active', startedAt: minsAgo(8), taskId: 'task-gold-001', taskTitle: 'Ancient Grape Press' });
-
-  await db.doc(`${userPath(DEMO_UID)}/profile/team`).set({
-    id: DEMO_UID, name: 'The Lions', code: 'LION1', captainPhone: '+972-50-555-1234',
-    participants: [{ name: 'Ari', age: '12' }, { name: 'Maya', age: '11' }],
-    memberNames: ['Ari', 'Maya'], waiverAccepted: true, status: 'park',
-    createdAt: minsAgo(100), startedAt: minsAgo(95),
-  });
-
-  // 6-slot layout: 3×green → gate (matchmaking) → orange (find Tene) → gold (craft+judge)
-  await db.doc(`${userPath(DEMO_UID)}/gameState/current`).set({
-    teamId: DEMO_UID, score: 550, bonusPenalty: 0, currentTaskId: 'task-gold-001',
-    judging: null, updatedAt: now,
-    slots: [
-      done(0, 'green', 'task-green-001', 'Jerusalem Landmarks Photo Hunt', 80),
-      done(1, 'green', 'task-green-002', 'Blindfolded Trust Relay', 70),
-      done(2, 'green', 'task-green-003', 'Bible Trivia Blitz', 60),
-      done(3, 'gate',   null, 'Matchmaking Duel', 30),
-      done(4, 'orange', 'task-orange-001', 'Find Your Tene', 20),
-      goldActive(5),
-    ],
-  });
-
-  // The PENDING check-in is what makes the team appear in listPendingArrivals.
-  await db.doc(`${userPath(DEMO_UID)}/checkIns/${CHECKIN_ID}`).set({
-    id: CHECKIN_ID, teamId: DEMO_UID, taskId: 'task-gold-001',
-    status: 'pending', timestamp: minsAgo(3), location: { lat: 31.808885, lng: 35.193833 },
-  });
-  console.log('[seed-local] Seeded demo team "The Lions" (LION1) with a PENDING check-in.');
-
-  await db.doc(lbPath).set({
-    eventId: 'current', frozen: false, updatedAt: now,
-    rankings: [{ rank: 1, teamId: DEMO_UID, teamName: 'The Lions', score: 550, completedSlots: 5 }],
-  });
-  console.log('[seed-local] Seeded leaderboard. Done.');
+  console.log(`[seed] Launched run ${RUN_ID} with codes: ${CODES.join(', ')}`);
+  console.log('[seed] Done. Creator: creator@rushpoint.dev / test1234 · Join code: PLAY01');
 }
 
-main().catch((err) => { console.error('[seed-local] Seed failed:', err); process.exit(1); });
+main().catch((err) => { console.error('[seed] Seed failed:', err); process.exit(1); });

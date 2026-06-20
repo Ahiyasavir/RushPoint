@@ -3,6 +3,7 @@ import {
   View, ScrollView, KeyboardAvoidingView, Platform,
   Pressable, Switch,
 } from 'react-native';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import { router, useLocalSearchParams } from 'expo-router';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../src/services/firebase.config';
@@ -11,6 +12,7 @@ import { Text } from '../src/components/Text';
 import { Input } from '../src/components/Input';
 import { Button } from '../src/components/Button';
 import { Card } from '../src/components/Card';
+import { PressableScale } from '../src/components/PressableScale';
 import { useToast } from '../src/components/Toast';
 import { useTranslation } from '../src/i18n';
 import { WAIVER_VERSION } from './waiver';
@@ -32,6 +34,21 @@ const registerTeam = httpsCallable(functions, 'registerTeam');
 // Team-size rules (event constraint): min 4, max 7 participants.
 const MIN_PARTICIPANTS = 4;
 const MAX_PARTICIPANTS = 7;
+
+// Maps the registerTeam HttpsError code → a localized, actionable message.
+// Firebase callable errors arrive as `functions/<code>`; strip the prefix first.
+function mapRegisterError(err: unknown, t: (k: string) => string): string {
+  const raw = (err as { code?: string }).code ?? '';
+  const code = raw.replace(/^functions\//, '');
+  switch (code) {
+    case 'not-found':           return t('register.errCodeInvalid');
+    case 'already-exists':      return t('register.errCodeClaimed');
+    case 'invalid-argument':    return t('register.errInvalidInput');
+    case 'failed-precondition': return t('register.errWaiverRequired');
+    case 'unauthenticated':     return t('register.errAuth');
+    default:                    return t('register.errSubmit');
+  }
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -116,9 +133,7 @@ export default function RegisterScreen() {
       initTeam(teamId, teamName.trim(), memberNames);
       router.replace('/dashboard');
     } catch (err) {
-      const message =
-        (err as { message?: string }).message ?? t('register.errSubmit');
-      showToast(message, 'error');
+      showToast(mapRegisterError(err, t), 'error');
     }
   }
 
@@ -135,7 +150,7 @@ export default function RegisterScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
-        <View className="mb-8">
+        <Animated.View entering={FadeInDown.duration(420)} className="mb-8">
           <View className="flex-row items-center gap-2 mb-3">
             <View className="px-2.5 py-1 rounded-full bg-neon-green/10 border border-neon-green/20">
               <Text variant="caption" className="text-neon-green font-mono tracking-widest">
@@ -144,38 +159,41 @@ export default function RegisterScreen() {
             </View>
             <Text variant="caption" className="text-zinc-600">{t('register.codeLabel', { code: '' }).trim()}</Text>
           </View>
-          <Text variant="heading">{t('register.title')}</Text>
-          <Text variant="bodySmall" className="text-zinc-500 mt-1">
+          <Text variant="heading" className="text-3xl">{t('register.title')}</Text>
+          <Text variant="body" className="text-zinc-400 mt-1.5">
             {t('register.subtitle')}
           </Text>
-        </View>
+        </Animated.View>
 
         {/* ── Team Name ─────────────────────────────────────────────────── */}
-        <Input
-          label={t('register.teamName')}
-          value={teamName}
-          onChangeText={(v) => { setTeamName(v); setErrors((e) => ({ ...e, teamName: undefined })); }}
-          placeholder={t('register.teamNamePlaceholder')}
-          maxLength={40}
-          autoCapitalize="words"
-          error={errors.teamName}
-          className="mb-5"
-        />
+        <Animated.View entering={FadeInDown.delay(90).duration(440)}>
+          <Input
+            label={t('register.teamName')}
+            value={teamName}
+            onChangeText={(v) => { setTeamName(v); setErrors((e) => ({ ...e, teamName: undefined })); }}
+            placeholder={t('register.teamNamePlaceholder')}
+            maxLength={40}
+            autoCapitalize="words"
+            error={errors.teamName}
+            className="mb-5"
+          />
+        </Animated.View>
 
         {/* ── Captain Phone ─────────────────────────────────────────────── */}
-        <Input
-          label={t('register.captainPhone')}
-          value={captainPhone}
-          onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
-          placeholder="+972 50 000 0000"
-          keyboardType="phone-pad"
-          error={errors.captainPhone}
-          className="mb-6"
-        />
+        <Animated.View entering={FadeInDown.delay(160).duration(440)} className="mb-8">
+          <Input
+            label={t('register.captainPhone')}
+            value={captainPhone}
+            onChangeText={(v) => { setCaptainPhone(v); setErrors((e) => ({ ...e, captainPhone: undefined })); }}
+            placeholder={t('register.phonePlaceholder')}
+            keyboardType="phone-pad"
+            error={errors.captainPhone}
+          />
+        </Animated.View>
 
         {/* ── Participants ──────────────────────────────────────────────── */}
         <Text variant="label" className="mb-1">{t('register.participants')}</Text>
-        <Text variant="caption" className="text-zinc-600 mb-3">
+        <Text variant="caption" className="text-zinc-600 mb-4">
           {t('register.teamSizeHint', { min: MIN_PARTICIPANTS, max: MAX_PARTICIPANTS })}
         </Text>
 
@@ -200,7 +218,8 @@ export default function RegisterScreen() {
             {participants.length > 1 && (
               <Pressable
                 onPress={() => removeParticipant(i)}
-                className="w-10 h-[52px] rounded-xl bg-app-raised border border-glass-border items-center justify-center active:bg-app-card"
+                hitSlop={6}
+                className="w-[52px] h-[52px] rounded-xl bg-app-raised border border-glass-border items-center justify-center active:bg-app-card"
               >
                 <Text variant="subheading" className="text-zinc-400 leading-none">×</Text>
               </Pressable>
@@ -215,7 +234,7 @@ export default function RegisterScreen() {
         <View className="mb-6">
           <Button
             variant="ghost"
-            size="sm"
+            size="md"
             onPress={addParticipant}
             disabled={participants.length >= MAX_PARTICIPANTS}
           >
@@ -229,7 +248,7 @@ export default function RegisterScreen() {
           <Text variant="caption" className="text-zinc-400 leading-relaxed mb-3">
             {t('register.waiverBody')}
           </Text>
-          <Pressable onPress={() => router.push('/waiver')} className="mb-4 active:opacity-70">
+          <Pressable onPress={() => router.push('/waiver')} hitSlop={17} className="mb-4 active:opacity-70">
             <Text variant="bodySmall" className="text-neon-green">
               {t('register.waiverReadFull')}
             </Text>
@@ -252,9 +271,11 @@ export default function RegisterScreen() {
         ) : <View className="mb-4" />}
 
         {/* ── Submit ────────────────────────────────────────────────────── */}
-        <Button onPress={handleSubmit} fullWidth disabled={!waiverAccepted}>
-          {t('register.start')}
-        </Button>
+        <PressableScale className="w-full" disabled={!waiverAccepted}>
+          <Button onPress={handleSubmit} fullWidth disabled={!waiverAccepted}>
+            {t('register.start')}
+          </Button>
+        </PressableScale>
       </ScrollView>
     </KeyboardAvoidingView>
   );

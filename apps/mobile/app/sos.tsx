@@ -130,7 +130,7 @@ export default function CallStaffScreen() {
   return (
     <View className="flex-1 bg-app-bg" style={{ paddingTop: insets.top + 8 }}>
       <View className="px-5 pb-4">
-        <Pressable onPress={() => router.back()} hitSlop={8}>
+        <Pressable onPress={() => router.back()} hitSlop={16} className="py-2 self-start">
           <Text variant="bodySmall" className="text-neon-green">{t('map.back')}</Text>
         </Pressable>
       </View>

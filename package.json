@@ -4,8 +4,8 @@
     "private": true,
     "packageManager": "npm@11.12.0",
     "workspaces": [
-        "apps/mobile",
-        "apps/admin",
+        "apps/creator-web",
+        "apps/play-web",
         "functions",
         "packages/shared",
         "scripts"
@@ -23,8 +23,10 @@
         "mobile": "npm run dev      --workspace=apps/mobile",
         "mobile:ios": "npm run ios      --workspace=apps/mobile",
         "mobile:android": "npm run android  --workspace=apps/mobile",
-        "admin": "npm run dev --workspace=apps/admin -- --port 5180",
-        "admin:build": "npm run build    --workspace=apps/admin",
+        "creator": "npm run dev --workspace=apps/creator-web",
+        "creator:build": "npm run build  --workspace=apps/creator-web",
+        "play": "npm run dev --workspace=apps/play-web",
+        "play:build": "npm run build     --workspace=apps/play-web",
         "shared:build": "npm run build    --workspace=packages/shared",
         "dev:tunnel": "concurrently --names PROXY,TUNNEL --prefix-colors cyan,magenta \"node scripts/proxy.mjs\" \"npx cloudflared tunnel --url http://localhost:3000\"",
         "predev:all:tunnel": "node scripts/free-ports.mjs",
@@ -41,6 +43,7 @@
         "//Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬ Dev data Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬": "",
         "seed": "npm run seed      --workspace=scripts",
         "seed:reset": "npm run seed:reset --workspace=scripts",
+        "e2e": "node scripts/e2e-verify.mjs",
         "sync": "node scripts/sync-sheets.mjs",
         "push:sheet": "node scripts/push-sheet.mjs",
         "simulate": "node scripts/simulate-tournament.mjs",
@@ -50,8 +53,8 @@
         "mobile:web": "npm run dev --workspace=apps/mobile -- --web",
         "emulator": "node scripts/dev-emulator.mjs",
         "predev:all": "node scripts/free-ports.mjs",
-        "dev:all": "concurrently --names EMU,SEED,MIRROR,MOBILE,ADMIN --prefix-colors blue,green,yellow,magenta,cyan \"npm:emulator\" \"npm:dev:seed\" \"npm:dev:mirror\" \"npm:mobile:web\" \"npm:admin\"",
-        "dev:seed": "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 && node scripts/sync-sheets.mjs"
+        "dev:all": "concurrently --names EMU,SEED,CREATOR,PLAY --prefix-colors blue,green,cyan,magenta \"npm:emulator\" \"npm:dev:seed\" \"npm:creator\" \"npm:play\"",
+        "dev:seed": "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 && node scripts/seed-local.mjs"
     },
     "devDependencies": {
         "@typescript-eslint/eslint-plugin": "^7.14.0",

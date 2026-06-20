@@ -37,12 +37,13 @@ import Animated, {
 
 // Slot shape is mirrored from the store (LiveSlot / LiveJudging).
 type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
-type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 type FirestoreSlot = LiveSlot;
 type JudgingState  = LiveJudging;
 
 const CRAFTING_DURATION_SECS = 20 * 60;
 const SPRINT_BUDGET_SECS     = 90;
+// Smart-station speed streak: 3 fast completions in a row latch a 1.5x multiplier.
+const STREAK_THRESHOLD       = 3;
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ export default function DashboardScreen() {
   const teamName = useGameStore((s) => s.teamName);
   const gameState = useGameStore((s) => s.live);
   const syncState = useGameStore((s) => s.syncState);
+  const isOnline  = useGameStore((s) => s.isOnline);
 
   const [nowMs, setNowMs] = useState(Date.now());
   const { show: showToast } = useToast();
@@ -183,6 +185,18 @@ export default function DashboardScreen() {
     if (!evacuatedFrom) lastEvacRef.current = null;
   }, [evacuatedFrom, showToast, t]);
 
+  // Smart-station speed streak (server-authoritative). Fire a celebration toast
+  // exactly once on the 2→3 transition; the badge itself is rendered in the header.
+  const smartStreak = gameState?.smartStreak ?? 0;
+  const onFire = smartStreak >= STREAK_THRESHOLD;
+  const prevStreakRef = useRef(smartStreak);
+  useEffect(() => {
+    if (prevStreakRef.current < STREAK_THRESHOLD && smartStreak >= STREAK_THRESHOLD) {
+      showToast(t('dash.comboToast'), 'success');
+    }
+    prevStreakRef.current = smartStreak;
+  }, [smartStreak, showToast, t]);
+
   // Tick once per second to drive the live elapsed-time clock.
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -200,6 +214,21 @@ export default function DashboardScreen() {
       router.push('/final-run');
     }
   }, [gameState?.slots]);
+
+  // Reconnect banner: show a brief "Back online" confirmation for ~2s after the
+  // connection is restored, then auto-dismiss. Tracks the previous online state
+  // so the green flash only fires on an offline→online transition.
+  const [showRestored, setShowRestored] = useState(false);
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    if (!wasOnlineRef.current && isOnline) {
+      setShowRestored(true);
+      const id = setTimeout(() => setShowRestored(false), 2000);
+      wasOnlineRef.current = isOnline;
+      return () => clearTimeout(id);
+    }
+    wasOnlineRef.current = isOnline;
+  }, [isOnline]);
 
   const loading         = syncState === 'loading' && !gameState;
   const snapError       = syncState === 'error' && !gameState;
@@ -289,15 +318,15 @@ export default function DashboardScreen() {
           <View className="flex-row items-center gap-2">
             <Pressable
               onPress={() => router.push('/map')}
-              hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20 active:scale-95 transition-all duration-200"
+              hitSlop={12}
+              className="px-3 py-2 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-green font-mono">🗺  {t('map.open')}</Text>
             </Pressable>
             <Pressable
               onPress={() => router.push('/sos')}
-              hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20 active:scale-95 transition-all duration-200"
+              hitSlop={12}
+              className="px-3 py-2 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-red font-mono">📣 {t('staff.open')}</Text>
             </Pressable>
@@ -325,6 +354,8 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        {onFire && <OnFireBadge label={t('dash.onFire')} />}
+
         <Text variant="caption" className="text-zinc-600 mt-2">
           {t('dash.slotsCompleted', { n: completedCount })}
         </Text>
@@ -332,6 +363,22 @@ export default function DashboardScreen() {
 
       {/* ── Operational announcement (persistent, until dismissed) ────── */}
       <AnnouncementBanner announcements={announcements} />
+
+      {/* ── Reconnect strip: sticky, non-blocking, slim (<36px). Only when
+          cached state is available; otherwise the loading spinner shows. ─ */}
+      {gameState && !isOnline ? (
+        <View className="bg-yellow-500/20 border-b border-yellow-500/40 px-4 py-2">
+          <Text variant="caption" className="text-yellow-300 font-mono text-start">
+            ⟳ {t('offline.reconnecting')}
+          </Text>
+        </View>
+      ) : gameState && showRestored ? (
+        <View className="bg-green-500/20 border-b border-green-500/40 px-4 py-2">
+          <Text variant="caption" className="text-green-300 font-mono text-start">
+            ✓ {t('offline.backOnline')}
+          </Text>
+        </View>
+      ) : null}
 
       {/* ── Body ─────────────────────────────────────────────────────── */}
       <ScrollView
@@ -352,13 +399,13 @@ export default function DashboardScreen() {
             </Text>
           </Card>
         ) : activeSlot?.type === 'gate' ? (
-          <GateCard matchStatus={gameState?.matchStatus} gateCooldownUntil={gameState?.gateCooldownUntil ?? null} nowMs={nowMs} />
+          <GateCard slot={activeSlot} matchStatus={gameState?.matchStatus} gateCooldownUntil={gameState?.gateCooldownUntil ?? null} nowMs={nowMs} />
         ) : activeSlot ? (
           <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} craftingActive={craftingActive} />
         ) : (
           <Card className="p-6 items-center">
             <Text variant="bodySmall" className="text-zinc-500 text-center">
-              {t('dash.noMission')}
+              {completedCount === 6 ? t('dash.noMission.done') : t('dash.noMission.waiting')}
             </Text>
           </Card>
         )}
@@ -414,6 +461,66 @@ export default function DashboardScreen() {
   );
 }
 
+// ─── Contextual next-step hint (what to physically DO on the active slot) ──────
+
+function NextStepHint({
+  slot, judging, craftingActive, matchStatus,
+}: {
+  slot: FirestoreSlot;
+  judging: JudgingState | null;
+  craftingActive: boolean;
+  matchStatus?: MatchStatus;
+}) {
+  const { t } = useTranslation();
+  const frozen = !!judging && judging.slotIndex === slot.index;
+
+  let key: string | null = null;
+  if (slot.type === 'green') {
+    key = slot.taskId ? 'dash.hint.greenTask' : 'dash.hint.greenAssigning';
+  } else if (slot.type === 'gold') {
+    if (frozen) key = 'dash.hint.goldFrozen';
+    else if (craftingActive) key = 'dash.hint.goldCrafting';
+  } else if (slot.type === 'orange') {
+    key = 'dash.hint.orange';
+  } else if (slot.type === 'gate' && matchStatus !== 'waiting' && matchStatus !== 'matched') {
+    // GateNextStepHint covers the in-queue states; this is the approach/pre-queue fallback.
+    key = 'dash.hint.gate';
+  }
+  if (!key) return null;
+
+  return (
+    <Text variant="bodySmall" className="text-zinc-400 mb-3">
+      📍 {t(key)}
+    </Text>
+  );
+}
+
+// ─── "ON FIRE" speed-streak badge (subtle pulse — UI-thread only) ─────────────
+
+function OnFireBadge({ label }: { label: string }) {
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+  }, [pulse]);
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.78 + pulse.value * 0.22,
+    transform: [{ scale: 1 + pulse.value * 0.03 }],
+  }));
+  return (
+    <Animated.View
+      entering={ZoomIn.duration(300)}
+      style={style}
+      className="mt-3 self-start flex-row items-center px-3 py-1.5 rounded-full border border-neon-orange/50 bg-neon-orange/10"
+    >
+      <Text variant="caption" className="text-neon-orange font-mono font-bold">{label}</Text>
+    </Animated.View>
+  );
+}
+
 // ─── Active task card ─────────────────────────────────────────────────────────
 
 function ActiveTaskCard({
@@ -442,6 +549,9 @@ function ActiveTaskCard({
       <Text variant="subheading" className="mb-2">
         {slot.taskTitle ?? t('dash.activeMission')}
       </Text>
+
+      {/* Contextual next-step guidance so the team knows what to physically do. */}
+      <NextStepHint slot={slot} judging={judging} craftingActive={craftingActive} />
 
       {/* Only surface the friendly "assigning" hint when no task is set yet —
           never the raw task id (the title + badge already name the mission). */}
@@ -537,6 +647,7 @@ function RequestCheckInButton({ slot }: { slot: FirestoreSlot }) {
       <Pressable
         onPress={() => void request()}
         disabled={busy}
+        hitSlop={8}
         className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20 active:scale-95 transition-all duration-200"
       >
         <Text variant="bodySmall" className="text-neon-green font-semibold">
@@ -554,8 +665,13 @@ function ClueHintButton() {
   const { show } = useToast();
   const [armed, setArmed]   = useState(false);
   const [busy, setBusy]     = useState(false);
+  // Ref guard: a rapid double-tap can fire two onPress events before `busy`
+  // re-renders the disabled state, so block re-entry synchronously here too.
+  const inFlight = useRef(false);
 
   async function request() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await httpsCallable(functions, 'requestClueHint')({});
@@ -563,6 +679,7 @@ function ClueHintButton() {
     } catch {
       show(t('hint.error'), 'error');
     } finally {
+      inFlight.current = false;
       setBusy(false);
       setArmed(false);
     }
@@ -580,6 +697,7 @@ function ClueHintButton() {
           <Pressable
             onPress={() => void request()}
             disabled={busy}
+            hitSlop={8}
             className="flex-1 py-2.5 rounded-xl bg-neon-gold/10 border border-neon-gold/30 items-center active:bg-neon-gold/20"
           >
             <Text variant="bodySmall" className="text-neon-gold font-semibold">
@@ -693,7 +811,7 @@ function CraftingCountdownCard({
             variant="mono"
             className={`text-3xl font-bold ${sprintExpired ? 'text-neon-red animate-pulse-neon' : 'text-neon-orange'}`}
           >
-            {sprintExpired ? '⚠️ LATE' : formatElapsed(sprintLeft)}
+            {sprintExpired ? t('craft.late') : formatElapsed(sprintLeft)}
           </Text>
           {!sprintExpired && (
             <Text variant="caption" className="text-zinc-500 mt-1 text-center">
@@ -738,7 +856,8 @@ function MatchRadar() {
 
 // ─── Gate card (matchmaking filter) ──────────────────────────────────────────
 
-function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
+function GateCard({ slot, matchStatus, gateCooldownUntil, nowMs }: {
+  slot: FirestoreSlot;
   matchStatus?: MatchStatus;
   gateCooldownUntil?: string | null;
   nowMs: number;
@@ -762,7 +881,7 @@ function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
         Alert.alert(t('match.title'), t('match.matched', { opponent: data.opponentName ?? '?' }));
       }
     } catch {
-      Alert.alert('Error', 'Could not join match queue. Try again.');
+      Alert.alert(t('match.errorTitle'), t('match.joinError'));
     } finally {
       setJoining(false);
     }
@@ -854,6 +973,21 @@ function GateCard({ matchStatus, gateCooldownUntil, nowMs }: {
           </Button>
         </>
       ) : null}
+
+      <GateNextStepHint matchStatus={matchStatus} />
+      <NextStepHint slot={slot} judging={null} craftingActive={false} matchStatus={matchStatus} />
     </Card>
+  );
+}
+
+// ─── Gate next-step hint (physical prompt, only while waiting / matched) ───────
+
+function GateNextStepHint({ matchStatus }: { matchStatus?: MatchStatus }) {
+  const { t } = useTranslation();
+  if (matchStatus !== 'waiting' && matchStatus !== 'matched') return null;
+  return (
+    <Text variant="caption" className="text-zinc-500 mt-3 text-center">
+      📍 {t('dash.hint.gate')}
+    </Text>
   );
 }

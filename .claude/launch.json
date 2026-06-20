@@ -2,22 +2,22 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "creator",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "creator"],
+      "port": 5180
+    },
+    {
+      "name": "play",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "play"],
+      "port": 5181
+    },
+    {
       "name": "dev:all",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:all"],
       "port": 5180
-    },
-    {
-      "name": "admin",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "admin"],
-      "port": 5180
-    },
-    {
-      "name": "mobile",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "mobile:web"],
-      "port": 8081
     }
   ]
 }
