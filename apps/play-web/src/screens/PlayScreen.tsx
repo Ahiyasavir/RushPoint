@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getMyTeamState, triggerSOS, type MyTeamState } from '../services/calls';
+import { getMyTeamState, triggerSOS, updateLocation, type MyTeamState } from '../services/calls';
 import { clearSession, type Session } from '../store';
 import { Button, Progress, Screen } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -12,6 +12,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const [err, setErr] = useState('');
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
+  // Whether the team is currently launched/active — read by the geolocation
+  // watcher (which mounts once) to decide if it should ping the live map.
+  const activeRef = useRef(false);
+  // Last time we pinged updateLocation, for ~20s client-side throttling.
+  const lastPing = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -28,16 +33,27 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return () => window.clearInterval(timer.current);
   }, [refresh]);
 
-  // Track the participant's live position for the navigation map.
+  // Track the participant's live position for the navigation map, and report it
+  // to the host's live team map (throttled to once per ~20s, only while active).
   useEffect(() => {
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
-      (p) => setMe({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      (p) => {
+        const lat = p.coords.latitude;
+        const lng = p.coords.longitude;
+        setMe({ lat, lng });
+        const now = Date.now();
+        if (activeRef.current && now - lastPing.current >= 20_000) {
+          lastPing.current = now;
+          updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng })
+            .catch(() => undefined);
+        }
+      },
       () => undefined,
       { enableHighAccuracy: true, maximumAge: 10_000 },
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, []);
+  }, [session]);
 
   async function leave() {
     if (await dialog.confirm('Leave this race? You can rejoin with the same code.')) { clearSession(); onLeave(); }
@@ -64,6 +80,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }
 
   const { team, game } = state;
+  // Ping the live map only while the team is launched and still racing.
+  activeRef.current = team.launched && team.status !== 'finished';
   const accent = game.branding?.primaryColor ?? '#F97316';
   const completedStages = team.stages.filter((s) => s.status === 'completed').length;
 

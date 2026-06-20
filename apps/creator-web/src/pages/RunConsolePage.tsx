@@ -10,6 +10,7 @@ import {
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import LiveTeamMap from '../components/LiveTeamMap';
 
 export default function RunConsolePage() {
   const { gameId, runId } = useParams();
@@ -128,6 +129,14 @@ export default function RunConsolePage() {
               </div>
             )}
           </Card>
+
+          {/* Live team map — where every team is right now, fed by GPS pings. */}
+          {!finished && teams.length > 0 && (
+            <Card className="p-4 mt-4">
+              <div className="text-sm font-medium mb-3">📍 Live team map</div>
+              <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
+            </Card>
+          )}
 
           {finished && run.leaderboard && (
             <Card className="p-4 mt-4">
