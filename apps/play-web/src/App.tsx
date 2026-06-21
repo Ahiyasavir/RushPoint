@@ -4,6 +4,7 @@ import { loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
 import PlayScreen from './screens/PlayScreen';
 import StaffConsole from './screens/StaffConsole';
+import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
   if (staffMode) {
     return (
       <>
+        <ConnectionBanner />
         <StaffConsole onExit={() => setStaffMode(false)} />
         <DialogHost />
       </>
@@ -40,6 +42,7 @@ export default function App() {
 
   return (
     <>
+      <ConnectionBanner />
       {!session
         ? <JoinScreen onJoined={setSession} onStaff={() => setStaffMode(true)} />
         : <PlayScreen session={session} onLeave={() => setSession(null)} />}

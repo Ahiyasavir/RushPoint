@@ -1,5 +1,10 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  connectFirestoreEmulator,
+} from 'firebase/firestore';
 import {
   getAuth,
   connectAuthEmulator,
@@ -27,7 +32,12 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
-export const db        = getFirestore(app);
+// Offline-first cache: live run/team state is served from IndexedDB when the
+// participant briefly loses signal in the field, and listeners reconnect
+// automatically. Multi-tab manager keeps several open tabs consistent.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+});
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
 export const storage   = getStorage(app);
