@@ -8,7 +8,7 @@
 //   node scripts/e2e-verify-v2.mjs
 //
 import { initializeApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
+import { getAuth, connectAuthEmulator, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
@@ -37,9 +37,11 @@ function check(label, cond, detail) {
 async function main() {
   const creator = makeParty('creator');
   const player = makeParty('player');
+  const staff = makeParty('staff');
 
   const creatorCred = await signInAnonymously(creator.auth);
   const playerCred = await signInAnonymously(player.auth);
+  await signInAnonymously(staff.auth); // upgraded to a staff custom token below
   console.log('Creator uid:', creatorCred.user.uid);
   console.log('Player  uid:', playerCred.user.uid, '\n');
 
@@ -52,6 +54,7 @@ async function main() {
   check('createGame returns a gameId', !!gameId, gameId);
 
   const CODE_TASK_ID = 'task-code-1';
+  const PHOTO_TASK_ID = 'task-photo-1';
   const PLAIN_TASK_ID = 'task-plain-1';
   const stages = [
     {
@@ -81,7 +84,29 @@ async function main() {
     {
       id: 'stage-2',
       order: 1,
-      title: 'Stage Two — plain task',
+      title: 'Stage Two — photo station (staff review)',
+      tasks: [
+        {
+          id: PHOTO_TASK_ID,
+          title: 'Selfie at the gate',
+          type: 'photo',
+          coordinates: { lat: 31.795, lng: 35.165 },
+          difficulty: 2,
+          estimatedMinutes: 6,
+          pointValue: 70,
+          maxConcurrentTeams: 3,
+          smart: {
+            enabled: true,
+            verificationType: 'photo_upload',
+            autoApprove: false, // requires a staff approval
+          },
+        },
+      ],
+    },
+    {
+      id: 'stage-3',
+      order: 2,
+      title: 'Stage Three — plain task',
       isFinal: true,
       tasks: [
         {
@@ -103,7 +128,7 @@ async function main() {
     stages,
     scoringPreset: 'smart_weighted',
   });
-  check('updateGame accepted 2 stages', true);
+  check('updateGame accepted 3 stages', true);
 
   // ── 2. Launch a run ─────────────────────────────────────────────────────────
   const { runId, accessCode } = await creator.call('launchRun', { gameId });
@@ -165,6 +190,63 @@ async function main() {
   check('stage 2 unlocked (active)', state?.team?.stages?.[1]?.status === 'active', state?.team?.stages?.[1]?.status);
   check('code task scored > 0', (state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore ?? 0) > 0,
     String(state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore));
+
+  // ── 8b. Live leaderboard mid-run (refreshLeaderboard) ───────────────────────
+  const lbCtx = { ownerUid: creatorCred.user.uid, gameId, runId };
+  const lbHidden = await creator.call('refreshLeaderboard', { ...lbCtx, publish: false });
+  check('refreshLeaderboard returns live rankings mid-run', (lbHidden?.rankings?.length ?? 0) === 1,
+    JSON.stringify(lbHidden?.rankings?.[0]));
+  check('refreshLeaderboard stays unpublished by default', lbHidden?.published === false);
+  let midState = await player.call('getMyTeamState', { code: accessCode });
+  check('run is still live after refresh (not finished)', midState?.run?.status !== 'finished', midState?.run?.status);
+  check('unpublished standings are hidden from participant', midState?.run?.leaderboard?.published === false);
+
+  const lbShown = await creator.call('refreshLeaderboard', { ...lbCtx, publish: true });
+  check('refreshLeaderboard can publish to teams', lbShown?.published === true);
+  midState = await player.call('getMyTeamState', { code: accessCode });
+  check('published standings are visible to participant', midState?.run?.leaderboard?.published === true);
+
+  // ── 8c. Photo task: submit → staff review → advance ─────────────────────────
+  const photoSubmit = await player.call('submitStationPhoto', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+    photoUrl: 'https://example.com/selfie.jpg',
+  });
+  check('submitStationPhoto accepts a photo (pending, not auto-approved)',
+    photoSubmit?.submitted === true && photoSubmit?.autoApproved === false, JSON.stringify(photoSubmit));
+
+  state = await player.call('getMyTeamState', { code: accessCode });
+  check('submission is stored NESTED under taskSubmissions (not a literal dotted key)',
+    state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status === 'pending',
+    JSON.stringify(state?.team?.taskSubmissions ?? {}));
+  check('photo stage stays active until reviewed', state?.team?.stages?.[1]?.status === 'active',
+    state?.team?.stages?.[1]?.status);
+
+  // Staff joins via PIN and approves the photo
+  const { pin } = await creator.call('inviteStaff', {
+    ownerUid: creatorCred.user.uid, gameId, runId, name: 'E2E Marshal', permissions: ['review_photos'],
+  });
+  check('inviteStaff returns a PIN', !!pin, pin);
+  const staffTok = await staff.call('staffSignIn', {
+    ownerUid: creatorCred.user.uid, gameId, runId, pin,
+  });
+  check('staffSignIn mints a custom token', !!staffTok?.customToken && staffTok?.name === 'E2E Marshal');
+  await signInWithCustomToken(staff.auth, staffTok.customToken);
+
+  const review = await staff.call('reviewStationSubmission', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID, approved: true,
+  });
+  check('reviewStationSubmission approves', review?.ok === true && review?.approved === true);
+
+  state = await player.call('getMyTeamState', { code: accessCode });
+  check('review marks the submission approved (nested update)',
+    state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status === 'approved',
+    state?.team?.taskSubmissions?.[PHOTO_TASK_ID]?.status);
+  check('approved photo completes the stage', state?.team?.stages?.[1]?.status === 'completed',
+    state?.team?.stages?.[1]?.status);
+  check('final stage unlocked after photo', state?.team?.stages?.[2]?.status === 'active',
+    state?.team?.stages?.[2]?.status);
 
   // ── 9. Complete the final plain task ────────────────────────────────────────
   const completeRes = await player.call('completeTask', {

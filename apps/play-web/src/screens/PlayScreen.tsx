@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getMyTeamState, triggerSOS, updateLocation, type MyTeamState } from '../services/calls';
 import { clearSession, type Session } from '../store';
+import { useWakeLock } from '../hooks/useWakeLock';
 import { Button, Progress, Screen } from '../components/ui';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
@@ -55,6 +56,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     );
     return () => navigator.geolocation.clearWatch(id);
   }, [session]);
+
+  // Keep the screen awake while actively racing (map open, navigating).
+  useWakeLock(!!state && state.team.launched && state.team.status !== 'finished');
 
   async function leave() {
     if (await dialog.confirm('Leave this race? You can rejoin with the same code.')) { clearSession(); onLeave(); }
