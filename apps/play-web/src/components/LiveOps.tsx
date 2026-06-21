@@ -69,7 +69,7 @@ export default function LiveOps({
       {liveAnnouncements.map((a) => (
         <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/10 border border-accent/30 px-3 py-2">
           <span className="text-sm">📢</span>
-          <p className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
+          <p dir="auto" className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
           <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
         </div>
       ))}
@@ -83,12 +83,12 @@ export default function LiveOps({
             <div className="flex items-start gap-2">
               <span className="text-sm">⚡</span>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-purple-200">
+                <div dir="auto" className="text-sm font-semibold text-purple-200">
                   {lang === 'he' && f.titleHe ? f.titleHe : f.title}
                   {f.bonusPoints ? <span className="ml-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
                 </div>
                 {(f.description || f.descriptionHe) && (
-                  <p className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
+                  <p dir="auto" className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
                 )}
               </div>
               <span className="text-xs font-mono text-purple-300 shrink-0">{mm}:{ss}</span>
@@ -130,7 +130,7 @@ function LeaderboardPeek({
               key={r.teamId}
               className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-accent font-semibold' : 'text-zinc-400'}`}
             >
-              <span className="truncate"><span className="font-mono mr-2">{r.rank}</span>{r.teamName}</span>
+              <span dir="auto" className="truncate"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
               <span className="font-mono shrink-0">{r.score}</span>
             </div>
           ))}

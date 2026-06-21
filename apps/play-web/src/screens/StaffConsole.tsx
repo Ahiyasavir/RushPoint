@@ -206,7 +206,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-zinc-100 uppercase">{a.type}</div>
                   <div className="text-xs text-zinc-500 truncate">team {a.teamId.slice(0, 8)}</div>
-                  {a.message && <div className="text-sm text-zinc-300 mt-1">{a.message}</div>}
+                  {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
                   {a.lat != null && a.lng != null && (
                     <a
                       className="text-accent text-xs underline"
@@ -241,7 +241,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             const isImage = /^https?:\/\//.test(s.photoUrl);
             return (
               <Card key={key} className="p-3 mb-2">
-                <div className="text-sm font-medium text-zinc-100">{s.displayName}</div>
+                <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
                 <div className="text-xs text-zinc-500 mb-2">task {s.taskId.slice(0, 10)}</div>
                 {isImage
                   ? <img src={s.photoUrl} alt="submission" className="w-full rounded-lg mb-2 max-h-64 object-cover" />

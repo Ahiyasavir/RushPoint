@@ -104,7 +104,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">⏳</div>
-          <h2 className="text-xl font-bold">You&apos;re in, {team.displayName}!</h2>
+          <h2 dir="auto" className="text-xl font-bold">You&apos;re in, {team.displayName}!</h2>
           <p className="text-zinc-500">Waiting for the host to start the race…</p>
         </div>
         <Button variant="danger" onClick={sos}>SOS</Button>
@@ -161,7 +161,7 @@ function Header({ game, score, accent, onLeave }: {
   return (
     <div className="flex items-center justify-between">
       <div>
-        <div className="font-brand font-extrabold text-lg" style={{ color: accent }}>
+        <div dir="auto" className="font-brand font-extrabold text-lg" style={{ color: accent }}>
           {game.branding?.name ?? game.title}
         </div>
         <div className="text-xs text-zinc-500">Score: <span className="text-accent font-mono">{score}</span></div>

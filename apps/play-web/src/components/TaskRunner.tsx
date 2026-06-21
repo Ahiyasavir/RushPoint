@@ -77,9 +77,9 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
   return (
     <Card className="p-5">
       <div className="text-xs text-accent uppercase tracking-widest mb-1">{stage.tasks.length > 1 ? 'Routed task' : 'Your task'}</div>
-      <h2 className="text-xl font-bold mb-2">{task.title}</h2>
-      {task.description && <p className="text-zinc-400 text-sm mb-3">{task.description}</p>}
-      {task.smart?.longInstructions && <p className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
+      <h2 dir="auto" className="text-xl font-bold mb-2">{task.title}</h2>
+      {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
+      {task.smart?.longInstructions && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
 
       <DistanceBadge task={task} />
 

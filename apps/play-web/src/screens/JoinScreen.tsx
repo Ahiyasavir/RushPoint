@@ -80,10 +80,10 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   return (
     <Screen>
       <div className="mb-6">
-        <h1 className="font-brand text-2xl font-extrabold" style={{ color: info.branding?.primaryColor ?? '#F97316' }}>
+        <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: info.branding?.primaryColor ?? '#F97316' }}>
           {info.branding?.name ?? info.title}
         </h1>
-        {info.description && <p className="text-zinc-500 text-sm mt-1">{info.description}</p>}
+        {info.description && <p dir="auto" className="text-zinc-500 text-sm mt-1">{info.description}</p>}
       </div>
 
       <div className="space-y-4 flex-1">

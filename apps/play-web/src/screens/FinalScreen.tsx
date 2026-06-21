@@ -15,7 +15,7 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
       <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
         <div className="text-7xl animate-bounce">🏆</div>
         <h1 className="font-brand text-3xl font-extrabold" style={{ color: accent }}>Finished!</h1>
-        <p className="text-zinc-400">{team.displayName}, you completed every stage.</p>
+        <p dir="auto" className="text-zinc-400">{team.displayName}, you completed every stage.</p>
 
         <Card className="p-6 w-full">
           <div className="text-xs text-zinc-500 uppercase tracking-widest">Final score</div>
@@ -25,12 +25,12 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
 
         {run.leaderboard && run.leaderboard.rankings.length > 0 && (
           <Card className="p-4 w-full">
-            <div className="text-sm font-medium text-zinc-300 mb-2 text-left">Leaderboard</div>
+            <div className="text-sm font-medium text-zinc-300 mb-2 text-start">Leaderboard</div>
             <div className="space-y-1">
               {run.leaderboard.rankings.slice(0, 10).map((r) => (
                 <div key={r.teamId} className={`flex items-center gap-3 text-sm ${r.teamId === team.id ? 'text-accent' : 'text-zinc-300'}`}>
                   <span className="w-5 text-zinc-500">{r.rank}</span>
-                  <span className="flex-1 text-left">{r.teamName}</span>
+                  <span dir="auto" className="flex-1 text-start">{r.teamName}</span>
                   <span className="font-mono">{r.score}</span>
                 </div>
               ))}
