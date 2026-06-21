@@ -266,6 +266,15 @@ async function main() {
   check('our team is ranked #1', fin?.rankings?.[0]?.teamId === playerCred.user.uid, JSON.stringify(fin?.rankings?.[0]));
   check('final score is positive', (fin?.rankings?.[0]?.score ?? 0) > 0, String(fin?.rankings?.[0]?.score));
 
+  // ── 11. A late participant cannot join a finished run ───────────────────────
+  let lateRejected = false;
+  try {
+    await staff.call('joinRun', { code: accessCode, displayName: 'Latecomers' });
+  } catch (e) {
+    lateRejected = /already finished/i.test(e.message);
+  }
+  check('joinRun rejects a finished run', lateRejected);
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

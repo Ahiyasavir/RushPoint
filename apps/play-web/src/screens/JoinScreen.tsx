@@ -16,6 +16,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     setErr(''); setBusy(true);
     try {
       const i = await getJoinInfo({ code: code.trim().toUpperCase() });
+      if (i.runStatus === 'finished') { setErr('This race has already finished.'); return; }
       setInfo(i);
     } catch (e) {
       setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Invalid code');

@@ -211,11 +211,16 @@ export const joinRun = functions.https.onCall(async (data, context) => {
     return { teamId, runId, gameId, ownerUid, alreadyJoined: true };
   }
 
-  // Wallet check: if over the free limit, deduct from creator's wallet
   const runSnap = await runRef.get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   const run = runSnap.data() as Run;
 
+  // Can't join a race that's already over (would also wrongly bill the creator).
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This race has already finished.');
+  }
+
+  // Wallet check: if over the free limit, deduct from creator's wallet
   const isBillable = run.freeParticipantsUsed >= FREE_PARTICIPANTS_PER_RUN;
   const price = game.mode === 'team' ? PRICE_ILS_TEAM : PRICE_ILS_INDIVIDUAL;
 
