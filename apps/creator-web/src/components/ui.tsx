@@ -1,5 +1,5 @@
 // Tiny shared UI kit for the creator console. Clean, data-dense, one accent.
-import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes } from 'react';
+import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
@@ -36,6 +36,16 @@ export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInput
     <input
       className={`w-full px-3 py-2 rounded-lg bg-app-bg border border-glass-border text-zinc-100 text-sm
                   placeholder:text-zinc-600 focus:outline-none focus:border-neon-green/60 ${className}`}
+      {...rest}
+    />
+  );
+}
+
+export function Textarea({ className = '', ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={`w-full px-3 py-2 rounded-lg bg-app-bg border border-glass-border text-zinc-100 text-sm
+                  placeholder:text-zinc-600 focus:outline-none focus:border-neon-green/60 resize-y ${className}`}
       {...rest}
     />
   );

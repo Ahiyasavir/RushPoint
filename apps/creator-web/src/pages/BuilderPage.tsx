@@ -5,7 +5,7 @@ import type {
 } from '@rushpoint/shared';
 import { PRESET_LABELS } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
-import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner } from '../components/ui';
+import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
 import LocationPicker from '../components/LocationPicker';
 import TaskLibrary from '../components/TaskLibrary';
@@ -282,6 +282,13 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         {onRemove && <button className="text-neon-red text-sm" onClick={onRemove}>✕</button>}
       </div>
 
+      <Textarea
+        value={task.description ?? ''}
+        onChange={(e) => set({ description: e.target.value })}
+        placeholder="What participants see — the clue or instructions for this task"
+        rows={2}
+      />
+
       <div>
         <Label>Location</Label>
         <LocationPicker
@@ -344,6 +351,17 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
               onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
             Auto-approve (no staff review needed)
           </label>
+        )}
+        {(task.type === 'smart_station' || task.type === 'photo') && (
+          <div>
+            <Label>Extended instructions (shown on the task screen)</Label>
+            <Textarea
+              value={task.smart?.longInstructions ?? ''}
+              onChange={(e) => setSmart({ longInstructions: e.target.value })}
+              placeholder="Optional step-by-step detail beyond the short description"
+              rows={2}
+            />
+          </div>
         )}
       </Advanced>
     </div>
