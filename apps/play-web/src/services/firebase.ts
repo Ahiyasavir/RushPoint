@@ -1,6 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import {
   initializeFirestore,
+  getFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
   connectFirestoreEmulator,
@@ -35,9 +36,21 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 // Offline-first cache: live run/team state is served from IndexedDB when the
 // participant briefly loses signal in the field, and listeners reconnect
 // automatically. Multi-tab manager keeps several open tabs consistent.
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-});
+// Cached on globalThis so a Vite HMR re-execution of this module reuses the
+// same instance instead of calling initializeFirestore() twice (which throws).
+const dbHolder = globalThis as unknown as { __rpPlayDb?: ReturnType<typeof getFirestore> };
+function initDb() {
+  if (dbHolder.__rpPlayDb) return dbHolder.__rpPlayDb;
+  try {
+    dbHolder.__rpPlayDb = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    dbHolder.__rpPlayDb = getFirestore(app);
+  }
+  return dbHolder.__rpPlayDb;
+}
+export const db = initDb();
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
 export const storage   = getStorage(app);

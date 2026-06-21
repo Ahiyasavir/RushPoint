@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { getMyTeamState, triggerSOS, updateLocation, type MyTeamState } from '../services/calls';
 import { clearSession, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { Button, Progress, Screen } from '../components/ui';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
-import NavMap, { type NavTarget } from '../components/NavMap';
+import type { NavTarget } from '../components/NavMap';
+// Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
+// join screen doesn't need it; it loads when the participant starts racing.
+const NavMap = lazy(() => import('../components/NavMap'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 
@@ -133,7 +136,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
       <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
 
-      {activeStage && <NavMap targets={targets} me={me} accent={accent} className="h-52 mb-4" />}
+      {activeStage && (
+        <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
+          <NavMap targets={targets} me={me} accent={accent} className="h-52 mb-4" />
+        </Suspense>
+      )}
 
       <div className="flex-1">
         {activeStage ? (
