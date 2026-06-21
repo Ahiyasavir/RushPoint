@@ -14,7 +14,7 @@ export default function DashboardPage() {
     const { games } = await listGames();
     setGames(games);
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, []);
 
   async function newGame() {
     setBusy(true);
@@ -38,12 +38,12 @@ export default function DashboardPage() {
   async function remove(g: Game) {
     if (!(await dialog.confirm(`Delete "${g.title}"? This cannot be undone.`, 'Delete'))) return;
     await deleteGame({ gameId: g.id });
-    load();
+    void load();
   }
 
   async function togglePublish(g: Game) {
     await publishGame({ gameId: g.id, visibility: g.visibility === 'public' ? 'private' : 'public' });
-    load();
+    void load();
   }
 
   if (!games) return <Spinner label="Loading your games…" />;

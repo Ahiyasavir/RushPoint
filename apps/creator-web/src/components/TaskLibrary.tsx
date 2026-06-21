@@ -35,7 +35,7 @@ export default function TaskLibrary({ onInsert, onClose }: {
     const { tasks } = await searchTaskLibrary({ query: q });
     setTasks(tasks);
   }
-  useEffect(() => { run(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { void run(); /* eslint-disable-next-line */ }, []);
 
   function pick(pt: PublicTask) {
     onInsert(toTask(pt));

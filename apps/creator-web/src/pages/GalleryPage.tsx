@@ -25,7 +25,7 @@ export default function GalleryPage() {
     if (tab === 'games') { const { games } = await searchGallery({ query: q }); setGames(games); }
     else { const { tasks } = await searchTaskLibrary({ query: q }); setTasks(tasks); }
   }
-  useEffect(() => { run(); /* eslint-disable-next-line */ }, [tab]);
+  useEffect(() => { void run(); /* eslint-disable-next-line */ }, [tab]);
 
   async function copy(g: PublicGame) {
     setBusy(true);

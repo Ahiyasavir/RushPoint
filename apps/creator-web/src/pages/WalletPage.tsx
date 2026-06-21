@@ -12,7 +12,7 @@ export default function WalletPage() {
   const [busy, setBusy] = useState(false);
 
   async function load() { const { wallet } = await getWallet(); setWallet(wallet); }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void load(); }, []);
 
   async function topUp(amountILS: number) {
     setBusy(true);

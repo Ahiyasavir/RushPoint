@@ -38,7 +38,7 @@ export default function BuilderPage() {
 
   useEffect(() => {
     if (!gameId) return;
-    getGame({ gameId }).then(({ game }) => setGame(game));
+    void getGame({ gameId }).then(({ game }) => setGame(game));
   }, [gameId]);
 
   function patch(p: Partial<Game>) { setGame((g) => (g ? { ...g, ...p } : g)); }
@@ -86,7 +86,7 @@ export default function BuilderPage() {
         {['Details', 'Stages & Tasks', 'Preview & Launch'].map((label, i) => (
           <button
             key={label}
-            onClick={() => { save(); setStep(i + 1); }}
+            onClick={() => { void save(); setStep(i + 1); }}
             className={`flex-1 px-3 py-2 rounded-lg text-sm border ${
               step === i + 1 ? 'border-neon-green/50 bg-neon-green/10 text-neon-green'
                              : 'border-glass-border text-zinc-500 hover:text-zinc-300'}`}
@@ -101,11 +101,11 @@ export default function BuilderPage() {
       {step === 3 && <StepPreview game={game} />}
 
       <div className="flex justify-between mt-6">
-        <Button variant="ghost" disabled={step === 1} onClick={() => { save(); setStep(step - 1); }}>Back</Button>
+        <Button variant="ghost" disabled={step === 1} onClick={() => { void save(); setStep(step - 1); }}>Back</Button>
         <div className="flex items-center gap-3">
           <span className="text-xs text-zinc-500">{saving ? 'Saving…' : 'Saved'}</span>
           {step < 3
-            ? <Button onClick={() => { save(); setStep(step + 1); }}>Next</Button>
+            ? <Button onClick={() => { void save(); setStep(step + 1); }}>Next</Button>
             : <Button onClick={saveAndLaunch}>Save &amp; Launch run</Button>}
         </div>
       </div>
