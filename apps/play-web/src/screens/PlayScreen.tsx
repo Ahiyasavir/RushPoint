@@ -121,8 +121,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         .filter((t) => t.status !== 'completed' && t.status !== 'skipped')
         .map((rec) => {
           const content = state.activeStageTasks.find((c) => c.id === rec.taskId);
+          if (content?.locationless) return null; // general task — not on the map
           const coords = content?.smart?.stationCoords ?? content?.coordinates;
-          return coords
+          return coords && (coords.lat !== 0 || coords.lng !== 0)
             ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Task', active: rec.status === 'assigned' }
             : null;
         })

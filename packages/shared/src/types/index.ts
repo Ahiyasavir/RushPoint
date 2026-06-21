@@ -195,6 +195,9 @@ export interface Task {
   status?: StationStatus;       // operator override: paused/closed
   maxDurationMinutes?: number;  // staff warning threshold
   smart?: SmartStationConfig;
+  // A general task with no fixed map location — can be done from anywhere
+  // (no travel, no map marker, no distance). Routing treats transit as zero.
+  locationless?: boolean;
   // Library metadata (for publicTasks index)
   tags?: string[];
 }
@@ -210,6 +213,11 @@ export interface Stage {
   title: string;
   tasks: Task[];
   isFinal?: boolean;  // triggers Final Run screen when completed
+  // How many of this stage's tasks each team must complete. Undefined or >=
+  // tasks.length means ALL tasks. When fewer, each team is routed to the
+  // best-suited subset (by distance/load/skill) and the stage completes once
+  // they've finished this many — the rest are auto-skipped for that team.
+  requiredTaskCount?: number;
 }
 
 
@@ -383,6 +391,9 @@ export interface RunStageRecord {
   status: StageStatus;
   startedAt?: string;
   completedAt?: string;
+  // Copied from Stage.requiredTaskCount at run-build time so the run is
+  // self-contained. Undefined = all tasks required.
+  requiredTaskCount?: number;
   tasks: RunTaskRecord[];
   earnedScore?: number;
 }

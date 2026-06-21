@@ -102,7 +102,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
 
 function DistanceBadge({ task }: { task: SafeTask }) {
   const [dist, setDist] = useState<number | null>(null);
-  const coords = task.smart?.stationCoords ?? task.coordinates;
+  const coords = task.locationless ? undefined : (task.smart?.stationCoords ?? task.coordinates);
   useEffect(() => {
     if (!coords || (!coords.lat && !coords.lng)) return;
     navigator.geolocation?.getCurrentPosition((p) => {

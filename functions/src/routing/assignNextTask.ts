@@ -29,6 +29,8 @@ function loadFactor(task: Task, taskCounts: Record<string, number>): number {
 }
 
 function transitMinutes(teamLocation: GeoPoint, task: Task): number {
+  // A locationless (general) task can be done from wherever the team is.
+  if (task.locationless) return 0;
   if (!task.coordinates || !isValidCoord(task.coordinates.lat, task.coordinates.lng)) return 5;
   return haversineKm(teamLocation, task.coordinates) * 12; // 5 km/h walking
 }
@@ -38,13 +40,21 @@ function skillMatch(skillRatio: number, difficulty: number): number {
   return 1 - Math.abs(skillRatio - normalizedDifficulty);
 }
 
+// When `skillAware` (the smart_weighted preset) the routing balances station
+// load, walking distance AND skill-difficulty fit + the team's pace history.
+// Otherwise (fixed-points / time presets) there's no per-team difficulty target,
+// so we route purely to the nearest available station — distance + load only.
 function priorityScore(
   task: Task,
   teamLocation: GeoPoint,
   skillRatio: number,
   taskCounts: Record<string, number>,
+  skillAware: boolean,
 ): number {
   const transitNorm = Math.min(transitMinutes(teamLocation, task), 30) / 30;
+  if (!skillAware) {
+    return 0.6 * loadFactor(task, taskCounts) - 0.4 * transitNorm;
+  }
   return (
     0.5 * loadFactor(task, taskCounts) -
     0.3 * transitNorm +
@@ -112,6 +122,7 @@ export async function buildRecommendations(
   gameId: string,
   runId: string,
   limit = 5,
+  skillAware = true,
 ): Promise<TaskRecommendation[]> {
   const taskCounts = await getTaskCounts(ownerUid, gameId, runId);
 
@@ -126,9 +137,9 @@ export async function buildRecommendations(
   return candidates
     .map((task) => ({
       task,
-      priority: priorityScore(task, teamLocation, skillRatio, taskCounts),
+      priority: priorityScore(task, teamLocation, skillRatio, taskCounts, skillAware),
       distanceKm:
-        task.coordinates && isValidCoord(task.coordinates.lat, task.coordinates.lng)
+        !task.locationless && task.coordinates && isValidCoord(task.coordinates.lat, task.coordinates.lng)
           ? haversineKm(teamLocation, task.coordinates)
           : 0,
     }))
@@ -160,6 +171,7 @@ export async function assignTask(
   ownerUid: string,
   gameId: string,
   runId: string,
+  skillAware = true,
 ): Promise<{ taskId?: string; taskIndex?: number }> {
   const taskCounts = await getTaskCounts(ownerUid, gameId, runId);
 
@@ -175,8 +187,8 @@ export async function assignTask(
 
   const chosen = candidates.sort(
     (a, b) =>
-      priorityScore(b, teamLocation, skillRatio, taskCounts) -
-      priorityScore(a, teamLocation, skillRatio, taskCounts),
+      priorityScore(b, teamLocation, skillRatio, taskCounts, skillAware) -
+      priorityScore(a, teamLocation, skillRatio, taskCounts, skillAware),
   )[0];
 
   // Increment the runtime counter atomically on the Run doc

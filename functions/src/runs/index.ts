@@ -83,6 +83,11 @@ function buildInitialStages(game: Game): RunStageRecord[] {
       stageId: stage.id,
       order: stage.order,
       status: (idx === 0 ? 'active' : 'locked') as StageStatus,
+      // Clamp to [1, tasks.length]; undefined means "all tasks".
+      requiredTaskCount:
+        stage.requiredTaskCount != null
+          ? Math.max(1, Math.min(stage.requiredTaskCount, stage.tasks.length))
+          : undefined,
       tasks: stage.tasks.map((task, tIdx) => ({
         taskId: task.id,
         taskIndex: tIdx,
@@ -387,9 +392,22 @@ export async function completeTaskForTeam(
     taskRec.earnedScore = earnedScore;
     taskRec.scoreBreakdown = { taskScore: earnedScore, total: earnedScore };
 
-    // Check if the whole stage is complete
-    const stageDone = stages[stageIdx].tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
+    // Stage completion: a stage may require only a SUBSET of its tasks
+    // (requiredTaskCount). It's done when that many are completed, OR when no
+    // task remains to do. When it finishes early, the leftover tasks are
+    // auto-skipped for this team so they aren't routed again.
+    const completedCount = stages[stageIdx].tasks.filter((t) => t.status === 'completed').length;
+    const required = Math.min(
+      stages[stageIdx].requiredTaskCount ?? stages[stageIdx].tasks.length,
+      stages[stageIdx].tasks.length,
+    );
+    const allTerminal = stages[stageIdx].tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
+    const stageDone = completedCount >= required || allTerminal;
     if (stageDone) {
+      // Auto-skip any tasks the team didn't need to do.
+      for (const t of stages[stageIdx].tasks) {
+        if (t.status !== 'completed') t.status = 'skipped';
+      }
       stages[stageIdx].status = 'completed';
       stages[stageIdx].completedAt = now;
       stages[stageIdx].earnedScore = stages[stageIdx].tasks.reduce((s, t) => s + (t.earnedScore ?? 0), 0);
@@ -749,7 +767,10 @@ async function assignNextInActiveStage(
     })),
     game.stages.flatMap((s) => s.tasks),
   );
-  const result = await assignTask(teamLocation, candidateTasks, completedTaskIds, skillRatio, ownerUid, gameId, runId);
+  const result = await assignTask(
+    teamLocation, candidateTasks, completedTaskIds, skillRatio,
+    ownerUid, gameId, runId, game.scoringPreset === 'smart_weighted',
+  );
   if (result.taskId) {
     const localIdx = stageRec.tasks.findIndex((t) => t.taskId === result.taskId);
     const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
@@ -830,7 +851,7 @@ export const getRecommendedTasks = functions.https.onCall(async (data, context) 
 
   const recommendations = await buildRecommendations(
     { lat, lng }, gameStage.tasks, completedTaskIds, skillRatio,
-    ctx.ownerUid, ctx.gameId, ctx.runId,
+    ctx.ownerUid, ctx.gameId, ctx.runId, 5, game.scoringPreset === 'smart_weighted',
   );
   return { recommendations };
 });

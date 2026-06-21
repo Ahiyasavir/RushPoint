@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, TaskType,
@@ -202,8 +202,63 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 }
 
 // ── Step 2: Stages & Tasks ──
+const TASK_ICON: Record<TaskType, string> = {
+  field: '📍', self_report: '✅', smart_station: '🔢', photo: '📷',
+};
+
+function taskIcon(task: Task): string {
+  if (task.locationless) return '🌐';
+  return TASK_ICON[task.type] ?? '📍';
+}
+
+// Compact, clickable task chip — the core of the at-a-glance stage editor.
+function TaskTile({ task, onClick }: { task: Task; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-32 h-24 shrink-0 rounded-xl border border-glass-border bg-app-bg p-2.5 text-start
+                 flex flex-col gap-1 hover:border-neon-green/50 hover:bg-glass-hover transition"
+    >
+      <span className="text-lg leading-none">{taskIcon(task)}</span>
+      <span className="text-xs font-medium text-zinc-100 line-clamp-2 flex-1">{task.title || 'Untitled task'}</span>
+      <span className="text-[10px] text-zinc-500">{task.locationless ? 'anywhere' : `★ ${task.difficulty}`}</span>
+    </button>
+  );
+}
+
+function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-32 h-24 shrink-0 rounded-xl border border-dashed border-glass-border text-zinc-500
+                 flex flex-col items-center justify-center gap-1 text-xs
+                 hover:border-neon-green/60 hover:text-neon-green transition"
+    >
+      <span className="text-xl leading-none">＋</span>{label}
+    </button>
+  );
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-app-card border border-glass-border rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto p-4 shadow-soft"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold">{title}</h3>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void }) {
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
   function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
   function addStage() { setStages([...game.stages, blankStage(game.stages.length)]); }
   function updateStage(id: string, p: Partial<Stage>) {
@@ -219,44 +274,68 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
     const blankOnly = stage.tasks.length === 1 && !stage.tasks[0].title && stage.tasks[0].coordinates.lat === 0;
     updateStage(stageId, { tasks: blankOnly ? [task] : [...stage.tasks, task] });
   }
+  function addTask(stageId: string) {
+    const stage = game.stages.find((s) => s.id === stageId);
+    if (!stage) return;
+    const t = blankTask();
+    updateStage(stageId, { tasks: [...stage.tasks, t] });
+    setEditing({ stageId, taskId: t.id });
+  }
+
+  const editingStage = editing && game.stages.find((s) => s.id === editing.stageId);
+  const editingTask = editingStage?.tasks.find((t) => t.id === editing?.taskId);
 
   return (
     <div className="space-y-4">
-      {game.stages.map((stage, idx) => (
-        <Card key={stage.id} className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Badge color="green">Stage {idx + 1}</Badge>
-            <Input value={stage.title} onChange={(e) => updateStage(stage.id, { title: e.target.value })} className="flex-1" />
-            {stage.tasks.length > 1 && <Badge color="cyan">routed pool</Badge>}
-            {idx === game.stages.length - 1 && (
-              <label className="flex items-center gap-1 text-xs text-zinc-400">
-                <input type="checkbox" checked={!!stage.isFinal}
-                  onChange={(e) => updateStage(stage.id, { isFinal: e.target.checked })} />final
-              </label>
+      {game.stages.map((stage, idx) => {
+        const m = stage.tasks.length;
+        const req = stage.requiredTaskCount ?? m;
+        return (
+          <Card key={stage.id} className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Badge color="green">Stage {idx + 1}</Badge>
+              <Input value={stage.title} onChange={(e) => updateStage(stage.id, { title: e.target.value })} className="flex-1" />
+              {idx === game.stages.length - 1 && (
+                <label className="flex items-center gap-1 text-xs text-zinc-400 shrink-0">
+                  <input type="checkbox" checked={!!stage.isFinal}
+                    onChange={(e) => updateStage(stage.id, { isFinal: e.target.checked })} />final
+                </label>
+              )}
+              {game.stages.length > 1 && (
+                <button className="text-neon-red text-sm shrink-0" onClick={() => removeStage(stage.id)}>✕</button>
+              )}
+            </div>
+
+            {/* Completion rule — only meaningful with a pool of tasks */}
+            {m > 1 && (
+              <div className="flex items-center flex-wrap gap-2 mb-3 text-xs text-zinc-400">
+                <span>Each team completes</span>
+                <Select
+                  className="w-auto py-1"
+                  value={String(req)}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value);
+                    updateStage(stage.id, { requiredTaskCount: n >= m ? undefined : n });
+                  }}
+                >
+                  {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </Select>
+                <span>of {m} tasks{req < m ? ' — routed to the best-suited ones' : ' (all of them)'}</span>
+              </div>
             )}
-            <button className="text-neon-red text-sm" onClick={() => removeStage(stage.id)}>✕</button>
-          </div>
 
-          <div className="space-y-2">
-            {stage.tasks.map((task) => (
-              <TaskEditor key={task.id} task={task}
-                onChange={(t) => updateStage(stage.id, { tasks: stage.tasks.map((x) => (x.id === t.id ? t : x)) })}
-                onRemove={stage.tasks.length > 1 ? () => updateStage(stage.id, { tasks: stage.tasks.filter((x) => x.id !== task.id) }) : undefined}
-              />
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2 mt-3">
-            <Button variant="ghost" className="text-xs"
-              onClick={() => updateStage(stage.id, { tasks: [...stage.tasks, blankTask()] })}>
-              + Add another task (enables smart routing)
-            </Button>
-            <Button variant="ghost" className="text-xs" onClick={() => setLibraryFor(stage.id)}>
-              ⌕ Insert from library
-            </Button>
-          </div>
-        </Card>
-      ))}
+            <div className="flex flex-wrap gap-2">
+              {stage.tasks.map((task) => (
+                <TaskTile key={task.id} task={task} onClick={() => setEditing({ stageId: stage.id, taskId: task.id })} />
+              ))}
+              <AddTile label="Add task" onClick={() => addTask(stage.id)} />
+              <AddTile label="From library" onClick={() => setLibraryFor(stage.id)} />
+            </div>
+          </Card>
+        );
+      })}
       <Button variant="subtle" onClick={addStage}>+ Add stage</Button>
 
       {libraryFor && (
@@ -264,6 +343,19 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
           onInsert={(task) => insertFromLibrary(libraryFor, task)}
           onClose={() => setLibraryFor(null)}
         />
+      )}
+
+      {editing && editingStage && editingTask && (
+        <Modal title="Edit task" onClose={() => setEditing(null)}>
+          <TaskEditor
+            task={editingTask}
+            onChange={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
+            onRemove={editingStage.tasks.length > 1
+              ? () => { updateStage(editingStage.id, { tasks: editingStage.tasks.filter((x) => x.id !== editingTask.id) }); setEditing(null); }
+              : undefined}
+          />
+          <Button className="w-full mt-3" onClick={() => setEditing(null)}>Done</Button>
+        </Modal>
       )}
     </div>
   );
@@ -275,12 +367,10 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
   const setSmart = (p: Record<string, unknown>) =>
     onChange({ ...task, smart: { enabled: true, verificationType: task.smart?.verificationType ?? 'code_verification', ...task.smart, ...p } });
 
+  const located = !task.locationless;
   return (
-    <div className="border border-glass-border rounded-lg p-3 space-y-2">
-      <div className="flex gap-2 items-center">
-        <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder="Task title" className="flex-1" />
-        {onRemove && <button className="text-neon-red text-sm" onClick={onRemove}>✕</button>}
-      </div>
+    <div className="space-y-2">
+      <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder="Task title" />
 
       <Textarea
         value={task.description ?? ''}
@@ -289,28 +379,40 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         rows={2}
       />
 
+      <label className="flex items-center gap-2 text-sm text-zinc-300 py-1">
+        <input type="checkbox" checked={located}
+          onChange={(e) => set({ locationless: !e.target.checked })} />
+        Has a specific map location
+      </label>
+
+      {located ? (
+        <>
+          <LocationPicker
+            lat={task.coordinates.lat}
+            lng={task.coordinates.lng}
+            onChange={(lat, lng) => set({ coordinates: { lat, lng } })}
+            className="h-44"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Lat</Label>
+              <Input type="number" value={task.coordinates.lat || ''} onChange={(e) => set({ coordinates: { ...task.coordinates, lat: parseFloat(e.target.value) || 0 } })} />
+            </div>
+            <div>
+              <Label>Lng</Label>
+              <Input type="number" value={task.coordinates.lng || ''} onChange={(e) => set({ coordinates: { ...task.coordinates, lng: parseFloat(e.target.value) || 0 } })} />
+            </div>
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-zinc-500 bg-app-raised rounded-lg px-3 py-2">
+          🌐 General task — teams can do this from anywhere. No map pin, no travel distance.
+        </p>
+      )}
+
       <div>
-        <Label>Location</Label>
-        <LocationPicker
-          lat={task.coordinates.lat}
-          lng={task.coordinates.lng}
-          onChange={(lat, lng) => set({ coordinates: { lat, lng } })}
-          className="h-44"
-        />
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div>
-          <Label>Lat</Label>
-          <Input type="number" value={task.coordinates.lat || ''} onChange={(e) => set({ coordinates: { ...task.coordinates, lat: parseFloat(e.target.value) || 0 } })} />
-        </div>
-        <div>
-          <Label>Lng</Label>
-          <Input type="number" value={task.coordinates.lng || ''} onChange={(e) => set({ coordinates: { ...task.coordinates, lng: parseFloat(e.target.value) || 0 } })} />
-        </div>
-        <div>
-          <Label>Difficulty 1–10</Label>
-          <Input type="number" min={1} max={10} value={task.difficulty} onChange={(e) => set({ difficulty: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) })} />
-        </div>
+        <Label>Difficulty 1–10</Label>
+        <Input type="number" min={1} max={10} value={task.difficulty} onChange={(e) => set({ difficulty: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) })} />
       </div>
 
       <Advanced title="Advanced task settings" open={adv} onToggle={() => setAdv(!adv)}>
@@ -364,6 +466,10 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
           </div>
         )}
       </Advanced>
+
+      {onRemove && (
+        <button onClick={onRemove} className="text-neon-red text-xs hover:underline pt-1">Delete task</button>
+      )}
     </div>
   );
 }

@@ -275,6 +275,42 @@ async function main() {
   }
   check('joinRun rejects a finished run', lateRejected);
 
+  // ── 12. Partial-completion stage + locationless task ────────────────────────
+  // A stage with 2 tasks but requiredTaskCount=1: completing ONE finishes the
+  // stage and auto-skips the other. One task is locationless (no coordinates).
+  const player2 = makeParty('player2');
+  const p2 = await signInAnonymously(player2.auth);
+
+  const { gameId: g2 } = await creator.call('createGame', { title: 'Pick-One Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: g2,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-pick', order: 0, title: 'Pick one', isFinal: true, requiredTaskCount: 1,
+      tasks: [
+        { id: 'pk-a', title: 'Located task', type: 'field', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 3, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 3 },
+        { id: 'pk-b', title: 'Anywhere task', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 3 },
+      ],
+    }],
+  });
+  const { runId: r2, accessCode: c2 } = await creator.call('launchRun', { gameId: g2 });
+  await player2.call('joinRun', { code: c2, displayName: 'Solo' });
+  await creator.call('startTeams', { gameId: g2, runId: r2 });
+
+  // Routing assigns one of the two; complete whichever it picked.
+  let s2 = await player2.call('getMyTeamState', { code: c2 });
+  const assigned = s2?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+  check('partial stage routes exactly one task', !!assigned, assigned?.taskId);
+  await player2.call('completeTask', { taskId: assigned.taskId, code: c2, lat: 31.78, lng: 35.21 });
+
+  s2 = await player2.call('getMyTeamState', { code: c2 });
+  const tasks2 = s2?.team?.stages?.[0]?.tasks ?? [];
+  const done = tasks2.filter((t) => t.status === 'completed').length;
+  const skipped = tasks2.filter((t) => t.status === 'skipped').length;
+  check('completing 1 of 2 finishes the partial stage', s2?.team?.stages?.[0]?.status === 'completed', s2?.team?.stages?.[0]?.status);
+  check('the unneeded task is auto-skipped', done === 1 && skipped === 1, `done=${done} skipped=${skipped}`);
+  check('team finished after the single required task', s2?.team?.status === 'finished', s2?.team?.status);
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
