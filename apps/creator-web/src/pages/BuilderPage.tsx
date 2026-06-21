@@ -465,6 +465,23 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
             />
           </div>
         )}
+
+        <div>
+          <Label>Hint (optional — teams pay points to reveal it)</Label>
+          <Textarea
+            value={task.hint ?? ''}
+            onChange={(e) => set({ hint: e.target.value })}
+            placeholder="A nudge stuck teams can unlock for a point cost"
+            rows={2}
+          />
+        </div>
+        {task.hint && (
+          <div>
+            <Label>Hint cost (points)</Label>
+            <Input type="number" min={0} value={task.hintPenalty ?? 25}
+              onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+        )}
       </Advanced>
 
       {onRemove && (

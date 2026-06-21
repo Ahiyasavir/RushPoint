@@ -198,6 +198,11 @@ export interface Task {
   // A general task with no fixed map location — can be done from anywhere
   // (no travel, no map marker, no distance). Routing treats transit as zero.
   locationless?: boolean;
+  // Optional paid hint: participants can reveal `hint` for a `hintPenalty`
+  // point cost (default 25). The hint text is NEVER sent to clients in the task
+  // payload — only via the requestTaskHint callable, which charges once.
+  hint?: string;
+  hintPenalty?: number;
   // Library metadata (for publicTasks index)
   tags?: string[];
 }
@@ -422,6 +427,8 @@ export interface RunTeam {
   smartVerifications?: Record<string, string[]>;
   // Live ops
   evacuatedFrom?: string | null;
+  // Tasks for which this team has already paid to reveal the hint (charge once).
+  taskHintsUsed?: string[];
   updatedAt: string;
 }
 

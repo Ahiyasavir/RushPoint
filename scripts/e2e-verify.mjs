@@ -311,6 +311,43 @@ async function main() {
   check('the unneeded task is auto-skipped', done === 1 && skipped === 1, `done=${done} skipped=${skipped}`);
   check('team finished after the single required task', s2?.team?.status === 'finished', s2?.team?.status);
 
+  // ── 13. Paid hints (reveal text, charge once, idempotent) ───────────────────
+  const { gameId: g3 } = await creator.call('createGame', { title: 'Hint Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: g3,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-h', order: 0, title: 'Riddle', isFinal: true,
+      tasks: [{
+        id: 'h-1', title: 'Solve the riddle', type: 'smart_station',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5, pointValue: 100, maxConcurrentTeams: 3,
+        smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'OLIVE' },
+        hint: 'It grows on a tree and makes oil.', hintPenalty: 30,
+      }],
+    }],
+  });
+  const { runId: r3, accessCode: c3 } = await creator.call('launchRun', { gameId: g3 });
+  const player3 = makeParty('player3');
+  await signInAnonymously(player3.auth);
+  await player3.call('joinRun', { code: c3, displayName: 'Riddler' });
+  await creator.call('startTeams', { gameId: g3, runId: r3 });
+
+  // The hint TEXT must not be leaked in the task payload.
+  const s3 = await player3.call('getMyTeamState', { code: c3 });
+  const htask = s3?.activeStageTasks?.[0];
+  check('hint text is NOT leaked to participants', htask?.hint === undefined && htask?.hasHint === true, JSON.stringify({ hint: htask?.hint, hasHint: htask?.hasHint }));
+
+  const hintRes = await player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-1' });
+  check('requestTaskHint returns the hint + charges the cost', hintRes?.hint === 'It grows on a tree and makes oil.' && hintRes?.penalty === 30, JSON.stringify(hintRes));
+
+  const afterHint = await player3.call('getMyTeamState', { code: c3 });
+  check('hint penalty applied to bonusPenalty', afterHint?.team?.bonusPenalty === 30, String(afterHint?.team?.bonusPenalty));
+
+  const hintAgain = await player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-1' });
+  check('second hint request does NOT double-charge', hintAgain?.alreadyUsed === true && hintAgain?.penalty === 0, JSON.stringify(hintAgain));
+  const afterAgain = await player3.call('getMyTeamState', { code: c3 });
+  check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

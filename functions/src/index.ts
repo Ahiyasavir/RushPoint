@@ -17,7 +17,7 @@ export { getWallet, topUpWallet, stripeWebhook } from './payments/index';
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
   refreshLeaderboard,
-  listRunTeams, completeTask, requestNextTask, getRecommendedTasks,
+  listRunTeams, completeTask, requestNextTask, requestTaskHint, getRecommendedTasks,
   checkOutTask, getMyTeamState,
 } from './runs/index';
 

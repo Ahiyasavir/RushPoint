@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { haversineKm } from '@rushpoint/shared';
 import type { RunStageRecord } from '@rushpoint/shared';
 import {
-  completeTask, requestNextTask, verifyStationCode, submitStationPhoto,
+  completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
 import { uploadTaskPhoto } from '../services/firebase';
 import type { Session } from '../store';
 import { Button, Card, Input } from '../components/ui';
+import { dialog } from '../components/dialog';
 
 export default function TaskRunner({ session, state, stage, onChanged }: {
   session: Session; state: MyTeamState; stage: RunStageRecord; onChanged: () => void;
@@ -15,6 +16,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
   const ctx = { ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId };
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [hint, setHint] = useState<string | null>(null);
 
   // The task currently assigned to this team within the active stage.
   const assignedRec = stage.tasks.find((t) => t.status === 'assigned');
@@ -31,6 +33,9 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
   const task: SafeTask | undefined = assignedRec
     ? state.activeStageTasks.find((t) => t.id === assignedRec.taskId)
     : undefined;
+
+  // Clear a revealed hint / message when the assigned task changes.
+  useEffect(() => { setHint(null); setMsg(''); }, [assignedRec?.taskId]);
 
   if (!task) {
     return <Card className="p-6 text-center text-zinc-500">Finding your next task…</Card>;
@@ -74,9 +79,30 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     } finally { setBusy(false); }
   }
 
+  async function revealHint() {
+    if (hint) return;
+    const cost = task!.hintPenalty ?? 25;
+    if (!(await dialog.confirm(`Reveal a hint for this task? It costs ${cost} points.`, { confirmLabel: 'Reveal hint' }))) return;
+    setBusy(true);
+    try {
+      const res = await requestTaskHint({ ...ctx, taskId: task!.id });
+      setHint(res.hint);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'No hint available');
+    } finally { setBusy(false); }
+  }
+
+  // Partial stages ("complete N of M") show progress so the team knows how many
+  // stops remain; full multi-task stages just say "routed task".
+  const requiredHere = stage.requiredTaskCount ?? stage.tasks.length;
+  const completedHere = stage.tasks.filter((t) => t.status === 'completed').length;
+  const headerLabel = stage.tasks.length > 1
+    ? (requiredHere < stage.tasks.length ? `Stop ${completedHere + 1} of ${requiredHere}` : 'Routed task')
+    : 'Your task';
+
   return (
     <Card className="p-5">
-      <div className="text-xs text-accent uppercase tracking-widest mb-1">{stage.tasks.length > 1 ? 'Routed task' : 'Your task'}</div>
+      <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
       <h2 dir="auto" className="text-xl font-bold mb-2">{task.title}</h2>
       {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
@@ -94,6 +120,16 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
           <PhotoEntry busy={busy} onSubmit={photo} />
         )}
       </div>
+
+      {task.hasHint && (
+        <div className="mt-3">
+          {hint
+            ? <p dir="auto" className="text-sm text-zinc-700 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
+            : <button onClick={revealHint} disabled={busy} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+                💡 Stuck? Reveal a hint (−{task.hintPenalty ?? 25} pts)
+              </button>}
+        </div>
+      )}
 
       {msg && <p className="text-center text-sm mt-3 text-zinc-300">{msg}</p>}
     </Card>

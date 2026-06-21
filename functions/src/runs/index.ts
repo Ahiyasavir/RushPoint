@@ -819,6 +819,50 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
   return { taskId: next.taskId ?? null };
 });
 
+// ─── requestTaskHint (reveal a paid hint, charge once) ────────────────────────
+
+export const requestTaskHint = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { taskId, ownerUid, gameId, runId, code } = data as {
+    taskId: string;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  let hint: string | undefined;
+  let penalty = 25;
+  for (const stage of game.stages) {
+    const t = stage.tasks.find((x) => x.id === taskId);
+    if (t) { hint = t.hint; penalty = t.hintPenalty ?? 25; break; }
+  }
+  if (!hint || !hint.trim()) {
+    throw new functions.https.HttpsError('failed-precondition', 'No hint available for this task');
+  }
+  const hintText = hint.trim();
+
+  const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    const used = team.taskHintsUsed ?? [];
+    if (used.includes(taskId)) return { alreadyUsed: true, charged: 0 }; // don't double-charge
+    tx.update(teamRef, {
+      taskHintsUsed: [...used, taskId],
+      bonusPenalty: (team.bonusPenalty ?? 0) + penalty,
+      updatedAt: new Date().toISOString(),
+    });
+    return { alreadyUsed: false, charged: penalty };
+  });
+
+  return { hint: hintText, penalty: result.charged, alreadyUsed: result.alreadyUsed };
+});
+
+
 // ─── getRecommendedTasks (ranked list, no assignment) ─────────────────────────
 
 export const getRecommendedTasks = functions.https.onCall(async (data, context) => {
@@ -862,9 +906,13 @@ export const getRecommendedTasks = functions.https.onCall(async (data, context) 
 // their currently-assigned task(s) — secrets (codes) are stripped server-side.
 
 function sanitizeTaskForParticipant(task: Task) {
-  const { smart, ...rest } = task;
+  // Strip the hint *text* (revealed only via the paid requestTaskHint callable);
+  // expose a flag + cost so the UI can offer it.
+  const { smart, hint, ...rest } = task;
   return {
     ...rest,
+    hasHint: !!hint && hint.trim().length > 0,
+    hintPenalty: task.hintPenalty ?? 25,
     smart: smart
       ? {
           enabled: smart.enabled,
