@@ -25,3 +25,31 @@ export function saveSession(s: Session) {
 export function clearSession() {
   localStorage.removeItem(KEY);
 }
+
+// ── Staff session: which run a staff member signed in to (custom-token auth) ──
+export interface StaffSession {
+  ownerUid: string;
+  gameId: string;
+  runId: string;
+  name: string;
+  permissions: string[];
+}
+
+const STAFF_KEY = 'rushpoint.staff';
+
+export function loadStaffSession(): StaffSession | null {
+  try {
+    const raw = localStorage.getItem(STAFF_KEY);
+    return raw ? (JSON.parse(raw) as StaffSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveStaffSession(s: StaffSession) {
+  localStorage.setItem(STAFF_KEY, JSON.stringify(s));
+}
+
+export function clearStaffSession() {
+  localStorage.removeItem(STAFF_KEY);
+}

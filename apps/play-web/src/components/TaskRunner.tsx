@@ -5,6 +5,7 @@ import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
+import { uploadTaskPhoto } from '../services/firebase';
 import type { Session } from '../store';
 import { Button, Card, Input } from '../components/ui';
 
@@ -54,14 +55,22 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     } finally { setBusy(false); }
   }
 
-  async function photo(url: string) {
+  // Accepts a picked File (uploaded to Storage) or a pasted URL.
+  async function photo(input: File | string) {
     setBusy(true); setMsg('');
     try {
+      let url: string;
+      if (typeof input === 'string') {
+        url = input;
+      } else {
+        setMsg('Uploading photo…');
+        url = await uploadTaskPhoto(input, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
+      }
       const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
       setMsg(res.autoApproved ? 'Approved!' : 'Submitted — waiting for review.');
       onChanged();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Failed');
+      setMsg(e instanceof Error ? e.message : 'Upload failed — try again.');
     } finally { setBusy(false); }
   }
 
@@ -119,18 +128,29 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
   );
 }
 
-function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (url: string) => void }) {
+function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File | string) => void }) {
+  const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
+  const [preview, setPreview] = useState<string | null>(null);
+
   function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) setUrl(`upload://${f.name}`); // Storage upload wired in production; emulator uses a marker
+    const f = e.target.files?.[0] ?? null;
+    setFile(f);
+    setPreview(f ? URL.createObjectURL(f) : null);
+    if (f) setUrl(''); // a picked file takes precedence over a pasted URL
   }
+
+  const canSubmit = !busy && (!!file || !!url.trim());
   return (
     <div className="space-y-3">
       <input type="file" accept="image/*" capture="environment" onChange={pickFile}
         className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-app-raised file:text-zinc-200" />
-      <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="…or paste a photo URL" />
-      <Button disabled={busy || !url} onClick={() => onSubmit(url)}>Submit photo</Button>
+      {preview && <img src={preview} alt="preview" className="w-full rounded-lg max-h-56 object-cover" />}
+      <Input value={url} onChange={(e) => { setUrl(e.target.value); if (e.target.value) { setFile(null); setPreview(null); } }}
+        placeholder="…or paste a photo URL" />
+      <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())}>
+        {busy ? 'Working…' : 'Submit photo'}
+      </Button>
     </div>
   );
 }

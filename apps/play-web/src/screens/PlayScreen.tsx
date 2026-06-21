@@ -5,6 +5,7 @@ import { Button, Progress, Screen } from '../components/ui';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
 import NavMap, { type NavTarget } from '../components/NavMap';
+import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
@@ -93,6 +94,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return (
       <Screen>
         <Header game={game} score={team.score} accent={accent} onLeave={leave} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">⏳</div>
           <h2 className="text-xl font-bold">You&apos;re in, {team.displayName}!</h2>
@@ -124,6 +126,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     <Screen>
       <Header game={game} score={team.score} accent={accent} onLeave={leave} />
       <div className="my-4"><Progress done={completedStages} total={game.stageCount} /></div>
+
+      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
 
       {activeStage && <NavMap targets={targets} me={me} accent={accent} className="h-52 mb-4" />}
 

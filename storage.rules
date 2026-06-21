@@ -8,6 +8,15 @@ service firebase.storage {
         && request.resource.size < 10 * 1024 * 1024  // 10MB max
         && request.resource.contentType.matches('image/.*');
     }
+    // v2 platform — photo-mission uploads under a run. A participant (uid ==
+    // teamId) may write only into their own team folder; any authed user (the
+    // owner + staff reviewing submissions) may read.
+    match /runs/{runId}/teams/{teamId}/{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == teamId
+        && request.resource.size < 10 * 1024 * 1024  // 10MB max
+        && request.resource.contentType.matches('image/.*');
+    }
     // Public photo stream: readable by all authenticated users
     match /stream/{allPaths=**} {
       allow read: if request.auth != null;

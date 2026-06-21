@@ -5,8 +5,16 @@ import {
   connectAuthEmulator,
   signInAnonymously,
   signInWithCustomToken,
+  onAuthStateChanged,
 } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
+import {
+  getStorage,
+  connectStorageEmulator,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -22,6 +30,7 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 export const db        = getFirestore(app);
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
+export const storage   = getStorage(app);
 
 const emuFlag = globalThis as unknown as { __rpPlayEmu?: boolean };
 if (import.meta.env.DEV && !emuFlag.__rpPlayEmu) {
@@ -29,18 +38,46 @@ if (import.meta.env.DEV && !emuFlag.__rpPlayEmu) {
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
 }
 
 // Participants play anonymously (uid == teamId). Each device/browser is a team.
+// Staff sign in with a one-time custom token; their session persists across
+// reloads, so we only mint a *new* anonymous user when none is restored —
+// otherwise a reload would clobber a restored staff (or anonymous) session.
 let authReady: Promise<void> | null = null;
 export function ensureAuth(): Promise<void> {
-  if (!authReady) authReady = signInAnonymously(auth).then(() => undefined);
+  if (!authReady) {
+    authReady = new Promise<void>((resolve, reject) => {
+      const unsub = onAuthStateChanged(auth, (user) => {
+        unsub();
+        if (user) { resolve(); return; }
+        signInAnonymously(auth).then(() => resolve(), reject);
+      });
+    });
+  }
   return authReady;
 }
 
 // Staff sign in with a custom token minted by the staffSignIn callable.
 export async function signInStaff(customToken: string) {
   await signInWithCustomToken(auth, customToken);
+}
+
+// Upload a photo-mission image to Storage and return its download URL. Path is
+// scoped to the team's own folder (runs/{runId}/teams/{teamId}/…) so storage
+// rules can confine writes to the authenticated participant.
+export async function uploadTaskPhoto(
+  file: File,
+  p: { runId: string; teamId: string; taskId: string },
+): Promise<string> {
+  await ensureAuth();
+  const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
+  const r = storageRef(storage, path);
+  await uploadBytes(r, file, { contentType: file.type || 'image/jpeg' });
+  return getDownloadURL(r);
 }
 
 export function callable<Req = void, Res = unknown>(name: string): (data?: Req) => Promise<Res> {

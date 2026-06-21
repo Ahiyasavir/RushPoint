@@ -4,7 +4,7 @@ import { getJoinInfo, joinRun, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 
-export default function JoinScreen({ onJoined }: { onJoined: (s: Session) => void }) {
+export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
   const [code, setCode] = useState('');
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -63,6 +63,11 @@ export default function JoinScreen({ onJoined }: { onJoined: (s: Session) => voi
           />
           {err && <p className="text-danger text-sm text-center mb-3">{err}</p>}
           <Button disabled={busy || code.length < 4} onClick={lookup}>Continue</Button>
+          {onStaff && (
+            <button className="text-zinc-500 text-sm mt-6 mx-auto" onClick={onStaff}>
+              I'm staff →
+            </button>
+          )}
         </div>
       </Screen>
     );

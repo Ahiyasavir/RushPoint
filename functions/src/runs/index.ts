@@ -478,26 +478,10 @@ export const skipStage = functions.https.onCall(async (data, context) => {
 // Owner ends the run. Scores all teams, applies Z-Score if preset ≠ time_only,
 // writes the leaderboard onto the Run doc.
 
-export const finalizeRun = functions.https.onCall(async (data, context) => {
-  const uid = requireAuth(context);
-  const { gameId, runId } = data as { gameId: string; runId: string };
-
-  const runRef = db.doc(runPath(uid, gameId, runId));
-  const runSnap = await runRef.get();
-  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  if ((runSnap.data() as Run).ownerUid !== uid) {
-    throw new functions.https.HttpsError('permission-denied', 'Not your run');
-  }
-
-  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
-  const game = gameSnap.data() as Game;
-  const run = runSnap.data() as Run;
-
-  const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
-  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
-
-  const now = new Date().toISOString();
-
+// Compute ranked standings for a run from the current team state. Used by both
+// finalizeRun (terminal) and refreshLeaderboard (live, mid-run) so the two can
+// never drift. `now` is the reference time for not-yet-finished teams.
+export function buildRankings(game: Game, teams: RunTeam[], now: string): LeaderboardEntry[] {
   type ScoredTeam = LeaderboardEntry & { durationMin: number };
   const scored: ScoredTeam[] = teams.map((team) => {
     let rawScore = 0;
@@ -531,7 +515,7 @@ export const finalizeRun = functions.https.onCall(async (data, context) => {
     };
   });
 
-  // Apply Z-Score for non-time presets
+  // Apply Z-Score for non-time presets (only meaningful once teams have finished)
   if (game.scoringPreset !== 'time_only' && scored.length >= 2) {
     const finishedDurations = scored.filter((t) => t.finishedAt).map((t) => t.durationMin);
     if (finishedDurations.length >= 2) {
@@ -543,15 +527,18 @@ export const finalizeRun = functions.https.onCall(async (data, context) => {
     }
   }
 
-  // Sort
   scored.sort((a, b) => {
     if (game.scoringPreset === 'time_only') {
-      return (a.durationSeconds ?? Infinity) - (b.durationSeconds ?? Infinity);
+      // Finished teams (by time) first; unfinished sink to the bottom by progress.
+      const aDone = a.finishedAt ? (a.durationSeconds ?? Infinity) : Infinity;
+      const bDone = b.finishedAt ? (b.durationSeconds ?? Infinity) : Infinity;
+      if (aDone !== bDone) return aDone - bDone;
+      return b.completedStages - a.completedStages;
     }
     return b.score - a.score;
   });
 
-  const rankings: LeaderboardEntry[] = scored.map((t, i) => ({
+  return scored.map((t, i) => ({
     rank: i + 1,
     teamId: t.teamId,
     teamName: t.teamName,
@@ -561,15 +548,85 @@ export const finalizeRun = functions.https.onCall(async (data, context) => {
     durationSeconds: t.durationSeconds,
     totalMinutes: t.totalMinutes,
   }));
+}
 
+export const finalizeRun = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId: string; runId: string };
+
+  const runRef = db.doc(runPath(uid, gameId, runId));
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  const game = gameSnap.data() as Game;
+
+  const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+  const now = new Date().toISOString();
+  const rankings = buildRankings(game, teams, now);
+
+  // Finalizing always publishes the final standings to participants.
   await runRef.update({
     status: 'finished',
     finishedAt: now,
-    leaderboard: { rankings, frozen: false, updatedAt: now },
+    leaderboard: { rankings, frozen: false, published: true, updatedAt: now },
     updatedAt: now,
   });
 
   return { rankings };
+});
+
+
+// ─── refreshLeaderboard ─────────────────────────────────────────────────────────
+// Compute live standings WITHOUT ending the run. Organizers always see the
+// result (they read the run doc directly); `publish` controls whether
+// participants may see it, so the reveal can be staged.
+
+export const refreshLeaderboard = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, publish, frozen } = data as {
+    gameId: string; runId: string; publish?: boolean; frozen?: boolean;
+  };
+
+  const runRef = db.doc(runPath(uid, gameId, runId));
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  const game = gameSnap.data() as Game;
+
+  const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+  const now = new Date().toISOString();
+  const rankings = buildRankings(game, teams, now);
+
+  // Preserve the previous published flag unless explicitly changed.
+  const wasPublished = run.leaderboard?.published ?? false;
+  const isPublished = publish ?? wasPublished;
+  const isFrozen = frozen ?? run.leaderboard?.frozen ?? false;
+
+  await runRef.update({
+    leaderboard: {
+      rankings,
+      frozen: isFrozen,
+      published: isPublished,
+      updatedAt: now,
+      ...(isFrozen ? { frozenAt: now } : {}),
+    },
+    updatedAt: now,
+  });
+
+  return { rankings, published: isPublished, frozen: isFrozen };
 });
 
 

@@ -24,6 +24,10 @@ export const launchRun     = callable<{ gameId: string }, { runId: string; acces
 export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number }>('startTeams');
 export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
+export const refreshLeaderboard = callable<
+  { ownerUid: string; gameId: string; runId: string; publish?: boolean; frozen?: boolean },
+  { rankings: LeaderboardEntry[]; published: boolean; frozen: boolean }
+>('refreshLeaderboard');
 export const listRunTeams  = callable<{ gameId: string; runId: string }, { teams: RunTeamRow[] }>('listRunTeams');
 
 export interface RunTeamRow {

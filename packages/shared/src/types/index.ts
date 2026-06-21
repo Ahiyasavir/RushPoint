@@ -312,6 +312,10 @@ export interface RunLeaderboard {
   rankings: LeaderboardEntry[];
   frozen: boolean;
   frozenAt?: string;
+  // Whether participants may see this leaderboard. Organizers always see live
+  // standings; participant visibility is opt-in so the reveal can be staged.
+  // finalizeRun publishes automatically.
+  published?: boolean;
   updatedAt: string;
 }
 

@@ -75,3 +75,19 @@ export const staffSignIn = callable<
   { ownerUid: string; gameId: string; runId: string; pin: string },
   { customToken: string; name: string; permissions: string[] }
 >('staffSignIn');
+
+// ── Staff console actions ──
+export const reviewStationSubmission = callable<
+  Ctx & { teamId: string; taskId: string; approved: boolean; note?: string },
+  { ok: boolean; approved: boolean }
+>('reviewStationSubmission');
+
+export const acknowledgeAlert = callable<
+  Ctx & { alertId: string },
+  { ok: boolean }
+>('acknowledgeAlert');
+
+export const pushAnnouncement = callable<
+  Ctx & { message: string; messageHe?: string },
+  { announcementId: string }
+>('pushAnnouncement');

@@ -16,6 +16,7 @@ export { getWallet, topUpWallet, stripeWebhook } from './payments/index';
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
+  refreshLeaderboard,
   listRunTeams, completeTask, requestNextTask, getRecommendedTasks,
   checkOutTask, getMyTeamState,
 } from './runs/index';
@@ -383,9 +384,11 @@ export const verifyStationCode = functions.https.onCall(async (data, context) =>
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  // NB: nest under the `taskVerifications` map via a real nested object. Dotted
+  // keys in .set({merge}) become *literal* top-level field names, not map paths.
   await teamRef.set(
     {
-      [`taskVerifications.${taskId}`]: { verified: true, verifiedAt: now, verifiedBy: uid },
+      taskVerifications: { [taskId]: { verified: true, verifiedAt: now, verifiedBy: uid } },
     },
     { merge: true },
   );
@@ -425,10 +428,12 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
   await teamRef.set(
     {
-      [`taskSubmissions.${taskId}`]: {
-        photoUrl: photoUrl.trim(),
-        submittedAt: now,
-        status: autoApprove ? 'approved' : 'pending',
+      taskSubmissions: {
+        [taskId]: {
+          photoUrl: photoUrl.trim(),
+          submittedAt: now,
+          status: autoApprove ? 'approved' : 'pending',
+        },
       },
     },
     { merge: true },
@@ -457,12 +462,18 @@ export const reviewStationSubmission = functions.https.onCall(async (data, conte
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  // merge:true deep-merges this into the existing submission, preserving
+  // photoUrl/submittedAt while updating the review subfields.
   await teamRef.set(
     {
-      [`taskSubmissions.${taskId}.status`]: approved ? 'approved' : 'rejected',
-      [`taskSubmissions.${taskId}.reviewedAt`]: now,
-      [`taskSubmissions.${taskId}.reviewedBy`]: context.auth!.uid,
-      [`taskSubmissions.${taskId}.reviewNote`]: note?.trim() ?? '',
+      taskSubmissions: {
+        [taskId]: {
+          status: approved ? 'approved' : 'rejected',
+          reviewedAt: now,
+          reviewedBy: context.auth!.uid,
+          reviewNote: note?.trim() ?? '',
+        },
+      },
     },
     { merge: true },
   );

@@ -5,7 +5,7 @@ import type { Run } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
-  listRunTeams, startTeams, finalizeRun, pushAnnouncement, pushFlashMission,
+  listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, type RunTeamRow,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
@@ -35,8 +35,8 @@ export default function RunConsolePage() {
   }, [gameId, runId]);
 
   useEffect(() => {
-    loadTeams();
-    const id = setInterval(loadTeams, 5000);
+    void loadTeams();
+    const id = setInterval(() => void loadTeams(), 5000);
     return () => clearInterval(id);
   }, [loadTeams]);
 
@@ -58,6 +58,11 @@ export default function RunConsolePage() {
     if (!name) return;
     const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
     setStaffPin(pin);
+  }
+  async function refreshStandings(publish?: boolean) {
+    setBusy(true);
+    try { await refreshLeaderboard({ ...ctx, ...(publish === undefined ? {} : { publish }) }); }
+    finally { setBusy(false); }
   }
 
   if (!run) return <Spinner label="Loading run…" />;
@@ -84,6 +89,7 @@ export default function RunConsolePage() {
       {/* Actions */}
       <div className="flex flex-wrap gap-2">
         <Button disabled={busy || finished} onClick={startAll}>Start all teams</Button>
+        <Button variant="ghost" disabled={busy || finished} onClick={() => refreshStandings()}>Refresh standings</Button>
         <Button variant="ghost" onClick={invite}>Invite staff (PIN)</Button>
         <Button variant="danger" disabled={busy || finished} onClick={finalize}>Finalize run</Button>
       </div>
@@ -114,13 +120,13 @@ export default function RunConsolePage() {
                     </div>
                     <div className="text-neon-green font-mono font-semibold">{t.score}</div>
                     <button className="text-[11px] text-zinc-400 hover:text-zinc-200"
-                      onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: t.id }); loadTeams(); }}>
+                      onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: t.id }); await loadTeams(); }}>
                       skip
                     </button>
                     <button className="text-[11px] text-zinc-400 hover:text-neon-red"
                       onClick={async () => {
                         const v = await dialog.prompt('Score adjustment (+bonus / -fine):'); if (!v) return;
-                        await adjustTeamScore({ ...ctx, teamId: t.id, delta: parseInt(v) || 0, reason: 'manual' }); loadTeams();
+                        await adjustTeamScore({ ...ctx, teamId: t.id, delta: parseInt(v) || 0, reason: 'manual' }); await loadTeams();
                       }}>
                       ±
                     </button>
@@ -135,6 +141,35 @@ export default function RunConsolePage() {
             <Card className="p-4 mt-4">
               <div className="text-sm font-medium mb-3">📍 Live team map</div>
               <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
+            </Card>
+          )}
+
+          {/* Live standings — computed on demand mid-run without ending it. */}
+          {!finished && run.leaderboard && run.leaderboard.rankings.length > 0 && (
+            <Card className="p-4 mt-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-medium">📊 Live standings</div>
+                <button
+                  className={`text-[11px] px-2 py-1 rounded-md ${run.leaderboard.published ? 'bg-neon-green/15 text-neon-green' : 'bg-app-raised text-zinc-400'}`}
+                  disabled={busy}
+                  onClick={() => refreshStandings(!run.leaderboard!.published)}
+                >
+                  {run.leaderboard.published ? 'Visible to teams ✓' : 'Hidden from teams'}
+                </button>
+              </div>
+              <div className="space-y-1">
+                {run.leaderboard.rankings.slice(0, 12).map((r) => (
+                  <div key={r.teamId} className="flex items-center gap-3 text-sm">
+                    <span className="w-6 text-zinc-500">{r.rank}</span>
+                    <span className="flex-1 text-zinc-200">{r.teamName}</span>
+                    <span className="text-[11px] text-zinc-500">{r.completedStages} done</span>
+                    <span className="text-neon-green font-mono">{r.score}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="text-[11px] text-zinc-600 mt-2">
+                Organizer-only until published. Updated {new Date(run.leaderboard.updatedAt).toLocaleTimeString()}.
+              </div>
             </Card>
           )}
 
