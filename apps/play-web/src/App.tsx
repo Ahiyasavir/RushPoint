@@ -4,6 +4,7 @@ import { loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
 import PlayScreen from './screens/PlayScreen';
 import StaffConsole from './screens/StaffConsole';
+import GamePromoScreen from './screens/GamePromoScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 
@@ -13,6 +14,11 @@ export default function App() {
   // Staff mode is entered via ?staff in the URL or a restored staff session.
   const [staffMode, setStaffMode] = useState(
     () => new URLSearchParams(window.location.search).has('staff') || !!loadStaffSession(),
+  );
+  // A shared promo link (`?game=<id>`) shows the public teaser for a game until
+  // the visitor chooses to enter a code (or already has a live session).
+  const [promoGameId, setPromoGameId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('game'),
   );
 
   useEffect(() => {
@@ -35,6 +41,16 @@ export default function App() {
       <>
         <ConnectionBanner />
         <StaffConsole onExit={() => setStaffMode(false)} />
+        <DialogHost />
+      </>
+    );
+  }
+
+  if (promoGameId && !session) {
+    return (
+      <>
+        <ConnectionBanner />
+        <GamePromoScreen gameId={promoGameId} onPlay={() => setPromoGameId(null)} />
         <DialogHost />
       </>
     );

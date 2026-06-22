@@ -4,13 +4,20 @@ import type { Game } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
+
+// Where the participant app lives — promo links point players there (?game=<id>).
+const PLAY_URL = import.meta.env.DEV
+  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
 export default function DashboardPage() {
   const nav = useNavigate();
   const [games, setGames] = useState<Game[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [sharing, setSharing] = useState<Game | null>(null);
 
   async function load() {
     const { games } = await listGames();
@@ -93,6 +100,7 @@ export default function DashboardPage() {
                   <Button variant="ghost" className="flex-1 text-xs" onClick={() => togglePublish(g)}>
                     {g.visibility === 'public' ? 'Unpublish' : 'Publish to gallery'}
                   </Button>
+                  <Button variant="ghost" className="flex-1 text-xs" onClick={() => setSharing(g)}>Share</Button>
                   <Button variant="ghost" className="text-xs text-neon-red" onClick={() => remove(g)}>Delete</Button>
                 </div>
               </Card>
@@ -120,6 +128,21 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {sharing && (
+        <ShareSheet
+          title={`Share "${sharing.title}"`}
+          text={`Join my RushPoint race adventure: ${sharing.title}`}
+          url={`${PLAY_URL}/?game=${sharing.id}`}
+          notPublic={sharing.visibility !== 'public'}
+          onPublish={async () => {
+            await publishGame({ gameId: sharing.id, visibility: 'public' });
+            setSharing({ ...sharing, visibility: 'public' });
+            void load();
+          }}
+          onClose={() => setSharing(null)}
+        />
       )}
     </div>
   );
