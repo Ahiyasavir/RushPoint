@@ -1,16 +1,22 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import QRCode from 'qrcode';
 import type { Run } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
-  inviteStaff, skipStage, adjustTeamScore, type RunTeamRow,
+  inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, type RunTeamRow,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
 import LiveTeamMap from '../components/LiveTeamMap';
+
+// Where the participant app lives (for the shareable join link/QR).
+const PLAY_URL = import.meta.env.DEV
+  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
 export default function RunConsolePage() {
   const { gameId, runId } = useParams();
@@ -20,12 +26,30 @@ export default function RunConsolePage() {
   const [teams, setTeams] = useState<RunTeamRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [staffPin, setStaffPin] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<{ id: string; teamId: string; type: string; message: string; lat: number | null; lng: number | null; createdAt: string }[]>([]);
 
   // Live run doc (owner can read directly)
   useEffect(() => {
     if (!gameId || !runId) return;
     const ref = doc(db, `users/${ownerUid}/games/${gameId}/runs/${runId}`);
     return onSnapshot(ref, (snap) => snap.exists() && setRun(snap.data() as Run));
+  }, [gameId, runId, ownerUid]);
+
+  // Live unacknowledged SOS / alerts (owner reads its own run's alerts).
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    const ref = query(
+      collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`),
+      where('acknowledged', '==', false),
+    );
+    return onSnapshot(ref, (snap) => {
+      const rows = snap.docs.map((d) => {
+        const a = d.data() as Partial<{ teamId: string; type: string; message: string; lat: number; lng: number; createdAt: string }>;
+        return { id: d.id, teamId: a.teamId ?? '', type: a.type ?? 'sos', message: a.message ?? '', lat: a.lat ?? null, lng: a.lng ?? null, createdAt: a.createdAt ?? '' };
+      });
+      rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      setAlerts(rows);
+    }, () => undefined);
   }, [gameId, runId, ownerUid]);
 
   const loadTeams = useCallback(async () => {
@@ -64,6 +88,9 @@ export default function RunConsolePage() {
     try { await refreshLeaderboard({ ...ctx, ...(publish === undefined ? {} : { publish }) }); }
     finally { setBusy(false); }
   }
+  async function ack(alertId: string) {
+    try { await acknowledgeAlert({ ...ctx, alertId }); } catch { /* listener will reflect state */ }
+  }
 
   if (!run) return <Spinner label="Loading run…" />;
 
@@ -80,11 +107,28 @@ export default function RunConsolePage() {
             <span className="text-zinc-500 text-sm">{teams.length} joined · {run.freeParticipantsUsed} used</span>
           </div>
         </div>
-        <Card className="px-5 py-3 text-center">
-          <div className="text-[11px] text-zinc-500 uppercase tracking-widest">Access code</div>
-          <div className="text-2xl font-mono font-bold text-neon-green tracking-[0.3em]">{run.accessCode}</div>
-        </Card>
+        <JoinShare accessCode={run.accessCode} />
       </div>
+
+      {/* Live SOS / alerts — the organizer sees these the moment a team raises one */}
+      {alerts.length > 0 && (
+        <Card className="p-4 border-neon-red/40">
+          <div className="text-sm font-medium mb-2 text-neon-red">🆘 Active alerts ({alerts.length})</div>
+          <div className="space-y-2">
+            {alerts.map((a) => (
+              <div key={a.id} className="flex items-center gap-3 text-sm">
+                <span className="uppercase text-neon-red font-medium">{a.type}</span>
+                <span className="text-zinc-500 text-xs">team {a.teamId.slice(0, 8)}</span>
+                {a.message && <span className="text-zinc-300 flex-1 truncate">{a.message}</span>}
+                {a.lat != null && a.lng != null && (
+                  <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">map</a>
+                )}
+                <Button variant="subtle" className="text-xs ms-auto" onClick={() => ack(a.id)}>Acknowledge</Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Actions */}
       <div className="flex flex-wrap gap-2">
@@ -195,6 +239,30 @@ export default function RunConsolePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Access code + shareable join link + QR — participants scan to land in the app
+// with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
+function JoinShare({ accessCode }: { accessCode: string }) {
+  const link = `${PLAY_URL}/?code=${accessCode}`;
+  const [qr, setQr] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    QRCode.toDataURL(link, { margin: 1, width: 200 }).then(setQr).catch(() => setQr(''));
+  }, [link]);
+  return (
+    <Card className="px-5 py-4 text-center">
+      <div className="text-[11px] text-zinc-500 uppercase tracking-widest">Access code</div>
+      <div className="text-2xl font-mono font-bold text-neon-green tracking-[0.3em] mb-2">{accessCode}</div>
+      {qr && <img src={qr} alt="Join QR code" className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
+      <button
+        className="mt-2 text-xs text-neon-green hover:underline"
+        onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ } }}
+      >
+        {copied ? 'Link copied ✓' : 'Copy join link'}
+      </button>
+    </Card>
   );
 }
 

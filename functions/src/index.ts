@@ -30,15 +30,6 @@ function requireAuth(context: functions.https.CallableContext): string {
   return context.auth.uid;
 }
 
-function assertStaff(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-  if (!isEmulator && !context.auth.token.staff && !context.auth.token.admin) {
-    throw new functions.https.HttpsError('permission-denied', 'Staff access required');
-  }
-  return context.auth.uid;
-}
-
 function assertAdmin(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
@@ -46,6 +37,19 @@ function assertAdmin(context: functions.https.CallableContext): string {
     throw new functions.https.HttpsError('permission-denied', 'Admin access required');
   }
   return context.auth.uid;
+}
+
+// Live-ops actions (announce, flash, ack SOS, review photo, adjust score) are
+// performed by EITHER the game owner running their own console OR a staff member
+// invited to that run (their custom token is scoped via the `ownerUid` claim).
+function assertStaffOrOwner(context: functions.https.CallableContext, ownerUid: string): string {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  if (process.env.FUNCTIONS_EMULATOR === 'true') return context.auth.uid;
+  const t = context.auth.token;
+  if (context.auth.uid === ownerUid) return context.auth.uid;        // the game owner
+  if (t.admin) return context.auth.uid;                              // platform admin
+  if (t.staff && t.ownerUid === ownerUid) return context.auth.uid;   // staff scoped to this run
+  throw new functions.https.HttpsError('permission-denied', 'Staff or owner access required');
 }
 
 
@@ -230,7 +234,7 @@ export const triggerSOS = functions.https.onCall(async (data, context) => {
 // ─── acknowledgeAlert ─────────────────────────────────────────────────────────
 
 export const acknowledgeAlert = functions.https.onCall(async (data, context) => {
-  assertStaff(context);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, alertId } = data as {
     ownerUid: string;
     gameId: string;
@@ -253,7 +257,7 @@ export const acknowledgeAlert = functions.https.onCall(async (data, context) => 
 // ─── pushAnnouncement ─────────────────────────────────────────────────────────
 
 export const pushAnnouncement = functions.https.onCall(async (data, context) => {
-  assertStaff(context);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, message, messageHe } = data as {
     ownerUid: string;
     gameId: string;
@@ -284,7 +288,7 @@ export const pushAnnouncement = functions.https.onCall(async (data, context) => 
 // ─── deactivateAnnouncement ───────────────────────────────────────────────────
 
 export const deactivateAnnouncement = functions.https.onCall(async (data, context) => {
-  assertStaff(context);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, announcementId } = data as {
     ownerUid: string;
     gameId: string;
@@ -303,7 +307,7 @@ export const deactivateAnnouncement = functions.https.onCall(async (data, contex
 // ─── pushFlashMission ─────────────────────────────────────────────────────────
 
 export const pushFlashMission = functions.https.onCall(async (data, context) => {
-  assertStaff(context);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const {
     ownerUid, gameId, runId,
     title, titleHe, description, descriptionHe,
@@ -450,7 +454,7 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
 
 
 export const reviewStationSubmission = functions.https.onCall(async (data, context) => {
-  assertStaff(context);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, teamId, taskId, approved, note } = data as {
     ownerUid: string;
     gameId: string;
@@ -491,7 +495,7 @@ export const reviewStationSubmission = functions.https.onCall(async (data, conte
 // ─── adjustTeamScore ──────────────────────────────────────────────────────────
 
 export const adjustTeamScore = functions.https.onCall(async (data, context) => {
-  assertStaff(context);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, teamId, delta, reason } = data as {
     ownerUid: string;
     gameId: string;

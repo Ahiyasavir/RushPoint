@@ -1,16 +1,25 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 
+// A shared join link looks like  …/?code=ABC123  — prefill + auto-lookup from it.
+const LINK_CODE = (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim();
+
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(LINK_CODE);
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [members, setMembers] = useState<string[]>(['']);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // If the participant arrived via a join link, look the run up automatically.
+  useEffect(() => {
+    if (LINK_CODE.length >= 4) void lookup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function lookup() {
     setErr(''); setBusy(true);
