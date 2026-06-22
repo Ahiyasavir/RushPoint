@@ -11,9 +11,9 @@ interface State {
 
 /**
  * Top-level crash guard. A render error in any page would otherwise blank the
- * whole admin dashboard mid-event; instead we catch it, log it (a production
+ * whole creator console mid-event; instead we catch it, log it (a production
  * Sentry hook would slot into componentDidCatch), and show a recover button that
- * resets the boundary so the judge/admin can keep working without a full reload.
+ * resets the boundary so the creator can keep working without a full reload.
  */
 export default class ErrorBoundary extends React.Component<Props, State> {
   state: State = { error: null };

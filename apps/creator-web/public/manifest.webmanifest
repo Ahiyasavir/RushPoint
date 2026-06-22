@@ -1,7 +1,7 @@
 {
-  "name": "RushPoint Admin — Race to Tzion",
+  "name": "RushPoint — Build a Race Adventure",
   "short_name": "RushPoint",
-  "description": "Judge & operations dashboard for the Race to Tzion event.",
+  "description": "Design real-world race adventures, launch live runs, and score teams automatically. No code.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

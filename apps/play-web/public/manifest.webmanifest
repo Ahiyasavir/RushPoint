@@ -1,7 +1,7 @@
 {
-  "name": "RushPoint",
+  "name": "RushPoint — Race Adventure",
   "short_name": "RushPoint",
-  "description": "Join a live race adventure",
+  "description": "Join a live, real-world team race adventure and play on your phone.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
