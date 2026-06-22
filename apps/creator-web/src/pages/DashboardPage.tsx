@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Game } from '@rushpoint/shared';
-import { createGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
+import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { TEMPLATES, type GameTemplate } from '../templates';
 
 export default function DashboardPage() {
   const nav = useNavigate();
   const [games, setGames] = useState<Game[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   async function load() {
     const { games } = await listGames();
@@ -16,10 +18,13 @@ export default function DashboardPage() {
   }
   useEffect(() => { void load(); }, []);
 
-  async function newGame() {
-    setBusy(true);
+  async function newGame(tpl: GameTemplate) {
+    setBusy(true); setPicking(false);
     try {
-      const { gameId } = await createGame({ title: 'Untitled adventure', mode: 'individual', tags: [] });
+      const title = tpl.key === 'blank' ? 'Untitled adventure' : tpl.label;
+      const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
+      const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
+      await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
       nav(`/build/${gameId}`);
     } finally { setBusy(false); }
   }
@@ -55,13 +60,13 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold">My Games</h1>
           <p className="text-zinc-500 text-sm">Build freely, then launch a live run with friends.</p>
         </div>
-        <Button disabled={busy} onClick={newGame}>+ New game</Button>
+        <Button disabled={busy} onClick={() => setPicking(true)}>+ New game</Button>
       </div>
 
       {games.length === 0 ? (
         <Card className="p-12 text-center">
           <p className="text-zinc-400 mb-4">You haven&apos;t built anything yet.</p>
-          <Button disabled={busy} onClick={newGame}>Create your first game</Button>
+          <Button disabled={busy} onClick={() => setPicking(true)}>Create your first game</Button>
         </Card>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -93,6 +98,27 @@ export default function DashboardPage() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {picking && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setPicking(false)}>
+          <div className="bg-app-card border border-glass-border rounded-2xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold">Start a new game</h3>
+              <button onClick={() => setPicking(false)} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-3">
+              {TEMPLATES.map((t) => (
+                <button key={t.key} disabled={busy} onClick={() => newGame(t)}
+                  className="text-start rounded-xl border border-glass-border bg-app-bg p-4 hover:border-neon-green/50 hover:bg-glass-hover transition disabled:opacity-40">
+                  <div className="text-2xl mb-1">{t.emoji}</div>
+                  <div className="font-medium text-zinc-100">{t.label}</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">{t.description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

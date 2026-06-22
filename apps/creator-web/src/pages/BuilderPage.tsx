@@ -8,6 +8,7 @@ import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
 import LocationPicker from '../components/LocationPicker';
+import RoutePreviewMap from '../components/RoutePreviewMap';
 import TaskLibrary from '../components/TaskLibrary';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
@@ -595,6 +596,12 @@ function StepPreview({ game }: { game: Game }) {
           </li>
         ))}
       </ol>
+
+      <div>
+        <Label>Route preview</Label>
+        <RoutePreviewMap stages={game.stages} className="h-64" />
+      </div>
+
       <p className="text-xs text-zinc-500">Launching creates an access code your friends use to join. First 2 participants are free.</p>
     </Card>
   );
