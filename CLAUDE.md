@@ -102,9 +102,9 @@ helpers are **internal** (not triggers) — never re-export them.
 | Module | Callables |
 |---|---|
 | `games/index.ts` | createGame · updateGame · deleteGame · duplicateGame · publishGame · getGame · listGames |
-| `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · finalizeRun · **refreshLeaderboard** · listRunTeams · completeTask · requestNextTask · **requestTaskHint** · getRecommendedTasks · checkOutTask · getMyTeamState |
+| `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · finalizeRun · **refreshLeaderboard** · **getPublicLeaderboard** · listRunTeams · completeTask · requestNextTask · **requestTaskHint** · getRecommendedTasks · checkOutTask · getMyTeamState |
 | `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount |
-| `payments/index.ts` | getWallet · topUpWallet · stripeWebhook (onRequest) |
+| `payments/index.ts` | getWallet · topUpWallet · **claimReferral** · stripeWebhook (onRequest) |
 | `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · acknowledgeAlert · pushAnnouncement · deactivateAnnouncement · pushFlashMission · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore · listAuditLogs |
 | `routing/assignNextTask.ts` | (internal) `assignTask` · `buildRecommendations` · `computeSkillRatio` · `releaseTask` |
 | `scoring/` | `taskScore.ts`, `calculateScore.ts`, `scoringPresets.ts` (in shared), `stationVerification.ts` |
@@ -161,8 +161,16 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   shared kit in `components/ui.tsx`; data layer `services/api.ts` (`callable()`) + `services/calls.ts`.
   Builder is tile + modal (`BuilderPage` `TaskEditor`); quick-start templates in `templates.ts`;
   whole-route `RoutePreviewMap` on the Preview step. New-game flow seeds a template via updateGame.
-- **Participant UI** → `apps/play-web/src/screens/*` (Join, Play, Final, StaffConsole) +
-  `components/*` (TaskRunner, NavMap, LiveOps, ConnectionBanner). Session in `store.ts`.
+- **Participant UI** → `apps/play-web/src/screens/*` (Join, Play, Final, StaffConsole,
+  GamePromo, PublicLeaderboard) + `components/*` (TaskRunner, NavMap, LiveOps, ConnectionBanner).
+  Session in `store.ts`. **Public marketing routes** (no router; `App.tsx` reads query params):
+  `?game=<id>` → game promo/teaser (public `publicGames` read), `?board=<accessCode>` → public
+  shareable leaderboard (`getPublicLeaderboard`, published-only). Shareable "story" images are
+  canvas-drawn in `lib/storyCard.ts` (`shareStoryCard()` — finish + in-run brag cards).
+- **Marketing & virality** — branded OG images at `apps/*/public/og.jpg` (see
+  [scripts/og-cards.README.md](scripts/og-cards.README.md)); creator landing page is the
+  logged-out `AuthGate`; `ShareSheet` (QR + copy + native share) powers game-promo and referral
+  invites; referral program = `claimReferral` + `?ref=<uid>` capture in `AuthGate` (₪`REFERRAL_BONUS_ILS`).
 - **Types / paths / scoring / geo** → `packages/shared/src` (`types/index.ts`, `scoringPresets.ts`,
   `geo.ts`, `mapStyle.ts`, `validation.ts`).
 - **Maps** — MapLibre + MapTiler `outdoor` with a keyless OpenTopoMap fallback; style via
