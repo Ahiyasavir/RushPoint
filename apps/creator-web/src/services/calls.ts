@@ -53,6 +53,7 @@ export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: b
 // ── Wallet ──
 export const getWallet   = callable<void, { wallet: Wallet }>('getWallet');
 export const topUpWallet = callable<{ amountILS: number }, { sessionUrl: string | null; mock?: boolean; amountILS: number }>('topUpWallet');
+export const claimReferral = callable<{ referrerUid: string }, { ok: boolean; alreadyClaimed: boolean; bonusILS: number }>('claimReferral');
 
 // ── Staff / live-ops ──
 export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; permissions: string[] }, { inviteId: string; pin: string }>('inviteStaff');

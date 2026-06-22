@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
 import type { Wallet } from '@rushpoint/shared';
-import { FREE_PARTICIPANTS_PER_RUN, PRICE_ILS_INDIVIDUAL, PRICE_ILS_TEAM } from '@rushpoint/shared';
+import { FREE_PARTICIPANTS_PER_RUN, PRICE_ILS_INDIVIDUAL, PRICE_ILS_TEAM, REFERRAL_BONUS_ILS } from '@rushpoint/shared';
 import { getWallet, topUpWallet } from '../services/calls';
 import { Button, Card, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { ShareSheet } from '../components/ShareSheet';
+import { useAuth } from '../components/AuthGate';
 
 const AMOUNTS = [50, 100, 200, 500];
 
 export default function WalletPage() {
+  const { user } = useAuth();
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [busy, setBusy] = useState(false);
+  const [inviting, setInviting] = useState(false);
 
   async function load() { const { wallet } = await getWallet(); setWallet(wallet); }
   useEffect(() => { void load(); }, []);
@@ -46,12 +50,34 @@ export default function WalletPage() {
         <p className="text-xs text-zinc-600">Secure checkout via Stripe. In local dev, credit is applied instantly.</p>
       </Card>
 
+      <Card className="p-5 mb-5">
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-sm font-medium text-zinc-200">Invite creators, earn credit</div>
+          {(wallet.referralCount ?? 0) > 0 && (
+            <span className="text-xs text-neon-green">{wallet.referralCount} joined</span>
+          )}
+        </div>
+        <p className="text-xs text-zinc-500 mb-3">
+          Share your invite link — when a new creator signs up, you both get <b className="text-zinc-300">₪{REFERRAL_BONUS_ILS}</b>.
+        </p>
+        <Button variant="subtle" disabled={!user} onClick={() => setInviting(true)}>🎁 Share invite link</Button>
+      </Card>
+
       <Card className="p-5 text-sm text-zinc-400 space-y-1">
         <div className="font-medium text-zinc-200 mb-1">Pricing</div>
         <div>First <b>{FREE_PARTICIPANTS_PER_RUN}</b> participants/teams per run — free.</div>
         <div>Each extra participant (individual mode): <b>₪{PRICE_ILS_INDIVIDUAL}</b></div>
         <div>Each extra team (team mode): <b>₪{PRICE_ILS_TEAM}</b></div>
       </Card>
+
+      {inviting && user && (
+        <ShareSheet
+          title="Invite a creator"
+          text={`Build your own real-world race adventure on RushPoint — we both get ₪${REFERRAL_BONUS_ILS} in credit when you join!`}
+          url={`${window.location.origin}/?ref=${user.uid}`}
+          onClose={() => setInviting(false)}
+        />
+      )}
     </div>
   );
 }

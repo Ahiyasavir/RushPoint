@@ -5,7 +5,7 @@
 import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
-import type { Wallet } from '@rushpoint/shared';
+import { type Wallet, REFERRAL_BONUS_ILS } from '@rushpoint/shared';
 
 const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
 
@@ -109,6 +109,68 @@ export const topUpWallet = functions.https.onCall(async (data, context) => {
   await txRef.update({ stripePaymentIntentId: session.payment_intent ?? session.id });
 
   return { sessionUrl: session.url };
+});
+
+
+// ─── claimReferral ────────────────────────────────────────────────────────────
+// Called once, right after a new creator signs up via an invite link
+// (creator-web stores ?ref=<uid> and replays it post-auth). Credits BOTH the
+// inviter and the newcomer with a fixed bonus. Idempotent per account: the
+// `referredBy` flag on the claimer's wallet blocks a second claim, and a
+// self-referral is rejected.
+
+export const claimReferral = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { referrerUid } = data as { referrerUid?: string };
+
+  if (!referrerUid?.trim()) throw new functions.https.HttpsError('invalid-argument', 'referrerUid required');
+  const referrer = referrerUid.trim();
+  if (referrer === uid) throw new functions.https.HttpsError('failed-precondition', 'You cannot refer yourself');
+
+  // The inviter must be a real account (display name comes from Auth, not a doc).
+  const referrerUser = await admin.auth().getUser(referrer).catch(() => null);
+  if (!referrerUser) throw new functions.https.HttpsError('not-found', 'Unknown inviter');
+
+  const now = new Date().toISOString();
+  const meRef = walletRef(uid);
+  const themRef = walletRef(referrer);
+
+  const result = await db.runTransaction(async (t) => {
+    const meSnap = await t.get(meRef);
+    const me = meSnap.exists ? (meSnap.data() as Wallet) : null;
+    if (me?.referredBy) return { already: true as const };
+
+    // Credit the newcomer.
+    t.set(meRef, {
+      uid,
+      balanceILS: admin.firestore.FieldValue.increment(REFERRAL_BONUS_ILS),
+      referredBy: referrer,
+      referralClaimedAt: now,
+      updatedAt: now,
+    }, { merge: true });
+    const meTx = meRef.collection('transactions').doc();
+    t.set(meTx, {
+      id: meTx.id, type: 'referral', amountILS: REFERRAL_BONUS_ILS,
+      description: 'Welcome referral bonus', createdAt: now,
+    });
+
+    // Credit the inviter.
+    t.set(themRef, {
+      uid: referrer,
+      balanceILS: admin.firestore.FieldValue.increment(REFERRAL_BONUS_ILS),
+      referralCount: admin.firestore.FieldValue.increment(1),
+      updatedAt: now,
+    }, { merge: true });
+    const themTx = themRef.collection('transactions').doc();
+    t.set(themTx, {
+      id: themTx.id, type: 'referral', amountILS: REFERRAL_BONUS_ILS,
+      description: 'Referral bonus — a creator you invited joined', createdAt: now,
+    });
+
+    return { already: false as const };
+  });
+
+  return { ok: true, alreadyClaimed: result.already, bonusILS: result.already ? 0 : REFERRAL_BONUS_ILS };
 });
 
 

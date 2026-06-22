@@ -436,6 +436,31 @@ async function main() {
   const fin4 = await player4.call('getMyTeamState', { code: c4 });
   check('all four task types completed → team finished', fin4?.team?.status === 'finished', fin4?.team?.status);
 
+  // ── 15. Referral program (claimReferral credits both sides, once) ───────────
+  const newbie = makeParty('newbie');
+  const newbieCred = await signInAnonymously(newbie.auth);
+  const refStart = (await creator.call('getWallet')).wallet.balanceILS;
+
+  let selfRejected = false;
+  try { await newbie.call('claimReferral', { referrerUid: newbieCred.user.uid }); }
+  catch (e) { selfRejected = /yourself/i.test(e.message); }
+  check('claimReferral rejects self-referral', selfRejected);
+
+  const claim = await newbie.call('claimReferral', { referrerUid: creatorCred.user.uid });
+  check('claimReferral credits the newcomer', claim?.ok === true && claim?.bonusILS > 0, JSON.stringify(claim));
+  const newbieWallet = (await newbie.call('getWallet')).wallet;
+  check('newcomer wallet credited + referredBy set',
+    newbieWallet.balanceILS >= claim.bonusILS && newbieWallet.referredBy === creatorCred.user.uid);
+  const refAfter = (await creator.call('getWallet')).wallet;
+  check('inviter wallet credited + referralCount bumped',
+    refAfter.balanceILS === refStart + claim.bonusILS && (refAfter.referralCount ?? 0) >= 1,
+    JSON.stringify({ before: refStart, after: refAfter.balanceILS, count: refAfter.referralCount }));
+
+  const claimAgain = await newbie.call('claimReferral', { referrerUid: creatorCred.user.uid });
+  check('claimReferral is one-time per account', claimAgain?.alreadyClaimed === true && claimAgain?.bonusILS === 0, JSON.stringify(claimAgain));
+  const refUnchanged = (await creator.call('getWallet')).wallet;
+  check('re-claim does NOT double-credit the inviter', refUnchanged.balanceILS === refAfter.balanceILS, String(refUnchanged.balanceILS));
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

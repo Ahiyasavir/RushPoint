@@ -116,7 +116,7 @@ export type VerificationType  = 'code_verification' | 'photo_upload';
 export type StationSubmissionStatus = 'pending' | 'approved' | 'rejected';
 export type VerifyOutcome   = 'correct' | 'wrong' | 'too-far' | 'limit-exceeded';
 export type StationStatus   = 'active' | 'paused' | 'closed';
-export type TransactionType = 'topup' | 'charge';
+export type TransactionType = 'topup' | 'charge' | 'referral';
 export type AuditActionType = 'fine' | 'score_override' | 'skip' | 'evacuation' | 'manual_unlock';
 
 
@@ -478,11 +478,19 @@ export interface AccessCode {
 export const FREE_PARTICIPANTS_PER_RUN = 2;
 export const PRICE_ILS_INDIVIDUAL      = 35;   // per additional participant (individual mode)
 export const PRICE_ILS_TEAM            = 100;  // per additional team (team mode)
+// Referral reward — credited to BOTH the inviter and the new creator the first
+// time a referred account claims (see the claimReferral callable).
+export const REFERRAL_BONUS_ILS        = 20;
 
 export interface Wallet {
   uid: string;
   balanceILS: number;
   updatedAt: string;
+  // Referral program: who invited this creator (set once, on first claim) and
+  // how many others they've successfully referred.
+  referredBy?: string;
+  referralClaimedAt?: string;
+  referralCount?: number;
 }
 
 export interface WalletTransaction {

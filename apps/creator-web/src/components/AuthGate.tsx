@@ -8,6 +8,9 @@ import {
   signOut as fbSignOut,
 } from '../services/firebase';
 import { Button, Card, Input, Label } from './ui';
+import { claimReferral } from '../services/calls';
+import { dialog } from './dialog';
+import { REFERRAL_BONUS_ILS } from '@rushpoint/shared';
 
 interface AuthCtx {
   user: User | null;
@@ -16,11 +19,31 @@ interface AuthCtx {
 const Ctx = createContext<AuthCtx>({ user: null, signOut: async () => {} });
 export const useAuth = () => useContext(Ctx);
 
+// Capture an invite (?ref=<uid>) the moment a visitor lands, before they sign
+// up — it's replayed once after auth (see below). Kept in localStorage so it
+// survives the OAuth redirect round-trip.
+const REF_KEY = 'rp_ref';
+const incomingRef = new URLSearchParams(window.location.search).get('ref');
+if (incomingRef) { try { localStorage.setItem(REF_KEY, incomingRef); } catch { /* private mode */ } }
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => watchAuth((u) => { setUser(u); setReady(true); }), []);
+
+  // Once signed in, redeem a pending invite exactly once (server enforces the
+  // one-claim-per-account + no-self-referral rules; we just fire and clear).
+  useEffect(() => {
+    if (!user) return;
+    let ref: string | null = null;
+    try { ref = localStorage.getItem(REF_KEY); } catch { /* private mode */ }
+    if (!ref || ref === user.uid) { if (ref) { try { localStorage.removeItem(REF_KEY); } catch { /* */ } } return; }
+    try { localStorage.removeItem(REF_KEY); } catch { /* */ }
+    claimReferral({ referrerUid: ref })
+      .then((r) => { if (r.ok && !r.alreadyClaimed) void dialog.alert(`🎁 Referral applied — ₪${r.bonusILS} added to your wallet!`); })
+      .catch(() => { /* invalid/expired invite — silently ignore */ });
+  }, [user]);
 
   if (!ready) {
     return (
@@ -139,9 +162,15 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         {/* Hero */}
         <div className="grid md:grid-cols-2 gap-10 items-center pt-8 pb-16">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-glass-border bg-app-raised px-3 py-1 text-xs text-zinc-400">
-              ✨ Real-world team race adventures
-            </div>
+            {incomingRef ? (
+              <div className="inline-flex items-center gap-2 rounded-full border border-neon-green/40 bg-neon-green/10 px-3 py-1 text-xs text-neon-green">
+                🎁 You&apos;ve been invited — sign up and you both get ₪{REFERRAL_BONUS_ILS} credit
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-2 rounded-full border border-glass-border bg-app-raised px-3 py-1 text-xs text-zinc-400">
+                ✨ Real-world team race adventures
+              </div>
+            )}
             <h1 className="font-brand text-4xl sm:text-5xl font-extrabold tracking-tight mt-4 leading-[1.05]">
               Build your own<br /><span className="text-neon-green">race adventure</span>
             </h1>
