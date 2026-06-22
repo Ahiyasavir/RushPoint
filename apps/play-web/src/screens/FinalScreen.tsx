@@ -1,6 +1,13 @@
 import { useState } from 'react';
 import type { MyTeamState } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
+import { buildStoryCard } from '../lib/storyCard';
+
+// Where the creator app lives — the viral CTA points participants here to build
+// their own game (dev → :5180, prod → VITE_CREATOR_URL or the hosting default).
+const CREATOR_URL = import.meta.env.DEV
+  ? `${window.location.protocol}//${window.location.hostname}:5180`
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -32,15 +39,50 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
   }
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
   const [shared, setShared] = useState(false);
+  const [busy, setBusy] = useState(false);
 
+  // Build a branded story image and share it (mobile → native share sheet to
+  // Instagram/WhatsApp/etc.; desktop → downloads the PNG). Text is the fallback.
   async function share() {
-    const name = game.branding?.name ?? game.title;
-    const text = `🏆 ${team.displayName} finished "${name}"`
-      + `${myRank ? ` — rank #${myRank}` : ''}`
-      + `${totalSec != null ? ` in ${fmtDuration(totalSec)}` : ''}! Score ${finalScore}.`;
-    const navAny = navigator as Navigator & { share?: (d: { title: string; text: string }) => Promise<void> };
-    if (navAny.share) { try { await navAny.share({ title: 'RushPoint', text }); return; } catch { /* cancelled */ } }
-    try { await navigator.clipboard.writeText(text); setShared(true); setTimeout(() => setShared(false), 2500); } catch { /* no clipboard */ }
+    setBusy(true);
+    try {
+      const name = game.branding?.name ?? game.title;
+      const text = `🏆 ${team.displayName} finished "${name}"`
+        + `${myRank ? ` — rank #${myRank}` : ''}`
+        + `${totalSec != null ? ` in ${fmtDuration(totalSec)}` : ''}! `
+        + `Build your own at ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
+      const navAny = navigator as Navigator & {
+        share?: (d: { title?: string; text?: string; files?: File[] }) => Promise<void>;
+        canShare?: (d: { files?: File[] }) => boolean;
+      };
+
+      const blob = await buildStoryCard({
+        gameName: name,
+        teamName: team.displayName,
+        score: finalScore,
+        rank: myRank,
+        totalTime: totalSec != null ? fmtDuration(totalSec) : undefined,
+        stagesDone: `${completedStages.length}/${game.stageCount}`,
+        ctaUrl: CREATOR_URL,
+      });
+
+      if (blob) {
+        const file = new File([blob], 'rushpoint-result.png', { type: 'image/png' });
+        if (navAny.share && navAny.canShare?.({ files: [file] })) {
+          try { await navAny.share({ files: [file], text }); return; } catch { /* cancelled */ }
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'rushpoint-result.png'; a.click();
+        URL.revokeObjectURL(url);
+        setShared(true); setTimeout(() => setShared(false), 2500);
+        return;
+      }
+
+      if (navAny.share) { try { await navAny.share({ title: 'RushPoint', text }); return; } catch { /* cancelled */ } }
+      await navigator.clipboard.writeText(text); setShared(true); setTimeout(() => setShared(false), 2500);
+    } catch { /* share unavailable */ }
+    finally { setBusy(false); }
   }
 
   return (
@@ -65,7 +107,9 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
             <Stat label="Fastest stage" value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '—'} />
             <Stat label="Hints used" value={String(hintsUsed)} />
           </div>
-          <Button variant="ghost" className="mt-4" onClick={share}>{shared ? 'Copied ✓' : 'Share my result'}</Button>
+          <Button className="mt-4" disabled={busy} onClick={share}>
+            {busy ? 'Creating…' : shared ? 'Saved ✓' : '📸 Share my result'}
+          </Button>
         </Card>
 
         {run.leaderboard && run.leaderboard.rankings.length > 0 && (
@@ -87,6 +131,11 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
           <p className="text-zinc-500 text-sm">Waiting for the host to finalize the leaderboard…</p>
         )}
       </div>
+
+      <a href={CREATOR_URL} target="_blank" rel="noreferrer"
+        className="block text-center text-sm text-accent font-medium py-3 hover:underline">
+        ✨ Loved it? Build your own race adventure →
+      </a>
       <Button variant="ghost" onClick={onLeave}>Leave</Button>
     </Screen>
   );
