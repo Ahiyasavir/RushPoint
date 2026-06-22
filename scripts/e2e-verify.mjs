@@ -201,10 +201,20 @@ async function main() {
   check('run is still live after refresh (not finished)', midState?.run?.status !== 'finished', midState?.run?.status);
   check('unpublished standings are hidden from participant', midState?.run?.leaderboard?.published === false);
 
+  // Public, shareable leaderboard is gated on publish: hidden before, shown after.
+  const boardBefore = await player.call('getPublicLeaderboard', { code: accessCode });
+  check('public leaderboard hides rankings until published',
+    boardBefore?.published === false && (boardBefore?.rankings?.length ?? 0) === 0);
+
   const lbShown = await creator.call('refreshLeaderboard', { ...lbCtx, publish: true });
   check('refreshLeaderboard can publish to teams', lbShown?.published === true);
   midState = await player.call('getMyTeamState', { code: accessCode });
   check('published standings are visible to participant', midState?.run?.leaderboard?.published === true);
+
+  const boardAfter = await player.call('getPublicLeaderboard', { code: accessCode });
+  check('public leaderboard exposes rankings once published',
+    boardAfter?.published === true && (boardAfter?.rankings?.length ?? 0) === 1,
+    JSON.stringify(boardAfter?.rankings?.[0]));
 
   // ── 8c. Photo task: submit → staff review → advance ─────────────────────────
   const photoSubmit = await player.call('submitStationPhoto', {

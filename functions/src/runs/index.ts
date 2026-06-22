@@ -655,6 +655,42 @@ export const refreshLeaderboard = functions.https.onCall(async (data, context) =
 });
 
 
+// ─── getPublicLeaderboard ───────────────────────────────────────────────────
+// Read-only, shareable standings for a run, looked up by its access code so the
+// link never exposes the owner/game path. Returns the leaderboard ONLY once the
+// organizer has published it (same staged-reveal gate participants see); before
+// that the board is reported as not-yet-published. Anyone signed in (the play
+// app's anonymous users included) may call it.
+
+export const getPublicLeaderboard = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const { code } = data as { code: string };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const c = codeSnap.data() as AccessCode;
+
+  const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
+  const run = runSnap.exists ? (runSnap.data() as Run) : null;
+
+  const board = run?.leaderboard;
+  const published = !!board?.published;
+  return {
+    title: game.branding?.name ?? game.title,
+    branding: game.branding ?? null,
+    runStatus: run?.status ?? 'live',
+    published,
+    frozen: !!board?.frozen,
+    updatedAt: board?.updatedAt ?? null,
+    rankings: published ? board!.rankings : [],
+  };
+});
+
+
 // ─── listRunTeams ─────────────────────────────────────────────────────────────
 
 export const listRunTeams = functions.https.onCall(async (data, context) => {

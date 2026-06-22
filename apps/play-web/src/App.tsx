@@ -5,6 +5,7 @@ import JoinScreen from './screens/JoinScreen';
 import PlayScreen from './screens/PlayScreen';
 import StaffConsole from './screens/StaffConsole';
 import GamePromoScreen from './screens/GamePromoScreen';
+import PublicLeaderboardScreen from './screens/PublicLeaderboardScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 
@@ -19,6 +20,10 @@ export default function App() {
   // the visitor chooses to enter a code (or already has a live session).
   const [promoGameId, setPromoGameId] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('game'),
+  );
+  // A shared standings link (`?board=<code>`) shows the public leaderboard.
+  const [boardCode, setBoardCode] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('board'),
   );
 
   useEffect(() => {
@@ -41,6 +46,16 @@ export default function App() {
       <>
         <ConnectionBanner />
         <StaffConsole onExit={() => setStaffMode(false)} />
+        <DialogHost />
+      </>
+    );
+  }
+
+  if (boardCode && !session) {
+    return (
+      <>
+        <ConnectionBanner />
+        <PublicLeaderboardScreen code={boardCode} onJoin={() => setBoardCode(null)} />
         <DialogHost />
       </>
     );

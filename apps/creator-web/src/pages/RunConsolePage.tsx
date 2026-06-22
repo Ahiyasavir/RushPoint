@@ -246,22 +246,28 @@ export default function RunConsolePage() {
 // with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
 function JoinShare({ accessCode }: { accessCode: string }) {
   const link = `${PLAY_URL}/?code=${accessCode}`;
+  const boardLink = `${PLAY_URL}/?board=${accessCode}`;
   const [qr, setQr] = useState('');
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('');
   useEffect(() => {
     QRCode.toDataURL(link, { margin: 1, width: 200 }).then(setQr).catch(() => setQr(''));
   }, [link]);
+  async function copy(url: string, which: string) {
+    try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { /* no clipboard */ }
+  }
   return (
     <Card className="px-5 py-4 text-center">
       <div className="text-[11px] text-zinc-500 uppercase tracking-widest">Access code</div>
       <div className="text-2xl font-mono font-bold text-neon-green tracking-[0.3em] mb-2">{accessCode}</div>
       {qr && <img src={qr} alt="Join QR code" className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
-      <button
-        className="mt-2 text-xs text-neon-green hover:underline"
-        onClick={async () => { try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ } }}
-      >
-        {copied ? 'Link copied ✓' : 'Copy join link'}
-      </button>
+      <div className="mt-2 flex flex-col gap-1">
+        <button className="text-xs text-neon-green hover:underline" onClick={() => copy(link, 'join')}>
+          {copied === 'join' ? 'Link copied ✓' : 'Copy join link'}
+        </button>
+        <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(boardLink, 'board')}>
+          {copied === 'board' ? 'Link copied ✓' : '🏆 Copy public leaderboard link'}
+        </button>
+      </div>
     </Card>
   );
 }

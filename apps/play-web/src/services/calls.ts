@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, Task, RegistrationField } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField } from '@rushpoint/shared';
 
 export interface JoinInfo {
   context: { ownerUid: string; gameId: string; runId: string };
@@ -11,6 +11,17 @@ export interface JoinInfo {
   runStatus: string;
 }
 export const getJoinInfo = callable<{ code: string }, JoinInfo>('getJoinInfo');
+
+export interface PublicLeaderboard {
+  title: string;
+  branding: GameBranding | null;
+  runStatus: string;
+  published: boolean;
+  frozen: boolean;
+  updatedAt: string | null;
+  rankings: LeaderboardEntry[];
+}
+export const getPublicLeaderboard = callable<{ code: string }, PublicLeaderboard>('getPublicLeaderboard');
 
 export interface JoinResult {
   teamId: string; runId: string; gameId: string; ownerUid: string; alreadyJoined: boolean;
