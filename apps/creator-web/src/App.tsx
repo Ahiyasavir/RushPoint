@@ -1,11 +1,17 @@
+import { lazy, Suspense } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { useAuth } from './components/AuthGate';
-import DashboardPage from './pages/DashboardPage';
-import BuilderPage from './pages/BuilderPage';
-import GalleryPage from './pages/GalleryPage';
-import WalletPage from './pages/WalletPage';
-import RunConsolePage from './pages/RunConsolePage';
+import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
+
+// Route-level code splitting — the Builder, Gallery and Run console each pull in
+// the heavy MapLibre bundle, so they're loaded on demand. The landing + Dashboard
+// (the first paint for most visitors) stay in a lean initial chunk.
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const BuilderPage = lazy(() => import('./pages/BuilderPage'));
+const GalleryPage = lazy(() => import('./pages/GalleryPage'));
+const WalletPage = lazy(() => import('./pages/WalletPage'));
+const RunConsolePage = lazy(() => import('./pages/RunConsolePage'));
 
 const NAV = [
   { to: '/', label: 'My Games', end: true },
@@ -41,13 +47,15 @@ export default function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 py-6">
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/build/:gameId" element={<BuilderPage />} />
-          <Route path="/gallery" element={<GalleryPage />} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/run/:gameId/:runId" element={<RunConsolePage />} />
-        </Routes>
+        <Suspense fallback={<Spinner label="Loading…" />}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/build/:gameId" element={<BuilderPage />} />
+            <Route path="/gallery" element={<GalleryPage />} />
+            <Route path="/wallet" element={<WalletPage />} />
+            <Route path="/run/:gameId/:runId" element={<RunConsolePage />} />
+          </Routes>
+        </Suspense>
       </main>
       <DialogHost />
     </div>
