@@ -8,7 +8,11 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs20"
+    "runtime": "nodejs20",
+    "predeploy": [
+      "npm run shared:build",
+      "npm run build --workspace=functions"
+    ]
   },
   "hosting": [
     {

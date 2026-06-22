@@ -85,6 +85,7 @@ export const topUpWallet = functions.https.onCall(async (data, context) => {
     type: 'topup',
     amountILS,
     description: `Top-up ₪${amountILS}`,
+    status: 'pending', // → 'paid' exactly once, by the webhook
     createdAt: now,
   });
 
@@ -145,20 +146,24 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
     if (uid && txId && amountILS) {
       const amount = parseInt(amountILS, 10);
       const now    = new Date().toISOString();
+      const txDoc  = walletRef(uid).collection('transactions').doc(txId);
 
-      await walletRef(uid).set(
-        {
-          uid,
-          balanceILS: admin.firestore.FieldValue.increment(amount),
-          updatedAt: now,
-        },
-        { merge: true },
-      );
-
-      await walletRef(uid)
-        .collection('transactions')
-        .doc(txId)
-        .update({ stripePaymentIntentId: session.payment_intent ?? session.id });
+      // Idempotent credit: Stripe delivers events at-least-once, so guard against
+      // crediting the same top-up twice on a retry. Only credit if not yet 'paid'.
+      await db.runTransaction(async (t) => {
+        const txSnap = await t.get(txDoc);
+        if (txSnap.exists && (txSnap.data() as { status?: string }).status === 'paid') return;
+        t.set(
+          walletRef(uid),
+          { uid, balanceILS: admin.firestore.FieldValue.increment(amount), updatedAt: now },
+          { merge: true },
+        );
+        t.set(
+          txDoc,
+          { status: 'paid', stripePaymentIntentId: session.payment_intent ?? session.id, paidAt: now },
+          { merge: true },
+        );
+      });
     }
   }
 

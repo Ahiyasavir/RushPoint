@@ -20,13 +20,15 @@ local emulator. Full lifecycle verified by `npm run e2e` (52/52) and all gates g
 - **Backend:** all callables (games/runs/gallery/payments + staff/live-ops), server-write-only
   rules, scoped staff read, Storage rules.
 
-## Remaining (not code — needs the owner)
-- [ ] Reconcile branches: this work is on `topographic-maps`; the autopilot's `Rushpoint-product`
-      clone only has V2-PHOTO. Merge the two lines before deploy.
-- [ ] Firebase production deploy: `npm run deploy:backend` (functions + rules + indexes + storage),
-      then host the two web apps.
-- [ ] Real content: actual coordinates, task copy, access codes, staff PINs.
-- [ ] Production auth/keys: Stripe live keys, MapTiler key, admin allowlist.
+## Going live — see [DEPLOY.md](DEPLOY.md)
+Full step-by-step for Firebase deploy + Stripe payments is in **[DEPLOY.md](DEPLOY.md)**. The repo
+is deploy-ready: `firebase.json` has both Hosting sites + a functions predeploy build hook; the
+functions bundle `@rushpoint/shared` via esbuild (no workspace-install issue); Stripe top-ups are
+real and credited idempotently by the webhook. What's left is owner-only: enter your Firebase +
+Stripe keys in the `.env` files, connect your bank in Stripe, run `npm run deploy:all`.
+
+Optional before a big event: reconcile with the autopilot's `Rushpoint-product` clone (only has
+V2-PHOTO), and load real content (coordinates, task copy, access codes, staff PINs).
 
 ## Roadmap ideas (see CLAUDE.md "Core concepts" for what exists)
 Quiz / numeric / geofence-auto-checkin / sequence tasks · per-team Wrapped recap ·

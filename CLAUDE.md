@@ -1,7 +1,8 @@
 # RushPoint — multi-tenant "race adventure" platform
 
 > Coding guidelines & Firestore path rules: [INSTRUCTIONS.md](INSTRUCTIONS.md) ·
-> Full architecture reference: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md)
+> Architecture: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md) ·
+> **Going live + payments: [DEPLOY.md](DEPLOY.md)**
 
 RushPoint is a **web platform where any creator builds and runs their own real-world team
 "race adventure" game** (scavenger-hunt / amazing-race style). A creator designs a game
