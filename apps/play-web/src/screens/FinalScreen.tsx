@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { MyTeamState } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
-import { buildStoryCard } from '../lib/storyCard';
+import { shareStoryCard } from '../lib/storyCard';
 
 // Where the creator app lives — the viral CTA points participants here to build
 // their own game (dev → :5180, prod → VITE_CREATOR_URL or the hosting default).
@@ -51,12 +51,7 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
         + `${myRank ? ` — rank #${myRank}` : ''}`
         + `${totalSec != null ? ` in ${fmtDuration(totalSec)}` : ''}! `
         + `Build your own at ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
-      const navAny = navigator as Navigator & {
-        share?: (d: { title?: string; text?: string; files?: File[] }) => Promise<void>;
-        canShare?: (d: { files?: File[] }) => boolean;
-      };
-
-      const blob = await buildStoryCard({
+      const result = await shareStoryCard({
         gameName: name,
         teamName: team.displayName,
         score: finalScore,
@@ -64,25 +59,9 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
         totalTime: totalSec != null ? fmtDuration(totalSec) : undefined,
         stagesDone: `${completedStages.length}/${game.stageCount}`,
         ctaUrl: CREATOR_URL,
-      });
-
-      if (blob) {
-        const file = new File([blob], 'rushpoint-result.png', { type: 'image/png' });
-        if (navAny.share && navAny.canShare?.({ files: [file] })) {
-          try { await navAny.share({ files: [file], text }); return; } catch { /* cancelled */ }
-        }
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = 'rushpoint-result.png'; a.click();
-        URL.revokeObjectURL(url);
-        setShared(true); setTimeout(() => setShared(false), 2500);
-        return;
-      }
-
-      if (navAny.share) { try { await navAny.share({ title: 'RushPoint', text }); return; } catch { /* cancelled */ } }
-      await navigator.clipboard.writeText(text); setShared(true); setTimeout(() => setShared(false), 2500);
-    } catch { /* share unavailable */ }
-    finally { setBusy(false); }
+      }, text);
+      if (result === 'downloaded' || result === 'copied') { setShared(true); setTimeout(() => setShared(false), 2500); }
+    } finally { setBusy(false); }
   }
 
   return (

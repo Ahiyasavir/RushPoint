@@ -10,6 +10,8 @@ export interface StoryCardData {
   totalTime?: string;
   stagesDone?: string;
   ctaUrl: string; // shown as the "create your own" call-to-action
+  headline?: string; // big banner word(s); defaults to FINISHED!
+  scoreLabel?: string; // label under the big number; defaults to POINTS
 }
 
 const W = 1080;
@@ -61,10 +63,12 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   ctx.font = '240px serif';
   ctx.fillText('🏆', W / 2, 470);
 
-  // FINISHED!
+  // Banner headline (FINISHED! / WE'RE #1! / ON THE TRAIL …)
   ctx.fillStyle = '#ffffff';
-  ctx.font = '800 110px Outfit, Inter, sans-serif';
-  ctx.fillText('FINISHED!', W / 2, 610);
+  const headline = data.headline ?? 'FINISHED!';
+  const hlSize = fitText(ctx, headline, W - 120, 110);
+  ctx.font = `800 ${hlSize}px Outfit, Inter, sans-serif`;
+  ctx.fillText(headline, W / 2, 610);
 
   // Game name (fit to width)
   const gnSize = fitText(ctx, data.gameName, W - 160, 52);
@@ -84,7 +88,7 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   ctx.fillText(String(data.score), W / 2, 1170);
   ctx.font = '600 46px Inter, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.8)';
-  ctx.fillText('POINTS', W / 2, 1240);
+  ctx.fillText(data.scoreLabel ?? 'POINTS', W / 2, 1240);
 
   // Stat chips (rank · time · stages) — only those present
   const chips: [string, string][] = [];
@@ -119,4 +123,31 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   ctx.fillText(data.ctaUrl.replace(/^https?:\/\//, ''), W / 2, 1820);
 
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png', 0.92));
+}
+
+// Build the card and share it: mobile → native share sheet (Instagram/WhatsApp/
+// stories); desktop or no file-share support → downloads the PNG / copies the
+// text. Returns 'shared' | 'downloaded' | 'copied' | 'failed' so callers can
+// show the right confirmation. `text` is the caption + viral CTA fallback.
+export async function shareStoryCard(data: StoryCardData, text: string): Promise<'shared' | 'downloaded' | 'copied' | 'failed'> {
+  try {
+    const navAny = navigator as Navigator & {
+      share?: (d: { title?: string; text?: string; files?: File[] }) => Promise<void>;
+      canShare?: (d: { files?: File[] }) => boolean;
+    };
+    const blob = await buildStoryCard(data);
+    if (blob) {
+      const file = new File([blob], 'rushpoint.png', { type: 'image/png' });
+      if (navAny.share && navAny.canShare?.({ files: [file] })) {
+        try { await navAny.share({ files: [file], text }); return 'shared'; } catch { /* cancelled */ return 'failed'; }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'rushpoint.png'; a.click();
+      URL.revokeObjectURL(url);
+      return 'downloaded';
+    }
+    if (navAny.share) { try { await navAny.share({ title: 'RushPoint', text }); return 'shared'; } catch { /* cancelled */ return 'failed'; } }
+    await navigator.clipboard.writeText(text); return 'copied';
+  } catch { return 'failed'; }
 }

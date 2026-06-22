@@ -11,12 +11,19 @@ import type { NavTarget } from '../components/NavMap';
 const NavMap = lazy(() => import('../components/NavMap'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
+import { shareStoryCard } from '../lib/storyCard';
+
+// Creator app — viral CTA baked into every shared progress card.
+const CREATOR_URL = import.meta.env.DEV
+  ? `${window.location.protocol}//${window.location.hostname}:5180`
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const [state, setState] = useState<MyTeamState | null>(null);
   const [err, setErr] = useState('');
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
+  const [sharing, setSharing] = useState(false);
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
@@ -76,6 +83,35 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     await dialog.alert('SOS sent. Stay where you are — help is on the way.');
   }
 
+  // Mid-race brag card — same branded story image as the finish screen, but with
+  // a "we're racing / we're #N" headline. Every share carries the build-your-own
+  // CTA, so an in-progress flex doubles as marketing for the creator app.
+  async function shareProgress() {
+    if (!state || sharing) return;
+    setSharing(true);
+    try {
+      const { team, game } = state;
+      const name = game.branding?.name ?? game.title;
+      const done = team.stages.filter((s) => s.status === 'completed').length;
+      const board = state.run.leaderboard;
+      const rank = board?.published ? board.rankings.find((r) => r.teamId === team.id)?.rank : undefined;
+      const headline = rank === 1 ? "WE'RE #1!" : rank && rank <= 3 ? `#${rank} & CLIMBING` : 'ON THE TRAIL';
+      const text = `🏃 ${team.displayName} is racing "${name}"`
+        + `${rank ? ` — currently #${rank}` : ''} with ${team.score} pts! `
+        + `Build your own at ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
+      await shareStoryCard({
+        gameName: name,
+        teamName: team.displayName,
+        score: team.score,
+        rank,
+        stagesDone: `${done}/${game.stageCount}`,
+        ctaUrl: CREATOR_URL,
+        headline,
+        scoreLabel: 'POINTS SO FAR',
+      }, text);
+    } finally { setSharing(false); }
+  }
+
   if (!state) {
     return (
       <Screen>
@@ -133,7 +169,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   return (
     <Screen>
       <Header game={game} score={team.score} accent={accent} onLeave={leave} />
-      <div className="my-4"><Progress done={completedStages} total={game.stageCount} /></div>
+      <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
+      <button onClick={shareProgress} disabled={sharing}
+        className="self-end text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
+        {sharing ? 'Creating…' : '📸 Share our progress'}
+      </button>
 
       <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
 
