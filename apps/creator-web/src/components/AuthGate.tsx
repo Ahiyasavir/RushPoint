@@ -10,7 +10,7 @@ import {
 import { Button, Card, Input, Label } from './ui';
 import { claimReferral } from '../services/calls';
 import { dialog } from './dialog';
-import { REFERRAL_BONUS_ILS } from '@rushpoint/shared';
+import { REFERRAL_BONUS_ILS, FREE_PARTICIPANTS_PER_RUN } from '@rushpoint/shared';
 
 interface AuthCtx {
   user: User | null;
@@ -160,7 +160,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         </div>
 
         {/* Hero */}
-        <div className="grid md:grid-cols-2 gap-10 items-center pt-8 pb-16">
+        <div className="grid md:grid-cols-2 gap-10 items-center pt-10 pb-20">
           <div>
             {incomingRef ? (
               <div className="inline-flex items-center gap-2 rounded-full border border-neon-green/40 bg-neon-green/10 px-3 py-1 text-xs text-neon-green">
@@ -178,12 +178,24 @@ function Landing({ authCard }: { authCard: ReactNode }) {
               Design a real-world scavenger-hunt / amazing-race game, launch a live run,
               and score teams automatically. No code, no judges.
             </p>
-            <div className="flex items-center gap-3 mt-6">
+            <div className="flex flex-wrap items-center gap-3 mt-6">
               <a href="#signin"><Button>Start building — free</Button></a>
-              <span className="text-xs text-zinc-500">Demo game included</span>
+              <a href="#how" className="text-sm text-zinc-400 hover:text-zinc-100 px-2 py-2">See how it works ↓</a>
+            </div>
+            <div className="flex items-center gap-5 mt-6 text-xs text-zinc-500">
+              <span className="flex items-center gap-1.5">✓ No credit card</span>
+              <span className="flex items-center gap-1.5">✓ Demo game included</span>
+              <span className="flex items-center gap-1.5">✓ {FREE_PARTICIPANTS_PER_RUN} free players / run</span>
             </div>
           </div>
-          <div id="signin" className="flex md:justify-end justify-center scroll-mt-20">{authCard}</div>
+          <div className="flex md:justify-end justify-center"><PhoneMockup /></div>
+        </div>
+
+        {/* Sign-up band */}
+        <div id="signin" className="scroll-mt-20 flex flex-col items-center pb-20">
+          <h2 className="font-brand text-2xl font-bold">Create your free account</h2>
+          <p className="text-zinc-500 text-sm mt-1 mb-6">Your first game takes about five minutes.</p>
+          {authCard}
         </div>
 
         {/* Features */}
@@ -198,7 +210,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         </div>
 
         {/* How it works */}
-        <div className="pb-20">
+        <div id="how" className="scroll-mt-20 pb-20">
           <h2 className="text-center font-brand text-2xl font-bold mb-8">From idea to start line in minutes</h2>
           <div className="grid sm:grid-cols-3 gap-4">
             {STEPS.map((s) => (
@@ -217,6 +229,66 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         <footer className="border-t border-glass-border py-6 text-center text-xs text-zinc-600">
           RushPoint — build &amp; run your own real-world race adventures.
         </footer>
+      </div>
+    </div>
+  );
+}
+
+// A pure-CSS mockup of the participant app mid-race — the product visual in the
+// hero. Uses the warm "Trail" palette of play-web so the two apps read as one
+// brand. No assets, so it can't 404 or slow first paint.
+function PhoneMockup() {
+  const board = [
+    { rank: 1, name: 'The Falafel Five', score: 740, me: false },
+    { rank: 2, name: 'Desert Foxes', score: 690, me: true },
+    { rank: 3, name: 'Gate Crashers', score: 615, me: false },
+  ];
+  return (
+    <div className="relative w-[260px] shrink-0" aria-hidden="true">
+      <div className="absolute -inset-6 rounded-[3rem] bg-orange-500/20 blur-3xl" />
+      <div className="relative rounded-[2.5rem] border border-white/10 bg-zinc-950 p-2.5 shadow-2xl">
+        <div className="rounded-[2rem] overflow-hidden bg-orange-50">
+          {/* status bar */}
+          <div className="h-6 bg-orange-50 flex items-center justify-center">
+            <div className="w-16 h-1.5 rounded-full bg-zinc-300" />
+          </div>
+          {/* app header */}
+          <div className="px-4 pt-1 pb-3">
+            <div className="text-[13px] font-extrabold text-orange-600">Old City Treasure Hunt</div>
+            <div className="text-[10px] text-zinc-500">Score: <span className="font-mono text-orange-600">690</span></div>
+            <div className="mt-2 flex gap-1">
+              <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
+              <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
+              <div className="h-1.5 flex-1 rounded-full bg-zinc-200" />
+            </div>
+          </div>
+          {/* map */}
+          <div className="relative mx-4 h-28 rounded-xl overflow-hidden bg-gradient-to-br from-amber-100 to-orange-200">
+            <svg viewBox="0 0 200 110" className="absolute inset-0 w-full h-full">
+              <path d="M20 90 C 60 70, 80 40, 130 35 S 180 25, 185 18" fill="none" stroke="#ea580c" strokeWidth="3" strokeDasharray="6 6" strokeLinecap="round" />
+              <circle cx="20" cy="90" r="6" fill="#16a34a" />
+              <circle cx="130" cy="35" r="5" fill="#ea580c" />
+              <circle cx="185" cy="18" r="5" fill="#f97316" />
+            </svg>
+            <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-zinc-600">240m to next</div>
+          </div>
+          {/* task card */}
+          <div className="m-4 mt-3 rounded-xl border border-orange-200 bg-white p-3">
+            <div className="text-[11px] font-semibold text-zinc-800">📷 Photo at Jaffa Gate</div>
+            <div className="text-[10px] text-zinc-500 mt-0.5">Snap your whole team under the arch.</div>
+            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">Submit photo</div>
+          </div>
+          {/* leaderboard */}
+          <div className="mx-4 mb-4 rounded-xl bg-white border border-zinc-200 p-2.5">
+            <div className="text-[10px] font-semibold text-zinc-700 mb-1.5">🏆 Leaderboard</div>
+            {board.map((r) => (
+              <div key={r.rank} className={`flex items-center justify-between text-[10px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-zinc-500'}`}>
+                <span className="truncate"><span className="font-mono me-1.5">{r.rank}</span>{r.name}</span>
+                <span className="font-mono">{r.score}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
