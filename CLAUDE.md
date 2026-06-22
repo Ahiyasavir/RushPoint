@@ -115,7 +115,12 @@ helpers are **internal** (not triggers) — never re-export them.
 ### Game → Stage → Task
 A **Game** has ordered **Stages**; each Stage has 1+ **Tasks**. A stage unlocks the next when
 complete; the `isFinal` stage triggers the Final screen. Task **types**: `field` (check-in),
-`self_report`, `smart_station` (enter a secret code), `photo` (upload → staff review or auto-approve).
+`self_report`, `smart_station` (secret code), `photo` (upload → staff review or auto-approve),
+`quiz` (multiple-choice or typed answer; `answers[]`), `numeric` (`numericAnswer` ± `numericTolerance`),
+`geofence` (auto check-in within `geofenceRadiusMeters` — server validates GPS), `sequence`
+(ordered `steps[]` at one stop). **Answer keys are server-secret** — the participant sanitizer
+strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify via `submitTaskAnswer`
+/ `submitSequenceStep` / `verifyStationCode`.
 
 - **Partial-completion stages** — `Stage.requiredTaskCount`: a team completes only N of M tasks;
   routing picks the best-suited subset and the rest auto-skip. Undefined = all tasks.
@@ -153,6 +158,8 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   + re-export in `functions/src/index.ts` + wrapper in the app's `services/calls.ts`.
 - **Creator UI** → `apps/creator-web/src/pages/*` (Dashboard, Builder, Gallery, Wallet, RunConsole);
   shared kit in `components/ui.tsx`; data layer `services/api.ts` (`callable()`) + `services/calls.ts`.
+  Builder is tile + modal (`BuilderPage` `TaskEditor`); quick-start templates in `templates.ts`;
+  whole-route `RoutePreviewMap` on the Preview step. New-game flow seeds a template via updateGame.
 - **Participant UI** → `apps/play-web/src/screens/*` (Join, Play, Final, StaffConsole) +
   `components/*` (TaskRunner, NavMap, LiveOps, ConnectionBanner). Session in `store.ts`.
 - **Types / paths / scoring / geo** → `packages/shared/src` (`types/index.ts`, `scoringPresets.ts`,
