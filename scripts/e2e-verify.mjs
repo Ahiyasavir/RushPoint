@@ -348,6 +348,84 @@ async function main() {
   const afterAgain = await player3.call('getMyTeamState', { code: c3 });
   check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
 
+  // ── 14. New task types: quiz · numeric · geofence · sequence ────────────────
+  const { gameId: g4 } = await creator.call('createGame', { title: 'Task-Types Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: g4,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      { id: 's-quiz', order: 0, title: 'Quiz', tasks: [{
+        id: 'q1', title: 'Capital of France?', type: 'quiz',
+        coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 2, pointValue: 50, maxConcurrentTeams: 9,
+        choices: ['Paris', 'London', 'Rome'], answers: ['Paris'],
+      }] },
+      { id: 's-num', order: 1, title: 'Numeric', tasks: [{
+        id: 'n1', title: 'How many arches? (±1)', type: 'numeric',
+        coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 2, pointValue: 50, maxConcurrentTeams: 9,
+        numericAnswer: 12, numericTolerance: 1,
+      }] },
+      { id: 's-geo', order: 2, title: 'Geofence', tasks: [{
+        id: 'gf1', title: 'Reach the gate', type: 'geofence',
+        coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 60, difficulty: 2, estimatedMinutes: 3, pointValue: 50, maxConcurrentTeams: 9,
+      }] },
+      { id: 's-seq', order: 3, title: 'Sequence', isFinal: true, tasks: [{
+        id: 'sq1', title: 'Three steps', type: 'sequence',
+        coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 4, pointValue: 50, maxConcurrentTeams: 9,
+        steps: [
+          { id: 'st1', prompt: 'Say the magic word', answer: 'open' },
+          { id: 'st2', prompt: 'Tap to confirm you found the door' },
+          { id: 'st3', prompt: 'Year on the plaque?', answer: '1899' },
+        ],
+      }] },
+    ],
+  });
+  const { runId: r4, accessCode: c4 } = await creator.call('launchRun', { gameId: g4 });
+  const player4 = makeParty('player4');
+  await signInAnonymously(player4.auth);
+  await player4.call('joinRun', { code: c4, displayName: 'Quizzer' });
+  await creator.call('startTeams', { gameId: g4, runId: r4 });
+  const C4 = { ownerUid: creatorCred.user.uid, gameId: g4, runId: r4 };
+
+  // quiz: secrets stripped, choices present; wrong rejected, right advances
+  const sq = await player4.call('getMyTeamState', { code: c4 });
+  const qTask = sq?.activeStageTasks?.[0];
+  check('quiz: answers stripped but choices sent', qTask?.answers === undefined && Array.isArray(qTask?.choices), JSON.stringify({ answers: qTask?.answers, choices: qTask?.choices }));
+  const wrongQ = await player4.call('submitTaskAnswer', { ...C4, taskId: 'q1', answer: 'London' });
+  check('quiz: wrong answer rejected', wrongQ?.correct === false);
+  const rightQ = await player4.call('submitTaskAnswer', { ...C4, taskId: 'q1', answer: 'paris' });
+  check('quiz: correct answer (case-insensitive) advances', rightQ?.correct === true);
+
+  // numeric: within tolerance
+  const wrongN = await player4.call('submitTaskAnswer', { ...C4, taskId: 'n1', answer: '20' });
+  check('numeric: out-of-tolerance rejected', wrongN?.correct === false);
+  const rightN = await player4.call('submitTaskAnswer', { ...C4, taskId: 'n1', answer: '11' });
+  check('numeric: within ±tolerance accepted', rightN?.correct === true);
+
+  // geofence: far rejected, near accepted (server validates GPS)
+  let geoFar = false;
+  try { await player4.call('completeTask', { ...C4, taskId: 'gf1', lat: 32.5, lng: 35.9 }); }
+  catch (e) { geoFar = /too far/i.test(e.message); }
+  check('geofence: too-far check-in rejected', geoFar);
+  const geoNear = await player4.call('completeTask', { ...C4, taskId: 'gf1', lat: 31.78, lng: 35.21 });
+  check('geofence: in-radius check-in accepted', geoNear?.ok === true);
+
+  // sequence: step prompts sent (no answers); steps advance in order
+  const sSeq = await player4.call('getMyTeamState', { code: c4 });
+  const seqTask = sSeq?.activeStageTasks?.[0];
+  check('sequence: step prompts sent without answers',
+    Array.isArray(seqTask?.steps) && seqTask.steps.length === 3 && seqTask.steps.every((s) => s.answer === undefined),
+    JSON.stringify(seqTask?.steps));
+  const seq0 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 0, answer: 'open' });
+  check('sequence: step 1 (answer) accepted', seq0?.stepCorrect === true && seq0?.stepsDone === 1);
+  const seq1 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 1 });
+  check('sequence: step 2 (tap-to-confirm) accepted', seq1?.stepCorrect === true && seq1?.stepsDone === 2);
+  const seqBad = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 2, answer: 'nope' });
+  check('sequence: wrong final answer rejected', seqBad?.stepCorrect === false);
+  const seq2 = await player4.call('submitSequenceStep', { ...C4, taskId: 'sq1', stepIndex: 2, answer: '1899' });
+  check('sequence: final step completes the task', seq2?.taskComplete === true);
+  const fin4 = await player4.call('getMyTeamState', { code: c4 });
+  check('all four task types completed → team finished', fin4?.team?.status === 'finished', fin4?.team?.status);
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

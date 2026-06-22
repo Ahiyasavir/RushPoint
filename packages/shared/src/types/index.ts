@@ -99,7 +99,8 @@ export interface GeoPoint {
 
 export type GameMode        = 'individual' | 'team';
 export type ScoringPreset   = 'time_only' | 'fixed_points_speed' | 'smart_weighted';
-export type TaskType        = 'field' | 'smart_station' | 'photo' | 'self_report';
+export type TaskType        = 'field' | 'smart_station' | 'photo' | 'self_report'
+                            | 'quiz' | 'numeric' | 'geofence' | 'sequence';
 export type StageStatus     = 'locked' | 'active' | 'completed';
 export type TaskStatus      = 'unassigned' | 'assigned' | 'completed' | 'skipped';
 export type RunStatus       = 'draft' | 'live' | 'finished';
@@ -203,8 +204,30 @@ export interface Task {
   // payload — only via the requestTaskHint callable, which charges once.
   hint?: string;
   hintPenalty?: number;
+  // ── Verification config by type. Answer keys (answers/numericAnswer/
+  //    steps[].answer) are SERVER-SECRET — stripped from the participant payload. ──
+  // quiz: render `choices` as buttons (if present) else a text box; correct
+  //       when the answer matches any of `answers` (trimmed, case-insensitive).
+  choices?: string[];
+  answers?: string[];
+  // numeric: correct when |entered − numericAnswer| ≤ numericTolerance (default 0).
+  numericAnswer?: number;
+  numericTolerance?: number;
+  // geofence: auto-checks-in when the participant is within this radius of
+  //           `coordinates` (default 50m). Server validates the GPS distance.
+  geofenceRadiusMeters?: number;
+  // sequence: ordered sub-steps done at one stop; the task completes after the last.
+  steps?: TaskStep[];
   // Library metadata (for publicTasks index)
   tags?: string[];
+}
+
+// One ordered sub-step of a `sequence` task. `answer` is server-secret (omit it
+// for a simple tap-to-confirm step).
+export interface TaskStep {
+  id: string;
+  prompt: string;
+  answer?: string;
 }
 
 
@@ -429,6 +452,8 @@ export interface RunTeam {
   evacuatedFrom?: string | null;
   // Tasks for which this team has already paid to reveal the hint (charge once).
   taskHintsUsed?: string[];
+  // Per-sequence-task progress: taskId → number of steps completed so far.
+  taskStepProgress?: Record<string, number>;
   updatedAt: string;
 }
 

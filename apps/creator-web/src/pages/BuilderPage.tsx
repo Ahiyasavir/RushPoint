@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, TaskType,
+  Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType,
 } from '@rushpoint/shared';
 import { PRESET_LABELS } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
@@ -204,6 +204,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 // ── Step 2: Stages & Tasks ──
 const TASK_ICON: Record<TaskType, string> = {
   field: '📍', self_report: '✅', smart_station: '🔢', photo: '📷',
+  quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩',
 };
 
 function taskIcon(task: Task): string {
@@ -424,6 +425,10 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
               <option value="self_report">self-report</option>
               <option value="smart_station">smart station (code)</option>
               <option value="photo">photo upload</option>
+              <option value="quiz">quiz / answer</option>
+              <option value="numeric">numeric answer</option>
+              <option value="geofence">GPS auto-check-in</option>
+              <option value="sequence">sequence (multi-step)</option>
             </Select>
           </div>
           <div>
@@ -453,6 +458,54 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
               onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
             Auto-approve (no staff review needed)
           </label>
+        )}
+
+        {task.type === 'quiz' && (
+          <>
+            <div>
+              <Label>Choices — one per line (leave empty for a typed answer)</Label>
+              <Textarea
+                value={(task.choices ?? []).join('\n')}
+                onChange={(e) => set({ choices: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
+                placeholder={'Paris\nLondon\nRome'}
+                rows={3}
+              />
+            </div>
+            <div>
+              <Label>Accepted answer(s) — one per line, case-insensitive</Label>
+              <Textarea
+                value={(task.answers ?? []).join('\n')}
+                onChange={(e) => set({ answers: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
+                placeholder={'Paris'}
+                rows={2}
+              />
+            </div>
+          </>
+        )}
+
+        {task.type === 'numeric' && (
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Correct number</Label>
+              <Input type="number" value={task.numericAnswer ?? ''} onChange={(e) => set({ numericAnswer: e.target.value === '' ? undefined : parseFloat(e.target.value) })} />
+            </div>
+            <div>
+              <Label>± tolerance</Label>
+              <Input type="number" min={0} value={task.numericTolerance ?? 0} onChange={(e) => set({ numericTolerance: Math.max(0, parseFloat(e.target.value) || 0) })} />
+            </div>
+          </div>
+        )}
+
+        {task.type === 'geofence' && (
+          <div>
+            <Label>Auto-check-in radius (meters)</Label>
+            <Input type="number" min={5} value={task.geofenceRadiusMeters ?? 50} onChange={(e) => set({ geofenceRadiusMeters: Math.max(5, parseInt(e.target.value) || 50) })} />
+            <p className="text-[11px] text-zinc-500 mt-1">Teams check in automatically within this distance of the pin above.</p>
+          </div>
+        )}
+
+        {task.type === 'sequence' && (
+          <StepsEditor steps={task.steps ?? []} onChange={(steps) => set({ steps })} />
         )}
         {(task.type === 'smart_station' || task.type === 'photo') && (
           <div>
@@ -487,6 +540,28 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       {onRemove && (
         <button onClick={onRemove} className="text-neon-red text-xs hover:underline pt-1">Delete task</button>
       )}
+    </div>
+  );
+}
+
+function StepsEditor({ steps, onChange }: { steps: TaskStep[]; onChange: (s: TaskStep[]) => void }) {
+  const update = (i: number, p: Partial<TaskStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...p } : s)));
+  return (
+    <div className="space-y-2">
+      <Label>Ordered steps — teams complete these in order at one stop</Label>
+      {steps.map((s, i) => (
+        <div key={s.id} className="flex gap-2 items-start">
+          <span className="text-xs text-zinc-500 mt-2.5 w-3">{i + 1}</span>
+          <div className="flex-1 space-y-1">
+            <Input value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder="Prompt / question" />
+            <Input value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder="Answer (blank = tap to confirm)" />
+          </div>
+          <button className="text-neon-red text-sm mt-2.5" onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
+        </div>
+      ))}
+      <Button variant="ghost" className="text-xs" onClick={() => onChange([...steps, { id: uuid(), prompt: '', answer: '' }])}>
+        + Add step
+      </Button>
     </div>
   );
 }

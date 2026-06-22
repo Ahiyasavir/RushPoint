@@ -20,10 +20,12 @@ export const joinRun = callable<
   JoinResult
 >('joinRun');
 
-// Sanitized task shape returned to participants (no secretCode, no hint text)
-export type SafeTask = Omit<Task, 'smart' | 'hint'> & {
+// Sanitized task shape returned to participants — every answer key is stripped
+// server-side (secretCode, hint text, quiz answers, numeric target, step answers).
+export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps'> & {
   hasHint?: boolean;
   hintPenalty?: number;
+  steps?: { id: string; prompt: string }[];
   smart?: {
     enabled: boolean;
     verificationType: 'code_verification' | 'photo_upload';
@@ -60,6 +62,16 @@ export const requestTaskHint = callable<
   Ctx & { taskId: string },
   { hint: string; penalty: number; alreadyUsed: boolean }
 >('requestTaskHint');
+
+export const submitTaskAnswer = callable<
+  Ctx & { taskId: string; answer: string; lat?: number; lng?: number },
+  { correct: boolean; nextTaskId?: string | null }
+>('submitTaskAnswer');
+
+export const submitSequenceStep = callable<
+  Ctx & { taskId: string; stepIndex: number; answer?: string; lat?: number; lng?: number },
+  { stepCorrect: boolean; stepsDone: number; totalSteps: number; taskComplete: boolean }
+>('submitSequenceStep');
 
 export const verifyStationCode = callable<
   Ctx & { teamId: string; taskId: string; code: string },

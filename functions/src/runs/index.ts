@@ -23,6 +23,8 @@ import {
   FREE_PARTICIPANTS_PER_RUN,
   PRICE_ILS_INDIVIDUAL,
   PRICE_ILS_TEAM,
+  haversineKm,
+  isValidCoord,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -795,6 +797,21 @@ export const completeTask = functions.https.onCall(async (data, context) => {
   const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
   const now = new Date().toISOString();
 
+  // Geofence tasks auto-complete on arrival — the server validates the GPS
+  // distance so it can't be spoofed by simply calling completeTask.
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  const gtask = gameSnap.exists ? findGameTask(gameSnap.data() as Game, taskId) : undefined;
+  if (gtask?.type === 'geofence') {
+    const radiusM = gtask.geofenceRadiusMeters ?? 50;
+    if (lat == null || lng == null || !isValidCoord(lat, lng) || !gtask.coordinates) {
+      throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
+    }
+    const distM = haversineKm({ lat, lng }, gtask.coordinates) * 1000;
+    if (distM > radiusM) {
+      throw new functions.https.HttpsError('failed-precondition', `Too far from the spot (${Math.round(distM)}m away)`);
+    }
+  }
+
   await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
   await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
 
@@ -863,6 +880,107 @@ export const requestTaskHint = functions.https.onCall(async (data, context) => {
 });
 
 
+// ─── Answer-checking helpers (quiz / numeric / sequence) ──────────────────────
+
+function findGameTask(game: Game, taskId: string): Task | undefined {
+  for (const stage of game.stages) {
+    const t = stage.tasks.find((x) => x.id === taskId);
+    if (t) return t;
+  }
+  return undefined;
+}
+
+function answerMatches(task: Task, raw: string): boolean {
+  const given = raw.trim().toLowerCase();
+  if (task.type === 'numeric') {
+    const n = parseFloat(raw);
+    if (Number.isNaN(n) || task.numericAnswer == null) return false;
+    return Math.abs(n - task.numericAnswer) <= (task.numericTolerance ?? 0);
+  }
+  // quiz (and any answer-list task): match any accepted answer, case-insensitive
+  return (task.answers ?? []).some((a) => a.trim().toLowerCase() === given);
+}
+
+// ─── submitTaskAnswer (quiz / numeric) ────────────────────────────────────────
+
+export const submitTaskAnswer = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { taskId, answer, lat, lng, ownerUid, gameId, runId, code } = data as {
+    taskId: string; answer: string;
+    lat?: number; lng?: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId || answer == null) throw new functions.https.HttpsError('invalid-argument', 'taskId and answer required');
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const task = findGameTask(gameSnap.data() as Game, taskId);
+  if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
+  if (task.type !== 'quiz' && task.type !== 'numeric') {
+    throw new functions.https.HttpsError('failed-precondition', 'Task does not take an answer');
+  }
+
+  if (!answerMatches(task, String(answer))) return { correct: false };
+
+  const now = new Date().toISOString();
+  await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+  const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+  return { correct: true, nextTaskId: next.taskId ?? null };
+});
+
+// ─── submitSequenceStep (sequence tasks — one ordered step at a time) ──────────
+
+export const submitSequenceStep = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { taskId, stepIndex, answer, lat, lng, ownerUid, gameId, runId, code } = data as {
+    taskId: string; stepIndex: number; answer?: string;
+    lat?: number; lng?: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId || typeof stepIndex !== 'number') {
+    throw new functions.https.HttpsError('invalid-argument', 'taskId and stepIndex required');
+  }
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const task = findGameTask(gameSnap.data() as Game, taskId);
+  if (!task || task.type !== 'sequence' || !task.steps?.length) {
+    throw new functions.https.HttpsError('failed-precondition', 'Not a sequence task');
+  }
+
+  const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
+  const teamSnap = await teamRef.get();
+  if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+  const team = teamSnap.data() as RunTeam;
+  const done = team.taskStepProgress?.[taskId] ?? 0;
+
+  // Must answer steps in order; ignore replays of already-cleared steps.
+  if (stepIndex !== done) return { stepCorrect: false, stepsDone: done, totalSteps: task.steps.length, taskComplete: false };
+
+  const step = task.steps[stepIndex];
+  const expected = step.answer?.trim().toLowerCase();
+  const ok = !expected || (answer ?? '').trim().toLowerCase() === expected; // no answer = tap-to-confirm
+  if (!ok) return { stepCorrect: false, stepsDone: done, totalSteps: task.steps.length, taskComplete: false };
+
+  const newDone = done + 1;
+  const now = new Date().toISOString();
+  const taskComplete = newDone >= task.steps.length;
+
+  await teamRef.update({ [`taskStepProgress.${taskId}`]: newDone, updatedAt: now });
+
+  if (taskComplete) {
+    await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+    const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+    await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+  }
+  return { stepCorrect: true, stepsDone: newDone, totalSteps: task.steps.length, taskComplete };
+});
+
 // ─── getRecommendedTasks (ranked list, no assignment) ─────────────────────────
 
 export const getRecommendedTasks = functions.https.onCall(async (data, context) => {
@@ -906,13 +1024,15 @@ export const getRecommendedTasks = functions.https.onCall(async (data, context) 
 // their currently-assigned task(s) — secrets (codes) are stripped server-side.
 
 function sanitizeTaskForParticipant(task: Task) {
-  // Strip the hint *text* (revealed only via the paid requestTaskHint callable);
-  // expose a flag + cost so the UI can offer it.
-  const { smart, hint, ...rest } = task;
+  // Strip every server-secret answer key: the hint text (paid reveal only),
+  // quiz answers, the numeric target, and each sequence step's answer. The UI
+  // still gets choices / tolerance / radius / step prompts so it can render.
+  const { smart, hint, answers, numericAnswer, steps, ...rest } = task;
   return {
     ...rest,
     hasHint: !!hint && hint.trim().length > 0,
     hintPenalty: task.hintPenalty ?? 25,
+    steps: steps?.map((s) => ({ id: s.id, prompt: s.prompt })),
     smart: smart
       ? {
           enabled: smart.enabled,
