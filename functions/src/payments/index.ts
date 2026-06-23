@@ -1,11 +1,22 @@
-// ─── Payments callables ───────────────────────────────────────────────────────
-// Wallet top-up via Stripe Checkout + webhook handler to confirm payment.
-// In emulator mode, topUpWallet returns a mock session without hitting Stripe.
+// ─── Payments callables (Event Credits model) ────────────────────────────────
+// Creators buy whole-event "Event Credits" (packages) or a "Creator Pro"
+// subscription via Stripe Checkout. A webhook confirms payment and credits the
+// wallet. In emulator mode every purchase is granted directly so local dev +
+// e2e work without Stripe keys.
 
 import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
-import { type Wallet, REFERRAL_BONUS_ILS } from '@rushpoint/shared';
+import {
+  type Wallet,
+  type WalletStatus,
+  type EventPackageId,
+  EVENT_PACKAGES,
+  FREE_RUNS_LIFETIME,
+  REFERRAL_BONUS_FREE_RUNS,
+  PRO_MONTHLY_ILS,
+  PRO_ANNUAL_ILS,
+} from '@rushpoint/shared';
 
 const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
 
@@ -18,106 +29,200 @@ function walletRef(uid: string) {
   return db.doc(`wallets/${uid}`);
 }
 
+function freshWallet(uid: string): Wallet {
+  return {
+    uid,
+    eventCredits: 0,
+    lifetimeFreeRunsUsed: 0,
+    bonusFreeRuns: 0,
+    plan: 'free',
+    proExpiresAt: null,
+    stripeSubscriptionId: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// Reads a wallet, normalizing legacy/missing fields to the Event-Credits shape
+// so every caller can rely on the defaults without repeating ?? everywhere.
+async function readWallet(uid: string): Promise<Wallet> {
+  const snap = await walletRef(uid).get();
+  if (!snap.exists) return freshWallet(uid);
+  const w = snap.data() as Partial<Wallet>;
+  return {
+    uid,
+    eventCredits: w.eventCredits ?? 0,
+    lifetimeFreeRunsUsed: w.lifetimeFreeRunsUsed ?? 0,
+    bonusFreeRuns: w.bonusFreeRuns ?? 0,
+    plan: w.plan ?? 'free',
+    proExpiresAt: w.proExpiresAt ?? null,
+    stripeCustomerId: w.stripeCustomerId,
+    stripeSubscriptionId: w.stripeSubscriptionId ?? null,
+    lastPackageMaxParticipants: w.lastPackageMaxParticipants,
+    processedSessions: w.processedSessions,
+    updatedAt: w.updatedAt ?? new Date().toISOString(),
+    referredBy: w.referredBy,
+    referralClaimedAt: w.referralClaimedAt,
+    referralCount: w.referralCount,
+  };
+}
+
+function freeRunsRemaining(w: Wallet): number {
+  return Math.max(0, FREE_RUNS_LIFETIME + (w.bonusFreeRuns ?? 0) - w.lifetimeFreeRunsUsed);
+}
+
+function stripeClient() {
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeKey) throw new functions.https.HttpsError('internal', 'Stripe not configured');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Stripe = require('stripe');
+  return new Stripe(stripeKey, { apiVersion: '2023-10-16' });
+}
+
+const APP_URL = () => process.env.APP_URL ?? 'http://localhost:5180';
+
+
 // ─── getWallet ────────────────────────────────────────────────────────────────
+// Returns the raw wallet (creating a fresh one on first access). Prefer
+// getWalletStatus on the client; this is kept for internal/diagnostic use.
 
 export const getWallet = functions.https.onCall(async (_data, context) => {
   const uid = requireAuth(context);
   const snap = await walletRef(uid).get();
   if (!snap.exists) {
-    const wallet: Wallet = { uid, balanceILS: 0, updatedAt: new Date().toISOString() };
+    const wallet = freshWallet(uid);
     await walletRef(uid).set(wallet);
     return { wallet };
   }
-  return { wallet: snap.data() as Wallet };
+  return { wallet: await readWallet(uid) };
 });
 
 
-// ─── topUpWallet ──────────────────────────────────────────────────────────────
-// Returns a Stripe Checkout session URL (or null in emulator mode, where the
-// balance is credited directly so local dev works without Stripe keys).
+// ─── getWalletStatus ──────────────────────────────────────────────────────────
+// Single client-facing snapshot: plan, credits, and free runs left.
 
-export const topUpWallet = functions.https.onCall(async (data, context) => {
+export const getWalletStatus = functions.https.onCall(async (_data, context) => {
   const uid = requireAuth(context);
-  const { amountILS } = data as { amountILS: number };
+  const w = await readWallet(uid);
+  const status: WalletStatus = {
+    plan: w.plan,
+    proExpiresAt: w.proExpiresAt ?? null,
+    eventCredits: w.eventCredits,
+    freeRunsRemaining: freeRunsRemaining(w),
+    lastPackageMaxParticipants: w.lastPackageMaxParticipants,
+  };
+  return status;
+});
 
-  if (!amountILS || amountILS < 10 || amountILS > 10_000) {
-    throw new functions.https.HttpsError('invalid-argument', 'amountILS must be 10–10,000');
-  }
+
+// ─── purchaseCredits ──────────────────────────────────────────────────────────
+// Buy an Event-Credits package. Emulator grants directly; production returns a
+// Stripe Checkout URL and the webhook credits the wallet on completion.
+
+export const purchaseCredits = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { packageId } = data as { packageId: EventPackageId };
+  const pkg = EVENT_PACKAGES[packageId];
+  if (!pkg) throw new functions.https.HttpsError('invalid-argument', 'Unknown package');
 
   if (EMULATOR) {
     const now = new Date().toISOString();
-    await walletRef(uid).set(
-      {
-        uid,
-        balanceILS: admin.firestore.FieldValue.increment(amountILS),
-        updatedAt: now,
-      },
-      { merge: true },
-    );
     const txRef = walletRef(uid).collection('transactions').doc();
-    await txRef.set({
-      id: txRef.id,
-      type: 'topup',
-      amountILS,
-      description: `Top-up ₪${amountILS} (emulator)`,
-      stripePaymentIntentId: `mock_${txRef.id}`,
-      createdAt: now,
+    await db.runTransaction(async (t) => {
+      t.set(walletRef(uid), {
+        uid,
+        eventCredits: admin.firestore.FieldValue.increment(pkg.credits),
+        lastPackageMaxParticipants: pkg.maxParticipants,
+        updatedAt: now,
+      }, { merge: true });
+      t.set(txRef, {
+        id: txRef.id, type: 'topup_credits', credits: pkg.credits,
+        maxParticipantsPerRun: pkg.maxParticipants, packageId, priceILS: pkg.priceILS,
+        description: `Bought ${pkg.credits} Event Credit${pkg.credits > 1 ? 's' : ''} (${packageId})`,
+        stripePaymentIntentId: `mock_${txRef.id}`, createdAt: now,
+      });
     });
-    return { sessionUrl: null, mock: true, amountILS };
+    return { checkoutUrl: null, mock: true, credits: pkg.credits };
   }
 
-  // ── Production Stripe path ──
-  const stripeKey = process.env.STRIPE_SECRET_KEY;
-  if (!stripeKey) {
-    throw new functions.https.HttpsError('internal', 'Stripe not configured');
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const Stripe = require('stripe');
-  const stripe = new Stripe(stripeKey, { apiVersion: '2023-10-16' });
-
-  const appUrl  = process.env.APP_URL ?? 'http://localhost:3000';
-  const now     = new Date().toISOString();
-  const txRef   = walletRef(uid).collection('transactions').doc();
-
-  await txRef.set({
-    id: txRef.id,
-    type: 'topup',
-    amountILS,
-    description: `Top-up ₪${amountILS}`,
-    status: 'pending', // → 'paid' exactly once, by the webhook
-    createdAt: now,
-  });
-
+  const stripe = stripeClient();
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: 'ils',
-          unit_amount: amountILS * 100,
-          product_data: { name: `RushPoint Wallet — ₪${amountILS}` },
-        },
+    line_items: [{
+      quantity: 1,
+      price_data: {
+        currency: 'ils',
+        unit_amount: pkg.priceILS * 100,
+        product_data: { name: `RushPoint Event Credits — ${packageId}` },
       },
-    ],
-    success_url: `${appUrl}/wallet?topup=success`,
-    cancel_url:  `${appUrl}/wallet?topup=cancel`,
-    metadata: { uid, txId: txRef.id, amountILS: String(amountILS) },
+    }],
+    success_url: `${APP_URL()}/wallet?purchase=success`,
+    cancel_url: `${APP_URL()}/wallet?purchase=cancel`,
+    metadata: {
+      uid, type: 'event_credits', packageId,
+      credits: String(pkg.credits),
+      maxParticipantsPerRun: String(pkg.maxParticipants),
+    },
   });
+  return { checkoutUrl: session.url };
+});
 
-  await txRef.update({ stripePaymentIntentId: session.payment_intent ?? session.id });
 
-  return { sessionUrl: session.url };
+// ─── subscribePro ─────────────────────────────────────────────────────────────
+// Start a Creator Pro subscription (monthly/annual). Emulator activates it
+// directly; production returns a Stripe subscription Checkout URL.
+
+export const subscribePro = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const interval = (data as { interval?: string })?.interval === 'year' ? 'year' : 'month';
+  const priceILS = interval === 'year' ? PRO_ANNUAL_ILS : PRO_MONTHLY_ILS;
+
+  if (EMULATOR) {
+    const start = new Date();
+    const expires = new Date(start);
+    if (interval === 'year') expires.setFullYear(expires.getFullYear() + 1);
+    else expires.setMonth(expires.getMonth() + 1);
+    const now = start.toISOString();
+    const txRef = walletRef(uid).collection('transactions').doc();
+    await db.runTransaction(async (t) => {
+      t.set(walletRef(uid), {
+        uid, plan: 'pro', proExpiresAt: expires.toISOString(),
+        stripeSubscriptionId: `mock_sub_${uid}`, updatedAt: now,
+      }, { merge: true });
+      t.set(txRef, {
+        id: txRef.id, type: 'pro_subscription', priceILS,
+        description: `Creator Pro — ${interval === 'year' ? 'annual' : 'monthly'}`,
+        stripePaymentIntentId: `mock_${txRef.id}`, createdAt: now,
+      });
+    });
+    return { checkoutUrl: null, mock: true, plan: 'pro' };
+  }
+
+  const stripe = stripeClient();
+  const session = await stripe.checkout.sessions.create({
+    mode: 'subscription',
+    line_items: [{
+      quantity: 1,
+      price_data: {
+        currency: 'ils',
+        unit_amount: priceILS * 100,
+        recurring: { interval },
+        product_data: { name: `RushPoint Creator Pro (${interval}ly)` },
+      },
+    }],
+    subscription_data: { metadata: { uid } },
+    success_url: `${APP_URL()}/wallet?pro=success`,
+    cancel_url: `${APP_URL()}/wallet?pro=cancel`,
+    metadata: { uid, type: 'pro_subscription', interval },
+  });
+  return { checkoutUrl: session.url };
 });
 
 
 // ─── claimReferral ────────────────────────────────────────────────────────────
 // Called once, right after a new creator signs up via an invite link
-// (creator-web stores ?ref=<uid> and replays it post-auth). Credits BOTH the
-// inviter and the newcomer with a fixed bonus. Idempotent per account: the
-// `referredBy` flag on the claimer's wallet blocks a second claim, and a
-// self-referral is rejected.
+// (creator-web stores ?ref=<uid> and replays it post-auth). Grants BOTH the
+// inviter and the newcomer one extra lifetime free run. Idempotent per account:
+// the `referredBy` flag blocks a second claim; a self-referral is rejected.
 
 export const claimReferral = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
@@ -134,48 +239,49 @@ export const claimReferral = functions.https.onCall(async (data, context) => {
   const now = new Date().toISOString();
   const meRef = walletRef(uid);
   const themRef = walletRef(referrer);
+  const bonus = REFERRAL_BONUS_FREE_RUNS;
 
   const result = await db.runTransaction(async (t) => {
     const meSnap = await t.get(meRef);
     const me = meSnap.exists ? (meSnap.data() as Wallet) : null;
     if (me?.referredBy) return { already: true as const };
 
-    // Credit the newcomer.
+    // Grant the newcomer an extra free run.
     t.set(meRef, {
       uid,
-      balanceILS: admin.firestore.FieldValue.increment(REFERRAL_BONUS_ILS),
+      bonusFreeRuns: admin.firestore.FieldValue.increment(bonus),
       referredBy: referrer,
       referralClaimedAt: now,
       updatedAt: now,
     }, { merge: true });
     const meTx = meRef.collection('transactions').doc();
     t.set(meTx, {
-      id: meTx.id, type: 'referral', amountILS: REFERRAL_BONUS_ILS,
-      description: 'Welcome referral bonus', createdAt: now,
+      id: meTx.id, type: 'referral',
+      description: 'Welcome bonus — a free run', createdAt: now,
     });
 
-    // Credit the inviter.
+    // Grant the inviter an extra free run.
     t.set(themRef, {
       uid: referrer,
-      balanceILS: admin.firestore.FieldValue.increment(REFERRAL_BONUS_ILS),
+      bonusFreeRuns: admin.firestore.FieldValue.increment(bonus),
       referralCount: admin.firestore.FieldValue.increment(1),
       updatedAt: now,
     }, { merge: true });
     const themTx = themRef.collection('transactions').doc();
     t.set(themTx, {
-      id: themTx.id, type: 'referral', amountILS: REFERRAL_BONUS_ILS,
+      id: themTx.id, type: 'referral',
       description: 'Referral bonus — a creator you invited joined', createdAt: now,
     });
 
     return { already: false as const };
   });
 
-  return { ok: true, alreadyClaimed: result.already, bonusILS: result.already ? 0 : REFERRAL_BONUS_ILS };
+  return { ok: true, alreadyClaimed: result.already, bonusFreeRuns: result.already ? 0 : bonus };
 });
 
 
 // ─── stripeWebhook ────────────────────────────────────────────────────────────
-// HTTP handler (not callable) that Stripe calls on checkout.session.completed.
+// HTTP handler (not callable) for Stripe checkout/subscription lifecycle events.
 
 export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   const stripeKey     = process.env.STRIPE_SECRET_KEY;
@@ -200,33 +306,85 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
     return;
   }
 
-  if (event.type === 'checkout.session.completed') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const session: any = event.data.object;
-    const { uid, txId, amountILS } = session.metadata ?? {};
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const session: any = event.data.object;
+        const meta = session.metadata ?? {};
+        if (!meta.uid) break;
 
-    if (uid && txId && amountILS) {
-      const amount = parseInt(amountILS, 10);
-      const now    = new Date().toISOString();
-      const txDoc  = walletRef(uid).collection('transactions').doc(txId);
+        if (meta.type === 'event_credits') {
+          const credits = Number(meta.credits) || 0;
+          const maxP = Number(meta.maxParticipantsPerRun) || 0;
+          const now = new Date().toISOString();
+          await db.runTransaction(async (t) => {
+            const wRef = walletRef(meta.uid);
+            const w = (await t.get(wRef)).data() as Wallet | undefined;
+            // Idempotency: Stripe delivers at-least-once.
+            if (w?.processedSessions?.includes(session.id)) return;
+            t.set(wRef, {
+              uid: meta.uid,
+              eventCredits: admin.firestore.FieldValue.increment(credits),
+              lastPackageMaxParticipants: maxP,
+              processedSessions: admin.firestore.FieldValue.arrayUnion(session.id),
+              stripeCustomerId: session.customer ?? w?.stripeCustomerId,
+              updatedAt: now,
+            }, { merge: true });
+            t.set(wRef.collection('transactions').doc(session.id), {
+              id: session.id, type: 'topup_credits', credits,
+              maxParticipantsPerRun: maxP, packageId: meta.packageId,
+              priceILS: (session.amount_total ?? 0) / 100,
+              description: `Bought ${credits} Event Credit${credits > 1 ? 's' : ''} (${meta.packageId})`,
+              createdAt: now,
+            }, { merge: true });
+          });
+        } else if (meta.type === 'pro_subscription') {
+          await walletRef(meta.uid).set({
+            uid: meta.uid, plan: 'pro',
+            stripeCustomerId: session.customer ?? undefined,
+            stripeSubscriptionId: session.subscription ?? null,
+            updatedAt: new Date().toISOString(),
+          }, { merge: true });
+        }
+        break;
+      }
 
-      // Idempotent credit: Stripe delivers events at-least-once, so guard against
-      // crediting the same top-up twice on a retry. Only credit if not yet 'paid'.
-      await db.runTransaction(async (t) => {
-        const txSnap = await t.get(txDoc);
-        if (txSnap.exists && (txSnap.data() as { status?: string }).status === 'paid') return;
-        t.set(
-          walletRef(uid),
-          { uid, balanceILS: admin.firestore.FieldValue.increment(amount), updatedAt: now },
-          { merge: true },
-        );
-        t.set(
-          txDoc,
-          { status: 'paid', stripePaymentIntentId: session.payment_intent ?? session.id, paidAt: now },
-          { merge: true },
-        );
-      });
+      case 'invoice.payment_succeeded': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const invoice: any = event.data.object;
+        if (!invoice.subscription) break;
+        const sub = await stripe.subscriptions.retrieve(invoice.subscription);
+        const uid = sub.metadata?.uid;
+        if (!uid) break;
+        await walletRef(uid).set({
+          uid, plan: 'pro',
+          proExpiresAt: new Date(sub.current_period_end * 1000).toISOString(),
+          stripeSubscriptionId: sub.id,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        break;
+      }
+
+      case 'customer.subscription.deleted': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sub: any = event.data.object;
+        const uid = sub.metadata?.uid;
+        if (!uid) break;
+        await walletRef(uid).set({
+          uid, plan: 'free', stripeSubscriptionId: null, proExpiresAt: null,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
+        break;
+      }
+
+      default:
+        break;
     }
+  } catch (err) {
+    functions.logger.error('stripeWebhook handler failed', err);
+    res.status(500).json({ error: 'handler failed' });
+    return;
   }
 
   res.json({ received: true });

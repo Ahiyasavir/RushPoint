@@ -11,7 +11,13 @@ import { completeTaskForTeam } from './runs/index';
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
 export * from './gallery/index';
-export { getWallet, topUpWallet, claimReferral, stripeWebhook } from './payments/index';
+export { updateMyProfile, exportMyData, deleteMyAccount } from './users/index';
+export {
+  pruneExpiredRunData, pruneExpiredRunDataNow, pruneRunNow,
+} from './maintenance/index';
+export {
+  getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
+} from './payments/index';
 // Explicit callable re-exports from runs (completeTaskForTeam is an internal
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 export {

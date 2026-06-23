@@ -116,7 +116,15 @@ export type VerificationType  = 'code_verification' | 'photo_upload';
 export type StationSubmissionStatus = 'pending' | 'approved' | 'rejected';
 export type VerifyOutcome   = 'correct' | 'wrong' | 'too-far' | 'limit-exceeded';
 export type StationStatus   = 'active' | 'paused' | 'closed';
-export type TransactionType = 'topup' | 'charge' | 'referral';
+// Event-Credits billing model. Legacy 'topup'/'charge' are retained so wallet
+// docs written before the migration still deserialize cleanly.
+export type TransactionType =
+  | 'topup_credits'      // bought Event Credits
+  | 'charge_event'       // spent 1 credit launching a run
+  | 'pro_subscription'   // Creator Pro payment
+  | 'referral'           // referral reward (now a free run)
+  | 'free_run_consumed'  // a lifetime free run was used ($0 log)
+  | 'topup' | 'charge';  // legacy
 export type AuditActionType = 'fine' | 'score_override' | 'skip' | 'evacuation' | 'manual_unlock';
 
 
@@ -364,7 +372,11 @@ export interface Run {
   staffPin?: string;
   launchedAt?: string;
   finishedAt?: string;
-  freeParticipantsUsed: number;  // toward the 2-free limit
+  // ── Billing (Event Credits model) ──
+  billingType: 'free' | 'credit' | 'pro';
+  maxParticipants: number;       // ceiling fixed at launch (from plan/package)
+  participantCount: number;      // grows with each joinRun
+  freeParticipantsUsed?: number; // legacy (pre-migration runs)
   leaderboard?: RunLeaderboard;
   createdAt: string;
   updatedAt: string;
@@ -475,29 +487,77 @@ export interface AccessCode {
 
 // ─── Wallet & Payments ────────────────────────────────────────────────────────
 
-export const FREE_PARTICIPANTS_PER_RUN = 2;
-export const PRICE_ILS_INDIVIDUAL      = 35;   // per additional participant (individual mode)
-export const PRICE_ILS_TEAM            = 100;  // per additional team (team mode)
-// Referral reward — credited to BOTH the inviter and the new creator the first
-// time a referred account claims (see the claimReferral callable).
-export const REFERRAL_BONUS_ILS        = 20;
+// ── Event-Credits pricing model ──
+// A "free run" is a whole event capped at 5 participants; every creator gets a
+// few for life. Beyond that, runs cost 1 Event Credit (bought in packages) or
+// are unlimited under Creator Pro.
+export const FREE_RUNS_LIFETIME              = 3;
+export const FREE_PARTICIPANTS_PER_FREE_RUN  = 5;
+export const PRO_DEFAULT_MAX_PARTICIPANTS    = 50;
+export const PRO_MONTHLY_ILS                 = 149;
+export const PRO_ANNUAL_ILS                  = 990;
+// Each successful referral grants ONE extra lifetime free run to both sides.
+export const REFERRAL_BONUS_FREE_RUNS        = 1;
+
+// Privacy retention: raw participant PII captured during a run (GPS location
+// pings + uploaded photos) is auto-purged this many days after the run finishes.
+// Aggregate results (scores/rankings) are kept while the account is active.
+// Mirrors the commitment in our Privacy Policy. See functions/src/maintenance.
+export const RUN_DATA_RETENTION_DAYS         = 90;
+
+export type EventPackageId = 'starter' | 'standard' | 'pro_pack';
+export interface EventPackageDef {
+  credits: number;          // Event Credits granted
+  maxParticipants: number;  // ceiling per run bought with this package
+  priceILS: number;
+  popular?: boolean;
+}
+export const EVENT_PACKAGES: Record<EventPackageId, EventPackageDef> = {
+  starter:  { credits: 1,  maxParticipants: 15, priceILS: 79  },
+  standard: { credits: 3,  maxParticipants: 30, priceILS: 179, popular: true },
+  pro_pack: { credits: 10, maxParticipants: 50, priceILS: 449 },
+};
 
 export interface Wallet {
   uid: string;
-  balanceILS: number;
+  eventCredits: number;            // whole-event credits remaining
+  lifetimeFreeRunsUsed: number;    // counts toward FREE_RUNS_LIFETIME (+ bonus)
+  bonusFreeRuns?: number;          // extra free runs earned via referrals
+  plan: 'free' | 'pro';
+  proExpiresAt?: string | null;    // ISO; null when not Pro
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string | null;
+  lastPackageMaxParticipants?: number; // ceiling applied to credit-funded runs
+  processedSessions?: string[];    // Stripe session ids already credited (idempotency)
   updatedAt: string;
-  // Referral program: who invited this creator (set once, on first claim) and
-  // how many others they've successfully referred.
+  // Referral program: who invited this creator (set once) + how many they invited.
   referredBy?: string;
   referralClaimedAt?: string;
   referralCount?: number;
+  // Legacy (pre-migration) — optional so old docs still typecheck.
+  balanceILS?: number;
+}
+
+// Client-safe wallet snapshot returned by getWalletStatus.
+export interface WalletStatus {
+  plan: 'free' | 'pro';
+  proExpiresAt?: string | null;
+  eventCredits: number;
+  freeRunsRemaining: number;
+  lastPackageMaxParticipants?: number;
 }
 
 export interface WalletTransaction {
   id: string;
   type: TransactionType;
-  amountILS: number;
   description: string;
+  amountILS?: number;       // legacy / referral
+  priceILS?: number;        // amount paid (credit/pro purchases)
+  credits?: number;         // credits granted (topup_credits)
+  creditCost?: number;      // credits spent (charge_event) — always 1
+  packageId?: EventPackageId;
+  maxParticipantsPerRun?: number;
+  gameTitle?: string;
   runId?: string;
   teamId?: string;
   stripePaymentIntentId?: string;

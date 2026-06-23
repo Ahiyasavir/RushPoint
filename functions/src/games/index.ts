@@ -18,6 +18,7 @@ import {
   DEFAULT_REGISTRATION_FIELDS,
   DEFAULT_SCORING_PRESET,
 } from '@rushpoint/shared';
+import { deleteRunsPhotos } from '../storageUtil';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 
@@ -132,7 +133,13 @@ export const deleteGame = functions.https.onCall(async (data, context) => {
     if (!publicTasksSnap.empty) await batch.commit();
   }
 
-  await ref.delete();
+  // Purge uploaded photos for every run of this game, then recursively delete
+  // the game and all its subcollections (runs → teams → locations …). A plain
+  // doc delete would orphan those subcollections in Firestore.
+  const runsSnap = await db.collection(`${gamePath(uid, gameId)}/runs`).get();
+  await deleteRunsPhotos(runsSnap.docs.map((d) => d.id));
+
+  await db.recursiveDelete(ref);
   return { ok: true };
 });
 

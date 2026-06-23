@@ -23,6 +23,14 @@
         { "fieldPath": "activeTaskId", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "runs",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "finishedAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

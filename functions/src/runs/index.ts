@@ -20,9 +20,11 @@ import {
   type AccessCode,
   type LeaderboardEntry,
   type StageStatus,
-  FREE_PARTICIPANTS_PER_RUN,
-  PRICE_ILS_INDIVIDUAL,
-  PRICE_ILS_TEAM,
+  type Wallet,
+  FREE_RUNS_LIFETIME,
+  FREE_PARTICIPANTS_PER_FREE_RUN,
+  PRO_DEFAULT_MAX_PARTICIPANTS,
+  EVENT_PACKAGES,
   haversineKm,
   isValidCoord,
 } from '@rushpoint/shared';
@@ -116,6 +118,50 @@ export const launchRun = functions.https.onCall(async (data, context) => {
   const code = await uniqueCode();
   const now = new Date().toISOString();
   const runRef = db.collection(`users/${uid}/games/${gameId}/runs`).doc();
+  const walletRef = db.doc(`wallets/${uid}`);
+
+  // ── Billing: pick a free run, then a credit, then refuse. Consuming the free
+  //    run / credit happens atomically so a double-launch can't double-spend. ──
+  const billing = await db.runTransaction<{ billingType: Run['billingType']; maxParticipants: number }>(async (t) => {
+    const wSnap = await t.get(walletRef);
+    const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
+    const plan = w.plan ?? 'free';
+    const lifetimeUsed = w.lifetimeFreeRunsUsed ?? 0;
+    const freeCap = FREE_RUNS_LIFETIME + (w.bonusFreeRuns ?? 0);
+    const credits = w.eventCredits ?? 0;
+
+    if (plan === 'pro') {
+      return { billingType: 'pro', maxParticipants: PRO_DEFAULT_MAX_PARTICIPANTS };
+    }
+    if (lifetimeUsed < freeCap) {
+      t.set(walletRef, {
+        uid, lifetimeFreeRunsUsed: admin.firestore.FieldValue.increment(1), updatedAt: now,
+      }, { merge: true });
+      const txRef = walletRef.collection('transactions').doc();
+      t.set(txRef, {
+        id: txRef.id, type: 'free_run_consumed', runId: runRef.id, gameTitle: game.title,
+        description: `Free run — ${game.title}`, createdAt: now,
+      });
+      return { billingType: 'free', maxParticipants: FREE_PARTICIPANTS_PER_FREE_RUN };
+    }
+    if (credits > 0) {
+      const maxParticipants = w.lastPackageMaxParticipants ?? EVENT_PACKAGES.starter.maxParticipants;
+      t.set(walletRef, {
+        uid, eventCredits: admin.firestore.FieldValue.increment(-1), updatedAt: now,
+      }, { merge: true });
+      const txRef = walletRef.collection('transactions').doc();
+      t.set(txRef, {
+        id: txRef.id, type: 'charge_event', runId: runRef.id, gameTitle: game.title,
+        creditCost: 1, maxParticipantsPerRun: maxParticipants,
+        description: `1 Event Credit — ${game.title}`, createdAt: now,
+      });
+      return { billingType: 'credit', maxParticipants };
+    }
+    throw new functions.https.HttpsError(
+      'resource-exhausted',
+      'No Event Credits left. Buy a credit package or upgrade to Creator Pro to launch this run.',
+    );
+  });
 
   const run: Run = {
     id: runRef.id,
@@ -123,7 +169,9 @@ export const launchRun = functions.https.onCall(async (data, context) => {
     ownerUid: uid,
     status: 'live',
     accessCode: code,
-    freeParticipantsUsed: 0,
+    billingType: billing.billingType,
+    maxParticipants: billing.maxParticipants,
+    participantCount: 0,
     launchedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -222,39 +270,13 @@ export const joinRun = functions.https.onCall(async (data, context) => {
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   const run = runSnap.data() as Run;
 
-  // Can't join a race that's already over (would also wrongly bill the creator).
+  // Can't join a race that's already over.
   if (run.status === 'finished') {
     throw new functions.https.HttpsError('failed-precondition', 'This race has already finished.');
   }
 
-  // Wallet check: if over the free limit, deduct from creator's wallet
-  const isBillable = run.freeParticipantsUsed >= FREE_PARTICIPANTS_PER_RUN;
-  const price = game.mode === 'team' ? PRICE_ILS_TEAM : PRICE_ILS_INDIVIDUAL;
-
-  if (isBillable) {
-    const walletRef = db.doc(`wallets/${ownerUid}`);
-    const walletSnap = await walletRef.get();
-    const balance = walletSnap.exists ? ((walletSnap.data() as { balanceILS: number }).balanceILS ?? 0) : 0;
-    if (balance < price) {
-      throw new functions.https.HttpsError(
-        'resource-exhausted',
-        `Insufficient wallet balance. Top up your wallet to add more ${game.mode === 'team' ? 'teams' : 'participants'}.`,
-        { requiredILS: price, balanceILS: balance },
-      );
-    }
-    // Deduct
-    await walletRef.update({ balanceILS: admin.firestore.FieldValue.increment(-price) });
-    await db.collection(`wallets/${ownerUid}/transactions`).add({
-      type: 'charge',
-      amountILS: price,
-      description: `${game.title} — new ${game.mode === 'team' ? 'team' : 'participant'}`,
-      runId,
-      teamId,
-      createdAt: new Date().toISOString(),
-    });
-  }
-
   const now = new Date().toISOString();
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
   const team: RunTeam = {
     id: teamId,
     runId,
@@ -273,15 +295,27 @@ export const joinRun = functions.https.onCall(async (data, context) => {
     updatedAt: now,
   };
 
-  const batch = db.batch();
-  batch.set(db.doc(teamPath(ownerUid, gameId, runId, teamId)), team);
-  batch.update(runRef, {
-    freeParticipantsUsed: admin.firestore.FieldValue.increment(1),
-    updatedAt: now,
+  // Capacity is a hard ceiling fixed at launch (free run = 5, credit = package
+  // size, Pro = 50). Enforced inside a transaction so concurrent joins can't
+  // overshoot the cap. No per-participant billing — the run was already paid for.
+  const joined = await db.runTransaction<{ already: boolean }>(async (t) => {
+    const [runFresh, teamFresh] = await Promise.all([t.get(runRef), t.get(teamRef)]);
+    if (teamFresh.exists) return { already: true };
+    const r = runFresh.data() as Run;
+    const used = r.participantCount ?? r.freeParticipantsUsed ?? 0;
+    const cap = r.maxParticipants ?? FREE_PARTICIPANTS_PER_FREE_RUN;
+    if (used >= cap) {
+      const msg = r.billingType === 'free'
+        ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
+        : `This run is full (${cap} participants max).`;
+      throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
+    }
+    t.set(teamRef, team);
+    t.update(runRef, { participantCount: used + 1, updatedAt: now });
+    return { already: false };
   });
-  await batch.commit();
 
-  return { teamId, runId, gameId, ownerUid, alreadyJoined: false };
+  return { teamId, runId, gameId, ownerUid, alreadyJoined: joined.already };
 });
 
 
@@ -1118,7 +1152,11 @@ export const getMyTeamState = functions.https.onCall(async (data, context) => {
 
   return {
     team,
-    run: { id: run.id, status: run.status, accessCode: run.accessCode, leaderboard: run.leaderboard ?? null },
+    run: {
+      id: run.id, status: run.status, accessCode: run.accessCode,
+      billingType: run.billingType ?? 'free',
+      leaderboard: run.leaderboard ?? null,
+    },
     game: {
       id: game.id,
       title: game.title,
