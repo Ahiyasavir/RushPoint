@@ -31,7 +31,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             <div className="text-4xl mb-3">⚠️</div>
             <h1 className="font-brand text-xl font-bold text-zinc-900 mb-2">Something went wrong</h1>
             <p className="text-zinc-500 text-sm mb-6">
-              The app hit an unexpected error. Your progress is saved — try again, or
+              The app hit an unexpected error. Your progress is saved. Try again, or
               reload if it keeps happening.
             </p>
             <div className="flex gap-2 justify-center">

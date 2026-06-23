@@ -20,7 +20,7 @@ export default function ConnectionBanner() {
   if (online) return null;
   return (
     <div className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-black text-center text-xs font-medium py-1.5 shadow">
-      ⚠ You're offline — your progress is saved, actions will resume when signal returns
+      ⚠ You're offline. Progress saved. Actions will resume when signal returns.
     </div>
   );
 }

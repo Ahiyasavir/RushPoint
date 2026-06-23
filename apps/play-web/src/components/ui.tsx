@@ -1,16 +1,32 @@
+import React from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 
 export function Button({
   variant = 'primary', className = '', children, ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' }) {
   const map: Record<string, string> = {
-    primary: 'bg-accent text-black font-bold active:brightness-90',
-    ghost:   'bg-app-raised text-zinc-100 border border-glass-border active:bg-glass-hover',
-    danger:  'bg-danger text-white font-semibold active:brightness-90',
+    primary: `
+      bg-gradient-to-r from-rp-fire to-rp-amber
+      text-white font-bold tracking-wide
+      shadow-[0_4px_16px_rgba(255,87,34,0.40),0_1px_4px_rgba(255,87,34,0.25)]
+      hover:shadow-[0_6px_24px_rgba(255,87,34,0.55),0_2px_8px_rgba(255,87,34,0.30)]
+      active:brightness-90 active:scale-[0.98]
+    `,
+    ghost: `
+      bg-white/80 text-zinc-500
+      border border-glass-border
+      active:bg-glass-hover
+      shadow-[0_1px_4px_rgba(26,10,0,0.06)]
+    `,
+    danger: `
+      bg-rp-alert text-white font-semibold
+      shadow-[0_4px_14px_rgba(239,68,68,0.35)]
+      active:brightness-90 active:scale-[0.98]
+    `,
   };
   return (
     <button
-      className={`w-full py-3.5 rounded-xl text-base transition disabled:opacity-40 ${map[variant]} ${className}`}
+      className={`w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:opacity-40 ${map[variant]} ${className}`}
       {...rest}
     >
       {children}
@@ -21,22 +37,45 @@ export function Button({
 export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
-      className={`w-full px-4 py-3.5 rounded-xl bg-app-card border border-glass-border text-zinc-100 text-base
-                  placeholder:text-zinc-600 focus:outline-none focus:border-accent/60 ${className}`}
+      className={`
+        w-full px-4 py-4 rounded-2xl text-base
+        bg-white border border-glass-border
+        text-zinc-100 placeholder:text-zinc-600
+        shadow-[0_1px_4px_rgba(26,10,0,0.06)]
+        focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40
+        transition-all duration-150
+        ${className}
+      `}
       {...rest}
     />
   );
 }
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`bg-app-card border border-glass-border rounded-2xl ${className}`}>{children}</div>;
+export function Card({ children, className = '', style }: {
+  children: ReactNode; className?: string; style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className={`bg-white border border-glass-border rounded-2xl shadow-[0_2px_12px_rgba(26,10,0,0.06),0_8px_32px_-8px_rgba(26,10,0,0.08)] ${className}`}
+      style={style}
+    >
+      {children}
+    </div>
+  );
 }
 
 export function Progress({ done, total }: { done: number; total: number }) {
   return (
     <div className="flex items-center gap-1.5">
       {Array.from({ length: total }).map((_, i) => (
-        <div key={i} className={`h-1.5 flex-1 rounded-full ${i < done ? 'bg-accent' : 'bg-app-raised'}`} />
+        <div
+          key={i}
+          className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+            i < done
+              ? 'bg-gradient-to-r from-rp-fire to-rp-amber shadow-[0_0_8px_rgba(255,87,34,0.5)]'
+              : 'bg-app-raised'
+          }`}
+        />
       ))}
     </div>
   );

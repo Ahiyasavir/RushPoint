@@ -4,7 +4,6 @@ import { getJoinInfo, joinRun, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 
-// A shared join link looks like  …/?code=ABC123  — prefill + auto-lookup from it.
 const LINK_CODE = (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim();
 
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
@@ -15,7 +14,6 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // If the participant arrived via a join link, look the run up automatically.
   useEffect(() => {
     if (LINK_CODE.length >= 4) void lookup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -36,15 +34,9 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     if (!info) return;
     setErr(''); setBusy(true);
     try {
-      // First member name is the team display name fallback
       const memberNames = members.map((m) => m.trim()).filter(Boolean);
       const displayName = (values['teamName'] || memberNames[0] || 'Team').toString();
-      const res = await joinRun({
-        code: code.trim().toUpperCase(),
-        displayName,
-        registrationData: values,
-        memberNames,
-      });
+      const res = await joinRun({ code: code.trim().toUpperCase(), displayName, registrationData: values, memberNames });
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: code.trim().toUpperCase(), displayName,
@@ -56,44 +48,128 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     } finally { setBusy(false); }
   }
 
-  // ── Step 1: enter code ──
+  // ── Step 1: enter access code ──────────────────────────────────────────────
   if (!info) {
     return (
-      <Screen>
-        <div className="flex-1 flex flex-col justify-center">
-          <h1 className="font-brand text-3xl font-extrabold text-accent text-center mb-2">RushPoint</h1>
-          <p className="text-zinc-500 text-center mb-8">Enter the access code from your host</p>
-          <Input
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="ABC123"
-            className="text-center text-2xl font-mono tracking-[0.4em] mb-4"
-            maxLength={8}
-            onKeyDown={(e) => e.key === 'Enter' && lookup()}
-          />
-          {err && <p className="text-danger text-sm text-center mb-3">{err}</p>}
-          <Button disabled={busy || code.length < 4} onClick={lookup}>Continue</Button>
+      <div className="min-h-screen flex flex-col max-w-md mx-auto w-full animate-race-in">
+
+        {/* Full-bleed gradient hero */}
+        <div className="relative flex flex-col items-center justify-center px-6 pt-16 pb-12 text-center overflow-hidden">
+          {/* Background glow */}
+          <div className="absolute inset-0 bg-gradient-to-b from-[#FFF0E0] via-[#FFFCF7] to-transparent" />
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-48 bg-gradient-radial from-rp-fire/20 to-transparent blur-3xl" />
+
+          <div className="relative">
+            {/* App icon */}
+            <div
+              className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mx-auto mb-6"
+              style={{
+                background: 'linear-gradient(135deg, #FF5722 0%, #FFB300 100%)',
+                boxShadow: '0 8px 32px rgba(255,87,34,0.45), 0 2px 8px rgba(255,87,34,0.3)',
+              }}
+            >
+              🏁
+            </div>
+
+            <h1 className="font-brand text-5xl font-extrabold tracking-tight leading-none mb-3"
+              style={{ background: 'linear-gradient(135deg, #FF5722 0%, #FF8A00 50%, #FFB300 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              RushPoint
+            </h1>
+            <p className="text-zinc-500 text-base leading-relaxed max-w-xs">
+              Enter the access code from your host to join the race
+            </p>
+          </div>
+        </div>
+
+        {/* Code input section */}
+        <div className="flex-1 flex flex-col px-5 pb-8">
+          <div className="relative mb-4">
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              placeholder="ABC 123"
+              className="
+                w-full px-6 py-5 rounded-2xl
+                text-center text-3xl font-mono font-bold tracking-[0.5em]
+                bg-white border-2 border-glass-border
+                text-zinc-100 placeholder:text-zinc-700/40
+                shadow-[0_2px_16px_rgba(26,10,0,0.08)]
+                focus:outline-none focus:border-rp-fire/60 focus:ring-4 focus:ring-rp-fire/15
+                transition-all duration-200
+              "
+              maxLength={8}
+              onKeyDown={(e) => e.key === 'Enter' && lookup()}
+            />
+          </div>
+
+          {err && (
+            <p className="text-rp-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
+          )}
+
+          <Button
+            disabled={busy || code.length < 4}
+            onClick={lookup}
+            className="!py-4 !text-lg !rounded-2xl"
+          >
+            {busy ? 'Looking up…' : 'Continue →'}
+          </Button>
+
           {onStaff && (
-            <button className="text-zinc-500 text-sm mt-6 mx-auto" onClick={onStaff}>
+            <button
+              className="text-zinc-400 text-sm mt-5 mx-auto block font-medium hover:text-zinc-300 transition-colors"
+              onClick={onStaff}
+            >
               I'm staff →
             </button>
           )}
+
+          {/* How it works — fills the lower screen + sets expectations */}
+          <div className="mt-auto pt-10">
+            <div className="grid grid-cols-3 gap-2.5">
+              {[
+                { icon: '🔑', label: 'Join', sub: 'Enter the code' },
+                { icon: '🧭', label: 'Race', sub: 'Get routed to tasks' },
+                { icon: '🏆', label: 'Win', sub: 'Climb the board' },
+              ].map((s, i) => (
+                <div
+                  key={s.label}
+                  className="rounded-2xl bg-white/70 border border-glass-border px-2 py-3.5 text-center shadow-[0_1px_4px_rgba(26,10,0,0.05)] animate-fade-up"
+                  style={{ animationDelay: `${i * 80}ms` }}
+                >
+                  <div className="text-xl mb-1">{s.icon}</div>
+                  <div className="text-[13px] font-bold text-zinc-200">{s.label}</div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5 leading-tight">{s.sub}</div>
+                </div>
+              ))}
+            </div>
+            <p className="text-center text-[11px] text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
+              <span className="text-rp-go">●</span> No account needed. Just your phone.
+            </p>
+          </div>
         </div>
-      </Screen>
+      </div>
     );
   }
 
-  // ── Step 2: registration form ──
+  // ── Step 2: registration form ──────────────────────────────────────────────
+  const accent = info.branding?.primaryColor ?? '#FF5722';
   const teamFields = info.registrationFields.filter((f) => f.level === 'team');
   const memberFields = info.registrationFields.filter((f) => f.level === 'member');
 
   return (
     <Screen>
-      <div className="mb-6">
-        <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: info.branding?.primaryColor ?? '#F97316' }}>
+      {/* Game hero */}
+      <div className="mb-7 animate-race-in">
+        <div
+          className="h-1 w-12 rounded-full mb-4 shadow-stage-badge"
+          style={{ background: `linear-gradient(90deg, ${accent}, ${accent}80)` }}
+        />
+        <h1 dir="auto" className="font-brand text-3xl font-extrabold tracking-tight leading-snug" style={{ color: accent }}>
           {info.branding?.name ?? info.title}
         </h1>
-        {info.description && <p dir="auto" className="text-zinc-500 text-sm mt-1">{info.description}</p>}
+        {info.description && (
+          <p dir="auto" className="text-zinc-400 text-sm mt-2 leading-relaxed">{info.description}</p>
+        )}
       </div>
 
       <div className="space-y-4 flex-1">
@@ -101,33 +177,41 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           <FieldInput key={f.id} field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} />
         ))}
 
-        <Card className="p-4">
-          <div className="text-sm font-medium text-zinc-300 mb-3">
+        <Card className="p-5">
+          <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
+            <span>{info.mode === 'team' ? '👥' : '👤'}</span>
             {info.mode === 'team' ? 'Team members' : 'Your name'}
           </div>
           {members.map((m, i) => (
-            <div key={i} className="flex gap-2 mb-2">
+            <div key={i} className="flex gap-2 mb-2.5">
               <Input value={m} placeholder={`Member ${i + 1}`}
                 onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
               {members.length > 1 && (
-                <button className="px-3 text-danger" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                <button className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
               )}
             </div>
           ))}
           {info.mode === 'team' && (
-            <button className="text-accent text-sm mt-1" onClick={() => setMembers([...members, ''])}>+ Add member</button>
+            <button className="text-rp-fire text-sm mt-1 font-bold flex items-center gap-1" onClick={() => setMembers([...members, ''])}>
+              + Add member
+            </button>
           )}
           {memberFields.filter((f) => f.id !== 'name').map((f) => (
-            <div key={f.id} className="mt-3">
+            <div key={f.id} className="mt-4">
               <FieldInput field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} />
             </div>
           ))}
         </Card>
       </div>
 
-      {err && <p className="text-danger text-sm text-center my-3">{err}</p>}
-      <Button disabled={busy || !members.some((m) => m.trim())} onClick={submit} className="mt-4">
-        Join the race
+      {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+
+      <Button
+        disabled={busy || !members.some((m) => m.trim())}
+        onClick={submit}
+        className="mt-5 !py-4 !text-lg !rounded-2xl"
+      >
+        {busy ? 'Joining…' : '🏁 Join the race'}
       </Button>
     </Screen>
   );
@@ -136,8 +220,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 function FieldInput({ field, value, onChange }: { field: RegistrationField; value: string; onChange: (v: string) => void }) {
   if (field.type === 'checkbox') {
     return (
-      <label className="flex items-center gap-2 text-sm text-zinc-300">
-        <input type="checkbox" checked={value === 'true'} onChange={(e) => onChange(String(e.target.checked))} />
+      <label className="flex items-center gap-3 text-sm text-zinc-300 bg-white border border-glass-border rounded-xl px-4 py-3">
+        <input type="checkbox" checked={value === 'true'} onChange={(e) => onChange(String(e.target.checked))} className="w-4 h-4" />
         {field.label}{field.required && ' *'}
       </label>
     );
@@ -145,9 +229,9 @@ function FieldInput({ field, value, onChange }: { field: RegistrationField; valu
   if (field.type === 'select') {
     return (
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">{field.label}{field.required && ' *'}</label>
+        <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
         <select value={value} onChange={(e) => onChange(e.target.value)}
-          className="w-full px-4 py-3.5 rounded-xl bg-app-card border border-glass-border text-zinc-100">
+          className="w-full px-4 py-4 rounded-2xl bg-white border border-glass-border text-zinc-100 focus:outline-none focus:border-rp-fire/40">
           <option value="">—</option>
           {(field.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
@@ -156,7 +240,7 @@ function FieldInput({ field, value, onChange }: { field: RegistrationField; valu
   }
   return (
     <div>
-      <label className="block text-xs text-zinc-500 mb-1">{field.label}{field.required && ' *'}</label>
+      <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
       <Input
         type={field.type === 'number' ? 'number' : field.type === 'phone' ? 'tel' : 'text'}
         value={value}

@@ -57,7 +57,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
       onChanged();
     } catch {
-      setMsg('Wrong code — try again.');
+      setMsg('Wrong code. Try again.');
     } finally { setBusy(false); }
   }
 
@@ -73,7 +73,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
         url = await uploadTaskPhoto(input, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
       }
       const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
-      setMsg(res.autoApproved ? 'Approved!' : 'Submitted — waiting for review.');
+      setMsg(res.autoApproved ? 'Approved!' : 'Submitted. Waiting for review.');
       onChanged();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Upload failed — try again.');
@@ -86,7 +86,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     try {
       const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text });
       if (res.correct) onChanged();
-      else setMsg('Not quite — try again.');
+      else setMsg('Not quite. Try again.');
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Failed');
     } finally { setBusy(false); }
@@ -98,7 +98,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
       if (res.stepCorrect) { onChanged(); if (!res.taskComplete) setMsg(`Step ${res.stepsDone} of ${res.totalSteps} ✓`); }
-      else setMsg('Not quite — try again.');
+      else setMsg('Not quite. Try again.');
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Failed');
     } finally { setBusy(false); }
@@ -268,8 +268,8 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
       {dist == null
         ? <p className="text-sm text-zinc-500">Finding your location…</p>
         : dist <= radius
-          ? <p className="text-sm text-accent font-medium">You&apos;re here — checking in…</p>
-          : <p className="text-sm text-zinc-500">{Math.round(dist)} m away — walk closer to auto-check-in (within {radius} m).</p>}
+          ? <p className="text-sm text-accent font-medium">You&apos;re here! Checking in…</p>
+          : <p className="text-sm text-zinc-500">{Math.round(dist)} m away. Walk closer to auto-check-in (within {radius} m).</p>}
     </div>
   );
 }
@@ -295,25 +295,42 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
   );
 }
 
+const MAX_PHOTO_BYTES = 12 * 1024 * 1024; // 12 MB — generous for a phone photo
+
 function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File | string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
+  const [fileErr, setFileErr] = useState('');
 
   function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    setFileErr('');
     const f = e.target.files?.[0] ?? null;
+    // Validate before we ever upload: type guard catches stray non-images, the
+    // size cap protects the UI and Storage from multi-hundred-MB files.
+    if (f && !f.type.startsWith('image/')) {
+      setFileErr('Please choose an image file.');
+      e.target.value = '';
+      return;
+    }
+    if (f && f.size > MAX_PHOTO_BYTES) {
+      setFileErr(`That image is too large (max ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB).`);
+      e.target.value = '';
+      return;
+    }
     setFile(f);
     setPreview(f ? URL.createObjectURL(f) : null);
     if (f) setUrl(''); // a picked file takes precedence over a pasted URL
   }
 
-  const canSubmit = !busy && (!!file || !!url.trim());
+  const canSubmit = !busy && !fileErr && (!!file || !!url.trim());
   return (
     <div className="space-y-3">
       <input type="file" accept="image/*" capture="environment" onChange={pickFile}
         className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-app-raised file:text-zinc-200" />
+      {fileErr && <p className="text-rp-alert text-sm">{fileErr}</p>}
       {preview && <img src={preview} alt="preview" className="w-full rounded-lg max-h-56 object-cover" />}
-      <Input value={url} onChange={(e) => { setUrl(e.target.value); if (e.target.value) { setFile(null); setPreview(null); } }}
+      <Input value={url} onChange={(e) => { setUrl(e.target.value); if (e.target.value) { setFile(null); setPreview(null); setFileErr(''); } }}
         placeholder="…or paste a photo URL" />
       <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())}>
         {busy ? 'Working…' : 'Submit photo'}

@@ -5,22 +5,30 @@ export default {
     extend: {
       fontFamily: {
         sans:  ['Inter', 'system-ui', 'sans-serif'],
-        brand: ['Outfit', 'Inter', 'sans-serif'],
+        brand: ['Space Grotesk', 'Inter', 'sans-serif'],
         mono:  ['JetBrains Mono', 'monospace'],
       },
       colors: {
-        // ── "Warm Trail" — light, airy & inviting (mirrors creator-web) ──
-        'app-bg':       '#FBF7F0',  // warm parchment
+        // ── Brand tokens ──────────────────────────────────────────────────────
+        'rp-fire':   '#FF5722',
+        'rp-amber':  '#FFB300',
+        'rp-plasma': '#06B6D4',
+        'rp-go':     '#10B981',
+        'rp-alert':  '#EF4444',
+
+        // ── "Warm Trail" legacy tokens ────────────────────────────────────────
+        'app-bg':       '#FFFCF7',
         'app-surface':  '#FFFFFF',
         'app-card':     '#FFFFFF',
-        'app-raised':   '#F3ECE0',  // warm sand
-        'accent':       '#F97316',  // electric-orange — success / progress
-        'accent-warm':  '#EA580C',
-        'accent-gold':  '#CA8A04',
-        'danger':       '#E11D48',
-        'glass-border': 'rgba(90,70,45,0.14)',
+        'app-raised':   '#FFF0E6',
+        'accent':       '#FF5722',
+        'accent-warm':  '#FF8A00',
+        'accent-gold':  '#FFB300',
+        'danger':       '#EF4444',
+        'glass-border': 'rgba(90,70,45,0.12)',
         'glass-hover':  'rgba(90,70,45,0.06)',
-        // Reversed/warm text scale so existing text-zinc-* reads dark on light.
+
+        // Reversed/warm text scale — dark text on light background.
         zinc: {
           50:  '#fafaf9',
           100: '#1c1917',
@@ -35,7 +43,54 @@ export default {
         },
       },
       boxShadow: {
-        'soft': '0 1px 2px rgba(60,45,25,0.06), 0 4px 12px -4px rgba(60,45,25,0.10)',
+        'soft':      '0 1px 2px rgba(60,45,25,0.06), 0 4px 12px -4px rgba(60,45,25,0.10)',
+        'task-card': '0 2px 8px rgba(26,10,0,0.08), 0 8px 24px -6px rgba(26,10,0,0.10)',
+        'card-hover':'0 4px 16px rgba(26,10,0,0.12), 0 12px 40px -8px rgba(26,10,0,0.14)',
+        'cta-glow':  '0 4px 20px rgba(255,87,34,0.50), 0 1px 4px rgba(255,87,34,0.30)',
+        'stage-badge':'0 2px 8px rgba(255,87,34,0.25)',
+      },
+      backgroundImage: {
+        'gradient-radial': 'radial-gradient(ellipse at center, var(--tw-gradient-stops))',
+        'hero-warm':       'linear-gradient(160deg, #FFF4E6 0%, #FFFCF7 60%)',
+        'gradient-fire':   'linear-gradient(135deg, #FF5722 0%, #FFB300 100%)',
+        'dot-grid':        'radial-gradient(rgba(90,70,45,0.18) 1px, transparent 1px)',
+      },
+      backgroundSize: {
+        'dot': '20px 20px',
+      },
+      animation: {
+        'race-in':     'race-in 0.4s cubic-bezier(0.16,1,0.3,1) both',
+        'task-appear': 'task-appear 0.35s ease-out both',
+        'score-pop':   'score-pop 0.6s cubic-bezier(0.34,1.56,0.64,1) both',
+        'finish-pulse':'finish-pulse 2s ease-in-out infinite',
+        'shimmer':     'shimmer 2.5s ease-in-out infinite',
+        'fade-up':     'fade-up 0.4s ease-out both',
+      },
+      keyframes: {
+        'race-in': {
+          '0%':   { opacity: '0', transform: 'translateY(24px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'task-appear': {
+          '0%':   { opacity: '0', transform: 'scale(0.95) translateY(8px)' },
+          '100%': { opacity: '1', transform: 'scale(1) translateY(0)' },
+        },
+        'score-pop': {
+          '0%':   { opacity: '0', transform: 'scale(0.5)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'finish-pulse': {
+          '0%, 100%': { boxShadow: '0 0 0 0 rgba(255,87,34,0)' },
+          '50%':       { boxShadow: '0 0 0 16px rgba(255,87,34,0)' },
+        },
+        'shimmer': {
+          '0%':   { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        'fade-up': {
+          '0%':   { opacity: '0', transform: 'translateY(12px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
     },
   },

@@ -1,5 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { FIRESTORE_PATHS } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, type MyTeamState } from '../services/calls';
+import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { Button, Progress, Screen } from '../components/ui';
@@ -40,10 +43,34 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }, [session]);
 
   useEffect(() => {
-    refresh();
-    timer.current = window.setInterval(refresh, 4000);
-    return () => window.clearInterval(timer.current);
-  }, [refresh]);
+    let alive = true;
+    let unsubDoc: (() => void) | undefined;
+
+    void refresh(); // immediate first paint
+
+    // Live trigger: our own team doc changes when the host starts the race,
+    // routing assigns a task, our score moves, or we finish. Reacting to the
+    // snapshot makes those feel instant instead of waiting for the next poll.
+    // The snapshot is only a trigger — we still fetch the server-sanitized
+    // state via getMyTeamState so answer keys never reach the client.
+    void ensureAuth().then(() => {
+      if (!alive) return;
+      const teamId = uid();
+      if (!teamId) return;
+      const ref = doc(db, FIRESTORE_PATHS.team(session.ownerUid, session.gameId, session.runId, teamId));
+      unsubDoc = onSnapshot(ref, () => { void refresh(); }, () => undefined);
+    });
+
+    // Slow fallback poll keeps the leaderboard fresh (it arrives via the
+    // callable, not our team doc) and recovers if the listener can't attach.
+    timer.current = window.setInterval(() => { void refresh(); }, 12_000);
+
+    return () => {
+      alive = false;
+      unsubDoc?.();
+      window.clearInterval(timer.current);
+    };
+  }, [refresh, session]);
 
   // Track the participant's live position for the navigation map, and report it
   // to the host's live team map (throttled to once per ~20s, only while active).
@@ -80,7 +107,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       (p) => triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat: p.coords.latitude, lng: p.coords.longitude }),
       () => triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId }),
     );
-    await dialog.alert('SOS sent. Stay where you are — help is on the way.');
+    await dialog.alert('SOS sent. Stay where you are. Help is on the way.');
   }
 
   // Mid-race brag card — same branded story image as the finish screen, but with
@@ -97,7 +124,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       const rank = board?.published ? board.rankings.find((r) => r.teamId === team.id)?.rank : undefined;
       const headline = rank === 1 ? "WE'RE #1!" : rank && rank <= 3 ? `#${rank} & CLIMBING` : 'ON THE TRAIL';
       const text = `🏃 ${team.displayName} is racing "${name}"`
-        + `${rank ? ` — currently #${rank}` : ''} with ${team.score} pts! `
+        + `${rank ? ` · currently #${rank}` : ''} with ${team.score} pts! `
         + `Build your own at ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
       await shareStoryCard({
         gameName: name,

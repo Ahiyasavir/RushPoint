@@ -7,10 +7,12 @@ const CREATOR_URL = import.meta.env.DEV
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
+const MEDAL_BG = [
+  'bg-gradient-to-r from-yellow-400/15 to-amber-300/5 border-yellow-400/25',
+  'bg-gradient-to-r from-gray-300/15 to-gray-200/5 border-gray-300/25',
+  'bg-gradient-to-r from-orange-400/15 to-orange-300/5 border-orange-400/25',
+];
 
-// Public, shareable standings for a run (`?board=<code>`). Spectators, dropped-out
-// teammates, and finished players can all watch the board without joining. Polls
-// while live; stops once finished. Shows standings only once the host publishes.
 export default function PublicLeaderboardScreen({ code, onJoin }: { code: string; onJoin: () => void }) {
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const [err, setErr] = useState('');
@@ -22,14 +24,13 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
 
   useEffect(() => { void load(); }, [load]);
 
-  // Live polling until the race finishes (and the board is frozen).
   useEffect(() => {
     if (data?.runStatus === 'finished' || data?.frozen) return;
     const t = window.setInterval(load, 8000);
     return () => window.clearInterval(t);
   }, [data?.runStatus, data?.frozen, load]);
 
-  const accent = data?.branding?.primaryColor ?? '#F97316';
+  const accent = data?.branding?.primaryColor ?? '#FF5722';
 
   async function share() {
     const url = window.location.href;
@@ -42,7 +43,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
+          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
         </div>
       </Screen>
     );
@@ -51,9 +52,11 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   if (!data || err) {
     return (
       <Screen>
-        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
           <div className="text-5xl">🏁</div>
-          <h1 className="font-brand text-2xl font-extrabold text-accent">Leaderboard unavailable</h1>
+          <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
+            Leaderboard unavailable
+          </h1>
           <p className="text-zinc-500 text-sm">{err || 'This race could not be found.'}</p>
           <Button className="mt-2" onClick={onJoin}>Enter a code</Button>
         </div>
@@ -61,36 +64,51 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     );
   }
 
+  const isLive = data.runStatus !== 'finished' && !data.frozen;
+
   return (
     <Screen>
-      <div className="text-center mb-5">
-        <div className="text-xs uppercase tracking-widest text-zinc-500">Live standings</div>
-        <h1 dir="auto" className="font-brand text-2xl font-extrabold mt-1" style={{ color: accent }}>{data.title}</h1>
-        <div className="text-xs text-zinc-500 mt-1">
-          {data.runStatus === 'finished' ? '🏁 Final results' : data.frozen ? '❄️ Standings frozen' : '🔴 Live'}
+      {/* Header */}
+      <div className="text-center mb-5 animate-race-in">
+        <div className="flex items-center justify-center gap-1.5 mb-2">
+          <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-rp-go animate-pulse' : 'bg-zinc-500'}`} />
+          <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            {data.runStatus === 'finished' ? 'Final results' : data.frozen ? 'Standings frozen' : 'Live'}
+          </span>
         </div>
+        <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: accent }}>{data.title}</h1>
       </div>
 
       <div className="flex-1">
         {!data.published ? (
           <Card className="p-8 text-center">
-            <div className="text-4xl mb-2">⏳</div>
-            <p className="text-zinc-300">Standings haven&apos;t been published yet.</p>
-            <p className="text-zinc-500 text-sm mt-1">Hang tight — the host reveals them during the race.</p>
+            <div className="text-4xl mb-3">⏳</div>
+            <p className="font-medium text-zinc-300">Standings haven&apos;t been published yet.</p>
+            <p className="text-zinc-500 text-sm mt-1">The host reveals them during the race.</p>
           </Card>
         ) : data.rankings.length === 0 ? (
           <Card className="p-8 text-center text-zinc-500">No teams yet.</Card>
         ) : (
           <div className="space-y-2">
-            {data.rankings.map((r) => (
-              <Card key={r.teamId} className="px-4 py-3 flex items-center gap-3">
-                <span className="w-8 text-center text-lg font-bold">{MEDALS[r.rank - 1] ?? <span className="text-zinc-500 text-sm">#{r.rank}</span>}</span>
+            {data.rankings.map((r, i) => (
+              <div
+                key={r.teamId}
+                className={`
+                  flex items-center gap-3 px-4 py-3 rounded-xl border animate-fade-up
+                  ${i < 3 ? MEDAL_BG[i] : 'bg-app-card border-glass-border'}
+                  shadow-task-card
+                `}
+                style={{ animationDelay: `${i * 50}ms` }}
+              >
+                <span className="w-8 text-center text-xl">
+                  {MEDALS[i] ?? <span className="text-zinc-500 text-sm font-mono">#{r.rank}</span>}
+                </span>
                 <div className="flex-1 min-w-0">
-                  <div dir="auto" className="truncate font-medium text-zinc-100">{r.teamName}</div>
+                  <div dir="auto" className="truncate font-semibold text-zinc-100">{r.teamName}</div>
                   <div className="text-[11px] text-zinc-500">{r.completedStages} stages</div>
                 </div>
-                <span className="font-mono font-bold" style={{ color: accent }}>{r.score}</span>
-              </Card>
+                <span className="font-brand font-bold text-base" style={{ color: accent }}>{r.score}</span>
+              </div>
             ))}
           </div>
         )}
@@ -98,7 +116,8 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
 
       <Button variant="ghost" className="mt-4" onClick={share}>🔗 Share this leaderboard</Button>
       <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-        className="block text-center text-sm text-accent font-medium py-3 hover:underline">
+        className="block text-center text-sm font-semibold py-3 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
+      >
         ✨ Build your own race adventure →
       </a>
     </Screen>
