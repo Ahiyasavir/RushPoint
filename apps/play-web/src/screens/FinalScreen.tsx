@@ -47,10 +47,10 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
     setBusy(true);
     try {
       const name = game.branding?.name ?? game.title;
-      const text = `🏆 ${team.displayName} finished "${name}"`
-        + `${myRank ? ` · rank #${myRank}` : ''}`
-        + `${totalSec != null ? ` in ${fmtDuration(totalSec)}` : ''}! `
-        + `Build your own at ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
+      const text = `🏆 ${team.displayName} סיימה את "${name}"`
+        + `${myRank ? ` · מקום #${myRank}` : ''}`
+        + `${totalSec != null ? ` תוך ${fmtDuration(totalSec)}` : ''}! `
+        + `רוצים לבנות מירוץ הרפתקה משלכם? ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
       const result = await shareStoryCard({
         gameName: name,
         teamName: team.displayName,

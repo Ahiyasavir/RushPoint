@@ -21,6 +21,13 @@ const LegalPage = lazy(() => import('../pages/LegalPage'));
 
 const LEGAL_PATHS = ['/privacy', '/terms'];
 
+// The participant app, for the no-signup "try a sample game" demo link. The seed
+// always keeps a live demo run reachable with the PLAY01 access code.
+const PLAY_URL = import.meta.env.DEV
+  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
+const DEMO_URL = `${PLAY_URL}/?code=PLAY01`;
+
 interface AuthCtx {
   user: User | null;
   signOut: () => Promise<void>;
@@ -349,12 +356,28 @@ function Landing({ authCard }: { authCard: ReactNode }) {
             <p className="text-[--ink-2] text-lg sm:text-xl mt-6 max-w-md leading-relaxed">{l.heroSub}</p>
             <div className="flex flex-wrap items-center gap-3 mt-8">
               <a href="#signin"><Button className="!px-7 !py-3 !text-base">{l.ctaPrimary}</Button></a>
+              <a href={DEMO_URL} target="_blank" rel="noreferrer">
+                <Button variant="ghost" className="!px-6 !py-3 !text-base">{l.tryDemo}</Button>
+              </a>
               <a href="#how" className="text-sm font-medium text-[--ink-2] hover:text-[--ink-1] px-3 py-2.5 rounded-xl hover:bg-[--surface-2] transition-colors">{l.ctaSecondary}</a>
             </div>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustNoCc}</span>
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustDemo}</span>
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
+            </div>
+
+            {/* Use-case strip — leads with the launch wedges (events) */}
+            <div className="mt-8">
+              <p className="text-[11px] uppercase tracking-widest text-[--ink-3] font-semibold mb-2.5">{l.useCasesTitle}</p>
+              <div className="flex flex-wrap gap-2">
+                {l.useCases.map((u) => (
+                  <span key={u.label}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] bg-[--surface-0]/60 px-3 py-1.5 text-xs font-medium text-[--ink-2]">
+                    <span>{u.emoji}</span> {u.label}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
           <div className="flex md:justify-end justify-center animate-fade-up" style={{ animationDelay: '120ms' }}>
