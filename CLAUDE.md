@@ -104,7 +104,7 @@ helpers are **internal** (not triggers) — never re-export them.
 | `games/index.ts` | createGame · updateGame · deleteGame · duplicateGame · publishGame · getGame · listGames |
 | `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · finalizeRun · **refreshLeaderboard** · **getPublicLeaderboard** · listRunTeams · completeTask · requestNextTask · **requestTaskHint** · getRecommendedTasks · checkOutTask · getMyTeamState |
 | `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount |
-| `payments/index.ts` | getWallet · topUpWallet · **claimReferral** · stripeWebhook (onRequest) |
+| `payments/index.ts` | getWallet · **getWalletStatus** · **purchaseCredits** · **subscribePro** · **claimReferral** · stripeWebhook (onRequest) |
 | `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · acknowledgeAlert · pushAnnouncement · deactivateAnnouncement · pushFlashMission · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore · listAuditLogs |
 | `routing/assignNextTask.ts` | (internal) `assignTask` · `buildRecommendations` · `computeSkillRatio` · `releaseTask` |
 | `scoring/` | `taskScore.ts`, `calculateScore.ts`, `scoringPresets.ts` (in shared), `stationVerification.ts` |
@@ -170,7 +170,9 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
 - **Marketing & virality** — branded OG images at `apps/*/public/og.jpg` (see
   [scripts/og-cards.README.md](scripts/og-cards.README.md)); creator landing page is the
   logged-out `AuthGate`; `ShareSheet` (QR + copy + native share) powers game-promo and referral
-  invites; referral program = `claimReferral` + `?ref=<uid>` capture in `AuthGate` (₪`REFERRAL_BONUS_ILS`).
+  invites; referral program = `claimReferral` + `?ref=<uid>` capture in `AuthGate` (grants a free run to
+  both sides, `REFERRAL_BONUS_FREE_RUNS`). The play-web finish screen also carries a `?ref=<ownerUid>`
+  "Powered by RushPoint" footer on non-Pro runs.
 - **Types / paths / scoring / geo** → `packages/shared/src` (`types/index.ts`, `scoringPresets.ts`,
   `geo.ts`, `mapStyle.ts`, `validation.ts`).
 - **Maps** — MapLibre + MapTiler `outdoor` with a keyless OpenTopoMap fallback; style via

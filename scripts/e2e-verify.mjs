@@ -53,6 +53,17 @@ async function main() {
   });
   check('createGame returns a gameId', !!gameId, gameId);
 
+  // ── 1b. Billing setup (Event Credits) ───────────────────────────────────────
+  // New creators get 3 lifetime free runs. This e2e launches 4 runs, so we buy a
+  // package up front: 3 launches use free runs, the 4th spends 1 Event Credit.
+  const wallet0 = await creator.call('getWalletStatus');
+  check('getWalletStatus: new creator has 3 free runs', wallet0?.freeRunsRemaining === 3, JSON.stringify(wallet0));
+  check('getWalletStatus: new creator has 0 credits', wallet0?.eventCredits === 0, JSON.stringify(wallet0));
+  const buy = await creator.call('purchaseCredits', { packageId: 'pro_pack' });
+  check('purchaseCredits grants credits in emulator', buy?.mock === true && buy?.credits === 10, JSON.stringify(buy));
+  const wallet1 = await creator.call('getWalletStatus');
+  check('wallet reflects 10 Event Credits', wallet1?.eventCredits === 10, JSON.stringify(wallet1));
+
   const CODE_TASK_ID = 'task-code-1';
   const PHOTO_TASK_ID = 'task-photo-1';
   const PLAIN_TASK_ID = 'task-plain-1';
@@ -276,6 +287,20 @@ async function main() {
   check('our team is ranked #1', fin?.rankings?.[0]?.teamId === playerCred.user.uid, JSON.stringify(fin?.rankings?.[0]));
   check('final score is positive', (fin?.rankings?.[0]?.score ?? 0) > 0, String(fin?.rankings?.[0]?.score));
 
+  // ── 10b. Data-retention prune of a finished run ─────────────────────────────
+  // pruneRunNow strips raw PII (GPS pings + photo URLs) while keeping scores.
+  // This run had a submitted photo, so at least one photoUrl should be cleared.
+  const prune = await creator.call('pruneRunNow', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+  });
+  check('pruneRunNow succeeds + clears the submitted photo URL',
+    prune?.ok === true && prune?.photoUrlsCleared >= 1, JSON.stringify(prune));
+  const prune2 = await creator.call('pruneRunNow', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+  });
+  check('pruneRunNow is idempotent (nothing left to clear)',
+    prune2?.ok === true && prune2?.photoUrlsCleared === 0, JSON.stringify(prune2));
+
   // ── 11. A late participant cannot join a finished run ───────────────────────
   let lateRejected = false;
   try {
@@ -436,10 +461,13 @@ async function main() {
   const fin4 = await player4.call('getMyTeamState', { code: c4 });
   check('all four task types completed → team finished', fin4?.team?.status === 'finished', fin4?.team?.status);
 
-  // ── 15. Referral program (claimReferral credits both sides, once) ───────────
+  // ── 15. Billing consumption + referral (free-run bonus, once) ───────────────
+  const preRef = await creator.call('getWalletStatus');
+  check('3 free runs consumed by the first 3 launches', preRef?.freeRunsRemaining === 0, JSON.stringify(preRef));
+  check('1 Event Credit spent on the 4th launch', preRef?.eventCredits === 9, JSON.stringify(preRef));
+
   const newbie = makeParty('newbie');
   const newbieCred = await signInAnonymously(newbie.auth);
-  const refStart = (await creator.call('getWallet')).wallet.balanceILS;
 
   let selfRejected = false;
   try { await newbie.call('claimReferral', { referrerUid: newbieCred.user.uid }); }
@@ -447,19 +475,23 @@ async function main() {
   check('claimReferral rejects self-referral', selfRejected);
 
   const claim = await newbie.call('claimReferral', { referrerUid: creatorCred.user.uid });
-  check('claimReferral credits the newcomer', claim?.ok === true && claim?.bonusILS > 0, JSON.stringify(claim));
+  check('claimReferral grants a free run to the newcomer', claim?.ok === true && claim?.bonusFreeRuns > 0, JSON.stringify(claim));
+  const newbieStatus = await newbie.call('getWalletStatus');
+  check('newcomer free runs bumped', newbieStatus?.freeRunsRemaining === 3 + claim.bonusFreeRuns, JSON.stringify(newbieStatus));
   const newbieWallet = (await newbie.call('getWallet')).wallet;
-  check('newcomer wallet credited + referredBy set',
-    newbieWallet.balanceILS >= claim.bonusILS && newbieWallet.referredBy === creatorCred.user.uid);
-  const refAfter = (await creator.call('getWallet')).wallet;
-  check('inviter wallet credited + referralCount bumped',
-    refAfter.balanceILS === refStart + claim.bonusILS && (refAfter.referralCount ?? 0) >= 1,
-    JSON.stringify({ before: refStart, after: refAfter.balanceILS, count: refAfter.referralCount }));
+  check('newcomer referredBy set', newbieWallet.referredBy === creatorCred.user.uid, newbieWallet.referredBy);
+
+  const refAfter = await creator.call('getWalletStatus');
+  check('inviter earns an extra free run',
+    refAfter?.freeRunsRemaining === preRef.freeRunsRemaining + claim.bonusFreeRuns,
+    JSON.stringify({ before: preRef.freeRunsRemaining, after: refAfter.freeRunsRemaining }));
+  const refWallet = (await creator.call('getWallet')).wallet;
+  check('inviter referralCount bumped', (refWallet.referralCount ?? 0) >= 1, String(refWallet.referralCount));
 
   const claimAgain = await newbie.call('claimReferral', { referrerUid: creatorCred.user.uid });
-  check('claimReferral is one-time per account', claimAgain?.alreadyClaimed === true && claimAgain?.bonusILS === 0, JSON.stringify(claimAgain));
-  const refUnchanged = (await creator.call('getWallet')).wallet;
-  check('re-claim does NOT double-credit the inviter', refUnchanged.balanceILS === refAfter.balanceILS, String(refUnchanged.balanceILS));
+  check('claimReferral is one-time per account', claimAgain?.alreadyClaimed === true && claimAgain?.bonusFreeRuns === 0, JSON.stringify(claimAgain));
+  const refUnchanged = await creator.call('getWalletStatus');
+  check('re-claim does NOT double-grant the inviter', refUnchanged?.freeRunsRemaining === refAfter.freeRunsRemaining, JSON.stringify(refUnchanged));
 
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);

@@ -111,7 +111,11 @@ async function main() {
 
   // ── Creator profile + wallet ──
   await db.doc(`users/${OWNER_UID}`).set({ uid: OWNER_UID, displayName: 'Demo Creator', email: 'creator@rushpoint.dev', createdAt: now });
-  await db.doc(`wallets/${OWNER_UID}`).set({ uid: OWNER_UID, balanceILS: 300, updatedAt: now });
+  await db.doc(`wallets/${OWNER_UID}`).set({
+    uid: OWNER_UID, eventCredits: 5, lifetimeFreeRunsUsed: 0, bonusFreeRuns: 0,
+    plan: 'free', proExpiresAt: null, stripeSubscriptionId: null,
+    lastPackageMaxParticipants: 30, updatedAt: now,
+  });
 
   // ── Game template ──
   const game = buildGame(now);
@@ -144,7 +148,8 @@ async function main() {
   // ── Live run + access codes ──
   await db.doc(`users/${OWNER_UID}/games/${GAME_ID}/runs/${RUN_ID}`).set({
     id: RUN_ID, gameId: GAME_ID, ownerUid: OWNER_UID, status: 'live',
-    accessCode: CODES[0], freeParticipantsUsed: 0, launchedAt: now, createdAt: now, updatedAt: now,
+    accessCode: CODES[0], billingType: 'free', maxParticipants: 5, participantCount: 0,
+    launchedAt: now, createdAt: now, updatedAt: now,
   });
   const cb = db.batch();
   for (const code of CODES) {
