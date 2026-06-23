@@ -7,6 +7,8 @@ import type {
   PublicGame,
   PublicTask,
   Wallet,
+  WalletStatus,
+  EventPackageId,
   LeaderboardEntry,
 } from '@rushpoint/shared';
 
@@ -50,10 +52,33 @@ export const searchGallery     = callable<{ query?: string; tags?: string[]; lim
 export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; limit?: number }, { tasks: PublicTask[] }>('searchTaskLibrary');
 export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: boolean }>('incrementTaskCopyCount');
 
-// ── Wallet ──
-export const getWallet   = callable<void, { wallet: Wallet }>('getWallet');
-export const topUpWallet = callable<{ amountILS: number }, { sessionUrl: string | null; mock?: boolean; amountILS: number }>('topUpWallet');
-export const claimReferral = callable<{ referrerUid: string }, { ok: boolean; alreadyClaimed: boolean; bonusILS: number }>('claimReferral');
+// ── Account management ──
+export const updateMyProfile = callable<{ displayName: string }, { ok: boolean; displayName: string }>('updateMyProfile');
+export const exportMyData    = callable<void, MyDataExport>('exportMyData');
+export const deleteMyAccount = callable<{ confirm: boolean }, { ok: boolean }>('deleteMyAccount');
+
+export interface MyDataExport {
+  exportedAt: string;
+  account: {
+    uid: string;
+    email: string | null;
+    displayName: string | null;
+    createdAt: string | null;
+    lastSignIn: string | null;
+    providers: string[];
+  };
+  profile: Record<string, unknown> | null;
+  games: unknown[];
+  wallet: Wallet | null;
+  transactions: unknown[];
+}
+
+// ── Wallet & billing (Event Credits) ──
+export const getWallet       = callable<void, { wallet: Wallet }>('getWallet');
+export const getWalletStatus = callable<void, WalletStatus>('getWalletStatus');
+export const purchaseCredits = callable<{ packageId: EventPackageId }, { checkoutUrl: string | null; mock?: boolean; credits?: number }>('purchaseCredits');
+export const subscribePro    = callable<{ interval: 'month' | 'year' }, { checkoutUrl: string | null; mock?: boolean; plan?: string }>('subscribePro');
+export const claimReferral   = callable<{ referrerUid: string }, { ok: boolean; alreadyClaimed: boolean; bonusFreeRuns: number }>('claimReferral');
 
 // ── Staff / live-ops ──
 export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; permissions: string[] }, { inviteId: string; pin: string }>('inviteStaff');

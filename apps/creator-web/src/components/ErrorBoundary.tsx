@@ -38,7 +38,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
               Something went wrong
             </h1>
             <p className="text-zinc-400 text-sm mb-6">
-              The dashboard hit an unexpected error. Your data is safe — try again,
+              The dashboard hit an unexpected error. Your data is safe. Try again,
               and if it keeps happening reload the page.
             </p>
             <pre className="text-start text-xs text-red-300/70 bg-black/30 rounded-lg p-3 mb-6 overflow-auto max-h-32">

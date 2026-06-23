@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType,
@@ -30,39 +30,95 @@ function blankStage(order: number): Stage {
   return { id: uuid(), order, title: `Stage ${order + 1}`, tasks: [blankTask()] };
 }
 
+// The exact fields persisted by updateGame — kept in one place so the auto-save
+// payload and the dirty-check serialization can never drift apart.
+function buildSavePayload(g: Game) {
+  return {
+    gameId: g.id,
+    title: g.title,
+    description: g.description,
+    mode: g.mode,
+    stages: g.stages,
+    scoringPreset: g.scoringPreset,
+    registrationFields: g.registrationFields,
+    tags: g.tags,
+  };
+}
+const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
+
+type SaveStatus = 'saved' | 'saving' | 'unsaved';
+const AUTOSAVE_DELAY = 1500;
+
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
   const [game, setGame] = useState<Game | null>(null);
   const [step, setStep] = useState(1);
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>('saved');
+
+  // Refs let the debounced auto-save and the beforeunload guard read the latest
+  // game/saved-snapshot without re-subscribing on every keystroke.
+  const gameRef = useRef<Game | null>(null);
+  const savedSnapshot = useRef<string>('');
+  const saveTimer = useRef<number>();
+  useEffect(() => { gameRef.current = game; }, [game]);
 
   useEffect(() => {
     if (!gameId) return;
-    void getGame({ gameId }).then(({ game }) => setGame(game));
+    void getGame({ gameId }).then(({ game }) => {
+      setGame(game);
+      savedSnapshot.current = serializeGame(game);
+      setStatus('saved');
+    });
   }, [gameId]);
 
   function patch(p: Partial<Game>) { setGame((g) => (g ? { ...g, ...p } : g)); }
 
-  async function save() {
-    if (!game) return;
-    setSaving(true);
+  // Persist only when there are real changes; safe to call eagerly (no-op when
+  // the current state already matches what was last saved).
+  const save = useCallback(async () => {
+    const g = gameRef.current;
+    if (!g) return;
+    const snap = serializeGame(g);
+    if (snap === savedSnapshot.current) return;
+    setStatus('saving');
     try {
-      await updateGame({
-        gameId: game.id,
-        title: game.title,
-        description: game.description,
-        mode: game.mode,
-        stages: game.stages,
-        scoringPreset: game.scoringPreset,
-        registrationFields: game.registrationFields,
-        tags: game.tags,
-      });
-    } finally { setSaving(false); }
-  }
+      await updateGame(buildSavePayload(g));
+      savedSnapshot.current = snap;
+      // If the user kept editing during the round-trip, stay 'unsaved'.
+      const latest = gameRef.current;
+      setStatus(latest && serializeGame(latest) !== snap ? 'unsaved' : 'saved');
+    } catch {
+      setStatus('unsaved');
+    }
+  }, []);
+
+  // Debounced auto-save: mark dirty immediately, persist after a short pause.
+  useEffect(() => {
+    if (!game) return;
+    if (serializeGame(game) === savedSnapshot.current) return;
+    setStatus('unsaved');
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => { void save(); }, AUTOSAVE_DELAY);
+    return () => window.clearTimeout(saveTimer.current);
+  }, [game, save]);
+
+  // Warn before leaving/closing the tab with unsaved edits.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      const g = gameRef.current;
+      if (g && serializeGame(g) !== savedSnapshot.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
 
   async function saveAndLaunch() {
     if (!game) return;
+    window.clearTimeout(saveTimer.current);
     await save();
     if (game.stages.length === 0 || game.stages.some((s) => s.tasks.length === 0)) {
       await dialog.alert('Every stage needs at least one task.'); return;
@@ -70,7 +126,15 @@ export default function BuilderPage() {
     try {
       const { runId } = await launchRun({ gameId: game.id });
       nav(`/run/${game.id}/${runId}`);
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Launch failed'); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Launch failed';
+      // Out of free runs + credits → offer to open the wallet.
+      if (/credit|pro/i.test(msg) && await dialog.confirm(msg, 'Go to wallet')) {
+        nav('/wallet');
+      } else if (!/credit|pro/i.test(msg)) {
+        await dialog.alert(msg);
+      }
+    }
   }
 
   if (!game) return <Spinner label="Loading builder…" />;
@@ -88,11 +152,12 @@ export default function BuilderPage() {
           <button
             key={label}
             onClick={() => { void save(); setStep(i + 1); }}
-            className={`flex-1 px-3 py-2 rounded-lg text-sm border ${
-              step === i + 1 ? 'border-neon-green/50 bg-neon-green/10 text-neon-green'
-                             : 'border-glass-border text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex-1 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
+              step === i + 1
+                ? 'bg-gradient-to-r from-rp-fire to-rp-amber text-white shadow-[0_2px_12px_rgba(255,87,34,0.35)]'
+                : 'border border-[--rp-border] text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
           >
-            <span className="font-mono mr-2">{i + 1}</span>{label}
+            <span className={`font-mono mr-2 ${step === i + 1 ? 'opacity-80' : ''}`}>{i + 1}</span>{label}
           </button>
         ))}
       </div>
@@ -104,7 +169,13 @@ export default function BuilderPage() {
       <div className="flex justify-between mt-6">
         <Button variant="ghost" disabled={step === 1} onClick={() => { void save(); setStep(step - 1); }}>Back</Button>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-zinc-500">{saving ? 'Saving…' : 'Saved'}</span>
+          <span className="text-xs flex items-center gap-1.5 text-zinc-500">
+            <span className={`w-1.5 h-1.5 rounded-full ${
+              status === 'saving' ? 'bg-rp-amber animate-pulse'
+                : status === 'unsaved' ? 'bg-rp-amber'
+                : 'bg-rp-go'}`} />
+            {status === 'saving' ? 'Saving…' : status === 'unsaved' ? 'Unsaved changes' : 'All changes saved'}
+          </span>
           {step < 3
             ? <Button onClick={() => { void save(); setStep(step + 1); }}>Next</Button>
             : <Button onClick={saveAndLaunch}>Save &amp; Launch run</Button>}
@@ -324,7 +395,7 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </Select>
-                <span>of {m} tasks{req < m ? ' — routed to the best-suited ones' : ' (all of them)'}</span>
+                <span>of {m} tasks{req < m ? ', routed to best-suited ones' : ' (all of them)'}</span>
               </div>
             )}
 
@@ -377,7 +448,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       <Textarea
         value={task.description ?? ''}
         onChange={(e) => set({ description: e.target.value })}
-        placeholder="What participants see — the clue or instructions for this task"
+        placeholder="What participants see: the clue or instructions for this task"
         rows={2}
       />
 
@@ -408,7 +479,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         </>
       ) : (
         <p className="text-xs text-zinc-500 bg-app-raised rounded-lg px-3 py-2">
-          🌐 General task — teams can do this from anywhere. No map pin, no travel distance.
+          🌐 General task. Teams can do this from anywhere, no map pin or travel distance.
         </p>
       )}
 
@@ -464,7 +535,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         {task.type === 'quiz' && (
           <>
             <div>
-              <Label>Choices — one per line (leave empty for a typed answer)</Label>
+              <Label>Choices, one per line (leave empty for a typed answer)</Label>
               <Textarea
                 value={(task.choices ?? []).join('\n')}
                 onChange={(e) => set({ choices: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
@@ -473,7 +544,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
               />
             </div>
             <div>
-              <Label>Accepted answer(s) — one per line, case-insensitive</Label>
+              <Label>Accepted answers, one per line, case-insensitive</Label>
               <Textarea
                 value={(task.answers ?? []).join('\n')}
                 onChange={(e) => set({ answers: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
@@ -521,7 +592,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         )}
 
         <div>
-          <Label>Hint (optional — teams pay points to reveal it)</Label>
+          <Label>Hint (optional, costs teams points to reveal)</Label>
           <Textarea
             value={task.hint ?? ''}
             onChange={(e) => set({ hint: e.target.value })}
@@ -549,7 +620,7 @@ function StepsEditor({ steps, onChange }: { steps: TaskStep[]; onChange: (s: Tas
   const update = (i: number, p: Partial<TaskStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...p } : s)));
   return (
     <div className="space-y-2">
-      <Label>Ordered steps — teams complete these in order at one stop</Label>
+      <Label>Ordered steps: teams complete these in order at one stop</Label>
       {steps.map((s, i) => (
         <div key={s.id} className="flex gap-2 items-start">
           <span className="text-xs text-zinc-500 mt-2.5 w-3">{i + 1}</span>

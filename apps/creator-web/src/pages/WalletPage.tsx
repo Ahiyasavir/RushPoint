@@ -1,83 +1,203 @@
 import { useEffect, useState } from 'react';
-import type { Wallet } from '@rushpoint/shared';
-import { FREE_PARTICIPANTS_PER_RUN, PRICE_ILS_INDIVIDUAL, PRICE_ILS_TEAM, REFERRAL_BONUS_ILS } from '@rushpoint/shared';
-import { getWallet, topUpWallet } from '../services/calls';
+import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
+import type { WalletStatus, WalletTransaction, EventPackageId } from '@rushpoint/shared';
+import { EVENT_PACKAGES, PRO_MONTHLY_ILS, PRO_ANNUAL_ILS } from '@rushpoint/shared';
+import { getWalletStatus, purchaseCredits, subscribePro } from '../services/calls';
+import { db } from '../services/firebase';
 import { Button, Card, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { useAuth } from '../components/AuthGate';
+import { useT } from '../components/LanguageContext';
 
-const AMOUNTS = [50, 100, 200, 500];
+const PACKAGE_ORDER: EventPackageId[] = ['starter', 'standard', 'pro_pack'];
 
 export default function WalletPage() {
   const { user } = useAuth();
-  const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [busy, setBusy] = useState(false);
+  const t = useT();
+  const w = t.wallet;
+
+  const [status, setStatus] = useState<WalletStatus | null>(null);
+  const [txns, setTxns] = useState<WalletTransaction[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
 
-  async function load() { const { wallet } = await getWallet(); setWallet(wallet); }
-  useEffect(() => { void load(); }, []);
+  async function loadStatus() { setStatus(await getWalletStatus()); }
+  useEffect(() => { void loadStatus(); }, []);
 
-  async function topUp(amountILS: number) {
-    setBusy(true);
+  // Transactions are owner-readable directly (firestore.rules) — live list.
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, `wallets/${user.uid}/transactions`),
+      orderBy('createdAt', 'desc'),
+      limit(20),
+    );
+    return onSnapshot(q, (snap) => setTxns(snap.docs.map((d) => d.data() as WalletTransaction)), () => undefined);
+  }, [user]);
+
+  async function buy(packageId: EventPackageId) {
+    setBusy(packageId);
     try {
-      const res = await topUpWallet({ amountILS });
-      if (res.sessionUrl) window.location.href = res.sessionUrl; // Stripe checkout
-      else await load(); // emulator mock — credited directly
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Top-up failed'); }
-    finally { setBusy(false); }
+      const res = await purchaseCredits({ packageId });
+      if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
+      await loadStatus(); // emulator grants instantly
+    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Purchase failed'); }
+    finally { setBusy(null); }
   }
 
-  if (!wallet) return <Spinner label="Loading wallet…" />;
+  async function goPro(interval: 'month' | 'year') {
+    setBusy(`pro-${interval}`);
+    try {
+      const res = await subscribePro({ interval });
+      if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
+      await loadStatus();
+    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Subscription failed'); }
+    finally { setBusy(null); }
+  }
+
+  if (!status) return <Spinner label={w.loading} />;
+
+  const isPro = status.plan === 'pro';
 
   return (
-    <div className="max-w-md mx-auto">
-      <h1 className="text-2xl font-bold mb-1">Wallet</h1>
-      <p className="text-zinc-500 text-sm mb-5">One balance for all your runs. Building is always free.</p>
+    <div className="max-w-2xl mx-auto animate-fade-up">
+      <h1 className="font-brand text-2xl font-bold mb-1">{w.title}</h1>
+      <p className="text-[--ink-3] text-sm mb-5">{w.subtitle}</p>
 
-      <Card className="p-6 mb-5 text-center">
-        <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Balance</div>
-        <div className="text-4xl font-bold text-neon-green">₪{wallet.balanceILS.toFixed(0)}</div>
-      </Card>
-
-      <Card className="p-5 mb-5">
-        <div className="text-sm font-medium mb-3">Add credit</div>
-        <div className="grid grid-cols-4 gap-2 mb-3">
-          {AMOUNTS.map((a) => (
-            <Button key={a} variant="subtle" disabled={busy} onClick={() => topUp(a)}>₪{a}</Button>
-          ))}
+      {/* ── Status card ─────────────────────────────────────────────────────── */}
+      <Card className="p-6 mb-5">
+        <div className="flex items-center justify-between mb-5">
+          <div className="text-xs text-[--ink-3] uppercase tracking-widest">{w.planLabel}</div>
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+            isPro ? 'bg-rp-signal/15 text-rp-signal' : 'bg-[--surface-2] text-[--ink-2]'}`}>
+            {isPro ? w.planPro : w.planFree}
+          </span>
         </div>
-        <p className="text-xs text-zinc-600">Secure checkout via Stripe. In local dev, credit is applied instantly.</p>
-      </Card>
-
-      <Card className="p-5 mb-5">
-        <div className="flex items-center justify-between mb-1">
-          <div className="text-sm font-medium text-zinc-200">Invite creators, earn credit</div>
-          {(wallet.referralCount ?? 0) > 0 && (
-            <span className="text-xs text-neon-green">{wallet.referralCount} joined</span>
-          )}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div className="font-brand text-4xl font-extrabold text-rp-fire tabular-nums">{status.eventCredits}</div>
+            <div className="text-xs text-[--ink-3] mt-1">{w.creditsLabel}</div>
+            <div className="text-[11px] text-[--ink-3] mt-0.5">{w.creditsHint}</div>
+          </div>
+          <div>
+            <div className="font-brand text-4xl font-extrabold text-[--ink-1] tabular-nums">{status.freeRunsRemaining}</div>
+            <div className="text-xs text-[--ink-3] mt-1">{w.freeRunsLabel}</div>
+            <div className="text-[11px] text-[--ink-3] mt-0.5">{w.freeRunsValue(status.freeRunsRemaining)}</div>
+          </div>
         </div>
-        <p className="text-xs text-zinc-500 mb-3">
-          Share your invite link — when a new creator signs up, you both get <b className="text-zinc-300">₪{REFERRAL_BONUS_ILS}</b>.
-        </p>
-        <Button variant="subtle" disabled={!user} onClick={() => setInviting(true)}>🎁 Share invite link</Button>
+        {isPro && status.proExpiresAt && (
+          <div className="mt-4 text-xs text-rp-signal">
+            {w.proUntil(new Date(status.proExpiresAt).toLocaleDateString())}
+          </div>
+        )}
       </Card>
 
-      <Card className="p-5 text-sm text-zinc-400 space-y-1">
-        <div className="font-medium text-zinc-200 mb-1">Pricing</div>
-        <div>First <b>{FREE_PARTICIPANTS_PER_RUN}</b> participants/teams per run — free.</div>
-        <div>Each extra participant (individual mode): <b>₪{PRICE_ILS_INDIVIDUAL}</b></div>
-        <div>Each extra team (team mode): <b>₪{PRICE_ILS_TEAM}</b></div>
+      {/* ── Credit packages ─────────────────────────────────────────────────── */}
+      <div className="mb-5">
+        <div className="flex items-baseline justify-between mb-1">
+          <h2 className="font-brand font-bold text-[--ink-1]">{w.packagesTitle}</h2>
+        </div>
+        <p className="text-xs text-[--ink-3] mb-3">{w.packagesSub}</p>
+        <div className="grid sm:grid-cols-3 gap-3">
+          {PACKAGE_ORDER.map((id) => {
+            const pkg = EVENT_PACKAGES[id];
+            return (
+              <Card key={id} className={`p-4 flex flex-col relative ${pkg.popular ? 'ring-2 ring-rp-fire/40' : ''}`}>
+                {pkg.popular && (
+                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rp-fire text-white whitespace-nowrap">
+                    {w.packagePopular}
+                  </span>
+                )}
+                <div className="font-brand text-xl font-extrabold text-[--ink-1]">{w.packageCredits(pkg.credits)}</div>
+                <div className="text-[11px] text-[--ink-3] mt-0.5 flex-1">{w.packageMaxP(pkg.maxParticipants)}</div>
+                <div className="font-brand text-2xl font-bold text-rp-fire mt-3">₪{pkg.priceILS}</div>
+                <Button className="!py-2 !text-sm mt-3" disabled={busy !== null} onClick={() => buy(id)}>
+                  {busy === id ? w.purchasing : w.packageBuy}
+                </Button>
+              </Card>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Creator Pro ─────────────────────────────────────────────────────── */}
+      <Card className="p-5 mb-5 bg-gradient-to-br from-rp-signal/8 to-transparent border-rp-signal/20">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="font-brand font-bold text-[--ink-1]">{w.proTitle}</h2>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rp-signal/15 text-rp-signal">PRO</span>
+        </div>
+        <p className="text-sm text-[--ink-3] mb-4">{w.proSubtitle}</p>
+        {isPro ? (
+          <p className="text-sm text-rp-signal font-medium">{w.proActiveNote}</p>
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            <Button variant="ghost" className="flex-1 !py-2.5" disabled={busy !== null} onClick={() => goPro('month')}>
+              {busy === 'pro-month' ? w.purchasing : `${w.proCtaMonthly} · ${w.proMonthly(PRO_MONTHLY_ILS)}`}
+            </Button>
+            <Button className="flex-1 !py-2.5" disabled={busy !== null} onClick={() => goPro('year')}>
+              {busy === 'pro-year' ? w.purchasing : `${w.proCtaAnnual} · ${w.proAnnual(PRO_ANNUAL_ILS)}`}
+            </Button>
+          </div>
+        )}
+      </Card>
+
+      {/* ── Referral ────────────────────────────────────────────────────────── */}
+      <Card className="p-5 mb-5">
+        <div className="text-sm font-medium text-[--ink-1] mb-1">{w.inviteTitle}</div>
+        <p className="text-xs text-[--ink-3] mb-3">{w.inviteBody}</p>
+        <Button variant="ghost" disabled={!user} onClick={() => setInviting(true)}>{w.inviteBtn}</Button>
+      </Card>
+
+      {/* ── Transaction history ─────────────────────────────────────────────── */}
+      <Card className="p-5">
+        <div className="font-brand font-bold text-[--ink-1] mb-3">{w.historyTitle}</div>
+        {txns.length === 0 ? (
+          <p className="text-sm text-[--ink-3]">{w.historyEmpty}</p>
+        ) : (
+          <div className="divide-y divide-[--rp-border]">
+            {txns.map((tx) => (
+              <div key={tx.id} className="flex items-center justify-between py-2.5 text-sm">
+                <div className="min-w-0">
+                  <div className="text-[--ink-1] font-medium truncate">{txLabel(tx, w)}</div>
+                  <div className="text-[11px] text-[--ink-3]">{new Date(tx.createdAt).toLocaleDateString()}</div>
+                </div>
+                <div className="text-[--ink-2] font-mono text-xs whitespace-nowrap ps-3">{txAmount(tx)}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       {inviting && user && (
         <ShareSheet
-          title="Invite a creator"
-          text={`Build your own real-world race adventure on RushPoint — we both get ₪${REFERRAL_BONUS_ILS} in credit when you join!`}
+          title={w.inviteTitle}
+          text={w.inviteBody}
           url={`${window.location.origin}/?ref=${user.uid}`}
           onClose={() => setInviting(false)}
         />
       )}
     </div>
   );
+}
+
+function txLabel(tx: WalletTransaction, w: ReturnType<typeof useT>['wallet']): string {
+  switch (tx.type) {
+    case 'topup_credits':     return tx.gameTitle ?? w.txTopupCredits;
+    case 'charge_event':      return tx.gameTitle ?? w.txChargeEvent;
+    case 'free_run_consumed': return tx.gameTitle ?? w.txFreeRun;
+    case 'pro_subscription':  return w.txProSub;
+    case 'referral':          return w.txReferral;
+    default:                  return tx.description;
+  }
+}
+
+function txAmount(tx: WalletTransaction): string {
+  if (tx.type === 'topup_credits' && tx.credits) return `+${tx.credits} 🎟️`;
+  if (tx.type === 'charge_event') return `−${tx.creditCost ?? 1} 🎟️`;
+  if (tx.type === 'free_run_consumed') return '🆓';
+  if (tx.type === 'referral') return '+🆓';
+  if (tx.priceILS != null) return `₪${tx.priceILS}`;
+  if (tx.amountILS != null) return `₪${tx.amountILS}`;
+  return '';
 }

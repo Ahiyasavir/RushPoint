@@ -6,21 +6,45 @@ import { Badge, Button, Card, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
+import { useAuth } from '../components/AuthGate';
+import { useT } from '../components/LanguageContext';
 
-// Where the participant app lives — promo links point players there (?game=<id>).
+// Module-level cache so navigating back to dashboard is instant (no spinner).
+let _gamesCache: { data: Game[]; ts: number } | null = null;
+const CACHE_TTL = 45_000;
+
 const PLAY_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5181`
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
+function getAccentBar(g: Game): string {
+  if (g.visibility === 'public') return 'from-rp-plasma to-rp-go';
+  return 'from-rp-fire to-rp-amber';
+}
+
+const TASK_TYPE_EMOJI: Record<string, string> = {
+  field: '📍', self_report: '✅', smart_station: '🔢',
+  photo: '📷', quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩',
+};
+
 export default function DashboardPage() {
   const nav = useNavigate();
-  const [games, setGames] = useState<Game[] | null>(null);
+  const { user } = useAuth();
+  const t = useT();
+  const d = t.dashboard;
+
+  const [games, setGames] = useState<Game[] | null>(() => {
+    if (_gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return _gamesCache.data;
+    return null;
+  });
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [sharing, setSharing] = useState<Game | null>(null);
 
-  async function load() {
+  async function load(invalidate = false) {
+    if (!invalidate && _gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return;
     const { games } = await listGames();
+    _gamesCache = { data: games, ts: Date.now() };
     setGames(games);
   }
   useEffect(() => { void load(); }, []);
@@ -28,7 +52,7 @@ export default function DashboardPage() {
   async function newGame(tpl: GameTemplate) {
     setBusy(true); setPicking(false);
     try {
-      const title = tpl.key === 'blank' ? 'Untitled adventure' : tpl.label;
+      const title = tpl.key === 'blank' ? 'הרפתקה ללא שם' : tpl.label;
       const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
       const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
       await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
@@ -37,94 +61,271 @@ export default function DashboardPage() {
   }
 
   async function launch(g: Game) {
-    if (g.stages.length === 0) { await dialog.alert('Add at least one stage before launching.'); return; }
+    if (g.stages.length === 0) { await dialog.alert(d.loadingGames); return; }
     setBusy(true);
     try {
       const { runId } = await launchRun({ gameId: g.id });
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
-      await dialog.alert(e instanceof Error ? e.message : 'Launch failed');
+      const msg = e instanceof Error ? e.message : 'Launch failed';
+      // Out of free runs + credits → route the creator to buy more.
+      if (/credit|pro/i.test(msg)) {
+        if (await dialog.confirm(msg, t.nav.wallet)) nav('/wallet');
+      } else {
+        await dialog.alert(msg);
+      }
     } finally { setBusy(false); }
   }
 
   async function remove(g: Game) {
-    if (!(await dialog.confirm(`Delete "${g.title}"? This cannot be undone.`, 'Delete'))) return;
+    if (!(await dialog.confirm(d.deleteConfirm(g.title), d.deleteBtn))) return;
     await deleteGame({ gameId: g.id });
-    void load();
+    void load(true);
   }
 
   async function togglePublish(g: Game) {
     await publishGame({ gameId: g.id, visibility: g.visibility === 'public' ? 'private' : 'public' });
-    void load();
+    void load(true);
   }
 
-  if (!games) return <Spinner label="Loading your games…" />;
+  if (!games) return <Spinner label={d.loadingGames} />;
+
+  const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
+  const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'יוצר';
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold">My Games</h1>
-          <p className="text-zinc-500 text-sm">Build freely, then launch a live run with friends.</p>
+    <div className="animate-fade-up">
+
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <div className="relative mb-10 pb-10 border-b border-[--rp-border]">
+        <div className="absolute -top-8 -left-8 w-96 h-48 bg-gradient-radial from-rp-fire/8 to-transparent pointer-events-none" />
+
+        <div className="relative flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+          <div>
+            <p className="text-[--ink-3] text-sm font-medium mb-1 uppercase tracking-widest">
+              {d.welcomeBack(firstName)}
+            </p>
+            <h1 className="font-brand text-5xl font-extrabold tracking-tight leading-none bg-gradient-to-r from-rp-fire via-rp-amber to-rp-amber bg-clip-text text-transparent">
+              {d.title}
+            </h1>
+            <p className="text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
+          </div>
+
+          <Button
+            disabled={busy}
+            onClick={() => setPicking(true)}
+            className="!px-6 !py-2.5 !text-sm shrink-0 flex items-center gap-2"
+          >
+            {d.newGame}
+          </Button>
         </div>
-        <Button disabled={busy} onClick={() => setPicking(true)}>+ New game</Button>
+
+        {/* Stats row */}
+        {games.length > 0 && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-8">
+            {[
+              { label: d.statGamesBuilt, value: games.length, icon: '🗺️', tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30' },
+              { label: d.statTotalTasks, value: totalTasks, icon: '✅', tint: 'from-rp-go/12 to-rp-go/5', ring: 'group-hover:border-rp-go/30' },
+              { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: '🌐', tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30' },
+              { label: d.statTotalPlays, value: games.reduce((s, g) => s + (g.playCount ?? 0), 0), icon: '🏁', tint: 'from-rp-signal/12 to-rp-signal/5', ring: 'group-hover:border-rp-signal/30' },
+            ].map((s) => (
+              <div key={s.label}
+                className={`group relative overflow-hidden rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`}
+              >
+                <div className={`absolute inset-0 bg-gradient-to-br ${s.tint} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+                <div className="relative flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
+                  <div className="min-w-0">
+                    <div className="font-brand text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
+                    <div className="text-[11px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* ── Empty state ───────────────────────────────────────────────────── */}
       {games.length === 0 ? (
-        <Card className="p-12 text-center">
-          <p className="text-zinc-400 mb-4">You haven&apos;t built anything yet.</p>
-          <Button disabled={busy} onClick={() => setPicking(true)}>Create your first game</Button>
-        </Card>
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <div
+            className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6"
+            style={{ background: 'linear-gradient(135deg, rgba(255,87,34,0.15) 0%, rgba(255,179,0,0.10) 100%)', boxShadow: '0 0 40px rgba(255,87,34,0.15)' }}
+          >🗺️</div>
+          <h3 className="font-brand text-2xl font-bold text-[--ink-1] mb-2">{d.emptyTitle}</h3>
+          <p className="text-[--ink-3] text-sm mb-8 max-w-xs leading-relaxed">{d.emptyBody}</p>
+          <Button disabled={busy} onClick={() => setPicking(true)} className="!px-8 !py-3 !text-base">
+            {d.emptyBtn}
+          </Button>
+        </div>
+
       ) : (
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {games.map((g) => {
+        /* ── Game cards ──────────────────────────────────────────────────── */
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {games.map((g, idx) => {
             const taskCount = g.stages.reduce((s, st) => s + st.tasks.length, 0);
+            const allTaskTypes = [...new Set(g.stages.flatMap(st => st.tasks.map(tsk => tsk.type)))].slice(0, 4);
+
             return (
-              <Card key={g.id} className="p-4 flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-semibold leading-tight">{g.title}</h3>
-                  <Badge color={g.visibility === 'public' ? 'cyan' : 'zinc'}>{g.visibility}</Badge>
-                </div>
-                <p className="text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">{g.description || 'No description'}</p>
-                <div className="flex gap-2 text-[11px] text-zinc-500">
-                  <span>{g.stages.length} stages</span>·
-                  <span>{taskCount} tasks</span>·
-                  <span>{g.mode}</span>·
-                  <span>{g.playCount} plays</span>
-                </div>
-                <div className="flex gap-2 mt-1">
-                  <Button variant="subtle" className="flex-1" onClick={() => nav(`/build/${g.id}`)}>Edit</Button>
-                  <Button className="flex-1" disabled={busy} onClick={() => launch(g)}>Launch run</Button>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="ghost" className="flex-1 text-xs" onClick={() => togglePublish(g)}>
-                    {g.visibility === 'public' ? 'Unpublish' : 'Publish to gallery'}
-                  </Button>
-                  <Button variant="ghost" className="flex-1 text-xs" onClick={() => setSharing(g)}>Share</Button>
-                  <Button variant="ghost" className="text-xs text-neon-red" onClick={() => remove(g)}>Delete</Button>
-                </div>
-              </Card>
+              <div key={g.id} className="animate-fade-up" style={{ animationDelay: `${idx * 60}ms` }}>
+                <Card className="p-0 overflow-hidden flex flex-col h-full">
+                  <div className={`h-[3px] w-full bg-gradient-to-r ${getAccentBar(g)} flex-shrink-0`} />
+                  <div className="p-5 flex flex-col gap-4 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="font-brand font-bold text-[--ink-1] text-base leading-snug flex-1">{g.title}</h3>
+                      <Badge color={g.visibility === 'public' ? 'cyan' : 'zinc'}>
+                        {g.visibility === 'public' ? 'ציבורי' : 'פרטי'}
+                      </Badge>
+                    </div>
+
+                    <p className="text-xs text-[--ink-3] line-clamp-2 leading-relaxed min-h-[2.5rem]">
+                      {g.description || 'אין תיאור עדיין.'}
+                    </p>
+
+                    {allTaskTypes.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap">
+                        {allTaskTypes.map(type => (
+                          <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[10px] font-medium">
+                            {TASK_TYPE_EMOJI[type] ?? '●'} {type.replace('_', ' ')}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3 text-[11px] text-[--ink-3] font-medium">
+                      <span>{d.cardStages(g.stages.length)}</span>
+                      <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                      <span>{d.cardTasks(taskCount)}</span>
+                      <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                      <span>{d.cardPlays(g.playCount ?? 0)}</span>
+                    </div>
+
+                    <div className="flex gap-2 mt-auto">
+                      <button
+                        onClick={() => nav(`/build/${g.id}`)}
+                        className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold text-[--ink-2] bg-[--surface-2] hover:bg-[--rp-border] hover:text-[--ink-1] transition-all duration-150"
+                      >
+                        {d.cardEdit}
+                      </button>
+                      <Button className="flex-1 !py-2 !text-xs !font-semibold" disabled={busy} onClick={() => launch(g)}>
+                        {d.cardLaunch}
+                      </Button>
+                    </div>
+
+                    <div className="flex gap-1 border-t border-[--rp-border] pt-3 -mb-1">
+                      <button
+                        className="flex-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+                        onClick={() => togglePublish(g)}
+                      >
+                        {g.visibility === 'public' ? d.cardUnpublish : d.cardPublish}
+                      </button>
+                      <button
+                        className="flex-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+                        onClick={() => setSharing(g)}
+                      >
+                        {d.cardShare}
+                      </button>
+                      <button
+                        className="px-2 py-1.5 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors"
+                        onClick={() => remove(g)}
+                      >
+                        {d.cardDelete}
+                      </button>
+                    </div>
+                  </div>
+                </Card>
+              </div>
             );
           })}
+
+          {/* Persistent create tile */}
+          <button
+            onClick={() => setPicking(true)}
+            disabled={busy}
+            className="group animate-fade-up min-h-[220px] rounded-2xl border-2 border-dashed border-[--rp-border] hover:border-rp-fire/50 bg-[--surface-0]/40 dark:bg-white/[0.02] hover:bg-rp-fire/[0.04] transition-all duration-200 flex flex-col items-center justify-center gap-3 text-center px-5"
+            style={{ animationDelay: `${games.length * 60}ms` }}
+          >
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl bg-[--surface-2] text-[--ink-2] group-hover:bg-gradient-to-br group-hover:from-rp-fire group-hover:to-rp-amber group-hover:text-white group-hover:scale-105 transition-all duration-200 shadow-sm">
+              ＋
+            </div>
+            <div>
+              <div className="font-brand font-bold text-sm text-[--ink-2] group-hover:text-rp-fire transition-colors">{d.newAdventureLabel}</div>
+              <div className="text-[11px] text-[--ink-3] mt-0.5">{d.newAdventureSub}</div>
+            </div>
+          </button>
         </div>
       )}
 
-      {picking && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setPicking(false)}>
-          <div className="bg-app-card border border-glass-border rounded-2xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold">Start a new game</h3>
-              <button onClick={() => setPicking(false)} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+      {/* ── Explore / next steps ──────────────────────────────────────────── */}
+      {games.length > 0 && (
+        <div className="mt-12 animate-fade-up" style={{ animationDelay: '120ms' }}>
+          {/* Feature banner */}
+          <div className="relative overflow-hidden rounded-3xl border border-[--rp-border] bg-gradient-to-br from-rp-fire/10 via-rp-amber/5 to-transparent p-7 sm:p-9 mb-6">
+            <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-rp-fire/15 blur-3xl pointer-events-none" />
+            <div className="absolute -right-4 -bottom-12 w-48 h-48 rounded-full bg-rp-amber/15 blur-3xl pointer-events-none" />
+            <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+              <div className="max-w-lg">
+                <div className="inline-flex items-center gap-1.5 rounded-full bg-rp-fire/10 text-rp-fire text-[11px] font-semibold px-2.5 py-1 mb-3">
+                  {d.bannerBadge}
+                </div>
+                <h3 className="font-brand text-2xl font-extrabold text-[--ink-1] leading-tight">{d.bannerTitle}</h3>
+                <p className="text-[--ink-2] text-sm mt-2 leading-relaxed">{d.bannerBody}</p>
+              </div>
+              <div className="flex sm:flex-col gap-2.5 shrink-0">
+                <Button className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/gallery')}>{d.bannerCta1}</Button>
+                <Button variant="ghost" className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/wallet')}>{d.bannerCta2}</Button>
+              </div>
             </div>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {TEMPLATES.map((t) => (
-                <button key={t.key} disabled={busy} onClick={() => newGame(t)}
-                  className="text-start rounded-xl border border-glass-border bg-app-bg p-4 hover:border-neon-green/50 hover:bg-glass-hover transition disabled:opacity-40">
-                  <div className="text-2xl mb-1">{t.emoji}</div>
-                  <div className="font-medium text-zinc-100">{t.label}</div>
-                  <div className="text-xs text-zinc-500 mt-0.5">{t.description}</div>
+          </div>
+
+          {/* Quick actions */}
+          <div className="grid sm:grid-cols-3 gap-4">
+            {d.quickCards.map((a, i) => {
+              const targets = ['/', '/gallery', '/wallet'];
+              return (
+                <button key={a.title} onClick={() => nav(targets[i] ?? '/')}
+                  className="group text-start rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] backdrop-blur-sm p-5 hover:-translate-y-1 hover:border-rp-fire/30 hover:shadow-[0_12px_32px_-12px_rgba(255,87,34,0.25)] transition-all duration-200 animate-fade-up"
+                  style={{ animationDelay: `${160 + i * 60}ms` }}
+                >
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl bg-[--surface-2] mb-3.5 group-hover:scale-105 transition-transform">{a.icon}</div>
+                  <div className="font-brand font-bold text-[--ink-1] text-base">{a.title}</div>
+                  <p className="text-[13px] text-[--ink-3] mt-1.5 leading-relaxed">{a.body}</p>
+                  <div className="text-xs font-semibold text-rp-fire mt-3.5 flex items-center gap-1 group-hover:gap-2 transition-all">{a.cta} <span>→</span></div>
                 </button>
-              ))}
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Template picker modal ─────────────────────────────────────────── */}
+      {picking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setPicking(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-lg shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-start justify-between mb-6">
+                <div>
+                  <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
+                  <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
+                </div>
+                <button onClick={() => setPicking(false)}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+              </div>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {TEMPLATES.map((tpl) => (
+                  <button key={tpl.key} disabled={busy} onClick={() => newGame(tpl)}
+                    className="text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-4 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
+                    <div className="text-2xl mb-2.5">{tpl.emoji}</div>
+                    <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{tpl.label}</div>
+                    <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{tpl.description}</div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -132,14 +333,14 @@ export default function DashboardPage() {
 
       {sharing && (
         <ShareSheet
-          title={`Share "${sharing.title}"`}
-          text={`Join my RushPoint race adventure: ${sharing.title}`}
+          title={`שתף "${sharing.title}"`}
+          text={`הצטרף להרפתקת הריצה שלי ב-RushPoint: ${sharing.title}`}
           url={`${PLAY_URL}/?game=${sharing.id}`}
           notPublic={sharing.visibility !== 'public'}
           onPublish={async () => {
             await publishGame({ gameId: sharing.id, visibility: 'public' });
             setSharing({ ...sharing, visibility: 'public' });
-            void load();
+            void load(true);
           }}
           onClose={() => setSharing(null)}
         />

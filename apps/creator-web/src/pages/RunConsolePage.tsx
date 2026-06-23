@@ -104,7 +104,14 @@ export default function RunConsolePage() {
           <h1 className="text-2xl font-bold">Live Run</h1>
           <div className="flex items-center gap-2 mt-1">
             <Badge color={finished ? 'zinc' : 'green'}>{run.status}</Badge>
-            <span className="text-zinc-500 text-sm">{teams.length} joined · {run.freeParticipantsUsed} used</span>
+            {run.billingType && (
+              <Badge color={run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
+                {run.billingType === 'free' ? 'Free run' : run.billingType === 'pro' ? 'Pro' : 'Credit'}
+              </Badge>
+            )}
+            <span className="text-zinc-500 text-sm">
+              {run.participantCount ?? teams.length} / {run.maxParticipants ?? '∞'} participants
+            </span>
           </div>
         </div>
         <JoinShare accessCode={run.accessCode} />
@@ -140,7 +147,7 @@ export default function RunConsolePage() {
       {staffPin && (
         <Card className="p-3 text-sm">
           Staff PIN: <span className="font-mono text-neon-green text-lg tracking-widest">{staffPin}</span>
-          <span className="text-zinc-500"> — share with your staff to sign in on the play app.</span>
+          <span className="text-zinc-500"> · share with your staff to sign in on the play app.</span>
         </Card>
       )}
 
