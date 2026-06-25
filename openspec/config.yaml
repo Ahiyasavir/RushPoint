@@ -1,0 +1,82 @@
+schema: spec-driven
+
+# Project context — injected into every artifact (proposal / design / tasks) so the
+# AI plans against RushPoint's real stack, data model, and test infrastructure.
+context: |
+  RushPoint — multi-tenant web platform for building & running real-world team
+  "race adventure" games. Architecture & exact feature behavior: see TECH_SPEC.md
+  (authoritative). Coding rules & Firestore paths: INSTRUCTIONS.md. Quick map: CLAUDE.md.
+
+  Stack: npm workspaces + Turborepo. TypeScript (strict) everywhere.
+    - apps/creator-web   React 18 + Vite (dark, Hebrew-first)   — creator console
+    - apps/play-web      React 18 + Vite PWA (light)            — participant + staff
+    - functions/         Node 20 + Firebase Functions v1 onCall — ALL game/run/score/pay logic
+    - packages/shared    @rushpoint/shared — canonical types, FIRESTORE_PATHS, scoring, geo
+
+  Non-negotiable conventions:
+    - Run/team/score/leaderboard/wallet docs are SERVER-WRITE-ONLY (firestore.rules deny
+      client writes). A new mutation = a callable in functions/src/<domain>/index.ts,
+      re-exported in functions/src/index.ts, with a typed wrapper in the app's services/calls.ts.
+      NEVER a client write.
+    - Always use FIRESTORE_PATHS from @rushpoint/shared. Never hardcode path strings.
+    - Answer keys (smart.secretCode, hint text, quiz answers, numericAnswer, steps[].answer)
+      are server-secret — stripped by sanitizeTaskForParticipant. Never send them to clients.
+    - .set({merge}) + dotted keys writes a LITERAL "a.b" field, not a nested path. Never
+      dotted-update an array element (coerces it to a map). Rewrite the full array instead.
+    - Tailwind: static class strings only. play-web reverses the zinc scale. Prefer ms-/text-start (RTL).
+
+  Test infrastructure (this is where TDD tests go):
+    - `npm test` runs BOTH lanes: (a) `node scripts/run-unit-tests.mjs` — every
+      scripts/test-*.ts pure-logic assertion script (tsx, no emulator), then (b) `turbo run test`
+      = **vitest** in functions/ (co-located *.test.ts). Both must be green. (The aggregator was
+      added because orphaned tsx tests had silently rotted — a stale test referencing a renamed
+      helper went unnoticed for exactly this reason. Never leave a pure-logic test unwired again.)
+    - Pure logic (scoring, geo, validation, routing math, and new helpers like bearingDeg /
+      computeVelocityKmh / rate-limit / version-compare) → a new scripts/test-<name>.ts (auto-picked
+      up by the aggregator) OR a co-located functions/src/**/<name>.test.ts vitest file.
+    - End-to-end callable behavior is verified by scripts/e2e-verify.mjs (`npm run e2e`) —
+      a full lifecycle vs the local emulator (create→update→launch→join→start→play→review→
+      leaderboard→finalize, plus partial stages, locationless routing, finished-run rejection,
+      paid hints). Extend it when adding/altering a callable.
+    - UI has no component test runner — verify UI changes via the preview tools / manual run.
+    - **v2.1 RED-phase blueprint:** functions/src/__planned__/v21-*.todo.test.ts hold `test.todo`
+      stubs — one describe block per Appendix-B roadmap row, every assertion the RED test must
+      encode, lane-tagged ([pure]/[e2e]/[rules]/[ui]). When you start a planned change, the FIRST
+      task is to convert that item's todos into real failing tests, confirm they fail, then implement.
+
+  Required gates before any change is "done":
+    npm run typecheck      (all workspaces — must pass)
+    npm run lint           (creator-web eslint — 0 errors; style warnings ok)
+    npm test               (vitest in functions — must pass)
+    npm run creator:build  (production build — must pass)
+    npm run e2e            (full lifecycle vs emulator — must stay green)
+
+# Per-artifact rules — enforce Spec-Driven Development + strict TDD on every change.
+rules:
+  proposal:
+    - State the observable behavior change, not the implementation. Frame it as a capability.
+    - Include a "Non-goals" section listing what this change explicitly does NOT do.
+    - "Note which surface(s) are touched: shared types / a callable / creator-web / play-web / rules."
+    - If it adds or changes a callable, say so explicitly (drives a typed wrapper + e2e coverage).
+
+  design:
+    - Name the exact files to touch (functions/src/<domain>, packages/shared/src/types, the
+      app screen/component, services/calls.ts). Reference TECH_SPEC.md for current behavior.
+    - "Specify the TEST STRATEGY up front: for pure logic → vitest *.test.ts or scripts/test-*.ts;
+      for a callable → the specific failing assertions to add to scripts/e2e-verify.mjs; for UI →
+      the preview-based verification steps. Every change must name how it will be proven."
+    - Respect server-write-only state, FIRESTORE_PATHS, answer-key secrecy, and the merge/array footguns.
+    - Call out any new Firestore index, security-rule change, or new env var.
+
+  tasks:
+    - Order tasks RED -> GREEN -> REFACTOR (strict TDD). The FIRST implementation task for any
+      logic/callable change MUST be "write a failing test that encodes the new behavior, run it,
+      confirm it fails for the right reason" — before any production code is written.
+    - The next task implements the minimum code to make that test pass; then a refactor task.
+    - Keep tasks small (about one red-green cycle each). Each task is independently checkable.
+    - The final task MUST run the full gate set (typecheck, lint, vitest `npm test`, creator:build,
+      e2e) and confirm all green.
+    - For a new/changed callable, include an explicit task to (a) add its typed wrapper in
+      services/calls.ts and (b) extend scripts/e2e-verify.mjs with the new-behavior assertions.
+    - For pure shared logic, prefer a co-located vitest test or scripts/test-*.ts; do NOT require
+      the emulator for logic that doesn't need it.
