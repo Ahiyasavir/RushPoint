@@ -101,9 +101,9 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
         <Card className="p-4 w-full">
           <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🗂️ Your race, wrapped</div>
           <div className="grid grid-cols-2 gap-2.5">
-            <Stat label="Total time" value={totalSec != null ? fmtDuration(totalSec) : '—'} accent={accent} />
+            <Stat label="Total time" value={totalSec != null ? fmtDuration(totalSec) : '?'} accent={accent} />
             <Stat label="Stages done" value={`${completedStages.length}/${game.stageCount}`} accent={accent} />
-            <Stat label="Fastest stage" value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '—'} accent={accent} />
+            <Stat label="Fastest stage" value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
             <Stat label="Hints used" value={String(hintsUsed)} accent={accent} />
           </div>
           <Button className="mt-4" disabled={busy} onClick={share}>

@@ -484,7 +484,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       )}
 
       <div>
-        <Label>Difficulty 1–10</Label>
+        <Label>Difficulty 1 to 10</Label>
         <Input type="number" min={1} max={10} value={task.difficulty} onChange={(e) => set({ difficulty: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) })} />
       </div>
 

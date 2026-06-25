@@ -76,7 +76,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       setMsg(res.autoApproved ? 'Approved!' : 'Submitted. Waiting for review.');
       onChanged();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Upload failed — try again.');
+      setMsg(e instanceof Error ? e.message : 'Upload failed, try again.');
     } finally { setBusy(false); }
   }
 

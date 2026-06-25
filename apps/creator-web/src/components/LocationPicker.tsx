@@ -1,15 +1,45 @@
 // Map-based location picker for the Builder (§13ב — "מיקום על מפה").
-// Click anywhere to place the task; drag the marker to fine-tune. Numeric
-// lat/lng stay available alongside it for precision.
+// Search a place by name/address, OR click anywhere to place the task; drag the
+// marker to fine-tune. Numeric lat/lng stay available alongside for precision.
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
+import { Input } from './ui';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 // Sensible default view when a task has no coordinates yet (central Israel).
 const DEFAULT_CENTER: [number, number] = [35.21, 31.77];
+
+interface GeoResult { label: string; lat: number; lng: number }
+
+// Geocode a free-text place/address. Uses MapTiler when a key is configured,
+// else falls back to keyless Nominatim (OSM) — mirroring the tile strategy.
+// Biased to Israel since that's the launch market; still returns global hits.
+async function geocode(query: string): Promise<GeoResult[]> {
+  const q = query.trim();
+  if (!q) return [];
+  if (KEY) {
+    const url = `https://api.maptiler.com/geocoding/${encodeURIComponent(q)}.json`
+      + `?key=${KEY}&language=he&country=il&limit=5`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('geocode failed');
+    const j = await r.json();
+    return (j.features ?? [])
+      .filter((f: { center?: number[] }) => Array.isArray(f.center) && f.center.length === 2)
+      .map((f: { place_name?: string; text?: string; center: number[] }) => ({
+        label: f.place_name ?? f.text ?? q, lng: f.center[0], lat: f.center[1],
+      }));
+  }
+  // Keyless fallback: Nominatim (OpenStreetMap). CORS-enabled; IL-biased.
+  const url = `https://nominatim.openstreetmap.org/search`
+    + `?format=jsonv2&q=${encodeURIComponent(q)}&limit=5&accept-language=he&countrycodes=il`;
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error('geocode failed');
+  const j = (await r.json()) as { display_name: string; lat: string; lon: string }[];
+  return j.map((it) => ({ label: it.display_name, lat: parseFloat(it.lat), lng: parseFloat(it.lon) }));
+}
 
 export default function LocationPicker({
   lat, lng, onChange, className = '',
@@ -25,6 +55,12 @@ export default function LocationPicker({
   const [mode, setMode] = useState<MapMode>('topo');
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+
+  // Place-search state
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<GeoResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchErr, setSearchErr] = useState('');
 
   const hasCoord = isValidCoord(lat, lng) && (lat !== 0 || lng !== 0);
 
@@ -80,14 +116,74 @@ export default function LocationPicker({
     marker.current.setLngLat([ln, la]).addTo(map.current);
   }
 
+  async function runSearch() {
+    if (!query.trim()) return;
+    setSearching(true); setSearchErr(''); setResults([]);
+    try {
+      const r = await geocode(query);
+      if (r.length === 0) setSearchErr('לא נמצאו תוצאות. נסו ניסוח אחר.');
+      setResults(r);
+    } catch {
+      setSearchErr('החיפוש נכשל. נסו שוב או הציבו ידנית על המפה.');
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function choose(r: GeoResult) {
+    setResults([]); setQuery(r.label);
+    setMarker(r.lat, r.lng);
+    onChangeRef.current(round(r.lat), round(r.lng));
+    map.current?.flyTo({ center: [r.lng, r.lat], zoom: 15, duration: 600 });
+  }
+
   return (
     <div className="relative">
+      {/* Place search */}
+      <div className="relative mb-2">
+        <div className="flex gap-2">
+          <Input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setSearchErr(''); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void runSearch(); } }}
+            dir="auto"
+            placeholder="🔍 חפשו כתובת או מקום…"
+            className="flex-1"
+          />
+          <button
+            type="button"
+            onClick={() => void runSearch()}
+            disabled={searching || !query.trim()}
+            className="px-4 rounded-lg bg-rp-fire text-white text-sm font-medium disabled:opacity-40 shrink-0"
+          >
+            {searching ? '…' : 'חיפוש'}
+          </button>
+        </div>
+        {searchErr && <p className="text-rp-alert text-xs mt-1">{searchErr}</p>}
+        {results.length > 0 && (
+          <ul className="absolute z-20 mt-1 w-full bg-app-raised border border-glass-border rounded-lg overflow-hidden shadow-lg max-h-56 overflow-y-auto">
+            {results.map((r, i) => (
+              <li key={i}>
+                <button
+                  type="button"
+                  onClick={() => choose(r)}
+                  dir="auto"
+                  className="w-full text-start px-3 py-2 text-sm text-zinc-700 hover:bg-rp-fire/10 transition-colors"
+                >
+                  📍 {r.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div ref={ref} className={`rounded-lg overflow-hidden border border-glass-border ${className}`} />
       <MapModeToggle mode={mode} onChange={setMode} />
       {!hasCoord && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none pb-3">
           <span className="bg-app-bg/80 text-zinc-300 text-xs px-3 py-1.5 rounded-full">
-            Tap the map to set the task location
+            חפשו מקום למעלה, או לחצו על המפה לקיבוע
           </span>
         </div>
       )}

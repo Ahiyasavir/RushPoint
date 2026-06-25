@@ -47,12 +47,12 @@ export const TEMPLATES: GameTemplate[] = [
         quiz('שאלה על החוגג/ת', 'באיזו שנה נולד/ה חתן/כלת השמחה? (ערכו את התשובה הנכונה)', ['2012']),
       ]),
       stage('משימת יצירתיות', [photo('חיקוי מצחיק', 'צלמו תמונה של חיקוי מצחיק של אחד מבני המשפחה.')]),
-      stage('ריקוד הניצחון', [photo('ריקוד ניצחון', 'כל הקבוצה רוקדת ריקוד ניצחון — צלמו!')], { isFinal: true }),
+      stage('ריקוד הניצחון', [photo('ריקוד ניצחון', 'כל הקבוצה רוקדת ריקוד ניצחון, צלמו!')], { isFinal: true }),
     ],
   },
   {
     key: 'youth_trip', label: 'טיול שכבה / תנועת נוער', emoji: '🏕️',
-    description: 'מסלול עם נקודות ציון, חידות שביל וצילומי שכבה — מושלם למדריכים.',
+    description: 'מסלול עם נקודות ציון, חידות שביל וצילומי שכבה, מושלם למדריכים.',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('נקודת ריכוז', [checkin('הגעה לנקודת המפגש', 'כל הקבוצה הגיעה לנקודת הריכוז? סמנו צ׳ק-אין.')]),
@@ -65,7 +65,7 @@ export const TEMPLATES: GameTemplate[] = [
   },
   {
     key: 'team_gibush', label: 'גיבוש צוות', emoji: '🤝',
-    description: 'אתגרי צוות, משימת רצף ושאלת סיום — לגיבושים בעבודה או ביחידה.',
+    description: 'אתגרי צוות, משימת רצף ושאלת סיום לגיבושים בעבודה או ביחידה.',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('משימת פתיחה', [task({
@@ -73,7 +73,7 @@ export const TEMPLATES: GameTemplate[] = [
         description: 'השלימו את השלבים לפי הסדר כצוות.',
         steps: [
           { id: uuid(), prompt: 'מצאו שם משותף לצוות והקלידו אותו' },
-          { id: uuid(), prompt: 'כל חברי הצוות עומדים על רגל אחת — הקישו לאישור' },
+          { id: uuid(), prompt: 'כל חברי הצוות עומדים על רגל אחת, הקישו לאישור' },
           { id: uuid(), prompt: 'מה המילה הסודית? (ערכו אותה בעורך)', answer: 'גיבוש' },
         ],
       })]),
@@ -87,7 +87,7 @@ export const TEMPLATES: GameTemplate[] = [
   // ── Generic starters ────────────────────────────────────────────────────────
   {
     key: 'blank', label: 'דף ריק', emoji: '📄',
-    description: 'שלב אחד ריק — בנו אותו איך שבא לכם.',
+    description: 'שלב אחד ריק, בנו אותו איך שבא לכם.',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [stage('שלב 1', [task({ title: '' })])],
   },

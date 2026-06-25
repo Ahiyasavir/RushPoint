@@ -93,7 +93,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
       {stops.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-bg/80 text-zinc-400 text-xs px-3 py-1.5 rounded-full">
-            No located tasks yet — add a map location to see the route.
+            No located tasks yet. Add a map location to see the route.
           </span>
         </div>
       )}

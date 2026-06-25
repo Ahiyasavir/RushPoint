@@ -23,11 +23,11 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 ## 2. הגדרות
 
-**"יוצר"** — כל מי שרשם חשבון ב-RushPoint ויוצר ו/או מפעיל משחקים.
-**"משתתף"** — כל אחד שמצטרף למשחק שנוצר ע"י יוצר.
-**"ריצה"** — אירוע משחק מתוזמן בזמן אמת שבו משתתפים מתחרים.
-**"נתוני מיקום"** — קואורדינטות GPS ו/או רשת שנאספות מהמכשיר.
-**"מידע אישי"** — כל מידע המזהה או שעלול לזהות אדם ספציפי.
+**"יוצר"**: כל מי שרשם חשבון ב-RushPoint ויוצר ו/או מפעיל משחקים.
+**"משתתף"**: כל אחד שמצטרף למשחק שנוצר ע"י יוצר.
+**"ריצה"**: אירוע משחק מתוזמן בזמן אמת שבו משתתפים מתחרים.
+**"נתוני מיקום"**: קואורדינטות GPS ו/או רשת שנאספות מהמכשיר.
+**"מידע אישי"**: כל מידע המזהה או שעלול לזהות אדם ספציפי.
 
 ## 3. מידע שאנו אוספים
 
@@ -47,7 +47,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - נתוני ביצועים: ניקוד, זמנים, תשובות שנמסרו
 - פרטים שהוזנו בשדות מותאמים (ראה סעיף 3.5)
 
-### 3.3 מיקום GPS — גילוי מלא
+### 3.3 מיקום GPS: גילוי מלא
 
 **חשיבות: איסוף מיקום הוא תכונת ליבה של השירות.**
 
@@ -113,13 +113,13 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 אנו **לא מוכרים ולא משכירים** מידע אישי. אנו משתפים מידע עם:
 
-**Google LLC / Firebase** — ספק תשתית הענן שלנו. Firebase Auth, Firestore, ו-Cloud Storage פועלים בשרתי Google. Google מחויבת ל-GDPR ולמסגרות Privacy Shield. Privacy Policy: policies.google.com/privacy.
+**Google LLC / Firebase**: ספק תשתית הענן שלנו. Firebase Auth, Firestore, ו-Cloud Storage פועלים בשרתי Google. Google מחויבת ל-GDPR ולמסגרות Privacy Shield. Privacy Policy: policies.google.com/privacy.
 
-**ספק הסליקה המאושר** — עיבוד תשלומי האשראי. פרטי כרטיס אשראי אינם עוברים דרך שרתינו ואינם מאוחסנים בבסיסי הנתונים שלנו. ספק הסליקה מקבל רק את הנתונים הנחוצים לאישור העסקה.
+**ספק הסליקה המאושר**: עיבוד תשלומי האשראי. פרטי כרטיס אשראי אינם עוברים דרך שרתינו ואינם מאוחסנים בבסיסי הנתונים שלנו. ספק הסליקה מקבל רק את הנתונים הנחוצים לאישור העסקה.
 
-**MapTiler AG** — ספק אריחי המפה. MapTiler מקבל בקשות אריחים סטנדרטיות ואינו מקבל נתוני מיקום של משתתפים ספציפיים.
+**MapTiler AG**: ספק אריחי המפה. MapTiler מקבל בקשות אריחים סטנדרטיות ואינו מקבל נתוני מיקום של משתתפים ספציפיים.
 
-**יוצרי המשחקים** — יוצר שמפעיל ריצה רואה את המיקום הנוכחי של הצוותות (בזמן ריצה בלבד), ניקוד, תשובות, ותמונות שהועלו. הוא גם רואה נתונים שמשתתפים מסרו בשדות מותאמים. ראה סעיף 3.5.
+**יוצרי המשחקים**: יוצר שמפעיל ריצה רואה את המיקום הנוכחי של הצוותות (בזמן ריצה בלבד), ניקוד, תשובות, ותמונות שהועלו. הוא גם רואה נתונים שמשתתפים מסרו בשדות מותאמים. ראה סעיף 3.5.
 
 **רשויות:** נמסור מידע לרשויות אכיפת חוק אך ורק בהתאם לחובה חוקית מפורשת או צו שיפוטי בר-תוקף.
 
@@ -173,7 +173,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 ## 10. מסרים שיווקיים ותקשורת
 
-בהתאם לחוק התקשורת (בזק ושידורים), תשמ"ב-1982 (תיקון מס' 40 — "חוק הספאם"), לא נשלח דיוור שיווקי ללא הסכמה מפורשת. הסכמה לדיוור שיווקי היא בחירה נפרדת מהסכמה לתנאי השימוש. ניתן לבטל הסכמה זו בכל עת דרך קישור הסרה בכל הודעה.
+בהתאם לחוק התקשורת (בזק ושידורים), תשמ"ב-1982 (תיקון מס' 40, "חוק הספאם"), לא נשלח דיוור שיווקי ללא הסכמה מפורשת. הסכמה לדיוור שיווקי היא בחירה נפרדת מהסכמה לתנאי השימוש. ניתן לבטל הסכמה זו בכל עת דרך קישור הסרה בכל הודעה.
 
 ## 11. ילדים ובני נוער
 
@@ -211,11 +211,11 @@ By using the Service, you agree to the collection and processing of data as desc
 
 ## 2. Definitions
 
-**"Creator"** — any person who has registered an account and creates and/or runs games.
-**"Participant"** — any person who joins a game created by a Creator.
-**"Run"** — a scheduled, real-time game event in which participants compete.
-**"Location Data"** — GPS and/or network coordinates collected from the device.
-**"Personal Data"** — any information that identifies or could identify a specific individual.
+**"Creator"**: any person who has registered an account and creates and/or runs games.
+**"Participant"**: any person who joins a game created by a Creator.
+**"Run"**: a scheduled, real-time game event in which participants compete.
+**"Location Data"**: GPS and/or network coordinates collected from the device.
+**"Personal Data"**: any information that identifies or could identify a specific individual.
 
 ## 3. Information We Collect
 
@@ -235,7 +235,7 @@ Participants access the Service via anonymous authentication (no registration re
 - Performance data: score, times, submitted answers
 - Details entered in custom registration fields (see Section 3.5)
 
-### 3.3 GPS Location Data — Full Disclosure
+### 3.3 GPS Location Data: Full Disclosure
 
 **Important: location collection is a core feature of the Service.**
 
@@ -301,13 +301,13 @@ We do **not** conduct automated profiling for advertising purposes or build mark
 
 We **do not sell or rent** personal data. We share data with:
 
-**Google LLC / Firebase** — our cloud infrastructure provider. Firebase Auth, Firestore, and Cloud Storage run on Google's servers. Google is committed to GDPR and equivalent privacy frameworks. Privacy Policy: policies.google.com/privacy.
+**Google LLC / Firebase**: our cloud infrastructure provider. Firebase Auth, Firestore, and Cloud Storage run on Google's servers. Google is committed to GDPR and equivalent privacy frameworks. Privacy Policy: policies.google.com/privacy.
 
-**Authorized Payment Processor** — credit card payment processing. Card details do not pass through our servers and are not stored in our databases. The payment processor receives only the data necessary to approve the transaction.
+**Authorized Payment Processor**: credit card payment processing. Card details do not pass through our servers and are not stored in our databases. The payment processor receives only the data necessary to approve the transaction.
 
-**MapTiler AG** — map tiles provider. MapTiler receives standard tile requests and does not receive individual participant location data.
+**MapTiler AG**: map tiles provider. MapTiler receives standard tile requests and does not receive individual participant location data.
 
-**Game Creators** — a Creator who runs a game can see current team locations (during the run only), scores, submitted answers, uploaded photos, and data entered in custom fields. See Section 3.5.
+**Game Creators**: a Creator who runs a game can see current team locations (during the run only), scores, submitted answers, uploaded photos, and data entered in custom fields. See Section 3.5.
 
 **Authorities:** we will disclose data to law enforcement only when required by an explicit legal obligation or a valid court order.
 
@@ -401,13 +401,13 @@ The Company will respond to requests within 30 days.
 
 ## 2. הגדרות
 
-**"יוצר"** — כל מי שרשם חשבון ויוצר ו/או מנהל משחקים.
-**"משתתף"** — כל מי שמצטרף למשחק שנוצר ע"י יוצר.
-**"ריצה"** — אירוע משחק בזמן אמת.
-**"שירות"** — פלטפורמת RushPoint כולה, כולל הממשקים, ה-API, ו-Cloud Functions.
-**"קרדיט אירוע"** — יחידת חיוב הנרכשת בתשלום ומשמשת להשקת ריצות.
-**"Creator Pro"** — מנוי בתשלום הנותן יכולות מורחבות ליוצרים.
-**"גלריה ציבורית"** — מאגר משימות ציבורי שיוצרים מפרסמים אליו ורשאים לשאול ממנו.
+**"יוצר"**: כל מי שרשם חשבון ויוצר ו/או מנהל משחקים.
+**"משתתף"**: כל מי שמצטרף למשחק שנוצר ע"י יוצר.
+**"ריצה"**: אירוע משחק בזמן אמת.
+**"שירות"**: פלטפורמת RushPoint כולה, כולל הממשקים, ה-API, ו-Cloud Functions.
+**"קרדיט אירוע"**: יחידת חיוב הנרכשת בתשלום ומשמשת להשקת ריצות.
+**"Creator Pro"**: מנוי בתשלום הנותן יכולות מורחבות ליוצרים.
+**"גלריה ציבורית"**: מאגר משימות ציבורי שיוצרים מפרסמים אליו ורשאים לשאול ממנו.
 
 ## 3. הרשמה ופרטי החשבון
 
@@ -417,7 +417,7 @@ The Company will respond to requests within 30 days.
 - עליך להודיע לנו לאלתר על כל חשד לשימוש לא מורשה בחשבונך.
 - החברה שומרת לעצמה את הזכות לדרוש אימות זהות במקרים של חשד להפרת תנאים.
 
-## 4. אופי השירות — פלטפורמת תוכנה בלבד
+## 4. אופי השירות: פלטפורמת תוכנה בלבד
 
 > RushPoint היא כלי תוכנה המספק תשתית טכנולוגית ליצירת ולניהול אירועים. החברה אינה מארגנת אירועים, אינה בוחרת מיקומים, אינה מספקת ציוד, ואינה נוכחת בשטח.
 
@@ -483,7 +483,7 @@ The Company will respond to requests within 30 days.
 
 **(ד) גישה לעזרה:** כי ידע למשתתפים כיצד לפנות לעזרה ראשונה ו/או שירותי חירום במהלך האירוע, וכי מספר חירום נגיש לכל הצוותות.
 
-**(ה) היתרים וביטוח:** כי קיבל את כל ההיתרים הנדרשים לשימוש בשטחים ציבוריים ו/או פרטיים הכלולים במסלול, ובמידת הצורך — רכש ביטוח אחריות מקצועית לאירוע.
+**(ה) היתרים וביטוח:** כי קיבל את כל ההיתרים הנדרשים לשימוש בשטחים ציבוריים ו/או פרטיים הכלולים במסלול, ובמידת הצורך, רכש ביטוח אחריות מקצועית לאירוע.
 
 **(ו) ציות לחוק:** כי האירוע עומד בכל דרישות החוק הישראלי הרלוונטיות.
 
@@ -524,19 +524,19 @@ The Company will respond to requests within 30 days.
 
 כל חשבון חדש מקבל ריצות חינמיות לכל החיים עד 5 משתתפים כל אחת. ריצות חינמיות אינן ניתנות להמרה לכסף.
 
-### 7.2 Event Credits — קרדיטי אירועים
+### 7.2 Event Credits: קרדיטי אירועים
 
 - קרדיטים נרכשים בחבילות מוגדרות ומשמשים להשקת ריצות בתשלום
 - קרדיטים שנרכשו אינם פגים
 - עם השקת ריצה, הקרדיטים המתאימים מנוכים מהארנק **בשלב ההשקה** בלא אפשרות ביטול
 - החזר כספי לקרדיטים שנרכשו ניתן אך ורק במקרה של תקלה טכנית מוכחת שמנעה לחלוטין את קיום הריצה, ובתנאי שהדיווח הוגש תוך 48 שעות מהמועד המתוכנן
 
-### 7.3 Creator Pro — מנוי יוצר מקצועי
+### 7.3 Creator Pro: מנוי יוצר מקצועי
 
 - Creator Pro הוא מנוי בתשלום שנתי ו/או חודשי
 - ניתן לבטל בכל עת; הביטול ייכנס לתוקף בתום תקופת החיוב הנוכחית
 - לא יינתן החזר יחסי על תקופה שנותרה לאחר ביטול
-- שדרוג ממנוי חודשי לשנתי — ניתן בכל עת; ההפרש מחושב יחסית
+- שדרוג ממנוי חודשי לשנתי: ניתן בכל עת; ההפרש מחושב יחסית
 
 ### 7.4 כללי תשלום
 
@@ -585,7 +585,7 @@ The Company will respond to requests within 30 days.
 
 ## 11. קניין רוחני
 
-הפלטפורמה עצמה — לרבות קוד המקור, עיצוב, אלגוריתמי הניתוב, ממשק המשתמש, ומסמכי מדיניות אלו — שייכת לחברה ומוגנת בזכויות יוצרים. אין להעתיק, לשכפל, ו/או להפיץ ללא אישור כתוב מהחברה. סימני המסחר של החברה לא ישמשו ללא אישור מוקדם.
+הפלטפורמה עצמה, לרבות קוד המקור, עיצוב, אלגוריתמי הניתוב, ממשק המשתמש, ומסמכי מדיניות אלו, שייכת לחברה ומוגנת בזכויות יוצרים. אין להעתיק, לשכפל, ו/או להפיץ ללא אישור כתוב מהחברה. סימני המסחר של החברה לא ישמשו ללא אישור מוקדם.
 
 ## 12. השעיה וסיום חשבון
 
@@ -636,13 +636,13 @@ If you do not agree, please do not use the Service. Minimum age: 16. If you are 
 
 ## 2. Definitions
 
-**"Creator"** — any person who has registered an account and creates and/or manages games.
-**"Participant"** — any person who joins a game created by a Creator.
-**"Run"** — a real-time game event.
-**"Service"** — the entire RushPoint platform, including interfaces, API, and Cloud Functions.
-**"Event Credit"** — a billing unit purchased for payment and used to launch paid runs.
-**"Creator Pro"** — a paid subscription that grants Creators expanded capabilities.
-**"Public Gallery"** — a public task repository to which Creators publish and from which they may borrow.
+**"Creator"**: any person who has registered an account and creates and/or manages games.
+**"Participant"**: any person who joins a game created by a Creator.
+**"Run"**: a real-time game event.
+**"Service"**: the entire RushPoint platform, including interfaces, API, and Cloud Functions.
+**"Event Credit"**: a billing unit purchased for payment and used to launch paid runs.
+**"Creator Pro"**: a paid subscription that grants Creators expanded capabilities.
+**"Public Gallery"**: a public task repository to which Creators publish and from which they may borrow.
 
 ## 3. Account Registration and Details
 
@@ -652,7 +652,7 @@ If you do not agree, please do not use the Service. Minimum age: 16. If you are 
 - You must notify us immediately of any suspected unauthorized use of your account.
 - The Company reserves the right to require identity verification in cases of suspected Terms violation.
 
-## 4. Nature of the Service — Software Tool Only
+## 4. Nature of the Service: Software Tool Only
 
 > RushPoint is a software tool providing technological infrastructure for creating and managing events. The Company does not organize events, choose locations, provide equipment, or attend events in the field.
 
@@ -718,7 +718,7 @@ Game Creators on the RushPoint platform are **independent event organizers** onl
 
 **(d) Access to help:** that they communicated to participants how to contact first aid and/or emergency services during the event, and that an emergency number is accessible to all teams.
 
-**(e) Permits and insurance:** that they obtained all permits required for use of any public and/or private spaces included in the route, and where necessary — purchased professional liability insurance for the event.
+**(e) Permits and insurance:** that they obtained all permits required for use of any public and/or private spaces included in the route, and where necessary, purchased professional liability insurance for the event.
 
 **(f) Legal compliance:** that the event complies with all applicable Israeli legal requirements.
 
@@ -820,7 +820,7 @@ You agree to indemnify and defend the Company, its employees, officers, and shar
 
 ## 11. Intellectual Property
 
-The platform itself — including source code, design, routing algorithms, user interface, and these policy documents — belongs to the Company and is protected by copyright. Copying, reproducing, and/or distributing without written permission from the Company is prohibited. The Company's trademarks may not be used without prior approval.
+The platform itself, including source code, design, routing algorithms, user interface, and these policy documents, belongs to the Company and is protected by copyright. Copying, reproducing, and/or distributing without written permission from the Company is prohibited. The Company's trademarks may not be used without prior approval.
 
 ## 12. Account Suspension and Termination
 
