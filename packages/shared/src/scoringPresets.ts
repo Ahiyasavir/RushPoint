@@ -164,7 +164,7 @@ export function applyZScoreBonus(
 export const PRESET_LABELS: Record<ScoringPreset, { en: string; description: string }> = {
   time_only: {
     en: 'Speed Race',
-    description: 'Ranked purely by total race time. No points — fastest team wins.',
+    description: 'Ranked purely by total race time. No points, fastest team wins.',
   },
   fixed_points_speed: {
     en: 'Points + Speed Bonus',

@@ -35,63 +35,70 @@ async function ensureUser(uid, email, displayName) {
 }
 
 // ── Sample game template ──────────────────────────────────────────────────────
+// A self-contained "try it from your couch" demo: every task is LOCATIONLESS and
+// auto-verifies (quiz / numeric / sequence / auto-approved selfie / self-report),
+// so a visitor can play it anywhere in seconds with NO operator and NO real-world
+// location. This is what the landing "try a sample game" button opens.
 function buildGame(now) {
+  const t = (over) => ({
+    coordinates: { lat: 0, lng: 0 }, locationless: true,
+    difficulty: 3, estimatedMinutes: 2, pointValue: 100, maxConcurrentTeams: 50, ...over,
+  });
   const stages = [
     {
-      id: 'stage-1', order: 0, title: 'Warm-up at the Gate',
-      tasks: [
-        {
-          id: 'task-1', title: 'Reach Jaffa Gate', description: 'Walk to Jaffa Gate and check in.',
-          type: 'field', coordinates: { lat: 31.7767, lng: 35.2275 },
-          difficulty: 2, estimatedMinutes: 10, pointValue: 100, maxConcurrentTeams: 5, tags: ['outdoor'],
-        },
-      ],
+      id: 'stage-1', order: 0, title: 'יוצאים לדרך',
+      tasks: [t({
+        id: 'task-1', title: 'שאלת פתיחה', type: 'quiz',
+        description: 'איזה אימוג׳י הכי מתאים למירוץ הרפתקה?',
+        choices: ['🏁', '🐌', '😴'], answers: ['🏁'], tags: ['demo'],
+      })],
     },
     {
-      id: 'stage-2', order: 1, title: 'The Market Challenge',
-      tasks: [
-        {
-          id: 'task-2a', title: 'Spice Stall Code', description: 'Find the spice stall and enter its code.',
-          type: 'smart_station', coordinates: { lat: 31.7780, lng: 35.2300 },
-          difficulty: 5, estimatedMinutes: 15, pointValue: 150, maxConcurrentTeams: 3, tags: ['puzzle'],
-          smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'SAFFRON',
-                   codeInputLabel: 'Spice stall code', longInstructions: 'Ask the vendor for today’s spice of the day.' },
-        },
-        {
-          id: 'task-2b', title: 'Street Musician Selfie', description: 'Take a group selfie with a street performer.',
-          type: 'photo', coordinates: { lat: 31.7775, lng: 35.2290 },
-          difficulty: 3, estimatedMinutes: 12, pointValue: 120, maxConcurrentTeams: 4, tags: ['fun'],
-          smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true },
-        },
-      ],
+      id: 'stage-2', order: 1, title: 'אתגר מספרים',
+      tasks: [t({
+        id: 'task-2', title: 'חשבון מהיר', type: 'numeric',
+        description: 'כמה זה 7 × 6?', numericAnswer: 42, numericTolerance: 0,
+        difficulty: 4, pointValue: 120, tags: ['demo'],
+      })],
     },
     {
-      id: 'stage-3', order: 2, title: 'The Final Climb', isFinal: true,
-      tasks: [
-        {
-          id: 'task-3', title: 'Summit the Tower of David', description: 'Reach the viewpoint and report in.',
-          type: 'self_report', coordinates: { lat: 31.7760, lng: 35.2280 },
-          difficulty: 4, estimatedMinutes: 15, pointValue: 200, maxConcurrentTeams: 10, tags: ['outdoor'],
-        },
-      ],
+      id: 'stage-3', order: 2, title: 'משימת רצף',
+      tasks: [t({
+        id: 'task-3', title: 'שלושה שלבים', type: 'sequence',
+        description: 'השלימו את שלושת השלבים לפי הסדר.',
+        difficulty: 4, pointValue: 140, tags: ['demo'],
+        steps: [
+          { id: 'step-1', prompt: 'מתחו את הרגליים והקישו לאישור' },
+          { id: 'step-2', prompt: 'הקלידו את המילה: קדימה', answer: 'קדימה' },
+          { id: 'step-3', prompt: 'קחו נשימה עמוקה והקישו לאישור' },
+        ],
+      })],
+    },
+    {
+      id: 'stage-4', order: 3, title: 'סלפי ניצחון', isFinal: true,
+      tasks: [t({
+        id: 'task-4', title: 'צילום סיום', type: 'photo',
+        description: 'צלמו סלפי מנצח (כל תמונה מתקבלת אוטומטית) — וסיימתם את הדמו!',
+        pointValue: 160, tags: ['demo'],
+        smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true },
+      })],
     },
   ];
 
   return {
     id: GAME_ID,
     ownerUid: OWNER_UID,
-    title: 'Old City Treasure Hunt',
-    description: 'A bite-size race through Jerusalem’s Old City — gates, markets and a final climb.',
-    mode: 'team',
+    title: 'משחק לדוגמה: מירוץ הסלון',
+    description: 'דמו קצר שאפשר לשחק מכל מקום — בלי GPS ובלי מפעיל. רק תלחצו ותתחילו!',
+    mode: 'individual',
     stages,
     scoringPreset: 'fixed_points_speed',
     registrationFields: [
-      { id: 'name', label: 'Name', type: 'text', required: true, level: 'member' },
-      { id: 'teamName', label: 'Team name', type: 'text', required: true, level: 'team' },
+      { id: 'teamName', label: 'השם שלך', type: 'text', required: true, level: 'team' },
     ],
     visibility: 'public',
-    tags: ['outdoor', 'puzzle', 'family', 'jerusalem'],
-    approxLocation: { lat: 31.7767, lng: 35.2275, label: 'Jerusalem Old City' },
+    tags: ['demo', 'מכל-מקום', 'דוגמה'],
+    approxLocation: { lat: 32.0853, lng: 34.7818, label: 'משחק לדוגמה' },
     playCount: 0,
     createdAt: now,
     updatedAt: now,
