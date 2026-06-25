@@ -4,7 +4,7 @@
 // All event-specific geography (race route, station coordinates) lives in the
 // Firestore game template (Game.stages[].tasks[].coordinates), not here.
 
-import type { GeoPoint } from './types';
+import type { GeoPoint, TriggerMode, GameRequirement } from './types';
 
 
 // ─── Coordinate validation ────────────────────────────────────────────────────
@@ -48,6 +48,86 @@ export function haversineKm(a: GeoPoint, b: GeoPoint): number {
       Math.cos((b.lat * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.asin(Math.sqrt(h));
+}
+
+
+// ─── Task trigger modes (change: task-trigger-modes) ──────────────────────────
+// Shared by the server completion gate (functions/src/runs/index.ts completeTask)
+// and the creator wizard so the proximity rule can't drift between them.
+
+/** Default trigger radius (metres) for a mode. 0 means "no proximity gate". */
+export function defaultRadiusFor(mode: TriggerMode): number {
+  switch (mode) {
+    case 'radius': return 40;
+    case 'exact':  return 4;
+    case 'instant':
+    case 'locationless':
+    default:       return 0;
+  }
+}
+
+/**
+ * Evaluate whether a task may complete given the participant's distance from the
+ * task coordinates. `radius`/`exact` require a finite distance within the radius
+ * (defaulting to defaultRadiusFor); `instant`/`locationless` always pass (no GPS).
+ */
+export function evaluateTrigger(
+  mode: TriggerMode,
+  distanceM: number | undefined,
+  radiusM?: number,
+): { ok: boolean; reason?: string } {
+  if (mode === 'instant' || mode === 'locationless') return { ok: true };
+  if (distanceM == null || !Number.isFinite(distanceM)) {
+    return { ok: false, reason: 'Location required to check in here' };
+  }
+  const limit = radiusM != null && Number.isFinite(radiusM) ? radiusM : defaultRadiusFor(mode);
+  if (distanceM > limit) {
+    return { ok: false, reason: `Too far from the spot (${Math.round(distanceM)}m away)` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Resolve the effective trigger mode for a (possibly legacy) task. An explicit
+ * `triggerMode` wins; otherwise `locationless` → 'locationless', a `geofence`
+ * type → 'radius', and everything else defaults to 'radius'. Keeps the invariant
+ * locationless ⇔ 'locationless'.
+ */
+export function normalizeTriggerMode(task: {
+  triggerMode?: TriggerMode;
+  locationless?: boolean;
+  type?: string;
+}): TriggerMode {
+  if (task.triggerMode) return task.triggerMode;
+  if (task.locationless) return 'locationless';
+  // 'geofence' type and any plain located task both behave as a radius gate.
+  return 'radius';
+}
+
+
+// ─── Game welcome-screen helpers (change: fix-live-launch-demo-text) ──────────
+// Derive an ACCURATE requirement indicator from real task config instead of
+// trusting free-text claims in a description (which is how demo placeholder copy
+// leaked onto live games). Returns only enum keys — never any placeholder text.
+
+/** 'gps' if any task is located (radius/exact); 'anywhere' if all are instant/locationless. */
+export function describeGameRequirements(game: {
+  stages?: Array<{ tasks?: Array<{ triggerMode?: TriggerMode; locationless?: boolean; type?: string }> }>;
+}): GameRequirement {
+  for (const stage of game.stages ?? []) {
+    for (const task of stage.tasks ?? []) {
+      const mode = normalizeTriggerMode(task);
+      if (mode === 'radius' || mode === 'exact') return 'gps';
+    }
+  }
+  return 'anywhere';
+}
+
+/** The real game description, trimmed. Blank/whitespace → '' so the UI shows a
+ *  neutral empty state rather than any demo fallback copy. */
+export function selectGameDescription(game: { description?: string }): string {
+  const d = (game.description ?? '').trim();
+  return d;
 }
 
 

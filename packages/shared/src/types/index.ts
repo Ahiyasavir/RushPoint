@@ -101,6 +101,15 @@ export type GameMode        = 'individual' | 'team';
 export type ScoringPreset   = 'time_only' | 'fixed_points_speed' | 'smart_weighted';
 export type TaskType        = 'field' | 'smart_station' | 'photo' | 'self_report'
                             | 'quiz' | 'numeric' | 'geofence' | 'sequence';
+// How a task is triggered/completed (change: task-trigger-modes). Default 'radius'.
+//   radius       — fires within a creator-set radius (default 40m, editable)
+//   exact        — fires only on precise arrival (tight default 4m, editable)
+//   instant      — fires immediately on stage advance, no GPS/proximity check
+//   locationless — purely digital, no map pin, no geospatial gate
+export type TriggerMode     = 'radius' | 'exact' | 'instant' | 'locationless';
+// Accurate play-anywhere vs GPS-required indicator for a game's welcome screen
+// (change: fix-live-launch-demo-text), derived from task trigger modes.
+export type GameRequirement = 'gps' | 'anywhere';
 export type StageStatus     = 'locked' | 'active' | 'completed';
 export type TaskStatus      = 'unassigned' | 'assigned' | 'completed' | 'skipped';
 export type RunStatus       = 'draft' | 'live' | 'finished';
@@ -204,6 +213,12 @@ export interface Task {
   status?: StationStatus;       // operator override: paused/closed
   maxDurationMinutes?: number;  // staff warning threshold
   smart?: SmartStationConfig;
+  // How this task is triggered (change: task-trigger-modes). Default 'radius'.
+  // `geofenceRadiusMeters` carries the radius for 'radius'/'exact'. The
+  // `locationless` boolean below is kept in sync (triggerMode==='locationless'
+  // ⇔ locationless===true) for backward compatibility. Use normalizeTriggerMode()
+  // to resolve the effective mode for legacy tasks (no triggerMode set).
+  triggerMode?: TriggerMode;
   // A general task with no fixed map location — can be done from anywhere
   // (no travel, no map marker, no distance). Routing treats transit as zero.
   locationless?: boolean;
@@ -312,6 +327,9 @@ export interface PublicGame {
   stageCount: number;
   taskCount: number;
   estimatedTotalMinutes: number;
+  // Accurate GPS requirement derived from task trigger modes at publish time
+  // (change: fix-live-launch-demo-text). 'gps' if any located task, else 'anywhere'.
+  requirement?: GameRequirement;
   createdAt: string;
   updatedAt: string;
 }
