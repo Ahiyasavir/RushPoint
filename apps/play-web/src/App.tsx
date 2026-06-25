@@ -8,8 +8,17 @@ import GamePromoScreen from './screens/GamePromoScreen';
 import PublicLeaderboardScreen from './screens/PublicLeaderboardScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
+import { I18nProvider, useT } from './i18nContext';
 
 export default function App() {
+  return (
+    <I18nProvider>
+      <AppInner />
+    </I18nProvider>
+  );
+}
+
+function AppInner() {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   // Staff mode is entered via ?staff in the URL or a restored staff session.
@@ -26,12 +35,20 @@ export default function App() {
     () => new URLSearchParams(window.location.search).get('board'),
   );
 
+  const { dir, lang } = useT();
+
   useEffect(() => {
     ensureAuth().then(() => {
       setSession(loadSession());
       setReady(true);
     });
   }, []);
+
+  // Reflect the active language on the document root for RTL/LTR.
+  useEffect(() => {
+    document.documentElement.dir = dir;
+    document.documentElement.lang = lang;
+  }, [dir, lang]);
 
   if (!ready) {
     return (

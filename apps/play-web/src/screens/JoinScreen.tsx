@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import type { RegistrationField } from '@rushpoint/shared';
+import { resolveDisplayName, resolveRegistrationFields, type RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
+import { useT } from '../i18nContext';
 
 const LINK_CODE = (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim();
 
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
+  const { t, toggleLang, lang } = useT();
   const [code, setCode] = useState(LINK_CODE);
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -23,10 +25,10 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     setErr(''); setBusy(true);
     try {
       const i = await getJoinInfo({ code: code.trim().toUpperCase() });
-      if (i.runStatus === 'finished') { setErr('This race has already finished.'); return; }
+      if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Invalid code');
+      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.invalidCode);
     } finally { setBusy(false); }
   }
 
@@ -35,7 +37,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     setErr(''); setBusy(true);
     try {
       const memberNames = members.map((m) => m.trim()).filter(Boolean);
-      const displayName = (values['teamName'] || memberNames[0] || 'Team').toString();
+      const displayName = resolveDisplayName(info.mode, values, memberNames);
       const res = await joinRun({ code: code.trim().toUpperCase(), displayName, registrationData: values, memberNames });
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
@@ -44,7 +46,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       saveSession(session);
       onJoined(session);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Join failed');
+      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.joinFailed);
     } finally { setBusy(false); }
   }
 
@@ -76,9 +78,17 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
               RushPoint
             </h1>
             <p className="text-zinc-500 text-base leading-relaxed max-w-xs">
-              Enter the access code from your host to join the race
+              {t.join.subtitle}
             </p>
           </div>
+
+          {/* Language toggle */}
+          <button
+            onClick={toggleLang}
+            className="absolute top-4 end-4 text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
+          >
+            {lang === 'he' ? 'English' : 'עברית'}
+          </button>
         </div>
 
         {/* Code input section */}
@@ -87,7 +97,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
             <input
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="ABC 123"
+              placeholder={t.join.codePlaceholder}
               className="
                 w-full px-6 py-5 rounded-2xl
                 text-center text-3xl font-mono font-bold tracking-[0.5em]
@@ -111,7 +121,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
             onClick={lookup}
             className="!py-4 !text-lg !rounded-2xl"
           >
-            {busy ? 'Looking up…' : 'Continue →'}
+            {busy ? t.join.lookingUp : t.join.continue}
           </Button>
 
           {onStaff && (
@@ -119,7 +129,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
               className="text-zinc-400 text-sm mt-5 mx-auto block font-medium hover:text-zinc-300 transition-colors"
               onClick={onStaff}
             >
-              I'm staff →
+              {t.join.staff}
             </button>
           )}
 
@@ -127,9 +137,9 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           <div className="mt-auto pt-10">
             <div className="grid grid-cols-3 gap-2.5">
               {[
-                { icon: '🔑', label: 'Join', sub: 'Enter the code' },
-                { icon: '🧭', label: 'Race', sub: 'Get routed to tasks' },
-                { icon: '🏆', label: 'Win', sub: 'Climb the board' },
+                { icon: '🔑', label: t.join.how1Label, sub: t.join.how1Sub },
+                { icon: '🧭', label: t.join.how2Label, sub: t.join.how2Sub },
+                { icon: '🏆', label: t.join.how3Label, sub: t.join.how3Sub },
               ].map((s, i) => (
                 <div
                   key={s.label}
@@ -143,7 +153,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
               ))}
             </div>
             <p className="text-center text-[11px] text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
-              <span className="text-rp-go">●</span> No account needed. Just your phone.
+              <span className="text-rp-go">●</span> {t.join.noAccountNeeded}
             </p>
           </div>
         </div>
@@ -153,8 +163,13 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
   // ── Step 2: registration form ──────────────────────────────────────────────
   const accent = info.branding?.primaryColor ?? '#FF5722';
-  const teamFields = info.registrationFields.filter((f) => f.level === 'team');
-  const memberFields = info.registrationFields.filter((f) => f.level === 'member');
+  const isSolo = info.mode !== 'team';
+  // Solo play = one entity, so collapse to a single name field (change:
+  // solo-mode-registration). Team mode is returned unchanged.
+  const fields = resolveRegistrationFields(info.mode, info.registrationFields);
+  const teamFields = fields.filter((f) => f.level === 'team');
+  const memberFields = fields.filter((f) => f.level === 'member');
+  const description = (info.description ?? '').trim();
 
   return (
     <Screen>
@@ -167,8 +182,15 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
         <h1 dir="auto" className="font-brand text-3xl font-extrabold tracking-tight leading-snug" style={{ color: accent }}>
           {info.branding?.name ?? info.title}
         </h1>
-        {info.description && (
-          <p dir="auto" className="text-zinc-400 text-sm mt-2 leading-relaxed">{info.description}</p>
+        {/* Real description, or a neutral non-demo empty state (change:
+            fix-live-launch-demo-text). Never demo placeholder copy. */}
+        <p dir="auto" className="text-zinc-400 text-sm mt-2 leading-relaxed">
+          {description || t.promo.noDescription}
+        </p>
+        {info.requirement && (
+          <div className="inline-flex items-center text-xs font-medium text-zinc-500 bg-app-card border border-glass-border rounded-full px-3 py-1 mt-3">
+            {info.requirement === 'gps' ? t.promo.reqGps : t.promo.reqAnywhere}
+          </div>
         )}
       </div>
 
@@ -179,22 +201,28 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
         <Card className="p-5">
           <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
-            <span>{info.mode === 'team' ? '👥' : '👤'}</span>
-            {info.mode === 'team' ? 'Team members' : 'Your name'}
+            <span>{isSolo ? '👤' : '👥'}</span>
+            {isSolo ? t.join.yourName : t.join.teamMembers}
           </div>
-          {members.map((m, i) => (
-            <div key={i} className="flex gap-2 mb-2.5">
-              <Input value={m} placeholder={`Member ${i + 1}`}
-                onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
-              {members.length > 1 && (
-                <button className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
-              )}
-            </div>
-          ))}
-          {info.mode === 'team' && (
-            <button className="text-rp-fire text-sm mt-1 font-bold flex items-center gap-1" onClick={() => setMembers([...members, ''])}>
-              + Add member
-            </button>
+          {isSolo ? (
+            // Solo: exactly one name input. No member list, no add-member.
+            <Input value={members[0] ?? ''} placeholder={t.join.yourName}
+              onChange={(e) => setMembers([e.target.value])} />
+          ) : (
+            <>
+              {members.map((m, i) => (
+                <div key={i} className="flex gap-2 mb-2.5">
+                  <Input value={m} placeholder={t.join.memberPlaceholder(i + 1)}
+                    onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
+                  {members.length > 1 && (
+                    <button className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                  )}
+                </div>
+              ))}
+              <button className="text-rp-fire text-sm mt-1 font-bold flex items-center gap-1" onClick={() => setMembers([...members, ''])}>
+                ＋ {t.join.addMember}
+              </button>
+            </>
           )}
           {memberFields.filter((f) => f.id !== 'name').map((f) => (
             <div key={f.id} className="mt-4">
@@ -211,7 +239,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
         onClick={submit}
         className="mt-5 !py-4 !text-lg !rounded-2xl"
       >
-        {busy ? 'Joining…' : '🏁 Join the race'}
+        {busy ? t.join.joining : t.join.joinCta}
       </Button>
     </Screen>
   );
@@ -232,7 +260,7 @@ function FieldInput({ field, value, onChange }: { field: RegistrationField; valu
         <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
         <select value={value} onChange={(e) => onChange(e.target.value)}
           className="w-full px-4 py-4 rounded-2xl bg-white border border-glass-border text-zinc-100 focus:outline-none focus:border-rp-fire/40">
-          <option value="">—</option>
+          <option value="">…</option>
           {(field.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       </div>

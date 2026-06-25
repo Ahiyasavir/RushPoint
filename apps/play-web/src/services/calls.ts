@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement } from '@rushpoint/shared';
 
 export interface JoinInfo {
   context: { ownerUid: string; gameId: string; runId: string };
@@ -9,6 +9,9 @@ export interface JoinInfo {
   branding: GameBranding | null;
   registrationFields: RegistrationField[];
   runStatus: string;
+  // Accurate GPS requirement derived from task trigger modes (change:
+  // fix-live-launch-demo-text). Optional until the server populates it.
+  requirement?: GameRequirement;
 }
 export const getJoinInfo = callable<{ code: string }, JoinInfo>('getJoinInfo');
 

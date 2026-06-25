@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, type PublicGame } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, selectGameDescription, type PublicGame } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { Button, Card, Screen } from '../components/ui';
+import { useT } from '../i18nContext';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; onPlay: () => void }) {
+  const { t } = useT();
   const [game, setGame] = useState<PublicGame | null | undefined>(undefined);
 
   useEffect(() => {
@@ -35,10 +37,10 @@ export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; on
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
           <div className="text-5xl">🧭</div>
           <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
-            Adventure not found
+            {t.promo.notFound}
           </h1>
-          <p className="text-zinc-500 text-sm">This game isn&apos;t public (yet). Got an access code?</p>
-          <Button className="mt-2" onClick={onPlay}>Enter a code</Button>
+          <p className="text-zinc-500 text-sm">{t.promo.notPublic}</p>
+          <Button className="mt-2" onClick={onPlay}>{t.promo.enterCode}</Button>
         </div>
       </Screen>
     );
@@ -61,7 +63,7 @@ export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; on
           )}
           {/* Badge */}
           <div className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
-            RushPoint adventure
+            {t.promo.badge}
           </div>
         </div>
 
@@ -69,19 +71,28 @@ export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; on
           {game.title}
         </h1>
         {game.ownerDisplayName && (
-          <p className="text-zinc-500 text-sm mb-3">by {game.ownerDisplayName}</p>
+          <p className="text-zinc-500 text-sm mb-3">{t.promo.by(game.ownerDisplayName)}</p>
         )}
 
-        {game.description && (
-          <p dir="auto" className="text-zinc-400 text-sm mb-5 leading-relaxed">{game.description}</p>
+        {/* Real description, or a neutral non-demo empty state (change:
+            fix-live-launch-demo-text). Never demo placeholder copy. */}
+        <p dir="auto" className="text-zinc-400 text-sm mb-3 leading-relaxed">
+          {selectGameDescription(game) || t.promo.noDescription}
+        </p>
+
+        {/* Accurate GPS requirement derived server-side, when available. */}
+        {game.requirement && (
+          <div className="inline-flex self-start items-center text-xs font-medium text-zinc-500 bg-app-card border border-glass-border rounded-full px-3 py-1 mb-5">
+            {game.requirement === 'gps' ? t.promo.reqGps : t.promo.reqAnywhere}
+          </div>
         )}
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-2.5 mb-5">
           {[
-            { label: 'Stages', value: String(game.stageCount), emoji: '📋' },
-            { label: 'Tasks', value: String(game.taskCount), emoji: '✅' },
-            { label: 'Time', value: mins ? `~${mins}m` : '—', emoji: '⏱️' },
+            { label: t.promo.stages, value: String(game.stageCount), emoji: '📋' },
+            { label: t.promo.tasks, value: String(game.taskCount), emoji: '✅' },
+            { label: t.promo.time, value: mins ? `~${mins}m` : '?', emoji: '⏱️' },
           ].map((s) => (
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
               <div className="text-base mb-0.5">{s.emoji}</div>
@@ -103,16 +114,16 @@ export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; on
           >
             🏁
           </div>
-          <div className="text-sm font-semibold text-zinc-200 mb-1">Playing in this event?</div>
-          <p className="text-xs text-zinc-500 mb-4">Your host will share an access code when the race goes live.</p>
-          <Button onClick={onPlay}>I have a code →</Button>
+          <div className="text-sm font-semibold text-zinc-200 mb-1">{t.promo.playingTitle}</div>
+          <p className="text-xs text-zinc-500 mb-4">{t.promo.playingSub}</p>
+          <Button onClick={onPlay}>{t.promo.haveCode}</Button>
         </Card>
       </div>
 
       <a href={CREATOR_URL} target="_blank" rel="noreferrer"
         className="block text-center text-sm font-semibold py-4 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
       >
-        ✨ Want to run your own? Build a race →
+        {t.promo.buildOwn}
       </a>
     </Screen>
   );

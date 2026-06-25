@@ -26,6 +26,23 @@ export function clearSession() {
   localStorage.removeItem(KEY);
 }
 
+// ── Language preference (change: play-web-i18n-hebrew) — Hebrew by default ────
+export type Lang = 'he' | 'en';
+const LANG_KEY = 'rushpoint.lang';
+
+export function loadLang(): Lang {
+  try {
+    const raw = localStorage.getItem(LANG_KEY);
+    return raw === 'en' ? 'en' : 'he';
+  } catch {
+    return 'he';
+  }
+}
+
+export function saveLang(lang: Lang) {
+  try { localStorage.setItem(LANG_KEY, lang); } catch { /* ignore */ }
+}
+
 // ── Staff session: which run a staff member signed in to (custom-token auth) ──
 export interface StaffSession {
   ownerUid: string;
