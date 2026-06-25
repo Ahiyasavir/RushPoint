@@ -4,6 +4,30 @@
 > Architecture: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md) ·
 > **Going live + payments: [DEPLOY.md](DEPLOY.md)**
 
+## ⚙️ How we work — Spec-Driven Development + TDD (mandatory)
+
+Every non-trivial change goes through **OpenSpec** (spec-driven) and is built **test-first (TDD)**.
+Trivial one-liners (typo, copy tweak, obvious bugfix with an existing test) may skip the ceremony.
+
+**The loop** (slash commands provided by OpenSpec, see `.claude/commands/opsx/`):
+1. `/opsx:propose "<what you want>"` — generates `openspec/changes/<name>/` with **proposal.md**
+   (what & why) → **design.md** (how + test strategy) → **tasks.md** (RED→GREEN→REFACTOR steps).
+2. Review/adjust the artifacts, then `/opsx:apply` — implement the tasks **strictly in order**.
+3. `/opsx:archive` — once all gates are green, fold the change into the living specs.
+
+**TDD is enforced by the task ordering** (see `openspec/config.yaml` rules): the first task of any
+logic/callable change is *write a failing test*, then minimum code to green, then refactor. Test lanes:
+- **Pure logic** (scoring/geo/validation/routing) → co-located **vitest** `*.test.ts` in `functions/`
+  *or* a `scripts/test-*.ts` tsx assertion script — both run by `npm test` (vitest + the
+  `scripts/run-unit-tests.mjs` aggregator). No emulator needed. The planned v2.1 work has a
+  RED-phase blueprint in `functions/src/__planned__/v21-*.todo.test.ts` (`test.todo` per roadmap row).
+- **Callable behavior** → add failing assertions to `scripts/e2e-verify.mjs`, then implement (`npm run e2e`).
+- **UI** → verify via the preview tools (no component test runner).
+
+**Gates before any change is done:** `npm run typecheck` · `npm run lint` · `npm test` ·
+`npm run creator:build` · `npm run e2e` — all green. Project context + per-artifact rules that drive
+proposals/designs/tasks live in [openspec/config.yaml](openspec/config.yaml).
+
 RushPoint is a **web platform where any creator builds and runs their own real-world team
 "race adventure" game** (scavenger-hunt / amazing-race style). A creator designs a game
 (stages + geolocated tasks), launches a live run, shares an access code; participants join on
@@ -47,8 +71,9 @@ npm run dev:all    # boots EVERYTHING in one terminal
 ### Required gates (run before declaring anything done)
 ```bash
 npm run typecheck        # all workspaces — must pass
-npm run creator:build    # production build of creator-web — must pass
+npm test                 # pure-logic lane: scripts/test-*.ts aggregator + vitest in functions/
 npm run lint             # creator-web eslint — 0 errors (style warnings ok)
+npm run creator:build    # production build of creator-web — must pass
 npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
 ```
 `npm run e2e` exercises createGame → updateGame → launchRun → join → start → play (code + photo +

@@ -15,7 +15,9 @@
         "build": "turbo run build",
         "typecheck": "turbo run typecheck",
         "lint": "turbo run lint",
-        "test": "turbo run test",
+        "test": "node scripts/run-unit-tests.mjs && turbo run test",
+        "test:unit": "node scripts/run-unit-tests.mjs",
+        "test:vitest": "turbo run test",
         "lint:fix": "turbo run lint -- --fix",
         "format": "prettier --write \"**/*.{ts,tsx,js,json,md,css}\"",
         "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,css}\"",
@@ -44,6 +46,8 @@
         "seed": "npm run seed      --workspace=scripts",
         "seed:reset": "npm run seed:reset --workspace=scripts",
         "e2e": "node scripts/e2e-verify.mjs",
+        "test:rules": "node scripts/test-rules.mjs",
+        "emails:export": "node scripts/export-emails.mjs",
         "sync": "node scripts/sync-sheets.mjs",
         "push:sheet": "node scripts/push-sheet.mjs",
         "simulate": "node scripts/simulate-tournament.mjs",
@@ -57,6 +61,7 @@
         "dev:seed": "wait-on tcp:127.0.0.1:8080 tcp:127.0.0.1:9099 && node scripts/seed-local.mjs"
     },
     "devDependencies": {
+        "@firebase/rules-unit-testing": "^4.0.1",
         "@typescript-eslint/eslint-plugin": "^7.14.0",
         "@typescript-eslint/parser": "^7.14.0",
         "ajv": "^8.20.0",
