@@ -19,7 +19,7 @@ all green).
 |---|---|
 | `prelaunch-critical-fixes` | ✅ archived (`2026-06-26-prelaunch-critical-fixes`) → 5 living specs; all 5 gates green. 49/53 tasks done; 4 human-only QA tasks (preview smoke ×2, **Hebrew native-speaker review of the 48 i18n keys**, creator smoke) remain pre-deploy. |
 | `prelaunch-polish` | ✅ archived (`2026-06-26-prelaunch-polish`) → legal-page-polish + locationpicker-a11y specs; all 5 gates green (P1–P12) |
-| `play-web-store-readiness` | 📋 backlog |
+| `play-web-store-readiness` | ✅ archived (`2026-06-26-play-web-store-readiness`) → pwa-installability spec; redesigned icon.svg + 3 raster icons (192/512/512-maskable) via `npm run icons` (sharp); manifest/sw/index wired; test-manifest.ts + STORE.md runbook; all 5 gates green (maskable.app visual gate = human) |
 | `fix-live-launch-demo-text` | ✅ archived (`2026-06-26-fix-live-launch-demo-text`) → accurate-launch-welcome spec; requirement now derived server-side in publishGame+getJoinInfo; seed copy cleaned; all 5 gates green |
 
 ## 2. Security & reliability — `v21-security-and-reliability.todo.test.ts`

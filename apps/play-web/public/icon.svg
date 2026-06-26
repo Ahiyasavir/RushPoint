@@ -1,6 +1,46 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect width="64" height="64" rx="14" fill="#0B0F17"/>
-  <circle cx="32" cy="32" r="16" fill="none" stroke="#22D3EE" stroke-width="4"/>
-  <circle cx="32" cy="32" r="5" fill="#22D3EE"/>
-  <path d="M32 6 L36 16 L28 16 Z" fill="#F59E0B"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Warm energetic base gradient (matches brand theme_color #F97316) -->
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FCA855"/>
+      <stop offset="0.45" stop-color="#F97316"/>
+      <stop offset="1" stop-color="#DC4F08"/>
+    </linearGradient>
+    <!-- Glossy top-dome highlight -> depth -->
+    <radialGradient id="gloss" cx="256" cy="150" r="300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Soft cyan glow halo (baked as opacity ramp, NOT a blur filter) -->
+    <radialGradient id="halo" cx="256" cy="256" r="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0.70" stop-color="#22D3EE" stop-opacity="0"/>
+      <stop offset="0.86" stop-color="#22D3EE" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Needle vertical shading -> 3D dimensionality -->
+    <linearGradient id="needle" x1="256" y1="120" x2="256" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFE3C2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Full-bleed background (OS masks corners for adaptive icons) -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#gloss)"/>
+
+  <!-- Glow halo + track ring + cyan speed arc -->
+  <circle cx="256" cy="256" r="150" fill="url(#halo)"/>
+  <circle cx="256" cy="256" r="132" fill="none" stroke="#FFFFFF" stroke-opacity="0.85" stroke-width="10"/>
+  <path d="M 256 124 A 132 132 0 0 1 388 256" fill="none" stroke="#22D3EE" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- Dynamic forward-leaning needle (motion) -->
+  <g transform="rotate(38 256 256)">
+    <path d="M256 132 L286 256 L256 286 L226 256 Z" fill="url(#needle)"/>
+    <path d="M256 380 L286 256 L256 286 L226 256 Z" fill="#0B0F17" fill-opacity="0.35"/>
+  </g>
+
+  <!-- Center hub -->
+  <circle cx="256" cy="256" r="20" fill="#0B0F17"/>
+  <circle cx="256" cy="256" r="9" fill="#22D3EE"/>
 </svg>

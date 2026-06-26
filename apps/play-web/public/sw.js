@@ -5,8 +5,8 @@
  * caches Firebase traffic (Firestore/Auth/Functions/Storage are cross-origin and
  * handled by the SDK's own offline cache); only same-origin GETs are touched.
  */
-const CACHE = 'rushpoint-play-v1';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'rushpoint-play-v2';
+const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

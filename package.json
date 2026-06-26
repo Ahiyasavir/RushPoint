@@ -46,6 +46,7 @@
         "seed": "npm run seed      --workspace=scripts",
         "seed:reset": "npm run seed:reset --workspace=scripts",
         "e2e": "node scripts/e2e-verify.mjs",
+        "icons": "node scripts/gen-pwa-icons.mjs",
         "test:rules": "node scripts/test-rules.mjs",
         "emails:export": "node scripts/export-emails.mjs",
         "sync": "node scripts/sync-sheets.mjs",
@@ -71,6 +72,7 @@
         "http-proxy": "^1.18.1",
         "localtunnel": "^2.0.2",
         "prettier": "^3.3.0",
+        "sharp": "^0.35.2",
         "turbo": "^2.0.0",
         "typescript": "^5.4.0",
         "wait-on": "^8.0.1"
