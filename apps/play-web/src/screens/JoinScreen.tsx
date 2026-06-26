@@ -5,11 +5,11 @@ import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 
-const LINK_CODE = (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim();
-
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
   const { t, toggleLang, lang } = useT();
-  const [code, setCode] = useState(LINK_CODE);
+  // Evaluate the ?code= link param at mount time, not at module-parse time (P9).
+  const [linkCode] = useState<string>(() => (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim());
+  const [code, setCode] = useState(linkCode);
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [members, setMembers] = useState<string[]>(['']);
@@ -18,7 +18,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (LINK_CODE.length >= 4) void lookup();
+    if (linkCode.length >= 4) void lookup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -92,6 +92,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           {/* Language toggle */}
           <button
             onClick={toggleLang}
+            aria-label={lang === 'he' ? 'Switch to English' : 'עבור לעברית'}
             className="absolute top-4 end-4 text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
           >
             {lang === 'he' ? 'English' : 'עברית'}
@@ -222,7 +223,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
                   <Input value={m} placeholder={t.join.memberPlaceholder(i + 1)}
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
-                    <button className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                    <button aria-label={lang === 'he' ? `הסר ${m}` : `Remove ${m}`} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
                   )}
                 </div>
               ))}

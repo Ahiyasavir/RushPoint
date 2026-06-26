@@ -69,6 +69,8 @@ export default function LocationPicker({
   const [results, setResults] = useState<GeoResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState('');
+  const [activeIndex, setActiveIndex] = useState(-1);
+  useEffect(() => { setActiveIndex(-1); }, [results]);
 
   const hasCoord = isValidCoord(lat, lng) && (lat !== 0 || lng !== 0);
 
@@ -153,7 +155,12 @@ export default function LocationPicker({
           <Input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSearchErr(''); }}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void runSearch(); } }}
+            onKeyDown={(e) => {
+              if (results.length && e.key === 'ArrowDown') { e.preventDefault(); setActiveIndex((i) => Math.min(i + 1, results.length - 1)); }
+              else if (results.length && e.key === 'ArrowUp') { e.preventDefault(); setActiveIndex((i) => Math.max(i - 1, 0)); }
+              else if (e.key === 'Enter') { e.preventDefault(); if (activeIndex >= 0 && results[activeIndex]) choose(results[activeIndex]); else void runSearch(); }
+              else if (e.key === 'Escape') { setResults([]); setActiveIndex(-1); }
+            }}
             dir="auto"
             placeholder="🔍 חפשו כתובת או מקום…"
             className="flex-1"
@@ -169,14 +176,15 @@ export default function LocationPicker({
         </div>
         {searchErr && <p className="text-rp-alert text-xs mt-1">{searchErr}</p>}
         {results.length > 0 && (
-          <ul className="absolute z-20 mt-1 w-full bg-app-raised border border-glass-border rounded-lg overflow-hidden shadow-lg max-h-56 overflow-y-auto">
+          <ul role="listbox" className="absolute z-20 mt-1 w-full bg-app-raised border border-glass-border rounded-lg overflow-hidden shadow-lg max-h-56 overflow-y-auto">
             {results.map((r, i) => (
-              <li key={i}>
+              <li key={i} role="option" aria-selected={i === activeIndex}>
                 <button
                   type="button"
                   onClick={() => choose(r)}
+                  onMouseEnter={() => setActiveIndex(i)}
                   dir="auto"
-                  className="w-full text-start px-3 py-2 text-sm text-zinc-700 hover:bg-rp-fire/10 transition-colors"
+                  className={`w-full text-start px-3 py-2 text-sm text-zinc-700 hover:bg-rp-fire/10 transition-colors ${i === activeIndex ? 'bg-rp-fire/10' : ''}`}
                 >
                   📍 {r.label}
                 </button>

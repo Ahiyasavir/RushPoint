@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Public leaderboard is displayed whenever boardCode is set
 The routing logic in `apps/play-web/src/App.tsx` SHALL display the `PublicLeaderboardScreen`

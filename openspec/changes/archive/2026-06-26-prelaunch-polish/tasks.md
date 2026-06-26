@@ -334,18 +334,18 @@ added, so no e2e additions are needed for this change.
 
 All of the following must be true before this change is considered complete:
 
-- [ ] `npm run typecheck` exits 0
-- [ ] `npm run lint` exits 0
-- [ ] `npm test` exits 0 and includes `"PASS legal-page-polish"`
-- [ ] `npm run creator:build` exits 0
-- [ ] `npm run e2e` exits 0 (26/26 assertions green)
-- [ ] `LegalPage.tsx` back button shows English text when `activeLang === 'en'`
-- [ ] `LegalPage.tsx` Section 7 in both HE and EN contains no `|` character
-- [ ] `renderMarkdown` HTML-escapes raw lines before bold substitution
-- [ ] `LocationPicker.tsx` results list handles ArrowDown/ArrowUp/Enter/Escape
-- [ ] Language toggle, remove-member ✕, and hint buttons all have `aria-label`
-- [ ] `RoutePreviewMap.tsx` uses `drawRouteRef.current()` in all event listeners
-- [ ] `App.tsx` shows public leaderboard when `boardCode` is set (session-independent)
-- [ ] `JoinScreen.tsx` `LINK_CODE` is inside the component (no module-level URLSearchParams)
-- [ ] `PhotoEntry` clears preview + file state on file rejection
-- [ ] `TaskRunner` `ctx` is wrapped in `useMemo` with three string deps
+- [x] `npm run typecheck` exits 0
+- [x] `npm run lint` exits 0
+- [x] `npm test` exits 0 and includes `"PASS legal-page-polish"`
+- [x] `npm run creator:build` exits 0
+- [x] `npm run e2e` exits 0 (26/26 assertions green)
+- [x] `LegalPage.tsx` back button shows English text when `activeLang === 'en'`
+- [x] `LegalPage.tsx` Section 7 in both HE and EN contains no `|` character
+- [x] `renderMarkdown` HTML-escapes raw lines before bold substitution
+- [x] `LocationPicker.tsx` results list handles ArrowDown/ArrowUp/Enter/Escape
+- [x] Language toggle, remove-member ✕, and hint buttons all have `aria-label`
+- [x] `RoutePreviewMap.tsx` uses `drawRouteRef.current()` in all event listeners
+- [x] `App.tsx` shows public leaderboard when `boardCode` is set (session-independent)
+- [x] `JoinScreen.tsx` `LINK_CODE` is inside the component (no module-level URLSearchParams)
+- [x] `PhotoEntry` clears preview + file state on file rejection
+- [x] `TaskRunner` `ctx` is wrapped in `useMemo` with three string deps

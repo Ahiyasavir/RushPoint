@@ -4,6 +4,7 @@
 // leaf string leaks Latin-script English (outside a small brand/units whitelist).
 // No emulator.
 //   npx tsx scripts/test-i18n-parity.ts
+import { readFileSync } from 'node:fs';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
 
@@ -82,6 +83,16 @@ for (const [app, t] of [['creator-web', creatorT], ['play-web', playT]] as const
     check(`play-web.${lang}: t.final fn keys are functions`,
       FN_KEYS.final.every((k) => typeof final?.[k] === 'function'));
   }
+}
+
+// ── P9 regression guard (change: prelaunch-polish) ───────────────────────────
+// JoinScreen must evaluate the ?code= link param at component mount, not at
+// module-parse time — so no module-level access to window.location.
+{
+  const src = readFileSync(new URL('../apps/play-web/src/screens/JoinScreen.tsx', import.meta.url), 'utf8');
+  const moduleScope = src.split('export default function')[0];
+  check('JoinScreen: no module-level window.location access (P9)',
+    !/window\.location/.test(moduleScope));
 }
 
 console.log(`\n${failures === 0 ? 'ALL I18N PARITY TESTS PASSED' : failures + ' TEST(S) FAILED'}`);

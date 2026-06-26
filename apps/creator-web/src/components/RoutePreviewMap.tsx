@@ -23,6 +23,11 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
       && (t.coordinates.lat !== 0 || t.coordinates.lng !== 0))
     .map((t) => ({ title: t.title || 'Task', lat: t.coordinates.lat, lng: t.coordinates.lng }));
 
+  // Keep a ref to the latest drawRoute closure so the map's 'load'/'styledata'
+  // listeners (registered once at mount) always call the current version — not
+  // the one captured when stops were still empty (P7 stale-closure bug).
+  const drawRouteRef = useRef<() => void>(() => {});
+
   function drawRoute() {
     const m = map.current;
     if (!m || !m.isStyleLoaded()) return; // 'load'/'styledata' will call again when ready
@@ -40,6 +45,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
       paint: { 'line-color': '#22c55e', 'line-width': 3, 'line-dasharray': [2, 1.5], 'line-opacity': 0.8 },
     });
   }
+  drawRouteRef.current = drawRoute;
 
   useEffect(() => {
     if (!ref.current || map.current) return;
@@ -50,8 +56,8 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
       attributionControl: { compact: true },
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    map.current.on('load', drawRoute);
-    map.current.on('styledata', drawRoute); // re-add the line after a tile-style swap
+    map.current.on('load', () => drawRouteRef.current());
+    map.current.on('styledata', () => drawRouteRef.current()); // re-add the line after a tile-style swap
     return () => { map.current?.remove(); map.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

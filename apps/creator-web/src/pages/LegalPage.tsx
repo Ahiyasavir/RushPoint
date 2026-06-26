@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { renderInline } from './legalMarkdown';
 
 type DocType = 'privacy' | 'terms';
 
@@ -137,7 +138,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 ## 7. שמירת מידע ומחיקה
 
-| סוג נתון | תקופת שמירה |
+**תקופות שמירת מידע:**
 - נתוני חשבון יוצר: כל עוד החשבון פעיל; 30 יום לאחר בקשת מחיקה
 - נתוני מיקום GPS גולמיים: נמחקים אוטומטית 90 יום מסיום הריצה
 - תמונות שהועלו: נמחקות אוטומטית 90 יום מסיום הריצה
@@ -881,7 +882,7 @@ function renderMarkdown(text: string) {
       );
     }
     if (line.startsWith('> ')) {
-      const content = line.slice(2).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      const content = renderInline(line.slice(2));
       return (
         <div
           key={i}
@@ -898,7 +899,7 @@ function renderMarkdown(text: string) {
       );
     }
     if (line.startsWith('- ')) {
-      const content = line.slice(2).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      const content = renderInline(line.slice(2));
       return (
         <li
           key={i}
@@ -908,7 +909,7 @@ function renderMarkdown(text: string) {
       );
     }
     if (line === '') return <div key={i} className="h-1.5" />;
-    const content = line.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    const content = renderInline(line);
     return (
       <p
         key={i}
@@ -942,7 +943,7 @@ export default function LegalPage({ type, lang = 'he', standalone = false }: Leg
               onClick={() => nav(-1)}
               className="text-sm text-[--ink-3] hover:text-[--ink-1] transition-colors mb-3 flex items-center gap-1.5"
             >
-              ← חזרה
+              {activeLang === 'he' ? '← חזרה' : '← Back'}
             </button>
           )}
           <h1 className="font-brand text-3xl font-extrabold text-[--ink-1]">{doc.title}</h1>

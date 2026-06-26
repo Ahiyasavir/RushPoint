@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { haversineKm } from '@rushpoint/shared';
 import type { RunStageRecord } from '@rushpoint/shared';
 import {
@@ -17,7 +17,10 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
   session: Session; state: MyTeamState; stage: RunStageRecord; onChanged: () => void;
 }) {
   const { t } = useT();
-  const ctx = { ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId };
+  const ctx = useMemo(
+    () => ({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId }),
+    [session.ownerUid, session.gameId, session.runId],
+  );
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [hint, setHint] = useState<string | null>(null);
@@ -115,15 +118,18 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     } finally { setBusy(false); }
   }
 
-  // sequence — submit the current ordered step
-  async function sequenceStep(stepIndex: number, ans: string) {
+  // sequence — submit the current ordered step. Returns whether the step was
+  // accepted so the input is cleared only on success (P3).
+  async function sequenceStep(stepIndex: number, ans: string): Promise<boolean> {
     setBusy(true); setMsg('');
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
       if (res.stepCorrect) { onChanged(); if (!res.taskComplete) setMsg(`Step ${res.stepsDone} of ${res.totalSteps} ✓`); }
       else setMsg('Not quite. Try again.');
+      return res.stepCorrect;
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Failed');
+      return false;
     } finally { setBusy(false); }
   }
 
@@ -190,7 +196,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
         <div className="mt-3">
           {hint
             ? <p dir="auto" className="text-sm text-zinc-700 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
-            : <button onClick={revealHint} disabled={busy} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+            : <button onClick={revealHint} disabled={busy} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
                 💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
               </button>}
         </div>
@@ -315,13 +321,18 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
 
 // Sequence — one ordered step at a time, with progress.
 function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
-  task: SafeTask; stepsDone: number; busy: boolean; onSubmit: (stepIndex: number, ans: string) => void;
+  task: SafeTask; stepsDone: number; busy: boolean; onSubmit: (stepIndex: number, ans: string) => Promise<boolean> | void;
 }) {
   const { t } = useT();
   const steps = task.steps ?? [];
   const [val, setVal] = useState('');
   const idx = Math.min(stepsDone, steps.length - 1);
   const step = steps[idx];
+  // Clear the input only when the step is accepted, so a wrong answer keeps what
+  // the participant typed (P3).
+  function submitStep() {
+    void Promise.resolve(onSubmit(idx, val)).then((ok) => { if (ok) setVal(''); });
+  }
   if (!step) return null;
   return (
     <div className="space-y-3">
@@ -329,8 +340,8 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
       <div className="text-xs text-zinc-500">{t.task.stepOf({ step: idx + 1, total: steps.length })}</div>
       <p dir="auto" className="text-sm text-zinc-700">{step.prompt}</p>
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
-        onKeyDown={(e) => e.key === 'Enter' && onSubmit(idx, val)} />
-      <Button disabled={busy} onClick={() => { onSubmit(idx, val); setVal(''); }}>{t.task.submitStep}</Button>
+        onKeyDown={(e) => { if (e.key === 'Enter') submitStep(); }} />
+      <Button disabled={busy} onClick={submitStep}>{t.task.submitStep}</Button>
     </div>
   );
 }
@@ -361,12 +372,12 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File 
     // size cap protects the UI and Storage from multi-hundred-MB files.
     if (f && !f.type.startsWith('image/')) {
       setFileErr('Please choose an image file.');
-      e.target.value = '';
+      e.target.value = ''; setFile(null); setPreviewUrl(null);
       return;
     }
     if (f && f.size > MAX_PHOTO_BYTES) {
       setFileErr(`That image is too large (max ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB).`);
-      e.target.value = '';
+      e.target.value = ''; setFile(null); setPreviewUrl(null);
       return;
     }
     setFile(f);

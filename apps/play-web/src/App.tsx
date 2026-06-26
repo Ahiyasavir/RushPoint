@@ -68,7 +68,7 @@ function AppInner() {
     );
   }
 
-  if (boardCode && !session) {
+  if (boardCode) {
     return (
       <>
         <ConnectionBanner />
