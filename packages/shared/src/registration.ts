@@ -47,6 +47,29 @@ export function resolveRegistrationFields(
   return [single, ...nonName];
 }
 
+/**
+ * Validate required registration fields client-side (change: prelaunch-critical-fixes,
+ * M5). Returns the set of field ids that are required but empty, so JoinScreen can
+ * highlight exactly which fields to fill before calling joinRun. A required checkbox
+ * must be the literal string 'true'; other fields must be non-blank.
+ */
+export function validateRequiredFields(
+  fields: RegistrationField[],
+  values: Record<string, string>,
+): Set<string> {
+  const errors = new Set<string>();
+  for (const f of fields) {
+    if (!f.required) continue;
+    const v = values[f.id] ?? '';
+    if (f.type === 'checkbox') {
+      if (v !== 'true') errors.add(f.id);
+    } else if (!v.trim()) {
+      errors.add(f.id);
+    }
+  }
+  return errors;
+}
+
 /** Resolve the display name to submit to joinRun, given the mode. */
 export function resolveDisplayName(
   mode: GameMode,

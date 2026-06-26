@@ -245,10 +245,27 @@ async function main() {
     JSON.stringify(boardAfter?.rankings?.[0]));
 
   // ── 8c. Photo task: submit → staff review → advance ─────────────────────────
+  // M3: submitStationPhoto only accepts Firebase Storage URLs from our bucket.
+  const STORAGE_PHOTO_URL =
+    'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/runs%2Fe2e%2Fselfie.jpg?alt=media';
+
+  // [M3] an external photo URL must be rejected with invalid-argument.
+  let externalPhotoRejected = false;
+  try {
+    await player.call('submitStationPhoto', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+      photoUrl: 'https://example.com/evil.jpg',
+    });
+  } catch (e) {
+    externalPhotoRejected = e.code === 'functions/invalid-argument' || /Firebase Storage URL/i.test(e.message);
+  }
+  check('submitStationPhoto rejects an external (non-Storage) photo URL', externalPhotoRejected);
+
   const photoSubmit = await player.call('submitStationPhoto', {
     ownerUid: creatorCred.user.uid, gameId, runId,
     teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
-    photoUrl: 'https://example.com/selfie.jpg',
+    photoUrl: STORAGE_PHOTO_URL,
   });
   check('submitStationPhoto accepts a photo (pending, not auto-approved)',
     photoSubmit?.submitted === true && photoSubmit?.autoApproved === false, JSON.stringify(photoSubmit));

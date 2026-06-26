@@ -62,5 +62,27 @@ for (const [app, t] of [['creator-web', creatorT], ['play-web', playT]] as const
     leaks.slice(0, 5).map(([k, v]) => `${k}="${v}"`).join(' | '));
 }
 
+// ── task + final namespaces (change: prelaunch-critical-fixes, M1/M2) ────────
+{
+  const TASK_KEYS = ['routing','routingError','retryRouting','yourTask','routedTask','stopOf','markComplete','imHere','verify','wrongCode','yourAnswer','submitAnswer','enterNumber','submit','uploadingPhoto','approved','pendingReview','submitPhoto','working','pastePhotoUrl','hintStuck','stepOf','stepAnswer','submitStep','findingLocation','youreHere','walkCloser','gpsWarning','gpsUnavailable','gpsContactHost'];
+  const FINAL_KEYS = ['title','subtitle','scoreLabel','rankLabel','recapTitle','statTotalTime','statStages','statFastest','statHints','shareBtn','shareCreating','shareSaved','leaderboardTitle','waitingFinalize','poweredBy','buildOwn','leave','shareText','shareRankPart','shareTimePart'];
+  const FN_KEYS = { task: ['stopOf','hintStuck','stepOf','walkCloser'], final: ['subtitle','rankLabel','shareText','shareRankPart','shareTimePart'] };
+
+  for (const [lang, t] of [['he', playT.he], ['en', playT.en]] as const) {
+    const task = (t as Record<string, Record<string, unknown>>).task;
+    const final = (t as Record<string, Record<string, unknown>>).final;
+    check(`play-web.${lang}: t.task namespace exists`, !!task);
+    check(`play-web.${lang}: t.final namespace exists`, !!final);
+    check(`play-web.${lang}: t.task has all ${TASK_KEYS.length} keys`,
+      TASK_KEYS.every((k) => k in (task ?? {})), TASK_KEYS.filter((k) => !(k in (task ?? {}))).join(','));
+    check(`play-web.${lang}: t.final has all ${FINAL_KEYS.length} keys`,
+      FINAL_KEYS.every((k) => k in (final ?? {})), FINAL_KEYS.filter((k) => !(k in (final ?? {}))).join(','));
+    check(`play-web.${lang}: t.task fn keys are functions`,
+      FN_KEYS.task.every((k) => typeof task?.[k] === 'function'));
+    check(`play-web.${lang}: t.final fn keys are functions`,
+      FN_KEYS.final.every((k) => typeof final?.[k] === 'function'));
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL I18N PARITY TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

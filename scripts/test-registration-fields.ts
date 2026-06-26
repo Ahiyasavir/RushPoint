@@ -5,6 +5,7 @@
 import {
   resolveRegistrationFields,
   resolveDisplayName,
+  validateRequiredFields,
   type RegistrationField,
 } from '../packages/shared/src/index';
 
@@ -43,6 +44,22 @@ check('team falls back to first member then default',
 // ── edge: default fields (single member name) ────────────────────────────────
 const defaultsOnly = resolveRegistrationFields('individual', [memberName]);
 check('individual with only member name → one field', defaultsOnly.length === 1);
+
+// ── validateRequiredFields (change: prelaunch-critical-fixes, M5) ────────────
+// Returns the set of field ids that are required but empty (so JoinScreen can
+// highlight them client-side before calling joinRun).
+{
+  const phoneReq: RegistrationField = { id: 'phone', label: 'Phone', type: 'phone', required: true, level: 'member' };
+  const noteOpt: RegistrationField = { id: 'note', label: 'Note', type: 'text', required: false, level: 'member' };
+  const consentReq: RegistrationField = { id: 'consent', label: 'Consent', type: 'checkbox', required: true, level: 'member' };
+
+  check('all filled → no errors', validateRequiredFields([phoneReq], { phone: '0501234567' }).size === 0);
+  check('required field empty → in error set', validateRequiredFields([phoneReq], { phone: '' }).has('phone'));
+  check('required whitespace-only → in error set', validateRequiredFields([phoneReq], { phone: '   ' }).has('phone'));
+  check('optional field empty → NOT in error set', validateRequiredFields([noteOpt], {}).size === 0);
+  check('checkbox required + "false" → invalid', validateRequiredFields([consentReq], { consent: 'false' }).has('consent'));
+  check('checkbox required + "true" → valid', validateRequiredFields([consentReq], { consent: 'true' }).size === 0);
+}
 
 console.log(`\n${failures === 0 ? 'ALL REGISTRATION TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

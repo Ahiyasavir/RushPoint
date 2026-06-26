@@ -55,6 +55,8 @@ export default function BuilderPage() {
   const [game, setGame] = useState<Game | null>(null);
   const [step, setStep] = useState(1);
   const [status, setStatus] = useState<SaveStatus>('saved');
+  const [error, setError] = useState<string | null>(null);
+  const [loadKey, setLoadKey] = useState(0);
 
   // Refs let the debounced auto-save and the beforeunload guard read the latest
   // game/saved-snapshot without re-subscribing on every keystroke.
@@ -65,12 +67,17 @@ export default function BuilderPage() {
 
   useEffect(() => {
     if (!gameId) return;
-    void getGame({ gameId }).then(({ game }) => {
-      setGame(game);
-      savedSnapshot.current = serializeGame(game);
-      setStatus('saved');
-    });
-  }, [gameId]);
+    setError(null);
+    void getGame({ gameId })
+      .then(({ game }) => {
+        setGame(game);
+        savedSnapshot.current = serializeGame(game);
+        setStatus('saved');
+      })
+      .catch((e) => {
+        setError(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Could not load game');
+      });
+  }, [gameId, loadKey]);
 
   function patch(p: Partial<Game>) { setGame((g) => (g ? { ...g, ...p } : g)); }
 
@@ -138,6 +145,14 @@ export default function BuilderPage() {
     }
   }
 
+  if (error && !game) return (
+    <Card className="p-8 text-center space-y-4">
+      <div className="text-3xl">⚠️</div>
+      <p className="font-semibold text-[--ink-1]">Could not load game</p>
+      <p className="text-sm text-[--ink-3]">{error}</p>
+      <Button onClick={() => { setError(null); setLoadKey((k) => k + 1); }}>Try again</Button>
+    </Card>
+  );
   if (!game) return <Spinner label="Loading builder…" />;
 
   return (

@@ -3,7 +3,7 @@
 Write `scripts/test-gps-error-ux.ts` before touching production code.
 Run `npm test`; confirm these tests fail for the right reason.
 
-- [ ] 1.1 Create `scripts/test-gps-error-ux.ts`. Import `withLocation` from
+- [x] 1.1 Create `scripts/test-gps-error-ux.ts`. Import `withLocation` from
   `apps/play-web/src/components/TaskRunner.tsx` (or extract it to a testable module first
   — see note in 2.1). Write the following assertions, all of which must FAIL now:
   ```
@@ -27,7 +27,7 @@ Run `npm test`; confirm these tests fail for the right reason.
     assert function does not throw
     assert cb was NOT called
   ```
-- [ ] 1.2 Run `npm test`. Confirm tests fail (currently `withLocation` has no `onDenied`
+- [x] 1.2 Run `npm test`. Confirm tests fail (currently `withLocation` has no `onDenied`
   parameter and calls `cb(0, 0)` on error). Record the exact failure message.
 
 
@@ -35,7 +35,7 @@ Run `npm test`; confirm these tests fail for the right reason.
 
 Minimum code to make the 1.x tests green.
 
-- [ ] 2.1 Extract `withLocation` from the bottom of `TaskRunner.tsx` into a new module
+- [x] 2.1 Extract `withLocation` from the bottom of `TaskRunner.tsx` into a new module
   `apps/play-web/src/utils/withLocation.ts` so `test-gps-error-ux.ts` can import it
   without pulling in React. Update `TaskRunner.tsx` to import from the new path.
   Signature:
@@ -48,7 +48,7 @@ Minimum code to make the 1.x tests green.
   Implementation: on `GeolocationPositionError` (any code) or absent
   `navigator.geolocation`, call `onDenied?.()`. Remove the `() => cb(0, 0)` fallback
   entirely.
-- [ ] 2.2 In `TaskRunner.tsx`, update the `field()` async function to pass an `onDenied`
+- [x] 2.2 In `TaskRunner.tsx`, update the `field()` async function to pass an `onDenied`
   callback:
   ```ts
   withLocation(
@@ -58,13 +58,13 @@ Minimum code to make the 1.x tests green.
   ```
   Set `setBusy(false)` in both the success path's `finally` block AND in `onDenied`. After
   setting the GPS warning message, re-enable the button (do NOT lock `busy` to `true`).
-- [ ] 2.3 Update the routing `useEffect` (the one that calls `requestNextTask` when no task
+- [x] 2.3 Update the routing `useEffect` (the one that calls `requestNextTask` when no task
   is assigned). Add a `routingError` state variable. Wrap the `requestNextTask` call in a
   try/catch that sets `routingError`. Render:
   - While in-flight (`busy`): `<Card>{t.task.routing}</Card>`
   - On error: a Card with `t.task.routingError` text and a `<Button onClick={retry}>{t.task.retryRouting}</Button>` that resets `routingError` and calls `requestNextTask` again.
   - On success: existing `onChanged()` path; clear `routingError`.
-- [ ] 2.4 Run `npm test`. Confirm the 1.x tests are now GREEN. Fix any regressions.
+- [x] 2.4 Run `npm test`. Confirm the 1.x tests are now GREEN. Fix any regressions.
 
 
 ## 3. GREEN — GeofenceAuto + DistanceBadge GPS improvements
@@ -72,7 +72,7 @@ Minimum code to make the 1.x tests green.
 No new test required beyond the existing `test-gps-error-ux.ts` (these are UI-only paths
 that will be verified via preview in step 3.2).
 
-- [ ] 3.1 In `GeofenceAuto` in `TaskRunner.tsx`, replace the `() => undefined` error
+- [x] 3.1 In `GeofenceAuto` in `TaskRunner.tsx`, replace the `() => undefined` error
   callback of `watchPosition` with a callback that:
   - Sets a `gpsError` state variable to `true`
   - Calls `navigator.geolocation.clearWatch(id)` (stop retrying)
@@ -84,7 +84,7 @@ that will be verified via preview in step 3.2).
     <p className="text-xs text-zinc-500">{t.task.gpsContactHost}</p>
   </div>
   ```
-- [ ] 3.2 In `DistanceBadge`, replace `navigator.geolocation.getCurrentPosition` with
+- [x] 3.2 In `DistanceBadge`, replace `navigator.geolocation.getCurrentPosition` with
   `navigator.geolocation.watchPosition`. In the `useEffect` cleanup, call
   `navigator.geolocation.clearWatch(id)`. The rest of the logic is unchanged (compute
   `haversineKm`, call `setDist`). Errors in `watchPosition` are silently ignored (no
@@ -98,37 +98,37 @@ that will be verified via preview in step 3.2).
 
 Extend the existing parity test to cover the two new namespaces BEFORE adding the keys.
 
-- [ ] 4.1 Read `scripts/test-i18n-parity.ts`. Extend it to assert:
+- [x] 4.1 Read `scripts/test-i18n-parity.ts`. Extend it to assert:
   - `t.task` exists in both `HE` and `EN`
   - Every key listed in `specs/taskrunner-i18n/spec.md` table exists in `HE.task`
   - Every key listed in `specs/finalscreen-i18n/spec.md` table exists in `HE.final`
   - `typeof HE` TypeScript constraint still compiles (verified by `npm run typecheck`)
   - All fn-type keys are functions (use `typeof val === 'function'`)
-- [ ] 4.2 Run `npm test`. Confirm failure: `t.task` and `t.final` do not exist yet. Record
+- [x] 4.2 Run `npm test`. Confirm failure: `t.task` and `t.final` do not exist yet. Record
   the exact missing-key list.
 
 
 ## 5. GREEN — Add `task` and `final` namespaces to i18n.ts
 
-- [ ] 5.1 In `apps/play-web/src/i18n.ts`, add the `task` namespace to the `HE` object with
+- [x] 5.1 In `apps/play-web/src/i18n.ts`, add the `task` namespace to the `HE` object with
   all 28 keys from `specs/play-web-i18n-hebrew/spec.md`'s HE table. Function-valued keys
   (marked `(fn)`) must be typed as arrow functions taking an object of named params.
   Example: `stopOf: ({ done, total }: { done: number; total: number }) => ...`
-- [ ] 5.2 In `apps/play-web/src/i18n.ts`, add the `final` namespace to the `HE` object with
+- [x] 5.2 In `apps/play-web/src/i18n.ts`, add the `final` namespace to the `HE` object with
   all 20 keys from `specs/play-web-i18n-hebrew/spec.md`'s HE table, including the three
   `shareText`/`shareRankPart`/`shareTimePart` function keys.
-- [ ] 5.3 Add the `task` namespace to the `EN` object with all English values from
+- [x] 5.3 Add the `task` namespace to the `EN` object with all English values from
   `specs/taskrunner-i18n/spec.md`.
-- [ ] 5.4 Add the `final` namespace to the `EN` object with all English values from
+- [x] 5.4 Add the `final` namespace to the `EN` object with all English values from
   `specs/finalscreen-i18n/spec.md`.
-- [ ] 5.5 Run `npm run typecheck`. The `typeof HE` constraint on `EN` must compile without
+- [x] 5.5 Run `npm run typecheck`. The `typeof HE` constraint on `EN` must compile without
   error — any missing key in `EN` will appear here. Fix until green.
-- [ ] 5.6 Run `npm test`. Confirm the 4.x tests are now GREEN.
+- [x] 5.6 Run `npm test`. Confirm the 4.x tests are now GREEN.
 
 
 ## 6. GREEN — Wire TaskRunner to useT()
 
-- [ ] 6.1 At the top of `TaskRunner.tsx`, add `const { t } = useT();`. Replace every
+- [x] 6.1 At the top of `TaskRunner.tsx`, add `const { t } = useT();`. Replace every
   hardcoded string in the component and sub-components with the corresponding `t.task.*`
   key. Full list (use the spec table as the checklist):
   - `"Finding your next task…"` → `t.task.routing`
@@ -163,18 +163,18 @@ Extend the existing parity test to cover the two new namespaces BEFORE adding th
     `t.task.walkCloser`-style interpolation is not applicable here since it is already
     a one-liner — leave the `m away` / `km away` unit strings as-is (unit abbreviations
     are whitelisted).
-- [ ] 6.2 Pass `t` down to sub-components that are defined outside `TaskRunner` (e.g.,
+- [x] 6.2 Pass `t` down to sub-components that are defined outside `TaskRunner` (e.g.,
   `CodeEntry`, `QuizEntry`, `NumericEntry`, `PhotoEntry`, `GeofenceAuto`, `SequenceRunner`)
   by adding a `t: T['task']` prop to each, OR by calling `useT()` at the top of each
   sub-component that is defined as a standalone function. Choose the `useT()` inside
   each sub-component approach (less prop-drilling).
-- [ ] 6.3 Run `npm run typecheck` and `npm run lint` (0 errors). Fix all TypeScript and lint
+- [x] 6.3 Run `npm run typecheck` and `npm run lint` (0 errors). Fix all TypeScript and lint
   errors before proceeding.
 
 
 ## 7. GREEN — Wire FinalScreen to useT() + fix share text language
 
-- [ ] 7.1 In `FinalScreen.tsx`, add `const { t, lang } = useT();`. Replace every hardcoded
+- [x] 7.1 In `FinalScreen.tsx`, add `const { t, lang } = useT();`. Replace every hardcoded
   string with the corresponding `t.final.*` key. Full list:
   - `"Finished!"` → `t.final.title`
   - `"{name}, you completed every stage."` → `t.final.subtitle({ name: team.displayName })`
@@ -193,7 +193,7 @@ Extend the existing parity test to cover the two new namespaces BEFORE adding th
   - `"Powered by RushPoint"` → `t.final.poweredBy`
   - `"Build your own race, free →"` → `t.final.buildOwn`
   - `"Leave"` → `t.final.leave`
-- [ ] 7.2 Rewrite the `share()` function's `text` variable to use `t.final.shareText`:
+- [x] 7.2 Rewrite the `share()` function's `text` variable to use `t.final.shareText`:
   ```ts
   const rankPart = myRank ? t.final.shareRankPart({ rank: myRank }) : '';
   const timePart = totalSec != null ? t.final.shareTimePart({ time: fmtDuration(totalSec) }) : '';
@@ -206,14 +206,14 @@ Extend the existing parity test to cover the two new namespaces BEFORE adding th
   });
   ```
   Remove the hardcoded Hebrew template string entirely.
-- [ ] 7.3 Run `npm run typecheck` and `npm run lint`. Fix all errors.
+- [x] 7.3 Run `npm run typecheck` and `npm run lint`. Fix all errors.
 
 
 ## 8. RED — Photo URL validation e2e test (failing)
 
 Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server.
 
-- [ ] 8.1 In `scripts/e2e-verify.mjs`, after the existing photo-submission section, add:
+- [x] 8.1 In `scripts/e2e-verify.mjs`, after the existing photo-submission section, add:
   ```js
   // [RED] submitStationPhoto — external URL must be rejected
   try {
@@ -229,12 +229,12 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
     console.log('✓ submitStationPhoto rejects external URL');
   }
   ```
-- [ ] 8.2 Run `npm run e2e`. Confirm the test FAILS (currently the call succeeds).
+- [x] 8.2 Run `npm run e2e`. Confirm the test FAILS (currently the call succeeds).
 
 
 ## 9a. RED — Photo URL validation pure-logic test (failing)
 
-- [ ] 9a.1 Create `scripts/test-photo-url-validation.ts` that imports the helper from shared
+- [x] 9a.1 Create `scripts/test-photo-url-validation.ts` that imports the helper from shared
   (the import fails until 9b.1 adds it — that is the RED state):
   ```ts
   import assert from 'node:assert/strict';
@@ -249,12 +249,12 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
   console.log('PASS photo-url-validation');
   ```
   > The aggregator auto-discovers `scripts/test-*.ts`; no manual registration needed.
-- [ ] 9a.2 Run `npm test`. Confirm FAILURE — `isFirebaseStorageUrl` is not exported from
+- [x] 9a.2 Run `npm test`. Confirm FAILURE — `isFirebaseStorageUrl` is not exported from
   `packages/shared/src/validation.ts` yet.
 
 ## 9b. GREEN — Server-side photo URL validation (shared helper)
 
-- [ ] 9b.1 In `packages/shared/src/validation.ts`, add and export the pure helper (no admin
+- [x] 9b.1 In `packages/shared/src/validation.ts`, add and export the pure helper (no admin
   imports — it must stay importable by the unit-test lane):
   ```ts
   export const FIREBASE_STORAGE_ORIGIN =
@@ -265,21 +265,21 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
   ```
   Confirm it is re-exported via `packages/shared/src/index.ts` (the `@rushpoint/shared`
   barrel) so functions can import `{ isFirebaseStorageUrl }` from `@rushpoint/shared`.
-- [ ] 9b.2 In `functions/src/runs/index.ts`, import the helper from `@rushpoint/shared`. At the
+- [x] 9b.2 In `functions/src/runs/index.ts`, import the helper from `@rushpoint/shared`. At the
   start of `submitStationPhoto` (before any Firestore read), add:
   ```ts
   if (!isFirebaseStorageUrl(data.photoUrl)) {
     throw new functions.https.HttpsError('invalid-argument', 'Photo URL must be a Firebase Storage URL.');
   }
   ```
-- [ ] 9b.3 Run `npm test`. Confirm `test-photo-url-validation.ts` passes (`PASS photo-url-validation`).
-- [ ] 9b.4 Run `npm run e2e`. Confirm the 8.x assertion now passes (external URL rejected).
+- [x] 9b.3 Run `npm test`. Confirm `test-photo-url-validation.ts` passes (`PASS photo-url-validation`).
+- [x] 9b.4 Run `npm run e2e`. Confirm the 8.x assertion now passes (external URL rejected).
   Confirm all other e2e assertions still pass.
 
 
 ## 10. GREEN — PhotoEntry object URL memory leak fix
 
-- [ ] 10.1 In `PhotoEntry` inside `TaskRunner.tsx`, replace the direct `setPreview(...)` call
+- [x] 10.1 In `PhotoEntry` inside `TaskRunner.tsx`, replace the direct `setPreview(...)` call
   with a `useEffect` pattern that revokes the previous URL:
   ```tsx
   const prevPreviewRef = useRef<string | null>(null);
@@ -302,12 +302,12 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
     };
   }, []);
   ```
-- [ ] 10.2 Run `npm run typecheck`. Fix any type errors.
+- [x] 10.2 Run `npm run typecheck`. Fix any type errors.
 
 
 ## 11. GREEN — JoinScreen required field client-side validation
 
-- [ ] 11.1 In `scripts/test-registration-fields.ts` (which already exists per the git
+- [x] 11.1 In `scripts/test-registration-fields.ts` (which already exists per the git
   status), add or extend assertions for a new helper `validateRequiredFields`:
   ```ts
   // Returns a Set of field IDs that are required but empty
@@ -332,7 +332,7 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
     assert validateRequiredFields(fields, values).has('consent')
   ```
   Run `npm test`, confirm the new tests FAIL (helper not yet exported).
-- [ ] 11.2 In `packages/shared/src/registration.ts`, export the new helper:
+- [x] 11.2 In `packages/shared/src/registration.ts`, export the new helper:
   ```ts
   export function validateRequiredFields(
     fields: RegistrationField[],
@@ -349,7 +349,7 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
   }
   ```
   Ensure `packages/shared/src/index.ts` re-exports `validateRequiredFields`.
-- [ ] 11.3 In `JoinScreen.tsx`, import `validateRequiredFields` from `@rushpoint/shared`.
+- [x] 11.3 In `JoinScreen.tsx`, import `validateRequiredFields` from `@rushpoint/shared`.
   Add a `fieldErrors` state: `const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set())`.
   In `submit()`, before calling `joinRun`, run:
   ```ts
@@ -361,13 +361,13 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
   In `FieldInput`, add a `hasError?: boolean` prop. When `hasError` is true, apply a
   red border class (`border-rp-alert`) to the input/select. In `JoinScreen`, pass
   `hasError={fieldErrors.has(f.id)}` to each `<FieldInput>`.
-- [ ] 11.4 Run `npm test`. Confirm all `test-registration-fields.ts` tests pass.
-- [ ] 11.5 Run `npm run typecheck` + `npm run lint`.
+- [x] 11.4 Run `npm test`. Confirm all `test-registration-fields.ts` tests pass.
+- [x] 11.5 Run `npm run typecheck` + `npm run lint`.
 
 
 ## 12. GREEN — BuilderPage error state
 
-- [ ] 12.1 In `BuilderPage.tsx`, wrap the `getGame` call in a try/catch. Add an `error`
+- [x] 12.1 In `BuilderPage.tsx`, wrap the `getGame` call in a try/catch. Add an `error`
   state: `const [error, setError] = useState<string | null>(null)`.
   ```ts
   useEffect(() => {
@@ -398,12 +398,12 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
   ```
   For the retry, use a `loadKey` counter state incremented on retry; include it in the
   `useEffect` deps array to re-run the load.
-- [ ] 12.2 Run `npm run typecheck` + `npm run lint`.
+- [x] 12.2 Run `npm run typecheck` + `npm run lint`.
 
 
 ## 13. GREEN — LocationPicker Nominatim production warning + DEPLOY.md
 
-- [ ] 13.1 In `LocationPicker.tsx`, immediately after the `const KEY = ...` line, add:
+- [x] 13.1 In `LocationPicker.tsx`, immediately after the `const KEY = ...` line, add:
   ```ts
   if (!KEY && import.meta.env.PROD) {
     console.warn(
@@ -425,7 +425,7 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
   Guard the banner with `import.meta.env.DEV` so it only shows in development:
   `{!KEY && import.meta.env.DEV && ( ... )}` — warning in dev, silent in prod (prod
   should never reach this state; the console.warn on PROD covers that edge case).
-- [ ] 13.2 In `DEPLOY.md`, under the required environment variables section for
+- [x] 13.2 In `DEPLOY.md`, under the required environment variables section for
   `apps/creator-web/.env`, mark `VITE_MAPTILER_KEY` as **required** (not optional) with
   a note:
   ```
@@ -433,16 +433,16 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
                                   # public Nominatim geocoder is used, which violates
                                   # the Nominatim Usage Policy for production use.
   ```
-- [ ] 13.3 Run `npm run creator:build`. Confirm the banner does not appear in the production
+- [x] 13.3 Run `npm run creator:build`. Confirm the banner does not appear in the production
   build output (it is dev-only).
 
 
 ## 14. REFACTOR — Polish and final cleanup
 
-- [ ] 14.1 Review the `withLocation` module extraction (2.1): ensure the module is exported
+- [x] 14.1 Review the `withLocation` module extraction (2.1): ensure the module is exported
   cleanly from `apps/play-web/src/utils/withLocation.ts` and the import in `TaskRunner.tsx`
   is clean. Add JSDoc comment describing the `onDenied` parameter.
-- [ ] 14.2 Review all `t.task.*` function keys for consistent parameter naming. Ensure
+- [x] 14.2 Review all `t.task.*` function keys for consistent parameter naming. Ensure
   `stopOf`, `walkCloser`, `hintStuck`, `stepOf` all use named-object params (not positional)
   so future parameter additions don't break callers silently.
 - [ ] 14.3 Native speaker review: Have a Hebrew native speaker verify all 48 new HE
@@ -452,18 +452,18 @@ Add the failing assertion to `scripts/e2e-verify.mjs` before touching the server
 
 ## 15. FINAL GATES — All green before marking change done
 
-- [ ] 15.1 `npm run typecheck` — must pass for all workspaces (creator-web, play-web,
+- [x] 15.1 `npm run typecheck` — must pass for all workspaces (creator-web, play-web,
   functions, packages/shared). Zero type errors.
-- [ ] 15.2 `npm run lint` — creator-web eslint must show 0 errors (style warnings ok).
-- [ ] 15.3 `npm test` — both lanes must be green:
+- [x] 15.2 `npm run lint` — creator-web eslint must show 0 errors (style warnings ok).
+- [x] 15.3 `npm test` — both lanes must be green:
   - `scripts/run-unit-tests.mjs` (aggregator): all `scripts/test-*.ts` pass, including:
     - `test-gps-error-ux.ts` (new — C1/C2 paths)
     - `test-photo-url-validation.ts` (new — M3 helper)
     - `test-registration-fields.ts` (extended — M5 `validateRequiredFields`)
     - `test-i18n-parity.ts` (extended — task + final namespace parity)
   - `turbo run test` (vitest in functions/): all existing tests pass + no new failures.
-- [ ] 15.4 `npm run creator:build` — production build of creator-web must succeed.
-- [ ] 15.5 `npm run e2e` — full lifecycle must pass, including:
+- [x] 15.4 `npm run creator:build` — production build of creator-web must succeed.
+- [x] 15.5 `npm run e2e` — full lifecycle must pass, including:
   - New assertion: `submitStationPhoto` rejects `https://example.com/evil.jpg` with
     `invalid-argument` (added in 8.1).
   - All 26+ existing e2e assertions still pass.

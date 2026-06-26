@@ -186,3 +186,14 @@ export function optionalCoordinatePair(
   if (!isValidCoord(lat, lng)) fail('location', 'validCoord', MESSAGES.coord());
   return { lat: lat as number, lng: lng as number };
 }
+
+// ─── Photo-URL origin guard (change: prelaunch-critical-fixes, M3) ────────────
+// submitStationPhoto must only accept photos hosted in our own Firebase Storage
+// bucket — never an arbitrary external URL a malicious client could inject. Pure
+// (no admin imports) so it stays importable by both the server and the unit lane.
+export const FIREBASE_STORAGE_ORIGIN =
+  'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/';
+
+export function isFirebaseStorageUrl(url: unknown): boolean {
+  return typeof url === 'string' && url.startsWith(FIREBASE_STORAGE_ORIGIN);
+}

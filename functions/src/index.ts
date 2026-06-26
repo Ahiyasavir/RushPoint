@@ -5,7 +5,7 @@
 import * as functions from 'firebase-functions';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
-import { isValidCoord } from '@rushpoint/shared';
+import { isValidCoord, isFirebaseStorageUrl } from '@rushpoint/shared';
 import { completeTaskForTeam } from './runs/index';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
@@ -423,6 +423,11 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
   };
 
   if (!photoUrl?.trim()) throw new functions.https.HttpsError('invalid-argument', 'photoUrl required');
+  // M3: only accept photos hosted in our own Firebase Storage bucket — reject any
+  // arbitrary external URL a client could inject.
+  if (!isFirebaseStorageUrl(photoUrl)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Photo URL must be a Firebase Storage URL.');
+  }
 
   // Check the task's smart config for autoApprove (staffless events).
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();

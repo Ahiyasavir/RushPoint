@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
+import { useT } from '../i18nContext';
 import { shareStoryCard } from '../lib/storyCard';
 
 const CREATOR_URL = import.meta.env.DEV
@@ -23,6 +24,7 @@ const MEDAL_BG = [
 ];
 
 export default function FinalScreen({ state, onLeave }: { state: MyTeamState; onLeave: () => void }) {
+  const { t } = useT();
   const { team, run, game } = state;
   const accent = game.branding?.primaryColor ?? '#FF5722';
   const myEntry = run.leaderboard?.rankings.find((r) => r.teamId === team.id);
@@ -48,10 +50,15 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
     setBusy(true);
     try {
       const name = game.branding?.name ?? game.title;
-      const text = `🏆 ${team.displayName} סיימה את "${name}"`
-        + `${myRank ? ` · מקום #${myRank}` : ''}`
-        + `${totalSec != null ? ` תוך ${fmtDuration(totalSec)}` : ''}! `
-        + `רוצים לבנות מירוץ הרפתקה משלכם? ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
+      const rankPart = myRank ? t.final.shareRankPart({ rank: myRank }) : '';
+      const timePart = totalSec != null ? t.final.shareTimePart({ time: fmtDuration(totalSec) }) : '';
+      const text = t.final.shareText({
+        team: team.displayName,
+        game: name,
+        rankPart,
+        timePart,
+        url: CREATOR_URL.replace(/^https?:\/\//, ''),
+      });
       const result = await shareStoryCard({
         gameName: name,
         teamName: team.displayName,
@@ -77,13 +84,13 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
           >
             🏆
           </div>
-          <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>Finished!</h1>
-          <p dir="auto" className="text-zinc-400 mt-1">{team.displayName}, you completed every stage.</p>
+          <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>{t.final.title}</h1>
+          <p dir="auto" className="text-zinc-400 mt-1">{t.final.subtitle({ name: team.displayName })}</p>
         </div>
 
         {/* Score card */}
         <Card className="p-6 w-full" style={{ borderColor: `${accent}30` }}>
-          <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">Final Score</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">{t.final.scoreLabel}</div>
           <div
             className="text-6xl font-brand font-extrabold my-2 animate-score-pop bg-gradient-to-r bg-clip-text text-transparent"
             style={{ backgroundImage: `linear-gradient(135deg, ${accent}, ${accent}99)` }}
@@ -93,29 +100,29 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
           {myRank && (
             <div className="flex items-center justify-center gap-2">
               <span className="text-lg">{MEDAL[myRank - 1] ?? '🏅'}</span>
-              <span className="text-sm font-medium text-zinc-300">Rank #{myRank}</span>
+              <span className="text-sm font-medium text-zinc-300">{t.final.rankLabel({ rank: myRank })}</span>
             </div>
           )}
         </Card>
 
         {/* Race recap */}
         <Card className="p-4 w-full">
-          <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🗂️ Your race, wrapped</div>
+          <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🗂️ {t.final.recapTitle}</div>
           <div className="grid grid-cols-2 gap-2.5">
-            <Stat label="Total time" value={totalSec != null ? fmtDuration(totalSec) : '?'} accent={accent} />
-            <Stat label="Stages done" value={`${completedStages.length}/${game.stageCount}`} accent={accent} />
-            <Stat label="Fastest stage" value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
-            <Stat label="Hints used" value={String(hintsUsed)} accent={accent} />
+            <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : '?'} accent={accent} />
+            <Stat label={t.final.statStages} value={`${completedStages.length}/${game.stageCount}`} accent={accent} />
+            <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
+            <Stat label={t.final.statHints} value={String(hintsUsed)} accent={accent} />
           </div>
           <Button className="mt-4" disabled={busy} onClick={share}>
-            {busy ? 'Creating…' : shared ? '✓ Saved!' : '📸 Share my result'}
+            {busy ? t.final.shareCreating : shared ? t.final.shareSaved : t.final.shareBtn}
           </Button>
         </Card>
 
         {/* Leaderboard */}
         {run.leaderboard && run.leaderboard.rankings.length > 0 && (
           <Card className="p-4 w-full">
-            <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🏅 Leaderboard</div>
+            <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🏅 {t.final.leaderboardTitle}</div>
             <div className="space-y-1.5">
               {run.leaderboard.rankings.slice(0, 10).map((r, i) => {
                 const isMe = r.teamId === team.id;
@@ -141,7 +148,7 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
         )}
 
         {!run.leaderboard && (
-          <p className="text-zinc-500 text-sm">Waiting for the host to finalize the leaderboard…</p>
+          <p className="text-zinc-500 text-sm">{t.final.waitingFinalize}</p>
         )}
       </div>
 
@@ -152,14 +159,14 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
         <a href={`${CREATOR_URL}/?ref=${team.ownerUid}`} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">
-            <span>⚡</span> Powered by RushPoint
+            <span>⚡</span> {t.final.poweredBy}
           </div>
           <div className="text-sm font-semibold" style={{ color: accent }}>
-            Build your own race, free →
+            {t.final.buildOwn}
           </div>
         </a>
       )}
-      <Button variant="ghost" onClick={onLeave} className="mt-2">Leave</Button>
+      <Button variant="ghost" onClick={onLeave} className="mt-2">{t.final.leave}</Button>
     </Screen>
   );
 }

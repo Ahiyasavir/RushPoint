@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { resolveDisplayName, resolveRegistrationFields, type RegistrationField } from '@rushpoint/shared';
+import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
@@ -15,6 +15,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const [members, setMembers] = useState<string[]>(['']);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (LINK_CODE.length >= 4) void lookup();
@@ -35,6 +36,12 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   async function submit() {
     if (!info) return;
     setErr(''); setBusy(true);
+    // Validate required registration fields client-side so participants see
+    // exactly which fields to fill instead of waiting for a cold server error.
+    const allFields = resolveRegistrationFields(info.mode, info.registrationFields);
+    const errors = validateRequiredFields(allFields, values);
+    if (errors.size > 0) { setFieldErrors(errors); setBusy(false); return; }
+    setFieldErrors(new Set());
     try {
       const memberNames = members.map((m) => m.trim()).filter(Boolean);
       const displayName = resolveDisplayName(info.mode, values, memberNames);
@@ -196,7 +203,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
       <div className="space-y-4 flex-1">
         {teamFields.map((f) => (
-          <FieldInput key={f.id} field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} />
+          <FieldInput key={f.id} field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} hasError={fieldErrors.has(f.id)} />
         ))}
 
         <Card className="p-5">
@@ -226,7 +233,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           )}
           {memberFields.filter((f) => f.id !== 'name').map((f) => (
             <div key={f.id} className="mt-4">
-              <FieldInput field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} />
+              <FieldInput field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} hasError={fieldErrors.has(f.id)} />
             </div>
           ))}
         </Card>
@@ -245,10 +252,11 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   );
 }
 
-function FieldInput({ field, value, onChange }: { field: RegistrationField; value: string; onChange: (v: string) => void }) {
+function FieldInput({ field, value, onChange, hasError }: { field: RegistrationField; value: string; onChange: (v: string) => void; hasError?: boolean }) {
+  const errRing = hasError ? ' border-rp-alert' : '';
   if (field.type === 'checkbox') {
     return (
-      <label className="flex items-center gap-3 text-sm text-zinc-300 bg-white border border-glass-border rounded-xl px-4 py-3">
+      <label className={`flex items-center gap-3 text-sm text-zinc-300 bg-white border border-glass-border rounded-xl px-4 py-3${errRing}`}>
         <input type="checkbox" checked={value === 'true'} onChange={(e) => onChange(String(e.target.checked))} className="w-4 h-4" />
         {field.label}{field.required && ' *'}
       </label>
@@ -259,7 +267,7 @@ function FieldInput({ field, value, onChange }: { field: RegistrationField; valu
       <div>
         <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
         <select value={value} onChange={(e) => onChange(e.target.value)}
-          className="w-full px-4 py-4 rounded-2xl bg-white border border-glass-border text-zinc-100 focus:outline-none focus:border-rp-fire/40">
+          className={`w-full px-4 py-4 rounded-2xl bg-white border border-glass-border text-zinc-100 focus:outline-none focus:border-rp-fire/40${errRing}`}>
           <option value="">…</option>
           {(field.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
@@ -274,6 +282,7 @@ function FieldInput({ field, value, onChange }: { field: RegistrationField; valu
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={field.label}
+        className={hasError ? 'border-rp-alert' : undefined}
       />
     </div>
   );

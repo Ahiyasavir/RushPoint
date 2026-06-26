@@ -9,6 +9,14 @@ import MapModeToggle from './MapModeToggle';
 import { Input } from './ui';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
+if (!KEY && import.meta.env.PROD) {
+  console.warn(
+    '[LocationPicker] VITE_MAPTILER_KEY is not set. ' +
+    'The public Nominatim geocoder is used as a fallback. ' +
+    'This violates the Nominatim Usage Policy and must not be used in production. ' +
+    'Set VITE_MAPTILER_KEY in apps/creator-web/.env',
+  );
+}
 // Sensible default view when a task has no coordinates yet (central Israel).
 const DEFAULT_CENTER: [number, number] = [35.21, 31.77];
 
@@ -179,6 +187,11 @@ export default function LocationPicker({
       </div>
 
       <div ref={ref} className={`rounded-lg overflow-hidden border border-glass-border ${className}`} />
+      {!KEY && import.meta.env.DEV && (
+        <div className="absolute top-2 inset-x-2 z-10 bg-amber-100 border border-amber-400 text-amber-800 text-xs px-3 py-1.5 rounded-lg">
+          ⚠️ No MapTiler key — using public geocoder. Not suitable for production.
+        </div>
+      )}
       <MapModeToggle mode={mode} onChange={setMode} />
       {!hasCoord && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none pb-3">

@@ -59,15 +59,22 @@ Copy each `.env.example` to `.env` (all are gitignored) and fill in real values.
 
 | File | What goes in it |
 |---|---|
-| `apps/creator-web/.env` | `VITE_FIREBASE_*` from your Web app config (+ optional `VITE_MAPTILER_KEY`) |
+| `apps/creator-web/.env` | `VITE_FIREBASE_*` from your Web app config + **required** `VITE_MAPTILER_KEY` (see below) |
 | `apps/play-web/.env` | same `VITE_FIREBASE_*` values (+ optional `VITE_MAPTILER_KEY`) |
 | `functions/.env` | `APP_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (Stripe in §4) |
 
 - `VITE_*` values are **public** (baked into the web bundle) — that's fine, they're not secrets.
 - `functions/.env` holds **server secrets**; it is gitignored and only deployed to your functions.
   (For extra security you can use `firebase functions:secrets:set` instead — see §6.)
-- **MapTiler** is optional: free tier, no card, https://cloud.maptiler.com. Without it maps fall
-  back to keyless OpenTopoMap tiles.
+- **MapTiler** tiles are optional (maps fall back to keyless OpenTopoMap), but
+  `VITE_MAPTILER_KEY` is **REQUIRED for `apps/creator-web` in production**: the location-picker
+  geocoder falls back to the public **Nominatim** service without it, which violates the
+  [Nominatim Usage Policy](https://operations.osmfoundation.org/policies/nominatim/) for production
+  use. Get a free key (no card) at https://cloud.maptiler.com and set:
+  ```
+  VITE_MAPTILER_KEY=<your-key>   # REQUIRED — without it the public Nominatim geocoder is used,
+                                  # which violates the Nominatim Usage Policy for production use.
+  ```
 
 ---
 

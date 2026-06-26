@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: play-web i18n covers all participant-facing screens
 The `apps/play-web/src/i18n.ts` file SHALL contain translation keys for every

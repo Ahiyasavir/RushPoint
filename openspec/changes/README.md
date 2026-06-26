@@ -17,7 +17,7 @@ all green).
 ## 1. Launch hardening — `v21-launch-hardening.todo.test.ts`
 | Change | Status |
 |---|---|
-| `prelaunch-critical-fixes` | 📋 backlog (largest: 53 tasks — finalscreen/taskrunner i18n, GPS-error UX, photo-URL validation) |
+| `prelaunch-critical-fixes` | ✅ archived (`2026-06-26-prelaunch-critical-fixes`) → 5 living specs; all 5 gates green. 49/53 tasks done; 4 human-only QA tasks (preview smoke ×2, **Hebrew native-speaker review of the 48 i18n keys**, creator smoke) remain pre-deploy. |
 | `prelaunch-polish` | 📋 backlog |
 | `play-web-store-readiness` | 📋 backlog |
 | `fix-live-launch-demo-text` | 🟡 partial — verify against live-launch demo copy before archiving |
@@ -83,6 +83,7 @@ all green).
 |---|---|
 | `map-provider-decision` ✅ | `openspec/specs/map-provider/spec.md` |
 | `free-mode-no-payments` ✅ | `openspec/specs/free-mode/spec.md` |
+| `prelaunch-critical-fixes` ✅ | `openspec/specs/{gps-error-ux,taskrunner-i18n,finalscreen-i18n,photo-url-validation,play-web-i18n-hebrew}/spec.md` |
 
 > **Checkbox caveat:** `tasks.md` checkboxes across the backlog are uniformly unticked and were not
 > maintained during the original build — they are **not** a reliable "done" signal. Implementation
