@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType,
+  Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType, TriggerMode,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED, normalizeTriggerMode, defaultRadiusFor } from '@rushpoint/shared';
+
+// Trigger-mode selector metadata (change: task-trigger-modes). The 4 modes
+// replace the old binary "has a location" toggle on the task editor.
+const TRIGGER_MODE_META: { mode: TriggerMode; icon: string; label: string; desc: string }[] = [
+  { mode: 'radius', icon: '📍', label: 'Within radius', desc: 'Fires when a player is within a set radius (default 40m).' },
+  { mode: 'exact', icon: '🎯', label: 'Exact spot', desc: 'Fires only on precise arrival (default 4m).' },
+  { mode: 'instant', icon: '⚡', label: 'Instant', desc: 'Fires immediately on arrival at this task. No GPS check.' },
+  { mode: 'locationless', icon: '🌐', label: 'Anywhere', desc: 'Purely digital. No map pin, playable from anywhere.' },
+];
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -456,7 +465,17 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
   const setSmart = (p: Record<string, unknown>) =>
     onChange({ ...task, smart: { enabled: true, verificationType: task.smart?.verificationType ?? 'code_verification', ...task.smart, ...p } });
 
-  const located = !task.locationless;
+  const mode = normalizeTriggerMode(task);
+  const located = mode === 'radius' || mode === 'exact';
+  // Select a trigger mode: keep the legacy `locationless` flag in sync and seed a
+  // sensible default radius for radius/exact.
+  const setMode = (m: TriggerMode) => set({
+    triggerMode: m,
+    locationless: m === 'locationless',
+    geofenceRadiusMeters: (m === 'radius' || m === 'exact')
+      ? (task.geofenceRadiusMeters ?? defaultRadiusFor(m))
+      : task.geofenceRadiusMeters,
+  });
   return (
     <div className="space-y-2">
       <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder="Task title" />
@@ -468,11 +487,32 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         rows={2}
       />
 
-      <label className="flex items-center gap-2 text-sm text-zinc-300 py-1">
-        <input type="checkbox" checked={located}
-          onChange={(e) => set({ locationless: !e.target.checked })} />
-        Has a specific map location
-      </label>
+      <div>
+        <Label>How does this task fire?</Label>
+        <div className="grid grid-cols-2 gap-2">
+          {TRIGGER_MODE_META.map((tm) => (
+            <button
+              key={tm.mode}
+              type="button"
+              onClick={() => setMode(tm.mode)}
+              className={`text-start rounded-lg border px-3 py-2 transition-colors ${
+                mode === tm.mode ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border] hover:bg-[--surface-2]'
+              }`}
+            >
+              <div className="text-sm font-medium text-[--ink-1]">{tm.icon} {tm.label}</div>
+              <div className="text-[11px] text-[--ink-3]">{tm.desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {(mode === 'radius' || mode === 'exact') && (
+        <div>
+          <Label>Trigger radius (metres)</Label>
+          <Input type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(mode)}
+            onChange={(e) => set({ geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(mode)) })} />
+        </div>
+      )}
 
       {located ? (
         <>
@@ -495,7 +535,9 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         </>
       ) : (
         <p className="text-xs text-zinc-500 bg-app-raised rounded-lg px-3 py-2">
-          🌐 General task. Teams can do this from anywhere, no map pin or travel distance.
+          {mode === 'instant'
+            ? '⚡ Instant task. Completes the moment a player reaches it, with no GPS check.'
+            : '🌐 General task. Teams can do this from anywhere, no map pin or travel distance.'}
         </p>
       )}
 
@@ -581,14 +623,6 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
               <Label>± tolerance</Label>
               <Input type="number" min={0} value={task.numericTolerance ?? 0} onChange={(e) => set({ numericTolerance: Math.max(0, parseFloat(e.target.value) || 0) })} />
             </div>
-          </div>
-        )}
-
-        {task.type === 'geofence' && (
-          <div>
-            <Label>Auto-check-in radius (meters)</Label>
-            <Input type="number" min={5} value={task.geofenceRadiusMeters ?? 50} onChange={(e) => set({ geofenceRadiusMeters: Math.max(5, parseInt(e.target.value) || 50) })} />
-            <p className="text-[11px] text-zinc-500 mt-1">Teams check in automatically within this distance of the pin above.</p>
           </div>
         )}
 

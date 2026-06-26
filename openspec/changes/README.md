@@ -66,7 +66,7 @@ all green).
 | Change | Status |
 |---|---|
 | `task-creation-wizard` | 📋 backlog (24 tasks) |
-| `task-trigger-modes` | 🟡 partial (~50%) — pure shared helpers (`evaluateTrigger`/`defaultRadiusFor`/`normalizeTriggerMode`) exist + `test-trigger-modes.ts` green, but they are **orphans**: the server gate (`completeTask` still uses the legacy `type === 'geofence'` check, default 50m — does NOT honor `triggerMode`/`exact`/`instant`) and the Builder Step-1 selector are **not implemented**, and e2e has no exact/instant coverage. **NOT archive-ready** — 2 of 4 spec requirements unmet. |
+| `task-trigger-modes` | ✅ archived (`2026-06-26-task-trigger-modes`) → task-trigger-modes spec; server gate now honors triggerMode (radius/exact/instant via evaluateTrigger), e2e exact+instant green, Builder 4-mode selector. §4.3 (edit the unbuilt task-creation-wizard spec) deferred with that change. |
 | `solo-mode-registration` | 🟡 partial — `test-registration-fields.ts` green; verify UI/backend remainder |
 | `import-game-spreadsheet` | 📋 backlog |
 | `white-label-pro` | 📋 backlog |

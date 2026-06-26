@@ -25,6 +25,8 @@ import {
   PAYMENTS_ENABLED,
   resolveLaunchBilling,
   describeGameRequirements,
+  normalizeTriggerMode,
+  evaluateTrigger,
   haversineKm,
   isValidCoord,
 } from '@rushpoint/shared';
@@ -872,18 +874,22 @@ export const completeTask = functions.https.onCall(async (data, context) => {
   const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
   const now = new Date().toISOString();
 
-  // Geofence tasks auto-complete on arrival — the server validates the GPS
-  // distance so it can't be spoofed by simply calling completeTask.
+  // Trigger-mode gate: radius/exact tasks validate GPS proximity server-side so
+  // they can't be spoofed by calling completeTask directly; instant/locationless
+  // need no GPS. Legacy `geofence`-type tasks normalize to `radius`.
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   const gtask = gameSnap.exists ? findGameTask(gameSnap.data() as Game, taskId) : undefined;
-  if (gtask?.type === 'geofence') {
-    const radiusM = gtask.geofenceRadiusMeters ?? 50;
-    if (lat == null || lng == null || !isValidCoord(lat, lng) || !gtask.coordinates) {
-      throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
-    }
-    const distM = haversineKm({ lat, lng }, gtask.coordinates) * 1000;
-    if (distM > radiusM) {
-      throw new functions.https.HttpsError('failed-precondition', `Too far from the spot (${Math.round(distM)}m away)`);
+  if (gtask) {
+    const mode = normalizeTriggerMode(gtask);
+    if (mode === 'radius' || mode === 'exact') {
+      if (lat == null || lng == null || !isValidCoord(lat, lng) || !gtask.coordinates) {
+        throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
+      }
+      const distM = haversineKm({ lat, lng }, gtask.coordinates) * 1000;
+      const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters);
+      if (!verdict.ok) {
+        throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? `Too far from the spot (${Math.round(distM)}m away)`);
+      }
     }
   }
 

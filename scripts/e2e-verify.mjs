@@ -437,6 +437,12 @@ async function main() {
       { id: 's-geo', order: 2, title: 'Geofence', tasks: [{
         id: 'gf1', title: 'Reach the gate', type: 'geofence',
         coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 60, difficulty: 2, estimatedMinutes: 3, pointValue: 50, maxConcurrentTeams: 9,
+      }, {
+        id: 'ex1', title: 'Exact arrival', type: 'field', triggerMode: 'exact',
+        coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 4, difficulty: 2, estimatedMinutes: 3, pointValue: 50, maxConcurrentTeams: 9,
+      }, {
+        id: 'in1', title: 'Instant task', type: 'field', triggerMode: 'instant',
+        coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
       }] },
       { id: 's-seq', order: 3, title: 'Sequence', isFinal: true, tasks: [{
         id: 'sq1', title: 'Three steps', type: 'sequence',
@@ -478,6 +484,18 @@ async function main() {
   check('geofence: too-far check-in rejected', geoFar);
   const geoNear = await player4.call('completeTask', { ...C4, taskId: 'gf1', lat: 31.78, lng: 35.21 });
   check('geofence: in-radius check-in accepted', geoNear?.ok === true);
+
+  // exact (triggerMode): tight 4m radius — 10m away rejected, 3m accepted.
+  let exFar = false;
+  try { await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.7801, lng: 35.21 }); }
+  catch (e) { exFar = /too far/i.test(e.message); }
+  check('exact: 10m-away check-in rejected', exFar);
+  const exNear = await player4.call('completeTask', { ...C4, taskId: 'ex1', lat: 31.78, lng: 35.21 });
+  check('exact: within-4m check-in accepted', exNear?.ok === true);
+
+  // instant (triggerMode): completes with no GPS at all.
+  const inst = await player4.call('completeTask', { ...C4, taskId: 'in1' });
+  check('instant: completes with no coordinates', inst?.ok === true);
 
   // sequence: step prompts sent (no answers); steps advance in order
   const sSeq = await player4.call('getMyTeamState', { code: c4 });
