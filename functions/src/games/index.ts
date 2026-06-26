@@ -17,6 +17,7 @@ import {
   type PublicTask,
   DEFAULT_REGISTRATION_FIELDS,
   DEFAULT_SCORING_PRESET,
+  describeGameRequirements,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos } from '../storageUtil';
 
@@ -234,6 +235,9 @@ export const publishGame = functions.https.onCall(async (data, context) => {
       stageCount: game.stages.length,
       taskCount: allTasks.length,
       estimatedTotalMinutes,
+      // Accurate GPS requirement derived from task trigger modes at publish time,
+      // so the welcome screen never trusts free-text "no GPS" claims in copy.
+      requirement: describeGameRequirements(game),
       createdAt: game.createdAt,
       updatedAt: now,
     };

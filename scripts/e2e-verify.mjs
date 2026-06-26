@@ -167,6 +167,7 @@ async function main() {
   check('getJoinInfo resolves the game title', joinInfo?.title === 'E2E Verify Game', joinInfo?.title);
   check('getJoinInfo exposes registrationFields', Array.isArray(joinInfo?.registrationFields));
   check('getJoinInfo does NOT leak game stages', joinInfo?.stages === undefined);
+  check('getJoinInfo returns a derived GPS requirement', joinInfo?.requirement === 'gps' || joinInfo?.requirement === 'anywhere', joinInfo?.requirement);
 
   // ── 4. Join the run ─────────────────────────────────────────────────────────
   const joinRes = await player.call('joinRun', {

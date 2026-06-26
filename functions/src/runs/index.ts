@@ -24,6 +24,7 @@ import {
   FREE_PARTICIPANTS_PER_FREE_RUN,
   PAYMENTS_ENABLED,
   resolveLaunchBilling,
+  describeGameRequirements,
   haversineKm,
   isValidCoord,
 } from '@rushpoint/shared';
@@ -228,6 +229,8 @@ export const getJoinInfo = functions.https.onCall(async (data, context) => {
     branding: game.branding ?? null,
     registrationFields: game.registrationFields,
     runStatus: run?.status ?? 'live',
+    // Accurate GPS requirement derived from the game's task trigger modes.
+    requirement: describeGameRequirements(game),
   };
 });
 

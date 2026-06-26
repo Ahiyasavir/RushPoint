@@ -89,7 +89,7 @@ function buildGame(now) {
     id: GAME_ID,
     ownerUid: OWNER_UID,
     title: 'משחק לדוגמה: מירוץ הסלון',
-    description: 'דמו קצר שאפשר לשחק מכל מקום — בלי GPS ובלי מפעיל. רק תלחצו ותתחילו!',
+    description: 'גרסת דמו קצרה של מירוץ הרפתקה. שחקו אותה כדי לראות איך RushPoint עובד מבפנים.',
     mode: 'individual',
     stages,
     scoringPreset: 'fixed_points_speed',
@@ -137,6 +137,9 @@ async function main() {
     scoringPreset: game.scoringPreset, tags: game.tags, approxLocation: game.approxLocation,
     playCount: 0, stageCount: game.stages.length, taskCount: allTasks.length,
     estimatedTotalMinutes: allTasks.reduce((s, t) => s + t.estimatedMinutes, 0),
+    // The demo's tasks are all locationless/instant → playable anywhere. Mirrors
+    // describeGameRequirements() so the welcome badge renders for the seed game.
+    requirement: 'anywhere',
     createdAt: now, updatedAt: now,
   });
   const pb = db.batch();

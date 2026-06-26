@@ -20,7 +20,7 @@ all green).
 | `prelaunch-critical-fixes` | ✅ archived (`2026-06-26-prelaunch-critical-fixes`) → 5 living specs; all 5 gates green. 49/53 tasks done; 4 human-only QA tasks (preview smoke ×2, **Hebrew native-speaker review of the 48 i18n keys**, creator smoke) remain pre-deploy. |
 | `prelaunch-polish` | ✅ archived (`2026-06-26-prelaunch-polish`) → legal-page-polish + locationpicker-a11y specs; all 5 gates green (P1–P12) |
 | `play-web-store-readiness` | 📋 backlog |
-| `fix-live-launch-demo-text` | 🟡 partial — verify against live-launch demo copy before archiving |
+| `fix-live-launch-demo-text` | ✅ archived (`2026-06-26-fix-live-launch-demo-text`) → accurate-launch-welcome spec; requirement now derived server-side in publishGame+getJoinInfo; seed copy cleaned; all 5 gates green |
 
 ## 2. Security & reliability — `v21-security-and-reliability.todo.test.ts`
 | Change | Status |
