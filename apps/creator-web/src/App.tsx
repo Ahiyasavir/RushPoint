@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
+import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './components/AuthGate';
 import { useT } from './components/LanguageContext';
 import { Spinner } from './components/ui';
@@ -32,10 +33,11 @@ export default function App() {
   const [dark, setDark] = useDarkMode();
   const t = useT();
 
+  // Free mode: hide the wallet/credits surface entirely while payments are off.
   const NAV = [
     { to: '/',        label: t.nav.myGames,  end: true },
     { to: '/gallery', label: t.nav.gallery },
-    { to: '/wallet',  label: t.nav.wallet },
+    ...(PAYMENTS_ENABLED ? [{ to: '/wallet', label: t.nav.wallet }] : []),
     { to: '/settings',label: t.nav.settings },
   ];
 
@@ -93,7 +95,7 @@ export default function App() {
             <Route path="/"                   element={<DashboardPage />} />
             <Route path="/build/:gameId"       element={<BuilderPage />} />
             <Route path="/gallery"             element={<GalleryPage />} />
-            <Route path="/wallet"              element={<WalletPage />} />
+            {PAYMENTS_ENABLED && <Route path="/wallet" element={<WalletPage />} />}
             <Route path="/run/:gameId/:runId"  element={<RunConsolePage />} />
             <Route path="/settings"            element={<SettingsPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />

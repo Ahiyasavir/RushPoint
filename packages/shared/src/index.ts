@@ -5,3 +5,4 @@ export * from './scoringPresets';
 export * from './mapStyle';
 export * from './perfBudget';
 export * from './registration';
+export * from './freeMode';

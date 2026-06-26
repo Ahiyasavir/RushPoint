@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Game } from '@rushpoint/shared';
+import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -68,8 +69,9 @@ export default function DashboardPage() {
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Launch failed';
-      // Out of free runs + credits → route the creator to buy more.
-      if (/credit|pro/i.test(msg)) {
+      // Out of free runs + credits → route the creator to buy more. In free
+      // mode launches never fail for billing, so just surface other errors.
+      if (PAYMENTS_ENABLED && /credit|pro/i.test(msg)) {
         if (await dialog.confirm(msg, t.nav.wallet)) nav('/wallet');
       } else {
         await dialog.alert(msg);

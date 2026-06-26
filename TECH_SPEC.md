@@ -1572,13 +1572,16 @@ above describe both current behavior and the target. Suggested order respects de
 |---|---|---|---|
 | 63 | **Free mode (payments off)** — a single `PAYMENTS_ENABLED` flag (default **false**) makes the whole app free: unlimited free launches, all Pro-gated features (49/58/59) unlocked, and every wallet/pricing/upsell surface hidden — with all billing code kept intact (dark) for a one-line flip back on | Launch posture | — |
 
-> Row 63 is **spec-ready** (passes `openspec validate --strict`):
-> [`free-mode-no-payments`](openspec/changes/free-mode-no-payments/). RED-phase blueprint:
-> [`functions/src/__planned__/v21-free-mode.todo.test.ts`](functions/src/__planned__/v21-free-mode.todo.test.ts).
-> **Status: artifacts authored; implementation deferred to the version build.** This intentionally
+> Row 63 is **✅ implemented & archived** (all 5 gates green; folded into
+> [`openspec/specs/free-mode/spec.md`](openspec/specs/free-mode/spec.md)). The flag + pure resolvers
+> (`resolveLaunchBilling` / `isFeatureUnlocked`) live in [`packages/shared/src/freeMode.ts`](packages/shared/src/freeMode.ts),
+> tested by [`scripts/test-free-mode.ts`](scripts/test-free-mode.ts); `launchRun`, `purchaseCredits`,
+> `subscribePro`, `stripeWebhook` and `getWalletStatus` are flag-aware; the creator wallet
+> page/nav/launch-error CTAs and the play-web finish footer are hidden while off. This intentionally
 > sets aside the Event-Credits + Creator-Pro billing for launch; nothing billing-related is deleted —
 > flipping `PAYMENTS_ENABLED = true` restores it. (Also unblocks launching ahead of the Cardcom /
-> Israeli merchant-account setup.)
+> Israeli merchant-account setup.) `isFeatureUnlocked` is exported and ready for the Pro-gated
+> surfaces #49/#58/#59 to consume when those changes land.
 
 ### Playtest & distribution (run it on your machine for a real test group)
 

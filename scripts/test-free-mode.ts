@@ -1,0 +1,76 @@
+// Pure-logic tests for free mode (change: free-mode-no-payments).
+// A single PAYMENTS_ENABLED flag gates ALL billing. When it is false the whole
+// app is free: launches never consume a credit/Pro and never refuse, and every
+// Pro-gated feature is unlocked. When true, the existing credit/Pro behavior is
+// restored unchanged. These two pure resolvers are the TDD lever. No emulator.
+//   npx tsx scripts/test-free-mode.ts
+import {
+  PAYMENTS_ENABLED,
+  FREE_MODE_MAX_PARTICIPANTS,
+  resolveLaunchBilling,
+  isFeatureUnlocked,
+  FREE_RUNS_LIFETIME,
+  PRO_DEFAULT_MAX_PARTICIPANTS,
+} from '../packages/shared/src/index';
+
+let failures = 0;
+function check(label: string, cond: boolean, detail = ''): void {
+  console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? ' :: ' + detail : ''}`);
+  if (!cond) failures++;
+}
+
+// ── The flag itself ──────────────────────────────────────────────────────────
+{
+  check('PAYMENTS_ENABLED defaults to false at launch', PAYMENTS_ENABLED === false,
+    `value=${PAYMENTS_ENABLED}`);
+  check('FREE_MODE_MAX_PARTICIPANTS is a positive number', typeof FREE_MODE_MAX_PARTICIPANTS === 'number' && FREE_MODE_MAX_PARTICIPANTS > 0,
+    `value=${FREE_MODE_MAX_PARTICIPANTS}`);
+}
+
+// ── resolveLaunchBilling — payments OFF → always a free launch, no consume ────
+{
+  // Even a worst-case wallet (free plan, all lifetime free runs used, 0 credits)
+  // must launch free with no consumption when payments are off.
+  const worst = { plan: 'free' as const, eventCredits: 0, lifetimeFreeRunsUsed: FREE_RUNS_LIFETIME };
+  const r = resolveLaunchBilling(false, worst);
+  check('payments off → ok', r.ok === true);
+  check('payments off → billingType "free"', r.ok && r.billingType === 'free');
+  check('payments off → consume "none"', r.ok && r.consume === 'none');
+  check('payments off → maxParticipants is FREE_MODE_MAX_PARTICIPANTS',
+    r.ok && r.maxParticipants === FREE_MODE_MAX_PARTICIPANTS);
+
+  const empty = resolveLaunchBilling(false, {});
+  check('payments off → empty wallet still launches free', empty.ok === true && empty.consume === 'none');
+}
+
+// ── resolveLaunchBilling — payments ON → existing pro/free-run/credit/refuse ──
+{
+  const pro = resolveLaunchBilling(true, { plan: 'pro' });
+  check('payments on, pro → billingType "pro"', pro.ok === true && pro.billingType === 'pro');
+  check('payments on, pro → maxParticipants PRO_DEFAULT', pro.ok && pro.maxParticipants === PRO_DEFAULT_MAX_PARTICIPANTS);
+
+  const freeRun = resolveLaunchBilling(true, { plan: 'free', lifetimeFreeRunsUsed: 0, eventCredits: 0 });
+  check('payments on, lifetime free run available → consume "free_run"',
+    freeRun.ok === true && freeRun.consume === 'free_run' && freeRun.billingType === 'free');
+
+  const credit = resolveLaunchBilling(true, { plan: 'free', lifetimeFreeRunsUsed: FREE_RUNS_LIFETIME, eventCredits: 2 });
+  check('payments on, no free runs but credits → consume "credit"',
+    credit.ok === true && credit.consume === 'credit' && credit.billingType === 'credit');
+
+  const refuse = resolveLaunchBilling(true, { plan: 'free', lifetimeFreeRunsUsed: FREE_RUNS_LIFETIME, eventCredits: 0 });
+  check('payments on, no free runs and no credits → refuse', refuse.ok === false);
+}
+
+// ── isFeatureUnlocked — off unlocks everything; on restores the Pro gate ──────
+{
+  const features = ['analytics', 'white_label', 'replay'] as const;
+  for (const f of features) {
+    check(`payments off → ${f} unlocked for non-Pro`, isFeatureUnlocked(false, { plan: 'free' }, f) === true);
+  }
+  check('payments on → analytics locked for non-Pro', isFeatureUnlocked(true, { plan: 'free' }, 'analytics') === false);
+  check('payments on → analytics unlocked for Pro', isFeatureUnlocked(true, { plan: 'pro' }, 'analytics') === true);
+  check('payments on → white_label locked for non-Pro', isFeatureUnlocked(true, { plan: 'free' }, 'white_label') === false);
+}
+
+console.log(`\n${failures === 0 ? 'ALL PASS' : failures + ' FAILED'}  (test-free-mode)`);
+process.exit(failures === 0 ? 0 : 1);

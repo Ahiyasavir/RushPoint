@@ -53,16 +53,30 @@ async function main() {
   });
   check('createGame returns a gameId', !!gameId, gameId);
 
-  // ── 1b. Billing setup (Event Credits) ───────────────────────────────────────
-  // New creators get 3 lifetime free runs. This e2e launches 4 runs, so we buy a
-  // package up front: 3 launches use free runs, the 4th spends 1 Event Credit.
+  // ── 1b. Free mode (payments off) ────────────────────────────────────────────
+  // PAYMENTS_ENABLED is false at launch: every run is free (no credits, no Pro)
+  // and buying is disabled. A brand-new 0-credit free-plan creator must launch
+  // unlimited runs with no wallet decrement — this e2e launches 4 runs on a
+  // wallet that never buys a credit.
   const wallet0 = await creator.call('getWalletStatus');
-  check('getWalletStatus: new creator has 3 free runs', wallet0?.freeRunsRemaining === 3, JSON.stringify(wallet0));
-  check('getWalletStatus: new creator has 0 credits', wallet0?.eventCredits === 0, JSON.stringify(wallet0));
-  const buy = await creator.call('purchaseCredits', { packageId: 'pro_pack' });
-  check('purchaseCredits grants credits in emulator', buy?.mock === true && buy?.credits === 10, JSON.stringify(buy));
-  const wallet1 = await creator.call('getWalletStatus');
-  check('wallet reflects 10 Event Credits', wallet1?.eventCredits === 10, JSON.stringify(wallet1));
+  check('free mode: getWalletStatus reports paymentsEnabled:false', wallet0?.paymentsEnabled === false, JSON.stringify(wallet0));
+  check('free mode: new creator has 0 credits', wallet0?.eventCredits === 0, JSON.stringify(wallet0));
+
+  let purchaseRejected = false;
+  try {
+    await creator.call('purchaseCredits', { packageId: 'pro_pack' });
+  } catch (e) {
+    purchaseRejected = /disabled/i.test(e.message);
+  }
+  check('free mode: purchaseCredits is rejected (payments disabled)', purchaseRejected);
+
+  let subscribeRejected = false;
+  try {
+    await creator.call('subscribePro', { interval: 'month' });
+  } catch (e) {
+    subscribeRejected = /disabled/i.test(e.message);
+  }
+  check('free mode: subscribePro is rejected (payments disabled)', subscribeRejected);
 
   const CODE_TASK_ID = 'task-code-1';
   const PHOTO_TASK_ID = 'task-photo-1';
@@ -144,6 +158,9 @@ async function main() {
   // ── 2. Launch a run ─────────────────────────────────────────────────────────
   const { runId, accessCode } = await creator.call('launchRun', { gameId });
   check('launchRun returns runId + accessCode', !!runId && !!accessCode, accessCode);
+  const walletAfterLaunch = await creator.call('getWalletStatus');
+  check('free mode: launch did not decrement the wallet (still 0 credits)',
+    walletAfterLaunch?.eventCredits === 0, JSON.stringify(walletAfterLaunch));
 
   // ── 3. Participant pre-join lookup ──────────────────────────────────────────
   const joinInfo = await player.call('getJoinInfo', { code: accessCode });
@@ -461,10 +478,13 @@ async function main() {
   const fin4 = await player4.call('getMyTeamState', { code: c4 });
   check('all four task types completed → team finished', fin4?.team?.status === 'finished', fin4?.team?.status);
 
-  // ── 15. Billing consumption + referral (free-run bonus, once) ───────────────
+  // ── 15. Free mode: no consumption + referral (free-run bonus, once) ─────────
+  // In free mode all 4 launches were free, so nothing was consumed: the wallet
+  // still shows the full 3 lifetime free runs and 0 credits. The referral
+  // mechanics below are retained (dark) and still bookkeep the wallet.
   const preRef = await creator.call('getWalletStatus');
-  check('3 free runs consumed by the first 3 launches', preRef?.freeRunsRemaining === 0, JSON.stringify(preRef));
-  check('1 Event Credit spent on the 4th launch', preRef?.eventCredits === 9, JSON.stringify(preRef));
+  check('free mode: 4 launches consumed no free runs (still 3)', preRef?.freeRunsRemaining === 3, JSON.stringify(preRef));
+  check('free mode: no Event Credits spent', preRef?.eventCredits === 0, JSON.stringify(preRef));
 
   const newbie = makeParty('newbie');
   const newbieCred = await signInAnonymously(newbie.auth);

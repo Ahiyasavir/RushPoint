@@ -16,6 +16,7 @@ import {
   REFERRAL_BONUS_FREE_RUNS,
   PRO_MONTHLY_ILS,
   PRO_ANNUAL_ILS,
+  PAYMENTS_ENABLED,
 } from '@rushpoint/shared';
 
 const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
@@ -23,6 +24,18 @@ const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
 function requireAuth(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   return context.auth.uid;
+}
+
+// While payments are off (free mode) every buying path is rejected with a typed,
+// bilingual error. The billing code stays present (dark) — flipping the flag
+// re-enables it with no other change.
+function requirePaymentsEnabled(): void {
+  if (!PAYMENTS_ENABLED) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'Payments are currently disabled — RushPoint is free. / התשלומים מושבתים כעת — RushPoint חינמי.',
+    );
+  }
 }
 
 function walletRef(uid: string) {
@@ -109,6 +122,7 @@ export const getWalletStatus = functions.https.onCall(async (_data, context) => 
     eventCredits: w.eventCredits,
     freeRunsRemaining: freeRunsRemaining(w),
     lastPackageMaxParticipants: w.lastPackageMaxParticipants,
+    paymentsEnabled: PAYMENTS_ENABLED,
   };
   return status;
 });
@@ -120,6 +134,7 @@ export const getWalletStatus = functions.https.onCall(async (_data, context) => 
 
 export const purchaseCredits = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
+  requirePaymentsEnabled();
   const { packageId } = data as { packageId: EventPackageId };
   const pkg = EVENT_PACKAGES[packageId];
   if (!pkg) throw new functions.https.HttpsError('invalid-argument', 'Unknown package');
@@ -173,6 +188,7 @@ export const purchaseCredits = functions.https.onCall(async (data, context) => {
 
 export const subscribePro = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
+  requirePaymentsEnabled();
   const interval = (data as { interval?: string })?.interval === 'year' ? 'year' : 'month';
   const priceILS = interval === 'year' ? PRO_ANNUAL_ILS : PRO_MONTHLY_ILS;
 
@@ -284,6 +300,11 @@ export const claimReferral = functions.https.onCall(async (data, context) => {
 // HTTP handler (not callable) for Stripe checkout/subscription lifecycle events.
 
 export const stripeWebhook = functions.https.onRequest(async (req, res) => {
+  // Free mode: the webhook is inert — acknowledge with 200 and mutate nothing.
+  if (!PAYMENTS_ENABLED) {
+    res.status(200).json({ received: true, paymentsEnabled: false });
+    return;
+  }
   const stripeKey     = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!stripeKey || !webhookSecret) {

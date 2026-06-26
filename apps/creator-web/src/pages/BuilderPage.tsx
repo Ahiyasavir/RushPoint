@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType,
 } from '@rushpoint/shared';
-import { PRESET_LABELS } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -128,10 +128,11 @@ export default function BuilderPage() {
       nav(`/run/${game.id}/${runId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Launch failed';
-      // Out of free runs + credits → offer to open the wallet.
-      if (/credit|pro/i.test(msg) && await dialog.confirm(msg, 'Go to wallet')) {
+      // Out of free runs + credits → offer to open the wallet. In free mode
+      // launches never fail for billing, so just surface any other error.
+      if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, 'Go to wallet')) {
         nav('/wallet');
-      } else if (!/credit|pro/i.test(msg)) {
+      } else if (!PAYMENTS_ENABLED || !/credit|pro/i.test(msg)) {
         await dialog.alert(msg);
       }
     }

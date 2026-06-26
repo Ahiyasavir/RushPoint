@@ -21,10 +21,9 @@ import {
   type LeaderboardEntry,
   type StageStatus,
   type Wallet,
-  FREE_RUNS_LIFETIME,
   FREE_PARTICIPANTS_PER_FREE_RUN,
-  PRO_DEFAULT_MAX_PARTICIPANTS,
-  EVENT_PACKAGES,
+  PAYMENTS_ENABLED,
+  resolveLaunchBilling,
   haversineKm,
   isValidCoord,
 } from '@rushpoint/shared';
@@ -120,48 +119,51 @@ export const launchRun = functions.https.onCall(async (data, context) => {
   const runRef = db.collection(`users/${uid}/games/${gameId}/runs`).doc();
   const walletRef = db.doc(`wallets/${uid}`);
 
-  // ── Billing: pick a free run, then a credit, then refuse. Consuming the free
-  //    run / credit happens atomically so a double-launch can't double-spend. ──
-  const billing = await db.runTransaction<{ billingType: Run['billingType']; maxParticipants: number }>(async (t) => {
-    const wSnap = await t.get(walletRef);
-    const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
-    const plan = w.plan ?? 'free';
-    const lifetimeUsed = w.lifetimeFreeRunsUsed ?? 0;
-    const freeCap = FREE_RUNS_LIFETIME + (w.bonusFreeRuns ?? 0);
-    const credits = w.eventCredits ?? 0;
-
-    if (plan === 'pro') {
-      return { billingType: 'pro', maxParticipants: PRO_DEFAULT_MAX_PARTICIPANTS };
-    }
-    if (lifetimeUsed < freeCap) {
-      t.set(walletRef, {
-        uid, lifetimeFreeRunsUsed: admin.firestore.FieldValue.increment(1), updatedAt: now,
-      }, { merge: true });
-      const txRef = walletRef.collection('transactions').doc();
-      t.set(txRef, {
-        id: txRef.id, type: 'free_run_consumed', runId: runRef.id, gameTitle: game.title,
-        description: `Free run — ${game.title}`, createdAt: now,
-      });
-      return { billingType: 'free', maxParticipants: FREE_PARTICIPANTS_PER_FREE_RUN };
-    }
-    if (credits > 0) {
-      const maxParticipants = w.lastPackageMaxParticipants ?? EVENT_PACKAGES.starter.maxParticipants;
-      t.set(walletRef, {
-        uid, eventCredits: admin.firestore.FieldValue.increment(-1), updatedAt: now,
-      }, { merge: true });
-      const txRef = walletRef.collection('transactions').doc();
-      t.set(txRef, {
-        id: txRef.id, type: 'charge_event', runId: runRef.id, gameTitle: game.title,
-        creditCost: 1, maxParticipantsPerRun: maxParticipants,
-        description: `1 Event Credit — ${game.title}`, createdAt: now,
-      });
-      return { billingType: 'credit', maxParticipants };
-    }
-    throw new functions.https.HttpsError(
-      'resource-exhausted',
-      'No Event Credits left. Buy a credit package or upgrade to Creator Pro to launch this run.',
-    );
-  });
+  // ── Billing. The decision (pro / free-run / credit / refuse) lives in the pure
+  //    resolveLaunchBilling helper; this function only performs the side-effects.
+  //    Free mode (PAYMENTS_ENABLED === false) short-circuits with a free launch
+  //    and touches the wallet not at all — no read, no decrement. ──
+  let billing: { billingType: Run['billingType']; maxParticipants: number };
+  if (!PAYMENTS_ENABLED) {
+    const free = resolveLaunchBilling(false, {});
+    // free.ok is always true when payments are off.
+    billing = free.ok
+      ? { billingType: free.billingType, maxParticipants: free.maxParticipants }
+      : { billingType: 'free', maxParticipants: FREE_PARTICIPANTS_PER_FREE_RUN };
+  } else {
+    billing = await db.runTransaction<{ billingType: Run['billingType']; maxParticipants: number }>(async (t) => {
+      const wSnap = await t.get(walletRef);
+      const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
+      const decision = resolveLaunchBilling(true, w);
+      if (!decision.ok) {
+        throw new functions.https.HttpsError(
+          'resource-exhausted',
+          'No Event Credits left. Buy a credit package or upgrade to Creator Pro to launch this run.',
+        );
+      }
+      if (decision.consume === 'free_run') {
+        t.set(walletRef, {
+          uid, lifetimeFreeRunsUsed: admin.firestore.FieldValue.increment(1), updatedAt: now,
+        }, { merge: true });
+        const txRef = walletRef.collection('transactions').doc();
+        t.set(txRef, {
+          id: txRef.id, type: 'free_run_consumed', runId: runRef.id, gameTitle: game.title,
+          description: `Free run — ${game.title}`, createdAt: now,
+        });
+      } else if (decision.consume === 'credit') {
+        t.set(walletRef, {
+          uid, eventCredits: admin.firestore.FieldValue.increment(-1), updatedAt: now,
+        }, { merge: true });
+        const txRef = walletRef.collection('transactions').doc();
+        t.set(txRef, {
+          id: txRef.id, type: 'charge_event', runId: runRef.id, gameTitle: game.title,
+          creditCost: 1, maxParticipantsPerRun: decision.maxParticipants,
+          description: `1 Event Credit — ${game.title}`, createdAt: now,
+        });
+      }
+      return { billingType: decision.billingType, maxParticipants: decision.maxParticipants };
+    });
+  }
 
   const run: Run = {
     id: runRef.id,

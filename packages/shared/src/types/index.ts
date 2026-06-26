@@ -563,6 +563,9 @@ export interface WalletStatus {
   eventCredits: number;
   freeRunsRemaining: number;
   lastPackageMaxParticipants?: number;
+  // Free mode: when false the whole app is free and clients hide every payment
+  // surface. Mirrors PAYMENTS_ENABLED so clients render free mode without guessing.
+  paymentsEnabled: boolean;
 }
 
 export interface WalletTransaction {

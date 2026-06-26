@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { shareStoryCard } from '../lib/storyCard';
@@ -144,9 +145,10 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
         )}
       </div>
 
-      {/* Viral footer — hidden for Pro runs (white-label). The ?ref tag credits
-          the host with a free run if a participant signs up as a creator. */}
-      {run.billingType !== 'pro' && (
+      {/* Viral footer — hidden for Pro runs (white-label) and entirely in free
+          mode (no payment/upsell surface). The ?ref tag credits the host with a
+          free run if a participant signs up as a creator. */}
+      {PAYMENTS_ENABLED && run.billingType !== 'pro' && (
         <a href={`${CREATOR_URL}/?ref=${team.ownerUid}`} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">

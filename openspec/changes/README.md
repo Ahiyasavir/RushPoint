@@ -74,7 +74,7 @@ all green).
 ## 8. Free mode — `v21-free-mode.todo.test.ts`
 | Change | Status |
 |---|---|
-| `free-mode-no-payments` | 📋 backlog — single flag (`PAYMENTS_ENABLED`) to launch fully free |
+| `free-mode-no-payments` | ✅ archived (`2026-06-26-free-mode-no-payments`) → `openspec/specs/free-mode/spec.md`; all 5 gates green |
 
 ---
 
@@ -82,6 +82,7 @@ all green).
 | Change | Living spec |
 |---|---|
 | `map-provider-decision` ✅ | `openspec/specs/map-provider/spec.md` |
+| `free-mode-no-payments` ✅ | `openspec/specs/free-mode/spec.md` |
 
 > **Checkbox caveat:** `tasks.md` checkboxes across the backlog are uniformly unticked and were not
 > maintained during the original build — they are **not** a reliable "done" signal. Implementation
