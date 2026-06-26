@@ -20,8 +20,8 @@ local emulator. Full lifecycle verified by `npm run e2e` (52/52) and all gates g
 - **Backend:** all callables (games/runs/gallery/payments + staff/live-ops), server-write-only
   rules, scoped staff read, Storage rules.
 
-## Going live — see [DEPLOY.md](DEPLOY.md)
-Full step-by-step for Firebase deploy + Stripe payments is in **[DEPLOY.md](DEPLOY.md)**. The repo
+## Going live — see [DEPLOY.md](../DEPLOY.md)
+Full step-by-step for Firebase deploy + Stripe payments is in **[DEPLOY.md](../DEPLOY.md)**. The repo
 is deploy-ready: `firebase.json` has both Hosting sites + a functions predeploy build hook; the
 functions bundle `@rushpoint/shared` via esbuild (no workspace-install issue); Stripe top-ups are
 real and credited idempotently by the webhook. What's left is owner-only: enter your Firebase +

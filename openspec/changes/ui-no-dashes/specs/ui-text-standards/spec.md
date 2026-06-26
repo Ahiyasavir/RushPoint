@@ -1,8 +1,9 @@
 ## ADDED Requirements
 
 ### Requirement: User-facing copy contains no dash/hyphen separators
-All user-facing strings shipped by the apps (translation-map leaf values and visible JSX text)
-SHALL NOT use an em-dash (`—`), en-dash (`–`), or spaced hyphen (` - `) as a separator. Sentences
+All user-facing strings shipped by the apps SHALL NOT use an em-dash (`—`), en-dash (`–`), or
+spaced hyphen (` - `) as a separator (this covers translation-map leaf values and visible JSX
+text). Sentences
 SHALL be joined with commas, periods, or line breaks instead. Code comments, file paths, CLI flags,
 CSS, and class names are exempt.
 

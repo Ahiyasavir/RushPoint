@@ -933,6 +933,11 @@ and inline error/status messages. Photo entry validates image type + ≤12 MB be
 ## 20. Maps
 
 - **Library:** MapLibre GL JS (kept behind `React.lazy` — the heavy bundle isn't in the initial download).
+- **Provider decision (of record):** Evaluated Google Maps and kept **MapLibre + MapTiler with the
+  keyless OpenTopoMap fallback** — the Google Maps migration was rejected on cost + hard API-key/billing
+  dependency grounds for no functional gain on a field-race product. `VITE_MAPTILER_KEY` is **optional**
+  (it only upgrades the keyless fallback to vector tiles). Full assessment: archived change
+  `map-provider-decision`.
 - **Style:** `resolveMapStyle(key?, mode?)` from `@rushpoint/shared/mapStyle` — MapTiler `outdoor`
   (topo) / satellite when `VITE_MAPTILER_KEY` is set; keyless **OpenTopoMap** fallback otherwise.
 - **Mode toggle:** topo ⇄ satellite via `MapModeToggle`.
