@@ -6,7 +6,7 @@ import * as functions from 'firebase-functions';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, type SafeZone } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -213,15 +213,34 @@ export const updateLocation = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
   }
 
+  const now = new Date().toISOString();
   const locationRef = db.doc(
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${uid}`,
   );
-  await locationRef.set(
-    { teamId: uid, lat, lng, updatedAt: new Date().toISOString() },
-    { merge: true },
-  );
+  await locationRef.set({ teamId: uid, lat, lng, updatedAt: now }, { merge: true });
 
-  return { ok: true };
+  // Safe-zone breach detection (safe-zone-boundary): server-side only. On a NEW
+  // breach raise an alert + flag the team out-of-bounds; on return inside, clear it.
+  const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
+  const safeZone = (gameSnap.data() as { safeZone?: SafeZone } | undefined)?.safeZone;
+  if (!safeZone) return { ok: true, outOfBounds: false };
+
+  const outside = isOutsideSafeZone({ lat, lng }, safeZone);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`);
+  const wasOut = ((await teamRef.get()).data() as { outOfBounds?: boolean } | undefined)?.outOfBounds === true;
+
+  if (outside && !wasOut) {
+    const alertRef = db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`).doc();
+    await alertRef.set({
+      id: alertRef.id, teamId: uid, type: 'safe_zone_breach',
+      lat, lng, message: 'Left the play area', acknowledged: false, createdAt: now,
+    });
+    await teamRef.set({ outOfBounds: true }, { merge: true });
+  } else if (!outside && wasOut) {
+    await teamRef.set({ outOfBounds: false }, { merge: true });
+  }
+
+  return { ok: true, outOfBounds: outside };
 });
 
 

@@ -661,6 +661,34 @@ async function main() {
   const start2 = await creator.call('startTeams', { gameId: g6, runId: r6 });
   check('consent: team starts after a guardian approves', start2?.launched === 1, JSON.stringify(start2));
 
+  // ── 18. Safe-zone boundary (safe-zone-boundary) ────────────────────────────
+  // A location outside the zone flags the team out-of-bounds and soft-pauses new
+  // task assignment; returning inside clears the flag and assignment resumes.
+  const { gameId: g7 } = await creator.call('createGame', { title: 'Safe Zone Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: g7, scoringPreset: 'time_only',
+    safeZone: { center: { lat: 31.78, lng: 35.21 }, radiusMeters: 200 },
+    stages: [{ id: 'sz-s', order: 0, title: 'Play', isFinal: true, requiredTaskCount: 1, tasks: [
+      { id: 'sz-a', title: 'A', type: 'self_report', triggerMode: 'locationless', coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      { id: 'sz-b', title: 'B', type: 'self_report', triggerMode: 'locationless', coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+    ] }],
+  });
+  const { runId: r7, accessCode: c7 } = await creator.call('launchRun', { gameId: g7 });
+  const wanderer = makeParty('wanderer');
+  await signInAnonymously(wanderer.auth);
+  await wanderer.call('joinRun', { code: c7, displayName: 'Wanderer' });
+  await creator.call('startTeams', { gameId: g7, runId: r7 });
+  const C7 = { ownerUid: creatorCred.user.uid, gameId: g7, runId: r7 };
+
+  const breach = await wanderer.call('updateLocation', { ...C7, lat: 32.5, lng: 35.9 });
+  check('safe-zone: out-of-zone location flags outOfBounds + alerts', breach?.outOfBounds === true, JSON.stringify(breach));
+  const paused = await wanderer.call('requestNextTask', { ...C7, lat: 32.5, lng: 35.9 });
+  check('safe-zone: no new task while out of bounds (soft-pause)', paused?.taskId === null && paused?.outOfBounds === true, JSON.stringify(paused));
+  const back = await wanderer.call('updateLocation', { ...C7, lat: 31.78, lng: 35.21 });
+  check('safe-zone: returning inside clears outOfBounds', back?.outOfBounds === false, JSON.stringify(back));
+  const resumed = await wanderer.call('requestNextTask', { ...C7, lat: 31.78, lng: 35.21 });
+  check('safe-zone: assignment resumes inside the zone', resumed?.outOfBounds !== true, JSON.stringify(resumed));
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

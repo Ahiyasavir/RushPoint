@@ -957,6 +957,12 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
+  const teamRef = db.doc(`users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/teams/${teamId}`);
+  const tSnap = await teamRef.get();
+  if ((tSnap.data() as { outOfBounds?: boolean } | undefined)?.outOfBounds === true) {
+    return { taskId: null, outOfBounds: true };
+  }
   const now = new Date().toISOString();
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);

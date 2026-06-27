@@ -307,6 +307,9 @@ export interface Game {
   // before a participant can start; minAge is the threshold the organizer sets.
   requiresGuardianConsent?: boolean;
   minAge?: number;
+  // Safe-zone boundary (change: safe-zone-boundary): a circular play area; a team
+  // outside it triggers a server-side alert + soft-pause.
+  safeZone?: import('./../safeZone').SafeZone;
   createdAt: string;
   updatedAt: string;
 }
@@ -476,6 +479,9 @@ export interface RunTeam {
   // Guardian consent (change: guardian-consent-qr): present (with grantedAt) once
   // a guardian approves; gates start on runs that require consent.
   guardianConsent?: import('./../guardianConsent').GuardianConsent;
+  // Safe-zone (change: safe-zone-boundary): set true while the team's last known
+  // location is outside the play area; soft-pauses new task assignment.
+  outOfBounds?: boolean;
   activeTaskId?: string | null;  // mirror for getStationTeams query
   launched: boolean;
   startedAt?: string;
@@ -760,6 +766,7 @@ export interface UpdateGamePayload {
   approxLocation?: GeoPoint & { label?: string };
   requiresGuardianConsent?: boolean;
   minAge?: number;
+  safeZone?: import('./../safeZone').SafeZone | null;
 }
 
 // Run management
