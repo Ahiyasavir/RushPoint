@@ -25,7 +25,7 @@ all green).
 ## 2. Security & reliability — `v21-security-and-reliability.todo.test.ts`
 | Change | Status |
 |---|---|
-| `auth-anticheat-hardening` | 📋 backlog |
+| `auth-anticheat-hardening` | ✅ archived (`2026-06-27-auth-anticheat-hardening`) → 5 security specs (authorization, input-validation, run-billing, staff-authentication, answer-submission). IDOR fix, access-code enum deny, staff-PIN throttle + crypto RNG, caller-scoped photoUrl, answer attemptLimit, atomic launchRun, referral cap + Pro-expiry. P1 security batch #1. |
 | `guardian-consent-qr` | 📋 backlog |
 | `safe-zone-boundary` | 📋 backlog |
 
