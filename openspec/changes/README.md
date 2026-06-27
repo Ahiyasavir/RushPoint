@@ -39,7 +39,7 @@ all green).
 ## 4. Marketing & virality — `v21-marketing-virality.todo.test.ts`
 | Change | Status |
 |---|---|
-| `share-branding` | 📋 backlog |
+| `share-branding` | ✅ archived (`2026-06-27-share-branding`) → share-branding spec; reusable brand stamp (logo + URL + scannable QR) on every shared image, pure resolveShareQrTarget/computeWatermarkLayout, storyCard QR + sharePhoto + graceful fallbacks; all 5 gates green. **P2 #1.** |
 | `podium-share-moment` | 📋 backlog |
 | `challenge-a-friend` | 📋 backlog |
 | `run-recap` | 📋 backlog |
