@@ -21,6 +21,7 @@ import QuizChoicesEditor from '../components/QuizChoicesEditor';
 import TaskCard from '../components/TaskCard';
 import PacingBar from '../components/PacingBar';
 import RichTooltip from '../components/RichTooltip';
+import { TASK_SAMPLES, applySample } from '../lib/taskTemplates';
 
 // MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
 // main builder bundle: the map engine is fetched only when a located task editor
@@ -492,7 +493,19 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
 
 function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Task) => void; onRemove?: () => void }) {
   const [adv, setAdv] = useState(false);
+  // Inspiration Mode: one-click sample fills the whole draft, with a brief green
+  // flash so the change is felt (change: v2.1-builder-shell-redesign).
+  const [flash, setFlash] = useState(false);
+  const flashTimer = useRef<number>();
+  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
   const set = (p: Partial<Task>) => onChange({ ...task, ...p });
+  const samples = TASK_SAMPLES[task.type] ?? [];
+  function loadSample(sample: typeof samples[number]) {
+    onChange(applySample(task, sample));
+    setFlash(true);
+    window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setFlash(false), 600);
+  }
   const setSmart = (p: Record<string, unknown>) =>
     onChange({ ...task, smart: { enabled: true, verificationType: task.smart?.verificationType ?? 'code_verification', ...task.smart, ...p } });
 
@@ -508,7 +521,23 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       : task.geofenceRadiusMeters,
   });
   return (
-    <div className="space-y-2">
+    <div className={`space-y-2 rounded-xl transition-colors duration-500 ${flash ? 'bg-rp-go/15 ring-1 ring-rp-go/50' : ''}`}>
+      {samples.length > 0 && (
+        <div className="flex items-center flex-wrap gap-1.5 pb-1">
+          <span className="text-[11px] text-[--ink-3] me-1">✨ Start from a sample:</span>
+          {samples.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => loadSample(s)}
+              className="text-xs px-2.5 py-1 rounded-full border border-[--rp-border] text-[--ink-2] hover:border-rp-fire hover:text-[--ink-1] transition-colors"
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder="Task title" />
 
       <Textarea
