@@ -18,8 +18,8 @@ import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea 
 import { dialog } from '../components/dialog';
 import TaskLibrary from '../components/TaskLibrary';
 import QuizChoicesEditor from '../components/QuizChoicesEditor';
-import TaskCard from '../components/TaskCard';
-import PacingBar from '../components/PacingBar';
+import StageRail from '../components/StageRail';
+import TaskCanvas from '../components/TaskCanvas';
 import RichTooltip from '../components/RichTooltip';
 import { TASK_SAMPLES, applySample } from '../lib/taskTemplates';
 import { moveItem } from '../lib/reorder';
@@ -113,6 +113,7 @@ export default function BuilderPage() {
   const nav = useNavigate();
   const [game, setGame] = useState<Game | null>(null);
   const [tab, setTab] = useState<BuilderTab>('build');
+  const [activeStageId, setActiveStageId] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
@@ -252,7 +253,7 @@ export default function BuilderPage() {
         </div>
       </header>
 
-      {tab === 'build' && <StepStages game={game} setGame={setGame} />}
+      {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} />}
       {tab === 'preview' && <StepPreview game={game} />}
       {tab === 'settings' && <StepDetails game={game} patch={patch} />}
       {tab === 'analytics' && (
@@ -364,22 +365,32 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void }) {
+function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
+  game: Game; setGame: (g: Game) => void;
+  activeStageId: string | null; setActiveStageId: (id: string) => void;
+}) {
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
   function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
   // Native HTML5 drag reorder: move a stage then re-sequence `order`.
   function moveStage(from: number, to: number) {
     setStages(moveItem(game.stages, from, to).map((s, i) => ({ ...s, order: i })));
   }
-  function addStage() { setStages([...game.stages, blankStage(game.stages.length)]); }
+  function addStage() {
+    const s = blankStage(game.stages.length);
+    setStages([...game.stages, s]);
+    setActiveStageId(s.id);
+  }
   function updateStage(id: string, p: Partial<Stage>) {
     setStages(game.stages.map((s) => (s.id === id ? { ...s, ...p } : s)));
   }
   function removeStage(id: string) {
-    setStages(game.stages.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i })));
+    const remaining = game.stages.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }));
+    setStages(remaining);
+    if (activeStageId === id) setActiveStageId(remaining[0]?.id ?? '');
   }
+  // The stage shown in the centre canvas (default to the first).
+  const activeStage = game.stages.find((s) => s.id === activeStageId) ?? game.stages[0];
   function insertFromLibrary(stageId: string, task: Task) {
     const stage = game.stages.find((s) => s.id === stageId);
     if (!stage) return;
@@ -398,42 +409,37 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
   const editingStage = editing && game.stages.find((s) => s.id === editing.stageId);
   const editingTask = editingStage?.tasks.find((t) => t.id === editing?.taskId);
 
+  const m = activeStage ? activeStage.tasks.length : 0;
+  const req = activeStage ? (activeStage.requiredTaskCount ?? m) : 0;
+  const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
+
   return (
-    <div className="space-y-4">
-      {game.stages.map((stage, idx) => {
-        const m = stage.tasks.length;
-        const req = stage.requiredTaskCount ?? m;
-        return (
-          <div
-            key={stage.id}
-            onDragOver={(e) => { if (dragIdx !== null) e.preventDefault(); }}
-            onDrop={() => { if (dragIdx !== null) moveStage(dragIdx, idx); setDragIdx(null); }}
-            className={`rounded-2xl ${dragIdx !== null && dragIdx !== idx ? 'outline-dashed outline-1 outline-rp-fire/40' : ''}`}
-          >
+    <div className="flex gap-4 items-start">
+      {/* ── Left rail: stage navigator ── */}
+      <StageRail
+        stages={game.stages}
+        activeStageId={activeStage?.id ?? null}
+        onSelect={setActiveStageId}
+        onMove={moveStage}
+        onAdd={addStage}
+      />
+
+      {/* ── Centre canvas: the active stage ── */}
+      <div className="flex-1 min-w-0">
+        {activeStage && (
           <Card className="p-4">
             <div className="flex items-center gap-2 mb-3">
-              <span
-                draggable
-                onDragStart={() => setDragIdx(idx)}
-                onDragEnd={() => setDragIdx(null)}
-                title="Drag to reorder"
-                className="cursor-grab active:cursor-grabbing select-none text-[--ink-3] hover:text-[--ink-1] px-1"
-              >⠿</span>
-              <Badge color="green">Stage {idx + 1}</Badge>
-              <Input value={stage.title} onChange={(e) => updateStage(stage.id, { title: e.target.value })} className="flex-1" />
-              {idx === game.stages.length - 1 && (
+              <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" />
+              {isLastStage && (
                 <label className="flex items-center gap-1 text-xs text-zinc-400 shrink-0">
-                  <input type="checkbox" checked={!!stage.isFinal}
-                    onChange={(e) => updateStage(stage.id, { isFinal: e.target.checked })} />final
+                  <input type="checkbox" checked={!!activeStage.isFinal}
+                    onChange={(e) => updateStage(activeStage.id, { isFinal: e.target.checked })} />final
                 </label>
               )}
               {game.stages.length > 1 && (
-                <button className="text-neon-red text-sm shrink-0" onClick={() => removeStage(stage.id)}>✕</button>
+                <button className="text-neon-red text-sm shrink-0" onClick={() => removeStage(activeStage.id)}>✕</button>
               )}
             </div>
-
-            {/* Pacing: difficulty arc + type mix across the stage at a glance. */}
-            {m > 0 && <div className="mb-3"><PacingBar tasks={stage.tasks} /></div>}
 
             {/* Completion rule — only meaningful with a pool of tasks */}
             {m > 1 && (
@@ -444,7 +450,7 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
                   value={String(req)}
                   onChange={(e) => {
                     const n = parseInt(e.target.value);
-                    updateStage(stage.id, { requiredTaskCount: n >= m ? undefined : n });
+                    updateStage(activeStage.id, { requiredTaskCount: n >= m ? undefined : n });
                   }}
                 >
                   {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
@@ -455,22 +461,18 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
               </div>
             )}
 
-            <div className="space-y-2">
-              {stage.tasks.map((task) => (
-                <TaskCard key={task.id} task={task}
-                  active={editing?.stageId === stage.id && editing?.taskId === task.id}
-                  onClick={() => setEditing({ stageId: stage.id, taskId: task.id })} />
-              ))}
-              <div className="flex gap-2 pt-1">
-                <AddTile label="Add task" onClick={() => addTask(stage.id)} />
-                <AddTile label="From library" onClick={() => setLibraryFor(stage.id)} />
-              </div>
+            <TaskCanvas
+              tasks={activeStage.tasks}
+              activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
+              onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
+            />
+            <div className="flex gap-2 pt-3">
+              <AddTile label="Add task" onClick={() => addTask(activeStage.id)} />
+              <AddTile label="From library" onClick={() => setLibraryFor(activeStage.id)} />
             </div>
           </Card>
-          </div>
-        );
-      })}
-      <Button variant="subtle" onClick={addStage}>+ Add stage</Button>
+        )}
+      </div>
 
       {libraryFor && (
         <TaskLibrary

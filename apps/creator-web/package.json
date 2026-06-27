@@ -13,6 +13,7 @@
   "dependencies": {
     "@rushpoint/shared": "*",
     "@tanstack/react-query": "^5.0.0",
+    "@tanstack/react-virtual": "^3.14.4",
     "date-fns": "^3.6.0",
     "firebase": "^10.12.0",
     "lucide-react": "^0.400.0",
