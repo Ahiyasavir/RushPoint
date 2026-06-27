@@ -590,6 +590,37 @@ async function main() {
   const refUnchanged = await creator.call('getWalletStatus');
   check('re-claim does NOT double-grant the inviter', refUnchanged?.freeRunsRemaining === refAfter.freeRunsRemaining, JSON.stringify(refUnchanged));
 
+  // ── 16. Answer attempt limit (anti-cheat row 42) ───────────────────────────
+  // A quiz with attemptLimit:2 — two wrong answers exhaust it; the 3rd attempt is
+  // refused with resource-exhausted, even though it would be correct.
+  const { gameId: g5 } = await creator.call('createGame', { title: 'Attempt-Limit Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: g5, scoringPreset: 'fixed_points_speed',
+    stages: [{ id: 'al-s', order: 0, title: 'Quiz', isFinal: true, tasks: [{
+      id: 'al-q', title: 'Capital of France?', type: 'quiz',
+      coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 2, pointValue: 50, maxConcurrentTeams: 9,
+      choices: ['Paris', 'London'], answers: ['Paris'],
+      smart: { enabled: true, verificationType: 'code_verification', attemptLimit: 2 },
+    }] }],
+  });
+  const { runId: r5, accessCode: c5 } = await creator.call('launchRun', { gameId: g5 });
+  const player5 = makeParty('player5');
+  await signInAnonymously(player5.auth);
+  await player5.call('joinRun', { code: c5, displayName: 'Limiter' });
+  await creator.call('startTeams', { gameId: g5, runId: r5 });
+  const C5 = { ownerUid: creatorCred.user.uid, gameId: g5, runId: r5 };
+  const w1 = await player5.call('submitTaskAnswer', { ...C5, taskId: 'al-q', answer: 'London' });
+  check('attempt-limit: 1st wrong answer rejected (not exhausted)', w1?.correct === false);
+  const w2 = await player5.call('submitTaskAnswer', { ...C5, taskId: 'al-q', answer: 'London' });
+  check('attempt-limit: 2nd wrong answer rejected (limit reached)', w2?.correct === false);
+  let attemptExhausted = false;
+  try {
+    await player5.call('submitTaskAnswer', { ...C5, taskId: 'al-q', answer: 'Paris' }); // would be correct
+  } catch (e) {
+    attemptExhausted = e.code === 'functions/resource-exhausted' || /attempts left/i.test(e.message);
+  }
+  check('attempt-limit: 3rd attempt refused even with the correct answer', attemptExhausted);
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

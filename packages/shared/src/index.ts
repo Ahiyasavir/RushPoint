@@ -7,3 +7,4 @@ export * from './perfBudget';
 export * from './registration';
 export * from './freeMode';
 export * from './staffThrottle';
+export * from './answerAttempts';

@@ -28,6 +28,7 @@ import {
   describeGameRequirements,
   normalizeTriggerMode,
   evaluateTrigger,
+  attemptLimitReached,
   haversineKm,
   isValidCoord,
 } from '@rushpoint/shared';
@@ -124,19 +125,30 @@ export const launchRun = functions.https.onCall(async (data, context) => {
   const runRef = db.collection(`users/${uid}/games/${gameId}/runs`).doc();
   const walletRef = db.doc(`wallets/${uid}`);
 
-  // ── Billing. The decision (pro / free-run / credit / refuse) lives in the pure
-  //    resolveLaunchBilling helper; this function only performs the side-effects.
-  //    Free mode (PAYMENTS_ENABLED === false) short-circuits with a free launch
-  //    and touches the wallet not at all — no read, no decrement. ──
-  let billing: { billingType: Run['billingType']; maxParticipants: number };
+  const accessCodeRef = db.doc(`accessCodes/${code}`);
+  // Build the run + access-code docs once a billing decision is known.
+  const buildRun = (billingType: Run['billingType'], maxParticipants: number): Run => ({
+    id: runRef.id, gameId, ownerUid: uid, status: 'live', accessCode: code,
+    billingType, maxParticipants, participantCount: 0,
+    launchedAt: now, createdAt: now, updatedAt: now,
+  });
+  const accessCode: AccessCode = { code, ownerUid: uid, gameId, runId: runRef.id, status: 'unused', createdAt: now };
+
+  // ── Billing + run creation are ATOMIC (row 43): the run + access code are
+  //    written in the SAME transaction that consumes the credit, so a write
+  //    failure can never burn a paid credit without producing a run. The decision
+  //    (pro / free-run / credit / refuse) is the pure resolveLaunchBilling helper.
+  //    Free mode (PAYMENTS_ENABLED === false) touches the wallet not at all. ──
   if (!PAYMENTS_ENABLED) {
     const free = resolveLaunchBilling(false, {});
-    // free.ok is always true when payments are off.
-    billing = free.ok
-      ? { billingType: free.billingType, maxParticipants: free.maxParticipants }
-      : { billingType: 'free', maxParticipants: FREE_PARTICIPANTS_PER_FREE_RUN };
+    const billingType = free.ok ? free.billingType : 'free';
+    const maxParticipants = free.ok ? free.maxParticipants : FREE_PARTICIPANTS_PER_FREE_RUN;
+    const batch = db.batch();
+    batch.set(runRef, buildRun(billingType, maxParticipants));
+    batch.set(accessCodeRef, accessCode);
+    await batch.commit();
   } else {
-    billing = await db.runTransaction<{ billingType: Run['billingType']; maxParticipants: number }>(async (t) => {
+    await db.runTransaction(async (t) => {
       const wSnap = await t.get(walletRef);
       const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
       const decision = resolveLaunchBilling(true, w);
@@ -166,39 +178,13 @@ export const launchRun = functions.https.onCall(async (data, context) => {
           description: `1 Event Credit — ${game.title}`, createdAt: now,
         });
       }
-      return { billingType: decision.billingType, maxParticipants: decision.maxParticipants };
+      // Same transaction → run + access code commit atomically with the charge.
+      t.set(runRef, buildRun(decision.billingType, decision.maxParticipants));
+      t.set(accessCodeRef, accessCode);
     });
   }
 
-  const run: Run = {
-    id: runRef.id,
-    gameId,
-    ownerUid: uid,
-    status: 'live',
-    accessCode: code,
-    billingType: billing.billingType,
-    maxParticipants: billing.maxParticipants,
-    participantCount: 0,
-    launchedAt: now,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const accessCode: AccessCode = {
-    code,
-    ownerUid: uid,
-    gameId,
-    runId: runRef.id,
-    status: 'unused',
-    createdAt: now,
-  };
-
-  const batch = db.batch();
-  batch.set(runRef, run);
-  batch.set(db.doc(`accessCodes/${code}`), accessCode);
-  await batch.commit();
-
-  // Increment game.playCount
+  // Increment game.playCount (best-effort, outside the atomic launch).
   db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch(() => undefined);
 
   return { runId: runRef.id, accessCode: code };
@@ -1004,7 +990,29 @@ export const submitTaskAnswer = functions.https.onCall(async (data, context) => 
     throw new functions.https.HttpsError('failed-precondition', 'Task does not take an answer');
   }
 
-  if (!answerMatches(task, String(answer))) return { correct: false };
+  // row 42: enforce the task's answer attempt limit server-side. Read the team's
+  // recorded wrong-answer count for this task; refuse once the cap is reached
+  // (even a correct answer is blocked once locked — no infinite brute force).
+  const attemptLimit = task.smart?.attemptLimit;
+  const teamRef = db.doc(`users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/teams/${teamId}`);
+  if (attemptLimit && attemptLimit > 0) {
+    const teamSnap = await teamRef.get();
+    const attempts = (teamSnap.data() as { taskAttempts?: Record<string, number> } | undefined)?.taskAttempts?.[taskId] ?? 0;
+    if (attemptLimitReached(attempts, attemptLimit)) {
+      throw new functions.https.HttpsError('resource-exhausted', 'No attempts left for this task');
+    }
+  }
+
+  if (!answerMatches(task, String(answer))) {
+    // Record the wrong attempt under a real nested map (not a dotted key).
+    if (attemptLimit && attemptLimit > 0) {
+      await teamRef.set(
+        { taskAttempts: { [taskId]: admin.firestore.FieldValue.increment(1) } },
+        { merge: true },
+      );
+    }
+    return { correct: false };
+  }
 
   const now = new Date().toISOString();
   await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
