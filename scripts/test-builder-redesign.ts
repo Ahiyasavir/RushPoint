@@ -10,6 +10,7 @@ import {
 } from '../apps/creator-web/src/lib/quizFields';
 import { TASK_SAMPLES, applySample } from '../apps/creator-web/src/lib/taskTemplates';
 import { initDraft, editDraft, isDirty, commit } from '../apps/creator-web/src/lib/taskDraft';
+import { moveItem } from '../apps/creator-web/src/lib/reorder';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -123,6 +124,16 @@ check('sequence singular', taskPreviewLine(task({ type: 'sequence', steps: [{ id
     TYPES.filter((ty) => !TYPE_FAMILY_COLOR[ty]).join(','));
   check('every task type has a label',
     TYPES.every((ty) => typeof TYPE_LABEL[ty] === 'string' && TYPE_LABEL[ty].length > 0));
+}
+
+// ── moveItem: native drag-drop stage reorder ────────────────────────────────
+{
+  check('moveItem forward', JSON.stringify(moveItem(['a', 'b', 'c', 'd'], 0, 2)) === JSON.stringify(['b', 'c', 'a', 'd']));
+  check('moveItem backward', JSON.stringify(moveItem(['a', 'b', 'c', 'd'], 3, 1)) === JSON.stringify(['a', 'd', 'b', 'c']));
+  const same = ['a', 'b', 'c'];
+  check('moveItem same index is a no-op (same ref)', moveItem(same, 1, 1) === same);
+  check('moveItem out-of-range is a no-op', moveItem(same, 0, 9) === same);
+  check('moveItem does not mutate input', (() => { const a = ['a', 'b', 'c']; moveItem(a, 0, 2); return JSON.stringify(a) === JSON.stringify(['a', 'b', 'c']); })());
 }
 
 console.log(`\n${failures === 0 ? 'ALL BUILDER-REDESIGN TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);

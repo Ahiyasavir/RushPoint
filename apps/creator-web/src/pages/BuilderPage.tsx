@@ -22,6 +22,7 @@ import TaskCard from '../components/TaskCard';
 import PacingBar from '../components/PacingBar';
 import RichTooltip from '../components/RichTooltip';
 import { TASK_SAMPLES, applySample } from '../lib/taskTemplates';
+import { moveItem } from '../lib/reorder';
 
 // MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
 // main builder bundle: the map engine is fetched only when a located task editor
@@ -382,7 +383,12 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void }) {
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
   function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
+  // Native HTML5 drag reorder: move a stage then re-sequence `order`.
+  function moveStage(from: number, to: number) {
+    setStages(moveItem(game.stages, from, to).map((s, i) => ({ ...s, order: i })));
+  }
   function addStage() { setStages([...game.stages, blankStage(game.stages.length)]); }
   function updateStage(id: string, p: Partial<Stage>) {
     setStages(game.stages.map((s) => (s.id === id ? { ...s, ...p } : s)));
@@ -414,8 +420,21 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
         const m = stage.tasks.length;
         const req = stage.requiredTaskCount ?? m;
         return (
-          <Card key={stage.id} className="p-4">
+          <div
+            key={stage.id}
+            onDragOver={(e) => { if (dragIdx !== null) e.preventDefault(); }}
+            onDrop={() => { if (dragIdx !== null) moveStage(dragIdx, idx); setDragIdx(null); }}
+            className={`rounded-2xl ${dragIdx !== null && dragIdx !== idx ? 'outline-dashed outline-1 outline-rp-fire/40' : ''}`}
+          >
+          <Card className="p-4">
             <div className="flex items-center gap-2 mb-3">
+              <span
+                draggable
+                onDragStart={() => setDragIdx(idx)}
+                onDragEnd={() => setDragIdx(null)}
+                title="Drag to reorder"
+                className="cursor-grab active:cursor-grabbing select-none text-[--ink-3] hover:text-[--ink-1] px-1"
+              >⠿</span>
               <Badge color="green">Stage {idx + 1}</Badge>
               <Input value={stage.title} onChange={(e) => updateStage(stage.id, { title: e.target.value })} className="flex-1" />
               {idx === game.stages.length - 1 && (
@@ -464,6 +483,7 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
               </div>
             </div>
           </Card>
+          </div>
         );
       })}
       <Button variant="subtle" onClick={addStage}>+ Add stage</Button>
