@@ -14,6 +14,7 @@ import {
   EVENT_PACKAGES,
   FREE_RUNS_LIFETIME,
   REFERRAL_BONUS_FREE_RUNS,
+  REFERRAL_MAX_PER_REFERRER,
   PRO_MONTHLY_ILS,
   PRO_ANNUAL_ILS,
   PAYMENTS_ENABLED,
@@ -259,8 +260,15 @@ export const claimReferral = functions.https.onCall(async (data, context) => {
 
   const result = await db.runTransaction(async (t) => {
     const meSnap = await t.get(meRef);
+    const themSnap = await t.get(themRef);
     const me = meSnap.exists ? (meSnap.data() as Wallet) : null;
     if (me?.referredBy) return { already: true as const };
+
+    // Anti-farming (row 44): cap how many bonuses one referrer can earn.
+    const them = themSnap.exists ? (themSnap.data() as Wallet) : null;
+    if ((them?.referralCount ?? 0) >= REFERRAL_MAX_PER_REFERRER) {
+      throw new functions.https.HttpsError('resource-exhausted', 'This inviter has reached the referral limit');
+    }
 
     // Grant the newcomer an extra free run.
     t.set(meRef, {

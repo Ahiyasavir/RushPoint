@@ -516,6 +516,9 @@ export const PRO_MONTHLY_ILS                 = 149;
 export const PRO_ANNUAL_ILS                  = 990;
 // Each successful referral grants ONE extra lifetime free run to both sides.
 export const REFERRAL_BONUS_FREE_RUNS        = 1;
+// Anti-farming cap: a single referrer can earn at most this many referral bonuses
+// (auth-anticheat row 44). Past this, claimReferral is refused for that inviter.
+export const REFERRAL_MAX_PER_REFERRER       = 20;
 
 // Privacy retention: raw participant PII captured during a run (GPS location
 // pings + uploaded photos) is auto-purged this many days after the run finishes.

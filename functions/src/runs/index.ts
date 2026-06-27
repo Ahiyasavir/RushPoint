@@ -151,7 +151,10 @@ export const launchRun = functions.https.onCall(async (data, context) => {
     await db.runTransaction(async (t) => {
       const wSnap = await t.get(walletRef);
       const w = (wSnap.exists ? wSnap.data() : {}) as Partial<Wallet>;
-      const decision = resolveLaunchBilling(true, w);
+      // row 44: Pro counts only while the subscription is unexpired. An expired
+      // proExpiresAt is treated as a free plan for the billing decision.
+      const proActive = w.plan === 'pro' && !!w.proExpiresAt && new Date(w.proExpiresAt).getTime() > Date.now();
+      const decision = resolveLaunchBilling(true, { ...w, plan: proActive ? 'pro' : 'free' });
       if (!decision.ok) {
         throw new functions.https.HttpsError(
           'resource-exhausted',
