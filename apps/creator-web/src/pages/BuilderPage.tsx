@@ -18,6 +18,8 @@ import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea 
 import { dialog } from '../components/dialog';
 import TaskLibrary from '../components/TaskLibrary';
 import QuizChoicesEditor from '../components/QuizChoicesEditor';
+import TaskCard from '../components/TaskCard';
+import PacingBar from '../components/PacingBar';
 
 // MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
 // main builder bundle: the map engine is fetched only when a located task editor
@@ -313,31 +315,6 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 }
 
 // ── Step 2: Stages & Tasks ──
-const TASK_ICON: Record<TaskType, string> = {
-  field: '📍', self_report: '✅', smart_station: '🔢', photo: '📷',
-  quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩',
-};
-
-function taskIcon(task: Task): string {
-  if (task.locationless) return '🌐';
-  return TASK_ICON[task.type] ?? '📍';
-}
-
-// Compact, clickable task chip — the core of the at-a-glance stage editor.
-function TaskTile({ task, onClick }: { task: Task; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-32 h-24 shrink-0 rounded-xl border border-glass-border bg-app-bg p-2.5 text-start
-                 flex flex-col gap-1 hover:border-neon-green/50 hover:bg-glass-hover transition"
-    >
-      <span className="text-lg leading-none">{taskIcon(task)}</span>
-      <span className="text-xs font-medium text-zinc-100 line-clamp-2 flex-1">{task.title || 'Untitled task'}</span>
-      <span className="text-[10px] text-zinc-500">{task.locationless ? 'anywhere' : `★ ${task.difficulty}`}</span>
-    </button>
-  );
-}
-
 function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -418,6 +395,9 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
               )}
             </div>
 
+            {/* Pacing: difficulty arc + type mix across the stage at a glance. */}
+            {m > 0 && <div className="mb-3"><PacingBar tasks={stage.tasks} /></div>}
+
             {/* Completion rule — only meaningful with a pool of tasks */}
             {m > 1 && (
               <div className="flex items-center flex-wrap gap-2 mb-3 text-xs text-zinc-400">
@@ -438,12 +418,16 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
               </div>
             )}
 
-            <div className="flex flex-wrap gap-2">
+            <div className="space-y-2">
               {stage.tasks.map((task) => (
-                <TaskTile key={task.id} task={task} onClick={() => setEditing({ stageId: stage.id, taskId: task.id })} />
+                <TaskCard key={task.id} task={task}
+                  active={editing?.stageId === stage.id && editing?.taskId === task.id}
+                  onClick={() => setEditing({ stageId: stage.id, taskId: task.id })} />
               ))}
-              <AddTile label="Add task" onClick={() => addTask(stage.id)} />
-              <AddTile label="From library" onClick={() => setLibraryFor(stage.id)} />
+              <div className="flex gap-2 pt-1">
+                <AddTile label="Add task" onClick={() => addTask(stage.id)} />
+                <AddTile label="From library" onClick={() => setLibraryFor(stage.id)} />
+              </div>
             </div>
           </Card>
         );

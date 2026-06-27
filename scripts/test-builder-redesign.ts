@@ -4,7 +4,7 @@
 // mapping, Inspiration-Mode template loading, and panel draft isolation.
 //   npx tsx scripts/test-builder-redesign.ts
 import type { Task, TaskType } from '../packages/shared/src/types/index';
-import { taskPreviewLine } from '../apps/creator-web/src/lib/taskCardPreview';
+import { taskPreviewLine, TYPE_FAMILY_COLOR, TYPE_LABEL } from '../apps/creator-web/src/lib/taskCardPreview';
 import {
   choicesFromTask, choicesToTask, addChoice, removeChoice, setChoiceText, toggleCorrect,
 } from '../apps/creator-web/src/lib/quizFields';
@@ -112,6 +112,17 @@ check('sequence singular', taskPreviewLine(task({ type: 'sequence', steps: [{ id
   // Deep clone: mutating the post-commit draft cannot alias committed.
   s2.draft.title = 'MutatedInPlace';
   check('commit deep-clones (no aliasing)', s2.committed.title === 'Edited');
+}
+
+// ── TaskCard / PacingBar visual encodings: every task type must map to a family
+//    colour + label, or a card/bar would render blank for that type. ──────────
+{
+  const TYPES = ['field', 'self_report', 'smart_station', 'photo', 'quiz', 'numeric', 'geofence', 'sequence'] as const;
+  check('every task type has a family colour',
+    TYPES.every((ty) => /^#[0-9A-Fa-f]{6}$/.test(TYPE_FAMILY_COLOR[ty])),
+    TYPES.filter((ty) => !TYPE_FAMILY_COLOR[ty]).join(','));
+  check('every task type has a label',
+    TYPES.every((ty) => typeof TYPE_LABEL[ty] === 'string' && TYPE_LABEL[ty].length > 0));
 }
 
 console.log(`\n${failures === 0 ? 'ALL BUILDER-REDESIGN TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);
