@@ -33,7 +33,7 @@ all green).
 | Change | Status |
 |---|---|
 | `play-web-i18n-hebrew` | ✅ archived (`2026-06-27-play-web-i18n-hebrew`) → play-web-i18n spec; ALL participant+staff screens/components i18n'd (StaffConsole, PlayScreen, PublicLeaderboard, ErrorBoundary + TaskRunner error/dialog strings); 156-key HE/EN parity, zero English chrome; all 5 gates green |
-| `ui-no-dashes` | 📋 backlog — its RED test `scripts/test-no-dashes.ts` does not exist yet |
+| `ui-no-dashes` | ✅ archived (`2026-06-27-ui-no-dashes`) → ui-text-standards spec; `scripts/test-no-dashes.ts` scans both apps' i18n maps for `—`/`–`/` - ` (in npm test); offenders swept; standard documented in INSTRUCTIONS.md §3.C; all 5 gates green |
 | `platform-benchmark` | 📋 backlog |
 
 ## 4. Marketing & virality — `v21-marketing-virality.todo.test.ts`

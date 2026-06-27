@@ -56,6 +56,22 @@ collection(db, 'artifacts', appId, 'users', userId, collectionName)
 
 - **No Complex Queries:** Avoid compound queries requiring custom indexes. Filter and sort in-memory if needed.
 
+### C. UI Text Standard: no dashes/hyphens as separators (change: ui-no-dashes)
+
+User-facing copy MUST NOT use an em-dash (`—`), en-dash (`–`), or a spaced hyphen (` - `) as a
+sentence separator. Use a comma, a period, or a line break instead. The wording is otherwise
+unchanged; clauses just join with normal punctuation. This keeps the product's typography clean and
+consistent across both apps.
+
+- **Rationale:** decorative dashes read inconsistently across RTL (Hebrew) and LTR, and creep back in
+  over time; a single comma/period standard is calmer and unambiguous.
+- **Scope:** app-shipped copy only, i.e. the translation maps (`apps/*/src/i18n.ts`) and visible JSX
+  text literals. **Exempt:** code comments, file paths, CLI flags, CSS/class names, and JS
+  expressions (`a - b`); hyphens there are valid.
+- **Enforced by** [`scripts/test-no-dashes.ts`](scripts/test-no-dashes.ts) (in `npm test`): it scans
+  both apps' translation-map string leaves and fails on any `—`, `–`, or ` - `. Add new copy without
+  dash separators so the lint stays green.
+
 ---
 
 ## 4. Implementation Stages (Work in this order)
