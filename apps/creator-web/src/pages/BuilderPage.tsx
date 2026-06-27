@@ -20,6 +20,7 @@ import TaskLibrary from '../components/TaskLibrary';
 import QuizChoicesEditor from '../components/QuizChoicesEditor';
 import TaskCard from '../components/TaskCard';
 import PacingBar from '../components/PacingBar';
+import RichTooltip from '../components/RichTooltip';
 
 // MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
 // main builder bundle: the map engine is fetched only when a located task editor
@@ -506,7 +507,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
 
       {(mode === 'radius' || mode === 'exact') && (
         <div>
-          <Label>Trigger radius (metres)</Label>
+          <Label>Trigger radius (metres) <RichTooltip concept="geofence" /></Label>
           <Input type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(mode)}
             onChange={(e) => set({ geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(mode)) })} />
         </div>
@@ -542,7 +543,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       )}
 
       <div>
-        <Label>Difficulty 1 to 10</Label>
+        <Label>Difficulty 1 to 10 <RichTooltip concept="difficulty" /></Label>
         <Input type="number" min={1} max={10} value={task.difficulty} onChange={(e) => set({ difficulty: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) })} />
       </div>
 
@@ -570,7 +571,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
             <Input type="number" value={task.estimatedMinutes} onChange={(e) => set({ estimatedMinutes: parseInt(e.target.value) || 1 })} />
           </div>
           <div>
-            <Label>Max teams at once</Label>
+            <Label>Max teams at once <RichTooltip concept="concurrent" /></Label>
             <Input type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
           </div>
         </div>
@@ -633,7 +634,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         </div>
         {task.hint && (
           <div>
-            <Label>Hint cost (points)</Label>
+            <Label>Hint cost (points) <RichTooltip concept="hint" /></Label>
             <Input type="number" min={0} value={task.hintPenalty ?? 25}
               onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
           </div>
