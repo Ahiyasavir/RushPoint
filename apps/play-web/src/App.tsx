@@ -7,9 +7,10 @@ import StaffConsole from './screens/StaffConsole';
 import GamePromoScreen from './screens/GamePromoScreen';
 import PublicLeaderboardScreen from './screens/PublicLeaderboardScreen';
 import ChallengeTeaser from './screens/ChallengeTeaser';
+import TvLeaderboard from './screens/TvLeaderboard';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
-import { parseChallengeParam } from '@rushpoint/shared';
+import { parseChallengeParam, TV_ROUTE_PARAM } from '@rushpoint/shared';
 import { I18nProvider, useT } from './i18nContext';
 
 export default function App() {
@@ -41,6 +42,8 @@ function AppInner() {
   const [challenge, setChallenge] = useState(
     () => parseChallengeParam(new URLSearchParams(window.location.search).get('challenge')),
   );
+  // A `?tv=<accessCode>` link opens the full-screen projection leaderboard.
+  const tvCode = new URLSearchParams(window.location.search).get(TV_ROUTE_PARAM);
 
   const { dir, lang } = useT();
 
@@ -70,6 +73,15 @@ function AppInner() {
       <>
         <ConnectionBanner />
         <StaffConsole onExit={() => setStaffMode(false)} />
+        <DialogHost />
+      </>
+    );
+  }
+
+  if (tvCode) {
+    return (
+      <>
+        <TvLeaderboard code={tvCode} />
         <DialogHost />
       </>
     );

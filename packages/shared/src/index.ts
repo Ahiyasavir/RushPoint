@@ -14,3 +14,4 @@ export * from './shareBranding';
 export * from './podium';
 export * from './challenge';
 export * from './streak';
+export * from './tv';

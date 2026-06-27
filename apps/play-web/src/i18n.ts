@@ -211,6 +211,11 @@ const HE = {
     share: '🔗 שתפו את טבלת הדירוג',
     buildOwn: '✨ בנו מירוץ הרפתקה משלכם ←',
   },
+  tv: {
+    liveStandings: 'דירוג חי',
+    notAvailable: 'הדירוג עדיין לא זמין לתצוגה',
+    nowLeading: '🔥 עכשיו בהובלה!',
+  },
 };
 
 const EN: typeof HE = {
@@ -414,6 +419,11 @@ const EN: typeof HE = {
     stagesCount: ({ n }: { n: number }) => `${n} stages`,
     share: '🔗 Share this leaderboard',
     buildOwn: '✨ Build your own race adventure →',
+  },
+  tv: {
+    liveStandings: 'Live standings',
+    notAvailable: 'Standings are not available for display yet',
+    nowLeading: '🔥 Now in the lead!',
   },
 };
 
