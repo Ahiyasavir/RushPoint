@@ -65,7 +65,8 @@ all green).
 ## 7. Feature expansion — `v21-feature-expansion.todo.test.ts`
 | Change | Status |
 |---|---|
-| `task-creation-wizard` | 📋 backlog (24 tasks) |
+| **`v2.1-builder-shell-redesign`** (flat design doc) | ✅ implemented & gate-green — Builder rebuilt as a persistent 3-pane shell (StageRail · virtualized TaskCanvas · slide-in ContextPanel) + dynamic Quiz editor, Inspiration samples, RichTooltips, lazy map/WebGL teardown; tsx + Vitest suites. See [`v2.1-builder-shell-redesign.md`](v2.1-builder-shell-redesign.md). Supersedes the **layout** half of `task-creation-wizard`. |
+| `task-creation-wizard` | 📋 backlog (24 tasks) — layout half superseded by the builder shell redesign above; pure-logic/wizard-flow half still open |
 | `task-trigger-modes` | ✅ archived (`2026-06-26-task-trigger-modes`) → task-trigger-modes spec; server gate now honors triggerMode (radius/exact/instant via evaluateTrigger), e2e exact+instant green, Builder 4-mode selector. §4.3 (edit the unbuilt task-creation-wizard spec) deferred with that change. |
 | `solo-mode-registration` | ✅ archived (`2026-06-27-solo-mode-registration`) → solo-registration spec; JoinScreen fully wired (solo = one name input, no member list; team unchanged) via resolveRegistrationFields/resolveDisplayName; all gates green |
 | `import-game-spreadsheet` | 📋 backlog |
