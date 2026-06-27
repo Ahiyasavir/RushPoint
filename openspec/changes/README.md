@@ -67,7 +67,7 @@ all green).
 |---|---|
 | `task-creation-wizard` | 📋 backlog (24 tasks) |
 | `task-trigger-modes` | ✅ archived (`2026-06-26-task-trigger-modes`) → task-trigger-modes spec; server gate now honors triggerMode (radius/exact/instant via evaluateTrigger), e2e exact+instant green, Builder 4-mode selector. §4.3 (edit the unbuilt task-creation-wizard spec) deferred with that change. |
-| `solo-mode-registration` | 🟡 partial — `test-registration-fields.ts` green; verify UI/backend remainder |
+| `solo-mode-registration` | ✅ archived (`2026-06-27-solo-mode-registration`) → solo-registration spec; JoinScreen fully wired (solo = one name input, no member list; team unchanged) via resolveRegistrationFields/resolveDisplayName; all gates green |
 | `import-game-spreadsheet` | 📋 backlog |
 | `white-label-pro` | 📋 backlog |
 
