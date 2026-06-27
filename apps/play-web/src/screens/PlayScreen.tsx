@@ -6,6 +6,7 @@ import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { Button, Progress, Screen } from '../components/ui';
+import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
 import type { NavTarget } from '../components/NavMap';
@@ -22,6 +23,7 @@ const CREATOR_URL = import.meta.env.DEV
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
+  const { t } = useT();
   const [state, setState] = useState<MyTeamState | null>(null);
   const [err, setErr] = useState('');
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
@@ -38,9 +40,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       const s = await getMyTeamState({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId });
       setState(s); setErr('');
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Sync failed');
+      setErr(e instanceof Error ? e.message : t.play.syncFailed);
     }
-  }, [session]);
+  }, [session, t]);
 
   useEffect(() => {
     let alive = true;
@@ -98,16 +100,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   useWakeLock(!!state && state.team.launched && state.team.status !== 'finished');
 
   async function leave() {
-    if (await dialog.confirm('Leave this race? You can rejoin with the same code.')) { clearSession(); onLeave(); }
+    if (await dialog.confirm(t.play.leaveConfirm)) { clearSession(); onLeave(); }
   }
 
   async function sos() {
-    if (!(await dialog.confirm('Send an SOS alert to the organizers?', { confirmLabel: 'Send SOS', danger: true }))) return;
+    if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true }))) return;
     navigator.geolocation?.getCurrentPosition(
       (p) => triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat: p.coords.latitude, lng: p.coords.longitude }),
       () => triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId }),
     );
-    await dialog.alert('SOS sent. Stay where you are. Help is on the way.');
+    await dialog.alert(t.play.sosSent);
   }
 
   // Mid-race brag card — same branded story image as the finish screen, but with
@@ -122,10 +124,14 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       const done = team.stages.filter((s) => s.status === 'completed').length;
       const board = state.run.leaderboard;
       const rank = board?.published ? board.rankings.find((r) => r.teamId === team.id)?.rank : undefined;
-      const headline = rank === 1 ? "WE'RE #1!" : rank && rank <= 3 ? `#${rank} & CLIMBING` : 'ON THE TRAIL';
-      const text = `🏃 ${team.displayName} is racing "${name}"`
-        + `${rank ? ` · currently #${rank}` : ''} with ${team.score} pts! `
-        + `Build your own at ${CREATOR_URL.replace(/^https?:\/\//, '')}`;
+      const headline = rank === 1 ? t.play.headlineFirst : rank && rank <= 3 ? t.play.headlineClimbing({ rank }) : t.play.headlineTrail;
+      const text = t.play.shareText({
+        team: team.displayName,
+        game: name,
+        rankPart: rank ? t.play.shareRankPart({ rank }) : '',
+        score: team.score,
+        url: CREATOR_URL.replace(/^https?:\/\//, ''),
+      });
       await shareStoryCard({
         gameName: name,
         teamName: team.displayName,
@@ -134,7 +140,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         stagesDone: `${done}/${game.stageCount}`,
         ctaUrl: CREATOR_URL,
         headline,
-        scoreLabel: 'POINTS SO FAR',
+        scoreLabel: t.play.pointsSoFar,
       }, text);
     } finally { setSharing(false); }
   }
@@ -167,8 +173,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">⏳</div>
-          <h2 dir="auto" className="text-xl font-bold">You&apos;re in, {team.displayName}!</h2>
-          <p className="text-zinc-500">Waiting for the host to start the race…</p>
+          <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
+          <p className="text-zinc-500">{t.play.waitingStart}</p>
         </div>
         <Button variant="danger" onClick={sos}>SOS</Button>
       </Screen>
@@ -199,7 +205,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
       <button onClick={shareProgress} disabled={sharing}
         className="self-end text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
-        {sharing ? 'Creating…' : '📸 Share our progress'}
+        {sharing ? t.play.creating : t.play.shareProgress}
       </button>
 
       <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
@@ -214,7 +220,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {activeStage ? (
           <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} />
         ) : (
-          <p className="text-center text-zinc-500 mt-10">No active stage.</p>
+          <p className="text-center text-zinc-500 mt-10">{t.play.noActiveStage}</p>
         )}
       </div>
 
@@ -226,15 +232,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 function Header({ game, score, accent, onLeave }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void;
 }) {
+  const { t } = useT();
   return (
     <div className="flex items-center justify-between">
       <div>
         <div dir="auto" className="font-brand font-extrabold text-lg" style={{ color: accent }}>
           {game.branding?.name ?? game.title}
         </div>
-        <div className="text-xs text-zinc-500">Score: <span className="text-accent font-mono">{score}</span></div>
+        <div className="text-xs text-zinc-500">{t.play.score}: <span className="text-accent font-mono">{score}</span></div>
       </div>
-      <button onClick={onLeave} className="text-xs text-zinc-500">Leave</button>
+      <button onClick={onLeave} className="text-xs text-zinc-500">{t.play.leave}</button>
     </div>
   );
 }

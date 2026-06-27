@@ -70,7 +70,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     withLocation(
       async (lat, lng) => {
         try { await completeTask({ ...ctx, taskId: task!.id, lat, lng }); onChanged(); }
-        catch (e) { setMsg(e instanceof Error ? e.message : 'Failed'); }
+        catch (e) { setMsg(e instanceof Error ? e.message : t.task.failed); }
         finally { setBusy(false); }
       },
       () => { setMsg(t.task.gpsWarning); setBusy(false); },
@@ -102,7 +102,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       setMsg(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Upload failed, try again.');
+      setMsg(e instanceof Error ? e.message : t.task.uploadFailed);
     } finally { setBusy(false); }
   }
 
@@ -112,9 +112,9 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     try {
       const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text });
       if (res.correct) onChanged();
-      else setMsg('Not quite. Try again.');
+      else setMsg(t.task.notQuite);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Failed');
+      setMsg(e instanceof Error ? e.message : t.task.failed);
     } finally { setBusy(false); }
   }
 
@@ -124,11 +124,11 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     setBusy(true); setMsg('');
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
-      if (res.stepCorrect) { onChanged(); if (!res.taskComplete) setMsg(`Step ${res.stepsDone} of ${res.totalSteps} ✓`); }
-      else setMsg('Not quite. Try again.');
+      if (res.stepCorrect) { onChanged(); if (!res.taskComplete) setMsg(`${t.task.stepOf({ step: res.stepsDone, total: res.totalSteps })} ✓`); }
+      else setMsg(t.task.notQuite);
       return res.stepCorrect;
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'Failed');
+      setMsg(e instanceof Error ? e.message : t.task.failed);
       return false;
     } finally { setBusy(false); }
   }
@@ -138,20 +138,20 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     setBusy(true); setMsg('');
     completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
       .then(() => onChanged())
-      .catch((e) => setMsg(e instanceof Error ? e.message : 'Check-in failed'))
+      .catch((e) => setMsg(e instanceof Error ? e.message : t.task.checkinFailed))
       .finally(() => setBusy(false));
   }
 
   async function revealHint() {
     if (hint) return;
     const cost = task!.hintPenalty ?? 25;
-    if (!(await dialog.confirm(`Reveal a hint for this task? It costs ${cost} points.`, { confirmLabel: 'Reveal hint' }))) return;
+    if (!(await dialog.confirm(t.task.hintConfirm({ cost }), { confirmLabel: t.task.hintConfirmBtn }))) return;
     setBusy(true);
     try {
       const res = await requestTaskHint({ ...ctx, taskId: task!.id });
       setHint(res.hint);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : 'No hint available');
+      setMsg(e instanceof Error ? e.message : t.task.noHint);
     } finally { setBusy(false); }
   }
 
@@ -178,7 +178,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
             {task.type === 'self_report' ? t.task.markComplete : t.task.imHere}
           </Button>
         ) : task.type === 'smart_station' ? (
-          <CodeEntry busy={busy} label={task.smart?.codeInputLabel ?? 'Enter station code'} onSubmit={verify} />
+          <CodeEntry busy={busy} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
           <QuizEntry task={task} busy={busy} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
@@ -371,12 +371,12 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File 
     // Validate before we ever upload: type guard catches stray non-images, the
     // size cap protects the UI and Storage from multi-hundred-MB files.
     if (f && !f.type.startsWith('image/')) {
-      setFileErr('Please choose an image file.');
+      setFileErr(t.task.chooseImage);
       e.target.value = ''; setFile(null); setPreviewUrl(null);
       return;
     }
     if (f && f.size > MAX_PHOTO_BYTES) {
-      setFileErr(`That image is too large (max ${Math.round(MAX_PHOTO_BYTES / 1024 / 1024)} MB).`);
+      setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
       e.target.value = ''; setFile(null); setPreviewUrl(null);
       return;
     }

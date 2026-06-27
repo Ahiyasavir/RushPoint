@@ -14,6 +14,7 @@ import {
   type StaffSession,
 } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
+import { useT } from '../i18nContext';
 
 // ── A flattened pending photo submission row (one per team×task) ──
 interface PendingSubmission {
@@ -49,6 +50,7 @@ function StaffSignIn({
   onSignedIn: (s: StaffSession) => void;
   onExit: () => void;
 }) {
+  const { t } = useT();
   const params = new URLSearchParams(window.location.search);
   const [ownerUid, setOwnerUid] = useState(params.get('owner') ?? '');
   const [gameId, setGameId] = useState(params.get('game') ?? '');
@@ -69,32 +71,32 @@ function StaffSignIn({
       saveStaffSession(session);
       onSignedIn(session);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Sign-in failed');
+      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.staff.signInFailed);
     } finally { setBusy(false); }
   }
 
   return (
     <Screen>
       <div className="flex-1 flex flex-col justify-center">
-        <h1 className="font-brand text-2xl font-extrabold text-accent text-center mb-1">Staff console</h1>
-        <p className="text-zinc-500 text-center mb-8 text-sm">Sign in with the PIN from your host</p>
+        <h1 className="font-brand text-2xl font-extrabold text-accent text-center mb-1">{t.staff.consoleTitle}</h1>
+        <p className="text-zinc-500 text-center mb-8 text-sm">{t.staff.signInSub}</p>
         <div className="space-y-3">
-          <Input value={ownerUid} onChange={(e) => setOwnerUid(e.target.value)} placeholder="Owner UID" />
-          <Input value={gameId} onChange={(e) => setGameId(e.target.value)} placeholder="Game ID" />
-          <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder="Run ID" />
+          <Input value={ownerUid} onChange={(e) => setOwnerUid(e.target.value)} placeholder={t.staff.ownerUid} />
+          <Input value={gameId} onChange={(e) => setGameId(e.target.value)} placeholder={t.staff.gameId} />
+          <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder={t.staff.runId} />
           <Input
             value={pin}
             onChange={(e) => setPin(e.target.value)}
-            placeholder="PIN"
+            placeholder={t.staff.pin}
             className="text-center text-xl font-mono tracking-[0.3em]"
             onKeyDown={(e) => e.key === 'Enter' && submit()}
           />
         </div>
         {err && <p className="text-danger text-sm text-center mt-3">{err}</p>}
         <Button disabled={busy || !ownerUid || !gameId || !runId || !pin} onClick={submit} className="mt-5">
-          Sign in
+          {t.staff.signIn}
         </Button>
-        <button className="text-zinc-500 text-sm mt-4 mx-auto" onClick={onExit}>← Back to player join</button>
+        <button className="text-zinc-500 text-sm mt-4 mx-auto" onClick={onExit}>{t.staff.backToJoin}</button>
       </div>
     </Screen>
   );
@@ -102,6 +104,7 @@ function StaffSignIn({
 
 // ─── Dashboard ──────────────────────────────────────────────────────────────
 function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: () => void }) {
+  const { t } = useT();
   const { ownerUid, gameId, runId } = staff;
   const ctx = useMemo(() => ({ ownerUid, gameId, runId }), [ownerUid, gameId, runId]);
 
@@ -116,16 +119,16 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     return onSnapshot(ref, (snap) => {
       const rows: PendingSubmission[] = [];
       snap.forEach((doc) => {
-        const t = doc.data() as {
+        const td = doc.data() as {
           displayName?: string;
           taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string }>;
         };
-        const subs = t.taskSubmissions ?? {};
+        const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
           if (sub?.status === 'pending') {
             rows.push({
               teamId: doc.id,
-              displayName: t.displayName ?? doc.id,
+              displayName: td.displayName ?? doc.id,
               taskId,
               photoUrl: sub.photoUrl ?? '',
               submittedAt: sub.submittedAt ?? '',
@@ -168,7 +171,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     try {
       await reviewStationSubmission({ ...ctx, teamId: s.teamId, taskId: s.taskId, approved });
     } catch (e) {
-      setReadErr(e instanceof Error ? e.message : 'Review failed');
+      setReadErr(e instanceof Error ? e.message : t.staff.reviewFailed);
     } finally { setBusyKey(null); }
   }
 
@@ -177,7 +180,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     try {
       await acknowledgeAlert({ ...ctx, alertId: a.id });
     } catch (e) {
-      setReadErr(e instanceof Error ? e.message : 'Acknowledge failed');
+      setReadErr(e instanceof Error ? e.message : t.staff.ackFailed);
     } finally { setBusyKey(null); }
   }
 
@@ -185,10 +188,10 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     <div className="min-h-screen max-w-md mx-auto w-full px-5 py-6 flex flex-col">
       <header className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="font-brand text-xl font-extrabold text-accent">Staff</h1>
+          <h1 className="font-brand text-xl font-extrabold text-accent">{t.staff.title}</h1>
           <p className="text-zinc-500 text-xs">{staff.name}</p>
         </div>
-        <button className="text-zinc-500 text-sm" onClick={onSignOut}>Sign out</button>
+        <button className="text-zinc-500 text-sm" onClick={onSignOut}>{t.staff.signOut}</button>
       </header>
 
       {readErr && <p className="text-danger text-xs mb-3">{readErr}</p>}
@@ -196,16 +199,16 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       {/* ── SOS alerts ── */}
       <section className="mb-6">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          🆘 Alerts {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
+          🆘 {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
         </h2>
         {alerts.length === 0
-          ? <p className="text-zinc-600 text-sm">No active alerts.</p>
+          ? <p className="text-zinc-600 text-sm">{t.staff.noAlerts}</p>
           : alerts.map((a) => (
             <Card key={a.id} className="p-3 mb-2 border-danger/40">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-zinc-100 uppercase">{a.type}</div>
-                  <div className="text-xs text-zinc-500 truncate">team {a.teamId.slice(0, 8)}</div>
+                  <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {a.teamId.slice(0, 8)}</div>
                   {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
                   {a.lat != null && a.lng != null && (
                     <a
@@ -213,7 +216,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                       href={`https://www.google.com/maps?q=${a.lat},${a.lng}`}
                       target="_blank" rel="noreferrer"
                     >
-                      open location
+                      {t.staff.openLocation}
                     </a>
                   )}
                 </div>
@@ -222,7 +225,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   disabled={busyKey === a.id}
                   onClick={() => ack(a)}
                 >
-                  Ack
+                  {t.staff.ack}
                 </button>
               </div>
             </Card>
@@ -232,34 +235,34 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       {/* ── Photo review ── */}
       <section className="mb-6 flex-1">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          📷 Photo review {pending.length > 0 && <span className="text-accent">({pending.length})</span>}
+          📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-accent">({pending.length})</span>}
         </h2>
         {pending.length === 0
-          ? <p className="text-zinc-600 text-sm">No submissions waiting.</p>
+          ? <p className="text-zinc-600 text-sm">{t.staff.noSubmissions}</p>
           : pending.map((s) => {
             const key = `${s.teamId}:${s.taskId}`;
             const isImage = /^https?:\/\//.test(s.photoUrl);
             return (
               <Card key={key} className="p-3 mb-2">
                 <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
-                <div className="text-xs text-zinc-500 mb-2">task {s.taskId.slice(0, 10)}</div>
+                <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} {s.taskId.slice(0, 10)}</div>
                 {isImage
-                  ? <img src={s.photoUrl} alt="submission" className="w-full rounded-lg mb-2 max-h-64 object-cover" />
-                  : <div className="text-xs text-zinc-600 italic mb-2 break-all">📎 {s.photoUrl || 'no photo'}</div>}
+                  ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-cover" />
+                  : <div className="text-xs text-zinc-600 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
                 <div className="flex gap-2">
                   <button
                     className="flex-1 py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
                     disabled={busyKey === key}
                     onClick={() => review(s, true)}
                   >
-                    Approve
+                    {t.staff.approve}
                   </button>
                   <button
                     className="flex-1 py-2 rounded-lg bg-danger text-white font-semibold text-sm disabled:opacity-40"
                     disabled={busyKey === key}
                     onClick={() => review(s, false)}
                   >
-                    Reject
+                    {t.staff.reject}
                   </button>
                 </div>
               </Card>
@@ -274,6 +277,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 }
 
 function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+  const { t } = useT();
   const [msg, setMsg] = useState('');
   const [msgHe, setMsgHe] = useState('');
   const [busy, setBusy] = useState(false);
@@ -291,13 +295,13 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
 
   return (
     <section className="pt-2 border-t border-glass-border">
-      <h2 className="text-sm font-semibold text-zinc-300 mb-2">📢 Announcement</h2>
+      <h2 className="text-sm font-semibold text-zinc-300 mb-2">📢 {t.staff.announcement}</h2>
       <div className="space-y-2">
-        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Message (English)" />
-        <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder="הודעה (עברית, רשות)" dir="rtl" />
+        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.staff.msgEn} />
+        <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder={t.staff.msgHe} dir="rtl" />
       </div>
       <Button disabled={busy || !msg.trim()} onClick={send} className="mt-3">
-        {sent ? 'Sent ✓' : 'Broadcast to all teams'}
+        {sent ? t.staff.sent : t.staff.broadcast}
       </Button>
     </section>
   );

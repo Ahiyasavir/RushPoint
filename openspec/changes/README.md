@@ -32,7 +32,7 @@ all green).
 ## 3. UI/UX & performance — `v21-uiux-and-perf.todo.test.ts` · `v21-performance-and-smoothness.todo.test.ts`
 | Change | Status |
 |---|---|
-| `play-web-i18n-hebrew` | 🟡 partial — `test-i18n-parity.ts` green; UI/backend remainder tracked |
+| `play-web-i18n-hebrew` | ✅ archived (`2026-06-27-play-web-i18n-hebrew`) → play-web-i18n spec; ALL participant+staff screens/components i18n'd (StaffConsole, PlayScreen, PublicLeaderboard, ErrorBoundary + TaskRunner error/dialog strings); 156-key HE/EN parity, zero English chrome; all 5 gates green |
 | `ui-no-dashes` | 📋 backlog — its RED test `scripts/test-no-dashes.ts` does not exist yet |
 | `platform-benchmark` | 📋 backlog |
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
+import { useT } from '../i18nContext';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
@@ -14,13 +15,14 @@ const MEDAL_BG = [
 ];
 
 export default function PublicLeaderboardScreen({ code, onJoin }: { code: string; onJoin: () => void }) {
+  const { t } = useT();
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
     try { setData(await getPublicLeaderboard({ code })); setErr(''); }
-    catch (e) { setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Could not load'); setData(null); }
-  }, [code]);
+    catch (e) { setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.board.couldNotLoad); setData(null); }
+  }, [code, t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -55,10 +57,10 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
           <div className="text-5xl">🏁</div>
           <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
-            Leaderboard unavailable
+            {t.board.unavailable}
           </h1>
-          <p className="text-zinc-500 text-sm">{err || 'This race could not be found.'}</p>
-          <Button className="mt-2" onClick={onJoin}>Enter a code</Button>
+          <p className="text-zinc-500 text-sm">{err || t.board.notFound}</p>
+          <Button className="mt-2" onClick={onJoin}>{t.board.enterCode}</Button>
         </div>
       </Screen>
     );
@@ -73,7 +75,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         <div className="flex items-center justify-center gap-1.5 mb-2">
           <span className={`w-2 h-2 rounded-full ${isLive ? 'bg-rp-go animate-pulse' : 'bg-zinc-500'}`} />
           <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-            {data.runStatus === 'finished' ? 'Final results' : data.frozen ? 'Standings frozen' : 'Live'}
+            {data.runStatus === 'finished' ? t.board.finalResults : data.frozen ? t.board.frozen : t.board.live}
           </span>
         </div>
         <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: accent }}>{data.title}</h1>
@@ -83,11 +85,11 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         {!data.published ? (
           <Card className="p-8 text-center">
             <div className="text-4xl mb-3">⏳</div>
-            <p className="font-medium text-zinc-300">Standings haven&apos;t been published yet.</p>
-            <p className="text-zinc-500 text-sm mt-1">The host reveals them during the race.</p>
+            <p className="font-medium text-zinc-300">{t.board.notPublished}</p>
+            <p className="text-zinc-500 text-sm mt-1">{t.board.revealsDuring}</p>
           </Card>
         ) : data.rankings.length === 0 ? (
-          <Card className="p-8 text-center text-zinc-500">No teams yet.</Card>
+          <Card className="p-8 text-center text-zinc-500">{t.board.noTeams}</Card>
         ) : (
           <div className="space-y-2">
             {data.rankings.map((r, i) => (
@@ -105,7 +107,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                 </span>
                 <div className="flex-1 min-w-0">
                   <div dir="auto" className="truncate font-semibold text-zinc-100">{r.teamName}</div>
-                  <div className="text-[11px] text-zinc-500">{r.completedStages} stages</div>
+                  <div className="text-[11px] text-zinc-500">{t.board.stagesCount({ n: r.completedStages })}</div>
                 </div>
                 <span className="font-brand font-bold text-base" style={{ color: accent }}>{r.score}</span>
               </div>
@@ -114,11 +116,11 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         )}
       </div>
 
-      <Button variant="ghost" className="mt-4" onClick={share}>🔗 Share this leaderboard</Button>
+      <Button variant="ghost" className="mt-4" onClick={share}>{t.board.share}</Button>
       <a href={CREATOR_URL} target="_blank" rel="noreferrer"
         className="block text-center text-sm font-semibold py-3 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
       >
-        ✨ Build your own race adventure →
+        {t.board.buildOwn}
       </a>
     </Screen>
   );
