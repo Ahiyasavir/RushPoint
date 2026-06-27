@@ -75,11 +75,41 @@ const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
 type SaveStatus = 'saved' | 'saving' | 'unsaved';
 const AUTOSAVE_DELAY = 1500;
 
+// The persistent shell's top-level views (change: v2.1-builder-shell-redesign).
+type BuilderTab = 'build' | 'preview' | 'analytics' | 'settings';
+const BUILDER_TABS: { id: BuilderTab; label: string }[] = [
+  { id: 'build', label: 'Build' },
+  { id: 'preview', label: 'Preview' },
+  { id: 'analytics', label: 'Analytics' },
+  { id: 'settings', label: 'Settings' },
+];
+
+// Inline-editable game title promoted into the shell header. Enter blurs (which
+// autosaves via the debounced patch); an empty value reverts to the prior title.
+function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: string) => void }) {
+  return (
+    <h2
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={false}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLElement).blur(); } }}
+      onBlur={(e) => {
+        const v = e.currentTarget.textContent?.trim() ?? '';
+        if (v && v !== title) onCommit(v);
+        else e.currentTarget.textContent = title || 'Untitled';
+      }}
+      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch]"
+    >
+      {title || 'Untitled'}
+    </h2>
+  );
+}
+
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
   const [game, setGame] = useState<Game | null>(null);
-  const [step, setStep] = useState(1);
+  const [tab, setTab] = useState<BuilderTab>('build');
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
@@ -183,46 +213,52 @@ export default function BuilderPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* breadcrumb + wizard nav */}
-      <div className="flex items-center gap-2 text-xs text-zinc-500 mb-4">
-        <button onClick={() => nav('/')} className="hover:text-zinc-300">My Games</button>
-        <span>/</span><span className="text-zinc-300">{game.title || 'Untitled'}</span>
-      </div>
-
-      <div className="flex items-center gap-2 mb-6">
-        {['Details', 'Stages & Tasks', 'Preview & Launch'].map((label, i) => (
-          <button
-            key={label}
-            onClick={() => { void save(); setStep(i + 1); }}
-            className={`flex-1 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-              step === i + 1
-                ? 'bg-gradient-to-r from-rp-fire to-rp-amber text-white shadow-[0_2px_12px_rgba(255,87,34,0.35)]'
-                : 'border border-[--rp-border] text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
-          >
-            <span className={`font-mono mr-2 ${step === i + 1 ? 'opacity-80' : ''}`}>{i + 1}</span>{label}
-          </button>
-        ))}
-      </div>
-
-      {step === 1 && <StepDetails game={game} patch={patch} />}
-      {step === 2 && <StepStages game={game} setGame={setGame} />}
-      {step === 3 && <StepPreview game={game} />}
-
-      <div className="flex justify-between mt-6">
-        <Button variant="ghost" disabled={step === 1} onClick={() => { void save(); setStep(step - 1); }}>Back</Button>
-        <div className="flex items-center gap-3">
-          <span className="text-xs flex items-center gap-1.5 text-zinc-500">
+      {/* ── Persistent shell header: breadcrumb · editable title · tabs · launch ── */}
+      <header className="mb-6">
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <button onClick={() => nav('/')} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">← Games</button>
+          <span className="text-zinc-600">/</span>
+          <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
+          <span className="text-xs flex items-center gap-1.5 text-zinc-500 shrink-0">
             <span className={`w-1.5 h-1.5 rounded-full ${
               status === 'saving' ? 'bg-rp-amber animate-pulse'
                 : status === 'unsaved' ? 'bg-rp-amber'
                 : 'bg-rp-go'}`} />
-            {status === 'saving' ? 'Saving…' : status === 'unsaved' ? 'Unsaved changes' : 'All changes saved'}
+            {status === 'saving' ? 'Saving…' : status === 'unsaved' ? 'Unsaved' : 'Saved'}
           </span>
-          {step < 3
-            ? <Button onClick={() => { void save(); setStep(step + 1); }}>Next</Button>
-            : <Button onClick={saveAndLaunch}>Save &amp; Launch run</Button>}
+          <div className="ms-auto shrink-0">
+            <Button onClick={saveAndLaunch}>Launch run</Button>
+          </div>
         </div>
-      </div>
+
+        <div role="tablist" className="flex items-center gap-1 border-b border-[--rp-border]">
+          {BUILDER_TABS.map((tt) => (
+            <button
+              key={tt.id}
+              role="tab"
+              aria-selected={tab === tt.id}
+              onClick={() => { void save(); setTab(tt.id); }}
+              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
+                tab === tt.id
+                  ? 'border-rp-fire text-[--ink-1]'
+                  : 'border-transparent text-[--ink-3] hover:text-[--ink-1]'}`}
+            >
+              {tt.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {tab === 'build' && <StepStages game={game} setGame={setGame} />}
+      {tab === 'preview' && <StepPreview game={game} />}
+      {tab === 'settings' && <StepDetails game={game} patch={patch} />}
+      {tab === 'analytics' && (
+        <Card className="p-10 text-center space-y-2">
+          <div className="text-3xl">📊</div>
+          <p className="font-semibold text-[--ink-1]">Analytics</p>
+          <p className="text-sm text-[--ink-3]">Run analytics appear here after your first live run.</p>
+        </Card>
+      )}
     </div>
   );
 }
@@ -233,10 +269,6 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
   const [advScore, setAdvScore] = useState(false);
   return (
     <Card className="p-5 space-y-4">
-      <div>
-        <Label>Game title</Label>
-        <Input value={game.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Old City Treasure Hunt" />
-      </div>
       <div>
         <Label>Mode</Label>
         <div className="flex gap-2">
