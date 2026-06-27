@@ -3,8 +3,10 @@ import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
+import { selectPodium } from '@rushpoint/shared';
 import { shareStoryCard } from '../lib/storyCard';
 import { sharePhoto } from '../lib/sharePhoto';
+import { sharePodium } from '../lib/podiumCard';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
@@ -54,6 +56,24 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
     for (const s of Object.values(subs)) if (s?.photoUrl) return s.photoUrl;
     return null;
   })();
+
+  // Top-3 podium for the reveal + the branded podium share (podium-share-moment).
+  const { podium } = selectPodium(run.leaderboard?.rankings ?? [], team.id);
+
+  async function sharePodiumFn() {
+    if (podium.length === 0) return;
+    setBusy(true);
+    try {
+      await sharePodium(podium, {
+        gameName: game.branding?.name ?? game.title,
+        ctaUrl: CREATOR_URL,
+        text: t.final.shareText({
+          team: team.displayName, game: game.branding?.name ?? game.title,
+          rankPart: '', timePart: '', url: CREATOR_URL.replace(/^https?:\/\//, ''),
+        }),
+      });
+    } finally { setBusy(false); }
+  }
 
   async function sharePhotoFn() {
     if (!firstPhotoUrl) return;
@@ -150,6 +170,31 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
             </button>
           )}
         </Card>
+
+        {/* Podium reveal: top 3 rise onto a 1-2-3 podium (motion-reduce → instant) */}
+        {podium.length > 0 && (
+          <Card className="p-4 w-full">
+            <div className="flex items-end justify-center gap-2 h-44">
+              {([2, 1, 3] as const).map((place) => {
+                const e = podium.find((p) => p.place === place);
+                if (!e) return <div key={place} className="flex-1" />;
+                const h = place === 1 ? 'h-40' : place === 2 ? 'h-32' : 'h-24';
+                const isMe = e.teamId === team.id;
+                return (
+                  <div key={place}
+                    className="flex-1 flex flex-col items-center justify-end animate-fade-up motion-reduce:animate-none"
+                    style={{ animationDelay: `${place * 80}ms` }}>
+                    <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
+                    <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-accent' : 'text-zinc-200'}`}>{e.teamName}</div>
+                    <div className="text-[11px] text-zinc-400 mb-1">{e.score}</div>
+                    <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-accent' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <Button variant="ghost" className="mt-3 w-full" disabled={busy} onClick={sharePodiumFn}>{t.final.sharePodium}</Button>
+          </Card>
+        )}
 
         {/* Leaderboard */}
         {run.leaderboard && run.leaderboard.rankings.length > 0 && (
