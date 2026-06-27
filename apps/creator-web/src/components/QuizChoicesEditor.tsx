@@ -51,11 +51,12 @@ export default function QuizChoicesEditor({
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-2">
             <label
-              className="flex items-center gap-1 text-[11px] text-zinc-400 shrink-0 cursor-pointer"
+              className="flex items-center gap-1 text-[11px] text-zinc-400 shrink-0 cursor-pointer select-none"
               title="Mark this choice as a correct answer"
             >
               <input
                 type="checkbox"
+                className="w-3.5 h-3.5 shrink-0"
                 checked={row.correct}
                 onChange={() => apply(toggleCorrect(rows, row.id))}
                 aria-label={`Mark choice ${i + 1} correct`}
@@ -66,12 +67,12 @@ export default function QuizChoicesEditor({
               value={row.text}
               onChange={(e) => apply(setChoiceText(rows, row.id, e.target.value))}
               placeholder={`Choice ${i + 1}`}
-              className="flex-1"
+              className="flex-1 min-w-0"
             />
             <button
               type="button"
               onClick={() => apply(removeChoice(rows, row.id))}
-              className="text-neon-red text-sm shrink-0 px-1"
+              className="text-neon-red shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent"
               aria-label={`Delete choice ${i + 1}`}
               disabled={rows.length <= 1}
             >

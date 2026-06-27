@@ -95,13 +95,24 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
       contentEditable
       suppressContentEditableWarning
       spellCheck={false}
-      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLElement).blur(); } }}
+      onKeyDown={(e) => {
+        // Enter commits (blur flushes), Escape reverts. Both explicitly blur so
+        // the title never stays in edit mode or inserts a stray line break.
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.currentTarget.textContent = title || 'Untitled';
+          e.currentTarget.blur();
+        }
+      }}
       onBlur={(e) => {
         const v = e.currentTarget.textContent?.trim() ?? '';
         if (v && v !== title) onCommit(v);
         else e.currentTarget.textContent = title || 'Untitled';
       }}
-      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch]"
+      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[40ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
       {title || 'Untitled'}
     </h2>
@@ -535,18 +546,24 @@ function ContextPanel({ task, onFlush, onClose, onRemove }: {
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={close}>
+      {/* Transform-based slide (no width animation → no layout thrashing). The
+          panel is a strict container: fixed width, overflow-hidden shell, a
+          shrink-0 header and a min-w-0 scroll body so inner content never
+          reflows or distorts during the transition. */}
       <aside
         onClick={(e) => e.stopPropagation()}
         style={{ willChange: 'transform' }}
-        className={`h-full w-full max-w-md bg-app-card border-s border-glass-border shadow-soft overflow-y-auto p-4
+        className={`flex flex-col h-full w-full max-w-md bg-app-card border-s border-glass-border shadow-soft overflow-hidden
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between p-4 pb-3 shrink-0 border-b border-glass-border">
           <h3 className="font-semibold">Edit task</h3>
           <button onClick={close} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
         </div>
-        <TaskEditor task={state.draft} onChange={handleChange} onRemove={onRemove} />
-        <Button className="w-full mt-3" onClick={close}>Done</Button>
+        <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4">
+          <TaskEditor task={state.draft} onChange={handleChange} onRemove={onRemove} />
+          <Button className="w-full mt-3" onClick={close}>Done</Button>
+        </div>
       </aside>
     </div>
   );

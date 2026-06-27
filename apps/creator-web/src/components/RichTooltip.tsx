@@ -18,7 +18,7 @@ const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: React
         <line x1="60" y1="30" x2="86" y2="30" stroke="#D85A30" strokeWidth="1" strokeDasharray="2 2" />
         <text x="73" y="26" fontSize="7" fill="#D85A30">r</text>
         <circle cx="32" cy="44" r="3" fill="#378ADD" />
-        <circle cx="92" cy="18" r="3" fill="#9AA2AD" />
+        <circle cx="92" cy="18" r="3" fill="currentColor" />
       </svg>
     ),
   },
@@ -41,10 +41,10 @@ const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: React
         <rect x="44" y="16" width="32" height="28" rx="4" fill="#7F77DD22" stroke="#7F77DD" strokeWidth="1.5" />
         <circle cx="54" cy="30" r="4" fill="#7F77DD" />
         <circle cx="66" cy="30" r="4" fill="#7F77DD" />
-        <circle cx="18" cy="30" r="4" fill="#9AA2AD" />
-        <circle cx="102" cy="30" r="4" fill="#9AA2AD" />
-        <path d="M26 30 H40" stroke="#9AA2AD" strokeWidth="1" strokeDasharray="2 2" />
-        <path d="M80 30 H94" stroke="#9AA2AD" strokeWidth="1" strokeDasharray="2 2" />
+        <circle cx="18" cy="30" r="4" fill="currentColor" />
+        <circle cx="102" cy="30" r="4" fill="currentColor" />
+        <path d="M26 30 H40" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
+        <path d="M80 30 H94" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
       </svg>
     ),
   },
@@ -57,8 +57,8 @@ const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: React
         {[46, 40, 30, 20, 10].map((y, i) => (
           <circle key={i} cx={12 + i * 24} cy={y} r="3" fill="#FF5722" />
         ))}
-        <text x="10" y="56" fontSize="6" fill="#9AA2AD">easy</text>
-        <text x="92" y="56" fontSize="6" fill="#9AA2AD">hard</text>
+        <text x="10" y="56" fontSize="6" fill="currentColor">easy</text>
+        <text x="92" y="56" fontSize="6" fill="currentColor">hard</text>
       </svg>
     ),
   },
@@ -86,7 +86,7 @@ export default function RichTooltip({ concept, children }: { concept: TooltipCon
           group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible"
       >
         <div className="text-xs font-semibold text-[--ink-1] mb-1">{d.title}</div>
-        <div className="rounded-lg bg-[--surface-2] mb-1.5">{d.svg}</div>
+        <div className="rounded-lg bg-[--surface-2] text-[--ink-2] mb-1.5">{d.svg}</div>
         <div className="text-[11px] text-[--ink-3] leading-snug">{d.body}</div>
       </span>
     </span>

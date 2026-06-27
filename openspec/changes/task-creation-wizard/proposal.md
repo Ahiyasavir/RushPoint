@@ -1,3 +1,10 @@
+> ⚠️ **PARTIALLY SUPERSEDED (2026-06-27) by [`v2.1-builder-shell-redesign`](../v2.1-builder-shell-redesign.md).**
+> The redesign replaced this change's **layout half** — the linear step-by-step wizard is now the
+> persistent 3-pane shell (Stage Rail · virtualized Task Canvas · slide-in Context Panel), with the
+> task-type selector, Inspiration samples, and dynamic Quiz editor already shipped and gate-green.
+> The **interaction-guidance / wizard-flow half** (location-first guided onboarding) remains open.
+> Treat the layout sections below as historical; reuse only the pure-logic intent.
+
 ## Why
 
 The current `TaskEditor` is a dense, single-scroll form that buries the most spatially critical decision (where is this task?) at the middle of the form and hides the interaction type inside an "Advanced" accordion. First-time creators are overwhelmed and make task-type mistakes they only discover at playtest. A guided, step-by-step wizard that anchors creators to the physical world first — then naming, then interaction — matches the natural mental model of designing a real-world adventure.
