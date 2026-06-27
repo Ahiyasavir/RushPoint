@@ -60,7 +60,7 @@ all green).
 | `tv-leaderboard` | ✅ archived (`2026-06-27-tv-leaderboard`) → tv-leaderboard spec; play-web `?tv=<accessCode>` full-screen projection screen (reuses getPublicLeaderboard, 12s auto-refresh, published-gated, "Now in the lead!" flash via pure detectLeaderChange); shared tv.ts; 8 pure tests; all gates green. RunConsole launcher button (req 4) **deferred to frontend agent** (creator-web i18n). **P3 #2.** |
 | `run-analytics-heatmap` | 📋 backlog |
 | `surprise-trivia-waypoints` | 📋 backlog |
-| `hot-zone-bonus` | 📋 backlog |
+| `hot-zone-bonus` | ✅ archived (`2026-06-27-hot-zone-bonus`) → hot-zone-bonus spec; organizer activate/deactivateHotZone callables (owner-auth, bounded, server-stamped, single zone), completeTaskForTeam multiplies earnedScore by pure hotZoneMultiplier (server task coords + clock, never client claim); shared hotZone.ts + HotZone type; 13 pure + 6 e2e (in-zone ×2, out-of-zone unchanged). Fixed missing runs re-export (not-found). UI (banner + RunConsole panel) **deferred to frontend agent**. All 5 gates green. **P3 #3.** |
 
 ## 7. Feature expansion — `v21-feature-expansion.todo.test.ts`
 | Change | Status |
