@@ -689,6 +689,46 @@ async function main() {
   const resumed = await wanderer.call('requestNextTask', { ...C7, lat: 31.78, lng: 35.21 });
   check('safe-zone: assignment resumes inside the zone', resumed?.outOfBounds !== true, JSON.stringify(resumed));
 
+  // ── Challenge a friend (checkChallengeAnswer) ───────────────────────────────
+  // Isolated published quiz game so the main lifecycle is untouched.
+  {
+    const { gameId: chGame } = await creator.call('createGame', { title: 'Challenge Quiz' });
+    const QUIZ_ID = 'ch-quiz-1';
+    await creator.call('updateGame', {
+      gameId: chGame,
+      stages: [{
+        id: 'ch-stage-1', order: 0, title: 'Quiz', isFinal: true,
+        tasks: [{
+          id: QUIZ_ID, title: 'Capital of France?', type: 'quiz',
+          coordinates: { lat: 31.79, lng: 35.16 }, difficulty: 1,
+          estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 5,
+          answers: ['Paris'],
+        }],
+      }],
+    });
+
+    // Unpublished → refused (no publicGames doc to resolve the owner).
+    let refused = false;
+    try { await creator.call('checkChallengeAnswer', { gameId: chGame, taskId: QUIZ_ID, answer: 'Paris' }); }
+    catch { refused = true; }
+    check('challenge: unpublished game is refused', refused);
+
+    await creator.call('publishGame', { gameId: chGame, visibility: 'public' });
+
+    const right = await creator.call('checkChallengeAnswer', { gameId: chGame, taskId: QUIZ_ID, answer: 'paris' });
+    check('challenge: correct answer → {correct:true}', right?.correct === true, JSON.stringify(right));
+    const wrong = await creator.call('checkChallengeAnswer', { gameId: chGame, taskId: QUIZ_ID, answer: 'London' });
+    check('challenge: wrong answer → {correct:false}', wrong?.correct === false, JSON.stringify(wrong));
+    // The answer key must NEVER appear in the response — only { correct }.
+    const keys = Object.keys(right ?? {});
+    check('challenge: payload exposes only {correct}', keys.length === 1 && keys[0] === 'correct', JSON.stringify(keys));
+
+    let missing = false;
+    try { await creator.call('checkChallengeAnswer', { gameId: chGame, taskId: 'no-such-task', answer: 'x' }); }
+    catch (e) { missing = e.code === 'functions/not-found'; }
+    check('challenge: unknown task → not-found', missing);
+  }
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

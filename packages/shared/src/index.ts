@@ -12,3 +12,4 @@ export * from './guardianConsent';
 export * from './safeZone';
 export * from './shareBranding';
 export * from './podium';
+export * from './challenge';

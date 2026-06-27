@@ -15,6 +15,13 @@ export interface JoinInfo {
 }
 export const getJoinInfo = callable<{ code: string }, JoinInfo>('getJoinInfo');
 
+// Challenge-a-friend teaser: server-checked, non-scoring answer. Returns only
+// whether the answer is correct — the key never reaches the client.
+export const checkChallengeAnswer = callable<
+  { gameId: string; taskId: string; answer: string },
+  { correct: boolean }
+>('checkChallengeAnswer');
+
 export interface PublicLeaderboard {
   title: string;
   branding: GameBranding | null;

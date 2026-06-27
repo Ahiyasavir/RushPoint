@@ -18,6 +18,7 @@ import {
   DEFAULT_REGISTRATION_FIELDS,
   DEFAULT_SCORING_PRESET,
   describeGameRequirements,
+  matchesTaskAnswer,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos } from '../storageUtil';
 
@@ -313,4 +314,39 @@ export const listGames = functions.https.onCall(async (_data, context) => {
     .get();
   const games = snap.docs.map((d) => d.data() as Game);
   return { games };
+});
+
+
+// ─── checkChallengeAnswer ─────────────────────────────────────────────────────
+// Public, non-scoring "challenge a friend" teaser check. Resolves the owner from
+// the published publicGames index (so ONLY published games are challengeable —
+// an unpublished game has no publicGames doc), loads the secret task, and returns
+// ONLY { correct }. The answer key never leaves the server. No auth required —
+// this is an external acquisition surface for brand-new (signed-out) viewers.
+export const checkChallengeAnswer = functions.https.onCall(async (data) => {
+  const { gameId, taskId, answer } = (data ?? {}) as {
+    gameId?: string; taskId?: string; answer?: string;
+  };
+  if (!gameId || !taskId) {
+    throw new functions.https.HttpsError('invalid-argument', 'gameId and taskId required');
+  }
+
+  // Published gate: only games indexed in publicGames can be challenged.
+  const pubSnap = await db.doc(`publicGames/${gameId}`).get();
+  if (!pubSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Challenge not available');
+  }
+  const ownerUid = (pubSnap.data() as PublicGame).ownerUid;
+
+  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+  if (!gameSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Challenge not available');
+  }
+  const game = gameSnap.data() as Game;
+  const task = game.stages.flatMap((s) => s.tasks).find((t) => t.id === taskId);
+  if (!task) {
+    throw new functions.https.HttpsError('not-found', 'Task not found');
+  }
+
+  return { correct: matchesTaskAnswer(task, String(answer ?? '')) };
 });

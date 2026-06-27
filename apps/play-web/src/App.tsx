@@ -6,8 +6,10 @@ import PlayScreen from './screens/PlayScreen';
 import StaffConsole from './screens/StaffConsole';
 import GamePromoScreen from './screens/GamePromoScreen';
 import PublicLeaderboardScreen from './screens/PublicLeaderboardScreen';
+import ChallengeTeaser from './screens/ChallengeTeaser';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
+import { parseChallengeParam } from '@rushpoint/shared';
 import { I18nProvider, useT } from './i18nContext';
 
 export default function App() {
@@ -33,6 +35,11 @@ function AppInner() {
   // A shared standings link (`?board=<code>`) shows the public leaderboard.
   const [boardCode, setBoardCode] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('board'),
+  );
+  // A "challenge a friend" deep link (`?challenge=<gameId>:<taskId>`) opens the
+  // standalone single-task teaser for brand-new (signed-out) visitors.
+  const [challenge, setChallenge] = useState(
+    () => parseChallengeParam(new URLSearchParams(window.location.search).get('challenge')),
   );
 
   const { dir, lang } = useT();
@@ -63,6 +70,16 @@ function AppInner() {
       <>
         <ConnectionBanner />
         <StaffConsole onExit={() => setStaffMode(false)} />
+        <DialogHost />
+      </>
+    );
+  }
+
+  if (challenge && !session) {
+    return (
+      <>
+        <ConnectionBanner />
+        <ChallengeTeaser gameId={challenge.gameId} taskId={challenge.taskId} onJoin={() => setChallenge(null)} />
         <DialogHost />
       </>
     );

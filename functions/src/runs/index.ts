@@ -29,6 +29,7 @@ import {
   normalizeTriggerMode,
   evaluateTrigger,
   attemptLimitReached,
+  matchesTaskAnswer,
   isConsentSatisfied,
   haversineKm,
   isValidCoord,
@@ -1023,16 +1024,8 @@ function findGameTask(game: Game, taskId: string): Task | undefined {
   return undefined;
 }
 
-function answerMatches(task: Task, raw: string): boolean {
-  const given = raw.trim().toLowerCase();
-  if (task.type === 'numeric') {
-    const n = parseFloat(raw);
-    if (Number.isNaN(n) || task.numericAnswer == null) return false;
-    return Math.abs(n - task.numericAnswer) <= (task.numericTolerance ?? 0);
-  }
-  // quiz (and any answer-list task): match any accepted answer, case-insensitive
-  return (task.answers ?? []).some((a) => a.trim().toLowerCase() === given);
-}
+// Answer matching is shared with checkChallengeAnswer via matchesTaskAnswer
+// (packages/shared/src/challenge.ts) so the two never drift.
 
 // ─── submitTaskAnswer (quiz / numeric) ────────────────────────────────────────
 
@@ -1067,7 +1060,7 @@ export const submitTaskAnswer = functions.https.onCall(async (data, context) => 
     }
   }
 
-  if (!answerMatches(task, String(answer))) {
+  if (!matchesTaskAnswer(task, String(answer))) {
     // Record the wrong attempt under a real nested map (not a dotted key).
     if (attemptLimit && attemptLimit > 0) {
       await teamRef.set(
