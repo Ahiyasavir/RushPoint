@@ -13,3 +13,4 @@ export * from './safeZone';
 export * from './shareBranding';
 export * from './podium';
 export * from './challenge';
+export * from './streak';

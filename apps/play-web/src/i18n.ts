@@ -194,6 +194,7 @@ const HE = {
     shareText: ({ team, game, rankPart, score, url }: { team: string; game: string; rankPart: string; score: number; url: string }) =>
       `🏃 ${team} רצים ב"${game}"${rankPart} עם ${score} נק'! בנו מירוץ משלכם ב-${url}`,
     shareRankPart: ({ rank }: { rank: number }) => ` · כרגע במקום #${rank}`,
+    streak: ({ n }: { n: number }) => `🔥 ${n} ברצף!`,
   },
   board: {
     unavailable: 'טבלת הדירוג אינה זמינה',
@@ -397,6 +398,7 @@ const EN: typeof HE = {
     shareText: ({ team, game, rankPart, score, url }: { team: string; game: string; rankPart: string; score: number; url: string }) =>
       `🏃 ${team} is racing "${game}"${rankPart} with ${score} pts! Build your own at ${url}`,
     shareRankPart: ({ rank }: { rank: number }) => ` · currently #${rank}`,
+    streak: ({ n }: { n: number }) => `🔥 ${n} in a row!`,
   },
   board: {
     unavailable: 'Leaderboard unavailable',

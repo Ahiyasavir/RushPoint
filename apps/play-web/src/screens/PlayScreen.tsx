@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, computeStreak } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, type MyTeamState } from '../services/calls';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, type Session } from '../store';
@@ -183,6 +183,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   const activeStage = team.stages.find((s) => s.status === 'active');
 
+  // Streak/momentum: consecutive completions across the run, in play order. A
+  // skip or a long idle gap resets it (computeStreak). Chip hidden below 2.
+  const { streak, milestone } = computeStreak(
+    team.stages
+      .flatMap((s) => s.tasks)
+      .filter((rec) => rec.status === 'completed' || rec.status === 'skipped')
+      .map((rec) => ({ status: rec.status, completedAt: rec.completedAt })),
+    { now: new Date().toISOString() },
+  );
+
   // Build map targets from the active stage's not-yet-completed tasks, joining
   // each run-record to its sanitized coordinates. The assigned task is "active".
   const targets: NavTarget[] = activeStage
@@ -203,6 +213,14 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     <Screen>
       <Header game={game} score={team.score} accent={accent} onLeave={leave} />
       <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
+      {streak >= 2 && (
+        <div
+          key={milestone ?? streak}
+          className={`self-start mb-2 inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-3 py-1 text-sm font-bold text-rp-fire ${milestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
+        >
+          {t.play.streak({ n: streak })}
+        </div>
+      )}
       <button onClick={shareProgress} disabled={sharing}
         className="self-end text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
         {sharing ? t.play.creating : t.play.shareProgress}
