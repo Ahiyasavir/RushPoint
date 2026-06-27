@@ -7,6 +7,7 @@
 //   As teams complete tasks → requestNextTask, verifyStationCode, etc.
 //   Owner calls finalizeRun → scores computed, leaderboard written
 
+import { randomInt } from 'node:crypto';
 import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
@@ -67,7 +68,8 @@ function teamsCol(ownerUid: string, gameId: string, runId: string) {
 function generateCode(len = 6): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusable chars
   let code = '';
-  for (let i = 0; i < len; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  // Cryptographic RNG so access codes aren't guessable (anti-cheat row 40).
+  for (let i = 0; i < len; i++) code += chars[randomInt(chars.length)];
   return code;
 }
 

@@ -5,7 +5,14 @@
 import * as functions from 'firebase-functions';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
-import { isValidCoord, isFirebaseStorageUrl } from '@rushpoint/shared';
+import { randomInt } from 'node:crypto';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown } from '@rushpoint/shared';
+import { validate } from './validation';
+
+/** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
+function generatePin(): string {
+  return String(randomInt(100000, 1000000));
+}
 import { completeTaskForTeam } from './runs/index';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
@@ -105,7 +112,7 @@ export const inviteStaff = functions.https.onCall(async (data, context) => {
   }
   if (!name?.trim()) throw new functions.https.HttpsError('invalid-argument', 'name required');
 
-  const pin = String(Math.floor(100000 + Math.random() * 900000));
+  const pin = generatePin();
   const now = new Date().toISOString();
   const ref = db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
@@ -126,7 +133,7 @@ export const inviteStaff = functions.https.onCall(async (data, context) => {
 
 
 export const staffSignIn = functions.https.onCall(async (data, context) => {
-  requireAuth(context);
+  const uid = requireAuth(context);
   const { ownerUid, gameId, runId, pin } = data as {
     ownerUid: string;
     gameId: string;
@@ -136,6 +143,20 @@ export const staffSignIn = functions.https.onCall(async (data, context) => {
 
   if (!pin) throw new functions.https.HttpsError('invalid-argument', 'PIN required');
 
+  // Brute-force throttle (row 40): too many failed PIN attempts within the
+  // cooldown window locks this caller out of THIS run — even with a correct PIN.
+  const attemptsRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffAttempts/${uid}`);
+  const nowMs = Date.now();
+  const aSnap = await attemptsRef.get();
+  const a = (aSnap.exists ? aSnap.data() : {}) as { count?: number; lastFailedAtMs?: number };
+  const prevCount = a.count ?? 0;
+  const lastFailedAt = a.lastFailedAtMs ?? 0;
+  if (shouldLockout(prevCount) && isWithinCooldown(lastFailedAt, nowMs)) {
+    throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.');
+  }
+  // Cooldown expired → forgive prior failures.
+  const baseCount = shouldLockout(prevCount) && !isWithinCooldown(lastFailedAt, nowMs) ? 0 : prevCount;
+
   const inviteSnap = await db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
     .where('pin', '==', pin)
@@ -144,14 +165,17 @@ export const staffSignIn = functions.https.onCall(async (data, context) => {
     .get();
 
   if (inviteSnap.empty) {
+    await attemptsRef.set({ count: baseCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true });
     throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
   }
 
   const invite = inviteSnap.docs[0].data() as { id: string; name: string; permissions: string[] };
 
+  // Success → reset the failure counter for this caller.
+  await attemptsRef.set({ count: 0, lastFailedAtMs: 0, updatedAt: new Date().toISOString() }, { merge: true });
   await inviteSnap.docs[0].ref.update({
     used: true,
-    usedBy: context.auth!.uid,
+    usedBy: uid,
     usedAt: new Date().toISOString(),
   });
 
@@ -432,12 +456,9 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
   if (teamId && teamId !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
   }
-  if (!photoUrl?.trim()) throw new functions.https.HttpsError('invalid-argument', 'photoUrl required');
-  // M3: only accept photos hosted in our own Firebase Storage bucket — reject any
-  // arbitrary external URL a client could inject.
-  if (!isFirebaseStorageUrl(photoUrl)) {
-    throw new functions.https.HttpsError('invalid-argument', 'Photo URL must be a Firebase Storage URL.');
-  }
+  // row 41: the photo must live under the caller's OWN run/team Storage folder
+  // (not just any bucket URL) — scoped to runId + uid. Throws invalid-argument.
+  validate(() => requireStorageUrl(photoUrl, runId, uid));
 
   // Check the task's smart config for autoApprove (staffless events).
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();

@@ -197,3 +197,38 @@ export const FIREBASE_STORAGE_ORIGIN =
 export function isFirebaseStorageUrl(url: unknown): boolean {
   return typeof url === 'string' && url.startsWith(FIREBASE_STORAGE_ORIGIN);
 }
+
+// ─── Caller-scoped photo URL (change: auth-anticheat-hardening, row 41) ───────
+// Tighter than isFirebaseStorageUrl: the submitted photo must live under the
+// CALLER'S OWN run/team folder (runs/{runId}/teams/{uid}/…) — so one team can't
+// attach another team's (or a foreign) image. Accepts our Firebase https download
+// URL or a gs:// URL; rejects javascript:, foreign origins/paths, and oversized
+// strings. Throws a typed ValidationError (the functions adapter maps it to
+// invalid-argument).
+const MAX_URL_LEN = 2048;
+
+export function requireStorageUrl(url: unknown, runId: string, uid: string): string {
+  if (typeof url !== 'string') fail('photoUrl', 'type:string', MESSAGES.string('photoUrl'));
+  const s = url as string;
+  if (s.length === 0) fail('photoUrl', 'nonEmpty', MESSAGES.empty('photoUrl'));
+  if (s.length > MAX_URL_LEN) fail('photoUrl', `maxLength:${MAX_URL_LEN}`, MESSAGES.maxLen('photoUrl', MAX_URL_LEN));
+
+  let objectPath: string | null = null;
+  if (s.startsWith(FIREBASE_STORAGE_ORIGIN)) {
+    const m = s.match(/\/o\/([^?]+)/);
+    if (m) { try { objectPath = decodeURIComponent(m[1]); } catch { objectPath = null; } }
+  } else if (s.startsWith('gs://')) {
+    const rest = s.slice('gs://'.length);
+    const slash = rest.indexOf('/');
+    if (slash >= 0) objectPath = rest.slice(slash + 1);
+  }
+
+  const expected = `runs/${runId}/teams/${uid}/`;
+  if (!objectPath || !objectPath.startsWith(expected)) {
+    fail('photoUrl', 'storagePath', [
+      'Photo must be uploaded to your own team folder.',
+      'יש להעלות את התמונה לתיקיית הקבוצה שלכם.',
+    ]);
+  }
+  return s;
+}

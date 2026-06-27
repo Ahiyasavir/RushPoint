@@ -272,8 +272,9 @@ async function main() {
 
   // ── 8c. Photo task: submit → staff review → advance ─────────────────────────
   // M3: submitStationPhoto only accepts Firebase Storage URLs from our bucket.
+  // row 41: the photo must live under the caller's OWN run/team folder.
   const STORAGE_PHOTO_URL =
-    'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/runs%2Fe2e%2Fselfie.jpg?alt=media';
+    `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${runId}/teams/${playerCred.user.uid}/selfie.jpg`)}?alt=media`;
 
   // [M3] an external photo URL must be rejected with invalid-argument.
   let externalPhotoRejected = false;
@@ -308,6 +309,21 @@ async function main() {
     ownerUid: creatorCred.user.uid, gameId, runId, name: 'E2E Marshal', permissions: ['review_photos'],
   });
   check('inviteStaff returns a PIN', !!pin, pin);
+
+  // [anti-cheat row 40] a different caller that fails the PIN 5× is locked out of
+  // this run — even a subsequent attempt with the CORRECT pin is refused. The
+  // lockout short-circuits before the invite lookup, so it never burns the PIN.
+  const locker = makeParty('locker');
+  await signInAnonymously(locker.auth);
+  for (let i = 0; i < 5; i++) {
+    try { await locker.call('staffSignIn', { ownerUid: creatorCred.user.uid, gameId, runId, pin: '000000' }); } catch { /* expected */ }
+  }
+  let lockoutHit = false;
+  try {
+    await locker.call('staffSignIn', { ownerUid: creatorCred.user.uid, gameId, runId, pin });
+  } catch (e) { lockoutHit = e.code === 'functions/resource-exhausted' || /too many/i.test(e.message); }
+  check('staffSignIn locks out after 5 failed attempts (even with correct PIN)', lockoutHit);
+
   const staffTok = await staff.call('staffSignIn', {
     ownerUid: creatorCred.user.uid, gameId, runId, pin,
   });
