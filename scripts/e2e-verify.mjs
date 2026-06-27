@@ -207,6 +207,31 @@ async function main() {
   }
   check('verifyStationCode rejects a wrong code', wrongRejected);
 
+  // [anti-cheat row 38] a participant may NOT act on another team — a payload
+  // teamId that isn't the caller is rejected with permission-denied (IDOR fix).
+  let idorRejected = false;
+  try {
+    await player.call('verifyStationCode', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: 'some-other-team-uid', taskId: CODE_TASK_ID, code: 'zion',
+    });
+  } catch (e) {
+    idorRejected = e.code === 'functions/permission-denied' || /another team/i.test(e.message);
+  }
+  check('verifyStationCode rejects acting on another team (IDOR)', idorRejected);
+
+  let idorPhotoRejected = false;
+  try {
+    await player.call('submitStationPhoto', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: 'some-other-team-uid', taskId: CODE_TASK_ID,
+      photoUrl: 'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/x.jpg?alt=media',
+    });
+  } catch (e) {
+    idorPhotoRejected = e.code === 'functions/permission-denied' || /another team/i.test(e.message);
+  }
+  check('submitStationPhoto rejects acting on another team (IDOR)', idorPhotoRejected);
+
   const verifyRes = await player.call('verifyStationCode', {
     ownerUid: creatorCred.user.uid, gameId, runId,
     teamId: playerCred.user.uid, taskId: CODE_TASK_ID, code: 'zion', // case-insensitive

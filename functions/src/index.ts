@@ -372,6 +372,11 @@ export const verifyStationCode = functions.https.onCall(async (data, context) =>
   };
 
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  // IDOR guard (auth-anticheat row 38): a participant may only verify for their
+  // OWN team. A payload teamId that isn't the caller is rejected; uid is the key.
+  if (teamId && teamId !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
+  }
 
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -394,7 +399,7 @@ export const verifyStationCode = functions.https.onCall(async (data, context) =>
   }
 
   const now = new Date().toISOString();
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`);
   // NB: nest under the `taskVerifications` map via a real nested object. Dotted
   // keys in .set({merge}) become *literal* top-level field names, not map paths.
   await teamRef.set(
@@ -405,14 +410,14 @@ export const verifyStationCode = functions.https.onCall(async (data, context) =>
   );
 
   // Correct code = task complete → score it + advance the team.
-  await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+  await completeTaskForTeam(ownerUid, gameId, runId, uid, taskId, now);
 
   return { verified: true };
 });
 
 
 export const submitStationPhoto = functions.https.onCall(async (data, context) => {
-  requireAuth(context);
+  const uid = requireAuth(context);
   const { ownerUid, gameId, runId, teamId, taskId, photoUrl } = data as {
     ownerUid: string;
     gameId: string;
@@ -422,6 +427,11 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
     photoUrl: string;
   };
 
+  // IDOR guard (auth-anticheat row 38): a participant may only submit for their
+  // OWN team. A payload teamId that isn't the caller is rejected; uid is the key.
+  if (teamId && teamId !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
+  }
   if (!photoUrl?.trim()) throw new functions.https.HttpsError('invalid-argument', 'photoUrl required');
   // M3: only accept photos hosted in our own Firebase Storage bucket — reject any
   // arbitrary external URL a client could inject.
@@ -441,7 +451,7 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
   }
 
   const now = new Date().toISOString();
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`);
   await teamRef.set(
     {
       taskSubmissions: {
@@ -457,7 +467,7 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
 
   // autoApprove: the photo is logged but does not block progression.
   if (autoApprove) {
-    await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+    await completeTaskForTeam(ownerUid, gameId, runId, uid, taskId, now);
   }
 
   return { submitted: true, autoApproved: autoApprove };

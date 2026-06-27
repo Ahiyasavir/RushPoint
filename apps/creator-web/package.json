@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "npx vite --port 5180",
+    "dev:preview": "npx vite --port 5185 --strictPort",
     "build": "npx vite build",
     "preview": "npx vite preview",
     "typecheck": "npx tsc --noEmit",

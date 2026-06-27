@@ -22,7 +22,7 @@ import {
   assertFails,
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getBytes } from 'firebase/storage';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,6 +108,10 @@ async function main() {
   await check('team CANNOT read ANOTHER team doc', assertFails(getDoc(doc(team, `${runPath}/teams/${TEAM2}`))));
   await check('other user CANNOT read the wallet', assertFails(getDoc(doc(other, `wallets/${OWNER}`))));
   await check('nobody can read auditLogs (CF-only)', assertFails(getDoc(doc(owner, `auditLogs/log1`))));
+  // [anti-cheat row 39] join by a KNOWN code works (get), but the collection
+  // cannot be enumerated (list) — that would leak every run's identifiers.
+  await check('accessCodes: get by known code is allowed', assertSucceeds(getDoc(doc(other, `accessCodes/ABC123`))));
+  await check('accessCodes: listing the collection is denied', assertFails(getDocs(collection(other, `accessCodes`))));
 
   console.log('\n── Staff scoping: a staff token is confined to its one run ──');
   await check('scoped staff CAN read a team in its run', assertSucceeds(getDoc(doc(staff, `${runPath}/teams/${TEAM}`))));

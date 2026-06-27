@@ -110,7 +110,10 @@ service cloud.firestore {
     //    Any authenticated user may read to validate a code before joining.
     //    The pointer doc ({ownerUid, gameId, runId}) carries no secrets.
     match /accessCodes/{code} {
-      allow read:  if isAuthenticated();
+      // A get by a known code is how you join. Listing the whole collection would
+      // enumerate every run's {ownerUid,gameId,runId} — deny it (anti-cheat row 39).
+      allow get:   if isAuthenticated();
+      allow list:  if false;
       allow write: if false;
     }
 
