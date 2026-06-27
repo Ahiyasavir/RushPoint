@@ -30,6 +30,7 @@ import {
   evaluateTrigger,
   attemptLimitReached,
   matchesTaskAnswer,
+  hotZoneMultiplier,
   isConsentSatisfied,
   haversineKm,
   isValidCoord,
@@ -436,6 +437,10 @@ export async function completeTaskForTeam(
 ): Promise<void> {
   const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   const game = gameSnap.data() as Game;
+  // Hot Zone (if any) is read-only here — used to multiply the earned score for
+  // completions inside the zone+window (hot-zone-bonus). Server-decided.
+  const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+  const hotZone = (runSnap.data() as Run | undefined)?.hotZone;
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
 
   await db.runTransaction(async (tx) => {
@@ -476,11 +481,21 @@ export async function completeTaskForTeam(
       }
     }
 
+    // Hot Zone bonus: multiply if this task's (server-stored) location is inside
+    // the active zone+window. Locationless / null-island tasks pass null → ×1.
+    const taskCoords = gameTask?.smart?.stationCoords ?? gameTask?.coordinates;
+    const validCoords = taskCoords && (taskCoords.lat !== 0 || taskCoords.lng !== 0) ? taskCoords : null;
+    const multiplier = hotZoneMultiplier(hotZone, validCoords, new Date(now).getTime());
+    const baseScore = earnedScore;
+    if (multiplier !== 1) earnedScore = Math.round(earnedScore * multiplier);
+
     taskRec.status = 'completed';
     taskRec.completedAt = now;
     taskRec.actualMinutes = actualMinutes;
     taskRec.earnedScore = earnedScore;
-    taskRec.scoreBreakdown = { taskScore: earnedScore, total: earnedScore };
+    taskRec.scoreBreakdown = multiplier !== 1
+      ? { taskScore: baseScore, hotZoneMultiplier: multiplier, total: earnedScore }
+      : { taskScore: earnedScore, total: earnedScore };
 
     // Stage completion: a stage may require only a SUBSET of its tasks
     // (requiredTaskCount). It's done when that many are completed, OR when no
@@ -662,6 +677,67 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     totalMinutes: t.totalMinutes,
   }));
 }
+
+// ─── activateHotZone / deactivateHotZone ──────────────────────────────────────
+// Organizer sets a timed, geofenced score multiplier on a run (hot-zone-bonus).
+// Server stamps startedAt/expiresAt; a single active zone replaces any prior one.
+// The multiplier is enforced in completeTaskForTeam, never from a client claim.
+
+export const activateHotZone = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, center, radiusMeters, multiplier, durationMinutes } = data as {
+    gameId: string; runId: string;
+    center: { lat: number; lng: number };
+    radiusMeters: number; multiplier: number; durationMinutes: number;
+  };
+
+  if (!gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
+  if (!center || !isValidCoord(center.lat, center.lng)) {
+    throw new functions.https.HttpsError('invalid-argument', 'valid center required');
+  }
+  if (!(radiusMeters > 0) || !(multiplier > 1) || !(durationMinutes > 0)) {
+    throw new functions.https.HttpsError('invalid-argument', 'radiusMeters>0, multiplier>1, durationMinutes>0 required');
+  }
+  // Bound the inputs so a typo can't grief a run.
+  const radius = Math.min(radiusMeters, 5000);
+  const mult = Math.min(multiplier, 5);
+  const durMin = Math.min(durationMinutes, 120);
+
+  const runRef = db.doc(runPath(uid, gameId, runId));
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const now = new Date();
+  const hotZone = {
+    center: { lat: center.lat, lng: center.lng },
+    radiusMeters: radius,
+    multiplier: mult,
+    startedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + durMin * 60_000).toISOString(),
+  };
+  await runRef.update({ hotZone, updatedAt: now.toISOString() });
+  return { ok: true, hotZone };
+});
+
+export const deactivateHotZone = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId: string; runId: string };
+  if (!gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
+
+  const runRef = db.doc(runPath(uid, gameId, runId));
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  await runRef.update({ hotZone: admin.firestore.FieldValue.delete(), updatedAt: new Date().toISOString() });
+  return { ok: true };
+});
+
 
 export const finalizeRun = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);

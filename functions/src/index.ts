@@ -34,6 +34,7 @@ export {
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState,
   requestGuardianConsent, grantGuardianConsent,
+  activateHotZone, deactivateHotZone,
 } from './runs/index';
 
 

@@ -15,3 +15,4 @@ export * from './podium';
 export * from './challenge';
 export * from './streak';
 export * from './tv';
+export * from './hotZone';

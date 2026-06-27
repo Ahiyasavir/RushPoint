@@ -689,6 +689,72 @@ async function main() {
   const resumed = await wanderer.call('requestNextTask', { ...C7, lat: 31.78, lng: 35.21 });
   check('safe-zone: assignment resumes inside the zone', resumed?.outOfBounds !== true, JSON.stringify(resumed));
 
+  // ── Hot Zone bonus (activate/deactivate + multiplied score) ─────────────────
+  {
+    const { gameId: hzGame } = await creator.call('createGame', { title: 'Hot Zone Game', mode: 'individual' });
+    const CENTER = { lat: 31.79, lng: 35.16 };
+    const FAR = { lat: 31.85, lng: 35.30 }; // ~15km away — outside any zone
+    await creator.call('updateGame', {
+      gameId: hzGame,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 'hz-stage', order: 0, title: 'Hot Zone stage', isFinal: true, requiredTaskCount: 2,
+        tasks: [
+          { id: 'hz-in', title: 'In the zone', type: 'field', coordinates: CENTER, difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3 },
+          { id: 'hz-out', title: 'Out of zone', type: 'field', coordinates: FAR, difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3 },
+        ],
+      }],
+    });
+    const { runId: hzRun, accessCode: hzCode } = await creator.call('launchRun', { gameId: hzGame });
+    const hzPlayer = makeParty('hzPlayer');
+    await signInAnonymously(hzPlayer.auth);
+    await hzPlayer.call('joinRun', { code: hzCode, displayName: 'Zoner' });
+    await creator.call('startTeams', { gameId: hzGame, runId: hzRun });
+
+    // Activation stamps a bounded zone with start/expiry.
+    const act = await creator.call('activateHotZone', {
+      gameId: hzGame, runId: hzRun, center: CENTER, radiusMeters: 250, multiplier: 2, durationMinutes: 10,
+    });
+    check('hot-zone: activation returns a stamped zone', !!act?.hotZone?.startedAt && !!act?.hotZone?.expiresAt, JSON.stringify(act?.hotZone));
+    check('hot-zone: multiplier stored', act?.hotZone?.multiplier === 2);
+
+    // Only one active zone — re-activating replaces, not stacks.
+    const act2 = await creator.call('activateHotZone', {
+      gameId: hzGame, runId: hzRun, center: CENTER, radiusMeters: 250, multiplier: 3, durationMinutes: 10,
+    });
+    check('hot-zone: re-activation replaces (single zone)', act2?.hotZone?.multiplier === 3);
+    // Reset back to 2x for the scoring assertions.
+    await creator.call('activateHotZone', { gameId: hzGame, runId: hzRun, center: CENTER, radiusMeters: 250, multiplier: 2, durationMinutes: 10 });
+
+    // Complete both tasks (routing assigns one at a time; re-request after each).
+    for (let i = 0; i < 2; i++) {
+      let st = await hzPlayer.call('getMyTeamState', { code: hzCode });
+      let assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      if (!assigned) {
+        await hzPlayer.call('requestNextTask', { code: hzCode, lat: CENTER.lat, lng: CENTER.lng });
+        st = await hzPlayer.call('getMyTeamState', { code: hzCode });
+        assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      }
+      if (!assigned) break;
+      const at = assigned.taskId === 'hz-in' ? CENTER : FAR;
+      await hzPlayer.call('completeTask', { taskId: assigned.taskId, code: hzCode, lat: at.lat, lng: at.lng });
+    }
+
+    const fin = await hzPlayer.call('getMyTeamState', { code: hzCode });
+    const recs = fin?.team?.stages?.[0]?.tasks ?? [];
+    const inRec = recs.find((t) => t.taskId === 'hz-in');
+    const outRec = recs.find((t) => t.taskId === 'hz-out');
+    check('hot-zone: in-zone completion is multiplied ×2',
+      inRec?.scoreBreakdown?.hotZoneMultiplier === 2 && inRec?.scoreBreakdown?.total === inRec?.scoreBreakdown?.taskScore * 2,
+      JSON.stringify(inRec?.scoreBreakdown));
+    check('hot-zone: out-of-zone completion is NOT multiplied',
+      !outRec?.scoreBreakdown?.hotZoneMultiplier && outRec?.scoreBreakdown?.total === outRec?.scoreBreakdown?.taskScore,
+      JSON.stringify(outRec?.scoreBreakdown));
+
+    const deact = await creator.call('deactivateHotZone', { gameId: hzGame, runId: hzRun });
+    check('hot-zone: deactivate clears the zone', deact?.ok === true);
+  }
+
   // ── Challenge a friend (checkChallengeAnswer) ───────────────────────────────
   // Isolated published quiz game so the main lifecycle is untouched.
   {

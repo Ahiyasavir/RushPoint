@@ -403,8 +403,19 @@ export interface Run {
   participantCount: number;      // grows with each joinRun
   freeParticipantsUsed?: number; // legacy (pre-migration runs)
   leaderboard?: RunLeaderboard;
+  hotZone?: HotZone;             // active timed score multiplier (hot-zone-bonus)
   createdAt: string;
   updatedAt: string;
+}
+
+// A timed, geofenced score multiplier an organizer activates on a run
+// (change: hot-zone-bonus). Enforced server-side via hotZoneMultiplier.
+export interface HotZone {
+  center: GeoPoint;       // zone centre
+  radiusMeters: number;   // inclusion radius
+  multiplier: number;     // score multiplier (e.g. 2 for double points)
+  startedAt: string;      // ISO — server-stamped activation
+  expiresAt: string;      // ISO — server-stamped expiry
 }
 
 
@@ -433,6 +444,7 @@ export interface TaskScoreBreakdown {
   taskScore: number;
   timeBonus?: number;
   penalty?: number;
+  hotZoneMultiplier?: number;   // applied when completed inside an active hot zone
   total: number;
 }
 
