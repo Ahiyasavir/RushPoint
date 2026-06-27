@@ -27,7 +27,7 @@ all green).
 |---|---|
 | `auth-anticheat-hardening` | ✅ archived (`2026-06-27-auth-anticheat-hardening`) → 5 security specs (authorization, input-validation, run-billing, staff-authentication, answer-submission). IDOR fix, access-code enum deny, staff-PIN throttle + crypto RNG, caller-scoped photoUrl, answer attemptLimit, atomic launchRun, referral cap + Pro-expiry. P1 security batch #1. |
 | `guardian-consent-qr` | ✅ archived (`2026-06-27-guardian-consent-qr`) → guardian-consent spec; server-enforced minors gate (isConsentSatisfied + requestGuardianConsent/grantGuardianConsent single-use token + startTeams gate + retention prune). Server tasks done + e2e green; UI (task 5: consent screen/guardian page) deferred to the frontend agent. |
-| `safe-zone-boundary` | 📋 backlog |
+| `safe-zone-boundary` | ✅ archived (`2026-06-27-safe-zone-boundary`) → safe-zone spec; server-side breach detection (isOutsideSafeZone in updateLocation → alert + outOfBounds flag), soft-pause in requestNextTask, retention-safe. Server tasks done + e2e green; UI (task 5) deferred to frontend agent. **P1 security batch COMPLETE.** |
 
 ## 3. UI/UX & performance — `v21-uiux-and-perf.todo.test.ts` · `v21-performance-and-smoothness.todo.test.ts`
 | Change | Status |
