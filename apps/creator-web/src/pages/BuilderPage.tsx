@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType, TriggerMode,
@@ -23,6 +23,7 @@ import PacingBar from '../components/PacingBar';
 import RichTooltip from '../components/RichTooltip';
 import { TASK_SAMPLES, applySample } from '../lib/taskTemplates';
 import { moveItem } from '../lib/reorder';
+import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 
 // MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
 // main builder bundle: the map engine is fetched only when a located task editor
@@ -363,23 +364,6 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-app-card border border-glass-border rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto p-4 shadow-soft"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold">{title}</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void }) {
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
@@ -496,17 +480,72 @@ function StepStages({ game, setGame }: { game: Game; setGame: (g: Game) => void 
       )}
 
       {editing && editingStage && editingTask && (
-        <Modal title="Edit task" onClose={() => setEditing(null)}>
-          <TaskEditor
-            task={editingTask}
-            onChange={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
-            onRemove={editingStage.tasks.length > 1
-              ? () => { updateStage(editingStage.id, { tasks: editingStage.tasks.filter((x) => x.id !== editingTask.id) }); setEditing(null); }
-              : undefined}
-          />
-          <Button className="w-full mt-3" onClick={() => setEditing(null)}>Done</Button>
-        </Modal>
+        <ContextPanel
+          key={editingTask.id}
+          task={editingTask}
+          onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
+          onRemove={editingStage.tasks.length > 1
+            ? () => { updateStage(editingStage.id, { tasks: editingStage.tasks.filter((x) => x.id !== editingTask.id) }); setEditing(null); }
+            : undefined}
+          onClose={() => setEditing(null)}
+        />
       )}
+    </div>
+  );
+}
+
+// Slide-in context panel (Component 4, change: v2.1-builder-shell-redesign).
+// Edits a LOCAL draft (lib/taskDraft) so keystrokes never re-render the canvas or
+// hit the server; the draft flushes to global state on a 1500ms debounce, and any
+// pending edit flushes on close/unmount. Hardware-accelerated transform slide-in.
+function ContextPanel({ task, onFlush, onClose, onRemove }: {
+  task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void;
+}) {
+  const [state, setState] = useState<DraftState>(() => initDraft(task));
+  const [shown, setShown] = useState(false);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const flushTimer = useRef<number>();
+
+  // Slide in on mount.
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(r);
+  }, []);
+
+  // Flush any pending draft when the panel unmounts (close or task switch).
+  useEffect(() => () => {
+    window.clearTimeout(flushTimer.current);
+    if (isDirty(stateRef.current)) onFlush(stateRef.current.draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handleChange(t: Task) {
+    setState((d) => editDraft(d, t));
+    window.clearTimeout(flushTimer.current);
+    flushTimer.current = window.setTimeout(() => {
+      const cur = stateRef.current;
+      if (isDirty(cur)) { onFlush(cur.draft); setState(commit(cur)); }
+    }, AUTOSAVE_DELAY);
+  }
+
+  function close() { window.clearTimeout(flushTimer.current); onClose(); }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={close}>
+      <aside
+        onClick={(e) => e.stopPropagation()}
+        style={{ willChange: 'transform' }}
+        className={`h-full w-full max-w-md bg-app-card border-s border-glass-border shadow-soft overflow-y-auto p-4
+          transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-semibold">Edit task</h3>
+          <button onClick={close} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+        </div>
+        <TaskEditor task={state.draft} onChange={handleChange} onRemove={onRemove} />
+        <Button className="w-full mt-3" onClick={close}>Done</Button>
+      </aside>
     </div>
   );
 }
