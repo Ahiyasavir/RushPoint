@@ -36,8 +36,12 @@ function stripWhitelist(s: string): string {
   return out;
 }
 // A "Latin English word" = 2+ consecutive ASCII letters left after whitelisting.
+// Tokens that contain a digit (sample codes / ids like "FOX42", "ABC123") are not
+// English copy — strip them first so an example code in Hebrew copy isn't flagged.
+// (Kept in sync with scripts/check-i18n.ts, the authoritative i18n gate.)
 function hasEnglish(s: string): boolean {
-  return /[A-Za-z]{2,}/.test(stripWhitelist(s));
+  const noCodes = stripWhitelist(s).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
+  return /[A-Za-z]{2,}/.test(noCodes);
 }
 
 function leafStrings(obj: unknown, prefix = ''): Array<[string, string]> {
