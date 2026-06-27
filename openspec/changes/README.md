@@ -40,7 +40,7 @@ all green).
 | Change | Status |
 |---|---|
 | `share-branding` | ✅ archived (`2026-06-27-share-branding`) → share-branding spec; reusable brand stamp (logo + URL + scannable QR) on every shared image, pure resolveShareQrTarget/computeWatermarkLayout, storyCard QR + sharePhoto + graceful fallbacks; all 5 gates green. **P2 #1.** |
-| `podium-share-moment` | 📋 backlog |
+| `podium-share-moment` | ✅ archived (`2026-06-27-podium-share-moment`) → podium-moment spec; selectPodium + computePodiumLayout (pure), FinalScreen reduced-motion-safe podium reveal, branded podium share via stampBrand; all 5 gates green. **P2 #2.** |
 | `challenge-a-friend` | 📋 backlog |
 | `run-recap` | 📋 backlog |
 | `run-replay-vod` | 📋 backlog |
