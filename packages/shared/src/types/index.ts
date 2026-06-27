@@ -303,6 +303,10 @@ export interface Game {
   coverImage?: string;
   approxLocation?: GeoPoint & { label?: string };
   playCount: number;
+  // Minors gate (change: guardian-consent-qr): when true, a guardian must approve
+  // before a participant can start; minAge is the threshold the organizer sets.
+  requiresGuardianConsent?: boolean;
+  minAge?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -469,6 +473,9 @@ export interface RunTeam {
   stages: RunStageRecord[];
   score: number;
   bonusPenalty: number;
+  // Guardian consent (change: guardian-consent-qr): present (with grantedAt) once
+  // a guardian approves; gates start on runs that require consent.
+  guardianConsent?: import('./../guardianConsent').GuardianConsent;
   activeTaskId?: string | null;  // mirror for getStationTeams query
   launched: boolean;
   startedAt?: string;
@@ -751,6 +758,8 @@ export interface UpdateGamePayload {
   tags?: string[];
   coverImage?: string;
   approxLocation?: GeoPoint & { label?: string };
+  requiresGuardianConsent?: boolean;
+  minAge?: number;
 }
 
 // Run management

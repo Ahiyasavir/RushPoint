@@ -33,6 +33,7 @@ export {
   listRunTeams, completeTask, requestNextTask, requestTaskHint,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState,
+  requestGuardianConsent, grantGuardianConsent,
 } from './runs/index';
 
 

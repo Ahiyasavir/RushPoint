@@ -79,6 +79,7 @@ export const updateGame = functions.https.onCall(async (data, context) => {
     gameId,
     title, description, mode, stages, scoringPreset, scoringOptions,
     registrationFields, branding, tags, coverImage, approxLocation,
+    requiresGuardianConsent, minAge,
   } = data as UpdateGamePayload;
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -102,6 +103,8 @@ export const updateGame = functions.https.onCall(async (data, context) => {
   if (tags !== undefined)               updates.tags = tags;
   if (coverImage !== undefined)         updates.coverImage = coverImage;
   if (approxLocation !== undefined)     updates.approxLocation = approxLocation;
+  if (requiresGuardianConsent !== undefined) updates.requiresGuardianConsent = requiresGuardianConsent;
+  if (minAge !== undefined)             updates.minAge = minAge;
 
   await ref.update(updates);
   return { ok: true };

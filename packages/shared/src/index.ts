@@ -8,3 +8,4 @@ export * from './registration';
 export * from './freeMode';
 export * from './staffThrottle';
 export * from './answerAttempts';
+export * from './guardianConsent';

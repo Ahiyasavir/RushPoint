@@ -7,7 +7,7 @@
 //   As teams complete tasks → requestNextTask, verifyStationCode, etc.
 //   Owner calls finalizeRun → scores computed, leaderboard written
 
-import { randomInt } from 'node:crypto';
+import { randomInt, randomBytes } from 'node:crypto';
 import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
@@ -29,6 +29,7 @@ import {
   normalizeTriggerMode,
   evaluateTrigger,
   attemptLimitReached,
+  isConsentSatisfied,
   haversineKm,
   isValidCoord,
 } from '@rushpoint/shared';
@@ -340,7 +341,11 @@ export const startTeams = functions.https.onCall(async (data, context) => {
 
   const targets = teamsSnap.docs.filter((d) => {
     const t = d.data() as RunTeam;
-    return !t.launched && (teamIds ? teamIds.includes(t.id) : true);
+    if (t.launched || (teamIds && !teamIds.includes(t.id))) return false;
+    // Guardian-consent gate (guardian-consent-qr): a minor's team is held in
+    // pending-consent and cannot start until a guardian has approved.
+    if (!isConsentSatisfied(t, game)) return false;
+    return true;
   });
 
   const batch = db.batch();
@@ -363,6 +368,56 @@ export const startTeams = functions.https.onCall(async (data, context) => {
   }
 
   return { launched: targets.length };
+});
+
+
+// ─── Guardian consent (change: guardian-consent-qr) ────────────────────────────
+// A minor's team requests a single-use consent token; a guardian opens the link
+// and approves; only then can the team be started. Consent is server-recorded and
+// not self-approvable by the child (the token is the authorization).
+
+export const requestGuardianConsent = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { ownerUid, gameId, runId, teamId } = data as {
+    ownerUid: string; gameId: string; runId: string; teamId?: string;
+  };
+  if (!ownerUid || !gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'run context required');
+  // IDOR: a team may only request consent for itself.
+  if (teamId && teamId !== uid) throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
+
+  const token = randomBytes(16).toString('hex');
+  const now = new Date().toISOString();
+  await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/consentTokens/${token}`).set({
+    token, teamId: uid, used: false, createdAt: now,
+  });
+  return { token };
+});
+
+export const grantGuardianConsent = functions.https.onCall(async (data, context) => {
+  requireAuth(context); // any authed device (the guardian's), authorized by the token
+  const { ownerUid, gameId, runId, token, guardianName } = data as {
+    ownerUid: string; gameId: string; runId: string; token: string; guardianName?: string;
+  };
+  if (!ownerUid || !gameId || !runId || !token) throw new functions.https.HttpsError('invalid-argument', 'token + run context required');
+
+  const tokenRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/consentTokens/${token}`);
+  const now = new Date().toISOString();
+  const name = (guardianName ?? '').toString().slice(0, 120) || null;
+
+  const teamId = await db.runTransaction(async (t) => {
+    const snap = await t.get(tokenRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Invalid consent token');
+    const rec = snap.data() as { teamId: string; used: boolean };
+    if (rec.used) throw new functions.https.HttpsError('failed-precondition', 'Consent token already used');
+    t.update(tokenRef, { used: true, guardianName: name, grantedAt: now });
+    t.set(
+      db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${rec.teamId}`),
+      { guardianConsent: { guardianName: name, grantedAt: now } },
+      { merge: true },
+    );
+    return rec.teamId;
+  });
+  return { ok: true, teamId };
 });
 
 

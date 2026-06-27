@@ -38,6 +38,7 @@ interface PruneResult {
   runId: string;
   locationsDeleted: number;
   photoUrlsCleared: number;
+  consentCleared: number;
   storagePurged: boolean;
 }
 
@@ -54,22 +55,42 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
     await batch.commit();
   }
 
-  // 2) Clear photo URLs from each team's submissions (keep scores/answers).
+  // 2) Clear photo URLs from each team's submissions (keep scores/answers), and
+  //    clear any guardian-consent PII (the guardian's name).
   const teamsSnap = await db.collection(`${runPath}/teams`).get();
   let photoUrlsCleared = 0;
+  let consentCleared = 0;
   for (const teamDoc of teamsSnap.docs) {
-    const data = teamDoc.data() as { taskSubmissions?: Record<string, { photoUrl?: string }> };
+    const data = teamDoc.data() as {
+      taskSubmissions?: Record<string, { photoUrl?: string }>;
+      guardianConsent?: { guardianName?: string | null; grantedAt?: string };
+    };
     const subs = data.taskSubmissions;
-    if (!subs) continue;
     const cleared: Record<string, { photoUrl: null; pruned: true }> = {};
     let touched = false;
-    for (const [taskId, sub] of Object.entries(subs)) {
-      if (sub && sub.photoUrl) { cleared[taskId] = { photoUrl: null, pruned: true }; photoUrlsCleared++; touched = true; }
+    if (subs) {
+      for (const [taskId, sub] of Object.entries(subs)) {
+        if (sub && sub.photoUrl) { cleared[taskId] = { photoUrl: null, pruned: true }; photoUrlsCleared++; touched = true; }
+      }
     }
-    if (touched) {
-      // merge:true with a real nested object updates only photoUrl/pruned per task.
-      await teamDoc.ref.set({ taskSubmissions: cleared }, { merge: true });
+    const patch: Record<string, unknown> = {};
+    if (touched) patch.taskSubmissions = cleared;
+    if (data.guardianConsent?.guardianName) {
+      // Keep the grantedAt fact (aggregate), drop the name (PII).
+      patch.guardianConsent = { guardianName: null, grantedAt: data.guardianConsent.grantedAt ?? null, pruned: true };
+      consentCleared++;
     }
+    if (Object.keys(patch).length > 0) {
+      await teamDoc.ref.set(patch, { merge: true });
+    }
+  }
+
+  // 2b) Delete the single-use consent tokens (they carry team identifiers).
+  const tokSnap = await db.collection(`${runPath}/consentTokens`).get();
+  if (!tokSnap.empty) {
+    const batch = db.batch();
+    for (const d of tokSnap.docs) { batch.delete(d.ref); consentCleared++; }
+    await batch.commit();
   }
 
   // 3) Delete uploaded photo objects under this run's Storage prefix.
@@ -84,7 +105,7 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   // 4) Stamp the run so the scheduled sweep skips it next time.
   await db.doc(runPath).set({ piiPrunedAt: new Date().toISOString() }, { merge: true });
 
-  return { runId, locationsDeleted, photoUrlsCleared, storagePurged };
+  return { runId, locationsDeleted, photoUrlsCleared, consentCleared, storagePurged };
 }
 
 // Finds finished runs older than the retention window that have not yet been

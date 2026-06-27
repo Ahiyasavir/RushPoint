@@ -621,6 +621,46 @@ async function main() {
   }
   check('attempt-limit: 3rd attempt refused even with the correct answer', attemptExhausted);
 
+  // ── 17. Guardian consent gate (guardian-consent-qr) ────────────────────────
+  // A consent-required run holds a minor's team in pending-consent: startTeams
+  // does NOT launch them until a guardian approves via a single-use token.
+  const { gameId: g6 } = await creator.call('createGame', { title: 'Consent Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: g6, scoringPreset: 'time_only', requiresGuardianConsent: true, minAge: 13,
+    stages: [{ id: 'cs-s', order: 0, title: 'One', isFinal: true, tasks: [{
+      id: 'cs-t', title: 'Tap in', type: 'self_report', triggerMode: 'locationless',
+      coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+    }] }],
+  });
+  const { runId: r6, accessCode: c6 } = await creator.call('launchRun', { gameId: g6 });
+  const minor = makeParty('minor');
+  await signInAnonymously(minor.auth);
+  await minor.call('joinRun', { code: c6, displayName: 'Kid' });
+  const start1 = await creator.call('startTeams', { gameId: g6, runId: r6 });
+  check('consent: team is NOT started before consent', start1?.launched === 0, JSON.stringify(start1));
+
+  const { token } = await minor.call('requestGuardianConsent', {
+    ownerUid: creatorCred.user.uid, gameId: g6, runId: r6, teamId: minor.auth.currentUser.uid,
+  });
+  check('requestGuardianConsent issues a token', !!token, token);
+
+  // A guardian (separate device) approves with the single-use token.
+  const guardian = makeParty('guardian');
+  await signInAnonymously(guardian.auth);
+  const grant = await guardian.call('grantGuardianConsent', {
+    ownerUid: creatorCred.user.uid, gameId: g6, runId: r6, token, guardianName: 'A. Parent',
+  });
+  check('grantGuardianConsent records consent', grant?.ok === true);
+
+  let tokenReused = false;
+  try {
+    await guardian.call('grantGuardianConsent', { ownerUid: creatorCred.user.uid, gameId: g6, runId: r6, token, guardianName: 'Again' });
+  } catch (e) { tokenReused = e.code === 'functions/failed-precondition' || /already used/i.test(e.message); }
+  check('consent: a used token is refused', tokenReused);
+
+  const start2 = await creator.call('startTeams', { gameId: g6, runId: r6 });
+  check('consent: team starts after a guardian approves', start2?.launched === 1, JSON.stringify(start2));
+
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }
