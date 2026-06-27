@@ -55,7 +55,7 @@ all green).
 ## 6. Engagement & analytics — `v21-engagement-and-analytics.todo.test.ts`
 | Change | Status |
 |---|---|
-| `streak-momentum` | 📋 backlog |
+| `streak-momentum` | ✅ archived (`2026-06-27-streak-momentum`) → streak-momentum spec; pure computeStreak + computeMedianTaskMs (consecutive completions; skip/idle-gap reset; milestones 3/5/10), PlayScreen "🔥 N in a row!" chip (hidden < 2, motion-reduce-safe milestone pop); 17 pure tests; play-web only, no backend. All gates green. **P3 #1.** |
 | `live-emoji-reactions` | 📋 backlog |
 | `tv-leaderboard` | 📋 backlog |
 | `run-analytics-heatmap` | 📋 backlog |
