@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType, TriggerMode,
@@ -16,9 +16,23 @@ const TRIGGER_MODE_META: { mode: TriggerMode; icon: string; label: string; desc:
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
-import LocationPicker from '../components/LocationPicker';
-import RoutePreviewMap from '../components/RoutePreviewMap';
 import TaskLibrary from '../components/TaskLibrary';
+import QuizChoicesEditor from '../components/QuizChoicesEditor';
+
+// MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
+// main builder bundle: the map engine is fetched only when a located task editor
+// (LocationPicker) or the preview route (RoutePreviewMap) actually mounts.
+const LocationPicker = lazy(() => import('../components/LocationPicker'));
+const RoutePreviewMap = lazy(() => import('../components/RoutePreviewMap'));
+
+// Lightweight placeholder while a map chunk + engine load.
+function MapSkeleton({ className = 'h-44' }: { className?: string }) {
+  return (
+    <div className={`${className} rounded-lg border border-[--rp-border] bg-[--surface-2] animate-pulse flex items-center justify-center gap-2 text-xs text-[--ink-3]`}>
+      <span>🗺</span> Loading map…
+    </div>
+  );
+}
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -516,12 +530,14 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
 
       {located ? (
         <>
-          <LocationPicker
-            lat={task.coordinates.lat}
-            lng={task.coordinates.lng}
-            onChange={(lat, lng) => set({ coordinates: { lat, lng } })}
-            className="h-44"
-          />
+          <Suspense fallback={<MapSkeleton />}>
+            <LocationPicker
+              lat={task.coordinates.lat}
+              lng={task.coordinates.lng}
+              onChange={(lat, lng) => set({ coordinates: { lat, lng } })}
+              className="h-44"
+            />
+          </Suspense>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label>Lat</Label>
@@ -591,26 +607,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
         )}
 
         {task.type === 'quiz' && (
-          <>
-            <div>
-              <Label>Choices, one per line (leave empty for a typed answer)</Label>
-              <Textarea
-                value={(task.choices ?? []).join('\n')}
-                onChange={(e) => set({ choices: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
-                placeholder={'Paris\nLondon\nRome'}
-                rows={3}
-              />
-            </div>
-            <div>
-              <Label>Accepted answers, one per line, case-insensitive</Label>
-              <Textarea
-                value={(task.answers ?? []).join('\n')}
-                onChange={(e) => set({ answers: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })}
-                placeholder={'Paris'}
-                rows={2}
-              />
-            </div>
-          </>
+          <QuizChoicesEditor task={task} onChange={(p) => set(p)} />
         )}
 
         {task.type === 'numeric' && (
@@ -720,7 +717,9 @@ function StepPreview({ game }: { game: Game }) {
 
       <div>
         <Label>Route preview</Label>
-        <RoutePreviewMap stages={game.stages} className="h-64" />
+        <Suspense fallback={<MapSkeleton className="h-64" />}>
+          <RoutePreviewMap stages={game.stages} className="h-64" />
+        </Suspense>
       </div>
 
       <p className="text-xs text-zinc-500">Launching creates an access code your friends use to join. First 2 participants are free.</p>
