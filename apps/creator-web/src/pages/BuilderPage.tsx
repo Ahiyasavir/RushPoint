@@ -20,15 +20,15 @@ import TaskLibrary from '../components/TaskLibrary';
 import QuizChoicesEditor from '../components/QuizChoicesEditor';
 import StageRail from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
+import LocationStep from '../components/LocationStep';
 import RichTooltip from '../components/RichTooltip';
 import { TASK_SAMPLES, applySample } from '../lib/taskTemplates';
 import { moveItem } from '../lib/reorder';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 
-// MapLibre is heavy (~500KB). Splitting these into lazy chunks keeps it out of the
-// main builder bundle: the map engine is fetched only when a located task editor
-// (LocationPicker) or the preview route (RoutePreviewMap) actually mounts.
-const LocationPicker = lazy(() => import('../components/LocationPicker'));
+// MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
+// (fetched only when a located task editor opens); the preview route map is split
+// the same way here so it stays out of the main builder bundle.
 const RoutePreviewMap = lazy(() => import('../components/RoutePreviewMap'));
 
 // Lightweight placeholder while a map chunk + engine load.
@@ -636,26 +636,7 @@ function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Ta
       )}
 
       {located ? (
-        <>
-          <Suspense fallback={<MapSkeleton />}>
-            <LocationPicker
-              lat={task.coordinates.lat}
-              lng={task.coordinates.lng}
-              onChange={(lat, lng) => set({ coordinates: { lat, lng } })}
-              className="h-44"
-            />
-          </Suspense>
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label>Lat</Label>
-              <Input type="number" value={task.coordinates.lat || ''} onChange={(e) => set({ coordinates: { ...task.coordinates, lat: parseFloat(e.target.value) || 0 } })} />
-            </div>
-            <div>
-              <Label>Lng</Label>
-              <Input type="number" value={task.coordinates.lng || ''} onChange={(e) => set({ coordinates: { ...task.coordinates, lng: parseFloat(e.target.value) || 0 } })} />
-            </div>
-          </div>
-        </>
+        <LocationStep coordinates={task.coordinates} onChange={(lat, lng) => set({ coordinates: { lat, lng } })} />
       ) : (
         <p className="text-xs text-zinc-500 bg-app-raised rounded-lg px-3 py-2">
           {mode === 'instant'
