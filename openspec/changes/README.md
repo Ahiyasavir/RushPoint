@@ -57,7 +57,7 @@ all green).
 |---|---|
 | `streak-momentum` | ✅ archived (`2026-06-27-streak-momentum`) → streak-momentum spec; pure computeStreak + computeMedianTaskMs (consecutive completions; skip/idle-gap reset; milestones 3/5/10), PlayScreen "🔥 N in a row!" chip (hidden < 2, motion-reduce-safe milestone pop); 17 pure tests; play-web only, no backend. All gates green. **P3 #1.** |
 | `live-emoji-reactions` | 📋 backlog |
-| `tv-leaderboard` | 📋 backlog |
+| `tv-leaderboard` | ✅ archived (`2026-06-27-tv-leaderboard`) → tv-leaderboard spec; play-web `?tv=<accessCode>` full-screen projection screen (reuses getPublicLeaderboard, 12s auto-refresh, published-gated, "Now in the lead!" flash via pure detectLeaderChange); shared tv.ts; 8 pure tests; all gates green. RunConsole launcher button (req 4) **deferred to frontend agent** (creator-web i18n). **P3 #2.** |
 | `run-analytics-heatmap` | 📋 backlog |
 | `surprise-trivia-waypoints` | 📋 backlog |
 | `hot-zone-bonus` | 📋 backlog |
