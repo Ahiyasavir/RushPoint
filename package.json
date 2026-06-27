@@ -46,6 +46,8 @@
         "seed": "npm run seed      --workspace=scripts",
         "seed:reset": "npm run seed:reset --workspace=scripts",
         "e2e": "node scripts/e2e-verify.mjs",
+        "i18n:check": "npx tsx scripts/check-i18n.ts",
+        "i18n:check:strict": "npx tsx scripts/check-i18n.ts --strict",
         "icons": "node scripts/gen-pwa-icons.mjs",
         "test:rules": "node scripts/test-rules.mjs",
         "emails:export": "node scripts/export-emails.mjs",

@@ -50,6 +50,16 @@ context: |
     npm test               (vitest in functions — must pass)
     npm run creator:build  (production build — must pass)
     npm run e2e            (full lifecycle vs emulator — must stay green)
+    npm run i18n:check     (MANDATORY for ANY UI change — Hebrew↔English correctness; see below)
+
+  i18n correctness (any change touching UI text / components / i18n.ts):
+    Every user-facing string comes from the translation maps (apps/*/src/i18n.ts, via t.*). Hebrew
+    must render 100% Hebrew, English 100% English — no hardcoded component strings, no English left
+    in a Hebrew dictionary value (the recurring "English in the Hebrew Builder" bug). Run
+    `npm run i18n:check` (PART A dictionary parity/purity is a HARD gate) and, while building new UI,
+    `npm run i18n:check:strict` (also fails on hardcoded strings). Fix findings by routing text
+    through t.*, or justify a deliberate literal with a trailing `// i18n-ignore`. New UI adds zero
+    findings. Enforced by scripts/check-i18n.ts. (See also INSTRUCTIONS.md §3.D.)
 
 # Per-artifact rules — enforce Spec-Driven Development + strict TDD on every change.
 rules:
@@ -64,7 +74,8 @@ rules:
       app screen/component, services/calls.ts). Reference TECH_SPEC.md for current behavior.
     - "Specify the TEST STRATEGY up front: for pure logic → vitest *.test.ts or scripts/test-*.ts;
       for a callable → the specific failing assertions to add to scripts/e2e-verify.mjs; for UI →
-      the preview-based verification steps. Every change must name how it will be proven."
+      the preview-based verification steps PLUS `npm run i18n:check` (any new/changed user-facing
+      text goes through t.* in i18n.ts, never hardcoded). Every change must name how it will be proven."
     - Respect server-write-only state, FIRESTORE_PATHS, answer-key secrecy, and the merge/array footguns.
     - Call out any new Firestore index, security-rule change, or new env var.
 
@@ -75,7 +86,9 @@ rules:
     - The next task implements the minimum code to make that test pass; then a refactor task.
     - Keep tasks small (about one red-green cycle each). Each task is independently checkable.
     - The final task MUST run the full gate set (typecheck, lint, vitest `npm test`, creator:build,
-      e2e) and confirm all green.
+      e2e) and confirm all green. If the change touches UI, that task MUST also run
+      `npm run i18n:check` (and `npm run i18n:check:strict` for new UI) and confirm it is clean —
+      add no new hardcoded-string findings.
     - For a new/changed callable, include an explicit task to (a) add its typed wrapper in
       services/calls.ts and (b) extend scripts/e2e-verify.mjs with the new-behavior assertions.
     - For pure shared logic, prefer a co-located vitest test or scripts/test-*.ts; do NOT require

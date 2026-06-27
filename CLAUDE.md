@@ -75,10 +75,21 @@ npm test                 # pure-logic lane: scripts/test-*.ts aggregator + vites
 npm run lint             # creator-web eslint — 0 errors (style warnings ok)
 npm run creator:build    # production build of creator-web — must pass
 npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
+npm run i18n:check       # ⚠ MANDATORY AFTER ANY UI CHANGE — Hebrew↔English correctness
 ```
 `npm run e2e` exercises createGame → updateGame → launchRun → join → start → play (code + photo +
 field) → staff review → live leaderboard → finalize, plus partial stages, locationless routing,
 finished-run rejection, and paid hints. Keep it green; extend it when adding callables.
+
+> 🌐 **i18n gate — if you touch ANY UI (text, JSX, components, `i18n.ts`), you MUST run
+> `npm run i18n:check` and it MUST come out clean.** It guarantees Hebrew copy is really Hebrew
+> and English copy is really English, and that no component hardcodes a UI string that won't switch
+> language (the recurring "English text showing while the app is in Hebrew" bug, especially in the
+> Builder). **PART A (dictionaries) is a hard gate — never ship with a PART A error.** PART B lists
+> hardcoded strings that bypass `t.*`: fix the ones your change touches (route the text through
+> `t.*`), or, for a deliberate non-switchable literal (brand mockup, sample data), add a trailing
+> `// i18n-ignore` on that line with a reason. New UI must add **zero** new PART B warnings — verify
+> with `npm run i18n:check:strict`. See [scripts/check-i18n.ts](scripts/check-i18n.ts).
 
 ### What the dev scripts handle (hard-won — don't regress)
 - **`scripts/dev-emulator.mjs`** — detects Java and **auto-switches to a JDK ≥ 21** (the emulator
