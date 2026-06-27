@@ -41,7 +41,7 @@ all green).
 |---|---|
 | `share-branding` | ✅ archived (`2026-06-27-share-branding`) → share-branding spec; reusable brand stamp (logo + URL + scannable QR) on every shared image, pure resolveShareQrTarget/computeWatermarkLayout, storyCard QR + sharePhoto + graceful fallbacks; all 5 gates green. **P2 #1.** |
 | `podium-share-moment` | ✅ archived (`2026-06-27-podium-share-moment`) → podium-moment spec; selectPodium + computePodiumLayout (pure), FinalScreen reduced-motion-safe podium reveal, branded podium share via stampBrand; all 5 gates green. **P2 #2.** |
-| `challenge-a-friend` | 📋 backlog |
+| `challenge-a-friend` | ✅ archived (`2026-06-27-challenge-a-friend`) → challenge-a-friend spec; shareable `?challenge=<gameId>:<taskId>` deep link → standalone ChallengeTeaser (30s timer, server-checked answer, join/build CTAs); `checkChallengeAnswer` callable resolves owner via publicGames (published-only), returns only `{correct}`; pure parseChallengeParam + matchesTaskAnswer (lifted from runs, DRY); branded teaser image via stampBrand; 20 pure + 5 e2e assertions; all 5 gates green. **P2 #3.** |
 | `run-recap` | 📋 backlog |
 | `run-replay-vod` | 📋 backlog |
 
