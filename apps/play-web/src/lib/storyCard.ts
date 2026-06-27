@@ -1,6 +1,7 @@
 // Generates a branded, share-ready "story" image (1080×1920) of a team's result
 // — the viral artifact participants post to Instagram/WhatsApp stories. Drawn on
 // a canvas at share time, so there are no static assets and no server round-trip.
+import { stampBrand } from './brandWatermark';
 
 export interface StoryCardData {
   gameName: string;
@@ -53,11 +54,6 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   ctx.fillRect(0, 0, W, H);
 
   ctx.textAlign = 'center';
-
-  // Brand wordmark
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '600 40px Outfit, Inter, sans-serif';
-  ctx.fillText('RUSHPOINT', W / 2, 150);
 
   // Trophy
   ctx.font = '240px serif';
@@ -114,13 +110,19 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
     }
   }
 
-  // CTA footer
+  // CTA tagline (the value prop); the logo + URL + scannable QR ride along via the
+  // shared brand stamp on the bottom edge, so every share is one scan from joining.
   ctx.fillStyle = '#ffffff';
   ctx.font = '700 48px Outfit, Inter, sans-serif';
-  ctx.fillText('Build your own race adventure', W / 2, 1760);
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.font = '500 40px Inter, sans-serif';
-  ctx.fillText(data.ctaUrl.replace(/^https?:\/\//, ''), W / 2, 1820);
+  ctx.fillText('Build your own race adventure', W / 2, 1690);
+
+  await stampBrand(ctx, {
+    width: W,
+    height: H,
+    urlText: data.ctaUrl.replace(/^https?:\/\//, ''),
+    qrTarget: data.ctaUrl,
+    logoSrc: '/icon.svg',
+  });
 
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png', 0.92));
 }

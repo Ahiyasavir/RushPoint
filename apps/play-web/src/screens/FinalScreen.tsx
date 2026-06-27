@@ -4,6 +4,7 @@ import type { MyTeamState } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { shareStoryCard } from '../lib/storyCard';
+import { sharePhoto } from '../lib/sharePhoto';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
@@ -45,6 +46,31 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
   const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // A team photo to offer as a branded individual share (share-branding).
+  const firstPhotoUrl = (() => {
+    const subs = (team as { taskSubmissions?: Record<string, { photoUrl?: string }> }).taskSubmissions;
+    if (!subs) return null;
+    for (const s of Object.values(subs)) if (s?.photoUrl) return s.photoUrl;
+    return null;
+  })();
+
+  async function sharePhotoFn() {
+    if (!firstPhotoUrl) return;
+    setBusy(true);
+    try {
+      const playBase = window.location.origin;
+      await sharePhoto(firstPhotoUrl, {
+        playBaseUrl: playBase,
+        gameId: (game as { id?: string }).id ?? null,
+        urlText: CREATOR_URL.replace(/^https?:\/\//, ''),
+        caption: t.final.shareText({
+          team: team.displayName, game: game.branding?.name ?? game.title,
+          rankPart: '', timePart: '', url: CREATOR_URL.replace(/^https?:\/\//, ''),
+        }),
+      });
+    } finally { setBusy(false); }
+  }
 
   async function share() {
     setBusy(true);
@@ -117,6 +143,12 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
           <Button className="mt-4" disabled={busy} onClick={share}>
             {busy ? t.final.shareCreating : shared ? t.final.shareSaved : t.final.shareBtn}
           </Button>
+          {firstPhotoUrl && (
+            <button disabled={busy} onClick={sharePhotoFn}
+              className="mt-2 w-full text-sm text-accent/90 hover:text-accent disabled:opacity-50">
+              {t.final.sharePhoto}
+            </button>
+          )}
         </Card>
 
         {/* Leaderboard */}

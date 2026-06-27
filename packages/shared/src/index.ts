@@ -10,3 +10,4 @@ export * from './staffThrottle';
 export * from './answerAttempts';
 export * from './guardianConsent';
 export * from './safeZone';
+export * from './shareBranding';
