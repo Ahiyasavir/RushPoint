@@ -48,3 +48,26 @@ npm run seed:reset   # re-seed a fresh run + access code
 ```
 
 > Stop with **Ctrl+C** so the emulator persists its data via `--export-on-exit`.
+
+## Crash recovery (emulator-data-backup)
+
+`npm run playtest` also runs a **BACKUP** loop that snapshots the live emulator data
+into rotating, timestamped folders every ~2 minutes — independent of the clean-exit
+export — so a power loss or crash mid-event loses at most a couple of minutes, not the
+whole game. Only the newest 10 snapshots are kept.
+
+- Interval / retention: `EMU_BACKUP_INTERVAL_MS` (default `120000`) and
+  `EMU_BACKUP_KEEP` (default `10`).
+- Snapshots live under `.firebase/backups/backup-<timestamp>/`.
+
+After a crash, find the newest valid snapshot and resume from it:
+
+```bash
+SNAP=$(npm run --silent emulator:restore-latest)   # prints the newest valid snapshot path
+npx firebase emulators:start --project rushpoint-pwa-7daaa \
+  --import "$SNAP" --export-on-exit .firebase/emulator-data
+```
+
+`emulator:restore-latest` picks the most recent snapshot that actually carries the
+emulator's `firebase-export-metadata.json` import gate, skipping a newest-but-incomplete
+one in favor of an older good snapshot.

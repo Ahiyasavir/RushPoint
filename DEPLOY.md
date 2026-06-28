@@ -166,3 +166,20 @@ running the gates locally:
 ```bash
 npm run typecheck && npm run creator:build && npm run play:build && npm run e2e
 ```
+
+## 10. Self-hosted events — crash-safe emulator backups
+
+When you run a real game off the local stack (e.g. ~15 players via `npm run playtest`),
+the live data is only protected by the emulator's `--export-on-exit`, which fires **only
+on a clean Ctrl+C**. A power loss or hard crash would otherwise lose the whole game.
+
+- `npm run playtest` runs a **BACKUP** loop that snapshots the emulator into rotating
+  `.firebase/backups/backup-<timestamp>/` folders every ~2 min (keeps the newest 10).
+- To enable it on a plain `dev:all`, set `RUSHPOINT_BACKUP=1` — `scripts/dev-emulator.mjs`
+  starts/stops the loop with the emulator.
+- Tune with `EMU_BACKUP_INTERVAL_MS` (default `120000`) and `EMU_BACKUP_KEEP` (default `10`).
+
+**Recover after a crash:** `npm run emulator:restore` copies the newest *valid* snapshot
+(one that carries `firebase-export-metadata.json`, skipping an incomplete newest one) into
+`.firebase/emulator-data`; then start the emulator to import it. See
+[PLAYTEST.md](PLAYTEST.md) for the full runbook.
