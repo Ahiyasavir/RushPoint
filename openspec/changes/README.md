@@ -50,7 +50,7 @@ all green).
 |---|---|
 | `no-signup-demo` | 📋 backlog |
 | `duplicate-translate-game` | ✅ archived (`2026-06-28-duplicate-translate-game`) → game-translation spec; translateGame callable (duplicate + translate display text, preserve coords/types/scoring, keep original answer as alias); pure collectTranslatableFields + applyTranslations (path-based, identity round-trips); shared translateFields.ts; 15 pure + 8 e2e. Mock translator until TRANSLATE_API_KEY set; creator-web action (task 5) **deferred**. All 6 gates green. **P5 #3.** |
-| `playtest-shareable-links` | 📋 backlog |
+| `playtest-shareable-links` | ✅ archived (`2026-06-28-playtest-shareable-links`) → playtest-links spec; `npm run playtest` (emulator+seed+both apps@0.0.0.0+proxy+cloudflared); pure resolveEmulatorHost (remote-origin auto-detect, dev:all unchanged) + resolveProxyTarget + buildPlaytestLinks; both firebase.ts on the helper; proxy.mjs rewritten; print-playtest-links.mjs + PLAYTEST.md; 26 pure tests. Human phone-verify (task 6) outstanding. All gates green. **P6 #2.** |
 
 ## 6. Engagement & analytics — `v21-engagement-and-analytics.todo.test.ts`
 | Change | Status |
