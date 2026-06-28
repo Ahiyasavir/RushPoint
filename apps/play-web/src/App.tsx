@@ -8,9 +8,10 @@ import GamePromoScreen from './screens/GamePromoScreen';
 import PublicLeaderboardScreen from './screens/PublicLeaderboardScreen';
 import ChallengeTeaser from './screens/ChallengeTeaser';
 import TvLeaderboard from './screens/TvLeaderboard';
+import RunRecap from './screens/RunRecap';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
-import { parseChallengeParam, TV_ROUTE_PARAM } from '@rushpoint/shared';
+import { parseChallengeParam, TV_ROUTE_PARAM, RECAP_ROUTE_PARAM } from '@rushpoint/shared';
 import { I18nProvider, useT } from './i18nContext';
 
 export default function App() {
@@ -44,6 +45,10 @@ function AppInner() {
   );
   // A `?tv=<accessCode>` link opens the full-screen projection leaderboard.
   const tvCode = new URLSearchParams(window.location.search).get(TV_ROUTE_PARAM);
+  // A `?recap=<accessCode>` link opens the public post-run recap (published only).
+  const [recapCode, setRecapCode] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get(RECAP_ROUTE_PARAM),
+  );
 
   const { dir, lang } = useT();
 
@@ -82,6 +87,16 @@ function AppInner() {
     return (
       <>
         <TvLeaderboard code={tvCode} />
+        <DialogHost />
+      </>
+    );
+  }
+
+  if (recapCode) {
+    return (
+      <>
+        <ConnectionBanner />
+        <RunRecap code={recapCode} onJoin={() => setRecapCode(null)} />
         <DialogHost />
       </>
     );

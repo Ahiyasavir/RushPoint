@@ -693,6 +693,34 @@ async function main() {
   const resumed = await wanderer.call('requestNextTask', { ...C7, lat: 31.78, lng: 35.21 });
   check('safe-zone: assignment resumes inside the zone', resumed?.outOfBounds !== true, JSON.stringify(resumed));
 
+  // ── Run recap (getRunRecap) ─────────────────────────────────────────────────
+  {
+    // The main run is published + has had photo activity by now.
+    const ownerRecap = await creator.call('getRunRecap', { code: accessCode });
+    check('recap: owner gets ordered standings', (ownerRecap?.standings?.length ?? 0) > 0, JSON.stringify(ownerRecap?.stats));
+    check('recap: stats report a winner + team count', !!ownerRecap?.stats?.winnerName && (ownerRecap?.stats?.teamCount ?? 0) > 0, JSON.stringify(ownerRecap?.stats));
+    check('recap: photos is an array (≥0)', Array.isArray(ownerRecap?.photos));
+
+    // Published run → a fresh non-owner can read the public recap.
+    const recapViewer = makeParty('recapViewer');
+    await signInAnonymously(recapViewer.auth);
+    const pubRecap = await recapViewer.call('getRunRecap', { code: accessCode });
+    check('recap: published run is public to non-owners', (pubRecap?.standings?.length ?? 0) > 0);
+
+    // Unpublished run → a non-owner is denied.
+    const { gameId: rcGame } = await creator.call('createGame', { title: 'Recap Gate', mode: 'individual' });
+    await creator.call('updateGame', { gameId: rcGame, stages: [{ id: 'rc-s', order: 0, title: 'S', isFinal: true,
+      tasks: [{ id: 'rc-t', title: 'T', type: 'field', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 3 }] }] });
+    const { accessCode: rcCode } = await creator.call('launchRun', { gameId: rcGame });
+    let denied = false;
+    try { await recapViewer.call('getRunRecap', { code: rcCode }); }
+    catch (e) { denied = e.code === 'functions/permission-denied'; }
+    check('recap: unpublished run is private to non-owners', denied);
+    // Owner can still read their own unpublished run's recap.
+    const ownerUnpub = await creator.call('getRunRecap', { code: rcCode });
+    check('recap: owner reads their own unpublished run', Array.isArray(ownerUnpub?.standings));
+  }
+
   // ── Discovery POIs (surprise-trivia-waypoints) ──────────────────────────────
   {
     const { gameId: dpGame } = await creator.call('createGame', { title: 'Discovery Game', mode: 'individual' });

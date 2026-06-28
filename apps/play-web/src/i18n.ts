@@ -216,6 +216,17 @@ const HE = {
     notAvailable: 'הדירוג עדיין לא זמין לתצוגה',
     nowLeading: '🔥 עכשיו בהובלה!',
   },
+  recap: {
+    notAvailable: 'הסיכום הזה עדיין לא זמין.',
+    enterCode: 'הזנת קוד',
+    summary: ({ teams, photos }: { teams: number; photos: number }) => `${teams} קבוצות · ${photos} תמונות`,
+    winner: ({ name }: { name: string }) => `🏆 המנצחים: ${name}`,
+    standings: 'דירוג סופי',
+    shareBtn: '📸 שתפו את הסיכום',
+    creating: 'יוצר…',
+    buildOwn: '✨ בנו מירוץ הרפתקה משלכם ←',
+    shareText: ({ game }: { game: string }) => `הסיכום של "${game}" ב-RushPoint!`,
+  },
 };
 
 const EN: typeof HE = {
@@ -424,6 +435,17 @@ const EN: typeof HE = {
     liveStandings: 'Live standings',
     notAvailable: 'Standings are not available for display yet',
     nowLeading: '🔥 Now in the lead!',
+  },
+  recap: {
+    notAvailable: 'This recap is not available yet.',
+    enterCode: 'Enter a code',
+    summary: ({ teams, photos }: { teams: number; photos: number }) => `${teams} teams · ${photos} photos`,
+    winner: ({ name }: { name: string }) => `🏆 Winner: ${name}`,
+    standings: 'Final standings',
+    shareBtn: '📸 Share the recap',
+    creating: 'Creating…',
+    buildOwn: '✨ Build your own race adventure →',
+    shareText: ({ game }: { game: string }) => `The recap of "${game}" on RushPoint!`,
   },
 };
 

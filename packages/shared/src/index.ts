@@ -17,3 +17,4 @@ export * from './streak';
 export * from './tv';
 export * from './hotZone';
 export * from './discoveryPoi';
+export * from './runRecap';
