@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import type { Stage } from '@rushpoint/shared';
 import PacingBar from './PacingBar';
+import { useT } from './LanguageContext';
 
 export default function StageRail({ stages, activeStageId, onSelect, onMove, onAdd }: {
   stages: Stage[];
@@ -13,9 +14,14 @@ export default function StageRail({ stages, activeStageId, onSelect, onMove, onA
   onMove: (from: number, to: number) => void;
   onAdd: () => void;
 }) {
+  const b = useT().builder;
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   return (
-    <aside className="w-56 shrink-0 space-y-2">
+    <aside className="w-52 shrink-0 space-y-2 h-full overflow-y-auto pe-0.5">
+      <div className="flex items-center justify-between px-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
+        <span className="text-[10px] text-[--ink-4]">{stages.length}</span>
+      </div>
       {stages.map((s, idx) => {
         const active = s.id === activeStageId;
         return (
@@ -33,11 +39,11 @@ export default function StageRail({ stages, activeStageId, onSelect, onMove, onA
           >
             <div className="flex items-center gap-1.5 mb-1">
               <span className="cursor-grab active:cursor-grabbing select-none text-[--ink-3]">⠿</span>
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-[--ink-3]">Stage {idx + 1}{s.isFinal ? ' · final' : ''}</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[--ink-3]">{b.stageLabel(idx + 1)}{s.isFinal ? ` · ${b.finalTag}` : ''}</span>
             </div>
-            <div className="text-sm font-medium text-[--ink-1] truncate">{s.title || 'Untitled stage'}</div>
+            <div className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{s.title || b.untitledStage}</div>
             <div className="mt-1.5"><PacingBar tasks={s.tasks} /></div>
-            <div className="text-[10px] text-[--ink-3] mt-1">{s.tasks.length} task{s.tasks.length === 1 ? '' : 's'}</div>
+            <div className="text-[10px] text-[--ink-3] mt-1">{b.taskCount(s.tasks.length)}</div>
           </div>
         );
       })}
@@ -45,7 +51,7 @@ export default function StageRail({ stages, activeStageId, onSelect, onMove, onA
         onClick={onAdd}
         className="w-full rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] text-sm py-2 hover:border-rp-fire/60 hover:text-rp-fire transition-colors"
       >
-        ＋ Add stage
+        ＋ {b.addStage}
       </button>
     </aside>
   );

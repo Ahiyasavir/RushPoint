@@ -7,16 +7,12 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { Input } from './ui';
+import { useT } from './LanguageContext';
 
+// Optional MapTiler key. When absent we run fully free + keyless: OpenTopoMap
+// tiles (via resolveMapStyle) + the OpenStreetMap Nominatim geocoder. That is the
+// supported default for self-run games, so we don't nag about a missing key.
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
-if (!KEY && import.meta.env.PROD) {
-  console.warn(
-    '[LocationPicker] VITE_MAPTILER_KEY is not set. ' +
-    'The public Nominatim geocoder is used as a fallback. ' +
-    'This violates the Nominatim Usage Policy and must not be used in production. ' +
-    'Set VITE_MAPTILER_KEY in apps/creator-web/.env',
-  );
-}
 // Sensible default view when a task has no coordinates yet (central Israel).
 const DEFAULT_CENTER: [number, number] = [35.21, 31.77];
 
@@ -57,6 +53,7 @@ export default function LocationPicker({
   onChange: (lat: number, lng: number) => void;
   className?: string;
 }) {
+  const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
@@ -131,10 +128,10 @@ export default function LocationPicker({
     setSearching(true); setSearchErr(''); setResults([]);
     try {
       const r = await geocode(query);
-      if (r.length === 0) setSearchErr('לא נמצאו תוצאות. נסו ניסוח אחר.');
+      if (r.length === 0) setSearchErr(b.searchNoResults);
       setResults(r);
     } catch {
-      setSearchErr('החיפוש נכשל. נסו שוב או הציבו ידנית על המפה.');
+      setSearchErr(b.searchFailed);
     } finally {
       setSearching(false);
     }
@@ -162,7 +159,7 @@ export default function LocationPicker({
               else if (e.key === 'Escape') { setResults([]); setActiveIndex(-1); }
             }}
             dir="auto"
-            placeholder="🔍 חפשו כתובת או מקום…"
+            placeholder={b.searchPlaceholder}
             className="flex-1"
           />
           <button
@@ -171,7 +168,7 @@ export default function LocationPicker({
             disabled={searching || !query.trim()}
             className="px-4 rounded-lg bg-rp-fire text-white text-sm font-medium disabled:opacity-40 shrink-0"
           >
-            {searching ? '…' : 'חיפוש'}
+            {searching ? '…' : b.searchBtn}
           </button>
         </div>
         {searchErr && <p className="text-rp-alert text-xs mt-1">{searchErr}</p>}
@@ -195,16 +192,11 @@ export default function LocationPicker({
       </div>
 
       <div ref={ref} className={`rounded-lg overflow-hidden border border-glass-border ${className}`} />
-      {!KEY && import.meta.env.DEV && (
-        <div className="absolute top-2 inset-x-2 z-10 bg-amber-100 border border-amber-400 text-amber-800 text-xs px-3 py-1.5 rounded-lg">
-          ⚠️ No MapTiler key — using public geocoder. Not suitable for production.
-        </div>
-      )}
       <MapModeToggle mode={mode} onChange={setMode} />
       {!hasCoord && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none pb-3">
           <span className="bg-app-bg/80 text-zinc-300 text-xs px-3 py-1.5 rounded-full">
-            חפשו מקום למעלה, או לחצו על המפה לקיבוע
+            {b.mapHint}
           </span>
         </div>
       )}

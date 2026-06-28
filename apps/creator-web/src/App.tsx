@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './components/AuthGate';
 import { useT } from './components/LanguageContext';
@@ -32,6 +32,9 @@ export default function App() {
   const { user, signOut } = useAuth();
   const [dark, setDark] = useDarkMode();
   const t = useT();
+  // The Builder is a full-width workspace (3-pane shell); every other route reads
+  // best as a centred column. Widen the main container only on /build/*.
+  const isBuilder = useLocation().pathname.startsWith('/build/');
 
   // Free mode: hide the wallet/credits surface entirely while payments are off.
   const NAV = [
@@ -42,7 +45,9 @@ export default function App() {
   ];
 
   return (
-    <div className="relative min-h-screen bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250">
+    // The Builder is an app-like, fixed-height workspace (no page scroll); every
+    // other route is a normal scrolling document.
+    <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'h-screen overflow-hidden flex flex-col' : 'min-h-screen'}`}>
 
       {/* ── Animated mesh gradient ── */}
       <div className="rp-mesh-layer" aria-hidden="true">
@@ -52,7 +57,7 @@ export default function App() {
       </div>
 
       {/* ── Header ── */}
-      <header className="sticky top-0 z-30 border-b border-[--rp-border] bg-[--surface-1]/80 dark:bg-[--surface-0]/70 backdrop-blur-xl">
+      <header className="sticky top-0 z-30 shrink-0 border-b border-[--rp-border] bg-[--surface-1]/80 dark:bg-[--surface-0]/70 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
           <NavLink to="/" className="font-brand text-xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent tracking-tight">
             RushPoint
@@ -89,7 +94,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="relative z-10 max-w-6xl mx-auto px-4 py-8">
+      <main className={`relative z-10 mx-auto w-full px-4 ${isBuilder ? 'max-w-[1600px] py-3 flex-1 min-h-0 overflow-hidden' : 'max-w-6xl py-8'}`}>
         <Suspense fallback={<Spinner label="…" />}>
           <Routes>
             <Route path="/"                   element={<DashboardPage />} />

@@ -1,30 +1,20 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  Game, Stage, Task, TaskStep, ScoringPreset, RegistrationField, GameMode, TaskType, TriggerMode,
+  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED, normalizeTriggerMode, defaultRadiusFor } from '@rushpoint/shared';
-
-// Trigger-mode selector metadata (change: task-trigger-modes). The 4 modes
-// replace the old binary "has a location" toggle on the task editor.
-const TRIGGER_MODE_META: { mode: TriggerMode; icon: string; label: string; desc: string }[] = [
-  { mode: 'radius', icon: '📍', label: 'Within radius', desc: 'Fires when a player is within a set radius (default 40m).' },
-  { mode: 'exact', icon: '🎯', label: 'Exact spot', desc: 'Fires only on precise arrival (default 4m).' },
-  { mode: 'instant', icon: '⚡', label: 'Instant', desc: 'Fires immediately on arrival at this task. No GPS check.' },
-  { mode: 'locationless', icon: '🌐', label: 'Anywhere', desc: 'Purely digital. No map pin, playable from anywhere.' },
-];
+import { PRESET_LABELS, PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
-import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
+import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { useT } from '../components/LanguageContext';
 import TaskLibrary from '../components/TaskLibrary';
-import QuizChoicesEditor from '../components/QuizChoicesEditor';
 import StageRail from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
-import LocationStep from '../components/LocationStep';
-import RichTooltip from '../components/RichTooltip';
-import { TASK_SAMPLES, applySample } from '../lib/taskTemplates';
+import TaskWizard from '../components/TaskWizard';
 import { moveItem } from '../lib/reorder';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
+import { blankTask } from '../lib/wizardLogic';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -42,19 +32,6 @@ function MapSkeleton({ className = 'h-44' }: { className?: string }) {
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
-function blankTask(): Task {
-  return {
-    id: uuid(),
-    title: '',
-    type: 'field',
-    coordinates: { lat: 0, lng: 0 },
-    difficulty: 5,
-    estimatedMinutes: 15,
-    pointValue: 100,
-    maxConcurrentTeams: 3,
-    tags: [],
-  };
-}
 function blankStage(order: number): Stage {
   return { id: uuid(), order, title: `Stage ${order + 1}`, tasks: [blankTask()] };
 }
@@ -80,21 +57,18 @@ const AUTOSAVE_DELAY = 1500;
 
 // The persistent shell's top-level views (change: v2.1-builder-shell-redesign).
 type BuilderTab = 'build' | 'preview' | 'analytics' | 'settings';
-const BUILDER_TABS: { id: BuilderTab; label: string }[] = [
-  { id: 'build', label: 'Build' },
-  { id: 'preview', label: 'Preview' },
-  { id: 'analytics', label: 'Analytics' },
-  { id: 'settings', label: 'Settings' },
-];
+const BUILDER_TAB_IDS: BuilderTab[] = ['build', 'preview', 'analytics', 'settings'];
 
 // Inline-editable game title promoted into the shell header. Enter blurs (which
 // autosaves via the debounced patch); an empty value reverts to the prior title.
 function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: string) => void }) {
+  const fallback = useT().builder.untitledGame;
   return (
     <h2
       contentEditable
       suppressContentEditableWarning
       spellCheck={false}
+      dir="auto"
       onKeyDown={(e) => {
         // Enter commits (blur flushes), Escape reverts. Both explicitly blur so
         // the title never stays in edit mode or inserts a stray line break.
@@ -103,18 +77,18 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
           e.currentTarget.blur();
         } else if (e.key === 'Escape') {
           e.preventDefault();
-          e.currentTarget.textContent = title || 'Untitled';
+          e.currentTarget.textContent = title || fallback;
           e.currentTarget.blur();
         }
       }}
       onBlur={(e) => {
         const v = e.currentTarget.textContent?.trim() ?? '';
         if (v && v !== title) onCommit(v);
-        else e.currentTarget.textContent = title || 'Untitled';
+        else e.currentTarget.textContent = title || fallback;
       }}
       className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[40ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
-      {title || 'Untitled'}
+      {title || fallback}
     </h2>
   );
 }
@@ -122,6 +96,10 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
+  const b = useT().builder;
+  const TAB_LABEL: Record<BuilderTab, string> = {
+    build: b.tabBuild, preview: b.tabPreview, analytics: b.tabAnalytics, settings: b.tabSettings,
+  };
   const [game, setGame] = useState<Game | null>(null);
   const [tab, setTab] = useState<BuilderTab>('build');
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
@@ -146,7 +124,7 @@ export default function BuilderPage() {
         setStatus('saved');
       })
       .catch((e) => {
-        setError(e instanceof Error ? e.message.replace('Firebase: ', '') : 'Could not load game');
+        setError(e instanceof Error ? e.message.replace('Firebase: ', '') : b.cannotLoad);
       });
   }, [gameId, loadKey]);
 
@@ -199,7 +177,7 @@ export default function BuilderPage() {
     window.clearTimeout(saveTimer.current);
     await save();
     if (game.stages.length === 0 || game.stages.some((s) => s.tasks.length === 0)) {
-      await dialog.alert('Every stage needs at least one task.'); return;
+      await dialog.alert(b.everyStageNeedsTask); return;
     }
     try {
       const { runId } = await launchRun({ gameId: game.id });
@@ -219,95 +197,101 @@ export default function BuilderPage() {
   if (error && !game) return (
     <Card className="p-8 text-center space-y-4">
       <div className="text-3xl">⚠️</div>
-      <p className="font-semibold text-[--ink-1]">Could not load game</p>
+      <p className="font-semibold text-[--ink-1]">{b.cannotLoad}</p>
       <p className="text-sm text-[--ink-3]">{error}</p>
-      <Button onClick={() => { setError(null); setLoadKey((k) => k + 1); }}>Try again</Button>
+      <Button onClick={() => { setError(null); setLoadKey((k) => k + 1); }}>{b.tryAgain}</Button>
     </Card>
   );
-  if (!game) return <Spinner label="Loading builder…" />;
+  if (!game) return <Spinner label={b.loadingBuilder} />;
 
   return (
-    <div className="max-w-3xl mx-auto">
-      {/* ── Persistent shell header: breadcrumb · editable title · tabs · launch ── */}
-      <header className="mb-6">
-        <div className="flex items-center gap-3 mb-3 flex-wrap">
-          <button onClick={() => nav('/')} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">← Games</button>
-          <span className="text-zinc-600">/</span>
-          <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
-          <span className="text-xs flex items-center gap-1.5 text-zinc-500 shrink-0">
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              status === 'saving' ? 'bg-rp-amber animate-pulse'
-                : status === 'unsaved' ? 'bg-rp-amber'
-                : 'bg-rp-go'}`} />
-            {status === 'saving' ? 'Saving…' : status === 'unsaved' ? 'Unsaved' : 'Saved'}
-          </span>
-          <div className="ms-auto shrink-0">
-            <Button onClick={saveAndLaunch}>Launch run</Button>
-          </div>
-        </div>
+    // Fills the fixed-height main (App sets it for /build/*): header is fixed, the
+    // body flexes to the remaining height. The page itself never scrolls.
+    <div className="h-full flex flex-col rounded-2xl border border-[--rp-border] bg-[--surface-1]/60 overflow-hidden shadow-soft">
+      {/* ── Persistent shell header bar: breadcrumb · title · save · tabs · launch ── */}
+      <header className="shrink-0 flex items-center gap-3 px-4 h-14 border-b border-[--rp-border] bg-[--surface-1]">
+        <button onClick={() => nav('/')} className="text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0">← {b.backToGames}</button>
+        <span className="text-[--ink-4] shrink-0">/</span>
+        <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
+        <span className="text-xs flex items-center gap-1.5 text-[--ink-3] shrink-0">
+          <span className={`w-1.5 h-1.5 rounded-full ${
+            status === 'saving' ? 'bg-rp-amber animate-pulse'
+              : status === 'unsaved' ? 'bg-rp-amber'
+              : 'bg-rp-go'}`} />
+          {status === 'saving' ? b.saving : status === 'unsaved' ? b.unsaved : b.saved}
+        </span>
 
-        <div role="tablist" className="flex items-center gap-1 border-b border-[--rp-border]">
-          {BUILDER_TABS.map((tt) => (
+        {/* Centered tab strip */}
+        <nav role="tablist" className="flex-1 flex items-center justify-center gap-1">
+          {BUILDER_TAB_IDS.map((id) => (
             <button
-              key={tt.id}
+              key={id}
               role="tab"
-              aria-selected={tab === tt.id}
-              onClick={() => { void save(); setTab(tt.id); }}
-              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
-                tab === tt.id
-                  ? 'border-rp-fire text-[--ink-1]'
-                  : 'border-transparent text-[--ink-3] hover:text-[--ink-1]'}`}
+              aria-selected={tab === id}
+              onClick={() => { void save(); setTab(id); }}
+              className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                tab === id
+                  ? 'bg-rp-fire/10 text-rp-fire'
+                  : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
             >
-              {tt.label}
+              {TAB_LABEL[id]}
             </button>
           ))}
-        </div>
+        </nav>
+
+        <Button onClick={saveAndLaunch} className="shrink-0">{b.launchRun}</Button>
       </header>
 
-      {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} />}
-      {tab === 'preview' && <StepPreview game={game} />}
-      {tab === 'settings' && <StepDetails game={game} patch={patch} />}
-      {tab === 'analytics' && (
-        <Card className="p-10 text-center space-y-2">
-          <div className="text-3xl">📊</div>
-          <p className="font-semibold text-[--ink-1]">Analytics</p>
-          <p className="text-sm text-[--ink-3]">Run analytics appear here after your first live run.</p>
-        </Card>
-      )}
+      <div className="flex-1 min-h-0 p-4 overflow-hidden">
+        {/* Build tab manages its own 3-pane overflow; the other tabs scroll
+            inside their own pane so the page never gains a scrollbar. */}
+        {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} />}
+        {tab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
+        {tab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
+        {tab === 'analytics' && (
+          <Card className="p-10 text-center space-y-2">
+            <div className="text-3xl">📊</div>
+            <p className="font-semibold text-[--ink-1]">{b.analyticsTitle}</p>
+            <p className="text-sm text-[--ink-3]">{b.analyticsBody}</p>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }
 
 // ── Step 1: Details ──
 function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
   const [advReg, setAdvReg] = useState(false);
   const [advScore, setAdvScore] = useState(false);
+  const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
       <div>
-        <Label>Mode</Label>
+        <Label>{b.mode}</Label>
         <div className="flex gap-2">
           {(['individual', 'team'] as GameMode[]).map((m) => (
             <button key={m} onClick={() => patch({ mode: m })}
-              className={`flex-1 py-2 rounded-lg text-sm border capitalize ${
+              className={`flex-1 py-2 rounded-lg text-sm border ${
                 game.mode === m ? 'border-neon-green/50 bg-neon-green/10 text-neon-green' : 'border-glass-border text-zinc-400'}`}>
-              {m}
+              {modeLabel[m]}
             </button>
           ))}
         </div>
       </div>
       <div>
-        <Label>Short description</Label>
-        <Input value={game.description ?? ''} onChange={(e) => patch({ description: e.target.value })} placeholder="One line that sells the adventure" />
+        <Label>{b.shortDescription}</Label>
+        <Input value={game.description ?? ''} onChange={(e) => patch({ description: e.target.value })} placeholder={b.shortDescriptionPlaceholder} dir="auto" />
       </div>
       <div>
-        <Label>Tags (comma-separated)</Label>
+        <Label>{b.tagsLabel}</Label>
         <Input value={game.tags.join(', ')} onChange={(e) => patch({ tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })}
-          placeholder="outdoor, puzzle, family" />
+          placeholder={b.tagsPlaceholder} dir="auto" />
       </div>
 
-      <Advanced title="Advanced scoring settings" open={advScore} onToggle={() => setAdvScore(!advScore)}>
-        <Label>Scoring preset</Label>
+      <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
+        <Label>{b.scoringPreset}</Label>
         <div className="space-y-2">
           {(Object.keys(PRESET_LABELS) as ScoringPreset[]).map((p) => (
             <button key={p} onClick={() => patch({ scoringPreset: p })}
@@ -320,7 +304,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         </div>
       </Advanced>
 
-      <Advanced title="Advanced registration fields" open={advReg} onToggle={() => setAdvReg(!advReg)}>
+      <Advanced title={b.advRegistration} open={advReg} onToggle={() => setAdvReg(!advReg)}>
         <RegFields game={game} patch={patch} />
       </Advanced>
     </Card>
@@ -328,6 +312,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
 }
 
 function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
   function add() {
     const f: RegistrationField = { id: uuid(), label: 'New field', type: 'text', required: false, level: 'member' };
     patch({ registrationFields: [...game.registrationFields, f] });
@@ -340,7 +325,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
   }
   return (
     <div className="space-y-2">
-      <p className="text-xs text-zinc-500">&quot;Name&quot; (per member) is always required.</p>
+      <p className="text-xs text-zinc-500">{b.regNameNote}</p>
       {game.registrationFields.map((f) => (
         <div key={f.id} className="flex gap-2 items-center">
           <Input value={f.label} onChange={(e) => update(f.id, { label: e.target.value })} disabled={f.id === 'name'} />
@@ -352,12 +337,12 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
             <option value="member">member</option><option value="team">team</option>
           </Select>
           <label className="flex items-center gap-1 text-xs text-zinc-400">
-            <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />req
+            <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}
           </label>
           {f.id !== 'name' && <button className="text-neon-red text-xs" onClick={() => remove(f.id)}>✕</button>}
         </div>
       ))}
-      <Button variant="subtle" onClick={add}>+ Add field</Button>
+      <Button variant="subtle" onClick={add}>+ {b.regAddField}</Button>
     </div>
   );
 }
@@ -380,6 +365,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
 }) {
+  const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
   function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
@@ -425,7 +411,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
 
   return (
-    <div className="flex gap-4 items-start">
+    // Fills the shell body; each pane manages its own overflow so the task panel
+    // gets the full height and never clips, and the page never scrolls.
+    <div className="flex gap-4 h-full min-h-0">
       {/* ── Left rail: stage navigator ── */}
       <StageRail
         stages={game.stages}
@@ -435,16 +423,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
         onAdd={addStage}
       />
 
-      {/* ── Centre canvas: the active stage ── */}
-      <div className="flex-1 min-w-0">
+      {/* ── Centre canvas: the active stage (scrolls independently) ── */}
+      <div className="flex-1 min-w-0 h-full overflow-y-auto pe-0.5">
         {activeStage && (
           <Card className="p-4">
             <div className="flex items-center gap-2 mb-3">
-              <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" />
+              <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
                 <label className="flex items-center gap-1 text-xs text-zinc-400 shrink-0">
                   <input type="checkbox" checked={!!activeStage.isFinal}
-                    onChange={(e) => updateStage(activeStage.id, { isFinal: e.target.checked })} />final
+                    onChange={(e) => updateStage(activeStage.id, { isFinal: e.target.checked })} />{b.finalLabel}
                 </label>
               )}
               {game.stages.length > 1 && (
@@ -455,7 +443,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
             {/* Completion rule — only meaningful with a pool of tasks */}
             {m > 1 && (
               <div className="flex items-center flex-wrap gap-2 mb-3 text-xs text-zinc-400">
-                <span>Each team completes</span>
+                <span>{b.completionLead}</span>
                 <Select
                   className="w-auto py-1"
                   value={String(req)}
@@ -468,7 +456,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                     <option key={n} value={n}>{n}</option>
                   ))}
                 </Select>
-                <span>of {m} tasks{req < m ? ', routed to best-suited ones' : ' (all of them)'}</span>
+                <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
               </div>
             )}
 
@@ -478,8 +466,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
             />
             <div className="flex gap-2 pt-3">
-              <AddTile label="Add task" onClick={() => addTask(activeStage.id)} />
-              <AddTile label="From library" onClick={() => setLibraryFor(activeStage.id)} />
+              <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
+              <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>
           </Card>
         )}
@@ -514,6 +502,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 function ContextPanel({ task, onFlush, onClose, onRemove }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void;
 }) {
+  const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
   const [shown, setShown] = useState(false);
   const stateRef = useRef(state);
@@ -544,290 +533,82 @@ function ContextPanel({ task, onFlush, onClose, onRemove }: {
 
   function close() { window.clearTimeout(flushTimer.current); onClose(); }
 
+  // Esc closes the panel (flush-on-unmount preserves the draft).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Inline third pane: a width-clipping wrapper (no sibling reflow) holds a
+  // fixed-width panel that slides in via transform. The centre canvas (flex-1
+  // min-w-0) naturally yields the space, matching the redesign mockup.
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={close}>
-      {/* Transform-based slide (no width animation → no layout thrashing). The
-          panel is a strict container: fixed width, overflow-hidden shell, a
-          shrink-0 header and a min-w-0 scroll body so inner content never
-          reflows or distorts during the transition. */}
-      <aside
-        onClick={(e) => e.stopPropagation()}
+    <aside
+      className="shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out"
+      style={{ width: shown ? 380 : 0 }}
+    >
+      {/* Full-height panel: it matches the fixed-height workspace row, so the
+          wizard's footer + all content stay visible (never clipped) and the
+          step body only scrolls as a last resort on very short viewports. */}
+      <div
         style={{ willChange: 'transform' }}
-        className={`flex flex-col h-full w-full max-w-md bg-app-card border-s border-glass-border shadow-soft overflow-hidden
+        className={`w-[380px] h-full flex flex-col rounded-2xl border border-[--rp-border] bg-[--surface-1] shadow-soft overflow-hidden
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
-        <div className="flex items-center justify-between p-4 pb-3 shrink-0 border-b border-glass-border">
-          <h3 className="font-semibold">Edit task</h3>
-          <button onClick={close} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+        <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-[--rp-border]">
+          <h3 className="font-semibold text-sm truncate" dir="auto">{state.draft.title || b.newTask}</h3>
+          <button onClick={close} aria-label={b.closePanel} className="text-[--ink-3] hover:text-[--ink-1] text-lg leading-none">✕</button>
         </div>
-        <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4">
-          <TaskEditor task={state.draft} onChange={handleChange} onRemove={onRemove} />
-          <Button className="w-full mt-3" onClick={close}>Done</Button>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function TaskEditor({ task, onChange, onRemove }: { task: Task; onChange: (t: Task) => void; onRemove?: () => void }) {
-  const [adv, setAdv] = useState(false);
-  // Inspiration Mode: one-click sample fills the whole draft, with a brief green
-  // flash so the change is felt (change: v2.1-builder-shell-redesign).
-  const [flash, setFlash] = useState(false);
-  const flashTimer = useRef<number>();
-  useEffect(() => () => window.clearTimeout(flashTimer.current), []);
-  const set = (p: Partial<Task>) => onChange({ ...task, ...p });
-  const samples = TASK_SAMPLES[task.type] ?? [];
-  function loadSample(sample: typeof samples[number]) {
-    onChange(applySample(task, sample));
-    setFlash(true);
-    window.clearTimeout(flashTimer.current);
-    flashTimer.current = window.setTimeout(() => setFlash(false), 600);
-  }
-  const setSmart = (p: Record<string, unknown>) =>
-    onChange({ ...task, smart: { enabled: true, verificationType: task.smart?.verificationType ?? 'code_verification', ...task.smart, ...p } });
-
-  const mode = normalizeTriggerMode(task);
-  const located = mode === 'radius' || mode === 'exact';
-  // Select a trigger mode: keep the legacy `locationless` flag in sync and seed a
-  // sensible default radius for radius/exact.
-  const setMode = (m: TriggerMode) => set({
-    triggerMode: m,
-    locationless: m === 'locationless',
-    geofenceRadiusMeters: (m === 'radius' || m === 'exact')
-      ? (task.geofenceRadiusMeters ?? defaultRadiusFor(m))
-      : task.geofenceRadiusMeters,
-  });
-  return (
-    <div className={`space-y-2 rounded-xl transition-colors duration-500 ${flash ? 'bg-rp-go/15 ring-1 ring-rp-go/50' : ''}`}>
-      {samples.length > 0 && (
-        <div className="flex items-center flex-wrap gap-1.5 pb-1">
-          <span className="text-[11px] text-[--ink-3] me-1">✨ Start from a sample:</span>
-          {samples.map((s) => (
-            <button
-              key={s.label}
-              type="button"
-              onClick={() => loadSample(s)}
-              className="text-xs px-2.5 py-1 rounded-full border border-[--rp-border] text-[--ink-2] hover:border-rp-fire hover:text-[--ink-1] transition-colors"
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder="Task title" />
-
-      <Textarea
-        value={task.description ?? ''}
-        onChange={(e) => set({ description: e.target.value })}
-        placeholder="What participants see: the clue or instructions for this task"
-        rows={2}
-      />
-
-      <div>
-        <Label>How does this task fire?</Label>
-        <div className="grid grid-cols-2 gap-2">
-          {TRIGGER_MODE_META.map((tm) => (
-            <button
-              key={tm.mode}
-              type="button"
-              onClick={() => setMode(tm.mode)}
-              className={`text-start rounded-lg border px-3 py-2 transition-colors ${
-                mode === tm.mode ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border] hover:bg-[--surface-2]'
-              }`}
-            >
-              <div className="text-sm font-medium text-[--ink-1]">{tm.icon} {tm.label}</div>
-              <div className="text-[11px] text-[--ink-3]">{tm.desc}</div>
-            </button>
-          ))}
+        <div className="flex-1 min-h-0 p-3">
+          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} />
         </div>
       </div>
-
-      {(mode === 'radius' || mode === 'exact') && (
-        <div>
-          <Label>Trigger radius (metres) <RichTooltip concept="geofence" /></Label>
-          <Input type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(mode)}
-            onChange={(e) => set({ geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(mode)) })} />
-        </div>
-      )}
-
-      {located ? (
-        <LocationStep coordinates={task.coordinates} onChange={(lat, lng) => set({ coordinates: { lat, lng } })} />
-      ) : (
-        <p className="text-xs text-zinc-500 bg-app-raised rounded-lg px-3 py-2">
-          {mode === 'instant'
-            ? '⚡ Instant task. Completes the moment a player reaches it, with no GPS check.'
-            : '🌐 General task. Teams can do this from anywhere, no map pin or travel distance.'}
-        </p>
-      )}
-
-      <div>
-        <Label>Difficulty 1 to 10 <RichTooltip concept="difficulty" /></Label>
-        <Input type="number" min={1} max={10} value={task.difficulty} onChange={(e) => set({ difficulty: Math.min(10, Math.max(1, parseInt(e.target.value) || 1)) })} />
-      </div>
-
-      <Advanced title="Advanced task settings" open={adv} onToggle={() => setAdv(!adv)}>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <Label>Type</Label>
-            <Select value={task.type} onChange={(e) => set({ type: e.target.value as TaskType })}>
-              <option value="field">field check-in</option>
-              <option value="self_report">self-report</option>
-              <option value="smart_station">smart station (code)</option>
-              <option value="photo">photo upload</option>
-              <option value="quiz">quiz / answer</option>
-              <option value="numeric">numeric answer</option>
-              <option value="geofence">GPS auto-check-in</option>
-              <option value="sequence">sequence (multi-step)</option>
-            </Select>
-          </div>
-          <div>
-            <Label>Points</Label>
-            <Input type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
-          </div>
-          <div>
-            <Label>Est. minutes</Label>
-            <Input type="number" value={task.estimatedMinutes} onChange={(e) => set({ estimatedMinutes: parseInt(e.target.value) || 1 })} />
-          </div>
-          <div>
-            <Label>Max teams at once <RichTooltip concept="concurrent" /></Label>
-            <Input type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
-          </div>
-        </div>
-
-        {task.type === 'smart_station' && (
-          <div>
-            <Label>Secret code (participants enter this)</Label>
-            <Input value={task.smart?.secretCode ?? ''} onChange={(e) => setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true })}
-              placeholder="e.g. FOX42" />
-          </div>
-        )}
-        {task.type === 'photo' && (
-          <label className="flex items-center gap-2 text-xs text-zinc-400">
-            <input type="checkbox" checked={task.smart?.autoApprove ?? false}
-              onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
-            Auto-approve (no staff review needed)
-          </label>
-        )}
-
-        {task.type === 'quiz' && (
-          <QuizChoicesEditor task={task} onChange={(p) => set(p)} />
-        )}
-
-        {task.type === 'numeric' && (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <Label>Correct number</Label>
-              <Input type="number" value={task.numericAnswer ?? ''} onChange={(e) => set({ numericAnswer: e.target.value === '' ? undefined : parseFloat(e.target.value) })} />
-            </div>
-            <div>
-              <Label>± tolerance</Label>
-              <Input type="number" min={0} value={task.numericTolerance ?? 0} onChange={(e) => set({ numericTolerance: Math.max(0, parseFloat(e.target.value) || 0) })} />
-            </div>
-          </div>
-        )}
-
-        {task.type === 'sequence' && (
-          <StepsEditor steps={task.steps ?? []} onChange={(steps) => set({ steps })} />
-        )}
-        {(task.type === 'smart_station' || task.type === 'photo') && (
-          <div>
-            <Label>Extended instructions (shown on the task screen)</Label>
-            <Textarea
-              value={task.smart?.longInstructions ?? ''}
-              onChange={(e) => setSmart({ longInstructions: e.target.value })}
-              placeholder="Optional step-by-step detail beyond the short description"
-              rows={2}
-            />
-          </div>
-        )}
-
-        <div>
-          <Label>Hint (optional, costs teams points to reveal)</Label>
-          <Textarea
-            value={task.hint ?? ''}
-            onChange={(e) => set({ hint: e.target.value })}
-            placeholder="A nudge stuck teams can unlock for a point cost"
-            rows={2}
-          />
-        </div>
-        {task.hint && (
-          <div>
-            <Label>Hint cost (points) <RichTooltip concept="hint" /></Label>
-            <Input type="number" min={0} value={task.hintPenalty ?? 25}
-              onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
-          </div>
-        )}
-      </Advanced>
-
-      {onRemove && (
-        <button onClick={onRemove} className="text-neon-red text-xs hover:underline pt-1">Delete task</button>
-      )}
-    </div>
-  );
-}
-
-function StepsEditor({ steps, onChange }: { steps: TaskStep[]; onChange: (s: TaskStep[]) => void }) {
-  const update = (i: number, p: Partial<TaskStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...p } : s)));
-  return (
-    <div className="space-y-2">
-      <Label>Ordered steps: teams complete these in order at one stop</Label>
-      {steps.map((s, i) => (
-        <div key={s.id} className="flex gap-2 items-start">
-          <span className="text-xs text-zinc-500 mt-2.5 w-3">{i + 1}</span>
-          <div className="flex-1 space-y-1">
-            <Input value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder="Prompt / question" />
-            <Input value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder="Answer (blank = tap to confirm)" />
-          </div>
-          <button className="text-neon-red text-sm mt-2.5" onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
-        </div>
-      ))}
-      <Button variant="ghost" className="text-xs" onClick={() => onChange([...steps, { id: uuid(), prompt: '', answer: '' }])}>
-        + Add step
-      </Button>
-    </div>
+    </aside>
   );
 }
 
 // ── Step 3: Preview ──
 function StepPreview({ game }: { game: Game }) {
+  const b = useT().builder;
   const taskCount = game.stages.reduce((s, st) => s + st.tasks.length, 0);
   const estMin = game.stages.flatMap((s) => s.tasks).reduce((s, t) => s + t.estimatedMinutes, 0);
+  const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
       <div>
-        <h2 className="text-xl font-bold">{game.title || 'Untitled'}</h2>
-        <p className="text-zinc-500 text-sm">{game.description}</p>
+        <h2 className="text-xl font-bold" dir="auto">{game.title || b.untitledGame}</h2>
+        <p className="text-zinc-500 text-sm" dir="auto">{game.description}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Badge>{game.mode}</Badge>
+        <Badge>{modeLabel[game.mode]}</Badge>
         <Badge color="green">{PRESET_LABELS[game.scoringPreset].en}</Badge>
-        <Badge>{game.stages.length} stages</Badge>
-        <Badge>{taskCount} tasks</Badge>
-        <Badge>~{estMin} min</Badge>
+        <Badge>{b.badgeStages(game.stages.length)}</Badge>
+        <Badge>{b.badgeTasks(taskCount)}</Badge>
+        <Badge>{b.badgeMinutes(estMin)}</Badge>
       </div>
       <ol className="space-y-2">
         {game.stages.map((s, i) => (
           <li key={s.id} className="flex items-center gap-3">
             <span className="w-6 h-6 rounded-full bg-neon-green/15 text-neon-green text-xs flex items-center justify-center">{i + 1}</span>
-            <span className="text-sm text-zinc-200">{s.title}</span>
+            <span className="text-sm text-zinc-200" dir="auto">{s.title}</span>
             <span className="text-xs text-zinc-500">
-              {s.tasks.length} task{s.tasks.length > 1 ? 's (routed)' : ''}
-              {s.isFinal ? ' · 🏁 final' : ''}
+              {b.taskCount(s.tasks.length)}{s.tasks.length > 1 ? b.routedSuffix : ''}
+              {s.isFinal ? ` · 🏁 ${b.finalTag}` : ''}
             </span>
           </li>
         ))}
       </ol>
 
       <div>
-        <Label>Route preview</Label>
+        <Label>{b.routePreview}</Label>
         <Suspense fallback={<MapSkeleton className="h-64" />}>
           <RoutePreviewMap stages={game.stages} className="h-64" />
         </Suspense>
       </div>
 
-      <p className="text-xs text-zinc-500">Launching creates an access code your friends use to join. First 2 participants are free.</p>
+      <p className="text-xs text-zinc-500">{b.previewLaunchNote}</p>
     </Card>
   );
 }

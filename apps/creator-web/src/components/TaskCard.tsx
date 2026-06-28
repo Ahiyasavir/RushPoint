@@ -3,9 +3,10 @@
 // creator can read a whole stage's structure (type, difficulty, time, points,
 // location mode, and a computed 1-line interaction preview) without opening a
 // panel. Pure presentation — all logic comes from lib/taskCardPreview.
-import type { Task } from '@rushpoint/shared';
+import type { Task, TaskType } from '@rushpoint/shared';
 import { normalizeTriggerMode } from '@rushpoint/shared';
-import { taskPreviewLine, TYPE_FAMILY_COLOR, TYPE_LABEL } from '../lib/taskCardPreview';
+import { taskPreviewLine, TYPE_FAMILY_COLOR, type PreviewLabels } from '../lib/taskCardPreview';
+import { useT } from './LanguageContext';
 
 const TRIGGER_ICON: Record<string, string> = {
   radius: '📍', exact: '🎯', instant: '⚡', locationless: '🌐',
@@ -24,8 +25,20 @@ function DifficultyDots({ difficulty }: { difficulty: number }) {
 }
 
 export default function TaskCard({ task, active, onClick }: { task: Task; active?: boolean; onClick: () => void }) {
+  const b = useT().builder;
   const color = TYPE_FAMILY_COLOR[task.type];
   const mode = normalizeTriggerMode(task);
+  const typeLabel: Record<TaskType, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation, photo: b.typePhoto,
+    quiz: b.typeQuiz, numeric: b.typeNumeric, geofence: b.typeGeofence, sequence: b.typeSequence,
+  };
+  const previewLabels: PreviewLabels = {
+    quizChoices: b.prevQuizChoices, quizTyped: b.prevQuizTyped, quizNone: b.prevQuizNone,
+    stationCode: b.prevStationCode, stationNone: b.prevStationNone,
+    photoAuto: b.prevPhotoAuto, photoStaff: b.prevPhotoStaff,
+    numericAnswer: b.prevNumericAnswer, numericNone: b.prevNumericNone,
+    geofence: b.prevGeofence, sequence: b.prevSequence, field: b.prevField, selfReport: b.prevSelfReport,
+  };
   return (
     <button
       onClick={onClick}
@@ -37,11 +50,11 @@ export default function TaskCard({ task, active, onClick }: { task: Task; active
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ background: `${color}22`, color }}>
-            {TYPE_LABEL[task.type]}
+            {typeLabel[task.type]}
           </span>
-          <span className="text-sm font-semibold text-[--ink-1] truncate">{task.title || 'Untitled task'}</span>
+          <span className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{task.title || b.untitledTask}</span>
         </div>
-        <div className="text-xs text-[--ink-3] truncate mt-0.5">{taskPreviewLine(task)}</div>
+        <div className="text-xs text-[--ink-3] truncate mt-0.5" dir="auto">{taskPreviewLine(task, previewLabels)}</div>
       </div>
       <div className="shrink-0 flex items-center gap-3 text-[11px] text-[--ink-3]">
         <DifficultyDots difficulty={task.difficulty} />

@@ -21,6 +21,7 @@ import {
   toggleCorrect,
 } from '../lib/quizFields';
 import { Button, Input, Label } from './ui';
+import { useT } from './LanguageContext';
 
 export default function QuizChoicesEditor({
   task,
@@ -29,6 +30,7 @@ export default function QuizChoicesEditor({
   task: Task;
   onChange: (p: Pick<Task, 'choices' | 'answers'>) => void;
 }) {
+  const b = useT().builder;
   const [rows, setRows] = useState<QuizChoice[]>(() => {
     const initial = choicesFromTask(task);
     // Always show at least two empty rows to invite multiple-choice authoring.
@@ -46,34 +48,35 @@ export default function QuizChoicesEditor({
 
   return (
     <div className="space-y-2">
-      <Label>Answer choices</Label>
+      <Label>{b.answerChoices}</Label>
       <div className="space-y-1.5">
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-2">
             <label
               className="flex items-center gap-1 text-[11px] text-zinc-400 shrink-0 cursor-pointer select-none"
-              title="Mark this choice as a correct answer"
+              title={b.correct}
             >
               <input
                 type="checkbox"
                 className="w-3.5 h-3.5 shrink-0"
                 checked={row.correct}
                 onChange={() => apply(toggleCorrect(rows, row.id))}
-                aria-label={`Mark choice ${i + 1} correct`}
+                aria-label={`${b.correct} ${i + 1}`}
               />
-              correct
+              {b.correct}
             </label>
             <Input
               value={row.text}
               onChange={(e) => apply(setChoiceText(rows, row.id, e.target.value))}
-              placeholder={`Choice ${i + 1}`}
+              placeholder={b.choicePlaceholder(i + 1)}
               className="flex-1 min-w-0"
+              dir="auto"
             />
             <button
               type="button"
               onClick={() => apply(removeChoice(rows, row.id))}
               className="text-neon-red shrink-0 w-7 h-7 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent"
-              aria-label={`Delete choice ${i + 1}`}
+              aria-label={`${b.deleteTask} ${i + 1}`}
               disabled={rows.length <= 1}
             >
               ✕
@@ -83,12 +86,12 @@ export default function QuizChoicesEditor({
       </div>
 
       <Button variant="ghost" className="text-xs" onClick={() => apply(addChoice(rows))}>
-        + Add choice
+        + {b.addChoice}
       </Button>
 
       {!anyCorrect && (
         <p className="text-[11px] text-rp-amber">
-          Tick at least one choice as correct, or teams cannot complete this quiz.
+          {b.quizNeedsCorrect}
         </p>
       )}
     </div>

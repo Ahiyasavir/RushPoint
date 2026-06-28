@@ -4,14 +4,14 @@
 // focus we show a small card with a one-line explanation and an asset-light inline
 // SVG diagram. CSS-only show/hide (no portal, no JS positioning) keeps it cheap.
 import { useId, type ReactNode } from 'react';
+import { useT } from './LanguageContext';
 
 export type TooltipConcept = 'geofence' | 'hint' | 'concurrent' | 'difficulty';
 
-const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: ReactNode }> = {
-  geofence: {
-    title: 'Geofence radius',
-    body: 'Players auto check in when they get within this many metres of the pin.',
-    svg: (
+// Only the (illustrative, asset-light) SVGs live here; the title + body come from
+// i18n so the tooltip is localized.
+const SVGS: Record<TooltipConcept, ReactNode> = {
+  geofence: (
       <svg viewBox="0 0 120 60" className="w-full h-14">
         <circle cx="60" cy="30" r="26" fill="#D85A3022" stroke="#D85A30" strokeWidth="1.5" />
         <circle cx="60" cy="30" r="3" fill="#D85A30" />
@@ -21,22 +21,14 @@ const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: React
         <circle cx="92" cy="18" r="3" fill="currentColor" />
       </svg>
     ),
-  },
-  hint: {
-    title: 'Hint penalty',
-    body: 'Revealing the hint costs the team this many points, once per task.',
-    svg: (
+  hint: (
       <svg viewBox="0 0 120 60" className="w-full h-14">
         <text x="20" y="38" fontSize="22">💡</text>
         <text x="56" y="36" fontSize="14" fill="#D85A30">−25</text>
         <text x="92" y="36" fontSize="14">★</text>
       </svg>
     ),
-  },
-  concurrent: {
-    title: 'Max concurrent teams',
-    body: 'How many teams may occupy this task at once before routing sends others elsewhere.',
-    svg: (
+  concurrent: (
       <svg viewBox="0 0 120 60" className="w-full h-14">
         <rect x="44" y="16" width="32" height="28" rx="4" fill="#7F77DD22" stroke="#7F77DD" strokeWidth="1.5" />
         <circle cx="54" cy="30" r="4" fill="#7F77DD" />
@@ -47,11 +39,7 @@ const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: React
         <path d="M80 30 H94" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
       </svg>
     ),
-  },
-  difficulty: {
-    title: 'Difficulty routing weight',
-    body: 'Smart routing sends harder tasks to teams moving at a faster pace.',
-    svg: (
+  difficulty: (
       <svg viewBox="0 0 120 60" className="w-full h-14">
         <polyline points="12,46 36,40 60,30 84,20 108,10" fill="none" stroke="#FF5722" strokeWidth="2" />
         {[46, 40, 30, 20, 10].map((y, i) => (
@@ -61,12 +49,18 @@ const DIAGRAMS: Record<TooltipConcept, { title: string; body: string; svg: React
         <text x="92" y="56" fontSize="6" fill="currentColor">hard</text>
       </svg>
     ),
-  },
 };
 
 export default function RichTooltip({ concept, children }: { concept: TooltipConcept; children?: ReactNode }) {
   const id = useId();
-  const d = DIAGRAMS[concept];
+  const b = useT().builder;
+  const TEXT: Record<TooltipConcept, { title: string; body: string }> = {
+    geofence: { title: b.tipGeofenceTitle, body: b.tipGeofenceBody },
+    hint: { title: b.tipHintTitle, body: b.tipHintBody },
+    concurrent: { title: b.tipConcurrentTitle, body: b.tipConcurrentBody },
+    difficulty: { title: b.tipDifficultyTitle, body: b.tipDifficultyBody },
+  };
+  const d = { ...TEXT[concept], svg: SVGS[concept] };
   return (
     <span className="relative inline-flex group align-middle">
       <button

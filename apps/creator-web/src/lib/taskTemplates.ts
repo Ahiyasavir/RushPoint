@@ -29,13 +29,15 @@ export function applySample(draft: Task, sample: TaskSample): Task {
   return next;
 }
 
+// Sample content is Hebrew (the product is Hebrew-first); codes, years and numbers
+// stay as-is. These are editable seeds, so a creator tweaks them to taste.
 export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   quiz: [
     {
-      label: 'Historical trivia',
+      label: 'טריוויה היסטורית',
       patch: {
-        title: 'History challenge',
-        description: 'Answer this question about the landmark in front of you.',
+        title: 'אתגר היסטוריה',
+        description: 'ענו על השאלה על האתר שמולכם.',
         choices: ['1541', '1099', '1187', '1917'],
         answers: ['1541'],
         pointValue: 40,
@@ -44,12 +46,12 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
       },
     },
     {
-      label: 'True or false',
+      label: 'נכון או לא נכון',
       patch: {
-        title: 'Quick fact check',
-        description: 'Is the following statement true or false?',
-        choices: ['True', 'False'],
-        answers: ['True'],
+        title: 'בדיקת עובדה מהירה',
+        description: 'האם המשפט הבא נכון או לא נכון?',
+        choices: ['נכון', 'לא נכון'],
+        answers: ['נכון'],
         pointValue: 20,
         estimatedMinutes: 2,
         difficulty: 2,
@@ -58,11 +60,11 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   smart_station: [
     {
-      label: 'Hidden marker code',
+      label: 'קוד סמן חבוי',
       patch: {
-        title: 'Find the hidden marker',
-        description: 'Search for the orange star marker near the entrance and enter its code.',
-        hint: 'About one metre off the ground, beside the doorway.',
+        title: 'מצאו את הסמן החבוי',
+        description: 'חפשו את סמן הכוכב הכתום ליד הכניסה והקלידו את הקוד שלו.',
+        hint: 'בערך מטר מהקרקע, ליד הפתח.',
         hintPenalty: 20,
         pointValue: 80,
         estimatedMinutes: 10,
@@ -71,10 +73,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
       smart: { verificationType: 'code_verification', secretCode: 'STAR24', hasCode: true },
     },
     {
-      label: 'On-site QR code',
+      label: 'קוד QR באתר',
       patch: {
-        title: 'Scan the posted code',
-        description: 'Find the printed code posted at the landmark and type it in.',
+        title: 'סרקו את הקוד המוצב',
+        description: 'מצאו את הקוד המודפס שמוצב באתר והקלידו אותו.',
         pointValue: 60,
         estimatedMinutes: 6,
         difficulty: 3,
@@ -84,10 +86,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   photo: [
     {
-      label: 'Team selfie',
+      label: 'סלפי קבוצתי',
       patch: {
-        title: 'Team photo at this landmark',
-        description: 'Take a group photo with the whole team in frame.',
+        title: 'תמונה קבוצתית באתר',
+        description: 'צלמו תמונה קבוצתית שכל הקבוצה בפריים.',
         pointValue: 50,
         estimatedMinutes: 8,
         difficulty: 2,
@@ -95,10 +97,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
       smart: { verificationType: 'photo_upload', autoApprove: true },
     },
     {
-      label: 'Creative action shot',
+      label: 'תמונת אקשן יצירתית',
       patch: {
-        title: 'Strike a creative pose',
-        description: 'Take the most creative team photo you can at this spot.',
+        title: 'תפסו פוזה יצירתית',
+        description: 'צלמו את התמונה הקבוצתית הכי יצירתית שאתם יכולים במקום הזה.',
         pointValue: 70,
         estimatedMinutes: 10,
         difficulty: 3,
@@ -108,10 +110,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   numeric: [
     {
-      label: 'Count something',
+      label: 'ספירת משהו',
       patch: {
-        title: 'How many steps?',
-        description: 'Count the steps leading up to the entrance and submit the exact number.',
+        title: 'כמה מדרגות?',
+        description: 'ספרו את המדרגות שמובילות לכניסה ושלחו את המספר המדויק.',
         numericAnswer: 42,
         numericTolerance: 2,
         pointValue: 40,
@@ -122,10 +124,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   geofence: [
     {
-      label: 'GPS check-in',
+      label: 'צ׳ק-אין GPS',
       patch: {
-        title: 'Reach this location',
-        description: 'Navigate to the marked spot. Your GPS confirms arrival automatically.',
+        title: 'הגיעו למיקום הזה',
+        description: 'נווטו לנקודה המסומנת. ה-GPS יאשר את ההגעה אוטומטית.',
         geofenceRadiusMeters: 50,
         pointValue: 30,
         estimatedMinutes: 10,
@@ -135,10 +137,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   field: [
     {
-      label: 'Landmark check-in',
+      label: 'צ׳ק-אין באתר',
       patch: {
-        title: 'Check in at this point',
-        description: 'Tap the button when your team reaches this landmark.',
+        title: 'בצעו צ׳ק-אין בנקודה הזו',
+        description: 'הקישו על הכפתור כשהקבוצה מגיעה לאתר.',
         pointValue: 25,
         estimatedMinutes: 8,
         difficulty: 1,
@@ -147,10 +149,10 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   self_report: [
     {
-      label: 'Creative challenge',
+      label: 'אתגר יצירתי',
       patch: {
-        title: 'Complete this challenge',
-        description: 'Finish the challenge together, then rate yourselves honestly.',
+        title: 'השלימו את האתגר',
+        description: 'סיימו את האתגר יחד, ואז דרגו את עצמכם בכנות.',
         pointValue: 60,
         estimatedMinutes: 15,
         difficulty: 4,
@@ -159,13 +161,13 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
   ],
   sequence: [
     {
-      label: 'Three-step puzzle',
+      label: 'חידה בשלושה שלבים',
       patch: {
-        title: 'Multi-step challenge',
+        title: 'אתגר רב-שלבי',
         steps: [
-          { id: 'step-sample-1', prompt: 'Step 1: Find the dated plaque.', answer: '' },
-          { id: 'step-sample-2', prompt: 'Step 2: Read the year on it.', answer: '' },
-          { id: 'step-sample-3', prompt: 'Step 3: Submit that year.', answer: '' },
+          { id: 'step-sample-1', prompt: 'שלב 1: מצאו את השלט המתוארך.', answer: '' },
+          { id: 'step-sample-2', prompt: 'שלב 2: קראו את השנה עליו.', answer: '' },
+          { id: 'step-sample-3', prompt: 'שלב 3: שלחו את השנה הזו.', answer: '' },
         ],
         pointValue: 90,
         estimatedMinutes: 12,

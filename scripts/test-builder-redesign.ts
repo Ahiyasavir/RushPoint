@@ -81,7 +81,7 @@ check('sequence singular', taskPreviewLine(task({ type: 'sequence', steps: [{ id
 {
   const blank = task({ id: 'keep-me', title: '', type: 'quiz' });
   const quizSample = applySample(blank, TASK_SAMPLES.quiz[0]);
-  check('quiz sample fills title', quizSample.title === 'History challenge');
+  check('quiz sample fills title', quizSample.title === 'אתגר היסטוריה');
   check('quiz sample fills choices', (quizSample.choices?.length ?? 0) === 4);
   check('quiz sample sets one answer', JSON.stringify(quizSample.answers) === JSON.stringify(['1541']));
   check('sample preserves draft id', quizSample.id === 'keep-me');
