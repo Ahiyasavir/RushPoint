@@ -39,6 +39,12 @@ ok(unknownType.game.stages.length === 0, 'invalid row omitted from game');
 const quizNoAnswer = parseGameRows([{ title: 'Q', type: 'quiz' }]);
 ok(quizNoAnswer.errors.some((e) => e.field === 'answer'), 'quiz without answer flagged');
 
+// Separator-only answer collapses to zero real answers → must be flagged, not
+// imported as an unanswerable quiz with answers: [].
+const quizSepOnly = parseGameRows([{ title: 'Q', type: 'quiz', answer: '|| |' }]);
+ok(quizSepOnly.errors.some((e) => e.field === 'answer'), 'quiz with separator-only answer flagged');
+ok(quizSepOnly.game.stages.length === 0, 'separator-only quiz omitted from game');
+
 const numNoAnswer = parseGameRows([{ title: 'N', type: 'numeric', answer: 'abc' }]);
 ok(numNoAnswer.errors.some((e) => e.field === 'answer'), 'numeric with non-number flagged');
 

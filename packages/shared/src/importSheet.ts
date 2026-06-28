@@ -101,8 +101,9 @@ export function parseGameRows(rows: ImportRow[], opts: { gameTitle?: string } = 
     // Answer-bearing types must carry an answer.
     const answer = String(row.answer ?? '').trim();
     if (type === 'quiz') {
-      if (!answer) { errors.push({ row: rowNum, field: 'answer', message: 'Quiz task needs an answer' }); return; }
-      task.answers = answer.split('|').map((a) => a.trim()).filter(Boolean);
+      const choices = answer.split('|').map((a) => a.trim()).filter(Boolean);
+      if (choices.length === 0) { errors.push({ row: rowNum, field: 'answer', message: 'Quiz task needs an answer' }); return; }
+      task.answers = choices;
     } else if (type === 'numeric') {
       const n = num(answer);
       if (n === undefined) { errors.push({ row: rowNum, field: 'answer', message: 'Numeric task needs a numeric answer' }); return; }
