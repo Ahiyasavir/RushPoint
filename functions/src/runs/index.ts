@@ -31,6 +31,11 @@ import {
   attemptLimitReached,
   matchesTaskAnswer,
   hotZoneMultiplier,
+  isWithinPoiRadius,
+  matchesDiscoveryAnswer,
+  isPoiAlreadyClaimed,
+  toDiscoveryPoiResult,
+  type DiscoveryPoi,
   isConsentSatisfied,
   haversineKm,
   isValidCoord,
@@ -736,6 +741,85 @@ export const deactivateHotZone = functions.https.onCall(async (data, context) =>
 
   await runRef.update({ hotZone: admin.firestore.FieldValue.delete(), updatedAt: new Date().toISOString() });
   return { ok: true };
+});
+
+
+// ─── getRunDiscoveryPois / claimDiscoveryPoi (surprise-trivia-waypoints) ───────
+// Hidden geofenced trivia waypoints. The POI coordinates + answer key are
+// server-secret — getRunDiscoveryPois returns a coordinate/answer-stripped shape,
+// and claimDiscoveryPoi re-validates proximity (server haversine) + the answer
+// before awarding the bonus. Idempotent per team via team.discoveryState.
+
+export const getRunDiscoveryPois = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const snap = await db.collection(`users/${ctx.ownerUid}/games/${ctx.gameId}/discoveryPois`).get();
+  const pois = snap.docs.map((d) => toDiscoveryPoiResult(d.data() as DiscoveryPoi));
+  return { pois };
+});
+
+export const claimDiscoveryPoi = functions.https.onCall(async (data, context) => {
+  const teamId = requireAuth(context);
+  const { poiId, lat, lng, answer, ownerUid, gameId, runId, code } = data as {
+    poiId: string; lat: number; lng: number; answer: string;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!poiId || answer == null) {
+    throw new functions.https.HttpsError('invalid-argument', 'poiId and answer required');
+  }
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+
+  const poiSnap = await db.doc(`users/${ctx.ownerUid}/games/${ctx.gameId}/discoveryPois/${poiId}`).get();
+  if (!poiSnap.exists) throw new functions.https.HttpsError('not-found', 'POI not found');
+  const poi = poiSnap.data() as DiscoveryPoi;
+
+  const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
+
+  return db.runTransaction(async (tx) => {
+    const teamSnap = await tx.get(teamRef);
+    if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = teamSnap.data() as RunTeam;
+
+    // Idempotent: a POI already answered cannot be claimed again.
+    if (isPoiAlreadyClaimed(team.discoveryState, poiId)) {
+      throw new functions.https.HttpsError('already-exists', 'POI already claimed');
+    }
+
+    // Proximity is re-validated server-side from the secret coordinates.
+    let inside = false;
+    try {
+      inside = isWithinPoiRadius(poi.coordinates, { lat, lng }, poi.radiusMeters);
+    } catch {
+      throw new functions.https.HttpsError('failed-precondition', 'Invalid location');
+    }
+    if (!inside) {
+      throw new functions.https.HttpsError('failed-precondition', 'Not within the POI radius');
+    }
+
+    const correct = matchesDiscoveryAnswer(poi.answers, String(answer));
+    const now = new Date().toISOString();
+    const discoveryState = { ...(team.discoveryState ?? {}) };
+
+    if (correct) {
+      discoveryState[poiId] = 'answered';
+      const bonus = Math.max(0, poi.bonusPoints ?? 0);
+      tx.update(teamRef, {
+        discoveryState,
+        score: (team.score ?? 0) + bonus,
+        updatedAt: now,
+      });
+      return { correct: true, bonus };
+    }
+
+    // Wrong answer: mark triggered (seen) but award nothing; retry allowed.
+    discoveryState[poiId] = 'triggered';
+    tx.update(teamRef, { discoveryState, updatedAt: now });
+    return { correct: false, bonus: 0 };
+  });
 });
 
 

@@ -124,6 +124,19 @@ async function main() {
   await check('anon CANNOT read an access code (auth required)', assertFails(getDoc(doc(anon, `accessCodes/ABC123`))));
   await check('owner CAN write own game template (builder responsiveness)', assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'edited' })));
 
+  console.log('\n── Discovery POIs: coordinates are server-secret ──');
+  // Seed a POI with admin privileges (bypasses rules).
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), `users/${OWNER}/games/${GAME}/discoveryPois/poi1`),
+      { id: 'poi1', coordinates: { lat: 31.79, lng: 35.16 }, answers: ['secret'], bonusPoints: 50 });
+  });
+  await check('owner CAN read a discovery POI', assertSucceeds(getDoc(doc(owner, `users/${OWNER}/games/${GAME}/discoveryPois/poi1`))));
+  await check('owner CAN list discovery POIs', assertSucceeds(getDocs(collection(owner, `users/${OWNER}/games/${GAME}/discoveryPois`))));
+  await check('owner CAN write a discovery POI', assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}/discoveryPois/poi2`), { id: 'poi2', bonusPoints: 10 })));
+  await check('play client CANNOT read a discovery POI (coords secret)', assertFails(getDoc(doc(team, `users/${OWNER}/games/${GAME}/discoveryPois/poi1`))));
+  await check('play client CANNOT list discovery POIs', assertFails(getDocs(collection(team, `users/${OWNER}/games/${GAME}/discoveryPois`))));
+  await check('other user CANNOT write a discovery POI', assertFails(setDoc(doc(other, `users/${OWNER}/games/${GAME}/discoveryPois/poi3`), { id: 'poi3' })));
+
   console.log('\n── Storage: photo uploads are owner+type+size gated ──');
   const img = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]); // tiny jpeg-ish
   const big = new Uint8Array(11 * 1024 * 1024); // >10MB

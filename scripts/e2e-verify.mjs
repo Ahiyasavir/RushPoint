@@ -10,6 +10,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
+import { getFirestore, connectFirestoreEmulator, doc, setDoc } from 'firebase/firestore';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
 
@@ -20,11 +21,14 @@ function makeParty(name) {
   );
   const auth = getAuth(app);
   const functions = getFunctions(app);
+  const db = getFirestore(app);
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
   return {
     auth,
     call: (fn, data) => httpsCallable(functions, fn)(data).then((r) => r.data),
+    setDocAt: (path, data) => setDoc(doc(db, path), data),
   };
 }
 
@@ -688,6 +692,62 @@ async function main() {
   check('safe-zone: returning inside clears outOfBounds', back?.outOfBounds === false, JSON.stringify(back));
   const resumed = await wanderer.call('requestNextTask', { ...C7, lat: 31.78, lng: 35.21 });
   check('safe-zone: assignment resumes inside the zone', resumed?.outOfBounds !== true, JSON.stringify(resumed));
+
+  // ── Discovery POIs (surprise-trivia-waypoints) ──────────────────────────────
+  {
+    const { gameId: dpGame } = await creator.call('createGame', { title: 'Discovery Game', mode: 'individual' });
+    const POI = { lat: 31.79, lng: 35.16 };
+    await creator.call('updateGame', {
+      gameId: dpGame, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'dp-s', order: 0, title: 'Stage', isFinal: true,
+        tasks: [{ id: 'dp-t', title: 'Go', type: 'field', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3 }] }],
+    });
+    // Creator writes a hidden POI directly (owner rules allow; coords are secret).
+    await creator.setDocAt(`users/${creatorCred.user.uid}/games/${dpGame}/discoveryPois/poiA`, {
+      id: 'poiA', coordinates: POI, radiusMeters: 200, title: 'Old fountain',
+      flavorText: 'You spot something...', question: 'What is this landmark?',
+      answers: ['Fountain', 'fountain'], bonusPoints: 40,
+    });
+
+    const { runId: dpRun, accessCode: dpCode } = await creator.call('launchRun', { gameId: dpGame });
+    const dpPlayer = makeParty('dpPlayer');
+    await signInAnonymously(dpPlayer.auth);
+    await dpPlayer.call('joinRun', { code: dpCode, displayName: 'Explorer' });
+    await creator.call('startTeams', { gameId: dpGame, runId: dpRun });
+
+    // getRunDiscoveryPois never leaks coordinates or answers.
+    const list = await dpPlayer.call('getRunDiscoveryPois', { code: dpCode });
+    const got = list?.pois?.[0];
+    check('discovery: getRunDiscoveryPois returns the POI', got?.id === 'poiA', JSON.stringify(got));
+    check('discovery: payload has NO coordinates or answers',
+      got && !('coordinates' in got) && !('answers' in got), JSON.stringify(Object.keys(got ?? {})));
+
+    const before = (await dpPlayer.call('getMyTeamState', { code: dpCode }))?.team?.score ?? 0;
+
+    // Outside radius → failed-precondition.
+    let outside = false;
+    try { await dpPlayer.call('claimDiscoveryPoi', { code: dpCode, poiId: 'poiA', lat: 32.5, lng: 35.9, answer: 'Fountain' }); }
+    catch (e) { outside = e.code === 'functions/failed-precondition'; }
+    check('discovery: outside radius → failed-precondition', outside);
+
+    // Wrong answer inside radius → no points.
+    const wrong = await dpPlayer.call('claimDiscoveryPoi', { code: dpCode, poiId: 'poiA', lat: POI.lat, lng: POI.lng, answer: 'Statue' });
+    check('discovery: wrong answer → {correct:false}', wrong?.correct === false, JSON.stringify(wrong));
+    const afterWrong = (await dpPlayer.call('getMyTeamState', { code: dpCode }))?.team?.score ?? 0;
+    check('discovery: wrong answer awards no points', afterWrong === before, `before=${before} after=${afterWrong}`);
+
+    // Correct answer inside radius → bonus.
+    const right = await dpPlayer.call('claimDiscoveryPoi', { code: dpCode, poiId: 'poiA', lat: POI.lat, lng: POI.lng, answer: 'fountain' });
+    check('discovery: correct answer → {correct:true} + bonus', right?.correct === true && right?.bonus === 40, JSON.stringify(right));
+    const afterRight = (await dpPlayer.call('getMyTeamState', { code: dpCode }))?.team?.score ?? 0;
+    check('discovery: correct answer increases score by the bonus', afterRight === before + 40, `before=${before} after=${afterRight}`);
+
+    // Double-claim → already-exists.
+    let dup = false;
+    try { await dpPlayer.call('claimDiscoveryPoi', { code: dpCode, poiId: 'poiA', lat: POI.lat, lng: POI.lng, answer: 'fountain' }); }
+    catch (e) { dup = e.code === 'functions/already-exists'; }
+    check('discovery: double-claim → already-exists', dup);
+  }
 
   // ── Hot Zone bonus (activate/deactivate + multiplied score) ─────────────────
   {

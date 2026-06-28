@@ -68,6 +68,13 @@ export const FIRESTORE_PATHS = {
   publicGame:  (gameId: string) => `publicGames/${gameId}`,
   publicTask:  (taskId: string) => `publicTasks/${taskId}`,
 
+  // Hidden geofenced discovery POIs on a game (surprise-trivia-waypoints).
+  // Creator read/write; play clients denied (coordinates are server-secret).
+  discoveryPoisCol: (ownerUid: string, gameId: string) =>
+    `users/${ownerUid}/games/${gameId}/discoveryPois`,
+  discoveryPoi: (ownerUid: string, gameId: string, poiId: string) =>
+    `users/${ownerUid}/games/${gameId}/discoveryPois/${poiId}`,
+
   wallet:      (uid: string) => `wallets/${uid}`,
   transaction: (uid: string, txId: string) => `wallets/${uid}/transactions/${txId}`,
 
@@ -494,6 +501,8 @@ export interface RunTeam {
   // Safe-zone (change: safe-zone-boundary): set true while the team's last known
   // location is outside the play area; soft-pauses new task assignment.
   outOfBounds?: boolean;
+  // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.
+  discoveryState?: import('./../discoveryPoi').TeamDiscoveryState;
   activeTaskId?: string | null;  // mirror for getStationTeams query
   launched: boolean;
   startedAt?: string;

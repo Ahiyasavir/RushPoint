@@ -83,6 +83,15 @@ service cloud.firestore {
             allow write: if false;
           }
         }
+
+        // ── DISCOVERY POIs (surprise-trivia-waypoints) ───────────────────────
+        //    Hidden geofenced trivia waypoints. Coordinates + answers are
+        //    SERVER-SECRET, so only the game owner may read/write these docs
+        //    directly; play clients are denied and must go through the
+        //    getRunDiscoveryPois / claimDiscoveryPoi callables.
+        match /discoveryPois/{poiId} {
+          allow read, write: if isOwner(uid);
+        }
       }
     }
 

@@ -35,6 +35,7 @@ export {
   checkOutTask, getMyTeamState,
   requestGuardianConsent, grantGuardianConsent,
   activateHotZone, deactivateHotZone,
+  getRunDiscoveryPois, claimDiscoveryPoi,
 } from './runs/index';
 
 
