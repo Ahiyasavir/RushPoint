@@ -130,7 +130,7 @@ function LeaderboardPeek({
               key={r.teamId}
               className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-accent font-semibold' : 'text-zinc-400'}`}
             >
-              <span dir="auto" className="truncate"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
+              <span dir="auto" className="truncate min-w-0"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
               <span className="font-mono shrink-0">{r.score}</span>
             </div>
           ))}
