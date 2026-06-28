@@ -2,15 +2,18 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
-import type { Run } from '@rushpoint/shared';
+import type { Run, HotZone } from '@rushpoint/shared';
+import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
-  inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, type RunTeamRow,
+  inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
+  type RunTeamRow,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
 
 // Where the participant app lives (for the shareable join link/QR).
@@ -150,6 +153,12 @@ export default function RunConsolePage() {
           <span className="text-zinc-500"> · share with your staff to sign in on the play app.</span>
         </Card>
       )}
+
+      {/* Live-ops + post-run organizer tools (deferred-UI wiring) */}
+      <div className="grid md:grid-cols-2 gap-5">
+        {!finished && <HotZonePanel ctx={ctx} hotZone={run.hotZone ?? null} />}
+        <PostRunLinks accessCode={run.accessCode} finished={finished} />
+      </div>
 
       <div className="grid lg:grid-cols-3 gap-5">
         {/* Teams */}
@@ -304,5 +313,95 @@ function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: st
         </div>
       </Card>
     </>
+  );
+}
+
+
+// ── Hot Zone activate panel (hot-zone-bonus) ──────────────────────────────────
+function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: string; runId: string }; hotZone: HotZone | null }) {
+  const t = useT();
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
+  const [radius, setRadius] = useState(200);
+  const [mult, setMult] = useState(2);
+  const [minutes, setMinutes] = useState(10);
+  const [busy, setBusy] = useState(false);
+
+  const active = !!hotZone && hotZoneMultiplier(hotZone, hotZone.center, Date.now()) > 1;
+
+  function useMyLocation() {
+    navigator.geolocation?.getCurrentPosition(
+      (p) => { setLat(p.coords.latitude.toFixed(5)); setLng(p.coords.longitude.toFixed(5)); },
+      () => dialog.alert(t.runConsole.hotZoneNeedsCenter),
+    );
+  }
+
+  async function activate() {
+    const la = parseFloat(lat), ln = parseFloat(lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) { void dialog.alert(t.runConsole.hotZoneNeedsCenter); return; }
+    setBusy(true);
+    try {
+      await activateHotZone({ gameId: ctx.gameId, runId: ctx.runId, center: { lat: la, lng: ln }, radiusMeters: radius, multiplier: mult, durationMinutes: minutes });
+    } finally { setBusy(false); }
+  }
+  async function deactivate() {
+    setBusy(true);
+    try { await deactivateHotZone({ gameId: ctx.gameId, runId: ctx.runId }); } finally { setBusy(false); }
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="text-sm font-semibold">{t.runConsole.hotZoneTitle}</div>
+      {active && hotZone ? (
+        <div className="space-y-2 text-sm">
+          <div className="text-neon-green font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
+          <div className="text-zinc-500">{t.runConsole.hotZoneExpires({ time: new Date(hotZone.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</div>
+          <Button variant="danger" disabled={busy} onClick={deactivate}>{t.runConsole.deactivate}</Button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <Label>{t.runConsole.hotZoneCenter}</Label>
+          <div className="flex gap-2">
+            <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="31.79" inputMode="decimal" />
+            <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="35.16" inputMode="decimal" />
+            <Button variant="ghost" type="button" onClick={useMyLocation}>{t.runConsole.hotZoneUseLocation}</Button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div><Label>{t.runConsole.hotZoneRadius}</Label><Input type="number" value={radius} onChange={(e) => setRadius(Math.max(1, Number(e.target.value)))} /></div>
+            <div><Label>{t.runConsole.hotZoneMultiplier}</Label><Input type="number" value={mult} min={2} max={5} onChange={(e) => setMult(Math.min(5, Math.max(2, Number(e.target.value))))} /></div>
+            <div><Label>{t.runConsole.hotZoneDuration}</Label><Input type="number" value={minutes} min={1} onChange={(e) => setMinutes(Math.max(1, Number(e.target.value)))} /></div>
+          </div>
+          <Button disabled={busy} onClick={activate}>{t.runConsole.activate}</Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Post-run shareable links (tv-leaderboard / run-recap) ─────────────────────
+function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: boolean }) {
+  const t = useT();
+  const [copied, setCopied] = useState('');
+  const tvUrl = `${PLAY_URL}/?${TV_ROUTE_PARAM}=${accessCode}`;
+  const recapUrl = `${PLAY_URL}/?${RECAP_ROUTE_PARAM}=${accessCode}`;
+
+  async function copy(url: string, which: string) {
+    try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { window.open(url, '_blank'); }
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="text-sm font-semibold">{t.runConsole.postRunTitle}</div>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="ghost" onClick={() => window.open(tvUrl, '_blank')}>{t.runConsole.tvScreen}</Button>
+        <Button variant="ghost" onClick={() => copy(tvUrl, 'tv')}>{copied === 'tv' ? t.runConsole.linkCopied : '🔗'}</Button>
+        {finished && (
+          <>
+            <Button variant="ghost" onClick={() => window.open(recapUrl, '_blank')}>{t.runConsole.shareRecap}</Button>
+            <Button variant="ghost" onClick={() => copy(recapUrl, 'recap')}>{copied === 'recap' ? t.runConsole.linkCopied : '🔗'}</Button>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
