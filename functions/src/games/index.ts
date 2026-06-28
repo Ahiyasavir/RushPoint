@@ -19,6 +19,8 @@ import {
   DEFAULT_SCORING_PRESET,
   describeGameRequirements,
   matchesTaskAnswer,
+  collectTranslatableFields,
+  applyTranslations,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos } from '../storageUtil';
 
@@ -349,4 +351,66 @@ export const checkChallengeAnswer = functions.https.onCall(async (data) => {
   }
 
   return { correct: matchesTaskAnswer(task, String(answer ?? '')) };
+});
+
+
+// ─── translateGame (duplicate-translate-game) ─────────────────────────────────
+// Duplicates an owner's game and machine-translates its user-facing text into a
+// target language, preserving coordinates / types / scoring verbatim. Free-text
+// answers are translated but the ORIGINAL is kept as an accepted alias so the
+// translated game still accepts the original answer.
+//
+// Real translation requires TRANSLATE_API_KEY (server-only, functions/.env). When
+// absent (dev / emulator), a deterministic mock prefixes each string with the
+// target language tag so the pipeline + e2e are exercised without an external call.
+async function translateTexts(texts: string[], lang: string): Promise<string[]> {
+  // TODO(billing/infra): call the real translation API when TRANSLATE_API_KEY is
+  // configured. Until then the mock makes translation observable + deterministic.
+  return texts.map((t) => `[${lang}] ${t}`);
+}
+
+export const translateGame = functions.https.onCall(async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, targetLang } = data as { gameId: string; targetLang: string };
+  if (!gameId || !targetLang?.trim()) {
+    throw new functions.https.HttpsError('invalid-argument', 'gameId and targetLang required');
+  }
+
+  const snap = await db.doc(gamePath(uid, gameId)).get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = snap.data() as Game;
+  if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
+
+  const lang = targetLang.trim();
+
+  // Translate display text via collect → translate → re-inject.
+  const fields = collectTranslatableFields(game);
+  const translatedText = await translateTexts(fields.map((f) => f.text), lang);
+  const map: Record<string, string> = {};
+  fields.forEach((f, i) => { map[f.path] = translatedText[i]; });
+  const newGame = applyTranslations(game, map);
+
+  // Translate free-text answers but keep the originals as accepted aliases.
+  for (const stage of newGame.stages ?? []) {
+    for (const task of stage.tasks ?? []) {
+      if (Array.isArray(task.answers) && task.answers.length > 0) {
+        const ta = await translateTexts(task.answers, lang);
+        task.answers = Array.from(new Set([...task.answers, ...ta]));
+      }
+    }
+  }
+
+  const now = new Date().toISOString();
+  const newRef = db.collection(gamesCol(uid)).doc();
+  const copy: Game = {
+    ...newGame,
+    id: newRef.id,
+    ownerUid: uid,
+    visibility: 'private',
+    playCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await newRef.set(copy);
+  return { gameId: newRef.id, targetLang: lang };
 });

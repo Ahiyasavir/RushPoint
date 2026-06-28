@@ -732,6 +732,33 @@ async function main() {
     check('replay: non-owner is denied', replayDenied);
   }
 
+  // ── Duplicate & translate a game (translateGame) ────────────────────────────
+  {
+    const { gameId: trGame } = await creator.call('createGame', { title: 'Translate Me', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: trGame, scoringPreset: 'smart_weighted',
+      stages: [{ id: 'tr-s', order: 0, title: 'Round 1', isFinal: true,
+        tasks: [{ id: 'tr-q', title: 'Capital of France?', description: 'Think hard', type: 'quiz',
+          coordinates: { lat: 31.79, lng: 35.16 }, difficulty: 2, estimatedMinutes: 3, pointValue: 40,
+          maxConcurrentTeams: 5, answers: ['Paris'] }] }],
+    });
+
+    const tr = await creator.call('translateGame', { gameId: trGame, targetLang: 'es' });
+    check('translate: returns a new gameId', !!tr?.gameId && tr.gameId !== trGame, JSON.stringify(tr));
+
+    const { game: newGame } = await creator.call('getGame', { gameId: tr.gameId });
+    check('translate: title is translated', /^\[es\]/.test(newGame?.title ?? ''), newGame?.title);
+    const newTask = newGame?.stages?.[0]?.tasks?.[0];
+    check('translate: task text translated', /^\[es\]/.test(newTask?.title ?? ''), newTask?.title);
+    // Non-text preserved verbatim.
+    check('translate: coordinates preserved', newTask?.coordinates?.lat === 31.79 && newTask?.coordinates?.lng === 35.16);
+    check('translate: type + scoring preserved', newTask?.type === 'quiz' && newGame?.scoringPreset === 'smart_weighted');
+    check('translate: pointValue preserved', newTask?.pointValue === 40);
+    // Original free-text answer kept as an accepted alias.
+    check('translate: original answer kept as alias', Array.isArray(newTask?.answers) && newTask.answers.includes('Paris'), JSON.stringify(newTask?.answers));
+    check('translate: translated answer added too', newTask?.answers?.includes('[es] Paris'), JSON.stringify(newTask?.answers));
+  }
+
   // ── Discovery POIs (surprise-trivia-waypoints) ──────────────────────────────
   {
     const { gameId: dpGame } = await creator.call('createGame', { title: 'Discovery Game', mode: 'individual' });

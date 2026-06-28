@@ -21,3 +21,4 @@ export * from './runRecap';
 export * from './runReplay';
 export * from './importSheet';
 export * from './runBrand';
+export * from './translateFields';
