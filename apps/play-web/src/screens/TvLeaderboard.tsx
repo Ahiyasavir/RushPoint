@@ -24,6 +24,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
   const { t } = useT();
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const prevTopId = useRef<string | null>(null);
+  const flashTimer = useRef<number | null>(null);
   const [newLeaderId, setNewLeaderId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -32,7 +33,11 @@ export default function TvLeaderboard({ code }: { code: string }) {
       const topId = next.published ? (next.rankings[0]?.teamId ?? null) : null;
       if (detectLeaderChange(prevTopId.current, topId)) {
         setNewLeaderId(topId);
-        window.setTimeout(() => setNewLeaderId((cur) => (cur === topId ? null : cur)), 6000);
+        if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
+        flashTimer.current = window.setTimeout(
+          () => setNewLeaderId((cur) => (cur === topId ? null : cur)),
+          6000,
+        );
       }
       prevTopId.current = topId;
       setData(next);
@@ -42,6 +47,10 @@ export default function TvLeaderboard({ code }: { code: string }) {
   }, [code]);
 
   useEffect(() => { void load(); }, [load]);
+  // Cancel any pending leader-flash timer on unmount (long-lived TV board).
+  useEffect(() => () => {
+    if (flashTimer.current != null) window.clearTimeout(flashTimer.current);
+  }, []);
   useEffect(() => {
     if (data?.runStatus === 'finished' || data?.frozen) return;
     const id = window.setInterval(load, REFRESH_MS);
