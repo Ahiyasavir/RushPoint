@@ -42,7 +42,7 @@ all green).
 | `share-branding` | ✅ archived (`2026-06-27-share-branding`) → share-branding spec; reusable brand stamp (logo + URL + scannable QR) on every shared image, pure resolveShareQrTarget/computeWatermarkLayout, storyCard QR + sharePhoto + graceful fallbacks; all 5 gates green. **P2 #1.** |
 | `podium-share-moment` | ✅ archived (`2026-06-27-podium-share-moment`) → podium-moment spec; selectPodium + computePodiumLayout (pure), FinalScreen reduced-motion-safe podium reveal, branded podium share via stampBrand; all 5 gates green. **P2 #2.** |
 | `challenge-a-friend` | ✅ archived (`2026-06-27-challenge-a-friend`) → challenge-a-friend spec; shareable `?challenge=<gameId>:<taskId>` deep link → standalone ChallengeTeaser (30s timer, server-checked answer, join/build CTAs); `checkChallengeAnswer` callable resolves owner via publicGames (published-only), returns only `{correct}`; pure parseChallengeParam + matchesTaskAnswer (lifted from runs, DRY); branded teaser image via stampBrand; 20 pure + 5 e2e assertions; all 5 gates green. **P2 #3.** |
-| `run-recap` | 📋 backlog |
+| `run-recap` | ✅ archived (`2026-06-28-run-recap`) → run-recap spec; getRunRecap callable (owner-any/published-only gate, prune-safe) returns standings + every team's approved photo + stats; pure buildRunRecap + computeMontageGrid; play-web RunRecap screen + `?recap=` route + branded collage (stampBrand); 25 pure + 6 e2e. Creator RunConsole "Share recap" action **deferred to frontend agent**. All 6 gates green. **P4 #1.** |
 | `run-replay-vod` | 📋 backlog |
 
 ## 5. Growth — `v21-growth.todo.test.ts` · `v21-playtest-links.todo.test.ts`
