@@ -29,7 +29,7 @@ export {
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
-  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay,
+  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics,
   listRunTeams, completeTask, requestNextTask, requestTaskHint,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState,

@@ -764,6 +764,16 @@ async function main() {
     try { await recapViewer.call('getRunReplay', { code: accessCode }); }
     catch (e) { replayDenied = e.code === 'functions/permission-denied'; }
     check('replay: non-owner is denied', replayDenied);
+
+    // ── Run analytics (getRunAnalytics) — owner-only per-task aggregate ────────
+    const analytics = await creator.call('getRunAnalytics', { code: accessCode });
+    check('analytics: owner gets per-task rows', Array.isArray(analytics?.tasks) && analytics.tasks.length > 0, `tasks=${analytics?.tasks?.length}`);
+    check('analytics: rows carry completion stats', analytics?.tasks?.every((t) => 'completionRate' in t && 'medianMs' in t && 'hintCount' in t), JSON.stringify(analytics?.tasks?.[0]));
+    check('analytics: overall completion rate present', typeof analytics?.overallCompletionRate === 'number');
+    let analyticsDenied = false;
+    try { await recapViewer.call('getRunAnalytics', { code: accessCode }); }
+    catch (e) { analyticsDenied = e.code === 'functions/permission-denied'; }
+    check('analytics: non-owner is denied', analyticsDenied);
   }
 
   // ── Duplicate & translate a game (translateGame) ────────────────────────────

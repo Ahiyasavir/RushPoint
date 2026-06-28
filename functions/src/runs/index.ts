@@ -38,6 +38,7 @@ import {
   type DiscoveryPoi,
   buildRunRecap,
   buildRunTimeline,
+  computeRunAnalytics,
   mergeBenchmark,
   median,
   type BenchmarkAggregate,
@@ -1059,6 +1060,40 @@ export const getRunReplay = functions.https.onCall(async (data, context) => {
     title: game?.branding?.name ?? game?.title ?? 'RushPoint',
     runStatus: run?.status ?? 'live',
     ...replay,
+  };
+});
+
+
+// ─── getRunAnalytics (run-analytics-heatmap) ──────────────────────────────────
+// Owner-only post-run analytics: per-task completion rate, median/p90 time, hint
+// + skip counts. Resolves the run by access code and refuses non-owners. Survives
+// the PII prune (computeRunAnalytics just contributes nothing for cleared teams).
+export const getRunAnalytics = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  const { code } = data as { code: string };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const c = codeSnap.data() as AccessCode;
+  if (uid !== c.ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Analytics are organizer-only');
+  }
+
+  const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
+  const game = gameSnap.exists ? (gameSnap.data() as Game) : null;
+  const gameTasks = (game?.stages ?? []).flatMap((s) => s.tasks).map((t) => ({ id: t.id, type: t.type }));
+
+  const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
+  const run = runSnap.exists ? (runSnap.data() as Run) : null;
+  const teamsSnap = await db.collection(teamsCol(c.ownerUid, c.gameId, c.runId)).get();
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+  return {
+    title: game?.branding?.name ?? game?.title ?? 'RushPoint',
+    runStatus: run?.status ?? 'live',
+    ...computeRunAnalytics(teams, gameTasks),
   };
 });
 
