@@ -411,6 +411,10 @@ export interface Run {
   freeParticipantsUsed?: number; // legacy (pre-migration runs)
   leaderboard?: RunLeaderboard;
   hotZone?: HotZone;             // active timed score multiplier (hot-zone-bonus)
+  // White-label Pro (change: white-label-pro): sealed at launch from the owner's
+  // entitlement; share surfaces decide branding via resolveRunBrand.
+  whiteLabel?: boolean;
+  brand?: { name?: string; logoUrl?: string };
   createdAt: string;
   updatedAt: string;
 }
