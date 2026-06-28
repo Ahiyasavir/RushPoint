@@ -317,6 +317,9 @@ export interface Game {
   // Safe-zone boundary (change: safe-zone-boundary): a circular play area; a team
   // outside it triggers a server-side alert + soft-pause.
   safeZone?: import('./../safeZone').SafeZone;
+  // Platform benchmark (change: platform-benchmark): opt this game's finished runs
+  // out of the anonymized cross-platform aggregate contribution.
+  benchmarkOptOut?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -792,6 +795,7 @@ export interface UpdateGamePayload {
   requiresGuardianConsent?: boolean;
   minAge?: number;
   safeZone?: import('./../safeZone').SafeZone | null;
+  benchmarkOptOut?: boolean;
 }
 
 // Run management

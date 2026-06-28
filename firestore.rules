@@ -105,6 +105,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ── PLATFORM BENCHMARK (anonymized aggregate; no per-run ids) ─────────────
+    //    Any authenticated creator may read the cross-platform median; only
+    //    Cloud Functions contribute (rolling merge in finalizeRun).
+    match /benchmarks/{taskType} {
+      allow read:  if isAuthenticated();
+      allow write: if false;
+    }
+
     // ── WALLETS ──────────────────────────────────────────────────────────────
     match /wallets/{uid} {
       allow read:  if isOwner(uid);

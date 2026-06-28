@@ -10,7 +10,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
-import { getFirestore, connectFirestoreEmulator, doc, setDoc } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc } from 'firebase/firestore';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
 
@@ -29,6 +29,7 @@ function makeParty(name) {
     auth,
     call: (fn, data) => httpsCallable(functions, fn)(data).then((r) => r.data),
     setDocAt: (path, data) => setDoc(doc(db, path), data),
+    getDocAt: (path) => getDoc(doc(db, path)).then((s) => ({ exists: s.exists(), data: s.data() })),
   };
 }
 
@@ -366,6 +367,39 @@ async function main() {
   check('finalizeRun returns rankings', Array.isArray(fin?.rankings) && fin.rankings.length === 1);
   check('our team is ranked #1', fin?.rankings?.[0]?.teamId === playerCred.user.uid, JSON.stringify(fin?.rankings?.[0]));
   check('final score is positive', (fin?.rankings?.[0]?.score ?? 0) > 0, String(fin?.rankings?.[0]?.score));
+
+  // ── 10a. Platform benchmark contribution (platform-benchmark) ───────────────
+  // Finalizing the main run folds anonymized per-task-type aggregates into
+  // benchmarks/{taskType}. The main game has a 'station' task type.
+  const benchStation = await creator.getDocAt('benchmarks/station');
+  check('benchmark: finalize contributed a station aggregate', benchStation.exists && (benchStation.data?.count ?? 0) >= 1, JSON.stringify(benchStation.data));
+  check('benchmark: aggregate is anonymized (no run/team ids)',
+    benchStation.exists && typeof benchStation.data?.medianMsRolling === 'number'
+      && !('runId' in benchStation.data) && !('teamId' in benchStation.data) && !('ownerUid' in benchStation.data),
+    JSON.stringify(benchStation.data));
+
+  // Opt-out skips contribution: a benchmarkOptOut game's finished run must not
+  // bump the aggregate for its task type.
+  {
+    const { gameId: boGame } = await creator.call('createGame', { title: 'No Bench', mode: 'individual' });
+    await creator.call('updateGame', { gameId: boGame, scoringPreset: 'fixed_points_speed', benchmarkOptOut: true,
+      stages: [{ id: 'bo-s', order: 0, title: 'S', isFinal: true,
+        tasks: [{ id: 'bo-t', title: 'Self report', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 3 }] }] });
+    const before = await creator.getDocAt('benchmarks/self_report');
+    const beforeCount = before.exists ? (before.data?.count ?? 0) : 0;
+    const { runId: boRun, accessCode: boCode } = await creator.call('launchRun', { gameId: boGame });
+    const boPlayer = makeParty('boPlayer');
+    await signInAnonymously(boPlayer.auth);
+    await boPlayer.call('joinRun', { code: boCode, displayName: 'Opt' });
+    await creator.call('startTeams', { gameId: boGame, runId: boRun });
+    const bs = await boPlayer.call('getMyTeamState', { code: boCode });
+    const assigned = bs?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+    if (assigned) await boPlayer.call('completeTask', { taskId: assigned.taskId, code: boCode });
+    await creator.call('finalizeRun', { gameId: boGame, runId: boRun });
+    const after = await creator.getDocAt('benchmarks/self_report');
+    const afterCount = after.exists ? (after.data?.count ?? 0) : 0;
+    check('benchmark: opt-out run does NOT contribute', afterCount === beforeCount, `before=${beforeCount} after=${afterCount}`);
+  }
 
   // ── 10b. Data-retention prune of a finished run ─────────────────────────────
   // pruneRunNow strips raw PII (GPS pings + photo URLs) while keeping scores.

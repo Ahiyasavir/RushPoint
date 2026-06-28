@@ -82,7 +82,7 @@ export const updateGame = functions.https.onCall(async (data, context) => {
     gameId,
     title, description, mode, stages, scoringPreset, scoringOptions,
     registrationFields, branding, tags, coverImage, approxLocation,
-    requiresGuardianConsent, minAge, safeZone,
+    requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
   } = data as UpdateGamePayload;
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -109,6 +109,7 @@ export const updateGame = functions.https.onCall(async (data, context) => {
   if (requiresGuardianConsent !== undefined) updates.requiresGuardianConsent = requiresGuardianConsent;
   if (minAge !== undefined)             updates.minAge = minAge;
   if (safeZone !== undefined)           updates.safeZone = safeZone ?? undefined;
+  if (benchmarkOptOut !== undefined)    updates.benchmarkOptOut = benchmarkOptOut;
 
   await ref.update(updates);
   return { ok: true };

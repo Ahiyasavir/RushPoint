@@ -38,6 +38,9 @@ import {
   type DiscoveryPoi,
   buildRunRecap,
   buildRunTimeline,
+  mergeBenchmark,
+  median,
+  type BenchmarkAggregate,
   isConsentSatisfied,
   haversineKm,
   isValidCoord,
@@ -852,6 +855,52 @@ export const finalizeRun = functions.https.onCall(async (data, context) => {
     leaderboard: { rankings, frozen: false, published: true, updatedAt: now },
     updatedAt: now,
   });
+
+  // Platform benchmark contribution (platform-benchmark): fold anonymized,
+  // per-task-type aggregates (median completion time + completion rate) into
+  // benchmarks/{taskType}. No per-run identifiers are written. Opt-outable via
+  // game.benchmarkOptOut. Best-effort — never blocks finalize.
+  if (!game.benchmarkOptOut) {
+    try {
+      const typeOf = new Map<string, string>();
+      for (const s of game.stages) for (const t of s.tasks) typeOf.set(t.id, t.type);
+      const durationsByType = new Map<string, number[]>();
+      const totalsByType = new Map<string, { done: number; total: number }>();
+      for (const team of teams) {
+        for (const stage of team.stages ?? []) {
+          for (const rec of stage.tasks ?? []) {
+            const type = typeOf.get(rec.taskId);
+            if (!type) continue;
+            const totals = totalsByType.get(type) ?? { done: 0, total: 0 };
+            totals.total += 1;
+            if (rec.status === 'completed') {
+              totals.done += 1;
+              if (rec.actualMinutes != null) {
+                const arr = durationsByType.get(type) ?? [];
+                arr.push(rec.actualMinutes * 60_000);
+                durationsByType.set(type, arr);
+              }
+            }
+            totalsByType.set(type, totals);
+          }
+        }
+      }
+      for (const [type, totals] of totalsByType) {
+        const sample = {
+          medianMs: median(durationsByType.get(type) ?? []),
+          completionRate: totals.total > 0 ? totals.done / totals.total : 0,
+        };
+        const benchRef = db.doc(`benchmarks/${type}`);
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(benchRef);
+          const prev = snap.exists ? (snap.data() as BenchmarkAggregate) : null;
+          tx.set(benchRef, mergeBenchmark(prev, sample));
+        });
+      }
+    } catch {
+      // Benchmark contribution is best-effort; never fail finalize over it.
+    }
+  }
 
   return { rankings };
 });
