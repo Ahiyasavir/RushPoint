@@ -52,8 +52,8 @@
 
 ## 1. Product Overview
 
-RushPoint is a **multi-tenant web platform** for building and running real-world team "race
-adventure" games (scavenger-hunt / amazing-race style). Any creator signs up, designs a game
+RushPoint is a **multi-tenant web platform** for building and running real-world team "field
+game" experiences (scavenger-hunt / amazing-race style). Any creator signs up, designs a game
 (ordered stages with geolocated or general tasks), launches a live run, shares an access code;
 participants join on their phones, get routed between tasks, complete them, and are scored
 automatically — **no human judge**.
@@ -677,7 +677,7 @@ Every purchase/charge/referral writes a `wallets/{uid}/transactions/{txId}` ledg
   Idempotent per account (`referredBy` flag); self-referral rejected; inviter must be a real Auth user.
 - **Share story cards** (`apps/play-web/src/lib/storyCard.ts`) — a branded 1080×1920 PNG drawn on a
   canvas at share time (no static assets, no server round-trip): gradient, trophy, headline,
-  game/team name, big score, stat chips (rank/time/stages), and a "Build your own race adventure"
+  game/team name, big score, stat chips (rank/time/stages), and a "Build your own field game"
   CTA URL. `shareStoryCard` uses the native share sheet on mobile (Instagram/WhatsApp), falls back to
   PNG download on desktop, or copies the caption text. Available on the **finish screen** ("Share my
   result") and **mid-race** ("Share our progress" brag card with rank headline).

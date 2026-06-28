@@ -19,7 +19,7 @@ relevant app, then save the result:
 copy(canvas.toDataURL('image/jpeg', 0.85));
 ```
 
-- **play-web** — warm "Trail" orange gradient, 🏁, headline "Join the race adventure".
-- **creator-web** — dark theme + orange glow, 🗺️, headline "Build your own race adventure".
+- **play-web** — warm "Trail" orange gradient, 🏁, headline "Join the field game".
+- **creator-web** — dark theme + orange glow, 🗺️, headline "Build your own field game".
 
 Keep the size at 1200×630 and update the `og:image:width/height` tags if that changes.

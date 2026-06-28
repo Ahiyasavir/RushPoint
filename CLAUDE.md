@@ -1,4 +1,4 @@
-# RushPoint — multi-tenant "race adventure" platform
+# RushPoint — multi-tenant "field game" platform
 
 > Coding guidelines & Firestore path rules: [INSTRUCTIONS.md](INSTRUCTIONS.md) ·
 > Architecture: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md) ·
@@ -29,7 +29,7 @@ logic/callable change is *write a failing test*, then minimum code to green, the
 proposals/designs/tasks live in [openspec/config.yaml](openspec/config.yaml).
 
 RushPoint is a **web platform where any creator builds and runs their own real-world team
-"race adventure" game** (scavenger-hunt / amazing-race style). A creator designs a game
+"field game"** (scavenger-hunt / amazing-race style). A creator designs a game
 (stages + geolocated tasks), launches a live run, shares an access code; participants join on
 their phones, get routed between tasks, and are scored automatically. The original "Race to
 Tzion" Jerusalem event is now just one game built on this platform.

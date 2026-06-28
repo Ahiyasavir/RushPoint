@@ -16,7 +16,7 @@ const SECTIONS = {
       body: `
 ## 1. מבוא ותחולה
 
-RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת SaaS ליצירה והפעלה של משחקי הרפתקה בעולם האמיתי בכתובת rushpoint.app ("השירות"). מדיניות פרטיות זו ("המדיניות") מסבירה אילו נתונים אנו אוספים, כיצד אנו מעבדים אותם, עם מי אנו משתפים אותם, וכיצד ניתן לממש את זכויותיך כנושא מידע.
+RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת SaaS ליצירה והפעלה של משחקי שדה בעולם האמיתי בכתובת rushpoint.app ("השירות"). מדיניות פרטיות זו ("המדיניות") מסבירה אילו נתונים אנו אוספים, כיצד אנו מעבדים אותם, עם מי אנו משתפים אותם, וכיצד ניתן לממש את זכויותיך כנושא מידע.
 
 מדיניות זו מיושמת בהתאם לחוק הגנת הפרטיות, תשמ"א-1981 ("חוק הפרטיות"), תקנות הגנת הפרטיות (אבטחת מידע), תשע"ז-2017, וחוק התקשורת (בזק ושידורים), תשמ"ב-1982 בכל הנוגע לדיוור ישיר.
 
@@ -204,7 +204,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
       body: `
 ## 1. Introduction and Scope
 
-RushPoint ("the Company", "we", "us") operates a SaaS platform for building and running real-world race adventure games at rushpoint.app ("the Service"). This Privacy Policy explains what data we collect, how we process it, with whom we share it, and how to exercise your rights as a data subject.
+RushPoint ("the Company", "we", "us") operates a SaaS platform for building and running real-world field games at rushpoint.app ("the Service"). This Privacy Policy explains what data we collect, how we process it, with whom we share it, and how to exercise your rights as a data subject.
 
 This Policy is applied in accordance with Israel's Protection of Privacy Law, 5741-1981, the Privacy Protection Regulations (Data Security) 5777-2017, and the Communications Law (Telecommunications and Broadcasts) 5742-1982 regarding direct marketing.
 
@@ -394,7 +394,7 @@ The Company will respond to requests within 30 days.
       body: `
 ## 1. כללי וקבלת התנאים
 
-ברוך הבא ל-RushPoint. תנאי שימוש אלו ("התנאים") מסדירים את הגישה שלך לפלטפורמת RushPoint ואת השימוש בה. RushPoint ("החברה") מפעילה פלטפורמת SaaS ליצירה, השקה וניהול משחקי הרפתקה בעולם האמיתי.
+ברוך הבא ל-RushPoint. תנאי שימוש אלו ("התנאים") מסדירים את הגישה שלך לפלטפורמת RushPoint ואת השימוש בה. RushPoint ("החברה") מפעילה פלטפורמת SaaS ליצירה, השקה וניהול משחקי שדה בעולם האמיתי.
 
 **בלחיצה על "יצירת חשבון", בכניסה למשחק, ו/או בכל שימוש אחר בשירות, אתה מצהיר שקראת, הבנת, ומסכים לתנאים אלו על כל חלקיהם.**
 
@@ -629,7 +629,7 @@ The Company will respond to requests within 30 days.
       body: `
 ## 1. Acceptance of Terms
 
-Welcome to RushPoint. These Terms of Service ("Terms") govern your access to and use of the RushPoint platform. RushPoint ("the Company") operates a SaaS platform for creating, launching, and managing real-world race adventure games.
+Welcome to RushPoint. These Terms of Service ("Terms") govern your access to and use of the RushPoint platform. RushPoint ("the Company") operates a SaaS platform for creating, launching, and managing real-world field games.
 
 **By clicking "Create Account", joining a game, and/or using the Service in any other way, you represent that you have read, understood, and agree to these Terms in their entirety.**
 

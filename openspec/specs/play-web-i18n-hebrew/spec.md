@@ -64,7 +64,7 @@ The `HE` values for `t.final` SHALL be:
 | `poweredBy` | `מופעל על ידי RushPoint` |
 | `buildOwn` | `בנו מירוץ משלכם, בחינם ←` |
 | `leave` | `צא` |
-| `shareText` | (fn) `🏆 {{team}} סיימה את "{{game}}"{{rankPart}}{{timePart}}! רוצים לבנות מירוץ הרפתקה משלכם? {{url}}` |
+| `shareText` | (fn) `🏆 {{team}} סיימה את "{{game}}"{{rankPart}}{{timePart}}! רוצים לבנות משחק שדה משלכם? {{url}}` |
 | `shareRankPart` | (fn) ` · מקום #{{rank}}` |
 | `shareTimePart` | (fn) ` תוך {{time}}` |
 

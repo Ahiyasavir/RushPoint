@@ -4,7 +4,7 @@ schema: spec-driven
 # AI plans against RushPoint's real stack, data model, and test infrastructure.
 context: |
   RushPoint — multi-tenant web platform for building & running real-world team
-  "race adventure" games. Architecture & exact feature behavior: see TECH_SPEC.md
+  "field game" experiences. Architecture & exact feature behavior: see TECH_SPEC.md
   (authoritative). Coding rules & Firestore paths: INSTRUCTIONS.md. Quick map: CLAUDE.md.
 
   Stack: npm workspaces + Turborepo. TypeScript (strict) everywhere.

@@ -49,7 +49,7 @@ function buildGame(now) {
       id: 'stage-1', order: 0, title: 'יוצאים לדרך',
       tasks: [t({
         id: 'task-1', title: 'שאלת פתיחה', type: 'quiz',
-        description: 'איזה אימוג׳י הכי מתאים למירוץ הרפתקה?',
+        description: 'איזה אימוג׳י הכי מתאים למשחק שדה?',
         choices: ['🏁', '🐌', '😴'], answers: ['🏁'], tags: ['demo'],
       })],
     },
@@ -89,7 +89,7 @@ function buildGame(now) {
     id: GAME_ID,
     ownerUid: OWNER_UID,
     title: 'משחק לדוגמה: מירוץ הסלון',
-    description: 'גרסת דמו קצרה של מירוץ הרפתקה. שחקו אותה כדי לראות איך RushPoint עובד מבפנים.',
+    description: 'גרסת דמו קצרה של משחק שדה. שחקו אותה כדי לראות איך RushPoint עובד מבפנים.',
     mode: 'individual',
     stages,
     scoringPreset: 'fixed_points_speed',

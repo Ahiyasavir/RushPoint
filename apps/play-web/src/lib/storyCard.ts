@@ -114,7 +114,7 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   // shared brand stamp on the bottom edge, so every share is one scan from joining.
   ctx.fillStyle = '#ffffff';
   ctx.font = '700 48px Outfit, Inter, sans-serif';
-  ctx.fillText('Build your own race adventure', W / 2, 1690);
+  ctx.fillText('Build your own field game', W / 2, 1690);
 
   await stampBrand(ctx, {
     width: W,

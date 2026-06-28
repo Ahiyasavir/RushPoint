@@ -46,7 +46,7 @@ selected. It SHALL NOT be hardcoded in Hebrew or English.
 The share text template keys SHALL be:
 | Key | EN value | HE value |
 |-----|----------|----------|
-| `shareText` | (fn) `🏆 {{team}} finished "{{game}}"{{rankPart}}{{timePart}}! Want to build your own race? {{url}}` | (fn) `🏆 {{team}} סיימה את "{{game}}"{{rankPart}}{{timePart}}! רוצים לבנות מירוץ הרפתקה משלכם? {{url}}` |
+| `shareText` | (fn) `🏆 {{team}} finished "{{game}}"{{rankPart}}{{timePart}}! Want to build your own field game? {{url}}` | (fn) `🏆 {{team}} סיימה את "{{game}}"{{rankPart}}{{timePart}}! רוצים לבנות משחק שדה משלכם? {{url}}` |
 | `shareRankPart` | (fn) ` · Rank #{{rank}}` | (fn) ` · מקום #{{rank}}` |
 | `shareTimePart` | (fn) ` in {{time}}` | (fn) ` תוך {{time}}` |
 
