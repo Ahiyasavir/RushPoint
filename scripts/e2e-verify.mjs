@@ -719,6 +719,17 @@ async function main() {
     // Owner can still read their own unpublished run's recap.
     const ownerUnpub = await creator.call('getRunRecap', { code: rcCode });
     check('recap: owner reads their own unpublished run', Array.isArray(ownerUnpub?.standings));
+
+    // ── Run replay (getRunReplay) — owner-only timeline ───────────────────────
+    const replay = await creator.call('getRunReplay', { code: accessCode });
+    check('replay: owner gets a time-ordered event stream', Array.isArray(replay?.events) && replay.events.length > 0, `events=${replay?.events?.length}`);
+    const ts = (replay?.events ?? []).map((e) => e.t);
+    check('replay: events are globally time-ordered', JSON.stringify(ts) === JSON.stringify([...ts].sort()));
+    check('replay: scoreSeries present per team', replay?.scoreSeries && Object.keys(replay.scoreSeries).length > 0);
+    let replayDenied = false;
+    try { await recapViewer.call('getRunReplay', { code: accessCode }); }
+    catch (e) { replayDenied = e.code === 'functions/permission-denied'; }
+    check('replay: non-owner is denied', replayDenied);
   }
 
   // ── Discovery POIs (surprise-trivia-waypoints) ──────────────────────────────

@@ -37,6 +37,7 @@ import {
   toDiscoveryPoiResult,
   type DiscoveryPoi,
   buildRunRecap,
+  buildRunTimeline,
   isConsentSatisfied,
   haversineKm,
   isValidCoord,
@@ -975,6 +976,40 @@ export const getRunRecap = functions.https.onCall(async (data, context) => {
     runStatus: run?.status ?? 'live',
     published,
     ...recap,
+  };
+});
+
+
+// ─── getRunReplay (run-replay-vod) ────────────────────────────────────────────
+// Owner-only chronological replay of a run: a globally time-ordered event stream
+// (start / task / finish) plus per-team cumulative score series. Resolves the run
+// by access code and refuses any non-owner caller. Retention-safe via
+// buildRunTimeline (pruned teams are simply omitted).
+export const getRunReplay = functions.https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  const { code } = data as { code: string };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const c = codeSnap.data() as AccessCode;
+  if (uid !== c.ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Replay is organizer-only');
+  }
+
+  const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
+  const game = gameSnap.exists ? (gameSnap.data() as Game) : null;
+  const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
+  const run = runSnap.exists ? (runSnap.data() as Run) : null;
+  const teamsSnap = await db.collection(teamsCol(c.ownerUid, c.gameId, c.runId)).get();
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+  const replay = buildRunTimeline(teams);
+  return {
+    title: game?.branding?.name ?? game?.title ?? 'RushPoint',
+    runStatus: run?.status ?? 'live',
+    ...replay,
   };
 });
 
