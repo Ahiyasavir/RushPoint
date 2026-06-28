@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone } from '@rushpoint/shared';
 
 export interface JoinInfo {
   context: { ownerUid: string; gameId: string; runId: string };
@@ -68,7 +68,7 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
 
 export interface MyTeamState {
   team: RunTeam;
-  run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; leaderboard: RunLeaderboard | null };
+  run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number };
   activeStageTasks: SafeTask[];
   context: { ownerUid: string; gameId: string; runId: string };

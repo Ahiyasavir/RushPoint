@@ -9,6 +9,7 @@ import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
+import InRunAlerts from '../components/InRunAlerts';
 import type { NavTarget } from '../components/NavMap';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
 // join screen doesn't need it; it loads when the participant starts racing.
@@ -213,6 +214,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     <Screen>
       <Header game={game} score={team.score} accent={accent} onLeave={leave} />
       <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
+      <InRunAlerts hotZone={state.run.hotZone} outOfBounds={team.outOfBounds} />
       {streak >= 2 && (
         <div
           key={milestone ?? streak}

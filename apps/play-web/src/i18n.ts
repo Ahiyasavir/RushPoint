@@ -195,6 +195,8 @@ const HE = {
       `🏃 ${team} רצים ב"${game}"${rankPart} עם ${score} נק'! בנו מירוץ משלכם ב-${url}`,
     shareRankPart: ({ rank }: { rank: number }) => ` · כרגע במקום #${rank}`,
     streak: ({ n }: { n: number }) => `🔥 ${n} ברצף!`,
+    hotZoneActive: ({ mult }: { mult: number }) => `אזור חם! ×${mult} נקודות`,
+    outOfBounds: 'אתם מחוץ לאזור המשחק — חזרו פנימה',
   },
   board: {
     unavailable: 'טבלת הדירוג אינה זמינה',
@@ -415,6 +417,8 @@ const EN: typeof HE = {
       `🏃 ${team} is racing "${game}"${rankPart} with ${score} pts! Build your own at ${url}`,
     shareRankPart: ({ rank }: { rank: number }) => ` · currently #${rank}`,
     streak: ({ n }: { n: number }) => `🔥 ${n} in a row!`,
+    hotZoneActive: ({ mult }: { mult: number }) => `Hot Zone! ${mult}× points`,
+    outOfBounds: "You're outside the play area — head back in",
   },
   board: {
     unavailable: 'Leaderboard unavailable',

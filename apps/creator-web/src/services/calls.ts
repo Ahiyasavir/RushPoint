@@ -10,6 +10,11 @@ import type {
   WalletStatus,
   EventPackageId,
   LeaderboardEntry,
+  HotZone,
+  TaskAnalytics,
+  ReplayEvent,
+  ScorePoint,
+  RunRecap,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -31,6 +36,21 @@ export const refreshLeaderboard = callable<
   { rankings: LeaderboardEntry[]; published: boolean; frozen: boolean }
 >('refreshLeaderboard');
 export const listRunTeams  = callable<{ gameId: string; runId: string }, { teams: RunTeamRow[] }>('listRunTeams');
+
+// ── Live-ops & post-run tools (deferred-UI callables now wired) ──
+export const activateHotZone = callable<
+  { gameId: string; runId: string; center: { lat: number; lng: number }; radiusMeters: number; multiplier: number; durationMinutes: number },
+  { ok: boolean; hotZone: HotZone }
+>('activateHotZone');
+export const deactivateHotZone = callable<{ gameId: string; runId: string }, { ok: boolean }>('deactivateHotZone');
+export const getRunAnalytics = callable<{ code: string }, RunAnalyticsResult>('getRunAnalytics');
+export const getRunReplay    = callable<{ code: string }, RunReplayResult>('getRunReplay');
+export const getRunRecap     = callable<{ code: string }, RunRecapResult>('getRunRecap');
+export const translateGame   = callable<{ gameId: string; targetLang: string }, { gameId: string; targetLang: string }>('translateGame');
+
+export interface RunAnalyticsResult { title: string; runStatus: string; teamCount: number; overallCompletionRate: number; tasks: TaskAnalytics[] }
+export interface RunReplayResult { title: string; runStatus: string; events: ReplayEvent[]; scoreSeries: Record<string, ScorePoint[]>; teams: { teamId: string; teamName: string }[] }
+export interface RunRecapResult extends RunRecap { title: string; runStatus: string; published: boolean }
 
 export interface RunTeamRow {
   id: string;

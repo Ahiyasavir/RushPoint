@@ -1553,6 +1553,10 @@ export const getMyTeamState = functions.https.onCall(async (data, context) => {
       id: run.id, status: run.status, accessCode: run.accessCode,
       billingType: run.billingType ?? 'free',
       leaderboard: run.leaderboard ?? null,
+      // Active hot zone (hot-zone-bonus) so the participant app can show the
+      // live "🔥 Hot Zone" banner + countdown. Coordinates are the zone centre
+      // (already public to anyone in the run); answer keys are unaffected.
+      hotZone: run.hotZone ?? null,
     },
     game: {
       id: game.id,
