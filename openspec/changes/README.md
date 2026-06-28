@@ -34,7 +34,7 @@ all green).
 |---|---|
 | `play-web-i18n-hebrew` | ✅ archived (`2026-06-27-play-web-i18n-hebrew`) → play-web-i18n spec; ALL participant+staff screens/components i18n'd (StaffConsole, PlayScreen, PublicLeaderboard, ErrorBoundary + TaskRunner error/dialog strings); 156-key HE/EN parity, zero English chrome; all 5 gates green |
 | `ui-no-dashes` | ✅ archived (`2026-06-27-ui-no-dashes`) → ui-text-standards spec; `scripts/test-no-dashes.ts` scans both apps' i18n maps for `—`/`–`/` - ` (in npm test); offenders swept; standard documented in INSTRUCTIONS.md §3.C; all 5 gates green |
-| `platform-benchmark` | 📋 backlog |
+| `platform-benchmark` | ✅ archived (`2026-06-28-platform-benchmark`) → platform-benchmark spec; finalizeRun folds anonymized per-task-type aggregates (median time + completion rate) into benchmarks/{taskType} (transactional rolling merge, no per-run ids, game.benchmarkOptOut, best-effort); pure mergeBenchmark + benchmarkIndicator + median; rules: authed read / CF-only write; 21 pure + 3 e2e + rules. Analytics column (task 5) **deferred to frontend agent**. All 6 gates green. **P6 #1.** |
 
 ## 4. Marketing & virality — `v21-marketing-virality.todo.test.ts`
 | Change | Status |
