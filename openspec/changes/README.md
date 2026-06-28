@@ -59,7 +59,7 @@ all green).
 | `live-emoji-reactions` | 📋 backlog |
 | `tv-leaderboard` | ✅ archived (`2026-06-27-tv-leaderboard`) → tv-leaderboard spec; play-web `?tv=<accessCode>` full-screen projection screen (reuses getPublicLeaderboard, 12s auto-refresh, published-gated, "Now in the lead!" flash via pure detectLeaderChange); shared tv.ts; 8 pure tests; all gates green. RunConsole launcher button (req 4) **deferred to frontend agent** (creator-web i18n). **P3 #2.** |
 | `run-analytics-heatmap` | 📋 backlog |
-| `surprise-trivia-waypoints` | 📋 backlog |
+| `surprise-trivia-waypoints` | ✅ archived (`2026-06-28-surprise-trivia-waypoints`) → surprise-trivia-waypoints spec; server core: getRunDiscoveryPois (coord/answer-stripped) + claimDiscoveryPoi (server proximity + answer + bonus, idempotent via team.discoveryState); shared discoveryPoi.ts (isWithinPoiRadius, matchesDiscoveryAnswer, isPoiAlreadyClaimed, injection-safe buildOverpassQuery) + types + paths; firestore.rules POI owner-only (play denied); 24 pure + 6 rules + 8 e2e. UI (Builder panel + play overlay, tasks 7-9) **deferred to frontend agent**. All 6 gates green. **P3 #4.** |
 | `hot-zone-bonus` | ✅ archived (`2026-06-27-hot-zone-bonus`) → hot-zone-bonus spec; organizer activate/deactivateHotZone callables (owner-auth, bounded, server-stamped, single zone), completeTaskForTeam multiplies earnedScore by pure hotZoneMultiplier (server task coords + clock, never client claim); shared hotZone.ts + HotZone type; 13 pure + 6 e2e (in-zone ×2, out-of-zone unchanged). Fixed missing runs re-export (not-found). UI (banner + RunConsole panel) **deferred to frontend agent**. All 5 gates green. **P3 #3.** |
 
 ## 7. Feature expansion — `v21-feature-expansion.todo.test.ts`
