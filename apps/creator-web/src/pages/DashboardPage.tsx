@@ -53,7 +53,7 @@ export default function DashboardPage() {
   async function newGame(tpl: GameTemplate) {
     setBusy(true); setPicking(false);
     try {
-      const title = tpl.key === 'blank' ? 'הרפתקה ללא שם' : tpl.label;
+      const title = tpl.key === 'blank' ? 'משחק ללא שם' : tpl.label;
       const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
       const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
       await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
@@ -276,17 +276,22 @@ export default function DashboardPage() {
               </div>
               <div className="flex sm:flex-col gap-2.5 shrink-0">
                 <Button className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/gallery')}>{d.bannerCta1}</Button>
-                <Button variant="ghost" className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/wallet')}>{d.bannerCta2}</Button>
+                {/* "Invite & earn" routes to the wallet — hidden in free mode. */}
+                {PAYMENTS_ENABLED && (
+                  <Button variant="ghost" className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/wallet')}>{d.bannerCta2}</Button>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Quick actions */}
+          {/* Quick actions — the Wallet/Credits card is hidden in free mode
+              (PAYMENTS_ENABLED === false), matching the hidden /wallet nav + route. */}
           <div className="grid sm:grid-cols-3 gap-4">
-            {d.quickCards.map((a, i) => {
-              const targets = ['/', '/gallery', '/wallet'];
-              return (
-                <button key={a.title} onClick={() => nav(targets[i] ?? '/')}
+            {d.quickCards
+              .map((a, i) => ({ a, target: ['/', '/gallery', '/wallet'][i] ?? '/' }))
+              .filter(({ target }) => PAYMENTS_ENABLED || target !== '/wallet')
+              .map(({ a, target }, i) => (
+                <button key={a.title} onClick={() => nav(target)}
                   className="group text-start rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] backdrop-blur-sm p-5 hover:-translate-y-1 hover:border-rp-fire/30 hover:shadow-[0_12px_32px_-12px_rgba(255,87,34,0.25)] transition-all duration-200 animate-fade-up"
                   style={{ animationDelay: `${160 + i * 60}ms` }}
                 >
@@ -295,8 +300,7 @@ export default function DashboardPage() {
                   <p className="text-[13px] text-[--ink-3] mt-1.5 leading-relaxed">{a.body}</p>
                   <div className="text-xs font-semibold text-rp-fire mt-3.5 flex items-center gap-1 group-hover:gap-2 transition-all">{a.cta} <span>→</span></div>
                 </button>
-              );
-            })}
+              ))}
           </div>
         </div>
       )}
@@ -336,7 +340,7 @@ export default function DashboardPage() {
       {sharing && (
         <ShareSheet
           title={`שתף "${sharing.title}"`}
-          text={`הצטרף להרפתקת הריצה שלי ב-RushPoint: ${sharing.title}`}
+          text={`הצטרף למשחק השדה שלי ב-RushPoint: ${sharing.title}`}
           url={`${PLAY_URL}/?game=${sharing.id}`}
           notPublic={sharing.visibility !== 'public'}
           onPublish={async () => {
