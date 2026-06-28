@@ -69,7 +69,7 @@ all green).
 | `task-creation-wizard` | 📋 backlog (24 tasks) — layout half superseded by the builder shell redesign above; pure-logic/wizard-flow half still open |
 | `task-trigger-modes` | ✅ archived (`2026-06-26-task-trigger-modes`) → task-trigger-modes spec; server gate now honors triggerMode (radius/exact/instant via evaluateTrigger), e2e exact+instant green, Builder 4-mode selector. §4.3 (edit the unbuilt task-creation-wizard spec) deferred with that change. |
 | `solo-mode-registration` | ✅ archived (`2026-06-27-solo-mode-registration`) → solo-registration spec; JoinScreen fully wired (solo = one name input, no member list; team unchanged) via resolveRegistrationFields/resolveDisplayName; all gates green |
-| `import-game-spreadsheet` | 📋 backlog |
+| `import-game-spreadsheet` | ✅ archived (`2026-06-28-import-game-spreadsheet`) → game-import spec; pure parseGameRows (rows → stages/tasks grouped by stage column, per-row validation: unknown type / quiz+numeric answer / bad coords / missing title; blank coords → locationless; quiz answers split on `\|`); shared importSheet.ts; 20 pure tests. Builder Import panel (task 3, creator-web) **deferred to frontend agent**. All gates green. **P5 #1.** |
 | `white-label-pro` | 📋 backlog |
 
 ## 8. Free mode — `v21-free-mode.todo.test.ts`
