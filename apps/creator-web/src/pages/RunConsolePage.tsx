@@ -9,7 +9,7 @@ import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
-  type RunTeamRow,
+  getRunAnalytics, type RunTeamRow, type RunAnalyticsResult,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -159,6 +159,7 @@ export default function RunConsolePage() {
         {!finished && <HotZonePanel ctx={ctx} hotZone={run.hotZone ?? null} />}
         <PostRunLinks accessCode={run.accessCode} finished={finished} />
       </div>
+      {finished && <AnalyticsPanel accessCode={run.accessCode} />}
 
       <div className="grid lg:grid-cols-3 gap-5">
         {/* Teams */}
@@ -402,6 +403,72 @@ function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: 
           </>
         )}
       </div>
+    </Card>
+  );
+}
+
+
+// ── Post-run per-task analytics (run-analytics-heatmap) ───────────────────────
+const TYPE_EMOJI: Record<string, string> = {
+  smart_station: '🔑', photo: '📸', quiz: '❓', numeric: '🔢',
+  field: '✅', self_report: '🙋', geofence: '📡', sequence: '📋',
+};
+function fmtMs(ms: number): string {
+  if (!ms) return '—';
+  const s = Math.round(ms / 1000);
+  return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
+}
+function AnalyticsPanel({ accessCode }: { accessCode: string }) {
+  const t = useT();
+  const [data, setData] = useState<RunAnalyticsResult | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    setBusy(true);
+    try { setData(await getRunAnalytics({ code: accessCode })); } finally { setBusy(false); }
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">{t.runConsole.analyticsTitle}</div>
+        {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.analyticsLoad}</Button>}
+      </div>
+      {data && (
+        data.tasks.length === 0 ? (
+          <div className="text-sm text-zinc-500">{t.runConsole.analyticsEmpty}</div>
+        ) : (
+          <div className="space-y-2">
+            <div className="text-sm text-zinc-400">{t.runConsole.analyticsOverall({ pct: Math.round(data.overallCompletionRate * 100) })}</div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-zinc-500 text-xs text-start">
+                  <tr>
+                    <th className="text-start font-medium py-1">{t.runConsole.colTask}</th>
+                    <th className="text-start font-medium py-1">{t.runConsole.colDone}</th>
+                    <th className="text-start font-medium py-1">{t.runConsole.colRate}</th>
+                    <th className="text-start font-medium py-1">{t.runConsole.colMedian}</th>
+                    <th className="text-start font-medium py-1">{t.runConsole.colHints}</th>
+                    <th className="text-start font-medium py-1">{t.runConsole.colSkips}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.tasks.map((task) => (
+                    <tr key={task.taskId} className="border-t border-[--rp-border]">
+                      <td className="py-1.5">{TYPE_EMOJI[task.type] ?? '•'} {task.type}</td>
+                      <td className="py-1.5">{task.completions}/{task.attempts}</td>
+                      <td className="py-1.5">{Math.round(task.completionRate * 100)}%</td>
+                      <td className="py-1.5 font-mono">{fmtMs(task.medianMs)}</td>
+                      <td className="py-1.5">{task.hintCount}</td>
+                      <td className="py-1.5">{task.skips}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      )}
     </Card>
   );
 }
