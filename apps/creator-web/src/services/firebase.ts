@@ -18,6 +18,7 @@ import {
   type User,
 } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+import { resolveEmulatorHost } from '@rushpoint/shared';
 
 // Emulator-safe defaults: the Firebase SDK only needs non-empty apiKey/appId
 // strings to initialize locally. projectId MUST match .firebaserc + the seed.
@@ -40,9 +41,12 @@ export const functions = getFunctions(app);
 const emuFlag = globalThis as unknown as { __rushpointEmu?: boolean };
 if (import.meta.env.DEV && !emuFlag.__rushpointEmu) {
   emuFlag.__rushpointEmu = true;
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
+  // Emulator host: 127.0.0.1 for normal dev; the tunnel origin in playtest
+  // (playtest-shareable-links). Default keeps dev:all unchanged.
+  const host = resolveEmulatorHost(import.meta.env, typeof window !== 'undefined' ? window.location.origin : null);
+  connectFirestoreEmulator(db, host, 8080);
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, host, 5001);
 }
 
 // ── Creator auth (email/password + Google) ───────────────────────────────────

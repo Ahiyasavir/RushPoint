@@ -21,6 +21,7 @@ import {
   uploadBytes,
   getDownloadURL,
 } from 'firebase/storage';
+import { resolveEmulatorHost } from '@rushpoint/shared';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -58,10 +59,13 @@ export const storage   = getStorage(app);
 const emuFlag = globalThis as unknown as { __rpPlayEmu?: boolean };
 if (import.meta.env.DEV && !emuFlag.__rpPlayEmu) {
   emuFlag.__rpPlayEmu = true;
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  // Emulator host: 127.0.0.1 for normal dev; the tunnel origin in playtest so a
+  // remote phone reaches the backend (playtest-shareable-links).
+  const host = resolveEmulatorHost(import.meta.env, typeof window !== 'undefined' ? window.location.origin : null);
+  connectFirestoreEmulator(db, host, 8080);
+  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, host, 5001);
+  connectStorageEmulator(storage, host, 9199);
 }
 
 // Participants play anonymously (uid == teamId). Each device/browser is a team.
