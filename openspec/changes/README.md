@@ -49,7 +49,7 @@ all green).
 | Change | Status |
 |---|---|
 | `no-signup-demo` | 📋 backlog |
-| `duplicate-translate-game` | 📋 backlog |
+| `duplicate-translate-game` | ✅ archived (`2026-06-28-duplicate-translate-game`) → game-translation spec; translateGame callable (duplicate + translate display text, preserve coords/types/scoring, keep original answer as alias); pure collectTranslatableFields + applyTranslations (path-based, identity round-trips); shared translateFields.ts; 15 pure + 8 e2e. Mock translator until TRANSLATE_API_KEY set; creator-web action (task 5) **deferred**. All 6 gates green. **P5 #3.** |
 | `playtest-shareable-links` | 📋 backlog |
 
 ## 6. Engagement & analytics — `v21-engagement-and-analytics.todo.test.ts`
