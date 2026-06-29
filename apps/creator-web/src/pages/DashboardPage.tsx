@@ -44,9 +44,16 @@ export default function DashboardPage() {
 
   async function load(invalidate = false) {
     if (!invalidate && _gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return;
-    const { games } = await listGames();
-    _gamesCache = { data: games, ts: Date.now() };
-    setGames(games);
+    try {
+      const { games } = await listGames();
+      _gamesCache = { data: games, ts: Date.now() };
+      setGames(games);
+    } catch (e) {
+      // Escape the spinner on a first-load failure, but never blank an already-
+      // loaded dashboard if a post-mutation refresh fails.
+      setGames((prev) => prev ?? []);
+      await dialog.alert(e instanceof Error ? e.message : 'Failed to load games');
+    }
   }
   useEffect(() => { void load(); }, []);
 
