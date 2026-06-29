@@ -5,6 +5,18 @@ import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import type { PublicGame, PublicTask } from '@rushpoint/shared';
 
+/**
+ * Case-insensitive substring match of `query` against a set of text fields.
+ * Undefined-safe: a missing/non-string field is simply skipped (denormalized
+ * gallery docs are server-written but must never crash search if one is sparse).
+ * An empty/whitespace query matches everything.
+ */
+export function publicTextMatch(haystacks: Array<string | undefined | null>, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return haystacks.some((h) => typeof h === 'string' && h.toLowerCase().includes(q));
+}
+
 // ─── searchGallery ───────────────────────────────────────────────────────────
 
 export const searchGallery = functions.https.onCall(async (data, _context) => {
@@ -26,13 +38,7 @@ export const searchGallery = functions.https.onCall(async (data, _context) => {
 
   // Client-side text filter (Firestore has no full-text search built-in)
   if (query.trim()) {
-    const q = query.toLowerCase();
-    games = games.filter(
-      (g) =>
-        g.title.toLowerCase().includes(q) ||
-        g.description?.toLowerCase().includes(q) ||
-        g.tags.some((t) => t.toLowerCase().includes(q)),
-    );
+    games = games.filter((g) => publicTextMatch([g.title, g.description, ...(g.tags ?? [])], query));
   }
 
   return { games };
@@ -58,12 +64,7 @@ export const searchTaskLibrary = functions.https.onCall(async (data, _context) =
   let tasks = snap.docs.map((d) => d.data() as PublicTask);
 
   if (query.trim()) {
-    const q = query.toLowerCase();
-    tasks = tasks.filter(
-      (t) =>
-        t.title.toLowerCase().includes(q) ||
-        t.description?.toLowerCase().includes(q),
-    );
+    tasks = tasks.filter((t) => publicTextMatch([t.title, t.description], query));
   }
 
   return { tasks };
