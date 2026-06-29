@@ -63,7 +63,7 @@ export function ShareSheet({
         {qr && <img src={qr} alt="QR code" className="mx-auto rounded-lg bg-white p-2 w-44 h-44" />}
 
         <div className="mt-4 flex items-center gap-2 rounded-lg bg-app-bg border border-glass-border px-3 py-2">
-          <span className="text-xs text-zinc-400 truncate flex-1">{url.replace(/^https?:\/\//, '')}</span>
+          <span className="text-xs text-zinc-400 truncate flex-1 min-w-0">{url.replace(/^https?:\/\//, '')}</span>
           <button onClick={copy} className="text-xs text-neon-green hover:underline shrink-0">
             {copied ? 'Copied ✓' : 'Copy'}
           </button>
