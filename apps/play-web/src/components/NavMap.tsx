@@ -51,8 +51,14 @@ export default function NavMap({
       'top-right',
     );
     return () => { map.current?.remove(); map.current = null; };
+    // Re-run when the map container appears/disappears: while `valid` is empty the
+    // component renders a placeholder with NO ref div, so a NavMap that mounts
+    // before its targets load would otherwise create the map against a null ref
+    // once and never retry — a permanently blank map. Keyed on emptiness (not the
+    // full target list) so the happy path, where targets are present throughout,
+    // is byte-identical to `[]` (the value never changes, so it fires once).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [valid.length === 0]);
 
   // Switch tile style on mode change (HTML markers persist across setStyle).
   useEffect(() => {
