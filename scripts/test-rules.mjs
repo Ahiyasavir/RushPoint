@@ -149,7 +149,15 @@ async function main() {
   await check('non-image content type is rejected', assertFails(uploadBytes(ref(teamStore, `runs/${RUN}/teams/${TEAM}/p.txt`), img, { contentType: 'text/plain' })));
   await check('>10MB upload is rejected', assertFails(uploadBytes(ref(teamStore, `runs/${RUN}/teams/${TEAM}/big.jpg`), big, meta)));
   await check('client CANNOT write the CF-only public stream', assertFails(uploadBytes(ref(teamStore, `stream/x.jpg`), img, meta)));
-  await check('authed user CAN read a checkin photo', assertSucceeds(getBytes(ref(teamStore, `runs/${RUN}/teams/${TEAM}/p.jpg`)).catch(() => { throw new Error('read denied'); })));
+  // ── Photo READ privacy: a participant must only read their OWN photos. A team
+  //    folder is keyed by uid, so a malicious participant who knows the runId
+  //    must NOT be able to list/download other teams' photos (faces, locations).
+  const staffStore = testEnv.authenticatedContext('staff-uid', { staff: true, ownerUid: OWNER, gameId: GAME, runId: RUN }).storage();
+  const wrongStaffStore = testEnv.authenticatedContext('staff2', { staff: true, ownerUid: OWNER, gameId: GAME, runId: 'OTHER-RUN' }).storage();
+  await check('a team CAN read its OWN photo', assertSucceeds(getBytes(ref(teamStore, `runs/${RUN}/teams/${TEAM}/p.jpg`))));
+  await check('a DIFFERENT team CANNOT read another team\'s photo (privacy)', assertFails(getBytes(ref(team2Store, `runs/${RUN}/teams/${TEAM}/p.jpg`))));
+  await check('scoped staff CAN read a team photo in its run', assertSucceeds(getBytes(ref(staffStore, `runs/${RUN}/teams/${TEAM}/p.jpg`))));
+  await check('staff for a DIFFERENT run CANNOT read a team photo', assertFails(getBytes(ref(wrongStaffStore, `runs/${RUN}/teams/${TEAM}/p.jpg`))));
   await check('anon CANNOT read a photo (auth required)', assertFails(getBytes(ref(anonStore, `runs/${RUN}/teams/${TEAM}/p.jpg`))));
 
   await testEnv.cleanup();

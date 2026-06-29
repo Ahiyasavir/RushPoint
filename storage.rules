@@ -9,10 +9,19 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
     // v2 platform — photo-mission uploads under a run. A participant (uid ==
-    // teamId) may write only into their own team folder; any authed user (the
-    // owner + staff reviewing submissions) may read.
+    // teamId) may write only into their own team folder.
+    //
+    // READ is restricted: a participant may read only their OWN team's photos,
+    // and staff scoped to THIS run may read them for review. The owner + the
+    // recap/share surfaces display photos via tokenized getDownloadURL() links
+    // (which bypass Storage rules), so this does NOT break legitimate display —
+    // it only stops a participant who knows the runId from listing/downloading
+    // every other team's photos (faces, locations) by path.
     match /runs/{runId}/teams/{teamId}/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && (
+        request.auth.uid == teamId
+        || (request.auth.token.staff == true && request.auth.token.runId == runId)
+      );
       allow write: if request.auth != null && request.auth.uid == teamId
         && request.resource.size < 10 * 1024 * 1024  // 10MB max
         && request.resource.contentType.matches('image/.*');
