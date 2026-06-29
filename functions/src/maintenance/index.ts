@@ -16,6 +16,7 @@
 import * as functions from 'firebase-functions';
 import { db, storage } from '../firebase';
 import { RUN_DATA_RETENTION_DAYS } from '@rushpoint/shared';
+import { deleteDocsInChunks } from '../batchUtil';
 
 const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
 
@@ -46,14 +47,10 @@ interface PruneResult {
 export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<PruneResult> {
   const runPath = `users/${ownerUid}/games/${gameId}/runs/${runId}`;
 
-  // 1) Delete the live GPS ping docs (teamLocations subcollection).
+  // 1) Delete the live GPS ping docs (teamLocations subcollection). This can run
+  //    to thousands of docs, so it must be deleted in batch-sized chunks.
   const locSnap = await db.collection(`${runPath}/teamLocations`).get();
-  let locationsDeleted = 0;
-  if (!locSnap.empty) {
-    const batch = db.batch();
-    for (const d of locSnap.docs) { batch.delete(d.ref); locationsDeleted++; }
-    await batch.commit();
-  }
+  const locationsDeleted = await deleteDocsInChunks(locSnap.docs.map((d) => d.ref));
 
   // 2) Clear photo URLs from each team's submissions (keep scores/answers), and
   //    clear any guardian-consent PII (the guardian's name).
@@ -87,11 +84,7 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
 
   // 2b) Delete the single-use consent tokens (they carry team identifiers).
   const tokSnap = await db.collection(`${runPath}/consentTokens`).get();
-  if (!tokSnap.empty) {
-    const batch = db.batch();
-    for (const d of tokSnap.docs) { batch.delete(d.ref); consentCleared++; }
-    await batch.commit();
-  }
+  consentCleared += await deleteDocsInChunks(tokSnap.docs.map((d) => d.ref));
 
   // 3) Delete uploaded photo objects under this run's Storage prefix.
   let storagePurged = false;
