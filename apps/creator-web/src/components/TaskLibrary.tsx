@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import type { PublicTask, Task } from '@rushpoint/shared';
 import { searchTaskLibrary, incrementTaskCopyCount } from '../services/calls';
 import { Button, Card, Input, Spinner } from './ui';
+import { dialog } from './dialog';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -32,8 +33,14 @@ export default function TaskLibrary({ onInsert, onClose }: {
 
   async function run() {
     setTasks(null);
-    const { tasks } = await searchTaskLibrary({ query: q });
-    setTasks(tasks);
+    try {
+      const { tasks } = await searchTaskLibrary({ query: q });
+      setTasks(tasks);
+    } catch (e) {
+      // Don't strand the modal on a spinner if the search fails.
+      await dialog.alert(e instanceof Error ? e.message : 'Search failed');
+      setTasks([]);
+    }
   }
   useEffect(() => { void run(); /* eslint-disable-next-line */ }, []);
 
