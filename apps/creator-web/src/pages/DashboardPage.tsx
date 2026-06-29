@@ -62,7 +62,7 @@ export default function DashboardPage() {
   }
 
   async function launch(g: Game) {
-    if (g.stages.length === 0) { await dialog.alert(d.loadingGames); return; }
+    if (g.stages.length === 0) { await dialog.alert(d.emptyBody); return; }
     setBusy(true);
     try {
       const { runId } = await launchRun({ gameId: g.id });
