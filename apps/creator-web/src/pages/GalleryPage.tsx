@@ -25,8 +25,15 @@ export default function GalleryPage() {
   }
 
   async function run() {
-    if (tab === 'games') { const { games } = await searchGallery({ query: q }); setGames(games); }
-    else { const { tasks } = await searchTaskLibrary({ query: q }); setTasks(tasks); }
+    try {
+      if (tab === 'games') { const { games } = await searchGallery({ query: q }); setGames(games); }
+      else { const { tasks } = await searchTaskLibrary({ query: q }); setTasks(tasks); }
+    } catch (e) {
+      // A failed search must not hang the gallery on an eternal spinner: surface
+      // the error and settle to an empty result the user can retry from.
+      await dialog.alert(e instanceof Error ? e.message : 'Search failed');
+      if (tab === 'games') setGames([]); else setTasks([]);
+    }
   }
   useEffect(() => { void run(); /* eslint-disable-next-line */ }, [tab]);
 
