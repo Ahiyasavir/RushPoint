@@ -39,11 +39,17 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     // Validate required registration fields client-side so participants see
     // exactly which fields to fill instead of waiting for a cold server error.
     const allFields = resolveRegistrationFields(info.mode, info.registrationFields);
-    const errors = validateRequiredFields(allFields, values);
+    // The member 'name' field is collected via the members list (memberNames),
+    // NOT `values` — so validate the remaining custom fields against `values`,
+    // and require at least one non-empty member name separately. (Validating
+    // 'name' against `values` here used to block every join: the name lives in
+    // `members`, so values['name'] was always empty.)
+    const memberNames = members.map((m) => m.trim()).filter(Boolean);
+    const errors = validateRequiredFields(allFields.filter((f) => f.id !== 'name'), values);
+    if (memberNames.length === 0) { setBusy(false); return; } // guarded by the disabled Join button
     if (errors.size > 0) { setFieldErrors(errors); setBusy(false); return; }
     setFieldErrors(new Set());
     try {
-      const memberNames = members.map((m) => m.trim()).filter(Boolean);
       const displayName = resolveDisplayName(info.mode, values, memberNames);
       const res = await joinRun({ code: code.trim().toUpperCase(), displayName, registrationData: values, memberNames });
       const session: Session = {
