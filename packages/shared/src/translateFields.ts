@@ -51,6 +51,9 @@ export function applyTranslations<T extends TGame>(game: T, translations: Record
   for (const [path, value] of Object.entries(translations)) {
     if (typeof value !== 'string') continue;
     const parts = path.split('.');
+    // Reject prototype-pollution paths (__proto__ / constructor / prototype) so a
+    // crafted translation key can never reach Object.prototype.
+    if (parts.some((p) => p === '__proto__' || p === 'constructor' || p === 'prototype')) continue;
     let obj: Record<string, unknown> = clone as unknown as Record<string, unknown>;
     let ok = true;
     for (let i = 0; i < parts.length - 1; i++) {

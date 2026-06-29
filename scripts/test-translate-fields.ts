@@ -59,6 +59,12 @@ ok(game.title === 'Old City Hunt', 'applyTranslations does not mutate the source
 const robust = applyTranslations(game, { 'stages.9.tasks.9.title': 'x' });
 ok(robust.title === 'Old City Hunt', 'unknown path ignored without throwing');
 
+// Prototype-pollution guard: a malicious path must never reach Object.prototype.
+applyTranslations(game, { '__proto__.polluted': 'yes' });
+const polluted = (({} as Record<string, unknown>).polluted);
+delete (Object.prototype as Record<string, unknown>).polluted; // cleanup regardless of outcome
+ok(polluted === undefined, 'applyTranslations does not pollute Object.prototype via a __proto__ path');
+
 console.log(failed === 0
   ? `\n✅ ALL TRANSLATE-FIELDS TESTS PASSED (${passed})`
   : `\n❌ ${failed} failed, ${passed} passed`);
