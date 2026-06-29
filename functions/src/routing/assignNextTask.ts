@@ -90,6 +90,7 @@ export async function computeSkillRatio(
     if (!task || task.estimatedMinutes <= 0) continue;
     const actual = s.actualMinutes ??
       (new Date(s.completedAt!).getTime() - new Date(s.startedAt!).getTime()) / 60_000;
+    if (!Number.isFinite(actual)) continue; // garbage timestamps must not poison the ratio
     total += Math.max(-1, Math.min(1, (actual - task.estimatedMinutes) / task.estimatedMinutes));
     count++;
   }
