@@ -23,6 +23,7 @@ import {
   applyTranslations,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos } from '../storageUtil';
+import { deleteDocsInChunks } from '../batchUtil';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 
@@ -134,12 +135,10 @@ export const deleteGame = functions.https.onCall(async (data, context) => {
   const game = snap.data() as Game;
   if (game.visibility === 'public') {
     await db.doc(`publicGames/${gameId}`).delete().catch(() => undefined);
-    // Remove public tasks from this game
+    // Remove public tasks from this game (chunked: a large game can have >500).
     const publicTasksSnap = await db.collection('publicTasks')
       .where('sourceGameId', '==', gameId).get();
-    const batch = db.batch();
-    for (const d of publicTasksSnap.docs) batch.delete(d.ref);
-    if (!publicTasksSnap.empty) await batch.commit();
+    await deleteDocsInChunks(publicTasksSnap.docs.map((d) => d.ref));
   }
 
   // Purge uploaded photos for every run of this game, then recursively delete

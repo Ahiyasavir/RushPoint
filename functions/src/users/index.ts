@@ -13,6 +13,7 @@
 import * as functions from 'firebase-functions';
 import { db, auth } from '../firebase';
 import { deleteRunsPhotos } from '../storageUtil';
+import { deleteDocsInChunks } from '../batchUtil';
 import type { Game, Wallet } from '@rushpoint/shared';
 
 function requireAuth(context: functions.https.CallableContext): string {
@@ -127,11 +128,11 @@ export const deleteMyAccount = functions.https.onCall(async (data, context) => {
     db.collection('publicTasks').where('ownerUid', '==', uid).get(),
     db.collection('accessCodes').where('ownerUid', '==', uid).get(),
   ]);
-  const batch = db.batch();
-  for (const d of pubGames.docs) batch.delete(d.ref);
-  for (const d of pubTasks.docs) batch.delete(d.ref);
-  for (const d of codes.docs) batch.delete(d.ref);
-  await batch.commit().catch(() => undefined);
+  // Chunked so a prolific creator with >500 combined gallery entries + codes
+  // can't blow the per-batch cap and silently orphan right-to-erasure data.
+  await deleteDocsInChunks(
+    [...pubGames.docs, ...pubTasks.docs, ...codes.docs].map((d) => d.ref),
+  ).catch(() => undefined);
 
   // 2) Purge uploaded photos for every run the user owns, BEFORE the Firestore
   // tree (which holds the runIds) is deleted. Otherwise they orphan in Storage.
