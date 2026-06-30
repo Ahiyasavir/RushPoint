@@ -106,11 +106,24 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   async function sos() {
     if (!(await dialog.confirm(t.play.sosConfirm, { confirmLabel: t.play.sosSend, danger: true }))) return;
-    navigator.geolocation?.getCurrentPosition(
-      (p) => triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat: p.coords.latitude, lng: p.coords.longitude }),
-      () => triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId }),
-    );
-    await dialog.alert(t.play.sosSent);
+    // Resolve a best-effort location first, THEN actually send — and only confirm
+    // "sent" once triggerSOS resolves. Reporting success before the call (or
+    // ignoring its failure) on a SAFETY feature could leave a team in trouble
+    // believing help is coming when the alert never reached the host.
+    const coords = await new Promise<{ lat: number; lng: number } | null>((resolve) => {
+      if (!navigator.geolocation) { resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => resolve(null),
+        { timeout: 8000 },
+      );
+    });
+    try {
+      await triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, ...(coords ?? {}) });
+      await dialog.alert(t.play.sosSent);
+    } catch {
+      await dialog.alert(t.play.sosFailed);
+    }
   }
 
   // Mid-race brag card — same branded story image as the finish screen, but with
