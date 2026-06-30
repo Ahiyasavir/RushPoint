@@ -20,6 +20,10 @@ const HE = {
     errorBody: 'האפליקציה נתקלה בשגיאה בלתי צפויה. ההתקדמות שלכם נשמרה. נסו שוב, או טענו מחדש אם זה חוזר.',
     tryAgain: 'נסו שוב',
     reload: 'טעינה מחדש',
+    ok: 'אישור',
+    confirm: 'אישור',
+    cancel: 'ביטול',
+    offline: '⚠ אין חיבור. ההתקדמות נשמרה. פעולות יתחדשו כשהקליטה תחזור.',
   },
   join: {
     subtitle: 'הזינו את קוד הגישה מהמארגן כדי להצטרף למירוץ',
@@ -246,6 +250,10 @@ const EN: typeof HE = {
     errorBody: 'The app hit an unexpected error. Your progress is saved. Try again, or reload if it keeps happening.',
     tryAgain: 'Try again',
     reload: 'Reload',
+    ok: 'OK',
+    confirm: 'Confirm',
+    cancel: 'Cancel',
+    offline: "⚠ You're offline. Progress saved. Actions will resume when signal returns.",
   },
   join: {
     subtitle: 'Enter the access code from your host to join the race',

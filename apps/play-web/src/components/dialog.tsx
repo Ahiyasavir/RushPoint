@@ -3,6 +3,7 @@
 // Mount <DialogHost/> once at the app root; call `await dialog.confirm(...)`.
 import { useEffect, useState } from 'react';
 import { Button, Card } from './ui';
+import { useT } from '../i18nContext';
 
 type DialogKind = 'alert' | 'confirm';
 interface DialogRequest {
@@ -15,13 +16,18 @@ interface DialogRequest {
 }
 
 let counter = 0;
-let listener: ((req: DialogRequest | null) => void) | null = null;
+// FIFO queue so a second dialog opened while one is showing doesn't overwrite
+// (and silently abandon) the first — previously the first promise never
+// resolved, hanging its awaiter. Requests show one at a time, in order.
+const queue: DialogRequest[] = [];
+let show: ((req: DialogRequest | null) => void) | null = null;
 
 function push(kind: DialogKind, message: string, opts?: { confirmLabel?: string; danger?: boolean }) {
   return new Promise<boolean>((resolve) => {
     const req: DialogRequest = { id: ++counter, kind, message, resolve, ...opts };
-    if (!listener) { resolve(kind !== 'confirm'); return; }
-    listener(req);
+    if (!show) { resolve(kind !== 'confirm'); return; }
+    queue.push(req);
+    if (queue.length === 1) show(req); // host is idle → display immediately
   });
 }
 
@@ -32,16 +38,22 @@ export const dialog = {
 };
 
 export function DialogHost() {
+  const { t } = useT();
   const [req, setReq] = useState<DialogRequest | null>(null);
 
   useEffect(() => {
-    listener = setReq;
-    return () => { listener = null; };
+    show = setReq;
+    return () => { show = null; };
   }, []);
 
   if (!req) return null;
 
-  const close = (result: boolean) => { req.resolve(result); setReq(null); };
+  // Resolve this request, drop it from the queue, then surface the next one.
+  const close = (result: boolean) => {
+    req.resolve(result);
+    queue.shift();
+    setReq(queue[0] ?? null);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -49,10 +61,10 @@ export function DialogHost() {
         <p className="text-base text-zinc-100 whitespace-pre-line text-center">{req.message}</p>
         <div className="space-y-2.5">
           <Button variant={req.danger ? 'danger' : 'primary'} onClick={() => close(true)}>
-            {req.confirmLabel ?? (req.kind === 'alert' ? 'OK' : 'Confirm')}
+            {req.confirmLabel ?? (req.kind === 'alert' ? t.common.ok : t.common.confirm)}
           </Button>
           {req.kind === 'confirm' && (
-            <Button variant="ghost" onClick={() => close(false)}>Cancel</Button>
+            <Button variant="ghost" onClick={() => close(false)}>{t.common.cancel}</Button>
           )}
         </div>
       </Card>
