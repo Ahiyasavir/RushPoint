@@ -46,12 +46,13 @@ async function geocode(query: string): Promise<GeoResult[]> {
 }
 
 export default function LocationPicker({
-  lat, lng, onChange, className = '',
+  lat, lng, onChange, className = '', fill = false,
 }: {
   lat: number;
   lng: number;
   onChange: (lat: number, lng: number) => void;
   className?: string;
+  fill?: boolean;
 }) {
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
@@ -89,7 +90,15 @@ export default function LocationPicker({
     map.current.on('click', (e) => place(e.lngLat));
 
     if (hasCoord) setMarker(lat, lng);
-    return () => { map.current?.remove(); map.current = null; marker.current = null; };
+
+    // In fill mode the container is sized by flexbox; keep the GL canvas in sync
+    // with the container (panel width animation, viewport changes) via ResizeObserver.
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined' && ref.current) {
+      ro = new ResizeObserver(() => map.current?.resize());
+      ro.observe(ref.current);
+    }
+    return () => { ro?.disconnect(); map.current?.remove(); map.current = null; marker.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -145,9 +154,9 @@ export default function LocationPicker({
   }
 
   return (
-    <div className="relative">
+    <div className={fill ? 'relative flex-1 min-h-0 flex flex-col' : 'relative'}>
       {/* Place search */}
-      <div className="relative mb-2">
+      <div className={`relative mb-2 ${fill ? 'shrink-0' : ''}`}>
         <div className="flex gap-2">
           <Input
             value={query}
@@ -191,7 +200,9 @@ export default function LocationPicker({
         )}
       </div>
 
-      <div ref={ref} className={`rounded-lg overflow-hidden border border-glass-border ${className}`} />
+      <div ref={ref} className={fill
+        ? 'flex-1 min-h-0 rounded-lg overflow-hidden border border-glass-border'
+        : `rounded-lg overflow-hidden border border-glass-border ${className}`} />
       <MapModeToggle mode={mode} onChange={setMode} />
       {!hasCoord && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none pb-3">

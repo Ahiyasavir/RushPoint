@@ -14,6 +14,7 @@
 // or not a run actually had photo uploads, and is idempotent.
 
 import * as functions from 'firebase-functions';
+import { loggedCallable } from '../obs/log';
 import { db, storage } from '../firebase';
 import { RUN_DATA_RETENTION_DAYS } from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
@@ -139,13 +140,13 @@ export const pruneExpiredRunData = functions.pubsub
 
 
 // ─── On-demand admin callables (testable) ─────────────────────────────────────
-export const pruneExpiredRunDataNow = functions.https.onCall(async (_data, context) => {
+export const pruneExpiredRunDataNow = loggedCallable('pruneExpiredRunDataNow', async (_data, context) => {
   assertAdmin(context);
   const results = await sweepExpiredRuns();
   return { ok: true, prunedCount: results.length, results };
 });
 
-export const pruneRunNow = functions.https.onCall(async (data, context) => {
+export const pruneRunNow = loggedCallable('pruneRunNow', async (data, context) => {
   assertAdmin(context);
   const { ownerUid, gameId, runId } = data as RunRef;
   if (!ownerUid || !gameId || !runId) {

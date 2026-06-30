@@ -1,3 +1,7 @@
+// ⚠️ RED-PHASE BLUEPRINT — NOT COVERAGE. The test.todo() lines below are the
+// intended future RED tests for the mapped Appendix B roadmap rows; they assert
+// nothing yet. Do not read this file's existence as test coverage. When a row is
+// started, convert its todos into real failing tests first (see openspec/config.yaml).
 // ───────────────────────────────────────────────────────────────────────────
 // v2.1 RED-PHASE BLUEPRINT — Engagement, analytics & discovery
 // ───────────────────────────────────────────────────────────────────────────

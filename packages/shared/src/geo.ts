@@ -75,6 +75,7 @@ export function evaluateTrigger(
   mode: TriggerMode,
   distanceM: number | undefined,
   radiusM?: number,
+  opts?: { hidden?: boolean },
 ): { ok: boolean; reason?: string } {
   if (mode === 'instant' || mode === 'locationless') return { ok: true };
   if (distanceM == null || !Number.isFinite(distanceM)) {
@@ -82,7 +83,15 @@ export function evaluateTrigger(
   }
   const limit = radiusM != null && Number.isFinite(radiusM) ? radiusM : defaultRadiusFor(mode);
   if (distanceM > limit) {
-    return { ok: false, reason: `Too far from the spot (${Math.round(distanceM)}m away)` };
+    // Hidden-location tasks (treasure-hunt) must not leak the distance — otherwise
+    // a player could triangulate the secret spot by polling completeTask. Return a
+    // generic clue-driven message instead of the metres-away figure.
+    return {
+      ok: false,
+      reason: opts?.hidden
+        ? 'Not here yet — keep following the clue'
+        : `Too far from the spot (${Math.round(distanceM)}m away)`,
+    };
   }
   return { ok: true };
 }
@@ -102,6 +111,40 @@ export function normalizeTriggerMode(task: {
   if (task.locationless) return 'locationless';
   // 'geofence' type and any plain located task both behave as a radius gate.
   return 'radius';
+}
+
+
+// ─── Hidden-location task validation (change: hidden-location-task) ───────────
+// A hidden task keeps its coordinates server-side and is gated by PHYSICAL arrival,
+// so it MUST have valid coordinates AND a proximity trigger (radius/exact). A
+// missing clue is a soft warning — a creator may rely on the title alone. Pure, so
+// the Builder UI (block save) and the server share the exact same rule.
+export interface HiddenLocationCheck {
+  ok: boolean;
+  error?: 'no_coordinates' | 'wrong_trigger';
+  warning?: 'no_clue';
+}
+
+export function checkHiddenLocationTask(task: {
+  hideLocation?: boolean;
+  coordinates?: { lat?: unknown; lng?: unknown };
+  triggerMode?: TriggerMode;
+  locationless?: boolean;
+  type?: string;
+  locationClue?: string;
+  locationClueHe?: string;
+}): HiddenLocationCheck {
+  if (!task.hideLocation) return { ok: true };
+
+  if (!task.coordinates || !isValidCoord(task.coordinates.lat, task.coordinates.lng)) {
+    return { ok: false, error: 'no_coordinates' };
+  }
+  const mode = normalizeTriggerMode(task);
+  if (mode !== 'radius' && mode !== 'exact') {
+    return { ok: false, error: 'wrong_trigger' };
+  }
+  const hasClue = !!(task.locationClue?.trim() || task.locationClueHe?.trim());
+  return hasClue ? { ok: true } : { ok: true, warning: 'no_clue' };
 }
 
 

@@ -11,6 +11,7 @@
 // portability, deletion). Every callable acts ONLY on the caller's own uid.
 
 import * as functions from 'firebase-functions';
+import { loggedCallable, logBestEffort } from '../obs/log';
 import { db, auth } from '../firebase';
 import { deleteRunsPhotos } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
@@ -29,7 +30,7 @@ function requireAuth(context: functions.https.CallableContext): string {
 // and the denormalized ownerDisplayName carried on every public gallery entry
 // so the gallery doesn't show a stale name.
 
-export const updateMyProfile = functions.https.onCall(async (data, context) => {
+export const updateMyProfile = loggedCallable('updateMyProfile', async (data, context) => {
   const uid = requireAuth(context);
   const { displayName } = data as { displayName: string };
 
@@ -54,7 +55,7 @@ export const updateMyProfile = functions.https.onCall(async (data, context) => {
     const batch = db.batch();
     for (const d of pubGames.docs) batch.update(d.ref, { ownerDisplayName: name });
     for (const d of pubTasks.docs) batch.update(d.ref, { ownerDisplayName: name });
-    await batch.commit().catch(() => undefined);
+    await batch.commit().catch((e) => logBestEffort('profile.galleryDenorm.commit', { uid }, e));
   }
 
   return { ok: true, displayName: name };
@@ -66,22 +67,22 @@ export const updateMyProfile = functions.https.onCall(async (data, context) => {
 // "right of access" / data-portability obligation. The client offers it as a
 // downloadable JSON file.
 
-export const exportMyData = functions.https.onCall(async (_data, context) => {
+export const exportMyData = loggedCallable('exportMyData', async (_data, context) => {
   const uid = requireAuth(context);
 
   const [authUser, profileSnap, gamesSnap, walletSnap, txSnap] = await Promise.all([
-    auth.getUser(uid).catch(() => null),
+    auth.getUser(uid).catch((e) => { logBestEffort('auth.getUser', { uid }, e); return null; }),
     db.doc(`users/${uid}`).get(),
     db.collection(`users/${uid}/games`).get(),
     db.doc(`wallets/${uid}`).get(),
-    db.collection(`wallets/${uid}/transactions`).orderBy('createdAt', 'desc').get().catch(() => null),
+    db.collection(`wallets/${uid}/transactions`).orderBy('createdAt', 'desc').get().catch((e) => { logBestEffort('wallet.transactions.get', { uid }, e); return null; }),
   ]);
 
   // Per-game run summaries (counts only — full team data can be very large).
   const games = await Promise.all(
     gamesSnap.docs.map(async (g) => {
       const game = g.data() as Game;
-      const runsSnap = await db.collection(`users/${uid}/games/${g.id}/runs`).get().catch(() => null);
+      const runsSnap = await db.collection(`users/${uid}/games/${g.id}/runs`).get().catch((e) => { logBestEffort('runs.get', { uid, gameId: g.id }, e); return null; });
       return {
         ...game,
         runCount: runsSnap?.size ?? 0,
@@ -115,7 +116,7 @@ export const exportMyData = functions.https.onCall(async (_data, context) => {
 //   • the user tree (users/{uid} → games → runs → teams …) via recursiveDelete
 //   • the Firebase Auth identity (last, so a failure mid-way is retry-safe)
 
-export const deleteMyAccount = functions.https.onCall(async (data, context) => {
+export const deleteMyAccount = loggedCallable('deleteMyAccount', async (data, context) => {
   const uid = requireAuth(context);
   const { confirm } = data as { confirm?: boolean };
   if (confirm !== true) {
@@ -132,7 +133,7 @@ export const deleteMyAccount = functions.https.onCall(async (data, context) => {
   // can't blow the per-batch cap and silently orphan right-to-erasure data.
   await deleteDocsInChunks(
     [...pubGames.docs, ...pubTasks.docs, ...codes.docs].map((d) => d.ref),
-  ).catch(() => undefined);
+  ).catch((e) => logBestEffort('account.galleryCodes.delete', { uid }, e));
 
   // 2) Purge uploaded photos for every run the user owns, BEFORE the Firestore
   // tree (which holds the runIds) is deleted. Otherwise they orphan in Storage.
@@ -145,7 +146,7 @@ export const deleteMyAccount = functions.https.onCall(async (data, context) => {
   await deleteRunsPhotos(runIds);
 
   // 3) Wallet + transactions, then the whole user tree (games → runs → teams).
-  await db.recursiveDelete(db.doc(`wallets/${uid}`)).catch(() => undefined);
+  await db.recursiveDelete(db.doc(`wallets/${uid}`)).catch((e) => logBestEffort('wallet.recursiveDelete', { uid }, e));
   await db.recursiveDelete(db.doc(`users/${uid}`));
 
   // 4) The Auth identity itself — done last so data is gone before the login is.

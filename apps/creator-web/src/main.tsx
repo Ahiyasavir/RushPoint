@@ -5,7 +5,11 @@ import App from './App';
 import { AuthProvider } from './components/AuthGate';
 import { LanguageProvider } from './components/LanguageContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import { initTelemetry } from './services/telemetry';
 import './index.css';
+
+// Install global crash/rejection handlers + (DSN-gated) crash reporter before render.
+initTelemetry();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

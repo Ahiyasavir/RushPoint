@@ -5,6 +5,7 @@
 // may update/delete their own games.
 
 import * as functions from 'firebase-functions';
+import { loggedCallable, logBestEffort } from '../obs/log';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
 import {
@@ -43,7 +44,7 @@ function requireAuth(context: functions.https.CallableContext): string {
 
 // ─── createGame ───────────────────────────────────────────────────────────────
 
-export const createGame = functions.https.onCall(async (data, context) => {
+export const createGame = loggedCallable('createGame', async (data, context) => {
   const uid = requireAuth(context);
   const { title, description, mode = 'individual', tags = [] } = data as CreateGamePayload;
 
@@ -77,7 +78,7 @@ export const createGame = functions.https.onCall(async (data, context) => {
 
 // ─── updateGame ───────────────────────────────────────────────────────────────
 
-export const updateGame = functions.https.onCall(async (data, context) => {
+export const updateGame = loggedCallable('updateGame', async (data, context) => {
   const uid = requireAuth(context);
   const {
     gameId,
@@ -119,7 +120,7 @@ export const updateGame = functions.https.onCall(async (data, context) => {
 
 // ─── deleteGame ───────────────────────────────────────────────────────────────
 
-export const deleteGame = functions.https.onCall(async (data, context) => {
+export const deleteGame = loggedCallable('deleteGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId } = data as { gameId: string };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -134,7 +135,7 @@ export const deleteGame = functions.https.onCall(async (data, context) => {
   // Remove the public index if the game was public
   const game = snap.data() as Game;
   if (game.visibility === 'public') {
-    await db.doc(`publicGames/${gameId}`).delete().catch(() => undefined);
+    await db.doc(`publicGames/${gameId}`).delete().catch((e) => logBestEffort('publicGames.delete', { gameId }, e));
     // Remove public tasks from this game (chunked: a large game can have >500).
     const publicTasksSnap = await db.collection('publicTasks')
       .where('sourceGameId', '==', gameId).get();
@@ -154,7 +155,7 @@ export const deleteGame = functions.https.onCall(async (data, context) => {
 
 // ─── duplicateGame ────────────────────────────────────────────────────────────
 
-export const duplicateGame = functions.https.onCall(async (data, context) => {
+export const duplicateGame = loggedCallable('duplicateGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, sourceOwnerUid } = data as { gameId: string; sourceOwnerUid?: string };
 
@@ -188,8 +189,8 @@ export const duplicateGame = functions.https.onCall(async (data, context) => {
 
   // Increment original's playCount (best-effort)
   if (ownerUid !== uid) {
-    sourceRef.update({ playCount: admin.firestore.FieldValue.increment(1) }).catch(() => undefined);
-    db.doc(`publicGames/${gameId}`).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch(() => undefined);
+    sourceRef.update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
+    db.doc(`publicGames/${gameId}`).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
   }
 
   return { gameId: newRef.id };
@@ -199,7 +200,7 @@ export const duplicateGame = functions.https.onCall(async (data, context) => {
 // ─── publishGame ─────────────────────────────────────────────────────────────
 // Toggles game visibility and syncs/removes the publicGames + publicTasks index.
 
-export const publishGame = functions.https.onCall(async (data, context) => {
+export const publishGame = loggedCallable('publishGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, visibility } = data as { gameId: string; visibility: 'public' | 'private' };
 
@@ -224,7 +225,7 @@ export const publishGame = functions.https.onCall(async (data, context) => {
     const estimatedTotalMinutes = allTasks.reduce((s, t) => s + t.estimatedMinutes, 0);
 
     // Get creator display name
-    const creatorSnap = await admin.auth().getUser(uid).catch(() => null);
+    const creatorSnap = await admin.auth().getUser(uid).catch((e) => { logBestEffort('auth.getUser', { uid }, e); return null; });
     const ownerDisplayName = creatorSnap?.displayName ?? undefined;
 
     const publicGame: PublicGame = {
@@ -292,7 +293,7 @@ export const publishGame = functions.https.onCall(async (data, context) => {
 
 // ─── getGame ──────────────────────────────────────────────────────────────────
 
-export const getGame = functions.https.onCall(async (data, context) => {
+export const getGame = loggedCallable('getGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId } = data as { gameId: string };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -309,10 +310,11 @@ export const getGame = functions.https.onCall(async (data, context) => {
 
 // ─── listGames ────────────────────────────────────────────────────────────────
 
-export const listGames = functions.https.onCall(async (_data, context) => {
+export const listGames = loggedCallable('listGames', async (_data, context) => {
   const uid = requireAuth(context);
   const snap = await db.collection(gamesCol(uid))
     .orderBy('updatedAt', 'desc')
+    .limit(200) // bound the read — a creator's game list is not unbounded in the UI
     .get();
   const games = snap.docs.map((d) => d.data() as Game);
   return { games };
@@ -325,7 +327,7 @@ export const listGames = functions.https.onCall(async (_data, context) => {
 // an unpublished game has no publicGames doc), loads the secret task, and returns
 // ONLY { correct }. The answer key never leaves the server. No auth required —
 // this is an external acquisition surface for brand-new (signed-out) viewers.
-export const checkChallengeAnswer = functions.https.onCall(async (data) => {
+export const checkChallengeAnswer = loggedCallable('checkChallengeAnswer', async (data) => {
   const { gameId, taskId, answer } = (data ?? {}) as {
     gameId?: string; taskId?: string; answer?: string;
   };
@@ -369,11 +371,14 @@ async function translateTexts(texts: string[], lang: string): Promise<string[]> 
   return texts.map((t) => `[${lang}] ${t}`);
 }
 
-export const translateGame = functions.https.onCall(async (data, context) => {
+export const translateGame = loggedCallable('translateGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, targetLang } = data as { gameId: string; targetLang: string };
   if (!gameId || !targetLang?.trim()) {
     throw new functions.https.HttpsError('invalid-argument', 'gameId and targetLang required');
+  }
+  if (targetLang.trim().length > 16) {
+    throw new functions.https.HttpsError('invalid-argument', 'targetLang is not a valid language code');
   }
 
   const snap = await db.doc(gamePath(uid, gameId)).get();

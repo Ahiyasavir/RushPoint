@@ -43,6 +43,20 @@ check('instant passes even with a huge distance', evaluateTrigger('instant', 999
 // ── radius/exact require a finite distance ───────────────────────────────────
 check('radius without distance is not ok', evaluateTrigger('radius', undefined, 40).ok === false);
 
+// ── hidden-location: same accept/reject, but the reject reason leaks no distance
+// (change: hidden-location-task). A player must not be able to triangulate the
+// hidden spot by reading the distance out of repeated rejections.
+const hiddenReject = evaluateTrigger('radius', 60, 40, { hidden: true });
+check('hidden radius@40 still rejects 60m', hiddenReject.ok === false);
+check('hidden reject reason contains NO distance digits',
+  !!hiddenReject.reason && !/\d/.test(hiddenReject.reason), hiddenReject.reason);
+check('hidden reject reason contains no "m away"',
+  !!hiddenReject.reason && !/m away/i.test(hiddenReject.reason), hiddenReject.reason);
+check('hidden radius@40 still accepts 30m', evaluateTrigger('radius', 30, 40, { hidden: true }).ok === true);
+const visibleReject = evaluateTrigger('radius', 60, 40);
+check('visible reject reason STILL contains the distance',
+  !!visibleReject.reason && /60m away/.test(visibleReject.reason), visibleReject.reason);
+
 // ── normalizeTriggerMode: legacy mapping ─────────────────────────────────────
 const located = { coordinates: { lat: 31.7, lng: 35.2 } } as Task;
 const geofence = { type: 'geofence', coordinates: { lat: 31.7, lng: 35.2 } } as Task;

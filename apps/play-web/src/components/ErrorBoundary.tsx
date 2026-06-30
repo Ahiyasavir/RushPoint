@@ -1,6 +1,7 @@
 import React from 'react';
 import { translations } from '../i18n';
 import { loadLang } from '../store';
+import { reportError } from '../services/telemetry';
 
 interface Props { children: React.ReactNode }
 interface State { error: Error | null }
@@ -19,8 +20,8 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Seam for crash reporting (Sentry, etc.). Console for now.
-    console.error('[play-web] crash:', error, info.componentStack);
+    // Funnel through the telemetry seam (console-only until a Sentry DSN is set).
+    reportError(error, { boundary: 'play-root', componentStack: info.componentStack });
   }
 
   reset = () => this.setState({ error: null });

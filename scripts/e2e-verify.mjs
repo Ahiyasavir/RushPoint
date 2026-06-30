@@ -237,6 +237,20 @@ async function main() {
   }
   check('submitStationPhoto rejects acting on another team (IDOR)', idorPhotoRejected);
 
+  // [callable-rate-limiting #19] a single uid's call volume is bounded per window.
+  // triggerSOS has a small budget (5/min); the 6th rapid call trips resource-exhausted.
+  let sosRateTrip = false;
+  for (let i = 0; i < 6; i++) {
+    try {
+      await player.call('triggerSOS', {
+        ownerUid: creatorCred.user.uid, gameId, runId, message: 'rate-limit probe',
+      });
+    } catch (e) {
+      if (e.code === 'functions/resource-exhausted') sosRateTrip = true;
+    }
+  }
+  check('rate limiting: spamming triggerSOS past its budget → resource-exhausted', sosRateTrip);
+
   const verifyRes = await player.call('verifyStationCode', {
     ownerUid: creatorCred.user.uid, gameId, runId,
     teamId: playerCred.user.uid, taskId: CODE_TASK_ID, code: 'zion', // case-insensitive
@@ -592,6 +606,57 @@ async function main() {
   check('sequence: final step completes the task', seq2?.taskComplete === true);
   const fin4 = await player4.call('getMyTeamState', { code: c4 });
   check('all four task types completed → team finished', fin4?.team?.status === 'finished', fin4?.team?.status);
+
+  // ── 14b. Hidden-location task (treasure hunt: coords secret, clue-guided) ───
+  // A hidden located task keeps its coordinates server-side: the participant gets
+  // the clue + a locationHidden flag but NO coordinates/radius, and the out-of-range
+  // rejection must not leak the distance. A sibling visible task still gets coords.
+  const { gameId: gHL } = await creator.call('createGame', { title: 'Hidden Spot Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gHL,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 's-hidden', order: 0, title: 'Find it', isFinal: true,
+      tasks: [{
+        id: 'hl-1', title: 'The secret spot', type: 'field', triggerMode: 'radius',
+        hideLocation: true, coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40,
+        locationClue: 'Where water never stops', locationClueHe: 'במקום שבו המים לא נחים',
+        difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 9,
+      }, {
+        id: 'hl-2', title: 'A visible spot', type: 'field', triggerMode: 'radius',
+        coordinates: { lat: 31.781, lng: 35.211 }, geofenceRadiusMeters: 40,
+        difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 9,
+      }],
+    }],
+  });
+  const { runId: rHL, accessCode: cHL } = await creator.call('launchRun', { gameId: gHL });
+  const playerHL = makeParty('playerHL');
+  await signInAnonymously(playerHL.auth);
+  await playerHL.call('joinRun', { code: cHL, displayName: 'Seeker' });
+  await creator.call('startTeams', { gameId: gHL, runId: rHL });
+  const CHL = { ownerUid: creatorCred.user.uid, gameId: gHL, runId: rHL };
+
+  const sHL = await playerHL.call('getMyTeamState', { code: cHL });
+  const hiddenTask = sHL?.activeStageTasks?.find((t) => t.id === 'hl-1');
+  const visibleTask = sHL?.activeStageTasks?.find((t) => t.id === 'hl-2');
+  check('hidden task: coordinates stripped from payload', hiddenTask?.coordinates === undefined, JSON.stringify(hiddenTask?.coordinates));
+  check('hidden task: locationHidden flag set', hiddenTask?.locationHidden === true, String(hiddenTask?.locationHidden));
+  check('hidden task: exact radius withheld', hiddenTask?.geofenceRadiusMeters === undefined, String(hiddenTask?.geofenceRadiusMeters));
+  check('hidden task: clue exposed (EN + HE)',
+    hiddenTask?.locationClue === 'Where water never stops' && hiddenTask?.locationClueHe === 'במקום שבו המים לא נחים',
+    JSON.stringify({ en: hiddenTask?.locationClue, he: hiddenTask?.locationClueHe }));
+  check('visible sibling task: coordinates still present', visibleTask?.coordinates?.lat === 31.781 && visibleTask?.locationHidden === undefined, JSON.stringify(visibleTask?.coordinates));
+
+  // Out-of-range check-in on the hidden task: rejected with NO distance leaked.
+  let hiddenFarMsg = '';
+  try { await playerHL.call('completeTask', { ...CHL, taskId: 'hl-1', lat: 32.5, lng: 35.9 }); }
+  catch (e) { hiddenFarMsg = e.message; }
+  check('hidden task: out-of-range check-in rejected', hiddenFarMsg.length > 0, hiddenFarMsg);
+  check('hidden task: rejection leaks NO distance digits', hiddenFarMsg.length > 0 && !/\d/.test(hiddenFarMsg) && !/m away/i.test(hiddenFarMsg), hiddenFarMsg);
+
+  // Arrival within radius completes (server-validated GPS), assigns the next task.
+  const hiddenNear = await playerHL.call('completeTask', { ...CHL, taskId: 'hl-1', lat: 31.78, lng: 35.21 });
+  check('hidden task: arrival within radius completes', hiddenNear?.ok === true, JSON.stringify(hiddenNear));
 
   // ── 15. Free mode: no consumption + referral (free-run bonus, once) ─────────
   // In free mode all 4 launches were free, so nothing was consumed: the wallet

@@ -51,9 +51,13 @@ export const joinRun = callable<
 
 // Sanitized task shape returned to participants — every answer key is stripped
 // server-side (secretCode, hint text, quiz answers, numeric target, step answers).
-export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps'> & {
+export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps' | 'coordinates'> & {
   hasHint?: boolean;
   hintPenalty?: number;
+  // Hidden-location tasks have their coordinates stripped server-side and carry
+  // `locationHidden`; the client suppresses the pin and shows `locationClue`.
+  coordinates?: Task['coordinates'];
+  locationHidden?: boolean;
   steps?: { id: string; prompt: string }[];
   smart?: {
     enabled: boolean;

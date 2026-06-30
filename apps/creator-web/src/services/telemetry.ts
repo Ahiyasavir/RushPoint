@@ -38,12 +38,28 @@ export function initTelemetry(): void {
   if (installed || typeof window === 'undefined') return;
   installed = true;
 
-  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-  if (dsn && !reporter) {
-    // eslint-disable-next-line no-console
-    console.warn('[RushPoint] VITE_SENTRY_DSN is set but no crash reporter is registered — call setCrashReporter() to activate it.');
-  }
-
   window.addEventListener('error', (e) => reportError(e.error ?? e.message, { source: 'window.onerror' }));
   window.addEventListener('unhandledrejection', (e) => reportError(e.reason, { source: 'unhandledrejection' }));
+
+  // Wire the real crash provider behind the seam, gated on a DSN. The SDK is
+  // dynamically imported (kept out of the main bundle) and only loaded when a
+  // DSN is configured — with no DSN this is a no-op and behavior is console-only.
+  const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
+  if (dsn && !reporter) {
+    // The specifier is a variable (not a literal) + @vite-ignore so the bundler
+    // never tries to resolve the OPTIONAL @sentry/browser at build time. With no
+    // DSN this branch never runs, so the SDK is loaded only when actually wired.
+    const mod = '@sentry/browser';
+    void import(/* @vite-ignore */ mod)
+      .then((Sentry: { init(o: { dsn: string; tracesSampleRate?: number }): void;
+                       captureException(e: unknown, h?: { extra?: Record<string, unknown> }): void }) => {
+        Sentry.init({ dsn, tracesSampleRate: 0 });
+        setCrashReporter((error, context) => Sentry.captureException(error, { extra: context }));
+      })
+      .catch(() => {
+        // @sentry/browser not installed → stay console-only. Never mask app startup.
+        // eslint-disable-next-line no-console
+        console.warn('[RushPoint] VITE_SENTRY_DSN is set but @sentry/browser is not installed.');
+      });
+  }
 }

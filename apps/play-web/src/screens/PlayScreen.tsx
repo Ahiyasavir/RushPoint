@@ -202,6 +202,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         .map((rec) => {
           const content = state.activeStageTasks.find((c) => c.id === rec.taskId);
           if (content?.locationless) return null; // general task — not on the map
+          if (content?.locationHidden) return null; // hidden spot — found by clue, no pin
           const coords = content?.smart?.stationCoords ?? content?.coordinates;
           return coords && (coords.lat !== 0 || coords.lng !== 0)
             ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Task', active: rec.status === 'assigned' }

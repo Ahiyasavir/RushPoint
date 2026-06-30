@@ -7,10 +7,7 @@ import type { Task, TaskType } from '@rushpoint/shared';
 import { normalizeTriggerMode } from '@rushpoint/shared';
 import { taskPreviewLine, TYPE_FAMILY_COLOR, type PreviewLabels } from '../lib/taskCardPreview';
 import { useT } from './LanguageContext';
-
-const TRIGGER_ICON: Record<string, string> = {
-  radius: '📍', exact: '🎯', instant: '⚡', locationless: '🌐',
-};
+import { BuilderIcon, TRIGGER_ICON_NAME } from './builderIcons';
 
 /** Filled/empty difficulty dots (1..10 compressed to 5 dots). */
 function DifficultyDots({ difficulty }: { difficulty: number }) {
@@ -18,7 +15,7 @@ function DifficultyDots({ difficulty }: { difficulty: number }) {
   return (
     <span className="inline-flex gap-0.5" title={`Difficulty ${difficulty}/10`} aria-label={`Difficulty ${difficulty} of 10`}>
       {Array.from({ length: 5 }, (_, i) => (
-        <span key={i} className={`w-1.5 h-1.5 rounded-full ${i < filled ? 'bg-rp-fire' : 'bg-[--rp-border]'}`} />
+        <span key={i} className={`w-2 h-2 rounded-full ${i < filled ? 'bg-rp-fire' : 'bg-[--rp-border]'}`} />
       ))}
     </span>
   );
@@ -43,24 +40,22 @@ export default function TaskCard({ task, active, onClick }: { task: Task; active
     <button
       onClick={onClick}
       style={{ borderInlineStartColor: color }}
-      className={`w-full text-start rounded-xl border border-[--rp-border] border-s-[3px] bg-[--surface-1] px-4 py-3
-        flex items-center gap-3 transition-colors hover:bg-[--surface-2]
+      className={`w-full text-start rounded-xl border border-[--rp-border] border-s-[4px] bg-[--surface-1] px-4 py-3
+        flex flex-col gap-2 transition-colors hover:bg-[--surface-2]
         ${active ? 'ring-2 ring-rp-fire/60' : ''}`}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded" style={{ background: `${color}22`, color }}>
-            {typeLabel[task.type]}
-          </span>
-          <span className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{task.title || b.untitledTask}</span>
-        </div>
-        <div className="text-xs text-[--ink-3] truncate mt-0.5" dir="auto">{taskPreviewLine(task, previewLabels)}</div>
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0" style={{ background: `${color}22`, color }}>
+          {typeLabel[task.type]}
+        </span>
+        <span className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{task.title || b.untitledTask}</span>
+        <BuilderIcon name={TRIGGER_ICON_NAME[mode]} className="w-4 h-4 ms-auto shrink-0 text-[--ink-3]" />
       </div>
-      <div className="shrink-0 flex items-center gap-3 text-[11px] text-[--ink-3]">
+      <div className="flex items-center gap-3 min-w-0 text-xs text-[--ink-3]">
+        <span className="truncate flex-1" dir="auto">{taskPreviewLine(task, previewLabels)}</span>
         <DifficultyDots difficulty={task.difficulty} />
-        <span title="Estimated minutes">⏱ {task.estimatedMinutes}m</span>
-        <span title="Points">★ {task.pointValue}</span>
-        <span title={`Trigger: ${mode}`}>{TRIGGER_ICON[mode] ?? '📍'}</span>
+        <span className="shrink-0 tabular-nums" title="Estimated minutes">⏱ {task.estimatedMinutes}m</span>
+        <span className="shrink-0 tabular-nums" title="Points">★ {task.pointValue}</span>
       </div>
     </button>
   );

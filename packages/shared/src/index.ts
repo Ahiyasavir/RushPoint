@@ -7,6 +7,7 @@ export * from './perfBudget';
 export * from './registration';
 export * from './freeMode';
 export * from './staffThrottle';
+export * from './rateLimit';
 export * from './answerAttempts';
 export * from './guardianConsent';
 export * from './safeZone';

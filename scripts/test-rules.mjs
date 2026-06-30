@@ -97,6 +97,9 @@ async function main() {
   await check('client CANNOT write an alert', assertFails(setDoc(doc(team, `${runPath}/alerts/x`), { type: 'sos' })));
   await check('client CANNOT write publicGames (gallery is CF-only)', assertFails(setDoc(doc(owner, `publicGames/${GAME}`), { title: 'x' })));
   await check('client CANNOT write auditLogs', assertFails(setDoc(doc(owner, `auditLogs/x`), { action: 'x' })));
+  // [callable-rate-limiting #19] per-uid rate-limit counters are server-only.
+  await check('client CANNOT read a rateLimits counter', assertFails(getDoc(doc(owner, `rateLimits/triggerSOS__${OWNER}`))));
+  await check('client CANNOT write a rateLimits counter', assertFails(setDoc(doc(owner, `rateLimits/triggerSOS__${OWNER}`), { count: 0 })));
   await check('default-deny: client CANNOT touch an unmatched collection', assertFails(setDoc(doc(owner, `random/x`), { a: 1 })));
 
   console.log('\n── Multi-tenant isolation: cross-tenant reads are denied ──');

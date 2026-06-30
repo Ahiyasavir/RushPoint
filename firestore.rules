@@ -140,6 +140,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── RATE-LIMIT COUNTERS ──────────────────────────────────────────────────
+    //    Per-uid callable rate-limit windows (callable-rate-limiting, #19).
+    //    Server-write-only — clients can neither read nor write them.
+    match /rateLimits/{key} {
+      allow read, write: if false;
+    }
+
 
     // ═════════════════════════════════════════════════════════════════════════
     // Helpers

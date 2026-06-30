@@ -2,6 +2,7 @@
 // Public game gallery + task library search.
 
 import * as functions from 'firebase-functions';
+import { loggedCallable } from '../obs/log';
 import { db } from '../firebase';
 import type { PublicGame, PublicTask } from '@rushpoint/shared';
 
@@ -19,7 +20,7 @@ export function publicTextMatch(haystacks: Array<string | undefined | null>, que
 
 // ─── searchGallery ───────────────────────────────────────────────────────────
 
-export const searchGallery = functions.https.onCall(async (data, _context) => {
+export const searchGallery = loggedCallable('searchGallery', async (data, _context) => {
   const { query = '', tags = [], limit = 20 } = data as {
     query?: string;
     tags?: string[];
@@ -47,7 +48,7 @@ export const searchGallery = functions.https.onCall(async (data, _context) => {
 
 // ─── searchTaskLibrary ────────────────────────────────────────────────────────
 
-export const searchTaskLibrary = functions.https.onCall(async (data, _context) => {
+export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data, _context) => {
   const { query = '', tags = [], limit = 30 } = data as {
     query?: string;
     tags?: string[];
@@ -74,7 +75,7 @@ export const searchTaskLibrary = functions.https.onCall(async (data, _context) =
 // ─── copyTask ────────────────────────────────────────────────────────────────
 // Increment copyCount on a public task when a creator drags it into their game.
 
-export const incrementTaskCopyCount = functions.https.onCall(async (data, context) => {
+export const incrementTaskCopyCount = loggedCallable('incrementTaskCopyCount', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const { publicTaskId } = data as { publicTaskId: string };
   if (!publicTaskId) throw new functions.https.HttpsError('invalid-argument', 'publicTaskId required');

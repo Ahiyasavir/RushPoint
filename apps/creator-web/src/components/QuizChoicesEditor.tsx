@@ -47,9 +47,9 @@ export default function QuizChoicesEditor({
   const anyCorrect = rows.some((r) => r.correct && r.text.trim() !== '');
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       <Label>{b.answerChoices}</Label>
-      <div className="space-y-1.5">
+      <div className="space-y-1">
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-2">
             <label

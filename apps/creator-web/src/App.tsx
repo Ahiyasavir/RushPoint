@@ -56,7 +56,9 @@ export default function App() {
         <div className="rp-blob rp-blob-3" />
       </div>
 
-      {/* ── Header ── */}
+      {/* ── Global header ── hidden in the Builder, which hosts its own compact
+          header bar (logo + back) so the workspace gets the full viewport height. */}
+      {!isBuilder && (
       <header className="sticky top-0 z-30 shrink-0 border-b border-[--rp-border] bg-[--surface-1]/80 dark:bg-[--surface-0]/70 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
           <NavLink to="/" className="font-brand text-xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent tracking-tight">
@@ -93,8 +95,9 @@ export default function App() {
           </button>
         </div>
       </header>
+      )}
 
-      <main className={`relative z-10 mx-auto w-full px-4 ${isBuilder ? 'max-w-[1600px] py-3 flex-1 min-h-0 overflow-hidden' : 'max-w-6xl py-8'}`}>
+      <main className={`relative z-10 mx-auto w-full ${isBuilder ? 'max-w-[1680px] px-2 py-1.5 flex-1 min-h-0 overflow-hidden' : 'max-w-6xl px-4 py-8'}`}>
         <Suspense fallback={<Spinner label="…" />}>
           <Routes>
             <Route path="/"                   element={<DashboardPage />} />

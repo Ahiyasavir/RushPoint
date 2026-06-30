@@ -9,6 +9,8 @@
 
 import { randomInt, randomBytes } from 'node:crypto';
 import * as functions from 'firebase-functions';
+import { loggedCallable, logBestEffort } from '../obs/log';
+import { enforceRateLimit } from '../rateLimitStore';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
 import {
@@ -58,7 +60,10 @@ import {
   taskScoreSmart,
   COMPLETION_BONUS,
 } from '@rushpoint/shared';
+import { requireString, MAX_ID_LEN } from '@rushpoint/shared';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
+import { sanitizeTaskForParticipant } from './sanitizeTask';
+import { validate } from '../validation';
 
 function requireAuth(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
@@ -121,7 +126,7 @@ function buildInitialStages(game: Game): RunStageRecord[] {
 
 // ─── launchRun ────────────────────────────────────────────────────────────────
 
-export const launchRun = functions.https.onCall(async (data, context) => {
+export const launchRun = loggedCallable('launchRun', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId } = data as { gameId: string };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -202,7 +207,7 @@ export const launchRun = functions.https.onCall(async (data, context) => {
   }
 
   // Increment game.playCount (best-effort, outside the atomic launch).
-  db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch(() => undefined);
+  db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
 
   return { runId: runRef.id, accessCode: code };
 });
@@ -212,8 +217,9 @@ export const launchRun = functions.https.onCall(async (data, context) => {
 // Client-safe lookup before joining: given an access code, return the game's
 // title, branding, mode, and registration fields so the join form can render.
 
-export const getJoinInfo = functions.https.onCall(async (data, context) => {
+export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  await enforceRateLimit(context.auth.uid, 'getJoinInfo');
   const { code } = data as { code: string };
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
 
@@ -244,9 +250,10 @@ export const getJoinInfo = functions.https.onCall(async (data, context) => {
 
 // ─── joinRun ─────────────────────────────────────────────────────────────────
 
-export const joinRun = functions.https.onCall(async (data, context) => {
+export const joinRun = loggedCallable('joinRun', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const teamId = context.auth.uid;
+  await enforceRateLimit(teamId, 'joinRun');
 
   const { code, displayName, registrationData = {}, memberNames = [] } = data as {
     code: string;
@@ -257,6 +264,18 @@ export const joinRun = functions.https.onCall(async (data, context) => {
 
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
   if (!displayName?.trim()) throw new functions.https.HttpsError('invalid-argument', 'displayName required');
+
+  // Anti-griefing / DoS: bound the untrusted join payload. displayName + each
+  // member name are length-capped; the member list and the free-form
+  // registrationData blob are size-capped so a client can't write a huge doc.
+  validate(() => requireString(displayName, 'displayName', MAX_ID_LEN));
+  if (!Array.isArray(memberNames) || memberNames.length > 30) {
+    throw new functions.https.HttpsError('invalid-argument', 'Too many member names (max 30)');
+  }
+  memberNames.forEach((n, i) => validate(() => requireString(n, `memberNames[${i}]`, MAX_ID_LEN)));
+  if (registrationData && JSON.stringify(registrationData).length > 4000) {
+    throw new functions.https.HttpsError('invalid-argument', 'registrationData too large');
+  }
 
   const normalizedCode = code.trim().toUpperCase();
   const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
@@ -334,7 +353,7 @@ export const joinRun = functions.https.onCall(async (data, context) => {
 // ─── startTeams ───────────────────────────────────────────────────────────────
 // Owner launches all (or specific) registered teams.
 
-export const startTeams = functions.https.onCall(async (data, context) => {
+export const startTeams = loggedCallable('startTeams', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId, teamIds } = data as { gameId: string; runId: string; teamIds?: string[] };
 
@@ -389,8 +408,9 @@ export const startTeams = functions.https.onCall(async (data, context) => {
 // and approves; only then can the team be started. Consent is server-recorded and
 // not self-approvable by the child (the token is the authorization).
 
-export const requestGuardianConsent = functions.https.onCall(async (data, context) => {
+export const requestGuardianConsent = loggedCallable('requestGuardianConsent', async (data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'requestGuardianConsent');
   const { ownerUid, gameId, runId, teamId } = data as {
     ownerUid: string; gameId: string; runId: string; teamId?: string;
   };
@@ -406,7 +426,7 @@ export const requestGuardianConsent = functions.https.onCall(async (data, contex
   return { token };
 });
 
-export const grantGuardianConsent = functions.https.onCall(async (data, context) => {
+export const grantGuardianConsent = loggedCallable('grantGuardianConsent', async (data, context) => {
   requireAuth(context); // any authed device (the guardian's), authorized by the token
   const { ownerUid, gameId, runId, token, guardianName } = data as {
     ownerUid: string; gameId: string; runId: string; token: string; guardianName?: string;
@@ -554,7 +574,7 @@ export async function completeTaskForTeam(
 
 // ─── skipStage ────────────────────────────────────────────────────────────────
 
-export const skipStage = functions.https.onCall(async (data, context) => {
+export const skipStage = loggedCallable('skipStage', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId, teamId } = data as { gameId: string; runId: string; teamId: string };
 
@@ -694,7 +714,7 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
 // Server stamps startedAt/expiresAt; a single active zone replaces any prior one.
 // The multiplier is enforced in completeTaskForTeam, never from a client claim.
 
-export const activateHotZone = functions.https.onCall(async (data, context) => {
+export const activateHotZone = loggedCallable('activateHotZone', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId, center, radiusMeters, multiplier, durationMinutes } = data as {
     gameId: string; runId: string;
@@ -733,7 +753,7 @@ export const activateHotZone = functions.https.onCall(async (data, context) => {
   return { ok: true, hotZone };
 });
 
-export const deactivateHotZone = functions.https.onCall(async (data, context) => {
+export const deactivateHotZone = loggedCallable('deactivateHotZone', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId } = data as { gameId: string; runId: string };
   if (!gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
@@ -756,8 +776,9 @@ export const deactivateHotZone = functions.https.onCall(async (data, context) =>
 // and claimDiscoveryPoi re-validates proximity (server haversine) + the answer
 // before awarding the bonus. Idempotent per team via team.discoveryState.
 
-export const getRunDiscoveryPois = functions.https.onCall(async (data, context) => {
+export const getRunDiscoveryPois = loggedCallable('getRunDiscoveryPois', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'getRunDiscoveryPois');
   const { ownerUid, gameId, runId, code } = data as {
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
@@ -768,8 +789,9 @@ export const getRunDiscoveryPois = functions.https.onCall(async (data, context) 
   return { pois };
 });
 
-export const claimDiscoveryPoi = functions.https.onCall(async (data, context) => {
+export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'claimDiscoveryPoi');
   const { poiId, lat, lng, answer, ownerUid, gameId, runId, code } = data as {
     poiId: string; lat: number; lng: number; answer: string;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
@@ -829,7 +851,7 @@ export const claimDiscoveryPoi = functions.https.onCall(async (data, context) =>
 });
 
 
-export const finalizeRun = functions.https.onCall(async (data, context) => {
+export const finalizeRun = loggedCallable('finalizeRun', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId } = data as { gameId: string; runId: string };
 
@@ -898,8 +920,10 @@ export const finalizeRun = functions.https.onCall(async (data, context) => {
           tx.set(benchRef, mergeBenchmark(prev, sample));
         });
       }
-    } catch {
-      // Benchmark contribution is best-effort; never fail finalize over it.
+    } catch (e) {
+      // Benchmark contribution is best-effort; never fail finalize over it — but
+      // log so a silent merge/transaction bug here is visible, not invisible.
+      logBestEffort('finalize.benchmark', { runId }, e);
     }
   }
 
@@ -912,7 +936,7 @@ export const finalizeRun = functions.https.onCall(async (data, context) => {
 // result (they read the run doc directly); `publish` controls whether
 // participants may see it, so the reveal can be staged.
 
-export const refreshLeaderboard = functions.https.onCall(async (data, context) => {
+export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId, publish, frozen } = data as {
     gameId: string; runId: string; publish?: boolean; frozen?: boolean;
@@ -962,7 +986,7 @@ export const refreshLeaderboard = functions.https.onCall(async (data, context) =
 // that the board is reported as not-yet-published. Anyone signed in (the play
 // app's anonymous users included) may call it.
 
-export const getPublicLeaderboard = functions.https.onCall(async (data, context) => {
+export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const { code } = data as { code: string };
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
@@ -996,7 +1020,7 @@ export const getPublicLeaderboard = functions.https.onCall(async (data, context)
 // headline stats. The owner may read any of their runs; a non-owner only when the
 // run is published (same gate as getPublicLeaderboard). Pruned runs still return
 // standings with an empty photo list (buildRunRecap is prune-safe).
-export const getRunRecap = functions.https.onCall(async (data, context) => {
+export const getRunRecap = loggedCallable('getRunRecap', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
@@ -1035,7 +1059,7 @@ export const getRunRecap = functions.https.onCall(async (data, context) => {
 // (start / task / finish) plus per-team cumulative score series. Resolves the run
 // by access code and refuses any non-owner caller. Retention-safe via
 // buildRunTimeline (pruned teams are simply omitted).
-export const getRunReplay = functions.https.onCall(async (data, context) => {
+export const getRunReplay = loggedCallable('getRunReplay', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
@@ -1068,7 +1092,7 @@ export const getRunReplay = functions.https.onCall(async (data, context) => {
 // Owner-only post-run analytics: per-task completion rate, median/p90 time, hint
 // + skip counts. Resolves the run by access code and refuses non-owners. Survives
 // the PII prune (computeRunAnalytics just contributes nothing for cleared teams).
-export const getRunAnalytics = functions.https.onCall(async (data, context) => {
+export const getRunAnalytics = loggedCallable('getRunAnalytics', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
@@ -1100,7 +1124,7 @@ export const getRunAnalytics = functions.https.onCall(async (data, context) => {
 
 // ─── listRunTeams ─────────────────────────────────────────────────────────────
 
-export const listRunTeams = functions.https.onCall(async (data, context) => {
+export const listRunTeams = loggedCallable('listRunTeams', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId } = data as { gameId: string; runId: string };
 
@@ -1228,8 +1252,9 @@ async function assignNextInActiveStage(
 
 // ─── completeTask (participant self-report / field) ───────────────────────────
 
-export const completeTask = functions.https.onCall(async (data, context) => {
+export const completeTask = loggedCallable('completeTask', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'completeTask');
   const { taskId, lat, lng, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     lat?: number; lng?: number;
@@ -1252,9 +1277,14 @@ export const completeTask = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
       }
       const distM = haversineKm({ lat, lng }, gtask.coordinates) * 1000;
-      const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters);
+      // Hidden-location tasks gate identically but the rejection must not leak the
+      // distance (otherwise the secret spot is triangulable by polling).
+      const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters, { hidden: !!gtask.hideLocation });
       if (!verdict.ok) {
-        throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? `Too far from the spot (${Math.round(distM)}m away)`);
+        const fallback = gtask.hideLocation
+          ? 'Not here yet — keep following the clue'
+          : `Too far from the spot (${Math.round(distM)}m away)`;
+        throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? fallback);
       }
     }
   }
@@ -1270,8 +1300,9 @@ export const completeTask = functions.https.onCall(async (data, context) => {
 
 // ─── requestNextTask (assign a task in the active stage) ──────────────────────
 
-export const requestNextTask = functions.https.onCall(async (data, context) => {
+export const requestNextTask = loggedCallable('requestNextTask', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'requestNextTask');
   const { lat, lng, ownerUid, gameId, runId, code } = data as {
     lat?: number; lng?: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
@@ -1291,8 +1322,9 @@ export const requestNextTask = functions.https.onCall(async (data, context) => {
 
 // ─── requestTaskHint (reveal a paid hint, charge once) ────────────────────────
 
-export const requestTaskHint = functions.https.onCall(async (data, context) => {
+export const requestTaskHint = loggedCallable('requestTaskHint', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'requestTaskHint');
   const { taskId, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
@@ -1348,8 +1380,9 @@ function findGameTask(game: Game, taskId: string): Task | undefined {
 
 // ─── submitTaskAnswer (quiz / numeric) ────────────────────────────────────────
 
-export const submitTaskAnswer = functions.https.onCall(async (data, context) => {
+export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'submitTaskAnswer');
   const { taskId, answer, lat, lng, ownerUid, gameId, runId, code } = data as {
     taskId: string; answer: string;
     lat?: number; lng?: number;
@@ -1400,8 +1433,9 @@ export const submitTaskAnswer = functions.https.onCall(async (data, context) => 
 
 // ─── submitSequenceStep (sequence tasks — one ordered step at a time) ──────────
 
-export const submitSequenceStep = functions.https.onCall(async (data, context) => {
+export const submitSequenceStep = loggedCallable('submitSequenceStep', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'submitSequenceStep');
   const { taskId, stepIndex, answer, lat, lng, ownerUid, gameId, runId, code } = data as {
     taskId: string; stepIndex: number; answer?: string;
     lat?: number; lng?: number;
@@ -1450,8 +1484,9 @@ export const submitSequenceStep = functions.https.onCall(async (data, context) =
 
 // ─── getRecommendedTasks (ranked list, no assignment) ─────────────────────────
 
-export const getRecommendedTasks = functions.https.onCall(async (data, context) => {
+export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'getRecommendedTasks');
   const { lat, lng, ownerUid, gameId, runId, code } = data as {
     lat: number; lng: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
@@ -1490,40 +1525,9 @@ export const getRecommendedTasks = functions.https.onCall(async (data, context) 
 // directly. This returns the team's live state plus the sanitized content of
 // their currently-assigned task(s) — secrets (codes) are stripped server-side.
 
-function sanitizeTaskForParticipant(task: Task) {
-  // Strip every server-secret answer key: the hint text (paid reveal only),
-  // quiz answers, the numeric target, and each sequence step's answer. The UI
-  // still gets choices / tolerance / radius / step prompts so it can render.
-  const { smart, hint, answers, numericAnswer, steps, ...rest } = task;
-  return {
-    ...rest,
-    hasHint: !!hint && hint.trim().length > 0,
-    hintPenalty: task.hintPenalty ?? 25,
-    steps: steps?.map((s) => ({ id: s.id, prompt: s.prompt })),
-    smart: smart
-      ? {
-          enabled: smart.enabled,
-          verificationType: smart.verificationType,
-          longInstructions: smart.longInstructions,
-          longInstructionsHe: smart.longInstructionsHe,
-          extraInfo: smart.extraInfo,
-          mediaUrl: smart.mediaUrl,
-          imageUrl: smart.imageUrl,
-          codeInputLabel: smart.codeInputLabel,
-          hasCode: smart.hasCode,
-          geofenceRadiusMeters: smart.geofenceRadiusMeters,
-          stationCoords: smart.stationCoords,
-          timeLimitSeconds: smart.timeLimitSeconds,
-          autoApprove: smart.autoApprove,
-          attemptLimit: smart.attemptLimit,
-          // secretCode intentionally omitted
-        }
-      : undefined,
-  };
-}
-
-export const getMyTeamState = functions.https.onCall(async (data, context) => {
+export const getMyTeamState = loggedCallable('getMyTeamState', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'getMyTeamState');
   const { ownerUid, gameId, runId, code } = data as {
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
@@ -1574,8 +1578,9 @@ export const getMyTeamState = functions.https.onCall(async (data, context) => {
 
 // ─── checkOutTask (release a station slot without completing) ─────────────────
 
-export const checkOutTask = functions.https.onCall(async (data, context) => {
+export const checkOutTask = loggedCallable('checkOutTask', async (data, context) => {
   const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'checkOutTask');
   const { taskId, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;

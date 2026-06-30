@@ -25,8 +25,8 @@ logic/callable change is *write a failing test*, then minimum code to green, the
 - **UI** → verify via the preview tools (no component test runner).
 
 **Gates before any change is done:** `npm run typecheck` · `npm run lint` · `npm test` ·
-`npm run creator:build` · `npm run e2e` — all green. Project context + per-artifact rules that drive
-proposals/designs/tasks live in [openspec/config.yaml](openspec/config.yaml).
+`npm run creator:build` · `npm run play:build` · `npm run e2e` — all green. Project context + per-artifact
+rules that drive proposals/designs/tasks live in [openspec/config.yaml](openspec/config.yaml).
 
 RushPoint is a **web platform where any creator builds and runs their own real-world team
 "field game"** (scavenger-hunt / amazing-race style). A creator designs a game
@@ -74,6 +74,7 @@ npm run typecheck        # all workspaces — must pass
 npm test                 # pure-logic lane: scripts/test-*.ts aggregator + vitest in functions/
 npm run lint             # creator-web eslint — 0 errors (style warnings ok)
 npm run creator:build    # production build of creator-web — must pass
+npm run play:build       # production build of play-web — must pass (don't let a play-web break slip through)
 npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
 npm run i18n:check       # ⚠ MANDATORY AFTER ANY UI CHANGE — Hebrew↔English correctness
 ```

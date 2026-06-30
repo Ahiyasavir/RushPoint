@@ -8,6 +8,10 @@ import { useT } from './LanguageContext';
 
 export type TooltipConcept = 'geofence' | 'hint' | 'concurrent' | 'difficulty';
 
+type ConceptTooltip = { concept: TooltipConcept; title?: never; body?: never; svg?: never };
+type DirectTooltip = { concept?: never; title: string; body: string; svg?: ReactNode };
+type TooltipProps = (ConceptTooltip | DirectTooltip) & { children?: ReactNode };
+
 // Only the (illustrative, asset-light) SVGs live here; the title + body come from
 // i18n so the tooltip is localized.
 const SVGS: Record<TooltipConcept, ReactNode> = {
@@ -51,7 +55,7 @@ const SVGS: Record<TooltipConcept, ReactNode> = {
     ),
 };
 
-export default function RichTooltip({ concept, children }: { concept: TooltipConcept; children?: ReactNode }) {
+export default function RichTooltip({ concept, title: titleProp, body: bodyProp, svg: svgProp, children }: TooltipProps) {
   const id = useId();
   const b = useT().builder;
   const TEXT: Record<TooltipConcept, { title: string; body: string }> = {
@@ -60,7 +64,9 @@ export default function RichTooltip({ concept, children }: { concept: TooltipCon
     concurrent: { title: b.tipConcurrentTitle, body: b.tipConcurrentBody },
     difficulty: { title: b.tipDifficultyTitle, body: b.tipDifficultyBody },
   };
-  const d = { ...TEXT[concept], svg: SVGS[concept] };
+  const d = concept
+    ? { ...TEXT[concept], svg: SVGS[concept] }
+    : { title: titleProp!, body: bodyProp!, svg: svgProp };
   return (
     <span className="relative inline-flex group align-middle">
       <button

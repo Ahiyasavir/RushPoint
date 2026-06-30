@@ -94,6 +94,10 @@ export const FIRESTORE_PATHS = {
   stationReview: (reviewId: string) => `stationReviews/${reviewId}`,
 
   auditLog: (id: string) => `auditLogs/${id}`,
+
+  // Per-uid callable rate-limit counters (change: callable-rate-limiting, Appendix B #19).
+  // Server-write-only; clients are denied read + write in firestore.rules.
+  rateLimit: (bucket: string, uid: string) => `rateLimits/${bucket}__${uid}`,
 } as const;
 
 
@@ -229,6 +233,19 @@ export interface Task {
   // A general task with no fixed map location — can be done from anywhere
   // (no travel, no map marker, no distance). Routing treats transit as zero.
   locationless?: boolean;
+  // Hidden-location (treasure-hunt) flag: the task keeps real `coordinates` +
+  // geofence radius SERVER-SIDE, but they are NEVER sent to the participant —
+  // sanitizeTaskForParticipant strips them and emits `locationHidden`. The map
+  // draws no pin; the player is guided only by `locationClue` and discovers the
+  // spot by physically arriving (server-validated GPS, radius/exact trigger).
+  // Orthogonal to TaskType — layers on any located task. Default absent = visible.
+  hideLocation?: boolean;
+  // The free, ALWAYS-VISIBLE clue/riddle that guides discovery of a hidden
+  // location (bilingual). Distinct from the paid `hint` below: the clue is sent
+  // to the participant in the task payload; the paid `hint` text is stripped and
+  // only revealed for a point cost via requestTaskHint.
+  locationClue?: string;
+  locationClueHe?: string;
   // Optional paid hint: participants can reveal `hint` for a `hintPenalty`
   // point cost (default 25). The hint text is NEVER sent to clients in the task
   // payload — only via the requestTaskHint callable, which charges once.

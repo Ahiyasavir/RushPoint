@@ -186,7 +186,7 @@ export default function RunConsolePage() {
                     </button>
                     <button className="text-[11px] text-zinc-400 hover:text-neon-red"
                       onClick={async () => {
-                        const v = await dialog.prompt('Score adjustment (+bonus / -fine):'); if (!v) return;
+                        const v = await dialog.prompt('Score adjustment (+bonus / −fine):'); if (!v) return;
                         await adjustTeamScore({ ...ctx, teamId: t.id, delta: parseInt(v) || 0, reason: 'manual' }); await loadTeams();
                       }}>
                       ±
@@ -229,7 +229,7 @@ export default function RunConsolePage() {
                 ))}
               </div>
               <div className="text-[11px] text-zinc-600 mt-2">
-                Organizer-only until published. Updated {new Date(run.leaderboard.updatedAt).toLocaleTimeString()}.
+                Organizer only until published. Updated {new Date(run.leaderboard.updatedAt).toLocaleTimeString()}.
               </div>
             </Card>
           )}

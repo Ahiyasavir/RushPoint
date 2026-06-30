@@ -5,6 +5,7 @@
 // e2e work without Stripe keys.
 
 import * as functions from 'firebase-functions';
+import { loggedCallable, logBestEffort } from '../obs/log';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
 import {
@@ -99,7 +100,7 @@ const APP_URL = () => process.env.APP_URL ?? 'http://localhost:5180';
 // Returns the raw wallet (creating a fresh one on first access). Prefer
 // getWalletStatus on the client; this is kept for internal/diagnostic use.
 
-export const getWallet = functions.https.onCall(async (_data, context) => {
+export const getWallet = loggedCallable('getWallet', async (_data, context) => {
   const uid = requireAuth(context);
   const snap = await walletRef(uid).get();
   if (!snap.exists) {
@@ -114,7 +115,7 @@ export const getWallet = functions.https.onCall(async (_data, context) => {
 // ─── getWalletStatus ──────────────────────────────────────────────────────────
 // Single client-facing snapshot: plan, credits, and free runs left.
 
-export const getWalletStatus = functions.https.onCall(async (_data, context) => {
+export const getWalletStatus = loggedCallable('getWalletStatus', async (_data, context) => {
   const uid = requireAuth(context);
   const w = await readWallet(uid);
   const status: WalletStatus = {
@@ -133,7 +134,7 @@ export const getWalletStatus = functions.https.onCall(async (_data, context) => 
 // Buy an Event-Credits package. Emulator grants directly; production returns a
 // Stripe Checkout URL and the webhook credits the wallet on completion.
 
-export const purchaseCredits = functions.https.onCall(async (data, context) => {
+export const purchaseCredits = loggedCallable('purchaseCredits', async (data, context) => {
   const uid = requireAuth(context);
   requirePaymentsEnabled();
   const { packageId } = data as { packageId: EventPackageId };
@@ -187,7 +188,7 @@ export const purchaseCredits = functions.https.onCall(async (data, context) => {
 // Start a Creator Pro subscription (monthly/annual). Emulator activates it
 // directly; production returns a Stripe subscription Checkout URL.
 
-export const subscribePro = functions.https.onCall(async (data, context) => {
+export const subscribePro = loggedCallable('subscribePro', async (data, context) => {
   const uid = requireAuth(context);
   requirePaymentsEnabled();
   const interval = (data as { interval?: string })?.interval === 'year' ? 'year' : 'month';
@@ -241,7 +242,7 @@ export const subscribePro = functions.https.onCall(async (data, context) => {
 // inviter and the newcomer one extra lifetime free run. Idempotent per account:
 // the `referredBy` flag blocks a second claim; a self-referral is rejected.
 
-export const claimReferral = functions.https.onCall(async (data, context) => {
+export const claimReferral = loggedCallable('claimReferral', async (data, context) => {
   const uid = requireAuth(context);
   const { referrerUid } = data as { referrerUid?: string };
 
@@ -250,7 +251,7 @@ export const claimReferral = functions.https.onCall(async (data, context) => {
   if (referrer === uid) throw new functions.https.HttpsError('failed-precondition', 'You cannot refer yourself');
 
   // The inviter must be a real account (display name comes from Auth, not a doc).
-  const referrerUser = await admin.auth().getUser(referrer).catch(() => null);
+  const referrerUser = await admin.auth().getUser(referrer).catch((e) => { logBestEffort('auth.getUser', { uid: referrer }, e); return null; });
   if (!referrerUser) throw new functions.https.HttpsError('not-found', 'Unknown inviter');
 
   const now = new Date().toISOString();

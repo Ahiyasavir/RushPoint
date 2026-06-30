@@ -21,10 +21,11 @@ export default function TaskCanvas({ tasks, activeTaskId, onSelect }: {
     overscan: 6,
   });
 
-  // Small stages: skip the windowing machinery entirely.
-  if (tasks.length <= 12) {
+  // Small stages: a roomy 2-column grid (skips the windowing machinery entirely).
+  // The centre pane is wide, so cards get generous size + spacing.
+  if (tasks.length <= 24) {
     return (
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 content-start">
         {tasks.map((t) => (
           <TaskCard key={t.id} task={t} active={t.id === activeTaskId} onClick={() => onSelect(t.id)} />
         ))}

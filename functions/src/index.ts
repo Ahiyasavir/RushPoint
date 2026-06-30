@@ -3,6 +3,8 @@
 // re-exports them so Firebase can discover them at the top level.
 
 import * as functions from 'firebase-functions';
+import { loggedCallable } from './obs/log';
+import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
@@ -97,7 +99,7 @@ async function writeAuditLog(entry: AuditEntry): Promise<void> {
 
 // ─── Staff management ─────────────────────────────────────────────────────────
 
-export const inviteStaff = functions.https.onCall(async (data, context) => {
+export const inviteStaff = loggedCallable('inviteStaff', async (data, context) => {
   const uid = requireAuth(context);
   const { ownerUid, gameId, runId, name, permissions } = data as {
     ownerUid: string;
@@ -135,7 +137,7 @@ export const inviteStaff = functions.https.onCall(async (data, context) => {
 });
 
 
-export const staffSignIn = functions.https.onCall(async (data, context) => {
+export const staffSignIn = loggedCallable('staffSignIn', async (data, context) => {
   const uid = requireAuth(context);
   const { ownerUid, gameId, runId, pin } = data as {
     ownerUid: string;
@@ -182,14 +184,20 @@ export const staffSignIn = functions.https.onCall(async (data, context) => {
     usedAt: new Date().toISOString(),
   });
 
-  const customToken = await admin.auth().createCustomToken(context.auth!.uid, {
-    staff: true,
-    staffName: invite.name,
-    permissions: invite.permissions,
-    ownerUid,
-    gameId,
-    runId,
-  });
+  let customToken: string;
+  try {
+    customToken = await admin.auth().createCustomToken(context.auth!.uid, {
+      staff: true,
+      staffName: invite.name,
+      permissions: invite.permissions,
+      ownerUid,
+      gameId,
+      runId,
+    });
+  } catch (e) {
+    functions.logger.error('staffSignIn.createCustomToken failed', { uid: context.auth!.uid, runId, err: String(e) });
+    throw new functions.https.HttpsError('internal', 'Could not complete staff sign-in. Please try again.');
+  }
 
   return { customToken, name: invite.name, permissions: invite.permissions };
 });
@@ -197,9 +205,10 @@ export const staffSignIn = functions.https.onCall(async (data, context) => {
 
 // ─── updateLocation ────────────────────────────────────────────────────────────
 
-export const updateLocation = functions.https.onCall(async (data, context) => {
+export const updateLocation = loggedCallable('updateLocation', async (data, context) => {
   requireAuth(context);
   const uid = context.auth!.uid;
+  await enforceRateLimit(uid, 'updateLocation');
   const { lat, lng, ownerUid, gameId, runId } = data as {
     lat: number;
     lng: number;
@@ -248,9 +257,10 @@ export const updateLocation = functions.https.onCall(async (data, context) => {
 
 // ─── triggerSOS ───────────────────────────────────────────────────────────────
 
-export const triggerSOS = functions.https.onCall(async (data, context) => {
+export const triggerSOS = loggedCallable('triggerSOS', async (data, context) => {
   requireAuth(context);
   const uid = context.auth!.uid;
+  await enforceRateLimit(uid, 'triggerSOS');
   const { ownerUid, gameId, runId, lat, lng, message } = data as {
     ownerUid: string;
     gameId: string;
@@ -285,7 +295,7 @@ export const triggerSOS = functions.https.onCall(async (data, context) => {
 
 // ─── acknowledgeAlert ─────────────────────────────────────────────────────────
 
-export const acknowledgeAlert = functions.https.onCall(async (data, context) => {
+export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, alertId } = data as {
     ownerUid: string;
@@ -308,7 +318,7 @@ export const acknowledgeAlert = functions.https.onCall(async (data, context) => 
 
 // ─── pushAnnouncement ─────────────────────────────────────────────────────────
 
-export const pushAnnouncement = functions.https.onCall(async (data, context) => {
+export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, message, messageHe } = data as {
     ownerUid: string;
@@ -342,7 +352,7 @@ export const pushAnnouncement = functions.https.onCall(async (data, context) => 
 
 // ─── deactivateAnnouncement ───────────────────────────────────────────────────
 
-export const deactivateAnnouncement = functions.https.onCall(async (data, context) => {
+export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, announcementId } = data as {
     ownerUid: string;
@@ -361,7 +371,7 @@ export const deactivateAnnouncement = functions.https.onCall(async (data, contex
 
 // ─── pushFlashMission ─────────────────────────────────────────────────────────
 
-export const pushFlashMission = functions.https.onCall(async (data, context) => {
+export const pushFlashMission = loggedCallable('pushFlashMission', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const {
     ownerUid, gameId, runId,
@@ -412,9 +422,10 @@ export const pushFlashMission = functions.https.onCall(async (data, context) => 
 
 // ─── Station callables ────────────────────────────────────────────────────────
 
-export const verifyStationCode = functions.https.onCall(async (data, context) => {
+export const verifyStationCode = loggedCallable('verifyStationCode', async (data, context) => {
   requireAuth(context);
   const uid = context.auth!.uid;
+  await enforceRateLimit(uid, 'verifyStationCode');
   const { ownerUid, gameId, runId, teamId, taskId, code } = data as {
     ownerUid: string;
     gameId: string;
@@ -469,8 +480,9 @@ export const verifyStationCode = functions.https.onCall(async (data, context) =>
 });
 
 
-export const submitStationPhoto = functions.https.onCall(async (data, context) => {
+export const submitStationPhoto = loggedCallable('submitStationPhoto', async (data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'submitStationPhoto');
   const { ownerUid, gameId, runId, teamId, taskId, photoUrl } = data as {
     ownerUid: string;
     gameId: string;
@@ -524,7 +536,7 @@ export const submitStationPhoto = functions.https.onCall(async (data, context) =
 });
 
 
-export const reviewStationSubmission = functions.https.onCall(async (data, context) => {
+export const reviewStationSubmission = loggedCallable('reviewStationSubmission', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, teamId, taskId, approved, note } = data as {
     ownerUid: string;
@@ -565,7 +577,7 @@ export const reviewStationSubmission = functions.https.onCall(async (data, conte
 
 // ─── adjustTeamScore ──────────────────────────────────────────────────────────
 
-export const adjustTeamScore = functions.https.onCall(async (data, context) => {
+export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
   const { ownerUid, gameId, runId, teamId, delta, reason } = data as {
     ownerUid: string;
@@ -607,7 +619,7 @@ export const adjustTeamScore = functions.https.onCall(async (data, context) => {
 
 // ─── listAuditLogs ────────────────────────────────────────────────────────────
 
-export const listAuditLogs = functions.https.onCall(async (data, context) => {
+export const listAuditLogs = loggedCallable('listAuditLogs', async (data, context) => {
   assertAdmin(context);
   const { limit = 100 } = data as { limit?: number };
   const snap = await db

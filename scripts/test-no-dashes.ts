@@ -1,10 +1,36 @@
-// UI text standard guard (change: ui-no-dashes). User-facing copy must not use
-// em-dash (—), en-dash (–), or a spaced hyphen ( - ) as a sentence separator —
-// commas / periods / line breaks instead. Scans both apps' translation maps and
-// fails on any offending string leaf, locking the standard in as a copy lint.
+// UI text standard guard (change: ui-no-dashes). Per product decision, NO hyphen
+// or dash of any kind may appear in user-facing copy — not a compound-word hyphen
+// (check-in), not a Hebrew prefix maqaf (ב-RushPoint), not an em/en dash. Use a
+// space, a comma, a period, or a rephrase instead. The ONLY horizontal-bar
+// character allowed is the true minus sign U+2212 (−), used for negative point
+// values (−25 pts), which is a math symbol, not a dash.
+//
+// Banned (any one fails the gate):
+//   U+002D hyphen-minus '-'   U+2010 hyphen        U+2011 non-breaking hyphen
+//   U+2012 figure dash        U+2013 en dash '–'   U+2014 em dash '—'
+//   U+2015 horizontal bar
+// Allowed: U+2212 minus '−'.
+//
+// Scans BOTH apps' translation maps and covers BOTH plain string leaves AND
+// function-valued entries (dynamic copy) by invoking each function with sample
+// args and inspecting the rendered string — the looser old rule missed those.
+// No emulator.
+// Two parts, mirroring the i18n gate:
+//   PART A — translation dictionaries (all copy that flows through t.*).
+//   PART B — hardcoded UI strings in components (JSX text / text attributes /
+//            dialog|error calls), so a stray hyphen can't hide in a literal that
+//            bypasses the dictionary. Same UI-text-position detection as
+//            scripts/check-i18n.ts → no className/import false positives. Suppress
+//            a deliberate literal with a trailing `// i18n-ignore`.
 //   npx tsx scripts/test-no-dashes.ts
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -12,10 +38,42 @@ function check(label: string, cond: boolean, detail = ''): void {
   if (!cond) failures++;
 }
 
-// Collect [dottedKey, value] for every STRING leaf (function-valued i18n entries
-// are skipped — they can't be statically inspected here).
+// Every dash/hyphen EXCEPT the true minus sign U+2212.
+const BANNED_DASH = /[-‐‑‒–—―]/;
+
+// Render a function-valued i18n entry to its string. Entries take either
+// positional primitives or a single options object; try both shapes and take the
+// first that yields a string. A broad sample object covers every key our copy
+// destructures (email, rank, team, game, url, …) so the literal template text —
+// which is where a stray hyphen would live — is always exercised.
+const SAMPLE_OBJ = {
+  n: 2, count: 2, rank: 3, score: 100, points: 25, minutes: 10,
+  dist: 40, radius: 50, r: 50, time: '12:00',
+  email: 'a@b.com', name: 'Sample', title: 'Sample', team: 'Sample',
+  game: 'Sample', url: 'example.com', rankPart: '', targetLang: 'en',
+};
+function render(fn: (...a: unknown[]) => unknown): string | null {
+  for (const args of [[2, 'Sample', 'Sample', 'Sample'], [SAMPLE_OBJ]] as unknown[][]) {
+    try {
+      const r = fn(...args);
+      if (typeof r === 'string') return r;
+    } catch { /* try the next arg shape */ }
+  }
+  return null;
+}
+
+// Collect [dottedKey, renderedValue] for every leaf: strings directly, functions
+// via render(). Unrenderable functions are reported so they can't hide a dash.
 function leafStrings(obj: unknown, prefix = ''): Array<[string, string]> {
   if (typeof obj === 'string') return [[prefix, obj]];
+  if (typeof obj === 'function') {
+    const r = render(obj as (...a: unknown[]) => unknown);
+    if (r === null) {
+      console.log(`WARN  could not render function entry "${prefix}" — not dash-checked`);
+      return [];
+    }
+    return [[prefix, r]];
+  }
   if (obj === null || typeof obj !== 'object') return [];
   const out: Array<[string, string]> = [];
   for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
@@ -24,17 +82,90 @@ function leafStrings(obj: unknown, prefix = ''): Array<[string, string]> {
   return out;
 }
 
-// Em-dash, en-dash, or a spaced hyphen used as a separator.
-const DASH = /—|–| - /;
-
+// ── PART A — dictionaries ─────────────────────────────────────────────────────
 for (const [app, t] of [['creator-web', creatorT], ['play-web', playT]] as const) {
   for (const [lang, map] of [['he', t.he], ['en', t.en]] as const) {
-    const offenders = leafStrings(map).filter(([, v]) => DASH.test(v));
-    check(`${app}.${lang}: no dash separators in copy`,
+    const offenders = leafStrings(map).filter(([, v]) => BANNED_DASH.test(v));
+    check(`A · ${app}.${lang}: no hyphen or dash in copy`,
       offenders.length === 0,
-      offenders.slice(0, 8).map(([k, v]) => `${k}="${v}"`).join(' | '));
+      offenders.slice(0, 12).map(([k, v]) => `${k}="${v}"`).join(' | '));
   }
 }
 
-console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' FILE(S) WITH DASHES'}`);
+// ── PART B — hardcoded UI strings in component source ─────────────────────────
+// Files whose literals are data/markup, not switchable UI chrome (kept in sync
+// with check-i18n.ts's allow-list).
+const FILE_ALLOWLIST = new Set([
+  'i18n.ts', 'i18nContext.tsx', 'templates.ts', 'taskTemplates.ts',
+  'LegalPage.tsx', 'legalMarkdown.ts',
+]);
+const TEXT_ATTRS = new Set(['placeholder', 'title', 'aria-label', 'alt', 'label']);
+const TEXT_CALL = /(alert|confirm|prompt|toast|Err|Error|message|Message)$/;
+const SCAN_DIRS = [join(ROOT, 'apps/creator-web/src'), join(ROOT, 'apps/play-web/src')];
+
+function listSourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...listSourceFiles(full));
+    else if (/\.(ts|tsx)$/.test(ent.name) && !FILE_ALLOWLIST.has(ent.name)) out.push(full);
+  }
+  return out;
+}
+function literalText(node: ts.Node): string | null {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  if (ts.isTemplateExpression(node)) {
+    let s = node.head.text;
+    for (const span of node.templateSpans) s += span.literal.text;
+    return s;
+  }
+  return null;
+}
+function inUiTextPosition(node: ts.Node): boolean {
+  const p = node.parent;
+  if (!p) return false;
+  if (ts.isJsxAttribute(p) && TEXT_ATTRS.has(p.name.getText())) return true;
+  if (ts.isJsxExpression(p) && p.parent) {
+    if (ts.isJsxAttribute(p.parent) && TEXT_ATTRS.has(p.parent.name.getText())) return true;
+    if (ts.isJsxElement(p.parent) || ts.isJsxFragment(p.parent)) return true;
+  }
+  if (ts.isCallExpression(p) && p.arguments.includes(node as ts.Expression)) {
+    const fn = ts.isPropertyAccessExpression(p.expression) ? p.expression.name.text : p.expression.getText();
+    if (TEXT_CALL.test(fn)) return true;
+  }
+  return false;
+}
+
+const sourceOffenders: string[] = [];
+for (const dir of SCAN_DIRS) {
+  for (const file of listSourceFiles(dir)) {
+    const rel = relative(ROOT, file).replace(/\\/g, '/');
+    const raw = readFileSync(file, 'utf8');
+    const lines = raw.split('\n');
+    const sf = ts.createSourceFile(basename(file), raw, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+
+    const flag = (node: ts.Node, text: string) => {
+      if (!BANNED_DASH.test(text)) return;
+      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+      const srcLine = lines[line] ?? '';
+      if (/\bi18n-ignore\b/.test(srcLine)) return;            // deliberate exception
+      if (/^https?:\/\//.test(text.trim())) return;           // a URL is not copy
+      sourceOffenders.push(`${rel}:${line + 1} → "${text.trim().replace(/\s+/g, ' ').slice(0, 80)}"`);
+    };
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxText(node)) {
+        if (node.text.trim()) flag(node, node.text);
+      } else {
+        const txt = literalText(node);
+        if (txt && txt.trim() && inUiTextPosition(node)) flag(node, txt);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+}
+check('B · no hyphen or dash in hardcoded UI strings', sourceOffenders.length === 0,
+  sourceOffenders.slice(0, 20).join(' | '));
+
+console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

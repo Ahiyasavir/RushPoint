@@ -31,7 +31,7 @@ export default function PacingBar({ tasks, className = '' }: { tasks: Task[]; cl
             fill={TYPE_FAMILY_COLOR[t.type]}
             opacity={0.85}
           >
-            <title>{`${t.title || 'Untitled'} — difficulty ${t.difficulty}`}</title>
+            <title>{`${t.title || 'Untitled'}, difficulty ${t.difficulty}`}</title>
           </rect>
         );
       })}

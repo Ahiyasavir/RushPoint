@@ -170,12 +170,27 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
 
-      <DistanceBadge task={task} />
+      {task.locationHidden ? (
+        // Treasure-hunt task: no pin, no distance — only the clue guides the player.
+        <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-warm mb-1">
+            🧭 {t.task.hiddenBadge}
+          </div>
+          {(task.locationClueHe || task.locationClue) && (
+            <p dir="auto" className="text-sm text-zinc-200">{task.locationClueHe || task.locationClue}</p>
+          )}
+          <p className="text-[11px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
+        </div>
+      ) : (
+        <DistanceBadge task={task} />
+      )}
 
       <div className="mt-5">
         {task.type === 'field' || task.type === 'self_report' ? (
           <Button disabled={busy} onClick={field}>
-            {task.type === 'self_report' ? t.task.markComplete : t.task.imHere}
+            {task.type === 'self_report'
+              ? t.task.markComplete
+              : task.locationHidden ? t.task.hiddenCheckIn : t.task.imHere}
           </Button>
         ) : task.type === 'smart_station' ? (
           <CodeEntry busy={busy} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />

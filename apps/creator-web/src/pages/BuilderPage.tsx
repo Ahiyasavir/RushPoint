@@ -13,6 +13,7 @@ import StageRail from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
 import TaskWizard from '../components/TaskWizard';
 import { moveItem } from '../lib/reorder';
+import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask } from '../lib/wizardLogic';
 
@@ -100,7 +101,14 @@ export default function BuilderPage() {
   const TAB_LABEL: Record<BuilderTab, string> = {
     build: b.tabBuild, preview: b.tabPreview, analytics: b.tabAnalytics, settings: b.tabSettings,
   };
-  const [game, setGame] = useState<Game | null>(null);
+  // `game` flows through an undo/redo history so every edit (typing, reorder,
+  // delete) can be reverted. `setGame` is the history-aware setter handed to the
+  // sub-steps; undo/redo restore prior snapshots and the autosave effect then
+  // persists them just like any other change.
+  const history = useHistory<Game | null>(null);
+  const game = history.state;
+  const setGame = history.set as (g: Game) => void;
+  const { undo, redo, canUndo, canRedo } = history;
   const [tab, setTab] = useState<BuilderTab>('build');
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
   const [status, setStatus] = useState<SaveStatus>('saved');
@@ -119,7 +127,7 @@ export default function BuilderPage() {
     setError(null);
     void getGame({ gameId })
       .then(({ game }) => {
-        setGame(game);
+        history.reset(game);
         savedSnapshot.current = serializeGame(game);
         setStatus('saved');
       })
@@ -128,7 +136,7 @@ export default function BuilderPage() {
       });
   }, [gameId, loadKey]);
 
-  function patch(p: Partial<Game>) { setGame((g) => (g ? { ...g, ...p } : g)); }
+  function patch(p: Partial<Game>) { history.set((g) => (g ? { ...g, ...p } : g)); }
 
   // Persist only when there are real changes; safe to call eagerly (no-op when
   // the current state already matches what was last saved).
@@ -172,6 +180,31 @@ export default function BuilderPage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
+  // Keyboard undo/redo: Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y). When focus
+  // is in a text field we defer to the browser's native field-level undo so we
+  // don't yank away game state the user can't see being edited.
+  useEffect(() => {
+    const isEditable = (el: EventTarget | null) => {
+      const n = el as HTMLElement | null;
+      if (!n) return false;
+      const tag = n.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || n.isContentEditable;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      const isUndo = key === 'z' && !e.shiftKey;
+      const isRedo = (key === 'z' && e.shiftKey) || key === 'y';
+      if (!isUndo && !isRedo) return;
+      if (isEditable(e.target)) return;
+      e.preventDefault();
+      if (isUndo) undo();
+      else redo();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
+
   async function saveAndLaunch() {
     if (!game) return;
     window.clearTimeout(saveTimer.current);
@@ -208,9 +241,16 @@ export default function BuilderPage() {
     // Fills the fixed-height main (App sets it for /build/*): header is fixed, the
     // body flexes to the remaining height. The page itself never scrolls.
     <div className="h-full flex flex-col rounded-2xl border border-[--rp-border] bg-[--surface-1]/60 overflow-hidden shadow-soft">
-      {/* ── Persistent shell header bar: breadcrumb · title · save · tabs · launch ── */}
+      {/* ── Persistent shell header bar: logo · back · title · save · tabs · launch.
+          This is the only header in the Builder (the global app nav is hidden),
+          so the workspace gets the full viewport height. ── */}
       <header className="shrink-0 flex items-center gap-3 px-4 h-14 border-b border-[--rp-border] bg-[--surface-1]">
-        <button onClick={() => nav('/')} className="text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0">← {b.backToGames}</button>
+        <button onClick={() => nav('/')} className="font-brand text-lg font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent tracking-tight shrink-0" title="RushPoint">
+          RushPoint
+        </button>
+        <button onClick={() => nav('/')} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
+          <span className="text-sm leading-none">←</span> {b.backToGames}
+        </button>
         <span className="text-[--ink-4] shrink-0">/</span>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
         <span className="text-xs flex items-center gap-1.5 text-[--ink-3] shrink-0">
@@ -220,6 +260,28 @@ export default function BuilderPage() {
               : 'bg-rp-go'}`} />
           {status === 'saving' ? b.saving : status === 'unsaved' ? b.unsaved : b.saved}
         </span>
+
+        {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            title={`${b.undo} (Ctrl+Z)`}
+            aria-label={b.undo}
+            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          >
+            ↶
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            title={`${b.redo} (Ctrl+Shift+Z)`}
+            aria-label={b.redo}
+            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          >
+            ↷
+          </button>
+        </div>
 
         {/* Centered tab strip */}
         <nav role="tablist" className="flex-1 flex items-center justify-center gap-1">
@@ -242,7 +304,7 @@ export default function BuilderPage() {
         <Button onClick={saveAndLaunch} className="shrink-0">{b.launchRun}</Button>
       </header>
 
-      <div className="flex-1 min-h-0 p-4 overflow-hidden">
+      <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
         {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} />}
@@ -352,11 +414,11 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="w-32 h-24 shrink-0 rounded-xl border border-dashed border-glass-border text-zinc-500
-                 flex flex-col items-center justify-center gap-1 text-xs
+      className="flex-1 h-11 rounded-xl border border-dashed border-glass-border text-zinc-500
+                 flex items-center justify-center gap-1.5 text-sm
                  hover:border-neon-green/60 hover:text-neon-green transition"
     >
-      <span className="text-xl leading-none">＋</span>{label}
+      <span className="text-lg leading-none">＋</span>{label}
     </button>
   );
 }
@@ -413,7 +475,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
-    <div className="flex gap-4 h-full min-h-0">
+    <div className="flex gap-3 h-full min-h-0">
       {/* ── Left rail: stage navigator ── */}
       <StageRail
         stages={game.stages}
@@ -423,11 +485,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
         onAdd={addStage}
       />
 
-      {/* ── Centre canvas: the active stage (scrolls independently) ── */}
-      <div className="flex-1 min-w-0 h-full overflow-y-auto pe-0.5">
+      {/* ── Centre canvas: the active stage. No wrapping Card — the shell already
+          contains it; the task cards provide the structure. Scrolls on its own. ── */}
+      <div className="flex-1 min-w-0 h-full overflow-y-auto pe-1 space-y-3 pt-0.5">
         {activeStage && (
-          <Card className="p-4">
-            <div className="flex items-center gap-2 mb-3">
+          <>
+            <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
                 <label className="flex items-center gap-1 text-xs text-zinc-400 shrink-0">
@@ -442,7 +505,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 
             {/* Completion rule — only meaningful with a pool of tasks */}
             {m > 1 && (
-              <div className="flex items-center flex-wrap gap-2 mb-3 text-xs text-zinc-400">
+              <div className="flex items-center flex-wrap gap-2 text-xs text-zinc-400">
                 <span>{b.completionLead}</span>
                 <Select
                   className="w-auto py-1"
@@ -465,11 +528,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
               onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
             />
-            <div className="flex gap-2 pt-3">
+            <div className="flex gap-2">
               <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
               <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>
-          </Card>
+          </>
         )}
       </div>
 
@@ -496,9 +559,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 }
 
 // Slide-in context panel (Component 4, change: v2.1-builder-shell-redesign).
-// Edits a LOCAL draft (lib/taskDraft) so keystrokes never re-render the canvas or
-// hit the server; the draft flushes to global state on a 1500ms debounce, and any
-// pending edit flushes on close/unmount. Hardware-accelerated transform slide-in.
+// Keeps a LOCAL draft (lib/taskDraft) as the input source so the panel's fields
+// stay responsive, but flushes each edit to global state *immediately* so the
+// canvas and the undo/redo buttons reflect it in real time. `useHistory` coalesces
+// a typing burst into one undo step, and the server save stays debounced via its
+// own effect — so live flushing here doesn't spam the backend.
+// Hardware-accelerated transform slide-in.
 function ContextPanel({ task, onFlush, onClose, onRemove }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void;
 }) {
@@ -507,7 +573,6 @@ function ContextPanel({ task, onFlush, onClose, onRemove }: {
   const [shown, setShown] = useState(false);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const flushTimer = useRef<number>();
 
   // Slide in on mount.
   useEffect(() => {
@@ -515,23 +580,22 @@ function ContextPanel({ task, onFlush, onClose, onRemove }: {
     return () => cancelAnimationFrame(r);
   }, []);
 
-  // Flush any pending draft when the panel unmounts (close or task switch).
+  // Safety flush on unmount — normally a no-op since every edit flushes live, but
+  // guards against any edit that hasn't reached global state yet (close or switch).
   useEffect(() => () => {
-    window.clearTimeout(flushTimer.current);
     if (isDirty(stateRef.current)) onFlush(stateRef.current.draft);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function handleChange(t: Task) {
-    setState((d) => editDraft(d, t));
-    window.clearTimeout(flushTimer.current);
-    flushTimer.current = window.setTimeout(() => {
-      const cur = stateRef.current;
-      if (isDirty(cur)) { onFlush(cur.draft); setState(commit(cur)); }
-    }, AUTOSAVE_DELAY);
+    // Update the local draft (keeps inputs responsive) and push to global state
+    // immediately so the canvas + undo/redo update live. commit() keeps the draft
+    // and committed in sync so the unmount safety flush stays a no-op.
+    setState((d) => commit(editDraft(d, t)));
+    onFlush(t);
   }
 
-  function close() { window.clearTimeout(flushTimer.current); onClose(); }
+  function close() { onClose(); }
 
   // Esc closes the panel (flush-on-unmount preserves the draft).
   useEffect(() => {
@@ -547,22 +611,20 @@ function ContextPanel({ task, onFlush, onClose, onRemove }: {
   return (
     <aside
       className="shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out"
-      style={{ width: shown ? 380 : 0 }}
+      style={{ width: shown ? 500 : 0 }}
     >
       {/* Full-height panel: it matches the fixed-height workspace row, so the
-          wizard's footer + all content stay visible (never clipped) and the
-          step body only scrolls as a last resort on very short viewports. */}
+          wizard's footer + all content stay visible (never clipped). It is wide
+          (460px) so the wizard has room to lay out without vertical scrolling. */}
+      {/* No separate title bar — the close control lives in the wizard's tab row,
+          reclaiming ~45px of chrome for the actual content. */}
       <div
         style={{ willChange: 'transform' }}
-        className={`w-[380px] h-full flex flex-col rounded-2xl border border-[--rp-border] bg-[--surface-1] shadow-soft overflow-hidden
+        className={`w-[500px] h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
-        <div className="flex items-center justify-between px-4 py-3 shrink-0 border-b border-[--rp-border]">
-          <h3 className="font-semibold text-sm truncate" dir="auto">{state.draft.title || b.newTask}</h3>
-          <button onClick={close} aria-label={b.closePanel} className="text-[--ink-3] hover:text-[--ink-1] text-lg leading-none">✕</button>
-        </div>
-        <div className="flex-1 min-h-0 p-3">
-          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} />
+        <div className="flex-1 min-h-0 p-2.5">
+          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} />
         </div>
       </div>
     </aside>
