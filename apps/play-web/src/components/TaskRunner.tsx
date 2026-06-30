@@ -210,7 +210,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       {task.hasHint && (
         <div className="mt-3">
           {hint
-            ? <p dir="auto" className="text-sm text-zinc-700 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
+            ? <p dir="auto" className="text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
             : <button onClick={revealHint} disabled={busy} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
                 💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
               </button>}
@@ -353,7 +353,7 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
     <div className="space-y-3">
       <Progress done={stepsDone} total={steps.length} />
       <div className="text-xs text-zinc-500">{t.task.stepOf({ step: idx + 1, total: steps.length })}</div>
-      <p dir="auto" className="text-sm text-zinc-700">{step.prompt}</p>
+      <p dir="auto" className="text-sm text-zinc-200">{step.prompt}</p>
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
         onKeyDown={(e) => { if (e.key === 'Enter') submitStep(); }} />
       <Button disabled={busy} onClick={submitStep}>{t.task.submitStep}</Button>
