@@ -24,9 +24,10 @@ const RoutePreviewMap = lazy(() => import('../components/RoutePreviewMap'));
 
 // Lightweight placeholder while a map chunk + engine load.
 function MapSkeleton({ className = 'h-44' }: { className?: string }) {
+  const b = useT().builder;
   return (
     <div className={`${className} rounded-lg border border-[--rp-border] bg-[--surface-2] animate-pulse flex items-center justify-center gap-2 text-xs text-[--ink-3]`}>
-      <span>🗺</span> Loading map…
+      <span>🗺</span> {b.loadingMapShort}
     </div>
   );
 }
@@ -219,7 +220,7 @@ export default function BuilderPage() {
       const msg = e instanceof Error ? e.message : 'Launch failed';
       // Out of free runs + credits → offer to open the wallet. In free mode
       // launches never fail for billing, so just surface any other error.
-      if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, 'Go to wallet')) {
+      if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, b.goToWallet)) {
         nav('/wallet');
       } else if (!PAYMENTS_ENABLED || !/credit|pro/i.test(msg)) {
         await dialog.alert(msg);
@@ -266,7 +267,7 @@ export default function BuilderPage() {
           <button
             onClick={undo}
             disabled={!canUndo}
-            title={`${b.undo} (Ctrl+Z)`}
+            title={`${b.undo} (Ctrl+Z)`} // i18n-ignore keyboard shortcut
             aria-label={b.undo}
             className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
           >
@@ -275,7 +276,7 @@ export default function BuilderPage() {
           <button
             onClick={redo}
             disabled={!canRedo}
-            title={`${b.redo} (Ctrl+Shift+Z)`}
+            title={`${b.redo} (Ctrl+Shift+Z)`} // i18n-ignore keyboard shortcut
             aria-label={b.redo}
             className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-30 disabled:pointer-events-none transition-colors"
           >
@@ -392,11 +393,11 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
         <div key={f.id} className="flex gap-2 items-center">
           <Input value={f.label} onChange={(e) => update(f.id, { label: e.target.value })} disabled={f.id === 'name'} />
           <Select value={f.type} onChange={(e) => update(f.id, { type: e.target.value as RegistrationField['type'] })}>
-            <option value="text">text</option><option value="number">number</option>
-            <option value="phone">phone</option><option value="checkbox">checkbox</option><option value="select">select</option>
+            <option value="text">{b.regTypeText}</option><option value="number">{b.regTypeNumber}</option>
+            <option value="phone">{b.regTypePhone}</option><option value="checkbox">{b.regTypeCheckbox}</option><option value="select">{b.regTypeSelect}</option>
           </Select>
           <Select value={f.level} onChange={(e) => update(f.id, { level: e.target.value as RegistrationField['level'] })}>
-            <option value="member">member</option><option value="team">team</option>
+            <option value="member">{b.regLevelMember}</option><option value="team">{b.regLevelTeam}</option>
           </Select>
           <label className="flex items-center gap-1 text-xs text-zinc-400">
             <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}

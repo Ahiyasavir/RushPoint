@@ -8,6 +8,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import MapModeToggle from './MapModeToggle';
+import { useT } from './LanguageContext';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
@@ -29,6 +30,7 @@ export default function LiveTeamMap({
   teams: { id: string; displayName: string }[];
   className?: string;
 }) {
+  const rc = useT().runConsole;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
@@ -115,7 +117,7 @@ export default function LiveTeamMap({
       {locs.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-card/90 text-zinc-500 text-xs px-3 py-1.5 rounded-full">
-            Waiting for teams to report their location…
+            {rc.waitingForTeams}
           </span>
         </div>
       )}

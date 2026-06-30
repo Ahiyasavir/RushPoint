@@ -125,7 +125,7 @@ export default function WalletPage() {
       <Card className="p-5 mb-5 bg-gradient-to-br from-rp-signal/8 to-transparent border-rp-signal/20">
         <div className="flex items-center gap-2 mb-1">
           <h2 className="font-brand font-bold text-[--ink-1]">{w.proTitle}</h2>
-          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rp-signal/15 text-rp-signal">PRO</span>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rp-signal/15 text-rp-signal">PRO</span> {/* i18n-ignore brand */}
         </div>
         <p className="text-sm text-[--ink-3] mb-4">{w.proSubtitle}</p>
         {isPro ? (

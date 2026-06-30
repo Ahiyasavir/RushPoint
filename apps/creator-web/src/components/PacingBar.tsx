@@ -4,8 +4,10 @@
 // arc and type mix at a glance. No chart library; a handful of <rect>s.
 import type { Task } from '@rushpoint/shared';
 import { TYPE_FAMILY_COLOR } from '../lib/taskCardPreview';
+import { useT } from './LanguageContext';
 
 export default function PacingBar({ tasks, className = '' }: { tasks: Task[]; className?: string }) {
+  const b = useT().builder;
   if (tasks.length === 0) return null;
   const W = 100, H = 16, gap = 1.5;
   const bw = Math.max(1, (W - gap * (tasks.length - 1)) / tasks.length);
@@ -15,7 +17,7 @@ export default function PacingBar({ tasks, className = '' }: { tasks: Task[]; cl
       preserveAspectRatio="none"
       className={`w-full h-4 ${className}`}
       role="img"
-      aria-label={`Difficulty pacing across ${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
+      aria-label={b.pacingAriaLabel(tasks.length)}
     >
       {tasks.map((t, i) => {
         const d = Math.min(10, Math.max(1, t.difficulty));
@@ -31,7 +33,7 @@ export default function PacingBar({ tasks, className = '' }: { tasks: Task[]; cl
             fill={TYPE_FAMILY_COLOR[t.type]}
             opacity={0.85}
           >
-            <title>{`${t.title || 'Untitled'}, difficulty ${t.difficulty}`}</title>
+            <title>{b.pacingTitle(t.title || b.untitledTask, t.difficulty)}</title>
           </rect>
         );
       })}

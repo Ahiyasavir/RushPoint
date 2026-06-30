@@ -1,5 +1,18 @@
 import React from 'react';
 import { reportError } from '../services/telemetry';
+import { translations, type Lang } from '../i18n';
+
+const LANG_KEY = 'rp-lang';
+
+// Mirrors LanguageContext's own localStorage read — this boundary wraps
+// LanguageProvider in main.tsx, so it has no access to the React context.
+function loadLang(): Lang {
+  try {
+    const stored = localStorage.getItem(LANG_KEY);
+    if (stored === 'en' || stored === 'he') return stored;
+  } catch { /* private mode */ }
+  return 'he';
+}
 
 interface Props {
   children: React.ReactNode;
@@ -30,16 +43,17 @@ export default class ErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      const lang = loadLang();
+      const c = translations[lang].common;
       return (
-        <div className="min-h-screen flex items-center justify-center bg-app-bg p-6">
+        <div className="min-h-screen flex items-center justify-center bg-app-bg p-6" dir={translations[lang].dir}>
           <div className="max-w-md w-full bg-app-surface/80 backdrop-blur-xl border border-glass-border rounded-2xl p-8 text-center">
             <div className="text-4xl mb-3">⚠️</div>
             <h1 className="font-brand text-xl font-bold text-zinc-100 mb-2">
-              Something went wrong
+              {c.errorTitle}
             </h1>
             <p className="text-zinc-400 text-sm mb-6">
-              The dashboard hit an unexpected error. Your data is safe. Try again,
-              and if it keeps happening reload the page.
+              {c.errorBody}
             </p>
             <pre className="text-start text-xs text-red-300/70 bg-black/30 rounded-lg p-3 mb-6 overflow-auto max-h-32">
               {this.state.error.message}
@@ -49,13 +63,13 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                 onClick={this.reset}
                 className="bg-neon-green/10 text-neon-green border border-neon-green/20 rounded-lg px-4 py-2 text-sm font-medium hover:bg-neon-green/20 transition-all"
               >
-                Try again
+                {c.tryAgain}
               </button>
               <button
                 onClick={() => window.location.reload()}
                 className="border border-glass-border bg-glass-bg hover:bg-glass-hover text-zinc-300 hover:text-zinc-100 rounded-lg px-4 py-2 text-sm transition-all"
               >
-                Reload
+                {c.reload}
               </button>
             </div>
           </div>

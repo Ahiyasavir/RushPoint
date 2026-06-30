@@ -11,9 +11,10 @@ import { BuilderIcon, TRIGGER_ICON_NAME } from './builderIcons';
 
 /** Filled/empty difficulty dots (1..10 compressed to 5 dots). */
 function DifficultyDots({ difficulty }: { difficulty: number }) {
+  const b = useT().builder;
   const filled = Math.round(Math.min(10, Math.max(1, difficulty)) / 2);
   return (
-    <span className="inline-flex gap-0.5" title={`Difficulty ${difficulty}/10`} aria-label={`Difficulty ${difficulty} of 10`}>
+    <span className="inline-flex gap-0.5" title={b.difficultyOutOfTen(difficulty)} aria-label={b.difficultyAriaLabel(difficulty)}>
       {Array.from({ length: 5 }, (_, i) => (
         <span key={i} className={`w-2 h-2 rounded-full ${i < filled ? 'bg-rp-fire' : 'bg-[--rp-border]'}`} />
       ))}
@@ -54,8 +55,8 @@ export default function TaskCard({ task, active, onClick }: { task: Task; active
       <div className="flex items-center gap-3 min-w-0 text-xs text-[--ink-3]">
         <span className="truncate flex-1" dir="auto">{taskPreviewLine(task, previewLabels)}</span>
         <DifficultyDots difficulty={task.difficulty} />
-        <span className="shrink-0 tabular-nums" title="Estimated minutes">⏱ {task.estimatedMinutes}m</span>
-        <span className="shrink-0 tabular-nums" title="Points">★ {task.pointValue}</span>
+        <span className="shrink-0 tabular-nums" title={b.estimatedMinutesTitle}>⏱ {task.estimatedMinutes}m</span>
+        <span className="shrink-0 tabular-nums" title={b.pointsTitle}>★ {task.pointValue}</span>
       </div>
     </button>
   );

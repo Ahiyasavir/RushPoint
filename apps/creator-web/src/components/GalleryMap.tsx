@@ -6,6 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { PublicGame } from '@rushpoint/shared';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
+import { useT } from './LanguageContext';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
@@ -16,6 +17,7 @@ export default function GalleryMap({
   onSelect: (gameId: string) => void;
   className?: string;
 }) {
+  const gl = useT().gallery;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
@@ -90,7 +92,7 @@ export default function GalleryMap({
       {located.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-bg/80 text-zinc-400 text-xs px-3 py-1.5 rounded-full">
-            No public games have a location yet.
+            {gl.noLocatedGames}
           </span>
         </div>
       )}

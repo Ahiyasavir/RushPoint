@@ -346,8 +346,8 @@ export default function DashboardPage() {
 
       {sharing && (
         <ShareSheet
-          title={`שתף "${sharing.title}"`}
-          text={`הצטרף למשחק השדה שלי ב-RushPoint: ${sharing.title}`}
+          title={d.shareTitle(sharing.title)}
+          text={d.shareText(sharing.title)}
           url={`${PLAY_URL}/?game=${sharing.id}`}
           notPublic={sharing.visibility !== 'public'}
           onPublish={async () => {

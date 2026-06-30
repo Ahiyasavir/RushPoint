@@ -6,10 +6,12 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Stage } from '@rushpoint/shared';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
+import { useT } from './LanguageContext';
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
 export default function RoutePreviewMap({ stages, className = '' }: { stages: Stage[]; className?: string }) {
+  const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
@@ -21,7 +23,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
     .flatMap((s) => s.tasks)
     .filter((t) => !t.locationless && t.coordinates && isValidCoord(t.coordinates.lat, t.coordinates.lng)
       && (t.coordinates.lat !== 0 || t.coordinates.lng !== 0))
-    .map((t) => ({ title: t.title || 'Task', lat: t.coordinates.lat, lng: t.coordinates.lng }));
+    .map((t) => ({ title: t.title || b.untitledTask, lat: t.coordinates.lat, lng: t.coordinates.lng }));
 
   // Keep a ref to the latest drawRoute closure so the map's 'load'/'styledata'
   // listeners (registered once at mount) always call the current version — not
@@ -99,7 +101,7 @@ export default function RoutePreviewMap({ stages, className = '' }: { stages: St
       {stops.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="bg-app-bg/80 text-zinc-400 text-xs px-3 py-1.5 rounded-full">
-            No located tasks yet. Add a map location to see the route.
+            {b.noRouteYet}
           </span>
         </div>
       )}

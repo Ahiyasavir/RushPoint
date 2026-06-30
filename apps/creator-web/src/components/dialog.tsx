@@ -9,6 +9,7 @@
 // Mount <DialogHost/> once at the app root.
 import { useEffect, useState } from 'react';
 import { Button, Card, Input } from './ui';
+import { useT } from './LanguageContext';
 
 type DialogKind = 'alert' | 'confirm' | 'prompt';
 interface DialogRequest {
@@ -41,6 +42,7 @@ export const dialog = {
 };
 
 export function DialogHost() {
+  const c = useT().common;
   const [req, setReq] = useState<DialogRequest | null>(null);
   const [value, setValue] = useState('');
 
@@ -75,7 +77,7 @@ export function DialogHost() {
 
         <div className="flex justify-end gap-2">
           {req.kind !== 'alert' && (
-            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+            <Button variant="ghost" onClick={onCancel}>{c.cancel}</Button>
           )}
           <Button
             variant={req.confirmLabel?.toLowerCase().includes('delete') ? 'danger' : 'primary'}

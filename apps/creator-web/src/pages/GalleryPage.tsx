@@ -106,7 +106,7 @@ export default function GalleryPage() {
               <h3 className="font-semibold text-sm">{tk.title}</h3>
               <p className="text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">{tk.description}</p>
               <div className="flex gap-2 text-[11px] text-zinc-500">
-                <span>{tk.type}</span>·<span>diff {tk.difficulty}</span>·<span>{tk.pointValue} pts</span>·<span>{tk.copyCount} copies</span>
+                <span>{tk.type}</span>·<span>{gl.metaDiff(tk.difficulty)}</span>·<span>{gl.metaPts(tk.pointValue)}</span>·<span>{gl.metaCopies(tk.copyCount)}</span>
               </div>
               <span className="text-[11px] text-zinc-600">{gl.from(tk.sourceGameTitle ?? '')}</span>
             </Card>

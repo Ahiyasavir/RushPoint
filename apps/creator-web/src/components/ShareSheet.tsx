@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Button } from './ui';
+import { useT } from './LanguageContext';
 
 // Reusable share modal: QR + copyable link + native share sheet. Used to recruit
 // players to a game's public promo page before an event, and reusable anywhere a
@@ -15,6 +16,7 @@ export function ShareSheet({
   onPublish?: () => void | Promise<void>;
   onClose: () => void;
 }) {
+  const b = useT().builder;
   const [qr, setQr] = useState('');
   const [copied, setCopied] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -50,26 +52,26 @@ export function ShareSheet({
 
         {notPublic && (
           <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
-            This game isn&apos;t in the gallery yet, so the preview link won&apos;t show anything.
+            {b.shareNotInGallery}
             {onPublish && (
               <button onClick={publish} disabled={publishing}
                 className="ms-1 underline hover:text-amber-200 disabled:opacity-50">
-                {publishing ? 'Publishing…' : 'Publish it now'}
+                {publishing ? b.sharePublishing : b.sharePublishNow}
               </button>
             )}
           </div>
         )}
 
-        {qr && <img src={qr} alt="QR code" className="mx-auto rounded-lg bg-white p-2 w-44 h-44" />}
+        {qr && <img src={qr} alt={b.shareQrAlt} className="mx-auto rounded-lg bg-white p-2 w-44 h-44" />}
 
         <div className="mt-4 flex items-center gap-2 rounded-lg bg-app-bg border border-glass-border px-3 py-2">
           <span className="text-xs text-zinc-400 truncate flex-1 min-w-0">{url.replace(/^https?:\/\//, '')}</span>
           <button onClick={copy} className="text-xs text-neon-green hover:underline shrink-0">
-            {copied ? 'Copied ✓' : 'Copy'}
+            {copied ? b.shareCopied : b.shareCopy}
           </button>
         </div>
 
-        <Button className="mt-4 w-full" onClick={nativeShare}>Share…</Button>
+        <Button className="mt-4 w-full" onClick={nativeShare}>{b.shareBtn}</Button>
       </div>
     </div>
   );

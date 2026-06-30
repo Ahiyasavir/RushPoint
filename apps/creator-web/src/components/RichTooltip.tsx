@@ -13,47 +13,50 @@ type DirectTooltip = { concept?: never; title: string; body: string; svg?: React
 type TooltipProps = (ConceptTooltip | DirectTooltip) & { children?: ReactNode };
 
 // Only the (illustrative, asset-light) SVGs live here; the title + body come from
-// i18n so the tooltip is localized.
-const SVGS: Record<TooltipConcept, ReactNode> = {
-  geofence: (
-      <svg viewBox="0 0 120 60" className="w-full h-14">
-        <circle cx="60" cy="30" r="26" fill="#D85A3022" stroke="#D85A30" strokeWidth="1.5" />
-        <circle cx="60" cy="30" r="3" fill="#D85A30" />
-        <line x1="60" y1="30" x2="86" y2="30" stroke="#D85A30" strokeWidth="1" strokeDasharray="2 2" />
-        <text x="73" y="26" fontSize="7" fill="#D85A30">r</text>
-        <circle cx="32" cy="44" r="3" fill="#378ADD" />
-        <circle cx="92" cy="18" r="3" fill="currentColor" />
-      </svg>
-    ),
-  hint: (
-      <svg viewBox="0 0 120 60" className="w-full h-14">
-        <text x="20" y="38" fontSize="22">💡</text>
-        <text x="56" y="36" fontSize="14" fill="#D85A30">−25</text>
-        <text x="92" y="36" fontSize="14">★</text>
-      </svg>
-    ),
-  concurrent: (
-      <svg viewBox="0 0 120 60" className="w-full h-14">
-        <rect x="44" y="16" width="32" height="28" rx="4" fill="#7F77DD22" stroke="#7F77DD" strokeWidth="1.5" />
-        <circle cx="54" cy="30" r="4" fill="#7F77DD" />
-        <circle cx="66" cy="30" r="4" fill="#7F77DD" />
-        <circle cx="18" cy="30" r="4" fill="currentColor" />
-        <circle cx="102" cy="30" r="4" fill="currentColor" />
-        <path d="M26 30 H40" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
-        <path d="M80 30 H94" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
-      </svg>
-    ),
-  difficulty: (
-      <svg viewBox="0 0 120 60" className="w-full h-14">
-        <polyline points="12,46 36,40 60,30 84,20 108,10" fill="none" stroke="#FF5722" strokeWidth="2" />
-        {[46, 40, 30, 20, 10].map((y, i) => (
-          <circle key={i} cx={12 + i * 24} cy={y} r="3" fill="#FF5722" />
-        ))}
-        <text x="10" y="56" fontSize="6" fill="currentColor">easy</text>
-        <text x="92" y="56" fontSize="6" fill="currentColor">hard</text>
-      </svg>
-    ),
-};
+// i18n so the tooltip is localized. The difficulty diagram's axis labels are
+// passed in (easyLabel/hardLabel) so they localize too.
+function buildSvgs(easyLabel: string, hardLabel: string): Record<TooltipConcept, ReactNode> {
+  return {
+    geofence: (
+        <svg viewBox="0 0 120 60" className="w-full h-14">
+          <circle cx="60" cy="30" r="26" fill="#D85A3022" stroke="#D85A30" strokeWidth="1.5" />
+          <circle cx="60" cy="30" r="3" fill="#D85A30" />
+          <line x1="60" y1="30" x2="86" y2="30" stroke="#D85A30" strokeWidth="1" strokeDasharray="2 2" />
+          <text x="73" y="26" fontSize="7" fill="#D85A30">r</text>
+          <circle cx="32" cy="44" r="3" fill="#378ADD" />
+          <circle cx="92" cy="18" r="3" fill="currentColor" />
+        </svg>
+      ),
+    hint: (
+        <svg viewBox="0 0 120 60" className="w-full h-14">
+          <text x="20" y="38" fontSize="22">💡</text>
+          <text x="56" y="36" fontSize="14" fill="#D85A30">−25</text>
+          <text x="92" y="36" fontSize="14">★</text>
+        </svg>
+      ),
+    concurrent: (
+        <svg viewBox="0 0 120 60" className="w-full h-14">
+          <rect x="44" y="16" width="32" height="28" rx="4" fill="#7F77DD22" stroke="#7F77DD" strokeWidth="1.5" />
+          <circle cx="54" cy="30" r="4" fill="#7F77DD" />
+          <circle cx="66" cy="30" r="4" fill="#7F77DD" />
+          <circle cx="18" cy="30" r="4" fill="currentColor" />
+          <circle cx="102" cy="30" r="4" fill="currentColor" />
+          <path d="M26 30 H40" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
+          <path d="M80 30 H94" stroke="currentColor" strokeWidth="1" strokeDasharray="2 2" />
+        </svg>
+      ),
+    difficulty: (
+        <svg viewBox="0 0 120 60" className="w-full h-14">
+          <polyline points="12,46 36,40 60,30 84,20 108,10" fill="none" stroke="#FF5722" strokeWidth="2" />
+          {[46, 40, 30, 20, 10].map((y, i) => (
+            <circle key={i} cx={12 + i * 24} cy={y} r="3" fill="#FF5722" />
+          ))}
+          <text x="10" y="56" fontSize="6" fill="currentColor">{easyLabel}</text>
+          <text x="92" y="56" fontSize="6" fill="currentColor">{hardLabel}</text>
+        </svg>
+      ),
+  };
+}
 
 export default function RichTooltip({ concept, title: titleProp, body: bodyProp, svg: svgProp, children }: TooltipProps) {
   const id = useId();
@@ -64,8 +67,9 @@ export default function RichTooltip({ concept, title: titleProp, body: bodyProp,
     concurrent: { title: b.tipConcurrentTitle, body: b.tipConcurrentBody },
     difficulty: { title: b.tipDifficultyTitle, body: b.tipDifficultyBody },
   };
+  const svgs = buildSvgs(b.diffEasy, b.diffHard);
   const d = concept
-    ? { ...TEXT[concept], svg: SVGS[concept] }
+    ? { ...TEXT[concept], svg: svgs[concept] }
     : { title: titleProp!, body: bodyProp!, svg: svgProp };
   return (
     <span className="relative inline-flex group align-middle">

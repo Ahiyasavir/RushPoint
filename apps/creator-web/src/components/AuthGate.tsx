@@ -41,6 +41,7 @@ const incomingRef = new URLSearchParams(window.location.search).get('ref');
 if (incomingRef) { try { localStorage.setItem(REF_KEY, incomingRef); } catch { /* private mode */ } }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const t = useT();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
   const [, bump] = useState(0); // force a re-render after an in-place user.reload()
@@ -61,9 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!ref || ref === user.uid) { if (ref) { try { localStorage.removeItem(REF_KEY); } catch { /* */ } } return; }
     try { localStorage.removeItem(REF_KEY); } catch { /* */ }
     claimReferral({ referrerUid: ref })
-      .then((r) => { if (r.ok && !r.alreadyClaimed) void dialog.alert('🎁 בונוס הפניה הוחל! קיבלת ריצה חינמית נוספת.'); })
+      .then((r) => { if (r.ok && !r.alreadyClaimed) void dialog.alert(`🎁 ${t.common.referralBonusApplied}`); })
       .catch(() => { /* invalid or expired invite, silently ignore */ });
-  }, [user]);
+  }, [user, t]);
 
   if (!ready) {
     return (
@@ -210,7 +211,7 @@ function LoginScreen() {
             <div>
               <Label>{t.auth.fullName}</Label>
               <Input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)}
-                placeholder="ישראל ישראלי" autoComplete="name" />
+                placeholder="ישראל ישראלי" autoComplete="name" /> {/* i18n-ignore mockup sample */}
             </div>
           )}
 
@@ -455,8 +456,8 @@ function PhoneMockup() {
             <div className="w-16 h-1.5 rounded-full bg-zinc-300" />
           </div>
           <div className="px-4 pt-1 pb-3">
-            <div className="text-[13px] font-extrabold text-orange-600">מסע אוצר העיר העתיקה</div>
-            <div className="text-[10px] text-zinc-500">ניקוד: <span className="font-mono text-orange-600">690</span></div>
+            <div className="text-[13px] font-extrabold text-orange-600">מסע אוצר העיר העתיקה</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[10px] text-zinc-500">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
             <div className="mt-2 flex gap-1">
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
@@ -470,15 +471,15 @@ function PhoneMockup() {
               <circle cx="130" cy="35" r="5" fill="#ea580c" />
               <circle cx="185" cy="18" r="5" fill="#f97316" />
             </svg>
-            <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-zinc-600">240מ להמשך</div>
+            <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-zinc-600">240מ להמשך</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="m-4 mt-3 rounded-xl border border-orange-200 bg-white p-3">
-            <div className="text-[11px] font-semibold text-zinc-800">📷 תמונה בשער יפו</div>
-            <div className="text-[10px] text-zinc-500 mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div>
-            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">שלח תמונה</div>
+            <div className="text-[11px] font-semibold text-zinc-800">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[10px] text-zinc-500 mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
+            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="mx-4 mb-4 rounded-xl bg-white border border-zinc-200 p-2.5">
-            <div className="text-[10px] font-semibold text-zinc-700 mb-1.5">🏆 לוח תוצאות</div>
+            <div className="text-[10px] font-semibold text-zinc-700 mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
             {board.map((r) => (
               <div key={r.rank} className={`flex items-center justify-between text-[10px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-zinc-500'}`}>
                 <span className="truncate"><span className="font-mono me-1.5">{r.rank}</span>{r.name}</span>
