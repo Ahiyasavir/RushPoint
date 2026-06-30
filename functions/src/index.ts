@@ -113,7 +113,7 @@ export const inviteStaff = functions.https.onCall(async (data, context) => {
       throw new functions.https.HttpsError('permission-denied', 'Only the game owner can invite staff');
     }
   }
-  if (!name?.trim()) throw new functions.https.HttpsError('invalid-argument', 'name required');
+  const cleanName = validate(() => requireString(name, 'name', MAX_MESSAGE_LEN));
 
   const pin = generatePin();
   const now = new Date().toISOString();
@@ -124,7 +124,7 @@ export const inviteStaff = functions.https.onCall(async (data, context) => {
   await ref.set({
     id: ref.id,
     ownerUid, gameId, runId,
-    name: name.trim(),
+    name: cleanName,
     permissions: permissions ?? [],
     pin,
     used: false,
@@ -547,7 +547,7 @@ export const reviewStationSubmission = functions.https.onCall(async (data, conte
           status: approved ? 'approved' : 'rejected',
           reviewedAt: now,
           reviewedBy: context.auth!.uid,
-          reviewNote: note?.trim() ?? '',
+          reviewNote: validate(() => optionalString(note, 'note', MAX_MESSAGE_LEN)) ?? '',
         },
       },
     },
@@ -598,7 +598,7 @@ export const adjustTeamScore = functions.https.onCall(async (data, context) => {
     actionType: delta >= 0 ? 'bonus' : 'fine',
     previousValue: -prev,
     newValue: -newPenalty,
-    reason: reason ?? '',
+    reason: validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '',
   });
 
   return { ok: true, newBonusPenalty: newPenalty };
