@@ -19,11 +19,14 @@ export function loadSession(): Session | null {
 }
 
 export function saveSession(s: Session) {
-  localStorage.setItem(KEY, JSON.stringify(s));
+  // Guard setItem (Safari private mode / quota-exceeded throws) — a persistence
+  // failure must NOT bubble into the join flow and block a participant who has
+  // already joined server-side. Matches saveLang's defensive handling.
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* session is best-effort */ }
 }
 
 export function clearSession() {
-  localStorage.removeItem(KEY);
+  try { localStorage.removeItem(KEY); } catch { /* ignore */ }
 }
 
 // ── Language preference (change: play-web-i18n-hebrew) — Hebrew by default ────
@@ -64,9 +67,9 @@ export function loadStaffSession(): StaffSession | null {
 }
 
 export function saveStaffSession(s: StaffSession) {
-  localStorage.setItem(STAFF_KEY, JSON.stringify(s));
+  try { localStorage.setItem(STAFF_KEY, JSON.stringify(s)); } catch { /* best-effort */ }
 }
 
 export function clearStaffSession() {
-  localStorage.removeItem(STAFF_KEY);
+  try { localStorage.removeItem(STAFF_KEY); } catch { /* ignore */ }
 }
