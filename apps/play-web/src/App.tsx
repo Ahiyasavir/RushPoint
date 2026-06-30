@@ -53,10 +53,13 @@ function AppInner() {
   const { dir, lang } = useT();
 
   useEffect(() => {
-    ensureAuth().then(() => {
-      setSession(loadSession());
-      setReady(true);
-    });
+    // Always leave the loading state, even if anonymous auth fails on a network
+    // blip — otherwise the whole app hangs on the spinner forever. On failure we
+    // still render (JoinScreen); the join flow re-attempts auth when it runs.
+    ensureAuth()
+      .then(() => setSession(loadSession()))
+      .catch(() => { /* render anyway; do not trap the user on a spinner */ })
+      .finally(() => setReady(true));
   }, []);
 
   // Reflect the active language on the document root for RTL/LTR.
