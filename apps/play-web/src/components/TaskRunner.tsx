@@ -406,7 +406,7 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File 
       <input type="file" accept="image/*" capture="environment" onChange={pickFile}
         className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-app-raised file:text-zinc-200" />
       {fileErr && <p className="text-rp-alert text-sm">{fileErr}</p>}
-      {preview && <img src={preview} alt="preview" className="w-full rounded-lg max-h-56 object-cover" />}
+      {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
       <Input value={url} onChange={(e) => { setUrl(e.target.value); if (e.target.value) { setFile(null); setPreviewUrl(null); setFileErr(''); } }}
         placeholder={t.task.pastePhotoUrl} />
       <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())}>

@@ -6,6 +6,7 @@ import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
+import { useT } from '../i18nContext';
 
 export interface NavTarget {
   id: string;
@@ -25,6 +26,7 @@ export default function NavMap({
   accent?: string;
   className?: string;
 }) {
+  const { t } = useT();
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const markers = useRef<maplibregl.Marker[]>([]);
@@ -118,7 +120,7 @@ export default function NavMap({
   if (valid.length === 0) {
     return (
       <div className={`rounded-2xl bg-app-card border border-glass-border flex items-center justify-center text-zinc-600 text-sm ${className}`}>
-        Map will appear once your task has a location.
+        {t.task.mapAppears}
       </div>
     );
   }
