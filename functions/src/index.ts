@@ -6,7 +6,7 @@ import * as functions from 'firebase-functions';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, type SafeZone } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -274,7 +274,7 @@ export const triggerSOS = functions.https.onCall(async (data, context) => {
     type: 'sos',
     lat: lat ?? null,
     lng: lng ?? null,
-    message: message?.trim() ?? '',
+    message: validate(() => optionalString(message, 'message', MAX_MESSAGE_LEN)) ?? '',
     acknowledged: false,
     createdAt: new Date().toISOString(),
   });
@@ -318,7 +318,10 @@ export const pushAnnouncement = functions.https.onCall(async (data, context) => 
     messageHe?: string;
   };
 
-  if (!message?.trim()) throw new functions.https.HttpsError('invalid-argument', 'message required');
+  // Bound the broadcast text: it is pushed to every participant's screen, so an
+  // oversized message would disrupt the whole run (and bloat the doc).
+  const cleanMsg = validate(() => requireString(message, 'message', MAX_MESSAGE_LEN));
+  const cleanMsgHe = validate(() => optionalString(messageHe, 'messageHe', MAX_MESSAGE_LEN));
 
   const ref = db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/announcements`)
@@ -326,8 +329,8 @@ export const pushAnnouncement = functions.https.onCall(async (data, context) => 
 
   await ref.set({
     id: ref.id,
-    message: message.trim(),
-    messageHe: messageHe?.trim() ?? message.trim(),
+    message: cleanMsg,
+    messageHe: cleanMsgHe ?? cleanMsg,
     active: true,
     createdAt: new Date().toISOString(),
     createdBy: context.auth!.uid,
@@ -376,7 +379,11 @@ export const pushFlashMission = functions.https.onCall(async (data, context) => 
     ttlSeconds: number;
   };
 
-  if (!title?.trim()) throw new functions.https.HttpsError('invalid-argument', 'title required');
+  // Bound the broadcast text (shown to every participant).
+  const cleanTitle = validate(() => requireString(title, 'title', MAX_MESSAGE_LEN));
+  const cleanTitleHe = validate(() => optionalString(titleHe, 'titleHe', MAX_MESSAGE_LEN));
+  const cleanDesc = validate(() => optionalString(description, 'description', MAX_MESSAGE_LEN));
+  const cleanDescHe = validate(() => optionalString(descriptionHe, 'descriptionHe', MAX_MESSAGE_LEN));
   const ttl     = Number(ttlSeconds) > 0 ? Number(ttlSeconds) : 300;
   const bonus   = Number(bonusPoints) >= 0 ? Number(bonusPoints) : 0;
   const nowIso  = new Date().toISOString();
@@ -388,10 +395,10 @@ export const pushFlashMission = functions.https.onCall(async (data, context) => 
 
   await ref.set({
     id: ref.id,
-    title: title.trim(),
-    titleHe: titleHe?.trim() ?? title.trim(),
-    description: description?.trim() ?? '',
-    descriptionHe: descriptionHe?.trim() ?? description?.trim() ?? '',
+    title: cleanTitle,
+    titleHe: cleanTitleHe ?? cleanTitle,
+    description: cleanDesc ?? '',
+    descriptionHe: cleanDescHe ?? cleanDesc ?? '',
     bonusPoints: bonus,
     expiresAt,
     isActive: true,
