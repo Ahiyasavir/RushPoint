@@ -24,6 +24,7 @@ const PLAY_URL = import.meta.env.DEV
 export default function RunConsolePage() {
   const { gameId, runId } = useParams();
   const { user } = useAuth();
+  const t = useT();
   const ownerUid = user!.uid;
   const [run, setRun] = useState<Run | null>(null);
   const [teams, setTeams] = useState<RunTeamRow[]>([]);
@@ -75,13 +76,13 @@ export default function RunConsolePage() {
     finally { setBusy(false); }
   }
   async function finalize() {
-    if (!(await dialog.confirm('Finalize the run? This computes the final leaderboard.', 'Finalize'))) return;
+    if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle))) return;
     setBusy(true);
     try { await finalizeRun({ gameId: gameId!, runId: runId! }); }
     finally { setBusy(false); }
   }
   async function invite() {
-    const name = await dialog.prompt('Staff member name?');
+    const name = await dialog.prompt(t.runConsole.staffNamePrompt);
     if (!name) return;
     const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
     setStaffPin(pin);
@@ -95,7 +96,7 @@ export default function RunConsolePage() {
     try { await acknowledgeAlert({ ...ctx, alertId }); } catch { /* listener will reflect state */ }
   }
 
-  if (!run) return <Spinner label="Loading run…" />;
+  if (!run) return <Spinner label={t.runConsole.loadingRun} />;
 
   const finished = run.status === 'finished';
 
@@ -104,16 +105,16 @@ export default function RunConsolePage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Live Run</h1>
+          <h1 className="text-2xl font-bold">{t.runConsole.liveRun}</h1>
           <div className="flex items-center gap-2 mt-1">
             <Badge color={finished ? 'zinc' : 'green'}>{run.status}</Badge>
             {run.billingType && (
               <Badge color={run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
-                {run.billingType === 'free' ? 'Free run' : run.billingType === 'pro' ? 'Pro' : 'Credit'}
+                {run.billingType === 'free' ? t.runConsole.freeRun : run.billingType === 'pro' ? t.runConsole.proRun : t.runConsole.creditRun}
               </Badge>
             )}
             <span className="text-zinc-500 text-sm">
-              {run.participantCount ?? teams.length} / {run.maxParticipants ?? '∞'} participants
+              {t.runConsole.participants({ n: run.participantCount ?? teams.length, max: String(run.maxParticipants ?? '∞') })}
             </span>
           </div>
         </div>
@@ -123,17 +124,17 @@ export default function RunConsolePage() {
       {/* Live SOS / alerts — the organizer sees these the moment a team raises one */}
       {alerts.length > 0 && (
         <Card className="p-4 border-neon-red/40">
-          <div className="text-sm font-medium mb-2 text-neon-red">🆘 Active alerts ({alerts.length})</div>
+          <div className="text-sm font-medium mb-2 text-neon-red">{t.runConsole.activeAlerts({ n: alerts.length })}</div>
           <div className="space-y-2">
             {alerts.map((a) => (
               <div key={a.id} className="flex items-center gap-3 text-sm">
                 <span className="uppercase text-neon-red font-medium">{a.type}</span>
-                <span className="text-zinc-500 text-xs">team {a.teamId.slice(0, 8)}</span>
+                <span className="text-zinc-500 text-xs">{t.runConsole.team({ id: a.teamId.slice(0, 8) })}</span>
                 {a.message && <span className="text-zinc-300 flex-1 truncate">{a.message}</span>}
                 {a.lat != null && a.lng != null && (
-                  <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">map</a>
+                  <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{t.runConsole.map}</a>
                 )}
-                <Button variant="subtle" className="text-xs ms-auto" onClick={() => ack(a.id)}>Acknowledge</Button>
+                <Button variant="subtle" className="text-xs ms-auto" onClick={() => ack(a.id)}>{t.runConsole.acknowledge}</Button>
               </div>
             ))}
           </div>
@@ -142,15 +143,15 @@ export default function RunConsolePage() {
 
       {/* Actions */}
       <div className="flex flex-wrap gap-2">
-        <Button disabled={busy || finished} onClick={startAll}>Start all teams</Button>
-        <Button variant="ghost" disabled={busy || finished} onClick={() => refreshStandings()}>Refresh standings</Button>
-        <Button variant="ghost" onClick={invite}>Invite staff (PIN)</Button>
-        <Button variant="danger" disabled={busy || finished} onClick={finalize}>Finalize run</Button>
+        <Button disabled={busy || finished} onClick={startAll}>{t.runConsole.startAllTeams}</Button>
+        <Button variant="ghost" disabled={busy || finished} onClick={() => refreshStandings()}>{t.runConsole.refreshStandings}</Button>
+        <Button variant="ghost" onClick={invite}>{t.runConsole.inviteStaffPin}</Button>
+        <Button variant="danger" disabled={busy || finished} onClick={finalize}>{t.runConsole.finalizeRun}</Button>
       </div>
       {staffPin && (
         <Card className="p-3 text-sm">
-          Staff PIN: <span className="font-mono text-neon-green text-lg tracking-widest">{staffPin}</span>
-          <span className="text-zinc-500"> · share with your staff to sign in on the play app.</span>
+          {t.runConsole.staffPinLabel} <span className="font-mono text-neon-green text-lg tracking-widest">{staffPin}</span>
+          <span className="text-zinc-500"> {t.runConsole.staffPinShareNote}</span>
         </Card>
       )}
 
@@ -165,29 +166,29 @@ export default function RunConsolePage() {
         {/* Teams */}
         <div className="lg:col-span-2">
           <Card className="p-4">
-            <div className="text-sm font-medium mb-3">Teams</div>
+            <div className="text-sm font-medium mb-3">{t.runConsole.teamsTitle}</div>
             {teams.length === 0 ? (
-              <p className="text-zinc-500 text-sm">No one has joined yet. Share the access code.</p>
+              <p className="text-zinc-500 text-sm">{t.runConsole.noOneJoinedYet}</p>
             ) : (
               <div className="space-y-2">
-                {teams.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 p-2 rounded-lg bg-app-bg">
+                {teams.map((team) => (
+                  <div key={team.id} className="flex items-center gap-3 p-2 rounded-lg bg-app-bg">
                     <div className="flex-1">
-                      <div className="text-sm text-zinc-200">{t.displayName}</div>
+                      <div className="text-sm text-zinc-200">{team.displayName}</div>
                       <div className="text-[11px] text-zinc-500">
-                        {t.finished ? 'finished' : t.launched ? `stage ${(t.activeStageOrder ?? 0) + 1}` : 'waiting'}
-                        {' · '}{t.completedStages} done
+                        {team.finished ? 'finished' : team.launched ? `stage ${(team.activeStageOrder ?? 0) + 1}` : 'waiting'}
+                        {' · '}{t.runConsole.stageDone({ n: team.completedStages })}
                       </div>
                     </div>
-                    <div className="text-neon-green font-mono font-semibold">{t.score}</div>
+                    <div className="text-neon-green font-mono font-semibold">{team.score}</div>
                     <button className="text-[11px] text-zinc-400 hover:text-zinc-200"
-                      onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: t.id }); await loadTeams(); }}>
-                      skip
+                      onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }}>
+                      {t.runConsole.skip}
                     </button>
                     <button className="text-[11px] text-zinc-400 hover:text-neon-red"
                       onClick={async () => {
-                        const v = await dialog.prompt('Score adjustment (+bonus / −fine):'); if (!v) return;
-                        await adjustTeamScore({ ...ctx, teamId: t.id, delta: parseInt(v) || 0, reason: 'manual' }); await loadTeams();
+                        const v = await dialog.prompt(t.runConsole.scoreAdjustmentPrompt); if (!v) return;
+                        await adjustTeamScore({ ...ctx, teamId: team.id, delta: parseInt(v) || 0, reason: 'manual' }); await loadTeams();
                       }}>
                       ±
                     </button>
@@ -200,7 +201,7 @@ export default function RunConsolePage() {
           {/* Live team map — where every team is right now, fed by GPS pings. */}
           {!finished && teams.length > 0 && (
             <Card className="p-4 mt-4">
-              <div className="text-sm font-medium mb-3">📍 Live team map</div>
+              <div className="text-sm font-medium mb-3">{t.runConsole.liveTeamMap}</div>
               <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
             </Card>
           )}
@@ -209,7 +210,7 @@ export default function RunConsolePage() {
           {!finished && run.leaderboard && run.leaderboard.rankings.length > 0 && (
             <Card className="p-4 mt-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-medium">📊 Live standings</div>
+                <div className="text-sm font-medium">{t.runConsole.liveStandings}</div>
                 <button
                   className={`text-[11px] px-2 py-1 rounded-md ${run.leaderboard.published ? 'bg-neon-green/15 text-neon-green' : 'bg-app-raised text-zinc-400'}`}
                   disabled={busy}
@@ -223,20 +224,20 @@ export default function RunConsolePage() {
                   <div key={r.teamId} className="flex items-center gap-3 text-sm">
                     <span className="w-6 text-zinc-500">{r.rank}</span>
                     <span className="flex-1 text-zinc-200">{r.teamName}</span>
-                    <span className="text-[11px] text-zinc-500">{r.completedStages} done</span>
+                    <span className="text-[11px] text-zinc-500">{t.runConsole.stageDone({ n: r.completedStages })}</span>
                     <span className="text-neon-green font-mono">{r.score}</span>
                   </div>
                 ))}
               </div>
               <div className="text-[11px] text-zinc-600 mt-2">
-                Organizer only until published. Updated {new Date(run.leaderboard.updatedAt).toLocaleTimeString()}.
+                {t.runConsole.organizerOnlyUpdated({ time: new Date(run.leaderboard.updatedAt).toLocaleTimeString() })}
               </div>
             </Card>
           )}
 
           {finished && run.leaderboard && (
             <Card className="p-4 mt-4">
-              <div className="text-sm font-medium mb-3">🏁 Final leaderboard</div>
+              <div className="text-sm font-medium mb-3">{t.runConsole.finalLeaderboard}</div>
               <div className="space-y-1">
                 {run.leaderboard.rankings.map((r) => (
                   <div key={r.teamId} className="flex items-center gap-3 text-sm">
@@ -262,6 +263,7 @@ export default function RunConsolePage() {
 // Access code + shareable join link + QR — participants scan to land in the app
 // with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
 function JoinShare({ accessCode }: { accessCode: string }) {
+  const t = useT();
   const link = `${PLAY_URL}/?code=${accessCode}`;
   const boardLink = `${PLAY_URL}/?board=${accessCode}`;
   const [qr, setQr] = useState('');
@@ -274,9 +276,9 @@ function JoinShare({ accessCode }: { accessCode: string }) {
   }
   return (
     <Card className="px-5 py-4 text-center">
-      <div className="text-[11px] text-zinc-500 uppercase tracking-widest">Access code</div>
+      <div className="text-[11px] text-zinc-500 uppercase tracking-widest">{t.runConsole.accessCode}</div>
       <div className="text-2xl font-mono font-bold text-neon-green tracking-[0.3em] mb-2">{accessCode}</div>
-      {qr && <img src={qr} alt="Join QR code" className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
+      {qr && <img src={qr} alt={t.runConsole.joinQrCode} className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
       <div className="mt-2 flex flex-col gap-1">
         <button className="text-xs text-neon-green hover:underline" onClick={() => copy(link, 'join')}>
           {copied === 'join' ? 'Link copied ✓' : 'Copy join link'}
@@ -290,6 +292,7 @@ function JoinShare({ accessCode }: { accessCode: string }) {
 }
 
 function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+  const t = useT();
   const [msg, setMsg] = useState('');
   const [flash, setFlash] = useState('');
   const [pts, setPts] = useState(50);
@@ -297,19 +300,19 @@ function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: st
   return (
     <>
       <Card className="p-4 space-y-2">
-        <Label>Announcement (persists)</Label>
-        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Heads up to all teams…" />
+        <Label>{t.runConsole.announcementPersists}</Label>
+        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.runConsole.announcementPlaceholder} />
         <Button className="w-full" disabled={!msg} onClick={async () => { await pushAnnouncement({ ...ctx, message: msg }); setMsg(''); }}>
-          Broadcast
+          {t.runConsole.broadcast}
         </Button>
       </Card>
       <Card className="p-4 space-y-2">
-        <Label>Flash mission (timed bonus)</Label>
-        <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder="Bonus mission title" />
+        <Label>{t.runConsole.flashMissionTitle}</Label>
+        <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} />
         <div className="flex gap-2">
           <Input type="number" value={pts} onChange={(e) => setPts(parseInt(e.target.value) || 0)} />
           <Button disabled={!flash} onClick={async () => { await pushFlashMission({ ...ctx, title: flash, bonusPoints: pts, ttlSeconds: 600 }); setFlash(''); }}>
-            Push
+            {t.runConsole.push}
           </Button>
         </div>
       </Card>
