@@ -162,9 +162,22 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   if (!state) {
     return (
       <Screen>
-        <div className="flex-1 flex flex-col items-center justify-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
-          {err && <p className="text-danger text-sm">{err}</p>}
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
+          {err ? (
+            // A persistent failure (e.g. the run was deleted, or the team pruned
+            // → "Team not found") must not trap the participant on a dead screen:
+            // offer a retry and a way to leave + clear the stale session.
+            <>
+              <div className="text-4xl">⚠️</div>
+              <p className="text-danger text-sm">{err}</p>
+              <div className="flex gap-2 mt-1">
+                <Button variant="ghost" onClick={() => void refresh()}>{t.common.tryAgain}</Button>
+                <Button variant="ghost" onClick={() => { clearSession(); onLeave(); }}>{t.play.leave}</Button>
+              </div>
+            </>
+          ) : (
+            <div className="w-8 h-8 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
+          )}
         </div>
       </Screen>
     );
