@@ -34,7 +34,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
         <div className="min-h-screen flex items-center justify-center bg-app-bg p-6" dir={loadLang() === 'he' ? 'rtl' : 'ltr'}>
           <div className="max-w-sm w-full bg-app-card border border-glass-border rounded-2xl p-7 text-center">
             <div className="text-4xl mb-3">⚠️</div>
-            <h1 className="font-brand text-xl font-bold text-zinc-900 mb-2">{c.errorTitle}</h1>
+            <h1 className="font-brand text-xl font-bold text-zinc-100 mb-2">{c.errorTitle}</h1>
             <p className="text-zinc-500 text-sm mb-6">{c.errorBody}</p>
             <div className="flex gap-2 justify-center">
               <button onClick={this.reset}
