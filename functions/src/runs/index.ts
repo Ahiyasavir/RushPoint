@@ -63,6 +63,10 @@ import {
 import { requireString, MAX_ID_LEN } from '@rushpoint/shared';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
+import {
+  assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
+  attachedDeviceUids, controllerUidOf,
+} from './teamDevices';
 import { validate } from '../validation';
 
 function requireAuth(context: functions.https.CallableContext): string {
@@ -323,6 +327,12 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     bonusPenalty: 0,
     launched: false,
     activeTaskId: null,
+    // Shared team devices: the founding phone is the sole device + controller;
+    // teammates attach their own phones via joinTeamAsDevice with this code.
+    deviceUids: [teamId],
+    controllerUid: teamId,
+    deviceJoinCode: generateDeviceJoinCode(),
+    devices: [{ uid: teamId, name: displayName.trim(), joinedAt: now }],
     updatedAt: now,
   };
 
@@ -495,8 +505,10 @@ export async function completeTaskForTeam(
     const startedAt = taskRec.startedAt ?? team.startedAt ?? now;
     const actualMinutes = (new Date(now).getTime() - new Date(startedAt).getTime()) / 60_000;
 
-    // Score this task
-    const gameTask = game.stages[stageIdx]?.tasks[taskIdx];
+    // Score this task. Look up the game task by id (not by [stageIdx][taskIdx]):
+    // team.stages is order-sorted while game.stages is stored in the builder's
+    // array order, so the two index spaces can diverge and score the wrong task.
+    const gameTask = findGameTask(game, taskId);
     let earnedScore = 0;
     if (gameTask) {
       switch (game.scoringPreset) {
@@ -1183,6 +1195,170 @@ async function resolveTeamContext(teamId: string, ctx: {
   throw new functions.https.HttpsError('invalid-argument', 'Cannot resolve run context (provide code or ownerUid/gameId/runId)');
 }
 
+// ─── Shared team devices (shared-team-devices) ────────────────────────────────
+// A team is no longer 1:1 with a uid: extra phones attach via joinTeamAsDevice
+// and are listed in the team doc's deviceUids. Resolve WHICH team the caller
+// belongs to (fast path: founding device, uid == teamId — covers every legacy
+// doc), and optionally gate mutations on the controller role.
+
+export async function resolveCallerTeam(
+  uid: string,
+  ctxIn: { ownerUid?: string; gameId?: string; runId?: string; code?: string },
+  opts: { requireController?: boolean } = {},
+): Promise<{
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  teamId: string;
+  team: RunTeam;
+  teamRef: FirebaseFirestore.DocumentReference;
+}> {
+  const ctx = await resolveTeamContext(uid, ctxIn);
+  let teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, uid));
+  let snap: FirebaseFirestore.DocumentSnapshot = await teamRef.get();
+  if (!snap.exists) {
+    const q = await db.collection(teamsCol(ctx.ownerUid, ctx.gameId, ctx.runId))
+      .where('deviceUids', 'array-contains', uid).limit(1).get();
+    if (q.empty) throw new functions.https.HttpsError('not-found', 'Team not found');
+    snap = q.docs[0];
+    teamRef = snap.ref;
+  }
+  const team = snap.data() as RunTeam;
+  if (opts.requireController) assertController(team, uid);
+  return { ctx, teamId: team.id, team, teamRef };
+}
+
+// ─── joinTeamAsDevice (attach another phone to an existing team) ───────────────
+
+export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  await enforceRateLimit(uid, 'joinTeamAsDevice');
+
+  const { code, teamCode, memberName } = data as {
+    code: string; teamCode: string; memberName?: string;
+  };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  if (!teamCode?.trim()) throw new functions.https.HttpsError('invalid-argument', 'teamCode required');
+  if (memberName != null) validate(() => requireString(memberName, 'memberName', MAX_ID_LEN));
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const codeData = codeSnap.data() as AccessCode;
+  if (codeData.status === 'revoked') {
+    throw new functions.https.HttpsError('permission-denied', 'This code has been revoked');
+  }
+  const { ownerUid, gameId, runId } = codeData;
+
+  const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This race has already finished.');
+  }
+
+  // Idempotent / conflict guard: is this uid already a team or attached to one?
+  const ownTeam = await db.doc(teamPath(ownerUid, gameId, runId, uid)).get();
+  const attachedQ = ownTeam.exists
+    ? null
+    : await db.collection(teamsCol(ownerUid, gameId, runId))
+        .where('deviceUids', 'array-contains', uid).limit(1).get();
+  const existing = ownTeam.exists ? ownTeam : (attachedQ && !attachedQ.empty ? attachedQ.docs[0] : null);
+
+  const normalizedTeamCode = teamCode.trim().toUpperCase();
+  if (existing) {
+    const t = existing.data() as RunTeam;
+    if (t.deviceJoinCode === normalizedTeamCode) {
+      return {
+        ownerUid, gameId, runId, teamId: t.id,
+        role: resolveDeviceRole(t, uid), alreadyAttached: true,
+      };
+    }
+    throw new functions.https.HttpsError('failed-precondition', 'Already part of another team in this run');
+  }
+
+  const teamQ = await db.collection(teamsCol(ownerUid, gameId, runId))
+    .where('deviceJoinCode', '==', normalizedTeamCode).limit(1).get();
+  if (teamQ.empty) throw new functions.https.HttpsError('not-found', 'No team with that device code');
+  const teamRef = teamQ.docs[0].ref;
+
+  const now = new Date().toISOString();
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    const decision = canAttachDevice(team, uid);
+    if (!decision.ok) {
+      if (decision.reason === 'duplicate') return; // raced with ourselves — already attached
+      if (decision.reason === 'full') {
+        throw new functions.https.HttpsError('resource-exhausted', 'This team already has the maximum number of phones');
+      }
+      throw new functions.https.HttpsError('failed-precondition', 'This team has already finished.');
+    }
+    // Rewrite the devices array wholesale (never dotted-path an array element)
+    // and backfill the device fields on a legacy doc in the same write.
+    const devices = [
+      ...(team.devices ?? [{ uid: team.id, name: team.displayName, joinedAt: team.updatedAt }]),
+      { uid, name: memberName?.trim() || 'Phone', joinedAt: now },
+    ];
+    tx.update(teamRef, {
+      deviceUids: [...attachedDeviceUids(team), uid],
+      controllerUid: controllerUidOf(team),
+      devices,
+      updatedAt: now,
+    });
+  });
+
+  return { ownerUid, gameId, runId, teamId: teamRef.id, role: 'viewer', alreadyAttached: false };
+});
+
+// ─── transferController / claimController ─────────────────────────────────────
+
+export const transferController = loggedCallable('transferController', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  await enforceRateLimit(uid, 'transferController');
+  const { toUid, ownerUid, gameId, runId, code } = data as {
+    toUid: string; ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!toUid?.trim()) throw new functions.https.HttpsError('invalid-argument', 'toUid required');
+
+  const { teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    assertController(team, uid); // only the current controller may hand off
+    if (!attachedDeviceUids(team).includes(toUid)) {
+      throw new functions.https.HttpsError('invalid-argument', 'Target device is not part of this team');
+    }
+    tx.update(teamRef, { controllerUid: toUid, updatedAt: new Date().toISOString() });
+  });
+  return { ok: true, controllerUid: toUid };
+});
+
+export const claimController = loggedCallable('claimController', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  await enforceRateLimit(uid, 'claimController');
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+
+  // Any attached device may take control — the never-stuck fallback when the
+  // controlling phone dies. Trust boundary stays at team level (attached uids).
+  const { teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    if (!attachedDeviceUids(team).includes(uid)) {
+      throw new functions.https.HttpsError('permission-denied', 'Not part of this team');
+    }
+    if (controllerUidOf(team) !== uid) {
+      tx.update(teamRef, { controllerUid: uid, updatedAt: new Date().toISOString() });
+    }
+  });
+  return { ok: true, controllerUid: uid };
+});
+
 // Assign the next unassigned task within the team's active stage. Single-task
 // stages assign directly; multi-task stages route by priority. No-op if none left.
 async function assignNextInActiveStage(
@@ -1253,8 +1429,8 @@ async function assignNextInActiveStage(
 // ─── completeTask (participant self-report / field) ───────────────────────────
 
 export const completeTask = loggedCallable('completeTask', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'completeTask');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'completeTask');
   const { taskId, lat, lng, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     lat?: number; lng?: number;
@@ -1262,7 +1438,7 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
 
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   const now = new Date().toISOString();
 
   // Trigger-mode gate: radius/exact tasks validate GPS proximity server-side so
@@ -1301,17 +1477,15 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
 // ─── requestNextTask (assign a task in the active stage) ──────────────────────
 
 export const requestNextTask = loggedCallable('requestNextTask', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'requestNextTask');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'requestNextTask');
   const { lat, lng, ownerUid, gameId, runId, code } = data as {
     lat?: number; lng?: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
-  const teamRef = db.doc(`users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/teams/${teamId}`);
-  const tSnap = await teamRef.get();
-  if ((tSnap.data() as { outOfBounds?: boolean } | undefined)?.outOfBounds === true) {
+  if (team.outOfBounds === true) {
     return { taskId: null, outOfBounds: true };
   }
   const now = new Date().toISOString();
@@ -1323,14 +1497,14 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
 // ─── requestTaskHint (reveal a paid hint, charge once) ────────────────────────
 
 export const requestTaskHint = loggedCallable('requestTaskHint', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'requestTaskHint');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'requestTaskHint');
   const { taskId, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -1381,15 +1555,15 @@ function findGameTask(game: Game, taskId: string): Task | undefined {
 // ─── submitTaskAnswer (quiz / numeric) ────────────────────────────────────────
 
 export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'submitTaskAnswer');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'submitTaskAnswer');
   const { taskId, answer, lat, lng, ownerUid, gameId, runId, code } = data as {
     taskId: string; answer: string;
     lat?: number; lng?: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId || answer == null) throw new functions.https.HttpsError('invalid-argument', 'taskId and answer required');
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -1434,8 +1608,8 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
 // ─── submitSequenceStep (sequence tasks — one ordered step at a time) ──────────
 
 export const submitSequenceStep = loggedCallable('submitSequenceStep', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'submitSequenceStep');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'submitSequenceStep');
   const { taskId, stepIndex, answer, lat, lng, ownerUid, gameId, runId, code } = data as {
     taskId: string; stepIndex: number; answer?: string;
     lat?: number; lng?: number;
@@ -1444,7 +1618,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   if (!taskId || typeof stepIndex !== 'number') {
     throw new functions.https.HttpsError('invalid-argument', 'taskId and stepIndex required');
   }
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const { ctx, teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -1453,10 +1627,6 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
     throw new functions.https.HttpsError('failed-precondition', 'Not a sequence task');
   }
 
-  const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
-  const teamSnap = await teamRef.get();
-  if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
-  const team = teamSnap.data() as RunTeam;
   const done = team.taskStepProgress?.[taskId] ?? 0;
 
   // Must answer steps in order; ignore replays of already-cleared steps.
@@ -1485,19 +1655,17 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
 // ─── getRecommendedTasks (ranked list, no assignment) ─────────────────────────
 
 export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'getRecommendedTasks');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'getRecommendedTasks');
   const { lat, lng, ownerUid, gameId, runId, code } = data as {
     lat: number; lng: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  // Read-only: any attached device may ask for recommendations.
+  const { ctx, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   const game = gameSnap.data() as Game;
-  const teamSnap = await db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId)).get();
-  if (!teamSnap.exists) return { recommendations: [] };
-  const team = teamSnap.data() as RunTeam;
 
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeStageIdx < 0) return { recommendations: [] };
@@ -1526,20 +1694,18 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
 // their currently-assigned task(s) — secrets (codes) are stripped server-side.
 
 export const getMyTeamState = loggedCallable('getMyTeamState', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'getMyTeamState');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'getMyTeamState');
   const { ownerUid, gameId, runId, code } = data as {
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  // Read-only: any attached device (controller or viewer) sees the same state.
+  const { ctx, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
 
-  const [teamSnap, gameSnap, runSnap] = await Promise.all([
-    db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId)).get(),
+  const [gameSnap, runSnap] = await Promise.all([
     db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get(),
     db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get(),
   ]);
-  if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
-  const team = teamSnap.data() as RunTeam;
   const game = gameSnap.data() as Game;
   const run = runSnap.data() as Run;
 
@@ -1571,6 +1737,9 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       stageCount: orderedStages.length,
     },
     activeStageTasks,
+    // Shared team devices: who controls + this caller's own role, so every
+    // attached phone can render controller/viewer UI without extra reads.
+    myRole: resolveDeviceRole(team, uid),
     context: ctx,
   };
 });
@@ -1579,14 +1748,14 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
 // ─── checkOutTask (release a station slot without completing) ─────────────────
 
 export const checkOutTask = loggedCallable('checkOutTask', async (data, context) => {
-  const teamId = requireAuth(context);
-  await enforceRateLimit(teamId, 'checkOutTask');
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'checkOutTask');
   const { taskId, ownerUid, gameId, runId, code } = data as {
     taskId: string;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
-  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const { ctx } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
   return { ok: true };
 });

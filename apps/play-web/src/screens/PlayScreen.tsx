@@ -9,6 +9,7 @@ import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
+import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
 import type { NavTarget } from '../components/NavMap';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
@@ -24,7 +25,7 @@ const CREATOR_URL = import.meta.env.DEV
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [state, setState] = useState<MyTeamState | null>(null);
   const [err, setErr] = useState('');
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
@@ -33,6 +34,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
+  // Shared team devices: only the CONTROLLING phone pings the live map, so the
+  // team's pin follows whoever is actually playing instead of flickering.
+  const controllerRef = useRef(true);
   // Last time we pinged updateLocation, for ~20s client-side throttling.
   const lastPing = useRef(0);
 
@@ -58,7 +62,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // state via getMyTeamState so answer keys never reach the client.
     void ensureAuth().then(() => {
       if (!alive) return;
-      const teamId = uid();
+      // Shared team devices: an attached viewer phone's uid is NOT the team id —
+      // the session carries the real teamId (legacy sessions fall back to uid).
+      const teamId = session.teamId ?? uid();
       if (!teamId) return;
       const ref = doc(db, FIRESTORE_PATHS.team(session.ownerUid, session.gameId, session.runId, teamId));
       unsubDoc = onSnapshot(ref, () => { void refresh(); }, () => undefined);
@@ -85,7 +91,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         const lng = p.coords.longitude;
         setMe({ lat, lng });
         const now = Date.now();
-        if (activeRef.current && now - lastPing.current >= 20_000) {
+        if (activeRef.current && controllerRef.current && now - lastPing.current >= 20_000) {
           lastPing.current = now;
           updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng })
             .catch(() => undefined);
@@ -186,6 +192,14 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const { team, game } = state;
   // Ping the live map only while the team is launched and still racing.
   activeRef.current = team.launched && team.status !== 'finished';
+  // Role is DERIVED live from the team doc (never persisted): a transfer flips
+  // every phone's UI on the next snapshot. Legacy docs: founding uid controls.
+  const myUid = uid();
+  const isController = (team.controllerUid ?? team.id) === myUid;
+  controllerRef.current = isController;
+  const controllerName = team.devices?.find((d) => d.uid === (team.controllerUid ?? team.id))?.name
+    ?? t.devices.deviceFallbackName;
+  const hasTeammateDevices = (team.deviceUids?.length ?? 1) > 1 || game.mode === 'team';
   const accent = game.branding?.primaryColor ?? '#F97316';
   const completedStages = team.stages.filter((s) => s.status === 'completed').length;
 
@@ -197,12 +211,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return (
       <Screen>
         <Header game={game} score={team.score} accent={accent} onLeave={leave} />
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">⏳</div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
           <p className="text-zinc-500">{t.play.waitingStart}</p>
         </div>
+        {hasTeammateDevices && myUid && (
+          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
+        )}
         <Button variant="danger" onClick={sos}>SOS</Button>
       </Screen>
     );
@@ -255,7 +272,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {sharing ? t.play.creating : t.play.shareProgress}
       </button>
 
-      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} />
+      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
+
+      {hasTeammateDevices && myUid && (
+        <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
+      )}
+      {!isController && (
+        <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
+          👀 {t.devices.viewingBanner({ name: controllerName })}
+        </div>
+      )}
 
       {activeStage && (
         <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
@@ -265,7 +291,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
       <div className="flex-1">
         {activeStage ? (
-          <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} />
+          <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} readOnly={!isController} />
         ) : (
           <p className="text-center text-zinc-500 mt-10">{t.play.noActiveStage}</p>
         )}

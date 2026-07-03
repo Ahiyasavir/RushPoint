@@ -129,7 +129,7 @@ const HE = {
     deleteBtn:     'מחיקה',
     loadingGames:  'טוען משחקים...',
     shareTitle:    (title: string) => `שתף "${title}"`,
-    shareText:     (title: string) => `הצטרף למשחק השדה שלי ב-RushPoint: ${title}`,
+    shareText:     (title: string) => `הצטרף למשחק השדה שלי בפלטפורמת RushPoint: ${title}`,
   },
   gallery: {
     title:             'גלריה',

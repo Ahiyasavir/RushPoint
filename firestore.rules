@@ -48,10 +48,13 @@ service cloud.firestore {
           allow write: if false;
 
           // ── TEAMS ──────────────────────────────────────────────────────────
-          //    A participant (anonymous uid == teamId) reads ONLY their own team
-          //    doc for live sync. The owner reads all teams. Writes are CF-only.
+          //    A participant reads ONLY their own team doc for live sync: the
+          //    founding uid (uid == teamId) or any phone attached to the team
+          //    (shared-team-devices: uid listed in deviceUids). The owner reads
+          //    all teams. Writes are CF-only.
           match /teams/{teamId} {
             allow read:  if isOwner(uid) || isOwner(teamId)
+                          || isAttachedDevice()
                           || isStaffForRun(uid, gameId, runId);
             allow write: if false;
           }
@@ -156,6 +159,15 @@ service cloud.firestore {
     }
     function isOwner(uid) {
       return request.auth != null && request.auth.uid == uid;
+    }
+    // Shared team devices: an attached phone (its uid listed in the team doc's
+    // deviceUids) may read that team doc. Checked against resource.data — free,
+    // no extra document reads. Legacy docs (no deviceUids) fall back to the
+    // isOwner(teamId) clause above.
+    function isAttachedDevice() {
+      return request.auth != null
+          && 'deviceUids' in resource.data
+          && request.auth.uid in resource.data.deviceUids;
     }
     // Staff signed in via the staffSignIn custom token. The token carries the
     // run scope it was minted for, so staff read is confined to that one run.

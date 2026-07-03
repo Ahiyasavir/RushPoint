@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
-import { getJoinInfo, joinRun, type JoinInfo } from '../services/calls';
+import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
@@ -16,6 +16,11 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
+  // Shared team devices: team-mode games offer "my team is already in" — this
+  // phone attaches to an existing team via its device join code.
+  const [joinMode, setJoinMode] = useState<'create' | 'attach'>('create');
+  const [teamCode, setTeamCode] = useState('');
+  const [memberName, setMemberName] = useState('');
 
   useEffect(() => {
     if (linkCode.length >= 4) void lookup();
@@ -55,11 +60,34 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: code.trim().toUpperCase(), displayName,
+        teamId: res.teamId,
       };
       saveSession(session);
       onJoined(session);
     } catch (e) {
       setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.joinFailed);
+    } finally { setBusy(false); }
+  }
+
+  // Attach this phone to a team that already joined (shared-team-devices).
+  async function attach() {
+    if (!info) return;
+    setErr(''); setBusy(true);
+    try {
+      const res = await joinTeamAsDevice({
+        code: code.trim().toUpperCase(),
+        teamCode: teamCode.trim().toUpperCase(),
+        memberName: memberName.trim() || undefined,
+      });
+      const session: Session = {
+        ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
+        code: code.trim().toUpperCase(), displayName: memberName.trim(),
+        teamId: res.teamId,
+      };
+      saveSession(session);
+      onJoined(session);
+    } catch {
+      setErr(t.devices.attachFailed);
     } finally { setBusy(false); }
   }
 
@@ -208,6 +236,53 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
         )}
       </div>
 
+      {/* Team-mode: create a fresh team, or attach this phone to a team that's
+          already in (shared-team-devices). */}
+      {!isSolo && (
+        <div className="flex rounded-xl bg-app-card border border-glass-border p-1 mb-4 text-sm font-semibold">
+          {([['create', t.devices.joinModeCreate], ['attach', t.devices.joinModeAttach]] as const).map(([m, label]) => (
+            <button
+              key={m}
+              onClick={() => { setJoinMode(m); setErr(''); }}
+              className={`flex-1 rounded-lg py-2 transition-colors ${joinMode === m ? 'bg-white text-zinc-100 shadow-sm' : 'text-zinc-500'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!isSolo && joinMode === 'attach' ? (
+        <>
+          <div className="space-y-4 flex-1">
+            <Card className="p-5">
+              <p className="text-sm text-zinc-400 mb-4 leading-relaxed">{t.devices.attachExplain}</p>
+              <Input
+                value={teamCode}
+                onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
+                placeholder={t.devices.teamCodePlaceholder}
+                className="text-center font-mono text-xl tracking-[0.4em] mb-3"
+                maxLength={6}
+              />
+              <Input
+                value={memberName}
+                dir="auto"
+                onChange={(e) => setMemberName(e.target.value)}
+                placeholder={t.devices.memberNamePlaceholder}
+              />
+            </Card>
+          </div>
+          {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+          <Button
+            disabled={busy || teamCode.trim().length < 6}
+            onClick={attach}
+            className="mt-5 !py-4 !text-lg !rounded-2xl"
+          >
+            {busy ? t.devices.attaching : t.devices.attachCta}
+          </Button>
+        </>
+      ) : (
+      <>
       <div className="space-y-4 flex-1">
         {teamFields.map((f) => (
           <FieldInput key={f.id} field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} hasError={fieldErrors.has(f.id)} />
@@ -255,6 +330,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       >
         {busy ? t.join.joining : t.join.joinCta}
       </Button>
+      </>
+      )}
     </Screen>
   );
 }

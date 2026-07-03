@@ -13,8 +13,11 @@ import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
 
-export default function TaskRunner({ session, state, stage, onChanged }: {
+export default function TaskRunner({ session, state, stage, onChanged, readOnly = false }: {
   session: Session; state: MyTeamState; stage: RunStageRecord; onChanged: () => void;
+  // Shared team devices: viewer phones render the task read-only — inputs and
+  // submits disabled (the server also rejects them; this is the friendly layer).
+  readOnly?: boolean;
 }) {
   const { t } = useT();
   const ctx = useMemo(
@@ -33,7 +36,10 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
 
   // If multi-task stage and nothing assigned yet, request a routing decision once.
   // A failed request surfaces a retryable error instead of an infinite spinner.
+  // Viewer phones never request routing — the controller drives assignment and
+  // the team-doc snapshot brings the result here.
   useEffect(() => {
+    if (readOnly) return;
     if (!assignedRec && unassigned.length > 0) {
       setRoutingError(false);
       withLocation(
@@ -42,7 +48,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignedRec, unassigned.length, routingAttempt]);
+  }, [assignedRec, unassigned.length, routingAttempt, readOnly]);
 
   const task: SafeTask | undefined = assignedRec
     ? state.activeStageTasks.find((t) => t.id === assignedRec.taskId)
@@ -50,6 +56,14 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
 
   // Clear a revealed hint / message when the assigned task changes.
   useEffect(() => { setHint(null); setMsg(''); }, [assignedRec?.taskId]);
+
+  // Every interactive element freezes for viewers; a submission that loses a
+  // race with a mid-flight control transfer maps to a friendly localized message.
+  const frozen = busy || readOnly;
+  function submitError(e: unknown, fallback: string): string {
+    if (e instanceof Error && e.message.includes('not-controller')) return t.devices.controlMoved;
+    return e instanceof Error ? e.message : fallback;
+  }
 
   if (!task) {
     if (routingError) {
@@ -70,7 +84,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     withLocation(
       async (lat, lng) => {
         try { await completeTask({ ...ctx, taskId: task!.id, lat, lng }); onChanged(); }
-        catch (e) { setMsg(e instanceof Error ? e.message : t.task.failed); }
+        catch (e) { setMsg(submitError(e, t.task.failed)); }
         finally { setBusy(false); }
       },
       () => { setMsg(t.task.gpsWarning); setBusy(false); },
@@ -82,8 +96,8 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
     try {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
       onChanged();
-    } catch {
-      setMsg(t.task.wrongCode);
+    } catch (e) {
+      setMsg(e instanceof Error && e.message.includes('not-controller') ? t.devices.controlMoved : t.task.wrongCode);
     } finally { setBusy(false); }
   }
 
@@ -102,7 +116,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       setMsg(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : t.task.uploadFailed);
+      setMsg(submitError(e, t.task.uploadFailed));
     } finally { setBusy(false); }
   }
 
@@ -114,7 +128,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       if (res.correct) onChanged();
       else setMsg(t.task.notQuite);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : t.task.failed);
+      setMsg(submitError(e, t.task.failed));
     } finally { setBusy(false); }
   }
 
@@ -128,17 +142,19 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       else setMsg(t.task.notQuite);
       return res.stepCorrect;
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : t.task.failed);
+      setMsg(submitError(e, t.task.failed));
       return false;
     } finally { setBusy(false); }
   }
 
-  // geofence — auto check-in once the watcher reports we're inside the radius
+  // geofence — auto check-in once the watcher reports we're inside the radius.
+  // Viewer phones never auto-fire: the controller's arrival completes the task.
   function geofenceArrive(la: number, ln: number) {
+    if (readOnly) return;
     setBusy(true); setMsg('');
     completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
       .then(() => onChanged())
-      .catch((e) => setMsg(e instanceof Error ? e.message : t.task.checkinFailed))
+      .catch((e) => setMsg(submitError(e, t.task.checkinFailed)))
       .finally(() => setBusy(false));
   }
 
@@ -151,7 +167,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
       const res = await requestTaskHint({ ...ctx, taskId: task!.id });
       setHint(res.hint);
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : t.task.noHint);
+      setMsg(submitError(e, t.task.noHint));
     } finally { setBusy(false); }
   }
 
@@ -185,25 +201,25 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
         <DistanceBadge task={task} />
       )}
 
-      <div className="mt-5">
+      <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
-          <Button disabled={busy} onClick={field}>
+          <Button disabled={frozen} onClick={field}>
             {task.type === 'self_report'
               ? t.task.markComplete
               : task.locationHidden ? t.task.hiddenCheckIn : t.task.imHere}
           </Button>
         ) : task.type === 'smart_station' ? (
-          <CodeEntry busy={busy} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />
+          <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
-          <QuizEntry task={task} busy={busy} onSubmit={answer} />
+          <QuizEntry task={task} busy={frozen} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
-          <NumericEntry busy={busy} onSubmit={answer} />
+          <NumericEntry busy={frozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <GeofenceAuto task={task} onArrive={geofenceArrive} />
         ) : task.type === 'sequence' ? (
-          <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={busy} onSubmit={sequenceStep} />
+          <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen} onSubmit={sequenceStep} />
         ) : (
-          <PhotoEntry busy={busy} onSubmit={photo} />
+          <PhotoEntry busy={frozen} onSubmit={photo} />
         )}
       </div>
 
@@ -211,7 +227,7 @@ export default function TaskRunner({ session, state, stage, onChanged }: {
         <div className="mt-3">
           {hint
             ? <p dir="auto" className="text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
-            : <button onClick={revealHint} disabled={busy} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+            : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
                 💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
               </button>}
         </div>
@@ -271,8 +287,8 @@ function QuizEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; on
   return (
     <div className="space-y-3">
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer}
-        onKeyDown={(e) => e.key === 'Enter' && val && onSubmit(val)} />
-      <Button disabled={busy || !val} onClick={() => onSubmit(val)}>{t.task.submitAnswer}</Button>
+        onKeyDown={(e) => e.key === 'Enter' && val.trim() && onSubmit(val.trim())} />
+      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())}>{t.task.submitAnswer}</Button>
     </div>
   );
 }
@@ -301,6 +317,11 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
   const coords = task.coordinates;
   useEffect(() => {
     if (!navigator.geolocation || !coords) { setGpsError(true); return; }
+    // Reset per task: if this component instance is reused for a different
+    // geofence task, the previous task's "already fired" latch must not block
+    // the new one (otherwise a transferred/next geofence never auto-checks-in).
+    fired.current = false;
+    setGpsError(false);
     const id = navigator.geolocation.watchPosition(
       (p) => {
         const d = haversineKm({ lat: p.coords.latitude, lng: p.coords.longitude }, coords) * 1000;
@@ -312,7 +333,7 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
     );
     return () => navigator.geolocation.clearWatch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [coords?.lat, coords?.lng, radius]);
   if (gpsError) {
     return (
       <div className="text-center py-2 space-y-2">

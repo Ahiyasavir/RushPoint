@@ -75,6 +75,9 @@ export interface MyTeamState {
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number };
   activeStageTasks: SafeTask[];
+  // Shared team devices: this caller's role on the team (controller = may
+  // submit; viewer = read-only until control is transferred/claimed).
+  myRole: 'controller' | 'viewer' | null;
   context: { ownerUid: string; gameId: string; runId: string };
 }
 export const getMyTeamState = callable<
@@ -122,6 +125,21 @@ export const triggerSOS = callable<
 >('triggerSOS');
 
 export const updateLocation = callable<Ctx & { lat: number; lng: number }, { ok: boolean }>('updateLocation');
+
+// ── Shared team devices (change: shared-team-devices) ──
+// Attach this phone to an existing team via the run access code + the team's
+// device join code (shown on the phones already attached).
+export const joinTeamAsDevice = callable<
+  { code: string; teamCode: string; memberName?: string },
+  { ownerUid: string; gameId: string; runId: string; teamId: string; role: 'controller' | 'viewer' | null; alreadyAttached: boolean }
+>('joinTeamAsDevice');
+
+export const transferController = callable<
+  Ctx & { toUid: string },
+  { ok: boolean; controllerUid: string }
+>('transferController');
+
+export const claimController = callable<Ctx, { ok: boolean; controllerUid: string }>('claimController');
 
 export const staffSignIn = callable<
   { ownerUid: string; gameId: string; runId: string; pin: string },

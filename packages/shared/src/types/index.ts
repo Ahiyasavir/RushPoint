@@ -506,6 +506,14 @@ export interface RunStageRecord {
   earnedScore?: number;
 }
 
+// Shared team devices (change: shared-team-devices): one phone per attached
+// participant; exactly one (controllerUid) may submit. Metadata for display.
+export interface TeamDevice {
+  uid: string;
+  name: string;
+  joinedAt: string;
+}
+
 export interface RunTeam {
   id: string;           // Firebase Auth UID (anonymous)
   runId: string;
@@ -542,6 +550,12 @@ export interface RunTeam {
   taskHintsUsed?: string[];
   // Per-sequence-task progress: taskId → number of steps completed so far.
   taskStepProgress?: Record<string, number>;
+  // Shared team devices (change: shared-team-devices). Absent on legacy docs —
+  // the founding uid (id) is then the sole attached device and the controller.
+  deviceUids?: string[];
+  controllerUid?: string;
+  deviceJoinCode?: string;
+  devices?: TeamDevice[];
   updatedAt: string;
 }
 

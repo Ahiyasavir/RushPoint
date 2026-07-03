@@ -15,7 +15,7 @@ import { validate } from './validation';
 function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
-import { completeTaskForTeam } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam } from './runs/index';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
@@ -35,6 +35,7 @@ export {
   listRunTeams, completeTask, requestNextTask, requestTaskHint,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState,
+  joinTeamAsDevice, transferController, claimController,
   requestGuardianConsent, grantGuardianConsent,
   activateHotZone, deactivateHotZone,
   getRunDiscoveryPois, claimDiscoveryPoi,
@@ -50,8 +51,9 @@ function requireAuth(context: functions.https.CallableContext): string {
 
 function assertAdmin(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-  if (!isEmulator && !context.auth.token.admin) {
+  // No emulator bypass: the e2e suite mints a real `admin` custom-token claim
+  // against the Auth emulator, so tests exercise the SAME gate production runs.
+  if (!context.auth.token.admin) {
     throw new functions.https.HttpsError('permission-denied', 'Admin access required');
   }
   return context.auth.uid;
@@ -59,14 +61,25 @@ function assertAdmin(context: functions.https.CallableContext): string {
 
 // Live-ops actions (announce, flash, ack SOS, review photo, adjust score) are
 // performed by EITHER the game owner running their own console OR a staff member
-// invited to that run (their custom token is scoped via the `ownerUid` claim).
-function assertStaffOrOwner(context: functions.https.CallableContext, ownerUid: string): string {
+// invited to that run. A staff custom token carries `ownerUid` AND `runId`
+// claims — both must match the payload: a PIN minted for run A must not grant
+// live-ops power over the owner's OTHER runs (caught by the e2e authz matrix).
+function assertStaffOrOwner(
+  context: functions.https.CallableContext,
+  ownerUid: string,
+  runId?: string,
+): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  if (process.env.FUNCTIONS_EMULATOR === 'true') return context.auth.uid;
+  // No emulator bypass — a bypass here made every staff/owner authz check
+  // untestable (and the e2e proved a participant could adjust scores, mint
+  // staff PINs, and push announcements in dev). Owner + staff tokens work the
+  // same in the emulator, so the real gate runs everywhere.
   const t = context.auth.token;
   if (context.auth.uid === ownerUid) return context.auth.uid;        // the game owner
   if (t.admin) return context.auth.uid;                              // platform admin
-  if (t.staff && t.ownerUid === ownerUid) return context.auth.uid;   // staff scoped to this run
+  if (t.staff && t.ownerUid === ownerUid && (!runId || t.runId === runId)) {
+    return context.auth.uid;                                         // staff scoped to THIS run
+  }
   throw new functions.https.HttpsError('permission-denied', 'Staff or owner access required');
 }
 
@@ -109,11 +122,9 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
     permissions: string[];
   };
 
-  if (uid !== ownerUid) {
-    const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-    if (!isEmulator && !context.auth?.token.admin) {
-      throw new functions.https.HttpsError('permission-denied', 'Only the game owner can invite staff');
-    }
+  // No emulator bypass — anyone who can mint a PIN owns the run's staff surface.
+  if (uid !== ownerUid && !context.auth?.token.admin) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the game owner can invite staff');
   }
   const cleanName = validate(() => requireString(name, 'name', MAX_MESSAGE_LEN));
 
@@ -224,11 +235,15 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
     throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
   }
 
+  // Shared team devices: the team's map pin follows the CONTROLLING phone (the
+  // one actually playing) — viewer devices don't ping, so the pin never flickers.
+  const { teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: true });
+
   const now = new Date().toISOString();
   const locationRef = db.doc(
-    `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${uid}`,
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
   );
-  await locationRef.set({ teamId: uid, lat, lng, updatedAt: now }, { merge: true });
+  await locationRef.set({ teamId, lat, lng, updatedAt: now }, { merge: true });
 
   // Safe-zone breach detection (safe-zone-boundary): server-side only. On a NEW
   // breach raise an alert + flag the team out-of-bounds; on return inside, clear it.
@@ -237,13 +252,13 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
   if (!safeZone) return { ok: true, outOfBounds: false };
 
   const outside = isOutsideSafeZone({ lat, lng }, safeZone);
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
   const wasOut = ((await teamRef.get()).data() as { outOfBounds?: boolean } | undefined)?.outOfBounds === true;
 
   if (outside && !wasOut) {
     const alertRef = db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`).doc();
     await alertRef.set({
-      id: alertRef.id, teamId: uid, type: 'safe_zone_breach',
+      id: alertRef.id, teamId, type: 'safe_zone_breach',
       lat, lng, message: 'Left the play area', acknowledged: false, createdAt: now,
     });
     await teamRef.set({ outOfBounds: true }, { merge: true });
@@ -274,13 +289,17 @@ export const triggerSOS = loggedCallable('triggerSOS', async (data, context) => 
     throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
   }
 
+  // Shared team devices: ANY attached phone may raise SOS (safety beats role
+  // discipline) — the alert is attributed to the team, not the calling uid.
+  const { teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId });
+
   const ref = db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`)
     .doc();
 
   await ref.set({
     id: ref.id,
-    teamId: uid,
+    teamId,
     type: 'sos',
     lat: lat ?? null,
     lng: lng ?? null,
@@ -296,7 +315,7 @@ export const triggerSOS = loggedCallable('triggerSOS', async (data, context) => 
 // ─── acknowledgeAlert ─────────────────────────────────────────────────────────
 
 export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
   const { ownerUid, gameId, runId, alertId } = data as {
     ownerUid: string;
     gameId: string;
@@ -319,7 +338,7 @@ export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, 
 // ─── pushAnnouncement ─────────────────────────────────────────────────────────
 
 export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
   const { ownerUid, gameId, runId, message, messageHe } = data as {
     ownerUid: string;
     gameId: string;
@@ -353,7 +372,7 @@ export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, 
 // ─── deactivateAnnouncement ───────────────────────────────────────────────────
 
 export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
   const { ownerUid, gameId, runId, announcementId } = data as {
     ownerUid: string;
     gameId: string;
@@ -372,7 +391,7 @@ export const deactivateAnnouncement = loggedCallable('deactivateAnnouncement', a
 // ─── pushFlashMission ─────────────────────────────────────────────────────────
 
 export const pushFlashMission = loggedCallable('pushFlashMission', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
   const {
     ownerUid, gameId, runId,
     title, titleHe, description, descriptionHe,
@@ -436,9 +455,14 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   };
 
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  // Shared team devices: resolve the team this uid is ATTACHED to (founding
+  // device or an attached phone) and require the controller role to mutate.
+  const { teamId: resolvedTeamId } = await resolveCallerTeam(
+    uid, { ownerUid, gameId, runId }, { requireController: true },
+  );
   // IDOR guard (auth-anticheat row 38): a participant may only verify for their
-  // OWN team. A payload teamId that isn't the caller is rejected; uid is the key.
-  if (teamId && teamId !== uid) {
+  // OWN team. A payload teamId that isn't the caller's team is rejected.
+  if (teamId && teamId !== resolvedTeamId) {
     throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
   }
 
@@ -463,7 +487,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   }
 
   const now = new Date().toISOString();
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
   // NB: nest under the `taskVerifications` map via a real nested object. Dotted
   // keys in .set({merge}) become *literal* top-level field names, not map paths.
   await teamRef.set(
@@ -474,7 +498,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   );
 
   // Correct code = task complete → score it + advance the team.
-  await completeTaskForTeam(ownerUid, gameId, runId, uid, taskId, now);
+  await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
 
   return { verified: true };
 });
@@ -492,9 +516,13 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     photoUrl: string;
   };
 
+  // Shared team devices: resolve the caller's team + require the controller role.
+  const { teamId: resolvedTeamId } = await resolveCallerTeam(
+    uid, { ownerUid, gameId, runId }, { requireController: true },
+  );
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
-  // OWN team. A payload teamId that isn't the caller is rejected; uid is the key.
-  if (teamId && teamId !== uid) {
+  // OWN team. A payload teamId that isn't the caller's team is rejected.
+  if (teamId && teamId !== resolvedTeamId) {
     throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
   }
   // row 41: the photo must live under the caller's OWN run/team Storage folder
@@ -513,7 +541,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   }
 
   const now = new Date().toISOString();
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${uid}`);
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
   await teamRef.set(
     {
       taskSubmissions: {
@@ -529,7 +557,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
 
   // autoApprove: the photo is logged but does not block progression.
   if (autoApprove) {
-    await completeTaskForTeam(ownerUid, gameId, runId, uid, taskId, now);
+    await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
   }
 
   return { submitted: true, autoApproved: autoApprove };
@@ -537,7 +565,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
 
 
 export const reviewStationSubmission = loggedCallable('reviewStationSubmission', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
   const { ownerUid, gameId, runId, teamId, taskId, approved, note } = data as {
     ownerUid: string;
     gameId: string;
@@ -578,7 +606,7 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 // ─── adjustTeamScore ──────────────────────────────────────────────────────────
 
 export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid);
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
   const { ownerUid, gameId, runId, teamId, delta, reason } = data as {
     ownerUid: string;
     gameId: string;

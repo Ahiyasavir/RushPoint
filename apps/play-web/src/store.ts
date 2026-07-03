@@ -5,6 +5,9 @@ export interface Session {
   runId: string;
   code: string;
   displayName: string;
+  // Shared team devices: the team this phone belongs to. Absent on sessions
+  // saved before the feature — those are founding devices, so teamId == uid.
+  teamId?: string;
 }
 
 const KEY = 'rushpoint.session';
