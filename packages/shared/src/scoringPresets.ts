@@ -70,7 +70,9 @@ export function scoreFixedPointsSpeed(
 
 // Awarded score for a single task under this preset
 export function taskScoreFixed(task: Pick<{ pointValue: number }, 'pointValue'>): number {
-  return task.pointValue;
+  // Guard malformed/legacy data: a non-numeric pointValue would return NaN,
+  // which poisons the team's total and every leaderboard comparison.
+  return Number.isFinite(task.pointValue) ? task.pointValue : 0;
 }
 
 
@@ -87,9 +89,12 @@ export function taskScoreSmart(
   actualMinutes: number,
   estimatedMinutes: number,
 ): number {
-  if (estimatedMinutes <= 0) return 0;
-  const x = actualMinutes / estimatedMinutes;
-  return Math.round(100 * (difficulty / 10) * sigmoidMultiplier(x));
+  // Guard malformed/legacy data: any non-numeric input would return NaN and
+  // corrupt the team total plus the Z-score for every other finisher.
+  if (!Number.isFinite(estimatedMinutes) || estimatedMinutes <= 0) return 0;
+  const d = Number.isFinite(difficulty) ? difficulty : 0;
+  const x = (Number.isFinite(actualMinutes) ? actualMinutes : 0) / estimatedMinutes;
+  return Math.round(100 * (d / 10) * sigmoidMultiplier(x));
 }
 
 export function scoreSmartWeighted(stages: RunStageRecord[]): number {

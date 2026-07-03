@@ -141,11 +141,11 @@ export default function BuilderPage() {
 
   // Persist only when there are real changes; safe to call eagerly (no-op when
   // the current state already matches what was last saved).
-  const save = useCallback(async () => {
+  const save = useCallback(async (): Promise<boolean> => {
     const g = gameRef.current;
-    if (!g) return;
+    if (!g) return true;
     const snap = serializeGame(g);
-    if (snap === savedSnapshot.current) return;
+    if (snap === savedSnapshot.current) return true;
     setStatus('saving');
     try {
       await updateGame(buildSavePayload(g));
@@ -153,8 +153,10 @@ export default function BuilderPage() {
       // If the user kept editing during the round-trip, stay 'unsaved'.
       const latest = gameRef.current;
       setStatus(latest && serializeGame(latest) !== snap ? 'unsaved' : 'saved');
+      return true;
     } catch {
       setStatus('unsaved');
+      return false;
     }
   }, []);
 
@@ -209,7 +211,8 @@ export default function BuilderPage() {
   async function saveAndLaunch() {
     if (!game) return;
     window.clearTimeout(saveTimer.current);
-    await save();
+    // Don't launch on top of a failed save — the run would use stale/unsaved data.
+    if (!(await save())) { await dialog.alert(b.saveFailed); return; }
     if (game.stages.length === 0 || game.stages.some((s) => s.tasks.length === 0)) {
       await dialog.alert(b.everyStageNeedsTask); return;
     }

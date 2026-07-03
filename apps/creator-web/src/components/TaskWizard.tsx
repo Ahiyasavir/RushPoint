@@ -13,7 +13,7 @@ import RichTooltip from './RichTooltip';
 import QuizChoicesEditor from './QuizChoicesEditor';
 import { BuilderIcon, TRIGGER_ICON_NAME, TYPE_ICON_NAME } from './builderIcons';
 import {
-  type WizardStep, TYPE_PICKER_ORDER, canGoNext, canGoBack, isTaskLocationValid,
+  type WizardStep, TYPE_PICKER_ORDER, canGoNext, canGoBack, isTaskLocationValid, isTaskInteractionValid,
 } from '../lib/wizardLogic';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
@@ -94,7 +94,7 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
           {step < 3 ? (
             <Button disabled={!canGoNext(step, task) || !stepValid} onClick={() => setStep((s) => (s + 1) as WizardStep)}>{b.next} →</Button>
           ) : (
-            <Button onClick={onDone}>{b.done}</Button>
+            <Button disabled={!isTaskInteractionValid(task)} onClick={onDone}>{b.done}</Button>
           )}
         </div>
       </div>

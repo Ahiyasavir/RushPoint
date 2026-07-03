@@ -1,9 +1,12 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Team photos: authenticated teams can upload to their own folder
+    // Team photos: authenticated teams can upload to their own folder.
+    // READ is scoped to the owning team — any-authed read let any player list
+    // every other team's checkin photos (faces, locations) by path. Legitimate
+    // display goes through tokenized getDownloadURL() links, which bypass rules.
     match /checkins/{teamId}/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && request.auth.uid == teamId;
       allow write: if request.auth != null && request.auth.uid == teamId
         && request.resource.size < 10 * 1024 * 1024  // 10MB max
         && request.resource.contentType.matches('image/.*');

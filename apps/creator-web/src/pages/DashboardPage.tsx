@@ -60,7 +60,7 @@ export default function DashboardPage() {
   async function newGame(tpl: GameTemplate) {
     setBusy(true); setPicking(false);
     try {
-      const title = tpl.key === 'blank' ? 'משחק ללא שם' : tpl.label;
+      const title = tpl.key === 'blank' ? d.untitledGame : tpl.label;
       const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
       const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
       await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });

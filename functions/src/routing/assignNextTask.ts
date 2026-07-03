@@ -162,6 +162,30 @@ export async function buildRecommendations(
 }
 
 
+// ─── Contended-lock retry ─────────────────────────────────────────────────────
+// Every assign/release transaction locks the ONE run doc, so a burst of teams
+// completing simultaneously queues on that lock and Firestore may abort with
+// "10 ABORTED: Transaction lock timeout" — which surfaced to players as an
+// opaque INTERNAL (caught by scripts/simulate-run.mjs under 12 concurrent
+// teams). The lock frees in milliseconds; a short jittered backoff + retry
+// absorbs the burst instead of failing the player's completion.
+async function withLockRetry<T>(op: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await op();
+    } catch (e) {
+      const code = (e as { code?: number | string }).code;
+      const msg = String((e as Error).message ?? '');
+      const contended = code === 10 || /ABORTED|lock timeout|too much contention/i.test(msg);
+      if (!contended) throw e;
+      lastErr = e;
+      await new Promise((r) => setTimeout(r, 75 * (i + 1) + Math.random() * 150));
+    }
+  }
+  throw lastErr;
+}
+
 // ─── Task assignment (atomically increments run.taskCounts[taskId]) ───────────
 
 export async function assignTask(
@@ -174,34 +198,44 @@ export async function assignTask(
   runId: string,
   skillAware = true,
 ): Promise<{ taskId?: string; taskIndex?: number }> {
-  const taskCounts = await getTaskCounts(ownerUid, gameId, runId);
+  const runRef = db.doc(runPath(ownerUid, gameId, runId));
 
-  const candidates = tasks.filter((t) => {
-    if (completedTaskIds.includes(t.id)) return false;
-    if (t.status === 'paused' || t.status === 'closed') return false;
-    const current = taskCounts[t.id] ?? 0;
-    if (current >= (t.maxConcurrentTeams ?? 3)) return false;
-    return true;
-  });
+  // Read the live counts, pick a task, and claim its slot in ONE transaction so
+  // two teams racing on the same stage can't both pass the cap check and blow
+  // past maxConcurrentTeams (check-then-increment must be atomic). Retried on
+  // run-doc lock contention (see withLockRetry).
+  return withLockRetry(() => db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    const taskCounts = (snap.data() as { taskCounts?: Record<string, number> } | undefined)?.taskCounts ?? {};
 
-  if (candidates.length === 0) return {};
+    const candidates = tasks.filter((t) => {
+      if (completedTaskIds.includes(t.id)) return false;
+      if (t.status === 'paused' || t.status === 'closed') return false;
+      const current = taskCounts[t.id] ?? 0;
+      if (current >= (t.maxConcurrentTeams ?? 3)) return false;
+      return true;
+    });
 
-  const chosen = candidates.sort(
-    (a, b) =>
-      priorityScore(b, teamLocation, skillRatio, taskCounts, skillAware) -
-      priorityScore(a, teamLocation, skillRatio, taskCounts, skillAware),
-  )[0];
+    if (candidates.length === 0) return {};
 
-  // Increment the runtime counter atomically on the Run doc
-  await db.doc(runPath(ownerUid, gameId, runId)).update({
-    [`taskCounts.${chosen.id}`]: FieldValue.increment(1),
-  });
+    const chosen = candidates.sort(
+      (a, b) =>
+        priorityScore(b, teamLocation, skillRatio, taskCounts, skillAware) -
+        priorityScore(a, teamLocation, skillRatio, taskCounts, skillAware),
+    )[0];
 
-  return { taskId: chosen.id, taskIndex: tasks.indexOf(chosen) };
+    tx.update(runRef, {
+      [`taskCounts.${chosen.id}`]: FieldValue.increment(1),
+    });
+
+    return { taskId: chosen.id, taskIndex: tasks.indexOf(chosen) };
+  }));
 }
 
 
 // ─── Task release ─────────────────────────────────────────────────────────────
+// Transactional for the same reason as assignTask: concurrent releases must not
+// double-decrement past zero (a negative counter would free phantom slots).
 
 export async function releaseTask(
   taskId: string,
@@ -210,13 +244,13 @@ export async function releaseTask(
   runId: string,
 ): Promise<void> {
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
-  const snap = await runRef.get();
-  if (!snap.exists) return;
-  const data = snap.data() as { taskCounts?: Record<string, number> };
-  const current = data.taskCounts?.[taskId] ?? 0;
-  if (current > 0) {
-    await runRef.update({
-      [`taskCounts.${taskId}`]: FieldValue.increment(-1),
-    });
-  }
+  await withLockRetry(() => db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    if (!snap.exists) return;
+    const data = snap.data() as { taskCounts?: Record<string, number> };
+    const current = data.taskCounts?.[taskId] ?? 0;
+    if (current > 0) {
+      tx.update(runRef, { [`taskCounts.${taskId}`]: FieldValue.increment(-1) });
+    }
+  }));
 }

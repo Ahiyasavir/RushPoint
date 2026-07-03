@@ -51,6 +51,17 @@ export function canGoBack(step: WizardStep): boolean {
   return step > 1;
 }
 
+// Interaction (step 3) config sanity: block finishing a task that can never be
+// completed. A quiz with no non-empty accepted answer is unwinnable — the
+// participant's answer is checked against `answers`, so an empty list always
+// fails. Other types self-validate or have safe defaults.
+export function isTaskInteractionValid(task: Task): boolean {
+  if (task.type === 'quiz') {
+    return !!task.answers && task.answers.some((a) => a.trim() !== '');
+  }
+  return true;
+}
+
 export interface TaskTypeMeta {
   emoji: string;
   label: string;

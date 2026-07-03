@@ -296,13 +296,28 @@ function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: st
   const [msg, setMsg] = useState('');
   const [flash, setFlash] = useState('');
   const [pts, setPts] = useState(50);
+  const [busyMsg, setBusyMsg] = useState(false);
+  const [busyFlash, setBusyFlash] = useState(false);
+
+  async function sendAnnouncement() {
+    setBusyMsg(true);
+    try { await pushAnnouncement({ ...ctx, message: msg }); setMsg(''); }
+    catch { await dialog.alert(t.runConsole.broadcastFailed); }
+    finally { setBusyMsg(false); }
+  }
+  async function sendFlash() {
+    setBusyFlash(true);
+    try { await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: 600 }); setFlash(''); }
+    catch { await dialog.alert(t.runConsole.broadcastFailed); }
+    finally { setBusyFlash(false); }
+  }
 
   return (
     <>
       <Card className="p-4 space-y-2">
         <Label>{t.runConsole.announcementPersists}</Label>
         <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.runConsole.announcementPlaceholder} />
-        <Button className="w-full" disabled={!msg} onClick={async () => { await pushAnnouncement({ ...ctx, message: msg }); setMsg(''); }}>
+        <Button className="w-full" disabled={!msg || busyMsg} onClick={sendAnnouncement}>
           {t.runConsole.broadcast}
         </Button>
       </Card>
@@ -310,8 +325,8 @@ function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: st
         <Label>{t.runConsole.flashMissionTitle}</Label>
         <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} />
         <div className="flex gap-2">
-          <Input type="number" value={pts} onChange={(e) => setPts(parseInt(e.target.value) || 0)} />
-          <Button disabled={!flash} onClick={async () => { await pushFlashMission({ ...ctx, title: flash, bonusPoints: pts, ttlSeconds: 600 }); setFlash(''); }}>
+          <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} />
+          <Button disabled={!flash || busyFlash} onClick={sendFlash}>
             {t.runConsole.push}
           </Button>
         </div>

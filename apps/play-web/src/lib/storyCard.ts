@@ -66,17 +66,20 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   ctx.font = `800 ${hlSize}px Outfit, Inter, sans-serif`;
   ctx.fillText(headline, W / 2, 610);
 
-  // Game name (fit to width)
-  const gnSize = fitText(ctx, data.gameName, W - 160, 52);
+  // Game name (fit to width). Guard against undefined so the share card never
+  // renders the literal "undefined" on this public/viral surface.
+  const gameName = data.gameName ?? '';
+  const gnSize = fitText(ctx, gameName, W - 160, 52);
   ctx.font = `600 ${gnSize}px Inter, sans-serif`;
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
-  ctx.fillText(data.gameName, W / 2, 700);
+  ctx.fillText(gameName, W / 2, 700);
 
   // Team name
-  const tnSize = fitText(ctx, data.teamName, W - 220, 44);
+  const teamName = data.teamName ?? '';
+  const tnSize = fitText(ctx, teamName, W - 220, 44);
   ctx.font = `500 ${tnSize}px Inter, sans-serif`;
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  ctx.fillText(data.teamName, W / 2, 770);
+  ctx.fillText(teamName, W / 2, 770);
 
   // Big score
   ctx.fillStyle = '#ffffff';
