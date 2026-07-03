@@ -36,6 +36,7 @@ export {
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState,
   joinTeamAsDevice, transferController, claimController,
+  submitRunFeedback, getRunFeedbackSummary,
   requestGuardianConsent, grantGuardianConsent,
   activateHotZone, deactivateHotZone,
   getRunDiscoveryPois, claimDiscoveryPoi,

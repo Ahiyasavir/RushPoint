@@ -81,6 +81,14 @@ service cloud.firestore {
             allow read:  if isOwner(uid);
             allow write: if false;
           }
+
+          // ── POST-GAME FEEDBACK (post-game-feedback) ────────────────────────
+          //    One survey response per player, written only by submitRunFeedback
+          //    (Admin SDK). Free text → owner-read-only; clients never write.
+          match /feedback/{docId} {
+            allow read:  if isOwner(uid);
+            allow write: if false;
+          }
           match /staffInvites/{docId} {
             allow read:  if isOwner(uid);
             allow write: if false;

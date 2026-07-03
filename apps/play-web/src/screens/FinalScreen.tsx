@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
+import type { Session } from '../store';
 import { Button, Card, Screen } from '../components/ui';
+import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
 import { shareStoryCard } from '../lib/storyCard';
@@ -26,8 +28,8 @@ const MEDAL_BG = [
   'bg-gradient-to-r from-orange-400/20 to-orange-300/10 border-orange-400/30',
 ];
 
-export default function FinalScreen({ state, onLeave }: { state: MyTeamState; onLeave: () => void }) {
-  const { t } = useT();
+export default function FinalScreen({ state, session, onLeave }: { state: MyTeamState; session: Session; onLeave: () => void }) {
+  const { t, lang } = useT();
   const { team, run, game } = state;
   const accent = game.branding?.primaryColor ?? '#FF5722';
   const myEntry = run.leaderboard?.rankings.find((r) => r.teamId === team.id);
@@ -170,6 +172,11 @@ export default function FinalScreen({ state, onLeave }: { state: MyTeamState; on
             </button>
           )}
         </Card>
+
+        {/* Post-game feedback survey (post-game-feedback): shown from the moment
+            the team finishes — including the wait for the host to finalize.
+            Self-guards against re-showing once answered/dismissed. */}
+        <PostGameSurvey session={session} lang={lang} />
 
         {/* Podium reveal: top 3 rise onto a 1-2-3 podium (motion-reduce → instant) */}
         {podium.length > 0 && (

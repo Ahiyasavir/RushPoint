@@ -204,7 +204,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const completedStages = team.stages.filter((s) => s.status === 'completed').length;
 
   if (team.status === 'finished') {
-    return <FinalScreen state={state} onLeave={leave} />;
+    return <FinalScreen state={state} session={session} onLeave={leave} />;
   }
 
   if (!team.launched) {

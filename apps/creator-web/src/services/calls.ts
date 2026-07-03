@@ -15,6 +15,8 @@ import type {
   ReplayEvent,
   ScorePoint,
   RunRecap,
+  RunFeedback,
+  RunFeedbackSummary,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -46,6 +48,10 @@ export const deactivateHotZone = callable<{ gameId: string; runId: string }, { o
 export const getRunAnalytics = callable<{ code: string }, RunAnalyticsResult>('getRunAnalytics');
 export const getRunReplay    = callable<{ code: string }, RunReplayResult>('getRunReplay');
 export const getRunRecap     = callable<{ code: string }, RunRecapResult>('getRunRecap');
+export const getRunFeedbackSummary = callable<
+  { gameId: string; runId: string },
+  { summary: RunFeedbackSummary; responses: RunFeedback[] }
+>('getRunFeedbackSummary');
 export const translateGame   = callable<{ gameId: string; targetLang: string }, { gameId: string; targetLang: string }>('translateGame');
 
 export interface RunAnalyticsResult { title: string; runStatus: string; teamCount: number; overallCompletionRate: number; tasks: TaskAnalytics[] }

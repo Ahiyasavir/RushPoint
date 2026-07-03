@@ -141,6 +141,18 @@ export const transferController = callable<
 
 export const claimController = callable<Ctx, { ok: boolean; controllerUid: string }>('claimController');
 
+// ── Post-game feedback (change: post-game-feedback) ──
+// One survey response per player; the server rejects a repeat with already:true.
+export const submitRunFeedback = callable<
+  Ctx & {
+    ratings: Record<string, number>;
+    issues?: string[];
+    comment?: string;
+    lang: string;
+  },
+  { ok: boolean; already: boolean }
+>('submitRunFeedback');
+
 export const staffSignIn = callable<
   { ownerUid: string; gameId: string; runId: string; pin: string },
   { customToken: string; name: string; permissions: string[] }

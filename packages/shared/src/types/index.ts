@@ -98,6 +98,14 @@ export const FIRESTORE_PATHS = {
   // Per-uid callable rate-limit counters (change: callable-rate-limiting, Appendix B #19).
   // Server-write-only; clients are denied read + write in firestore.rules.
   rateLimit: (bucket: string, uid: string) => `rateLimits/${bucket}__${uid}`,
+
+  // Post-game feedback (change: post-game-feedback): one response per player uid,
+  // written only by submitRunFeedback, owner-read-only. Dies with the run in the
+  // 90-day PII prune (it holds free text).
+  feedback: (ownerUid: string, gameId: string, runId: string, uid: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/feedback/${uid}`,
+  feedbackCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/feedback`,
 } as const;
 
 
@@ -557,6 +565,64 @@ export interface RunTeam {
   deviceJoinCode?: string;
   devices?: TeamDevice[];
   updatedAt: string;
+}
+
+
+// ─── Post-game feedback (change: post-game-feedback) ──────────────────────────
+// A short, playful survey each finished PLAYER (every attached device, not just
+// the team) fills on the finish screen. Fixed question set so client render and
+// server validation share one shape. Ratings are integers in the key's range;
+// unanswered dimensions are simply absent.
+
+// Each rating key with its inclusive [min,max]. 1–5 for feel/interest/bonding/
+// recommend; 1–3 for the two "fit" questions.
+export const FEEDBACK_RATINGS = {
+  overall:    { min: 1, max: 5 },
+  content:    { min: 1, max: 5 },
+  bonding:    { min: 1, max: 5 },
+  difficulty: { min: 1, max: 3 },
+  smoothness: { min: 1, max: 3 },
+  recommend:  { min: 1, max: 5 },
+} as const;
+export type FeedbackRatingKey = keyof typeof FEEDBACK_RATINGS;
+export const FEEDBACK_RATING_KEYS = Object.keys(FEEDBACK_RATINGS) as FeedbackRatingKey[];
+
+// Fixed set of "what went wrong" chips, offered when smoothness is not top.
+export const FEEDBACK_ISSUES = [
+  'gps', 'photo', 'station_code', 'task_unclear', 'slow', 'other',
+] as const;
+export type FeedbackIssue = typeof FEEDBACK_ISSUES[number];
+
+export const FEEDBACK_COMMENT_MAX = 1000;
+
+// The stored doc at runs/{runId}/feedback/{uid}.
+export interface RunFeedback {
+  uid: string;              // the responding player (device) uid == doc id
+  teamId: string;           // the team they played on
+  teamName: string;         // denormalized for the creator's list
+  memberName?: string;      // this device's display name when known
+  ratings: Partial<Record<FeedbackRatingKey, number>>;
+  issues?: FeedbackIssue[];
+  comment?: string;
+  lang: string;             // 'he' | 'en' — which language they answered in
+  createdAt: string;
+}
+
+// One dimension's rollup. distribution[i] = count of answers equal to (min+i).
+export interface FeedbackRatingStat {
+  avg: number;
+  count: number;
+  distribution: number[];
+}
+
+export interface RunFeedbackSummary {
+  responseCount: number;
+  participantCount: number;
+  responseRate: number;     // 0..1, guarded against ÷0
+  ratings: Partial<Record<FeedbackRatingKey, FeedbackRatingStat>>;
+  recommendScore: number;   // 0..1 share of recommend answers that were 4 or 5
+  issueCounts: Partial<Record<FeedbackIssue, number>>;
+  commentCount: number;
 }
 
 

@@ -2,14 +2,14 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
-import type { Run, HotZone } from '@rushpoint/shared';
-import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier } from '@rushpoint/shared';
+import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue } from '@rushpoint/shared';
+import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
-  getRunAnalytics, type RunTeamRow, type RunAnalyticsResult,
+  getRunAnalytics, getRunFeedbackSummary, type RunTeamRow, type RunAnalyticsResult,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -161,6 +161,7 @@ export default function RunConsolePage() {
         <PostRunLinks accessCode={run.accessCode} finished={finished} />
       </div>
       {finished && <AnalyticsPanel accessCode={run.accessCode} />}
+      {finished && <FeedbackPanel gameId={gameId} runId={runId} />}
 
       <div className="grid lg:grid-cols-3 gap-5">
         {/* Teams */}
@@ -488,5 +489,183 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
         )
       )}
     </Card>
+  );
+}
+
+
+// ─── Post-game feedback panel (post-game-feedback) ────────────────────────────
+// Auto-loads once the run is finished: response rate, per-dimension averages,
+// difficulty/smoothness breakdowns, reported issues, and every free comment,
+// with per-respondent drill-down to the full individual response.
+const FIVE_DIMS: FeedbackRatingKey[] = ['overall', 'content', 'bonding', 'recommend'];
+
+function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
+  const t = useT();
+  const [data, setData] = useState<{ summary: RunFeedbackSummary; responses: RunFeedback[] } | null>(null);
+  const [open, setOpen] = useState<RunFeedback | null>(null);
+
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    let alive = true;
+    getRunFeedbackSummary({ gameId, runId }).then((d) => { if (alive) setData(d); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [gameId, runId]);
+
+  const dimLabel: Record<FeedbackRatingKey, string> = {
+    overall: t.runConsole.feedbackDimOverall, content: t.runConsole.feedbackDimContent,
+    bonding: t.runConsole.feedbackDimBonding, recommend: t.runConsole.feedbackDimRecommend,
+    difficulty: t.runConsole.feedbackDifficulty, smoothness: t.runConsole.feedbackSmoothness,
+  };
+  const issueLabel: Record<FeedbackIssue, string> = {
+    gps: t.runConsole.feedbackIssueGps, photo: t.runConsole.feedbackIssuePhoto,
+    station_code: t.runConsole.feedbackIssueStationCode, task_unclear: t.runConsole.feedbackIssueTaskUnclear,
+    slow: t.runConsole.feedbackIssueSlow, other: t.runConsole.feedbackIssueOther,
+  };
+
+  const s = data?.summary;
+  const responses = data?.responses ?? [];
+  const comments = responses.filter((r) => r.comment && r.comment.trim());
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">{t.runConsole.feedbackTitle}</div>
+        {s && <div className="text-xs text-zinc-500">{t.runConsole.feedbackResponseRate({ n: s.responseCount, total: s.participantCount })}</div>}
+      </div>
+
+      {!s ? null : s.responseCount === 0 ? (
+        <div className="text-sm text-zinc-500">{t.runConsole.feedbackEmpty}</div>
+      ) : (
+        <div className="space-y-4">
+          {s.ratings.recommend && (
+            <div className="text-sm text-neon-green">{t.runConsole.feedbackRecommend({ pct: Math.round(s.recommendScore * 100) })}</div>
+          )}
+
+          {/* 1–5 dimension tiles */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {FIVE_DIMS.filter((k) => s.ratings[k]).map((k) => (
+              <div key={k} className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
+                <div className="text-[11px] text-zinc-500 mb-0.5">{dimLabel[k]}</div>
+                <div className="text-lg font-bold text-neon-green">
+                  {s.ratings[k]!.avg.toFixed(1)}
+                  <span className="text-xs font-normal text-zinc-500"> / 5 · {s.ratings[k]!.count}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* difficulty + smoothness distributions */}
+          <div className="grid sm:grid-cols-2 gap-3">
+            {s.ratings.difficulty && (
+              <Distribution
+                title={t.runConsole.feedbackDifficulty}
+                bars={[
+                  [t.runConsole.feedbackDiffEasy, s.ratings.difficulty.distribution[0]],
+                  [t.runConsole.feedbackDiffRight, s.ratings.difficulty.distribution[1]],
+                  [t.runConsole.feedbackDiffHard, s.ratings.difficulty.distribution[2]],
+                ]}
+              />
+            )}
+            {s.ratings.smoothness && (
+              <Distribution
+                title={t.runConsole.feedbackSmoothness}
+                bars={[
+                  [t.runConsole.feedbackSmoothGood, s.ratings.smoothness.distribution[2]],
+                  [t.runConsole.feedbackSmoothSome, s.ratings.smoothness.distribution[1]],
+                  [t.runConsole.feedbackSmoothBad, s.ratings.smoothness.distribution[0]],
+                ]}
+              />
+            )}
+          </div>
+
+          {/* reported issues */}
+          {FEEDBACK_ISSUES.some((i) => (s.issueCounts[i] ?? 0) > 0) && (
+            <div>
+              <div className="text-xs text-zinc-500 mb-1.5">{t.runConsole.feedbackIssuesTitle}</div>
+              <div className="flex flex-wrap gap-2">
+                {FEEDBACK_ISSUES.filter((i) => (s.issueCounts[i] ?? 0) > 0).map((i) => (
+                  <span key={i} className="rounded-full bg-neon-red/10 border border-neon-red/30 text-neon-red text-xs px-2.5 py-1">
+                    {issueLabel[i]} · {s.issueCounts[i]}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* comments + drill-down list */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1.5">{t.runConsole.feedbackCommentsTitle({ n: comments.length })}</div>
+            {responses.length === 0 ? (
+              <div className="text-sm text-zinc-500">{t.runConsole.feedbackNoComments}</div>
+            ) : (
+              <div className="space-y-1.5">
+                {responses.map((r) => (
+                  <button key={r.uid} onClick={() => setOpen(r)}
+                    className="w-full text-start rounded-lg bg-[--rp-raised] hover:bg-[--rp-card] px-3 py-2 transition-colors">
+                    <div className="flex items-center justify-between gap-2">
+                      <span dir="auto" className="text-sm font-medium truncate">
+                        {r.teamName}{r.memberName ? ` · ${r.memberName}` : ''}
+                      </span>
+                      <span className="text-xs text-zinc-500 shrink-0">{t.runConsole.feedbackViewResponse}</span>
+                    </div>
+                    {r.comment && <div dir="auto" className="text-sm text-zinc-400 truncate mt-0.5">“{r.comment}”</div>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setOpen(null)}>
+          <div className="max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+          <Card className="p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div dir="auto" className="font-semibold">{open.teamName}{open.memberName ? ` · ${open.memberName}` : ''}</div>
+              <button onClick={() => setOpen(null)} className="text-zinc-500 text-sm">{t.runConsole.feedbackClose}</button>
+            </div>
+            <div className="text-xs text-zinc-500">{t.runConsole.feedbackResponseTitle}</div>
+            <div className="space-y-1.5">
+              {(['overall', 'content', 'bonding', 'difficulty', 'smoothness', 'recommend'] as FeedbackRatingKey[]).map((k) => (
+                <div key={k} className="flex justify-between text-sm">
+                  <span className="text-zinc-400">{dimLabel[k]}</span>
+                  <span className="font-medium">{open.ratings[k] ?? <span className="text-zinc-600">{t.runConsole.feedbackNoAnswer}</span>}</span>
+                </div>
+              ))}
+            </div>
+            {open.issues && open.issues.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {open.issues.map((i) => (
+                  <span key={i} className="rounded-full bg-neon-red/10 border border-neon-red/30 text-neon-red text-xs px-2 py-0.5">{issueLabel[i]}</span>
+                ))}
+              </div>
+            )}
+            {open.comment && <p dir="auto" className="text-sm bg-[--rp-raised] rounded-lg px-3 py-2">{open.comment}</p>}
+          </Card>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function Distribution({ title, bars }: { title: string; bars: [string, number][] }) {
+  const max = Math.max(1, ...bars.map(([, n]) => n));
+  return (
+    <div className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
+      <div className="text-[11px] text-zinc-500 mb-2">{title}</div>
+      <div className="space-y-1.5">
+        {bars.map(([label, n]) => (
+          <div key={label} className="flex items-center gap-2 text-xs">
+            <span className="w-24 shrink-0 text-zinc-400 truncate">{label}</span>
+            <div className="flex-1 h-2 rounded-full bg-black/20 overflow-hidden">
+              <div className="h-full rounded-full bg-neon-green/60" style={{ width: `${(n / max) * 100}%` }} />
+            </div>
+            <span className="w-5 text-end text-zinc-400">{n}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

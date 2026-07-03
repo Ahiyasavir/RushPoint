@@ -67,6 +67,8 @@ import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
   attachedDeviceUids, controllerUidOf,
 } from './teamDevices';
+import type { RunFeedback } from '@rushpoint/shared';
+import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
 import { validate } from '../validation';
 
 function requireAuth(context: functions.https.CallableContext): string {
@@ -1758,4 +1760,103 @@ export const checkOutTask = loggedCallable('checkOutTask', async (data, context)
   const { ctx } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
   return { ok: true };
+});
+
+
+// ─── Post-game feedback (change: post-game-feedback) ──────────────────────────
+// Each finished PLAYER (every attached device, not just the controller) may
+// submit one short survey response. Owner-only aggregation with drill-down.
+
+function feedbackCol(ownerUid: string, gameId: string, runId: string) {
+  return `users/${ownerUid}/games/${gameId}/runs/${runId}/feedback`;
+}
+
+export const submitRunFeedback = loggedCallable('submitRunFeedback', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'submitRunFeedback');
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+
+  // Feedback is personal, so ANY attached device may answer (no controller gate).
+  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
+
+  // The survey opens only once play is over — the team finished, or the whole
+  // run was finalized (covers the waiting-for-finalize window on the client).
+  const runSnap = await db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get();
+  const runFinished = (runSnap.data() as Run | undefined)?.status === 'finished';
+  if (team.status !== 'finished' && !runFinished) {
+    throw new functions.https.HttpsError('failed-precondition', 'Feedback opens when the game ends');
+  }
+
+  // Validate + normalize the payload (pure, unit-tested).
+  const valid = validateFeedbackPayload(data);
+  const memberName = team.devices?.find((d) => d.uid === uid)?.name;
+
+  const ref = db.doc(`${feedbackCol(ctx.ownerUid, ctx.gameId, ctx.runId)}/${uid}`);
+  const result = await db.runTransaction<{ already: boolean }>(async (tx) => {
+    const existing = await tx.get(ref);
+    if (existing.exists) return { already: true }; // one response per player; never overwrite
+    const feedback: RunFeedback = {
+      uid,
+      teamId,
+      teamName: team.displayName,
+      ...(memberName ? { memberName } : {}),
+      ratings: valid.ratings,
+      ...(valid.issues.length ? { issues: valid.issues } : {}),
+      ...(valid.comment ? { comment: valid.comment } : {}),
+      lang: valid.lang,
+      createdAt: new Date().toISOString(),
+    };
+    tx.set(ref, feedback);
+    return { already: false };
+  });
+
+  return { ok: true, already: result.already };
+});
+
+export const getRunFeedbackSummary = loggedCallable('getRunFeedbackSummary', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'getRunFeedbackSummary');
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+
+  // Owner-only. The creator console calls with just {gameId, runId} (owner ==
+  // caller, like listRunTeams); a code path is also supported. The run doc's
+  // own ownerUid is the authority for the gate.
+  let resolved: { ownerUid: string; gameId: string; runId: string };
+  if (code?.trim()) {
+    const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+    if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+    const c = codeSnap.data() as AccessCode;
+    resolved = { ownerUid: c.ownerUid, gameId: c.gameId, runId: c.runId };
+  } else if (gameId && runId) {
+    resolved = { ownerUid: ownerUid ?? uid, gameId, runId };
+  } else {
+    throw new functions.https.HttpsError('invalid-argument', 'gameId and runId (or code) required');
+  }
+
+  const runSnap = await db.doc(runPath(resolved.ownerUid, resolved.gameId, resolved.runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if ((runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Feedback is organizer-only');
+  }
+
+  const [fbSnap, teamsSnap] = await Promise.all([
+    db.collection(feedbackCol(resolved.ownerUid, resolved.gameId, resolved.runId)).get(),
+    db.collection(teamsCol(resolved.ownerUid, resolved.gameId, resolved.runId)).get(),
+  ]);
+  const responses = fbSnap.docs.map((d) => d.data() as RunFeedback);
+  // Participant count = distinct devices across all teams (each device is a
+  // potential respondent), falling back to team count on legacy docs.
+  const participantCount = teamsSnap.docs.reduce((n, d) => {
+    const t = d.data() as RunTeam;
+    return n + (t.deviceUids?.length ?? 1);
+  }, 0);
+
+  return {
+    summary: computeFeedbackSummary(responses, participantCount),
+    responses,
+  };
 });
