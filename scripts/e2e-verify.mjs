@@ -2039,6 +2039,13 @@ async function main() {
       // A stranger (never joined) must not resolve anything in the run:
       ['stranger', str, 'getMyTeamState', { code: ac }],
       ['stranger', str, 'transferController', { ownerUid: OWNER, gameId: ag, runId: ar, toUid: plUid }],
+      ['stranger', str, 'captureZone', { ownerUid: OWNER, gameId: ag, runId: ar, zoneId: 'fake', lat: 31.78, lng: 35.21 }],
+      ['stranger', str, 'pickUpTrackable', { ownerUid: OWNER, gameId: ag, runId: ar, trackableId: 'fake' }],
+      // Territory/trackable authoring is owner-only — a participant can't create them:
+      ['participant', pl, 'createZone', { gameId: ag, runId: ar, title: 'pwn', lat: 31.78, lng: 35.21 }],
+      ['participant', pl, 'deleteZone', { gameId: ag, runId: ar, zoneId: 'fake' }],
+      ['participant', pl, 'createTrackable', { gameId: ag, runId: ar, name: 'pwn' }],
+      ['participant', pl, 'getRunHeatmap', { code: ac }],
     ];
     for (const [who, party, fn, payload] of rows) {
       await expectError(`authz: ${who} is denied ${fn}`, party.call(fn, payload), { codeIn: DENY });

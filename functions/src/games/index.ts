@@ -219,12 +219,18 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
 
   const now = new Date().toISOString();
   const newRef = db.collection(gamesCol(uid)).doc();
+  // SECURITY: never carry the source owner's private Slack/Teams webhook secret into
+  // the copy (esp. when duplicating ANOTHER creator's public game). Also reset
+  // marketplace opt-in so a copy isn't silently exposed. (change: chat-integrations /
+  // marketplace-instant-play).
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeSource } = sourceGame;
   const copy: Game = {
-    ...sourceGame,
+    ...safeSource,
     id: newRef.id,
     ownerUid: uid,
     title: `${sourceGame.title} (copy)`,
     visibility: 'private',
+    allowInstantPlay: false,
     playCount: 0,
     createdAt: now,
     updatedAt: now,

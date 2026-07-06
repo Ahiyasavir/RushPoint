@@ -32,6 +32,9 @@ export function isAllowedWebhookUrl(url: unknown): boolean {
   let u: URL;
   try { u = new URL(url.trim()); } catch { return false; }
   if (u.protocol !== 'https:') return false;
+  // Reject embedded credentials (https://user:pass@host) — they'd be sent as HTTP
+  // basic-auth on the outbound fetch and can disguise the real destination.
+  if (u.username || u.password) return false;
   const host = u.hostname.toLowerCase();
   // Reject IP-literal / loopback / internal explicitly.
   if (host === 'localhost' || /^\d/.test(host) || host.endsWith('.local') || host.endsWith('.internal')) {

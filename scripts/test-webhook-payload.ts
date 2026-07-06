@@ -19,6 +19,8 @@ ok(isAllowedWebhookUrl('https://evil.example.com/x') === false, 'unknown host re
 ok(isAllowedWebhookUrl('https://localhost/x') === false, 'localhost rejected');
 ok(isAllowedWebhookUrl('https://127.0.0.1/x') === false, 'ip-literal rejected');
 ok(isAllowedWebhookUrl('https://hooks.slack.com.evil.com/x') === false, 'suffix-spoof rejected');
+ok(isAllowedWebhookUrl('https://user:pass@hooks.slack.com/x') === false, 'embedded credentials rejected');
+ok(isAllowedWebhookUrl('https://evil.com@hooks.slack.com/x') === false, 'userinfo-disguise rejected');
 ok(isAllowedWebhookUrl('') === false, 'empty rejected');
 ok(isAllowedWebhookUrl(null) === false, 'null rejected');
 ok(isAllowedWebhookUrl('not a url') === false, 'garbage rejected');

@@ -150,7 +150,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         }
       });
       rows.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
-      teamRows.sort((a, b) => b.score - a.score);
+      // Stable order: score desc, then id — so tied teams don't flicker rows between
+      // snapshots (which could make a busy +/- button appear on the wrong team).
+      teamRows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       setPending(rows);
       setTeams(teamRows);
     }, (e) => setReadErr(e.message));

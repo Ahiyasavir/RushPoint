@@ -669,15 +669,15 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   }
 
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
-  const teamSnap = await teamRef.get();
-  if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
-
-  const prev = (teamSnap.data() as { bonusPenalty?: number }).bonusPenalty ?? 0;
-  const newPenalty = prev - delta;
-
-  await teamRef.update({
-    bonusPenalty: newPenalty,
-    updatedAt: new Date().toISOString(),
+  // Transactional read-modify-write so a concurrent captureZone / requestTaskHint (both
+  // transactional) can't lose this adjustment via a stale bonusPenalty (scoring integrity).
+  const { prev, newPenalty } = await db.runTransaction(async (tx) => {
+    const teamSnap = await tx.get(teamRef);
+    if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const p = (teamSnap.data() as { bonusPenalty?: number }).bonusPenalty ?? 0;
+    const np = p - delta;
+    tx.update(teamRef, { bonusPenalty: np, updatedAt: new Date().toISOString() });
+    return { prev: p, newPenalty: np };
   });
 
   await writeAuditLog({

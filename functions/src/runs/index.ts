@@ -609,15 +609,24 @@ export async function completeTaskForTeam(
 // Server-only (players/{uid} is CF-write-only); transactional so concurrent finishes
 // on the same device don't clobber each other. Called from finalizeRun (batch), NOT
 // the hot completeTask path — one profile write per team at run finalize.
+// When `teamRef` is given, the run's `profileRecorded` guard is checked AND set inside
+// the SAME transaction, so two concurrent finalizeRun calls can't double-count.
 async function recordPlayerResult(
   r: { uid: string; displayName?: string; tasksCompleted: number; points: number },
+  teamRef?: FirebaseFirestore.DocumentReference,
 ): Promise<void> {
   const ref = db.doc(`players/${r.uid}`);
   await db.runTransaction(async (tx) => {
+    // All reads before any writes (Firestore transaction rule).
+    const teamSnap = teamRef ? await tx.get(teamRef) : null;
+    if (teamSnap && (teamSnap.data() as { profileRecorded?: boolean } | undefined)?.profileRecorded) {
+      return; // already recorded by a concurrent finalize — skip
+    }
     const snap = await tx.get(ref);
     const prev = snap.exists ? (snap.data() as PlayerProfile) : null;
     const { profile } = mergePlayerResult(prev, r);
     tx.set(ref, { ...profile, updatedAt: new Date().toISOString() }, { merge: true });
+    if (teamRef) tx.update(teamRef, { profileRecorded: true });
   });
 }
 
@@ -940,13 +949,14 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
       if (team.status !== 'finished' || team.profileRecorded) continue;
       const tasksCompleted = (team.stages ?? []).reduce(
         (n, s) => n + (s.tasks ?? []).filter((t) => t.status === 'completed').length, 0);
+      // The `profileRecorded` guard is checked + set atomically inside recordPlayerResult
+      // (same transaction as the profile write) so a concurrent finalize can't double-count.
       await recordPlayerResult({
         uid: d.id,
         displayName: team.displayName,
         tasksCompleted,
         points: scoreByTeam.get(d.id) ?? team.score ?? 0,
-      });
-      await d.ref.update({ profileRecorded: true }).catch(() => undefined);
+      }, d.ref);
     }
   } catch (e) {
     logBestEffort('finalize.playerProfiles', { runId }, e);
@@ -1202,6 +1212,7 @@ export const getRunAnalytics = loggedCallable('getRunAnalytics', async (data, co
 export const getRunHeatmap = loggedCallable('getRunHeatmap', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
+  await enforceRateLimit(uid, 'getRunHeatmap');
   const { code } = data as { code: string };
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
 
@@ -1240,6 +1251,7 @@ export const getRunHeatmap = loggedCallable('getRunHeatmap', async (data, contex
 // player has never finished a run.
 export const getMyProfile = loggedCallable('getMyProfile', async (_data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'getMyProfile');
   const snap = await db.doc(`players/${uid}`).get();
   const profile = snap.exists ? (snap.data() as PlayerProfile) : emptyProfile(uid);
   return { profile };
@@ -1312,6 +1324,7 @@ export const startInstantPlay = loggedCallable('startInstantPlay', async (data, 
 
 export const createTrackable = loggedCallable('createTrackable', async (data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'createTrackable');
   const { gameId, runId, name, description, homeTaskId } = data as {
     gameId: string; runId: string; name: string; description?: string; homeTaskId?: string;
   };
@@ -1394,6 +1407,7 @@ export const dropTrackable = loggedCallable('dropTrackable', async (data, contex
 
 export const createZone = loggedCallable('createZone', async (data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'createZone');
   const { gameId, runId, title, lat, lng, radiusMeters, captureBonus } = data as {
     gameId: string; runId: string; title: string; lat: number; lng: number;
     radiusMeters?: number; captureBonus?: number;
@@ -1419,6 +1433,7 @@ export const createZone = loggedCallable('createZone', async (data, context) => 
 
 export const deleteZone = loggedCallable('deleteZone', async (data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'deleteZone');
   const { gameId, runId, zoneId } = data as { gameId: string; runId: string; zoneId: string };
   if (!zoneId) throw new functions.https.HttpsError('invalid-argument', 'zoneId required');
   const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
@@ -2196,6 +2211,7 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
 // to render a card + alert badge; the UI deep-links into the existing per-run console.
 export const listLiveRuns = loggedCallable('listLiveRuns', async (_data, context) => {
   const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'listLiveRuns');
   const snap = await db
     .collectionGroup('runs')
     .where('ownerUid', '==', uid)

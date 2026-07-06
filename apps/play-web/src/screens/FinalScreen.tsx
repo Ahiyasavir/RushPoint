@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
 import { getMyProfile } from '../services/calls';
+import { uid } from '../services/firebase';
 import type { Session } from '../store';
 import { Button, Card, Screen } from '../components/ui';
 import PostGameSurvey from '../components/PostGameSurvey';
@@ -287,12 +288,15 @@ function BadgesCard({ finalized }: { finalized: boolean }) {
       .then((res) => {
         if (!alive) return;
         const earned = res.profile.badges ?? [];
+        // Per-player key: on a shared device, each player's "already seen" set is
+        // separate so player B doesn't inherit player A's highlighted-badge state.
+        const seenKey = `rp.badges.seen.${uid() ?? 'anon'}`;
         let seen: string[] = [];
-        try { seen = JSON.parse(localStorage.getItem('rp.badges.seen') || '[]'); } catch { /* ignore */ }
+        try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { /* ignore */ }
         const seenSet = new Set(seen);
         setFresh(new Set(earned.filter((b) => !seenSet.has(b))));
         setBadges(earned);
-        try { localStorage.setItem('rp.badges.seen', JSON.stringify(earned)); } catch { /* ignore */ }
+        try { localStorage.setItem(seenKey, JSON.stringify(earned)); } catch { /* ignore */ }
       })
       .catch(() => { if (alive) setBadges((b) => b ?? []); });
     return () => { alive = false; };

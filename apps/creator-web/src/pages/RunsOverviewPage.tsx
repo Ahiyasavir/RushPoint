@@ -14,31 +14,33 @@ export default function RunsOverviewPage() {
   const t = useT();
   const r = t.liveRuns;
   const [runs, setRuns] = useState<LiveRunSummary[] | null>(null);
-  const [err, setErr] = useState('');
+  const [errored, setErrored] = useState(false);
 
+  // Empty deps: a single poll loop that survives language switches without churning
+  // the interval. The error LABEL is read at render time so it's always in-language.
   useEffect(() => {
     let alive = true;
     async function load() {
       try {
         const res = await listLiveRuns({});
-        if (alive) { setRuns(res.runs); setErr(''); }
+        if (alive) { setRuns(res.runs); setErrored(false); }
       } catch {
-        if (alive) setErr(r.loadError);
+        if (alive) setErrored(true);
       }
     }
     void load();
     const id = setInterval(() => void load(), 10_000);
     return () => { alive = false; clearInterval(id); };
-  }, [r.loadError]);
+  }, []);
 
-  if (runs === null && !err) return <div className="flex justify-center py-20"><Spinner /></div>;
+  if (runs === null && !errored) return <div className="flex justify-center py-20"><Spinner /></div>;
 
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-2xl font-bold text-zinc-100 mb-1">{r.title}</h1>
       <p className="text-sm text-zinc-500 mb-5">{r.subtitle}</p>
 
-      {err && <p className="text-neon-red text-sm mb-4">{err}</p>}
+      {errored && <p className="text-neon-red text-sm mb-4">{r.loadError}</p>}
 
       {runs && runs.length === 0 ? (
         <Card className="p-8 text-center text-zinc-500">{r.empty}</Card>

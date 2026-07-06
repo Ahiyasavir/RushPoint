@@ -524,6 +524,7 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
     finally { setBusy(false); }
   }
   async function remove(zoneId: string) {
+    if (!(await dialog.confirm(rc.zonesDeleteConfirm))) return;
     await deleteZone({ gameId, runId, zoneId }).catch(() => undefined);
     setTick((x) => x + 1);
   }
@@ -602,7 +603,10 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
     if (!data) return;
     const header = ['task_id', 'type', 'attempts', 'completions', 'completion_rate', 'median_ms', 'p90_ms', 'hints', 'skips'];
     const esc = (v: string | number) => {
-      const s = String(v);
+      let s = String(v);
+      // Neutralize spreadsheet formula injection: a leading =,+,-,@ makes Excel treat a
+      // (creator-authored) task id as a formula. Prefix a quote to force literal text.
+      if (/^[=+\-@]/.test(s)) s = `'${s}`;
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const rows = data.tasks.map((task) => [

@@ -399,6 +399,9 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
   const b = useT().builder;
   const [val, setVal] = useState(game.integrationWebhookUrl ?? '');
   const [err, setErr] = useState('');
+  // Keep the field in sync when the game loads async or an undo/redo restores a prior
+  // value — otherwise the box would show a stale URL that no longer matches what saves.
+  useEffect(() => { setVal(game.integrationWebhookUrl ?? ''); }, [game.integrationWebhookUrl]);
   function commit() {
     const raw = val.trim();
     if (raw === '') { setErr(''); patch({ integrationWebhookUrl: '' }); return; }
