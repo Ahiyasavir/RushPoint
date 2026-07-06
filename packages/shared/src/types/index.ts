@@ -273,8 +273,34 @@ export interface Task {
   geofenceRadiusMeters?: number;
   // sequence: ordered sub-steps done at one stop; the task completes after the last.
   steps?: TaskStep[];
+  // General creator-authored media (images / videos / YouTube) shown with the task.
+  // Orthogonal to type; validated + normalized server-side. Absent = no media.
+  media?: TaskMedia[];
+  // Scheduled / timed release (change: scheduled-release). When set, this task
+  // becomes AVAILABLE (routable/assignable) only once released — at a wall-clock
+  // instant (`releaseAt`, ISO) and/or `releaseAfterMinutes` after the run started.
+  // Evaluated server-side via isReleased(); absent = available immediately. Carries
+  // no secret → passed through by sanitizeTaskForParticipant for the countdown UI.
+  releaseAt?: string;
+  releaseAfterMinutes?: number;
   // Library metadata (for publicTasks index)
   tags?: string[];
+}
+
+// ─── Task media (change: task-media-attachments) ──────────────────────────────
+// A creator-authored image / video / YouTube attachment shown to participants with
+// the task instructions. Orthogonal to TaskType — MAY appear on any task type — and
+// independent of the smart-station `smart.imageUrl`/`smart.mediaUrl` fields. For
+// `image`/`video`, `url` is a Firebase Storage download URL (uploaded file); for
+// `youtube`, `url` is the canonical `https://www.youtube.com/embed/<id>` form.
+// Validated + normalized server-side by normalizeTaskMedia (see shared/validation).
+// Carries no secret → passed through by sanitizeTaskForParticipant.
+// (Declared AFTER Task so the sanitizer-coverage type parser resolves `Task` first.)
+export interface TaskMedia {
+  id: string;
+  kind: 'image' | 'video' | 'youtube';
+  url: string;
+  caption?: string;
 }
 
 // One ordered sub-step of a `sequence` task. `answer` is server-secret (omit it
@@ -290,17 +316,37 @@ export interface TaskStep {
 // A stage holds 1+ tasks. When tasks.length > 1, smart routing picks which task
 // to assign. Stage is complete when ALL its tasks are complete.
 
+// Narrative "beat" shown as a full card (change: narrative-chapters). Bilingual body
+// (bodyHe optional; falls back to body). Not a secret — echoed to participants.
+export interface StoryBeat {
+  title?: string;
+  body?: string;
+  bodyHe?: string;
+  imageUrl?: string;
+}
+
 export interface Stage {
   id: string;
   order: number;
   title: string;
   tasks: Task[];
   isFinal?: boolean;  // triggers Final Run screen when completed
+  // Story chapters (change: narrative-chapters). Optional intro shown when this
+  // stage becomes active, and outro shown when it completes — turns a flat stage
+  // into an authored chapter. Cosmetic: never gates progression.
+  narrative?: { intro?: StoryBeat; outro?: StoryBeat };
   // How many of this stage's tasks each team must complete. Undefined or >=
   // tasks.length means ALL tasks. When fewer, each team is routed to the
   // best-suited subset (by distance/load/skill) and the stage completes once
   // they've finished this many — the rest are auto-skipped for that team.
   requiredTaskCount?: number;
+  // Scheduled / timed release (change: scheduled-release). When set, this whole
+  // stage stays LOCKED until released — at a wall-clock instant (`releaseAt`, ISO)
+  // and/or `releaseAfterMinutes` after the run started. Evaluated server-side via
+  // isReleased(); the next stage is only unlocked once its gate has opened. Enables
+  // multi-day / timed-drop games. Absent = unlocks as soon as the prior stage ends.
+  releaseAt?: string;
+  releaseAfterMinutes?: number;
 }
 
 
@@ -345,6 +391,16 @@ export interface Game {
   // Platform benchmark (change: platform-benchmark): opt this game's finished runs
   // out of the anonymized cross-platform aggregate contribution.
   benchmarkOptOut?: boolean;
+  // Chat integration (change: chat-integrations): an owner-only Slack/Teams incoming
+  // webhook URL. When set, announcements + flash missions on any run of this game are
+  // mirrored to that channel (server-side, SSRF-validated). SECRET — never copied into
+  // publicGames or any participant payload. `integrationPlatform` is derived on save.
+  integrationWebhookUrl?: string;
+  integrationPlatform?: 'slack' | 'teams';
+  // Marketplace instant play (change: marketplace-instant-play): when true and the game
+  // is published, any player can start a free, self-guided solo run on demand via
+  // startInstantPlay — no organizer, no access code, no credit consumed.
+  allowInstantPlay?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -372,6 +428,8 @@ export interface PublicGame {
   // Accurate GPS requirement derived from task trigger modes at publish time
   // (change: fix-live-launch-demo-text). 'gps' if any located task, else 'anywhere'.
   requirement?: GameRequirement;
+  // Marketplace instant play (change: marketplace-instant-play): show a "Play now" CTA.
+  allowInstantPlay?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -443,8 +501,25 @@ export interface Run {
   // entitlement; share surfaces decide branding via resolveRunBrand.
   whiteLabel?: boolean;
   brand?: { name?: string; logoUrl?: string };
+  // Marketplace instant play (change: marketplace-instant-play): a free self-guided solo
+  // run started on demand from a public game, not launched by an organizer.
+  selfGuided?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+// A one-line summary of a live run for the multi-run GM overview
+// (change: multi-run-gm-panel). Returned by listLiveRuns; the overview card
+// deep-links into the existing per-run console.
+export interface LiveRunSummary {
+  ownerUid: string;
+  gameId: string;
+  runId: string;
+  gameTitle: string;
+  accessCode: string;
+  participantCount: number;
+  launchedAt: string | null;
+  unackedAlerts: number;
 }
 
 // A timed, geofenced score multiplier an organizer activates on a run
@@ -893,6 +968,10 @@ export interface UpdateGamePayload {
   minAge?: number;
   safeZone?: import('./../safeZone').SafeZone | null;
   benchmarkOptOut?: boolean;
+  // Chat integration (change: chat-integrations). Empty string clears it.
+  integrationWebhookUrl?: string | null;
+  // Marketplace instant play (change: marketplace-instant-play).
+  allowInstantPlay?: boolean;
 }
 
 // Run management

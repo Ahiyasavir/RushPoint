@@ -52,12 +52,25 @@ export function canGoBack(step: WizardStep): boolean {
 }
 
 // Interaction (step 3) config sanity: block finishing a task that can never be
-// completed. A quiz with no non-empty accepted answer is unwinnable — the
-// participant's answer is checked against `answers`, so an empty list always
-// fails. Other types self-validate or have safe defaults.
+// completed. Each rule mirrors the server-side check that would otherwise fail
+// every participant attempt:
+//   quiz    — matchesTaskAnswer needs ≥1 non-empty accepted answer
+//   numeric — matchesTaskAnswer returns false when numericAnswer is null/NaN
+//   station — verifyStationCode rejects everything when no secretCode is set
+//   sequence — submitSequenceStep throws failed-precondition on empty steps
+// Other types self-validate or have safe defaults.
 export function isTaskInteractionValid(task: Task): boolean {
   if (task.type === 'quiz') {
     return !!task.answers && task.answers.some((a) => a.trim() !== '');
+  }
+  if (task.type === 'numeric') {
+    return task.numericAnswer != null && Number.isFinite(task.numericAnswer);
+  }
+  if (task.type === 'smart_station') {
+    return !!task.smart?.secretCode?.trim();
+  }
+  if (task.type === 'sequence') {
+    return !!task.steps && task.steps.length > 0;
   }
   return true;
 }

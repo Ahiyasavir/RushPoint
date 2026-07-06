@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -31,10 +31,13 @@ export {
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
-  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics,
+  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
-  checkOutTask, getMyTeamState,
+  checkOutTask, getMyTeamState, listLiveRuns, getMyProfile,
+  createTrackable, getRunTrackables, pickUpTrackable, dropTrackable,
+  startInstantPlay,
+  createZone, deleteZone, getRunZones, captureZone,
   joinTeamAsDevice, transferController, claimController,
   submitRunFeedback, getRunFeedbackSummary,
   requestGuardianConsent, grantGuardianConsent,
@@ -108,6 +111,35 @@ async function writeAuditLog(entry: AuditEntry): Promise<void> {
     reason:        entry.reason ?? '',
     timestamp:     new Date().toISOString(),
   });
+}
+
+
+// ─── Chat integrations (change: chat-integrations) ─────────────────────────────
+// Mirror a live-ops broadcast to the game's Slack/Teams incoming webhook, if set.
+// Best-effort + SSRF-guarded: a bad/absent webhook NEVER fails the participant-facing
+// broadcast (the Firestore write already succeeded before this runs). `gameTitle`
+// is filled from the loaded game doc. Requires Blaze egress + Node-20 global fetch.
+async function mirrorToChat(
+  ownerUid: string,
+  gameId: string,
+  event: Omit<WebhookEvent, 'gameTitle'>,
+): Promise<void> {
+  try {
+    const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
+    const g = gameSnap.data() as
+      | { title?: string; integrationWebhookUrl?: string; integrationPlatform?: 'slack' | 'teams' }
+      | undefined;
+    const url = g?.integrationWebhookUrl;
+    if (!url || !isAllowedWebhookUrl(url)) return;
+    const body = buildWebhookPayload({ ...event, gameTitle: g?.title ?? 'RushPoint' }, g?.integrationPlatform);
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    functions.logger.warn('mirrorToChat failed', { ownerUid, gameId, err: String(e) });
+  }
 }
 
 
@@ -246,6 +278,13 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
   );
   await locationRef.set({ teamId, lat, lng, updatedAt: now }, { merge: true });
 
+  // Movement heatmap (change: movement-heatmap): retain an append-only GPS track so the
+  // creator can see foot-traffic density after the run. teamLocations keeps only the
+  // latest point; this keeps history. CF-write-only; pruned with the run's PII at 90 days.
+  await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
+    .add({ teamId, lat, lng, at: now })
+    .catch(() => undefined); // track is best-effort; never fail the location update
+
   // Safe-zone breach detection (safe-zone-boundary): server-side only. On a NEW
   // breach raise an alert + flag the team out-of-bounds; on return inside, clear it.
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
@@ -366,6 +405,9 @@ export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, 
     createdBy: context.auth!.uid,
   });
 
+  // Mirror to Slack/Teams if the game has a webhook configured (best-effort).
+  await mirrorToChat(ownerUid, gameId, { kind: 'announcement', message: cleanMsg });
+
   return { announcementId: ref.id };
 });
 
@@ -434,6 +476,11 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
     isActive: true,
     createdAt: nowIso,
     createdBy: context.auth!.uid,
+  });
+
+  // Mirror to Slack/Teams if the game has a webhook configured (best-effort).
+  await mirrorToChat(ownerUid, gameId, {
+    kind: 'flashMission', title: cleanTitle, message: cleanDesc ?? '', bonusPoints: bonus,
   });
 
   return { id: ref.id, expiresAt };

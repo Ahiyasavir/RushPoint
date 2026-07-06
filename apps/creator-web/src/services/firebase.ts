@@ -18,6 +18,13 @@ import {
   type User,
 } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
+import {
+  getStorage,
+  connectStorageEmulator,
+  ref as storageRef,
+  uploadBytesResumable,
+  getDownloadURL,
+} from 'firebase/storage';
 import { resolveEmulatorHost } from '@rushpoint/shared';
 
 // Emulator-safe defaults: the Firebase SDK only needs non-empty apiKey/appId
@@ -36,6 +43,7 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 export const db        = getFirestore(app);
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
+export const storage   = getStorage(app);
 
 // ── Emulator wiring (dev only) ────────────────────────────────────────────────
 const emuFlag = globalThis as unknown as { __rushpointEmu?: boolean };
@@ -47,6 +55,37 @@ if (import.meta.env.DEV && !emuFlag.__rushpointEmu) {
   connectFirestoreEmulator(db, host, 8080);
   connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
   connectFunctionsEmulator(functions, host, 5001);
+  connectStorageEmulator(storage, host, 9199);
+}
+
+// ── Task-media upload (change: task-media-attachments) ────────────────────────
+// Upload a creator-picked image/video file to the creator's own media folder so
+// Storage rules (gameMedia/{ownerUid}/…) confine writes to the authenticated owner.
+// Returns the download URL to store on the task's `media` entry. `onProgress` gets
+// 0–100. The task's media kind is derived from the file's MIME type.
+export async function uploadTaskMedia(
+  file: File,
+  p: { gameId: string; taskId: string },
+  onProgress?: (pct: number) => void,
+): Promise<{ url: string; kind: 'image' | 'video' }> {
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error('Not signed in');
+  const kind: 'image' | 'video' = file.type.startsWith('video/') ? 'video' : 'image';
+  const ext = (file.name.split('.').pop() ?? (kind === 'video' ? 'mp4' : 'jpg'))
+    .toLowerCase().replace(/[^a-z0-9]/g, '') || (kind === 'video' ? 'mp4' : 'jpg');
+  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const path = `gameMedia/${uid}/games/${p.gameId}/${safeTask}-${Date.now()}.${ext}`;
+  const r = storageRef(storage, path);
+  const task = uploadBytesResumable(r, file, { contentType: file.type || 'image/jpeg' });
+  await new Promise<void>((resolve, reject) => {
+    task.on('state_changed',
+      (snap) => onProgress?.(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+      reject,
+      () => resolve(),
+    );
+  });
+  const url = await getDownloadURL(r);
+  return { url, kind };
 }
 
 // ── Creator auth (email/password + Google) ───────────────────────────────────

@@ -6,6 +6,7 @@ import {
   reviewStationSubmission,
   acknowledgeAlert,
   pushAnnouncement,
+  adjustTeamScore,
 } from '../services/calls';
 import {
   loadStaffSession,
@@ -33,6 +34,13 @@ interface Alert {
   lat: number | null;
   lng: number | null;
   createdAt: string;
+}
+
+// ── A team row for the manual bonus/deduction panel ──
+interface TeamRow {
+  id: string;
+  displayName: string;
+  score: number;
 }
 
 export default function StaffConsole({ onExit }: { onExit: () => void }) {
@@ -109,20 +117,25 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const ctx = useMemo(() => ({ ownerUid, gameId, runId }), [ownerUid, gameId, runId]);
 
   const [pending, setPending] = useState<PendingSubmission[]>([]);
+  const [teams, setTeams] = useState<TeamRow[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [readErr, setReadErr] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  // Live pending photo submissions across all teams in the run.
+  // Live pending photo submissions + team scores across all teams in the run.
+  // One snapshot feeds both the photo-review queue and the manual bonus panel.
   useEffect(() => {
     const ref = collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/teams`);
     return onSnapshot(ref, (snap) => {
       const rows: PendingSubmission[] = [];
+      const teamRows: TeamRow[] = [];
       snap.forEach((doc) => {
         const td = doc.data() as {
           displayName?: string;
+          score?: number;
           taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string }>;
         };
+        teamRows.push({ id: doc.id, displayName: td.displayName ?? doc.id, score: td.score ?? 0 });
         const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
           if (sub?.status === 'pending') {
@@ -137,7 +150,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         }
       });
       rows.sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+      teamRows.sort((a, b) => b.score - a.score);
       setPending(rows);
+      setTeams(teamRows);
     }, (e) => setReadErr(e.message));
   }, [ownerUid, gameId, runId]);
 
@@ -183,6 +198,18 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       setReadErr(e instanceof Error ? e.message : t.staff.ackFailed);
     } finally { setBusyKey(null); }
   }
+
+  // Manual bonus / deduction. Positive delta = bonus, negative = fine. The team
+  // score updates live via the open snapshot; no manual refresh needed.
+  async function adjust(team: TeamRow, delta: number) {
+    setBusyKey(team.id);
+    try {
+      await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'staff' });
+    } catch (e) {
+      setReadErr(e instanceof Error ? e.message : t.staff.adjustFailed);
+    } finally { setBusyKey(null); }
+  }
+
 
   return (
     <div className="min-h-screen max-w-md mx-auto w-full px-5 py-6 flex flex-col">
@@ -268,6 +295,38 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               </Card>
             );
           })}
+      </section>
+
+      {/* ── Manual bonus / deduction ── */}
+      <section className="mb-6">
+        <h2 className="text-sm font-semibold text-zinc-300 mb-2">
+          ⚖️ {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
+        </h2>
+        {teams.length === 0
+          ? <p className="text-zinc-600 text-sm">{t.staff.noTeams}</p>
+          : teams.map((tm) => (
+            <Card key={tm.id} className="p-3 mb-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{tm.displayName}</div>
+                  <div className="text-xs text-zinc-500">{t.staff.scoreLabel} {tm.score}</div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {[-10, -5, 5, 10].map((d) => (
+                    <button
+                      key={d}
+                      className={`w-9 h-9 rounded-lg text-sm font-bold border disabled:opacity-40 ${
+                        d > 0 ? 'bg-accent/15 text-accent border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
+                      }`}
+                      disabled={busyKey === tm.id}
+                      aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
+                      onClick={() => adjust(tm, d)}
+                    >{d > 0 ? `+${d}` : d}</button>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          ))}
       </section>
 
       {/* ── Announcement composer ── */}

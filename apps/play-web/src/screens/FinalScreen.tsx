@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
+import { getMyProfile } from '../services/calls';
 import type { Session } from '../store';
 import { Button, Card, Screen } from '../components/ui';
 import PostGameSurvey from '../components/PostGameSurvey';
@@ -176,6 +177,8 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         {/* Post-game feedback survey (post-game-feedback): shown from the moment
             the team finishes — including the wait for the host to finalize.
             Self-guards against re-showing once answered/dismissed. */}
+        <BadgesCard finalized={!!run.leaderboard} />
+
         <PostGameSurvey session={session} lang={lang} />
 
         {/* Podium reveal: top 3 rise onto a 1-2-3 podium (motion-reduce → instant) */}
@@ -261,5 +264,64 @@ function Stat({ label, value, accent }: { label: string; value: string; accent: 
       <div className="text-[11px] text-zinc-500 mb-0.5">{label}</div>
       <div className="text-base font-semibold font-brand" style={{ color: accent }}>{value}</div>
     </div>
+  );
+}
+
+// Cross-run badges (change: player-profile-badges): the player's earned badges,
+// with any newly-unlocked this game highlighted. Reads the server-written profile
+// (recorded on finish); newness is tracked locally so it only celebrates once.
+const BADGE_EMOJI: Record<string, string> = {
+  first_finish: '🏁', explorer: '🧭', pathfinder: '🗺️', veteran: '🎖️', high_scorer: '💯', legend: '👑',
+};
+
+function BadgesCard({ finalized }: { finalized: boolean }) {
+  const { t } = useT();
+  const [badges, setBadges] = useState<string[] | null>(null);
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+
+  // Profiles are recorded when the organizer finalizes the run, so (re)fetch on mount
+  // and again once the run is finalized — that's when new badges actually appear.
+  useEffect(() => {
+    let alive = true;
+    getMyProfile({})
+      .then((res) => {
+        if (!alive) return;
+        const earned = res.profile.badges ?? [];
+        let seen: string[] = [];
+        try { seen = JSON.parse(localStorage.getItem('rp.badges.seen') || '[]'); } catch { /* ignore */ }
+        const seenSet = new Set(seen);
+        setFresh(new Set(earned.filter((b) => !seenSet.has(b))));
+        setBadges(earned);
+        try { localStorage.setItem('rp.badges.seen', JSON.stringify(earned)); } catch { /* ignore */ }
+      })
+      .catch(() => { if (alive) setBadges((b) => b ?? []); });
+    return () => { alive = false; };
+  }, [finalized]);
+
+  if (!badges || badges.length === 0) return null;
+  const label = (id: string): string => {
+    const map = t.badges as unknown as Record<string, string>;
+    return map[id] ?? id;
+  };
+  return (
+    <Card className="p-4 w-full">
+      <div className="text-sm font-bold text-zinc-100 mb-3">{t.badges.title}</div>
+      <div className="flex flex-wrap gap-2">
+        {badges.map((b) => (
+          <div
+            key={b}
+            className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-sm ${
+              fresh.has(b)
+                ? 'border-accent bg-accent/10 text-accent animate-score-pop motion-reduce:animate-none'
+                : 'border-glass-border text-zinc-300'
+            }`}
+          >
+            <span aria-hidden>{BADGE_EMOJI[b] ?? '🏅'}</span>
+            <span dir="auto">{label(b)}</span>
+            {fresh.has(b) && <span className="text-[10px] font-bold uppercase">{t.badges.new}</span>}
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }

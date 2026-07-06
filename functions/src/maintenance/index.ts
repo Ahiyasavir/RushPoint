@@ -19,13 +19,12 @@ import { db, storage } from '../firebase';
 import { RUN_DATA_RETENTION_DAYS } from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
 
-const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
-
-// Admin only (platform maintenance). In the emulator we allow any caller so the
-// e2e suite can exercise the logic without minting an admin token.
+// Admin only (platform maintenance). No emulator bypass — the e2e suite mints
+// a real `admin` custom-token claim against the Auth emulator, so tests hit
+// the same gate production runs.
 function assertAdmin(context: functions.https.CallableContext): void {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  if (!EMULATOR && !context.auth.token.admin) {
+  if (!context.auth.token.admin) {
     throw new functions.https.HttpsError('permission-denied', 'Admin access required');
   }
 }
@@ -49,9 +48,22 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   const runPath = `users/${ownerUid}/games/${gameId}/runs/${runId}`;
 
   // 1) Delete the live GPS ping docs (teamLocations subcollection). This can run
-  //    to thousands of docs, so it must be deleted in batch-sized chunks.
+  //    to thousands of docs, so it must be deleted in batch-sized chunks. The
+  //    append-only movement-heatmap track (locationTrack) is raw GPS PII too — purge it.
   const locSnap = await db.collection(`${runPath}/teamLocations`).get();
-  const locationsDeleted = await deleteDocsInChunks(locSnap.docs.map((d) => d.ref));
+  const trackSnap = await db.collection(`${runPath}/locationTrack`).get();
+  // Trackable travel-log entries name teams (PII) — purge them (keep the trackable docs).
+  const trackablesSnap = await db.collection(`${runPath}/trackables`).get();
+  const trackableLogRefs: FirebaseFirestore.DocumentReference[] = [];
+  for (const td of trackablesSnap.docs) {
+    const logSnap = await td.ref.collection('log').get();
+    for (const ld of logSnap.docs) trackableLogRefs.push(ld.ref);
+  }
+  // Capture zones carry the owning team's display name (mild PII) — purge them too.
+  const zonesSnap = await db.collection(`${runPath}/zones`).get();
+  const locationsDeleted = await deleteDocsInChunks(
+    [...locSnap.docs, ...trackSnap.docs, ...zonesSnap.docs].map((d) => d.ref).concat(trackableLogRefs),
+  );
 
   // 2) Clear photo URLs from each team's submissions (keep scores/answers), and
   //    clear any guardian-consent PII (the guardian's name).

@@ -17,6 +17,10 @@ import type {
   RunRecap,
   RunFeedback,
   RunFeedbackSummary,
+  LiveRunSummary,
+  RunHeatmapResult,
+  Trackable,
+  CaptureZone,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -46,6 +50,8 @@ export const activateHotZone = callable<
 >('activateHotZone');
 export const deactivateHotZone = callable<{ gameId: string; runId: string }, { ok: boolean }>('deactivateHotZone');
 export const getRunAnalytics = callable<{ code: string }, RunAnalyticsResult>('getRunAnalytics');
+export const getRunHeatmap   = callable<{ code: string }, RunHeatmapResult>('getRunHeatmap');
+export type { RunHeatmapResult } from '@rushpoint/shared';
 export const getRunReplay    = callable<{ code: string }, RunReplayResult>('getRunReplay');
 export const getRunRecap     = callable<{ code: string }, RunRecapResult>('getRunRecap');
 export const getRunFeedbackSummary = callable<
@@ -53,6 +59,15 @@ export const getRunFeedbackSummary = callable<
   { summary: RunFeedbackSummary; responses: RunFeedback[] }
 >('getRunFeedbackSummary');
 export const translateGame   = callable<{ gameId: string; targetLang: string }, { gameId: string; targetLang: string }>('translateGame');
+// Multi-run GM overview (change: multi-run-gm-panel).
+export const listLiveRuns    = callable<Record<string, never>, { runs: LiveRunSummary[] }>('listLiveRuns');
+// Trackable collectibles (change: trackable-collectibles).
+export const createTrackable  = callable<{ gameId: string; runId: string; name: string; description?: string; homeTaskId?: string }, { trackable: Trackable }>('createTrackable');
+export const getRunTrackables = callable<{ ownerUid?: string; gameId?: string; runId?: string; code?: string }, { trackables: Trackable[] }>('getRunTrackables');
+// Territory / contested-zone capture (change: territory-capture).
+export const createZone   = callable<{ gameId: string; runId: string; title: string; lat: number; lng: number; radiusMeters?: number; captureBonus?: number }, { zone: CaptureZone }>('createZone');
+export const deleteZone   = callable<{ gameId: string; runId: string; zoneId: string }, { ok: boolean }>('deleteZone');
+export const getRunZones  = callable<{ ownerUid?: string; gameId?: string; runId?: string; code?: string }, { zones: CaptureZone[] }>('getRunZones');
 
 export interface RunAnalyticsResult { title: string; runStatus: string; teamCount: number; overallCompletionRate: number; tasks: TaskAnalytics[] }
 export interface RunReplayResult { title: string; runStatus: string; events: ReplayEvent[]; scoreSeries: Record<string, ScorePoint[]>; teams: { teamId: string; teamName: string }[] }

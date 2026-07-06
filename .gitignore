@@ -45,3 +45,8 @@ packages/shared/dist/
 autopilot/
 .autopilot-tooling-snapshot/
 .claude/scheduled_tasks.lock
+
+# Playwright UI smoke artifacts
+playwright-report/
+test-results/
+.last-run.json

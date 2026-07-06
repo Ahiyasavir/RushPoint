@@ -1,7 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
+// ⚠️ DEPRECATED — v1-era simulator. Targets the ARCHIVED v1 data model
+// (`artifacts/...` paths, upsertStation, crafting, Tene baskets) which the v2
+// platform no longer serves; expect it NOT to work against current functions.
+// The maintained v2 load simulation is scripts/simulate-run.mjs (npm run
+// simulate). Kept only as historical reference.
+//
 // RushPoint — 30-team tournament stress-test against the local emulator.
 //
-//   node scripts/simulate-tournament.mjs     (npm run simulate)
+//   node scripts/simulate-tournament.mjs     (npm run simulate:v1)
 //
 // Drives the REAL callable API end-to-end: dynamic station creation (upsertStation),
 // priority routing (requestNextTask), matchmaking (joinMatchQueue/resolveMatch),

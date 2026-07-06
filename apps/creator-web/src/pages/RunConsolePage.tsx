@@ -2,19 +2,21 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
-import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue } from '@rushpoint/shared';
+import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
 import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
-  getRunAnalytics, getRunFeedbackSummary, type RunTeamRow, type RunAnalyticsResult,
+  getRunAnalytics, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
+  createZone, deleteZone, getRunZones, type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
+import HeatmapMap from '../components/HeatmapMap';
 
 // Where the participant app lives (for the shareable join link/QR).
 const PLAY_URL = import.meta.env.DEV
@@ -161,6 +163,7 @@ export default function RunConsolePage() {
         <PostRunLinks accessCode={run.accessCode} finished={finished} />
       </div>
       {finished && <AnalyticsPanel accessCode={run.accessCode} />}
+      {finished && <HeatmapPanel accessCode={run.accessCode} />}
       {finished && <FeedbackPanel gameId={gameId} runId={runId} />}
 
       <div className="grid lg:grid-cols-3 gap-5">
@@ -206,6 +209,12 @@ export default function RunConsolePage() {
               <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
             </Card>
           )}
+
+          {/* Trackable collectibles — author items + see who's carrying them. */}
+          {!finished && <TrackablesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} />}
+
+          {/* Territory zones — author capturable zones + see who holds them. */}
+          {!finished && <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />}
 
           {/* Live standings — computed on demand mid-run without ending it. */}
           {!finished && run.leaderboard && run.leaderboard.rankings.length > 0 && (
@@ -437,6 +446,146 @@ function fmtMs(ms: number): string {
   const s = Math.round(ms / 1000);
   return s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}s`;
 }
+// Trackable collectibles console (change: trackable-collectibles): author items and
+// see which team is carrying each. Coordinates/holders aren't secret.
+function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: string; gameId: string; runId: string; teams: RunTeamRow[] }) {
+  const rc = useT().runConsole;
+  const [items, setItems] = useState<Trackable[]>([]);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [tick, setTick] = useState(0);
+  const nameOf = (id?: string | null) => teams.find((x) => x.id === id)?.displayName ?? id ?? '';
+
+  useEffect(() => {
+    let alive = true;
+    getRunTrackables({ ownerUid, gameId, runId })
+      .then((r) => { if (alive) setItems(r.trackables); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [ownerUid, gameId, runId, tick]);
+
+  async function create() {
+    if (!name.trim()) return;
+    setBusy(true);
+    try { await createTrackable({ gameId, runId, name: name.trim() }); setName(''); setTick((x) => x + 1); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Card className="p-4 mt-4">
+      <div className="text-sm font-medium mb-3">🎒 {rc.trackablesTitle}</div>
+      <div className="flex gap-2 mb-3">
+        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={rc.trackablesPlaceholder} dir="auto" className="flex-1" />
+        <Button variant="ghost" disabled={busy || !name.trim()} onClick={create}>{rc.trackablesAdd}</Button>
+      </div>
+      {items.length === 0 ? (
+        <div className="text-sm text-zinc-500">{rc.trackablesEmpty}</div>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((tr) => (
+            <div key={tr.id} className="flex items-center justify-between text-sm">
+              <span className="text-zinc-200" dir="auto">{tr.name}</span>
+              <span className="text-zinc-500 text-xs">
+                {tr.currentHolderTeamId ? rc.trackablesHeldBy({ name: nameOf(tr.currentHolderTeamId) }) : rc.trackablesUnheld}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Territory zones console (change: territory-capture): author capturable zones and
+// see which team currently holds each. Center is entered as lat/lng (or 0,0 for a
+// locationless zone). Capturing is validated server-side against the player's GPS.
+function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: string; runId: string }) {
+  const rc = useT().runConsole;
+  const [zones, setZones] = useState<CaptureZone[]>([]);
+  const [title, setTitle] = useState('');
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    getRunZones({ ownerUid, gameId, runId })
+      .then((r) => { if (alive) setZones(r.zones); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [ownerUid, gameId, runId, tick]);
+
+  async function create() {
+    const la = parseFloat(lat), ln = parseFloat(lng);
+    if (!title.trim() || !Number.isFinite(la) || !Number.isFinite(ln)) return;
+    setBusy(true);
+    try { await createZone({ gameId, runId, title: title.trim(), lat: la, lng: ln }); setTitle(''); setLat(''); setLng(''); setTick((x) => x + 1); }
+    finally { setBusy(false); }
+  }
+  async function remove(zoneId: string) {
+    await deleteZone({ gameId, runId, zoneId }).catch(() => undefined);
+    setTick((x) => x + 1);
+  }
+
+  return (
+    <Card className="p-4 mt-4">
+      <div className="text-sm font-medium mb-3">🚩 {rc.zonesTitle}</div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={rc.zonesTitlePlaceholder} dir="auto" className="flex-1 min-w-[8rem]" />
+        <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder={rc.zonesLat} className="w-24" />
+        <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder={rc.zonesLng} className="w-24" />
+        <Button variant="ghost" disabled={busy || !title.trim()} onClick={create}>{rc.zonesAdd}</Button>
+      </div>
+      {zones.length === 0 ? (
+        <div className="text-sm text-zinc-500">{rc.zonesEmpty}</div>
+      ) : (
+        <div className="space-y-1.5">
+          {zones.map((z) => (
+            <div key={z.id} className="flex items-center justify-between text-sm gap-2">
+              <span className="text-zinc-200 flex-1" dir="auto">{z.title}</span>
+              <span className="text-zinc-500 text-xs">{z.ownerTeamId ? rc.zonesHeldBy({ name: z.ownerTeamName ?? '' }) : rc.zonesOpen}</span>
+              <button className="text-neon-red text-xs" onClick={() => remove(z.id)}>✕</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Movement heatmap panel (change: movement-heatmap): on demand, loads the run's
+// foot-traffic density and renders it as a MapLibre heat layer over the play area.
+function HeatmapPanel({ accessCode }: { accessCode: string }) {
+  const t = useT();
+  const [data, setData] = useState<RunHeatmapResult | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    setBusy(true);
+    try { setData(await getRunHeatmap({ code: accessCode })); } finally { setBusy(false); }
+  }
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">{t.runConsole.heatmapTitle}</div>
+        {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.heatmapLoad}</Button>}
+      </div>
+      {data && (
+        data.pointCount === 0
+          ? <div className="text-sm text-zinc-500">{t.runConsole.heatmapEmpty}</div>
+          : (
+            <div className="space-y-2">
+              <div className="text-sm text-zinc-400">{t.runConsole.heatmapPoints({ n: data.pointCount })}</div>
+              <HeatmapMap cells={data.cells} className="h-80" />
+            </div>
+          )
+      )}
+    </Card>
+  );
+}
+
 function AnalyticsPanel({ accessCode }: { accessCode: string }) {
   const t = useT();
   const [data, setData] = useState<RunAnalyticsResult | null>(null);
@@ -447,11 +596,41 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
     try { setData(await getRunAnalytics({ code: accessCode })); } finally { setBusy(false); }
   }
 
+  // Export the loaded per-task analytics as a CSV file (pure client-side; no
+  // callable). One row per task, header row included; downloaded via a blob URL.
+  function exportCsv() {
+    if (!data) return;
+    const header = ['task_id', 'type', 'attempts', 'completions', 'completion_rate', 'median_ms', 'p90_ms', 'hints', 'skips'];
+    const esc = (v: string | number) => {
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = data.tasks.map((task) => [
+      task.taskId, task.type, task.attempts, task.completions,
+      task.completionRate.toFixed(4), task.medianMs, task.p90Ms, task.hintCount, task.skips,
+    ]);
+    const csv = [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+    // Prepend a UTF-8 BOM so Excel opens Hebrew/Unicode correctly.
+    const bom = String.fromCharCode(0xfeff);
+    const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `run-analytics-${accessCode}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">{t.runConsole.analyticsTitle}</div>
-        {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.analyticsLoad}</Button>}
+        <div className="flex items-center gap-2">
+          {data && data.tasks.length > 0 && (
+            <Button variant="ghost" onClick={exportCsv}>{t.runConsole.analyticsExport}</Button>
+          )}
+          {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.analyticsLoad}</Button>}
+        </div>
       </div>
       {data && (
         data.tasks.length === 0 ? (

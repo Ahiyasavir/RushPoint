@@ -54,7 +54,7 @@ const HEBREW = /[֐-׿]/;
 // Brand names / units / acronyms that may legitimately stay Latin inside Hebrew
 // copy, the language-toggle label, and the structural direction values.
 const LATIN_WHITELIST = [
-  'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'PWA',
+  'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
   'English', 'rtl', 'ltr', '₪',
 ];
 // Hebrew words allowed inside English copy (a language's own name in the toggle).

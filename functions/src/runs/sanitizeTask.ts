@@ -19,6 +19,10 @@ export function sanitizeTaskForParticipant(task: Task) {
   // Strip every server-secret answer key: the hint text (paid reveal only),
   // quiz answers, the numeric target, and each sequence step's answer. The UI
   // still gets choices / tolerance / radius / step prompts so it can render.
+  // `media` (creator-authored image/video/YouTube attachments) carries no secret —
+  // it stays in `...rest` and is passed through to the participant unchanged. It is
+  // validated + canonicalized server-side at write time (normalizeTaskMedia), so no
+  // sanitization is needed here. Listed in the e2e ALLOWED_TASK_KEYS allowlist.
   const { smart, hint, answers, numericAnswer, steps, ...rest } = task;
 
   // Hidden-location (treasure-hunt) tasks keep their coordinates + radius SERVER-

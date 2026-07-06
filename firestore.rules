@@ -81,6 +81,30 @@ service cloud.firestore {
             allow read:  if isOwner(uid);
             allow write: if false;
           }
+          // Retained GPS track for the post-run movement heatmap (movement-heatmap).
+          // Owner-read only; appended solely by updateLocation (Admin SDK).
+          match /locationTrack/{docId} {
+            allow read:  if isOwner(uid);
+            allow write: if false;
+          }
+          // Trackable collectibles (trackable-collectibles): coordinates/holder aren't
+          // secret (they render live), so any authed run participant may read; all
+          // writes go through the pickup/drop/create callables (Admin SDK).
+          match /trackables/{trackableId} {
+            allow read:  if isAuthenticated();
+            allow write: if false;
+            match /log/{entryId} {
+              allow read:  if isAuthenticated();
+              allow write: if false;
+            }
+          }
+          // Capturable territory zones (territory-capture): ownership renders live on
+          // the map, so any authed run participant may read; captures go through the
+          // captureZone callable (Admin SDK).
+          match /zones/{zoneId} {
+            allow read:  if isAuthenticated();
+            allow write: if false;
+          }
 
           // ── POST-GAME FEEDBACK (post-game-feedback) ────────────────────────
           //    One survey response per player, written only by submitRunFeedback
@@ -132,6 +156,14 @@ service cloud.firestore {
         allow read:  if isOwner(uid);
         allow write: if false;
       }
+    }
+
+    // ── PLAYER PROFILES ──────────────────────────────────────────────────────
+    //    Cross-run lifetime stats + badges (player-profile-badges). A player reads
+    //    only their OWN profile; it is written solely by CFs (recordPlayerResult).
+    match /players/{uid} {
+      allow read:  if isOwner(uid);
+      allow write: if false;
     }
 
     // ── ACCESS CODES ─────────────────────────────────────────────────────────

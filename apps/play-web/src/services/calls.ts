@@ -1,5 +1,24 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone } from '@rushpoint/shared';
+
+// Cross-run player profile (change: player-profile-badges).
+export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
+
+// Marketplace instant play (change: marketplace-instant-play).
+export const startInstantPlay = callable<
+  { gameId: string; displayName?: string },
+  { ownerUid: string; gameId: string; runId: string; accessCode: string }
+>('startInstantPlay');
+
+// Trackable collectibles (change: trackable-collectibles).
+type TrackableCtx = { ownerUid: string; gameId: string; runId: string };
+export const getRunTrackables = callable<TrackableCtx, { trackables: Trackable[] }>('getRunTrackables');
+export const pickUpTrackable  = callable<TrackableCtx & { trackableId: string; taskId?: string }, { ok: boolean; trackable: Trackable }>('pickUpTrackable');
+export const dropTrackable    = callable<TrackableCtx & { trackableId: string; taskId?: string }, { ok: boolean; trackable: Trackable }>('dropTrackable');
+
+// Territory / contested-zone capture (change: territory-capture).
+export const getRunZones = callable<TrackableCtx & { code?: string }, { zones: CaptureZone[] }>('getRunZones');
+export const captureZone = callable<TrackableCtx & { zoneId: string; lat: number; lng: number }, { ok: boolean; zone: CaptureZone }>('captureZone');
 
 export interface JoinInfo {
   context: { ownerUid: string; gameId: string; runId: string };
@@ -70,11 +89,26 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
   };
 };
 
+export interface StoryBeatSafe { title?: string; body?: string; bodyHe?: string; imageUrl?: string }
+export interface StageNarrative {
+  stageId: string;
+  order: number;
+  title: string;
+  status: 'active' | 'completed';
+  narrative: { intro?: StoryBeatSafe; outro?: StoryBeatSafe };
+}
+
 export interface MyTeamState {
   team: RunTeam;
-  run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
+  run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number };
   activeStageTasks: SafeTask[];
+  // Narrative chapters: intro/outro beats for stages the team has reached (active or
+  // completed). The play UI shows an intro when a chapter opens, an outro when it ends.
+  stageNarratives?: StageNarrative[];
+  // Scheduled-release: when the team is waiting on a timed stage "drop", the ms
+  // epoch it unlocks (else null) — drives the "next chapter unlocks in…" countdown.
+  nextStageReleaseAt?: number | null;
   // Shared team devices: this caller's role on the team (controller = may
   // submit; viewer = read-only until control is transferred/claimed).
   myRole: 'controller' | 'viewer' | null;
@@ -173,3 +207,10 @@ export const pushAnnouncement = callable<
   Ctx & { message: string; messageHe?: string },
   { announcementId: string }
 >('pushAnnouncement');
+
+// Manual bonus / deduction from the staff console (server-authoritative; the
+// staff custom token satisfies assertStaffOrOwner). Positive delta = bonus.
+export const adjustTeamScore = callable<
+  Ctx & { teamId: string; delta: number; reason?: string },
+  { ok: boolean; newBonusPenalty: number }
+>('adjustTeamScore');

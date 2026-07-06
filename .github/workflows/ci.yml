@@ -113,3 +113,47 @@ jobs:
 
       - name: Security-rules tests (anti-cheat + tenant isolation)
         run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/test-rules.mjs"
+
+      # Concurrent load smoke: 8 teams play a real game at once, then the run's
+      # leaderboard invariants + station-slot accounting are audited. Catches
+      # concurrency regressions (station-cap races, lock-timeout handling, score
+      # drift) that a single-player e2e can't see. Fresh suite = clean taskCounts.
+      - name: Concurrent load smoke (8 teams)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/simulate-run.mjs --teams=8"
+
+      # Adversarial smoke: honest + cheater teams (brute-force answers, GPS spoof,
+      # duplicate submissions, cross-team IDOR) play the SAME stations concurrently.
+      # Asserts every cheat is rebuffed AND the honest run stays consistent (no
+      # double-count, no leaked/negative station counters) — anti-cheat under load,
+      # which neither the single-actor e2e nor the all-honest load sim exercises.
+      - name: Adversarial concurrent smoke (cheaters + honest)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/simulate-adversarial.mjs --teams=9 --cheaters=0.5"
+
+  ui:
+    name: UI smoke (Playwright — real browser render)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The apps' shared package must be built for the Vite dev servers to resolve
+      # @rushpoint/shared.
+      - run: npm run shared:build
+
+      # Only Chromium is needed for the headless smoke.
+      - name: Install Playwright Chromium
+        run: npx --yes playwright install --with-deps chromium
+
+      # Boots creator-web (:5180) + play-web (:5181) via the config's webServer and
+      # asserts both apps RENDER in a real browser (no white-screen crash, critical
+      # controls present, Hebrew-first UI mounts). The seeded join round-trip is gated
+      # on PLAY_CODE (needs the emulator) and auto-skips here — the render smokes need
+      # no backend. This is the ONLY layer that drives the React apps in a browser.
+      - name: Playwright UI render smoke
+        run: npm run test:ui

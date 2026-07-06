@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { haversineKm } from '@rushpoint/shared';
-import type { RunStageRecord } from '@rushpoint/shared';
+import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint,
   submitTaskAnswer, submitSequenceStep,
@@ -12,6 +12,35 @@ import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
+
+// Creator-authored task media (change: task-media-attachments): images render as
+// <img>, uploaded videos as inline <video controls>, YouTube as a lazy iframe embed
+// (the url is the canonical /embed/<id> form, validated server-side). Captions use
+// dir="auto" so Hebrew/English both render correctly. Rendered only when non-empty.
+function TaskMediaGallery({ media }: { media: TaskMedia[] }) {
+  return (
+    <div className="space-y-2 mb-3">
+      {media.map((m) => (
+        <figure key={m.id} className="m-0">
+          {m.kind === 'image' ? (
+            <img src={m.url} alt={m.caption ?? ''} loading="lazy"
+              className="w-full rounded-lg border border-glass-border" />
+          ) : m.kind === 'video' ? (
+            <video src={m.url} controls preload="metadata"
+              className="w-full rounded-lg border border-glass-border" />
+          ) : (
+            <div className="relative w-full rounded-lg overflow-hidden border border-glass-border" style={{ aspectRatio: '16 / 9' }}>
+              <iframe src={m.url} title={m.caption ?? 'YouTube'} loading="lazy"
+                allow="accelerometer; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen className="absolute inset-0 w-full h-full" />
+            </div>
+          )}
+          {m.caption && <figcaption dir="auto" className="text-xs text-zinc-500 mt-1">{m.caption}</figcaption>}
+        </figure>
+      ))}
+    </div>
+  );
+}
 
 export default function TaskRunner({ session, state, stage, onChanged, readOnly = false }: {
   session: Session; state: MyTeamState; stage: RunStageRecord; onChanged: () => void;
@@ -184,6 +213,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
       <h2 dir="auto" className="text-xl font-bold mb-2">{task.title}</h2>
       {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
+      {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
 
       {task.locationHidden ? (
@@ -242,7 +272,9 @@ function DistanceBadge({ task }: { task: SafeTask }) {
   const [dist, setDist] = useState<number | null>(null);
   const coords = task.locationless ? undefined : (task.smart?.stationCoords ?? task.coordinates);
   useEffect(() => {
-    if (!navigator.geolocation || !coords || (!coords.lat && !coords.lng)) return;
+    if (!navigator.geolocation || !coords
+      || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)
+      || (!coords.lat && !coords.lng)) return;
     // Live watch so the badge updates as the participant walks toward the task.
     const id = navigator.geolocation.watchPosition((p) => {
       setDist(haversineKm({ lat: p.coords.latitude, lng: p.coords.longitude }, coords));
@@ -376,7 +408,7 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
       <div className="text-xs text-zinc-500">{t.task.stepOf({ step: idx + 1, total: steps.length })}</div>
       <p dir="auto" className="text-sm text-zinc-200">{step.prompt}</p>
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
-        onKeyDown={(e) => { if (e.key === 'Enter') submitStep(); }} />
+        onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} />
       <Button disabled={busy} onClick={submitStep}>{t.task.submitStep}</Button>
     </div>
   );

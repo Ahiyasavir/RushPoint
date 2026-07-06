@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
 import { FIRESTORE_PATHS, selectGameDescription, type PublicGame } from '@rushpoint/shared';
-import { db } from '../services/firebase';
+import { db, ensureAuth, uid } from '../services/firebase';
+import { startInstantPlay } from '../services/calls';
+import { saveSession, type Session } from '../store';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 
@@ -9,9 +11,25 @@ const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
-export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; onPlay: () => void }) {
+export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
   const { t } = useT();
   const [game, setGame] = useState<PublicGame | null | undefined>(undefined);
+  const [starting, setStarting] = useState(false);
+
+  async function playNow() {
+    setStarting(true);
+    try {
+      await ensureAuth();
+      const name = t.promo.soloPlayer;
+      const res = await startInstantPlay({ gameId, displayName: name });
+      const session: Session = {
+        ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
+        code: res.accessCode, displayName: name, teamId: uid() ?? undefined,
+      };
+      saveSession(session);
+      onInstantPlay(session);
+    } catch { setStarting(false); }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -116,7 +134,12 @@ export default function GamePromoScreen({ gameId, onPlay }: { gameId: string; on
           </div>
           <div className="text-sm font-semibold text-zinc-200 mb-1">{t.promo.playingTitle}</div>
           <p className="text-xs text-zinc-500 mb-4">{t.promo.playingSub}</p>
-          <Button onClick={onPlay}>{t.promo.haveCode}</Button>
+          {game.allowInstantPlay && (
+            <Button className="mb-2" disabled={starting} onClick={playNow}>
+              {starting ? t.promo.starting : t.promo.playNow}
+            </Button>
+          )}
+          <Button variant={game.allowInstantPlay ? 'ghost' : 'primary'} onClick={onPlay}>{t.promo.haveCode}</Button>
         </Card>
       </div>
 

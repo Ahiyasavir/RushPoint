@@ -68,6 +68,17 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(smart).toMatchObject({ hasCode: true, codeInputLabel: 'Enter code', attemptLimit: 3 });
     expect(out.hasHint).toBe(false);
   });
+
+  // task-media-attachments: general media is participant-visible (no secret) and
+  // must survive the sanitizer intact so the TaskRunner can render it.
+  test('task media (image + youtube) passes through to the participant unchanged', () => {
+    const media = [
+      { id: 'm1', kind: 'image' as const, url: 'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/gameMedia%2Fx.jpg', caption: 'the spot' },
+      { id: 'm2', kind: 'youtube' as const, url: 'https://www.youtube.com/embed/dQw4w9WgXcQ' },
+    ];
+    const out = sanitizeTaskForParticipant(baseTask({ media })) as Record<string, unknown>;
+    expect(out.media).toEqual(media);
+  });
 });
 
 describe('sanitizeTaskForParticipant — hidden location', () => {

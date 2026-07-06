@@ -198,6 +198,99 @@ export function isFirebaseStorageUrl(url: unknown): boolean {
   return typeof url === 'string' && url.startsWith(FIREBASE_STORAGE_ORIGIN);
 }
 
+// ─── Task media: YouTube parsing + upload-URL validation (change: task-media-attachments) ─
+// Creator-authored task media has two sources: uploaded image/video files (which
+// MUST live in our Firebase Storage bucket) and YouTube links (embedded, never
+// uploaded). These pure helpers are the trust boundary shared by the Builder (instant
+// feedback) and the server (createGame/updateGame enforcement). No Firebase imports.
+
+/** A single creator-authored media attachment on a task. Mirrors the `TaskMedia`
+ *  interface in types/index.ts (kept structurally identical; typed loosely here so
+ *  validation stays dependency-free of the type barrel). */
+export type TaskMediaKind = 'image' | 'video' | 'youtube';
+export interface TaskMediaLike {
+  id?: string;
+  kind: TaskMediaKind;
+  url: string;
+  caption?: string;
+}
+
+/**
+ * Extract the 11-char YouTube video id from the common URL forms, else null.
+ * Supported: watch?v=, youtu.be/, shorts/, embed/. Returns null for non-string
+ * input or any URL that doesn't yield a valid `[A-Za-z0-9_-]{11}` id.
+ */
+export function parseYouTubeId(url: unknown): string | null {
+  if (typeof url !== 'string') return null;
+  const s = url.trim();
+  if (!s) return null;
+  const idRe = /^[A-Za-z0-9_-]{11}$/;
+  const isId = (v: string | undefined | null): v is string => !!v && idRe.test(v);
+
+  // youtu.be/<id>[?…]  and  youtube.com/{embed,shorts}/<id>[?…|/…]
+  const pathMatch = s.match(/(?:youtu\.be\/|youtube\.com\/(?:embed|shorts|v)\/)([^?/&#]+)/i);
+  if (pathMatch && isId(pathMatch[1])) return pathMatch[1];
+
+  // youtube.com/watch?v=<id>&…  (query param, any order)
+  const vMatch = s.match(/[?&]v=([^?&#]+)/i);
+  if (vMatch && isId(vMatch[1])) return vMatch[1];
+
+  return null;
+}
+
+/** Canonical embed URL for a parsed YouTube id. */
+export function youTubeEmbedUrl(id: string): string {
+  return `https://www.youtube.com/embed/${id}`;
+}
+
+/** True if a single media entry is well-formed and its URL passes its kind's origin
+ *  rule (image/video → Firebase Storage URL; youtube → parseable to a valid id). */
+export function isTaskMediaValid(m: unknown): boolean {
+  if (!m || typeof m !== 'object') return false;
+  const { kind, url } = m as { kind?: unknown; url?: unknown };
+  if (typeof url !== 'string') return false;
+  if (kind === 'image' || kind === 'video') return isFirebaseStorageUrl(url);
+  if (kind === 'youtube') return parseYouTubeId(url) !== null;
+  return false;
+}
+
+/**
+ * Take an arbitrary client-supplied value and return a clean, validated
+ * `TaskMediaLike[]`: non-array → []; invalid entries dropped; YouTube URLs rewritten
+ * to the canonical `.../embed/<id>` form; captions trimmed (empty dropped); every
+ * entry given a stable non-empty id (preserved if present, else derived from index).
+ * This is the server-side enforcement boundary in createGame/updateGame.
+ */
+export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
+  if (!Array.isArray(input)) return [];
+  const out: TaskMediaLike[] = [];
+  input.forEach((raw, i) => {
+    if (!raw || typeof raw !== 'object') return;
+    const { id, kind, url, caption } = raw as {
+      id?: unknown; kind?: unknown; url?: unknown; caption?: unknown;
+    };
+    if (typeof url !== 'string') return;
+    let finalUrl = url;
+    if (kind === 'youtube') {
+      const ytId = parseYouTubeId(url);
+      if (!ytId) return;
+      finalUrl = youTubeEmbedUrl(ytId);
+    } else if (kind === 'image' || kind === 'video') {
+      if (!isFirebaseStorageUrl(url)) return;
+    } else {
+      return; // unknown kind
+    }
+    const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
+    out.push({
+      id: typeof id === 'string' && id.trim() ? id.trim() : `m${i}-${finalUrl.length}`,
+      kind: kind as TaskMediaKind,
+      url: finalUrl,
+      ...(trimmedCaption ? { caption: trimmedCaption } : {}),
+    });
+  });
+  return out;
+}
+
 // ─── Caller-scoped photo URL (change: auth-anticheat-hardening, row 41) ───────
 // Tighter than isFirebaseStorageUrl: the submitted photo must live under the
 // CALLER'S OWN run/team folder (runs/{runId}/teams/{uid}/…) — so one team can't

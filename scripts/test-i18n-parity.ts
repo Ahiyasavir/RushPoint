@@ -28,7 +28,7 @@ function keysDeep(obj: unknown, prefix = ''): string[] {
 // Brand names / units / acronyms that legitimately stay Latin inside Hebrew copy,
 // plus the language-toggle label (a language's own name) and the structural
 // direction values ('rtl'/'ltr', which are not user-facing copy).
-const WHITELIST = ['RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'PWA', '₪', 'English', 'rtl', 'ltr'];
+const WHITELIST = ['RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA', '₪', 'English', 'rtl', 'ltr'];
 
 function stripWhitelist(s: string): string {
   let out = s;

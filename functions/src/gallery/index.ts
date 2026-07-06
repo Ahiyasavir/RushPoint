@@ -2,6 +2,7 @@
 // Public game gallery + task library search.
 
 import * as functions from 'firebase-functions';
+import { FieldValue } from 'firebase-admin/firestore';
 import { loggedCallable } from '../obs/log';
 import { db } from '../firebase';
 import type { PublicGame, PublicTask } from '@rushpoint/shared';
@@ -80,7 +81,11 @@ export const incrementTaskCopyCount = loggedCallable('incrementTaskCopyCount', a
   const { publicTaskId } = data as { publicTaskId: string };
   if (!publicTaskId) throw new functions.https.HttpsError('invalid-argument', 'publicTaskId required');
 
+  // NB: `require('firebase-admin')` here threw INTERNAL at runtime — the function
+  // bundle is esbuild-built, so a bare CommonJS require of admin isn't resolvable.
+  // Use the ESM FieldValue import (as the rest of the codebase does). set/merge so
+  // a missing denorm doc self-heals into a copyCount:1 instead of NOT_FOUND-ing.
   const ref = db.doc(`publicTasks/${publicTaskId}`);
-  await ref.update({ copyCount: require('firebase-admin').firestore.FieldValue.increment(1) });
+  await ref.set({ copyCount: FieldValue.increment(1) }, { merge: true });
   return { ok: true };
 });

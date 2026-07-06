@@ -129,7 +129,8 @@ function AppInner() {
     return (
       <>
         <ConnectionBanner />
-        <GamePromoScreen gameId={promoGameId} onPlay={() => setPromoGameId(null)} />
+        <GamePromoScreen gameId={promoGameId} onPlay={() => setPromoGameId(null)}
+          onInstantPlay={(s) => { setSession(s); setPromoGameId(null); }} />
         <DialogHost />
       </>
     );

@@ -41,12 +41,24 @@ import {
   buildRunRecap,
   buildRunTimeline,
   computeRunAnalytics,
+  buildMovementDensity,
+  mergePlayerResult,
+  emptyProfile,
+  type PlayerProfile,
+  canPickUp,
+  canDrop,
+  type Trackable,
+  isWithinZone,
+  canCapture,
+  type CaptureZone,
   mergeBenchmark,
   median,
   type BenchmarkAggregate,
   isConsentSatisfied,
   haversineKm,
   isValidCoord,
+  isReleased,
+  releaseInstantMs,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -483,7 +495,9 @@ export async function completeTaskForTeam(
   // Hot Zone (if any) is read-only here — used to multiply the earned score for
   // completions inside the zone+window (hot-zone-bonus). Server-decided.
   const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
-  const hotZone = (runSnap.data() as Run | undefined)?.hotZone;
+  const runData = runSnap.data() as Run | undefined;
+  const hotZone = runData?.hotZone;
+  const launchedAt = runData?.launchedAt;
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
 
   await db.runTransaction(async (tx) => {
@@ -565,10 +579,16 @@ export async function completeTaskForTeam(
       // Check if final stage (triggers Final Run)
       const isLastStage = game.stages.find((s) => s.id === stages[stageIdx].stageId)?.isFinal ?? (stageIdx === stages.length - 1);
 
-      // Unlock next stage if not final
+      // Unlock next stage if not final — UNLESS it has a scheduled-release gate
+      // that hasn't opened yet (change: scheduled-release). A gated next stage
+      // stays `locked`; a later requestNextTask/getMyTeamState poll unlocks it
+      // once its gate opens (see computeStageUnlock).
       if (!isLastStage && stageIdx + 1 < stages.length) {
-        stages[stageIdx + 1].status = 'active';
-        stages[stageIdx + 1].startedAt = now;
+        const nextGameStage = game.stages.find((s) => s.id === stages[stageIdx + 1].stageId);
+        if (isReleased(nextGameStage, launchedAt, new Date(now).getTime())) {
+          stages[stageIdx + 1].status = 'active';
+          stages[stageIdx + 1].startedAt = now;
+        }
       }
     }
 
@@ -582,6 +602,22 @@ export async function completeTaskForTeam(
       activeTaskId: null,
       updatedAt: now,
     });
+  });
+}
+
+// Read-modify-write a player's cross-run profile (change: player-profile-badges).
+// Server-only (players/{uid} is CF-write-only); transactional so concurrent finishes
+// on the same device don't clobber each other. Called from finalizeRun (batch), NOT
+// the hot completeTask path — one profile write per team at run finalize.
+async function recordPlayerResult(
+  r: { uid: string; displayName?: string; tasksCompleted: number; points: number },
+): Promise<void> {
+  const ref = db.doc(`players/${r.uid}`);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const prev = snap.exists ? (snap.data() as PlayerProfile) : null;
+    const { profile } = mergePlayerResult(prev, r);
+    tx.set(ref, { ...profile, updatedAt: new Date().toISOString() }, { merge: true });
   });
 }
 
@@ -893,6 +929,29 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     updatedAt: now,
   });
 
+  // Player profiles (change: player-profile-badges): fold each finished team's result
+  // into the player's cross-run profile. Done here as a batch — OFF the hot completeTask
+  // path — and made idempotent by `profileRecorded` on the team so a re-finalize never
+  // double-counts. Best-effort: a profile write must never fail finalize.
+  try {
+    const scoreByTeam = new Map(rankings.map((r) => [r.teamId, r.score]));
+    for (const d of teamsSnap.docs) {
+      const team = d.data() as RunTeam & { profileRecorded?: boolean };
+      if (team.status !== 'finished' || team.profileRecorded) continue;
+      const tasksCompleted = (team.stages ?? []).reduce(
+        (n, s) => n + (s.tasks ?? []).filter((t) => t.status === 'completed').length, 0);
+      await recordPlayerResult({
+        uid: d.id,
+        displayName: team.displayName,
+        tasksCompleted,
+        points: scoreByTeam.get(d.id) ?? team.score ?? 0,
+      });
+      await d.ref.update({ profileRecorded: true }).catch(() => undefined);
+    }
+  } catch (e) {
+    logBestEffort('finalize.playerProfiles', { runId }, e);
+  }
+
   // Platform benchmark contribution (platform-benchmark): fold anonymized,
   // per-task-type aggregates (median completion time + completion rate) into
   // benchmarks/{taskType}. No per-run identifiers are written. Opt-outable via
@@ -1136,6 +1195,284 @@ export const getRunAnalytics = loggedCallable('getRunAnalytics', async (data, co
 });
 
 
+// ─── getRunHeatmap (movement-heatmap) ─────────────────────────────────────────
+// Owner-only foot-traffic density over the run's retained GPS track. Resolves the run
+// by access code, refuses non-owners, bins the track via the pure buildMovementDensity.
+// Prune-safe: a cleared track just yields no cells.
+export const getRunHeatmap = loggedCallable('getRunHeatmap', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  const { code } = data as { code: string };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const c = codeSnap.data() as AccessCode;
+  if (uid !== c.ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Heatmap is organizer-only');
+  }
+
+  const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
+  const game = gameSnap.exists ? (gameSnap.data() as Game) : null;
+  const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
+  const run = runSnap.exists ? (runSnap.data() as Run) : null;
+
+  const trackSnap = await db
+    .collection(`users/${c.ownerUid}/games/${c.gameId}/runs/${c.runId}/locationTrack`)
+    .get();
+  const points = trackSnap.docs.map((d) => {
+    const p = d.data() as { lat: number; lng: number };
+    return { lat: p.lat, lng: p.lng };
+  });
+
+  return {
+    title: game?.branding?.name ?? game?.title ?? 'RushPoint',
+    runStatus: run?.status ?? 'live',
+    cells: buildMovementDensity(points),
+    pointCount: points.length,
+  };
+});
+
+
+// ─── getMyProfile (player-profile-badges) ─────────────────────────────────────
+// The caller's own cross-run profile (lifetime stats + earned badges). Read-only;
+// the profile is written server-side on run finish. Returns a zeroed profile if the
+// player has never finished a run.
+export const getMyProfile = loggedCallable('getMyProfile', async (_data, context) => {
+  const uid = requireAuth(context);
+  const snap = await db.doc(`players/${uid}`).get();
+  const profile = snap.exists ? (snap.data() as PlayerProfile) : emptyProfile(uid);
+  return { profile };
+});
+
+
+// ─── startInstantPlay (marketplace-instant-play) ──────────────────────────────
+// On-demand, free, self-guided solo play of a PUBLIC + opted-in game. Creates a fresh
+// self-guided run under the owner's tree (Admin SDK — no owner auth, no credit), registers
+// the caller as the sole team, starts it, and returns the run context. No organizer needed.
+export const startInstantPlay = loggedCallable('startInstantPlay', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'startInstantPlay');
+  const { gameId, displayName } = data as { gameId: string; displayName?: string };
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+
+  // Authoritative owner lookup: only games indexed in publicGames are challengeable.
+  const pubSnap = await db.doc(`publicGames/${gameId}`).get();
+  if (!pubSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const ownerUid = (pubSnap.data() as { ownerUid: string }).ownerUid;
+
+  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  if (!game.allowInstantPlay) {
+    throw new functions.https.HttpsError('failed-precondition', 'This game is not open for instant play');
+  }
+  if (!game.stages?.length) {
+    throw new functions.https.HttpsError('failed-precondition', 'Game has no stages');
+  }
+
+  const now = new Date().toISOString();
+  const code = await uniqueCode();
+  const runRef = db.collection(`users/${ownerUid}/games/${gameId}/runs`).doc();
+  const runId = runRef.id;
+  const name = (displayName ?? '').trim().slice(0, MAX_ID_LEN) || 'Player';
+
+  const run: Run = {
+    id: runId, gameId, ownerUid, status: 'live', accessCode: code,
+    billingType: 'free', maxParticipants: 1, participantCount: 1,
+    selfGuided: true, launchedAt: now, createdAt: now, updatedAt: now,
+  };
+  const accessCode: AccessCode = { code, ownerUid, gameId, runId, status: 'unused', createdAt: now };
+  const teamRef = db.doc(teamPath(ownerUid, gameId, runId, uid));
+  const team: RunTeam = {
+    id: uid, runId, gameId, ownerUid,
+    displayName: name, registrationData: {}, memberNames: [], memberCount: 1,
+    status: 'active', stages: buildInitialStages(game).map((s, i) => ({ ...s, ...(i === 0 ? { startedAt: now } : {}) })),
+    score: 0, bonusPenalty: 0, launched: true, startedAt: now, activeTaskId: null,
+    deviceUids: [uid], controllerUid: uid, deviceJoinCode: generateDeviceJoinCode(),
+    devices: [{ uid, name, joinedAt: now }], updatedAt: now,
+  };
+
+  const batch = db.batch();
+  batch.set(runRef, run);
+  batch.set(db.doc(`accessCodes/${code}`), accessCode);
+  batch.set(teamRef, team);
+  await batch.commit();
+
+  // Hand out the first task exactly as startTeams does.
+  await assignNextInActiveStage(ownerUid, gameId, runId, uid, { lat: 31.7905, lng: 35.164 }, now);
+
+  return { ownerUid, gameId, runId, accessCode: code };
+});
+
+
+// ─── Trackable collectibles (change: trackable-collectibles) ──────────────────
+// A virtual item picked up at one task and dropped at another, carrying a travel log.
+// Run-scoped subcollection; holder transfer is transactional; coordinates aren't secret.
+
+export const createTrackable = loggedCallable('createTrackable', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, name, description, homeTaskId } = data as {
+    gameId: string; runId: string; name: string; description?: string; homeTaskId?: string;
+  };
+  validate(() => requireString(name, 'name', MAX_ID_LEN));
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists || (runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  const ref = db.collection(`${runPath(uid, gameId, runId)}/trackables`).doc();
+  const trackable = {
+    id: ref.id,
+    name: name.trim(),
+    description: (description ?? '').slice(0, 500),
+    homeTaskId: homeTaskId ?? null,
+    currentHolderTeamId: null,
+    currentTaskId: homeTaskId ?? null,
+    createdAt: new Date().toISOString(),
+  };
+  await ref.set(trackable);
+  return { trackable };
+});
+
+export const getRunTrackables = loggedCallable('getRunTrackables', async (data, context) => {
+  const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'getRunTrackables');
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const snap = await db.collection(`${runPath(ctx.ownerUid, ctx.gameId, ctx.runId)}/trackables`).get();
+  const trackables = snap.docs.map((d) => d.data() as Trackable);
+  return { trackables };
+});
+
+async function transferTrackable(
+  context: functions.https.CallableContext, action: 'pickup' | 'drop',
+  data: { ownerUid: string; gameId: string; runId: string; trackableId: string; taskId?: string },
+): Promise<{ ok: boolean; trackable: Trackable }> {
+  const uid = requireAuth(context);
+  const { ownerUid, gameId, runId, trackableId, taskId } = data;
+  if (!trackableId) throw new functions.https.HttpsError('invalid-argument', 'trackableId required');
+  // Controller-only (shared team devices): a viewer device can't move items.
+  const { teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: true });
+  const teamName = team.displayName;
+  const tRef = db.doc(`${runPath(ownerUid, gameId, runId)}/trackables/${trackableId}`);
+  const now = new Date().toISOString();
+
+  const trackable = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(tRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Trackable not found');
+    const t = snap.data() as Trackable;
+    if (action === 'pickup') {
+      if (!canPickUp(t)) throw new functions.https.HttpsError('failed-precondition', 'Already held by another team');
+      tx.update(tRef, { currentHolderTeamId: teamId, currentTaskId: null, updatedAt: now });
+      return { ...t, currentHolderTeamId: teamId, currentTaskId: null };
+    }
+    if (!canDrop(t, teamId)) throw new functions.https.HttpsError('failed-precondition', 'You are not carrying this');
+    tx.update(tRef, { currentHolderTeamId: null, currentTaskId: taskId ?? null, updatedAt: now });
+    return { ...t, currentHolderTeamId: null, currentTaskId: taskId ?? null };
+  });
+
+  // Append to the append-only travel log (best-effort; pruned with the run's PII).
+  await tRef.collection('log').add({ teamId, teamName: teamName ?? null, taskId: taskId ?? null, action, at: now })
+    .catch(() => undefined);
+
+  return { ok: true, trackable };
+}
+
+export const pickUpTrackable = loggedCallable('pickUpTrackable', async (data, context) =>
+  transferTrackable(context, 'pickup', data as never));
+
+export const dropTrackable = loggedCallable('dropTrackable', async (data, context) =>
+  transferTrackable(context, 'drop', data as never));
+
+
+// ─── Territory / contested-zone capture (change: territory-capture) ────────────
+// Run-scoped capturable zones. Proximity is re-validated server-side; the capture
+// bonus is awarded IMMEDIATELY at capture time (via team.bonusPenalty, which both
+// refreshLeaderboard and finalizeRun read) so live and final standings can't drift.
+
+export const createZone = loggedCallable('createZone', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, title, lat, lng, radiusMeters, captureBonus } = data as {
+    gameId: string; runId: string; title: string; lat: number; lng: number;
+    radiusMeters?: number; captureBonus?: number;
+  };
+  validate(() => requireString(title, 'title', MAX_ID_LEN));
+  if (!(Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid coordinates');
+  }
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists || (runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  const ref = db.collection(`${runPath(uid, gameId, runId)}/zones`).doc();
+  const zone: CaptureZone & { createdAt: string } = {
+    id: ref.id, title: title.trim(), center: { lat, lng },
+    radiusMeters: Number.isFinite(radiusMeters) && radiusMeters! > 0 ? radiusMeters! : 50,
+    captureBonus: Number.isFinite(captureBonus) && captureBonus! >= 0 ? captureBonus! : 10,
+    ownerTeamId: null, ownerTeamName: null, createdAt: new Date().toISOString(),
+  };
+  await ref.set(zone);
+  return { zone };
+});
+
+export const deleteZone = loggedCallable('deleteZone', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId, zoneId } = data as { gameId: string; runId: string; zoneId: string };
+  if (!zoneId) throw new functions.https.HttpsError('invalid-argument', 'zoneId required');
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists || (runSnap.data() as Run).ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  await db.doc(`${runPath(uid, gameId, runId)}/zones/${zoneId}`).delete();
+  return { ok: true };
+});
+
+export const getRunZones = loggedCallable('getRunZones', async (data, context) => {
+  const teamId = requireAuth(context);
+  await enforceRateLimit(teamId, 'getRunZones');
+  const { ownerUid, gameId, runId, code } = data as {
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  const ctx = await resolveTeamContext(teamId, { ownerUid, gameId, runId, code });
+  const snap = await db.collection(`${runPath(ctx.ownerUid, ctx.gameId, ctx.runId)}/zones`).get();
+  return { zones: snap.docs.map((d) => d.data() as CaptureZone) };
+});
+
+export const captureZone = loggedCallable('captureZone', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'captureZone');
+  const { ownerUid, gameId, runId, zoneId, lat, lng } = data as {
+    ownerUid: string; gameId: string; runId: string; zoneId: string; lat: number; lng: number;
+  };
+  if (!zoneId) throw new functions.https.HttpsError('invalid-argument', 'zoneId required');
+  // Controller-only; returns the caller's own team + ref for the atomic award.
+  const { teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: true });
+  const zRef = db.doc(`${runPath(ownerUid, gameId, runId)}/zones/${zoneId}`);
+
+  return db.runTransaction(async (tx) => {
+    const [zSnap, tSnap] = await Promise.all([tx.get(zRef), tx.get(teamRef)]);
+    if (!zSnap.exists) throw new functions.https.HttpsError('not-found', 'Zone not found');
+    const zone = zSnap.data() as CaptureZone;
+    if (!canCapture(zone, teamId)) {
+      throw new functions.https.HttpsError('failed-precondition', 'Your team already holds this zone');
+    }
+    // GPS proximity is re-validated server-side (never trust client coordinates).
+    if (!isWithinZone(zone.center, { lat, lng }, zone.radiusMeters)) {
+      throw new functions.https.HttpsError('failed-precondition', 'Not within the zone');
+    }
+    const now = new Date().toISOString();
+    const t = tSnap.data() as RunTeam;
+    // Award the capture bonus now: bonusPenalty is SUBTRACTED from score, so a bonus
+    // is a negative delta. Applied to the live team doc → live & final both see it.
+    tx.update(teamRef, { bonusPenalty: (t.bonusPenalty ?? 0) - (zone.captureBonus ?? 0), updatedAt: now });
+    tx.update(zRef, { ownerTeamId: teamId, ownerTeamName: team.displayName, capturedAt: now });
+    return { ok: true, zone: { ...zone, ownerTeamId: teamId, ownerTeamName: team.displayName, capturedAt: now } };
+  });
+});
+
+
 // ─── listRunTeams ─────────────────────────────────────────────────────────────
 
 export const listRunTeams = loggedCallable('listRunTeams', async (data, context) => {
@@ -1363,6 +1700,33 @@ export const claimController = loggedCallable('claimController', async (data, co
 
 // Assign the next unassigned task within the team's active stage. Single-task
 // stages assign directly; multi-task stages route by priority. No-op if none left.
+// Scheduled-release stage unlock (change: scheduled-release). When a team has NO
+// active stage but the next locked stage's predecessor is completed and its
+// release gate has opened, flip it to `active`. Mutates `stages` in place and
+// returns whether it changed anything. Linear flow: only the earliest eligible
+// locked stage is considered — a not-yet-released gate blocks the rest.
+function computeStageUnlock(
+  stages: RunStageRecord[],
+  game: Game,
+  launchedAt: string | undefined,
+  nowMs: number,
+): boolean {
+  if (stages.some((s) => s.status === 'active')) return false;
+  for (let i = 0; i < stages.length; i++) {
+    if (stages[i].status !== 'locked') continue;
+    const prevDone = i === 0 || stages[i - 1].status === 'completed';
+    if (!prevDone) return false; // can't jump ahead of an unfinished stage
+    const gameStage = game.stages.find((s) => s.id === stages[i].stageId);
+    if (isReleased(gameStage, launchedAt, nowMs)) {
+      stages[i].status = 'active';
+      stages[i].startedAt = new Date(nowMs).toISOString();
+      return true;
+    }
+    return false; // earliest eligible locked stage not released yet → hold
+  }
+  return false;
+}
+
 async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
@@ -1375,6 +1739,18 @@ async function assignNextInActiveStage(
   const teamSnap = await teamRef.get();
   if (!teamSnap.exists) return {};
   const team = teamSnap.data() as RunTeam;
+
+  // Poll re-check: a scheduled-release stage that has since opened gets unlocked
+  // here, so a team waiting on a timed drop advances the moment its gate opens.
+  if (team.stages.findIndex((s) => s.status === 'active') < 0) {
+    const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+    const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    if (computeStageUnlock(stages, game, launchedAt, Date.now())) {
+      await teamRef.update({ stages, updatedAt: now });
+      team.stages = stages;
+    }
+  }
 
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeStageIdx < 0) return {};
@@ -1448,6 +1824,16 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   // need no GPS. Legacy `geofence`-type tasks normalize to `radius`.
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   const gtask = gameSnap.exists ? findGameTask(gameSnap.data() as Game, taskId) : undefined;
+  // Scheduled-release gate (change: scheduled-release): a not-yet-released task
+  // can't be completed even by calling completeTask directly (anti-cheat: the
+  // routing filter already hides it, this stops a hand-crafted bypass).
+  if (gtask && (gtask.releaseAt || gtask.releaseAfterMinutes)) {
+    const runSnap = await db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get();
+    const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
+    if (!isReleased(gtask, launchedAt, Date.now())) {
+      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
+    }
+  }
   if (gtask) {
     const mode = normalizeTriggerMode(gtask);
     if (mode === 'radius' || mode === 'exact') {
@@ -1711,6 +2097,18 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   const game = gameSnap.data() as Game;
   const run = runSnap.data() as Run;
 
+  // Scheduled-release (change: scheduled-release): unlock a due stage here too, so
+  // a team waiting on a timed drop advances the moment its gate opens even when it
+  // is only polling state (not requesting a task).
+  if (team.stages.findIndex((s) => s.status === 'active') < 0) {
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    if (computeStageUnlock(stages, game, run.launchedAt, Date.now())) {
+      await db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id))
+        .update({ stages, updatedAt: new Date().toISOString() });
+      team.stages = stages;
+    }
+  }
+
   // Build a map of taskId → sanitized content for tasks in the active stage
   const orderedStages = game.stages.slice().sort((a, b) => a.order - b.order);
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
@@ -1719,17 +2117,61 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       ? orderedStages[activeStageIdx].tasks.map(sanitizeTaskForParticipant)
       : [];
 
+  // If the team is between stages waiting on a timed drop, the instant the next
+  // locked stage unlocks — so the play UI can render a "next chapter unlocks in…"
+  // countdown. null when nothing is waiting on a schedule.
+  let nextStageReleaseAt: number | null = null;
+  if (activeStageIdx < 0) {
+    for (let i = 0; i < team.stages.length; i++) {
+      if (team.stages[i].status !== 'locked') continue;
+      const prevDone = i === 0 || team.stages[i - 1].status === 'completed';
+      if (!prevDone) break;
+      const gs = orderedStages.find((s) => s.id === team.stages[i].stageId);
+      nextStageReleaseAt = releaseInstantMs(gs, run.launchedAt);
+      break;
+    }
+  }
+
+  // Narrative chapters (change: narrative-chapters): intro/outro beats for stages the
+  // team has actually reached (active or completed) — never future stages, so upcoming
+  // chapters aren't spoiled. Cosmetic passthrough; image URLs are https-guarded. The
+  // play UI shows an intro when a chapter opens and an outro when it closes.
+  const cleanBeat = (b?: { title?: string; body?: string; bodyHe?: string; imageUrl?: string }) => {
+    if (!b) return undefined;
+    const img = b.imageUrl && /^https:\/\//.test(b.imageUrl) ? b.imageUrl : undefined;
+    return { title: b.title, body: b.body, bodyHe: b.bodyHe, imageUrl: img };
+  };
+  const stageNarratives = team.stages
+    .map((s) => {
+      const gs = orderedStages.find((g) => g.id === s.stageId);
+      if (!gs?.narrative || (s.status !== 'active' && s.status !== 'completed')) return null;
+      return {
+        stageId: s.stageId,
+        order: gs.order,
+        title: gs.title,
+        status: s.status,
+        narrative: { intro: cleanBeat(gs.narrative.intro), outro: cleanBeat(gs.narrative.outro) },
+      };
+    })
+    .filter(Boolean);
+
   return {
     team,
+    stageNarratives,
     run: {
       id: run.id, status: run.status, accessCode: run.accessCode,
       billingType: run.billingType ?? 'free',
+      // Run start, so the client can compute per-task `releaseAfterMinutes`
+      // countdowns for scheduled-release tasks in the active stage.
+      launchedAt: run.launchedAt ?? null,
       leaderboard: run.leaderboard ?? null,
       // Active hot zone (hot-zone-bonus) so the participant app can show the
       // live "🔥 Hot Zone" banner + countdown. Coordinates are the zone centre
       // (already public to anyone in the run); answer keys are unaffected.
       hotZone: run.hotZone ?? null,
     },
+    // Scheduled-release countdown to the next timed stage drop (ms epoch or null).
+    nextStageReleaseAt,
     game: {
       id: game.id,
       title: game.title,
@@ -1744,6 +2186,50 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     myRole: resolveDeviceRole(team, uid),
     context: ctx,
   };
+});
+
+
+// ─── listLiveRuns (multi-run GM overview) ─────────────────────────────────────
+// Owner-scoped aggregate of every LIVE run across all of the caller's games, for a
+// cross-run operations dashboard. A collection-group query filtered to the owner +
+// status 'live' (needs the ownerUid+status composite index). Each row carries enough
+// to render a card + alert badge; the UI deep-links into the existing per-run console.
+export const listLiveRuns = loggedCallable('listLiveRuns', async (_data, context) => {
+  const uid = requireAuth(context);
+  const snap = await db
+    .collectionGroup('runs')
+    .where('ownerUid', '==', uid)
+    .where('status', '==', 'live')
+    .get();
+
+  const runs = await Promise.all(snap.docs.map(async (d) => {
+    const r = d.data() as Run;
+    const parts = d.ref.path.split('/'); // users/{ownerUid}/games/{gameId}/runs/{runId}
+    const gameId = parts[3];
+    let gameTitle = '';
+    try {
+      const gs = await db.doc(`users/${uid}/games/${gameId}`).get();
+      gameTitle = (gs.data() as Game | undefined)?.title ?? '';
+    } catch { /* title is best-effort */ }
+    let unackedAlerts = 0;
+    try {
+      const agg = await d.ref.collection('alerts').where('acknowledged', '==', false).count().get();
+      unackedAlerts = agg.data().count;
+    } catch { /* alerts count is best-effort */ }
+    return {
+      ownerUid: uid,
+      gameId,
+      runId: r.id,
+      gameTitle,
+      accessCode: r.accessCode,
+      participantCount: r.participantCount ?? 0,
+      launchedAt: r.launchedAt ?? null,
+      unackedAlerts,
+    };
+  }));
+
+  runs.sort((a, b) => (b.launchedAt ?? '').localeCompare(a.launchedAt ?? ''));
+  return { runs };
 });
 
 

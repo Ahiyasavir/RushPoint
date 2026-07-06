@@ -90,9 +90,11 @@ export function taskScoreSmart(
   estimatedMinutes: number,
 ): number {
   // Guard malformed/legacy data: any non-numeric input would return NaN and
-  // corrupt the team total plus the Z-score for every other finisher.
+  // corrupt the team total plus the Z-score for every other finisher. Difficulty
+  // is documented 1–10; clamp to >= 0 so a malformed NEGATIVE difficulty can't
+  // yield a negative task score (which would silently subtract from the total).
   if (!Number.isFinite(estimatedMinutes) || estimatedMinutes <= 0) return 0;
-  const d = Number.isFinite(difficulty) ? difficulty : 0;
+  const d = Number.isFinite(difficulty) ? Math.max(0, difficulty) : 0;
   const x = (Number.isFinite(actualMinutes) ? actualMinutes : 0) / estimatedMinutes;
   return Math.round(100 * (d / 10) * sigmoidMultiplier(x));
 }

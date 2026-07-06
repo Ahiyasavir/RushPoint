@@ -1,5 +1,6 @@
 import React from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
+import { useT } from '../i18nContext';
 
 export function Button({
   variant = 'primary', className = '', children, ...rest
@@ -65,18 +66,30 @@ export function Card({ children, className = '', style }: {
 }
 
 export function Progress({ done, total }: { done: number; total: number }) {
+  const { colorblind, t } = useT();
   return (
-    <div className="flex items-center gap-1.5">
+    <div
+      className="flex items-center gap-1.5"
+      role="progressbar"
+      aria-valuenow={done}
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-label={t.play.progressLabel({ done, total })}
+    >
       {Array.from({ length: total }).map((_, i) => (
         <div
           key={i}
           className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
             i < done
               ? 'bg-gradient-to-r from-rp-fire to-rp-amber shadow-[0_0_8px_rgba(255,87,34,0.5)]'
-              : 'bg-app-raised'
+              : `bg-app-raised ${colorblind ? 'border border-dashed border-zinc-500' : ''}`
           }`}
         />
       ))}
+      {/* Colorblind cue: a numeric readout so progress doesn't rely on color alone. */}
+      {colorblind && (
+        <span className="ms-1 text-xs font-mono text-zinc-400 tabular-nums shrink-0">{done}/{total}</span>
+      )}
     </div>
   );
 }

@@ -49,6 +49,19 @@ export function saveLang(lang: Lang) {
   try { localStorage.setItem(LANG_KEY, lang); } catch { /* ignore */ }
 }
 
+// Colorblind / high-contrast preference (change: accessibility-colorblind). When on,
+// status indicators add a non-color cue (shape/icon/number) so meaning survives without
+// color. Persisted like the language preference; defaults off.
+const COLORBLIND_KEY = 'rushpoint.colorblind';
+
+export function loadColorblind(): boolean {
+  try { return localStorage.getItem(COLORBLIND_KEY) === '1'; } catch { return false; }
+}
+
+export function saveColorblind(on: boolean) {
+  try { localStorage.setItem(COLORBLIND_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+}
+
 // ── Staff session: which run a staff member signed in to (custom-token auth) ──
 export interface StaffSession {
   ownerUid: string;

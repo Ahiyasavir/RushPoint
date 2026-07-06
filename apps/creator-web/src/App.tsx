@@ -11,6 +11,7 @@ const BuilderPage    = lazy(() => import('./pages/BuilderPage'));
 const GalleryPage    = lazy(() => import('./pages/GalleryPage'));
 const WalletPage     = lazy(() => import('./pages/WalletPage'));
 const RunConsolePage = lazy(() => import('./pages/RunConsolePage'));
+const RunsOverviewPage = lazy(() => import('./pages/RunsOverviewPage'));
 const SettingsPage   = lazy(() => import('./pages/SettingsPage'));
 const LegalPage      = lazy(() => import('./pages/LegalPage'));
 
@@ -39,6 +40,7 @@ export default function App() {
   // Free mode: hide the wallet/credits surface entirely while payments are off.
   const NAV = [
     { to: '/',        label: t.nav.myGames,  end: true },
+    { to: '/live',    label: t.nav.liveRuns },
     { to: '/gallery', label: t.nav.gallery },
     ...(PAYMENTS_ENABLED ? [{ to: '/wallet', label: t.nav.wallet }] : []),
     { to: '/settings',label: t.nav.settings },
@@ -104,6 +106,7 @@ export default function App() {
             <Route path="/build/:gameId"       element={<BuilderPage />} />
             <Route path="/gallery"             element={<GalleryPage />} />
             {PAYMENTS_ENABLED && <Route path="/wallet" element={<WalletPage />} />}
+            <Route path="/live"                element={<RunsOverviewPage />} />
             <Route path="/run/:gameId/:runId"  element={<RunConsolePage />} />
             <Route path="/settings"            element={<SettingsPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />

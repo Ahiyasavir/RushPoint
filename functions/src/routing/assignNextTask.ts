@@ -11,7 +11,7 @@
 
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../firebase';
-import { haversineKm, isValidCoord } from '@rushpoint/shared';
+import { haversineKm, isValidCoord, isReleased } from '@rushpoint/shared';
 import type { Task, GeoPoint, TaskRecommendation } from '@rushpoint/shared';
 
 // Runtime counter path for a task within a run
@@ -100,15 +100,15 @@ export async function computeSkillRatio(
 
 // ─── Read task runtime counters from the Run doc ──────────────────────────────
 
-async function getTaskCounts(
+async function getRunRouting(
   ownerUid: string,
   gameId: string,
   runId: string,
-): Promise<Record<string, number>> {
+): Promise<{ taskCounts: Record<string, number>; launchedAt?: string }> {
   const snap = await db.doc(runPath(ownerUid, gameId, runId)).get();
-  if (!snap.exists) return {};
-  const data = snap.data() as { taskCounts?: Record<string, number> };
-  return data.taskCounts ?? {};
+  if (!snap.exists) return { taskCounts: {} };
+  const data = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string };
+  return { taskCounts: data.taskCounts ?? {}, launchedAt: data.launchedAt };
 }
 
 
@@ -125,11 +125,14 @@ export async function buildRecommendations(
   limit = 5,
   skillAware = true,
 ): Promise<TaskRecommendation[]> {
-  const taskCounts = await getTaskCounts(ownerUid, gameId, runId);
+  const { taskCounts, launchedAt } = await getRunRouting(ownerUid, gameId, runId);
+  const nowMs = Date.now();
 
   const candidates = tasks.filter((t) => {
     if (completedTaskIds.includes(t.id)) return false;
     if (t.status === 'paused' || t.status === 'closed') return false;
+    // Scheduled-release gate: a not-yet-released task is not a candidate.
+    if (!isReleased(t, launchedAt, nowMs)) return false;
     const current = taskCounts[t.id] ?? 0;
     if (current >= (t.maxConcurrentTeams ?? 3)) return false;
     return true;
@@ -206,11 +209,16 @@ export async function assignTask(
   // run-doc lock contention (see withLockRetry).
   return withLockRetry(() => db.runTransaction(async (tx) => {
     const snap = await tx.get(runRef);
-    const taskCounts = (snap.data() as { taskCounts?: Record<string, number> } | undefined)?.taskCounts ?? {};
+    const runData = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string } | undefined;
+    const taskCounts = runData?.taskCounts ?? {};
+    const launchedAt = runData?.launchedAt;
+    const nowMs = Date.now();
 
     const candidates = tasks.filter((t) => {
       if (completedTaskIds.includes(t.id)) return false;
       if (t.status === 'paused' || t.status === 'closed') return false;
+      // Scheduled-release gate: a not-yet-released task can't be assigned.
+      if (!isReleased(t, launchedAt, nowMs)) return false;
       const current = taskCounts[t.id] ?? 0;
       if (current >= (t.maxConcurrentTeams ?? 3)) return false;
       return true;

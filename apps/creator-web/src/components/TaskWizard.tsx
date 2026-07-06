@@ -2,11 +2,12 @@
 // (change: v2.1-builder-shell-redesign). Progressive disclosure replaces the old
 // flat scroll form: Location -> Details -> Interaction. Fully localized (he/en via
 // useT) and compacted so each step fits the panel without scrolling.
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { Task, TaskStep, TaskType, TriggerMode } from '@rushpoint/shared';
-import { normalizeTriggerMode, defaultRadiusFor } from '@rushpoint/shared';
+import type { Task, TaskStep, TaskType, TriggerMode, TaskMedia } from '@rushpoint/shared';
+import { normalizeTriggerMode, defaultRadiusFor, parseYouTubeId, youTubeEmbedUrl } from '@rushpoint/shared';
 import { Button, Input, Label, Textarea } from './ui';
+import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
 import LocationStep from './LocationStep';
 import RichTooltip from './RichTooltip';
@@ -29,9 +30,9 @@ const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[]
   { key: 'hard', value: 8, test: (d) => d >= 7 },
 ];
 
-export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, closeLabel }: {
+export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, closeLabel, gameId }: {
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
-  onClose: () => void; closeLabel: string;
+  onClose: () => void; closeLabel: string; gameId?: string;
 }) {
   const t = useT();
   const b = t.builder;
@@ -80,11 +81,14 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
           grow to fill; steps 2 & 3 scroll only inside themselves if ever needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
         {step === 1 && <LocationStepBody task={task} mode={mode} located={located} setMode={setMode} set={set} b={b} />}
-        {step === 2 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5"><DetailsStepBody task={task} set={set} b={b} /></div>}
+        {step === 2 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} /></div>}
         {step === 3 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} b={b} /></div>}
       </div>
 
       {/* Footer */}
+      {step === 3 && !isTaskInteractionValid(task) && (
+        <p className="text-[11px] text-rp-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
+      )}
       <div className="flex items-center gap-2 pt-2 shrink-0 border-t border-[--rp-border] mt-2">
         {canGoBack(step) ? (
           <Button variant="ghost" onClick={() => setStep((s) => (s - 1) as WizardStep)}>← {b.back}</Button>
@@ -178,7 +182,7 @@ function LocationStepBody({ task, mode, located, setMode, set, b }: {
 }
 
 // ── Step 2: Details ──
-function DetailsStepBody({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
+function DetailsStepBody({ task, set, b, gameId }: { task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string }) {
   const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
   // Optional hint collapses behind a toggle so the common (no-hint) form is short
   // enough to never scroll, even on small laptops.
@@ -237,7 +241,117 @@ function DetailsStepBody({ task, set, b }: { task: Task; set: (p: Partial<Task>)
           + {b.addHint}
         </button>
       )}
+
+      <MediaSection task={task} set={set} b={b} gameId={gameId} />
     </>
+  );
+}
+
+// ── Task media (images / videos / YouTube) — change: task-media-attachments ──
+// Upload image/video files from the computer (→ Firebase Storage) or paste a
+// YouTube link (→ canonical embed). Each entry has an optional caption and can be
+// reordered / removed. Client-side validation mirrors the server (normalizeTaskMedia).
+function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string }) {
+  const media = task.media ?? [];
+  const [ytUrl, setYtUrl] = useState('');
+  const [ytError, setYtError] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState(false);
+
+  const commit = (next: TaskMedia[]) => set({ media: next.length ? next : undefined });
+
+  const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+    setUploadError(false);
+    setUploadPct(0);
+    try {
+      const { url, kind } = await uploadTaskMedia(file, { gameId: gameId ?? 'draft', taskId: task.id }, setUploadPct);
+      commit([...media, { id: uuid(), kind, url }]);
+    } catch {
+      setUploadError(true);
+    } finally {
+      setUploadPct(null);
+    }
+  };
+
+  const addYouTube = () => {
+    const id = parseYouTubeId(ytUrl);
+    if (!id) { setYtError(true); return; }
+    commit([...media, { id: uuid(), kind: 'youtube', url: youTubeEmbedUrl(id) }]);
+    setYtUrl('');
+    setYtError(false);
+  };
+
+  const removeAt = (i: number) => commit(media.filter((_, idx) => idx !== i));
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= media.length) return;
+    const next = [...media];
+    [next[i], next[j]] = [next[j], next[i]];
+    commit(next);
+  };
+  const setCaption = (i: number, caption: string) =>
+    commit(media.map((m, idx) => (idx === i ? { ...m, caption: caption || undefined } : m)));
+
+  return (
+    <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <InlineLabel>{b.mediaField}</InlineLabel>
+      </div>
+
+      {media.length > 0 && (
+        <ul className="space-y-2">
+          {media.map((m, i) => (
+            <li key={m.id} className="flex gap-2 items-start rounded-lg border border-[--rp-border] p-2">
+              <div className="w-16 h-16 shrink-0 rounded-md overflow-hidden bg-[--surface-2] flex items-center justify-center">
+                {m.kind === 'image'
+                  ? <img src={m.url} alt="" className="w-full h-full object-cover" />
+                  : m.kind === 'video'
+                    ? <video src={m.url} className="w-full h-full object-cover" muted />
+                    : <span className="text-2xl" aria-hidden>▶</span>}
+              </div>
+              <div className="flex-1 min-w-0 space-y-1">
+                <div className="text-[11px] text-[--ink-3] truncate">
+                  {m.kind === 'youtube' ? b.mediaKindYouTube : m.kind === 'video' ? b.mediaKindVideo : b.mediaKindImage}
+                </div>
+                <Input value={m.caption ?? ''} onChange={(e) => setCaption(i, e.target.value)}
+                  placeholder={b.mediaCaptionPlaceholder} dir="auto" className="text-sm" />
+              </div>
+              <div className="flex flex-col gap-1 shrink-0">
+                <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={b.mediaMoveUp}
+                  className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 text-xs">↑</button>
+                <button onClick={() => move(i, 1)} disabled={i === media.length - 1} aria-label={b.mediaMoveDown}
+                  className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 text-xs">↓</button>
+                <button onClick={() => removeAt(i)} aria-label={b.mediaRemove}
+                  className="text-neon-red hover:opacity-70 text-xs">✕</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Upload from computer */}
+      <div className="flex items-center gap-2">
+        <label className="cursor-pointer self-start text-xs text-rp-fire hover:underline">
+          + {b.mediaUpload}
+          <input type="file" accept="image/*,video/*" className="hidden" onChange={onPickFile} disabled={uploadPct !== null} />
+        </label>
+        {uploadPct !== null && <span className="text-[11px] text-[--ink-3]">{uploadPct}%</span>}
+        {uploadError && <span className="text-[11px] text-neon-red">{b.mediaUploadError}</span>}
+      </div>
+
+      {/* YouTube link */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <Input value={ytUrl} onChange={(e) => { setYtUrl(e.target.value); setYtError(false); }}
+            placeholder={b.mediaYouTubePlaceholder} dir="ltr" className="text-sm flex-1" />
+          <Button variant="ghost" onClick={addYouTube} disabled={!ytUrl.trim()}>{b.mediaAddYouTube}</Button>
+        </div>
+        {ytError && <span className="text-[11px] text-neon-red">{b.mediaYouTubeError}</span>}
+      </div>
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import {
   canGoNext,
   canGoBack,
   isTaskLocationValid,
+  isTaskInteractionValid,
   TASK_TYPE_META,
   TYPE_PICKER_ORDER,
   WIZARD_STEPS,
@@ -43,6 +44,28 @@ ok(isTaskLocationValid({ ...fresh, locationless: true }) === true, 'locationless
 ok(isTaskLocationValid({ ...fresh, triggerMode: 'instant' } as Task) === true, 'instant-trigger task valid at 0,0');
 ok(isTaskLocationValid(fresh) === false, 'located task with 0,0 is invalid');
 ok(isTaskLocationValid({ ...fresh, coordinates: { lat: 31.79, lng: 35.16 } }) === true, 'located task with real coords is valid');
+
+// ── isTaskInteractionValid — block saving unwinnable tasks ───────────────────
+// quiz: needs at least one non-empty accepted answer
+ok(isTaskInteractionValid({ ...fresh, type: 'quiz' }) === false, 'quiz with no answers is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'quiz', answers: ['  '] }) === false, 'quiz with only blank answers is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'quiz', answers: ['Paris'] }) === true, 'quiz with a real answer is valid');
+// numeric: matchesTaskAnswer always fails when numericAnswer is missing/NaN
+ok(isTaskInteractionValid({ ...fresh, type: 'numeric' }) === false, 'numeric without an answer is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'numeric', numericAnswer: NaN }) === false, 'numeric with NaN answer is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'numeric', numericAnswer: 0 }) === true, 'numeric answer 0 is a valid answer');
+ok(isTaskInteractionValid({ ...fresh, type: 'numeric', numericAnswer: 42 }) === true, 'numeric with an answer is valid');
+// smart_station: verifyStationCode rejects everything when no secretCode is set
+ok(isTaskInteractionValid({ ...fresh, type: 'smart_station' }) === false, 'station without a secret code is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'smart_station', smart: { verificationType: 'code_verification', secretCode: '  ' } } as Task) === false, 'station with blank code is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'smart_station', smart: { verificationType: 'code_verification', secretCode: 'OPEN' } } as Task) === true, 'station with a code is valid');
+// sequence: submitSequenceStep throws failed-precondition when steps is empty
+ok(isTaskInteractionValid({ ...fresh, type: 'sequence' }) === false, 'sequence without steps is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'sequence', steps: [] }) === false, 'sequence with empty steps is unwinnable');
+ok(isTaskInteractionValid({ ...fresh, type: 'sequence', steps: [{ id: 's1', prompt: 'go', answer: '' }] } as Task) === true, 'sequence with a step is valid (empty answer = tap-to-confirm)');
+// self-validating types stay valid
+ok(isTaskInteractionValid({ ...fresh, type: 'field' }) === true, 'field task always valid');
+ok(isTaskInteractionValid({ ...fresh, type: 'photo' }) === true, 'photo task always valid');
 
 // ── TASK_TYPE_META ───────────────────────────────────────────────────────────
 const metaKeys = Object.keys(TASK_TYPE_META);

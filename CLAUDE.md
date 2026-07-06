@@ -78,9 +78,28 @@ npm run play:build       # production build of play-web — must pass (don't let
 npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
 npm run i18n:check       # ⚠ MANDATORY AFTER ANY UI CHANGE — Hebrew↔English correctness
 ```
-`npm run e2e` exercises createGame → updateGame → launchRun → join → start → play (code + photo +
-field) → staff review → live leaderboard → finalize, plus partial stages, locationless routing,
-finished-run rejection, and paid hints. Keep it green; extend it when adding callables.
+`npm run e2e` runs as isolated **scenarios** (a throw fails one scenario, not the whole suite;
+ends with a per-scenario + per-callable-latency summary). Beyond the happy path it hunts bug
+classes directly: the createGame→…→finalize lifecycle, partial stages, locationless routing,
+paid hints, all task types, hidden-location, referral, consent, safe-zone; PLUS a **sanitizer
+allowlist** (a new `Task` field fails loud instead of leaking — update `ALLOWED_TASK_KEYS`/
+`ALLOWED_SMART_KEYS` in the script when you add one), a **leaderboard invariant oracle** +
+live/final parity, a **station-contention** race (concurrent `requestNextTask` can't exceed a
+station cap) + duplicate-submission idempotence, a **table-driven authz denial matrix**
+(participant/stranger/other-run-staff/owner × privileged callables), and **seeded boundary
+fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin` custom-token and
+real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
+run: it introspects the callables the emulator serves and fails if any was never invoked, so a
+**new callable ships RED until it has a test** (currently 66/66 covered — add a scenario, don't
+just add the callable). Keep it green; extend the relevant scenario (not just the lifecycle).
+`functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
+— seeded-random property tests for scoring/ranking/answer/geo/rate-limit; run via `npm test`.
+`npm run simulate` (scripts/simulate-run.mjs, `--teams=N`) is the v2 concurrent load sim — N
+teams play a real game at once, then it audits leaderboard invariants + that every station
+counter returns to 0. (`simulate:v1` is the archived v1 tournament script.)
+**One-command gauntlets for agents:** `npm run verify` (typecheck·lint·test·builds·i18n, no
+emulator) and `npm run verify:emulator` (builds → e2e → rules → 8-team simulate under a
+self-booted suite — no long-running emulator needed).
 
 > 🌐 **i18n gate — if you touch ANY UI (text, JSX, components, `i18n.ts`), you MUST run
 > `npm run i18n:check` and it MUST come out clean.** It guarantees Hebrew copy is really Hebrew

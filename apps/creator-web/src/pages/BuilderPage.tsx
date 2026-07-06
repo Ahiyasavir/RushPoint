@@ -3,9 +3,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
-import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner } from '../components/ui';
+import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 import TaskLibrary from '../components/TaskLibrary';
@@ -50,6 +50,11 @@ function buildSavePayload(g: Game) {
     scoringPreset: g.scoringPreset,
     registrationFields: g.registrationFields,
     tags: g.tags,
+    // Chat integration (change: chat-integrations). Undefined when unset (skipped
+    // server-side); '' clears it. Only ever patched with an empty or valid URL.
+    integrationWebhookUrl: g.integrationWebhookUrl,
+    // Marketplace instant play (change: marketplace-instant-play).
+    allowInstantPlay: g.allowInstantPlay,
   };
 }
 const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
@@ -356,6 +361,15 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           placeholder={b.tagsPlaceholder} dir="auto" />
       </div>
 
+      <WebhookField game={game} patch={patch} />
+
+      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <input type="checkbox" checked={!!game.allowInstantPlay}
+          onChange={(e) => patch({ allowInstantPlay: e.target.checked })} />
+        {b.instantPlayLabel}
+      </label>
+      <p className="text-xs text-zinc-500 -mt-2">{b.instantPlayHelp}</p>
+
       <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
         <Label>{b.scoringPreset}</Label>
         <div className="space-y-2">
@@ -374,6 +388,82 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <RegFields game={game} patch={patch} />
       </Advanced>
     </Card>
+  );
+}
+
+// Chat integration (change: chat-integrations): an owner pastes a Slack/Teams
+// incoming-webhook URL. Validated client-side (same shared allow-list the server
+// enforces) on blur — only an empty or valid URL is committed, so autosave never
+// POSTs an invalid URL the server would reject.
+function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
+  const [val, setVal] = useState(game.integrationWebhookUrl ?? '');
+  const [err, setErr] = useState('');
+  function commit() {
+    const raw = val.trim();
+    if (raw === '') { setErr(''); patch({ integrationWebhookUrl: '' }); return; }
+    if (!isAllowedWebhookUrl(raw)) { setErr(b.webhookInvalid); return; }
+    setErr('');
+    patch({ integrationWebhookUrl: raw });
+  }
+  return (
+    <div>
+      <Label>{b.webhookLabel}</Label>
+      <Input
+        type="url"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        placeholder="https://hooks.slack.com/services/…" // i18n-ignore — canonical sample webhook URL, not translatable copy
+        dir="ltr"
+      />
+      {err
+        ? <p className="text-neon-red text-xs mt-1">{err}</p>
+        : <p className="text-xs text-zinc-500 mt-1">{b.webhookHelp}</p>}
+    </div>
+  );
+}
+
+// Narrative chapters (change: narrative-chapters): author an optional intro beat
+// (shown when the chapter opens) and outro beat (shown when it closes) for a stage.
+// Bilingual body (EN + HE) so the participant sees copy in their language.
+function StageStory({ stage, onChange }: { stage: Stage; onChange: (n: Stage['narrative']) => void }) {
+  const b = useT().builder;
+  const [open, setOpen] = useState(false);
+  const n = stage.narrative ?? {};
+  function setIntro(p: Partial<NonNullable<Stage['narrative']>['intro']>) {
+    onChange({ ...n, intro: { ...n.intro, ...p } });
+  }
+  function setOutro(p: Partial<NonNullable<Stage['narrative']>['outro']>) {
+    onChange({ ...n, outro: { ...n.outro, ...p } });
+  }
+  return (
+    <Advanced title={b.storyTitle} open={open} onToggle={() => setOpen(!open)}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">{b.storyHint}</p>
+        <div>
+          <Label>{b.storyIntroTitle}</Label>
+          <Input value={n.intro?.title ?? ''} onChange={(e) => setIntro({ title: e.target.value })}
+            placeholder={b.storyIntroTitlePlaceholder} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.storyIntroBodyEn}</Label>
+          <Textarea rows={2} value={n.intro?.body ?? ''} onChange={(e) => setIntro({ body: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.storyIntroBodyHe}</Label>
+          <Textarea rows={2} value={n.intro?.bodyHe ?? ''} onChange={(e) => setIntro({ bodyHe: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.storyOutroBodyEn}</Label>
+          <Textarea rows={2} value={n.outro?.body ?? ''} onChange={(e) => setOutro({ body: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.storyOutroBodyHe}</Label>
+          <Textarea rows={2} value={n.outro?.bodyHe ?? ''} onChange={(e) => setOutro({ bodyHe: e.target.value })} dir="auto" />
+        </div>
+      </div>
+    </Advanced>
   );
 }
 
@@ -475,6 +565,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   const m = activeStage ? activeStage.tasks.length : 0;
   const req = activeStage ? (activeStage.requiredTaskCount ?? m) : 0;
   const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
+  // Scheduled-release: the first stage opens at run start, so timed release only
+  // applies to later stages (a timed "drop" of a chapter mid-game / on day N).
+  const isFirstStage = !!activeStage && game.stages[0]?.id === activeStage.id;
 
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
@@ -527,6 +620,29 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               </div>
             )}
 
+            {/* Scheduled release — a timed drop of this stage (change: scheduled-release) */}
+            {!isFirstStage && (
+              <div className="flex items-center flex-wrap gap-2 text-xs text-zinc-400">
+                <span>{b.releaseLead}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  className="w-20 py-1"
+                  value={activeStage.releaseAfterMinutes ?? ''}
+                  placeholder="0"
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    updateStage(activeStage.id, {
+                      releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined,
+                    });
+                  }}
+                />
+                <span>{b.releaseAfterUnit}</span>
+              </div>
+            )}
+
+            <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
+
             <TaskCanvas
               tasks={activeStage.tasks}
               activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
@@ -551,6 +667,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
         <ContextPanel
           key={editingTask.id}
           task={editingTask}
+          gameId={game.id}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
             ? () => { updateStage(editingStage.id, { tasks: editingStage.tasks.filter((x) => x.id !== editingTask.id) }); setEditing(null); }
@@ -569,8 +686,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove }: {
-  task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void;
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId }: {
+  task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -628,7 +745,8 @@ function ContextPanel({ task, onFlush, onClose, onRemove }: {
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <div className="flex-1 min-h-0 p-2.5">
-          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} />
+          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} />
+          {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
         </div>
       </div>
     </aside>

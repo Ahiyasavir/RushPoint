@@ -6,7 +6,7 @@ import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
-  const { t, toggleLang, lang } = useT();
+  const { t, toggleLang, lang, colorblind, setColorblind } = useT();
   // Evaluate the ?code= link param at mount time, not at module-parse time (P9).
   const [linkCode] = useState<string>(() => (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim());
   const [code, setCode] = useState(linkCode);
@@ -123,14 +123,28 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
             </p>
           </div>
 
-          {/* Language toggle */}
-          <button
-            onClick={toggleLang}
-            aria-label={lang === 'he' ? 'Switch to English' : 'עבור לעברית'}
-            className="absolute top-4 end-4 text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
-          >
-            {lang === 'he' ? 'English' : 'עברית'}
-          </button>
+          {/* Language + accessibility toggles */}
+          <div className="absolute top-4 end-4 flex items-center gap-2">
+            <button
+              onClick={() => setColorblind(!colorblind)}
+              role="switch"
+              aria-checked={colorblind}
+              aria-label={t.common.colorblindMode}
+              title={t.common.colorblindMode}
+              className={`text-xs font-semibold border rounded-full w-7 h-7 flex items-center justify-center transition-colors ${
+                colorblind ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              ◐
+            </button>
+            <button
+              onClick={toggleLang}
+              aria-label={lang === 'he' ? 'Switch to English' : 'עבור לעברית'}
+              className="text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
+            >
+              {lang === 'he' ? 'English' : 'עברית'}
+            </button>
+          </div>
         </div>
 
         {/* Code input section */}

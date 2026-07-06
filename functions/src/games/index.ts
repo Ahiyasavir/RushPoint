@@ -22,8 +22,12 @@ import {
   matchesTaskAnswer,
   collectTranslatableFields,
   applyTranslations,
+  normalizeTaskMedia,
+  type TaskMedia,
+  isAllowedWebhookUrl,
+  detectPlatform,
 } from '@rushpoint/shared';
-import { deleteRunsPhotos } from '../storageUtil';
+import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
@@ -40,6 +44,27 @@ function requireAuth(context: functions.https.CallableContext): string {
     throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   }
   return context.auth.uid;
+}
+
+// Enforce the task-media trust boundary on every write: run each task's `media`
+// through normalizeTaskMedia so a client can never persist an off-origin image/video
+// URL or an unparseable YouTube link, and YouTube URLs are stored canonically. Returns
+// a NEW stages array (never dotted-update an array element — coerces it to a map).
+function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined {
+  if (!Array.isArray(stages)) return stages;
+  return stages.map((stage) => ({
+    ...stage,
+    tasks: (stage.tasks ?? []).map((task) => {
+      if (task.media === undefined) return task;
+      const media = normalizeTaskMedia(task.media) as TaskMedia[];
+      // Drop the field entirely when it normalizes to empty (avoid persisting []).
+      if (media.length === 0) {
+        const { media: _omit, ...rest } = task;
+        return rest as Task;
+      }
+      return { ...task, media };
+    }),
+  }));
 }
 
 // ─── createGame ───────────────────────────────────────────────────────────────
@@ -85,6 +110,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     title, description, mode, stages, scoringPreset, scoringOptions,
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
+    integrationWebhookUrl, allowInstantPlay,
   } = data as UpdateGamePayload;
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -100,7 +126,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (title !== undefined)              updates.title = title.trim();
   if (description !== undefined)        updates.description = description?.trim();
   if (mode !== undefined)               updates.mode = mode;
-  if (stages !== undefined)             updates.stages = stages;
+  if (stages !== undefined)             updates.stages = normalizeStagesMedia(stages);
   if (scoringPreset !== undefined)      updates.scoringPreset = scoringPreset;
   if (scoringOptions !== undefined)     updates.scoringOptions = scoringOptions;
   if (registrationFields !== undefined) updates.registrationFields = registrationFields;
@@ -112,6 +138,22 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (minAge !== undefined)             updates.minAge = minAge;
   if (safeZone !== undefined)           updates.safeZone = safeZone ?? undefined;
   if (benchmarkOptOut !== undefined)    updates.benchmarkOptOut = benchmarkOptOut;
+  if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
+  // Chat integration (change: chat-integrations): validate the owner-supplied
+  // webhook URL against the SSRF allow-list. An empty string clears it; a non-empty
+  // off-allowlist URL is rejected loud (never silently persisted).
+  if (integrationWebhookUrl !== undefined) {
+    const raw = (integrationWebhookUrl ?? '').trim();
+    if (raw === '') {
+      updates.integrationWebhookUrl = admin.firestore.FieldValue.delete() as unknown as undefined;
+      updates.integrationPlatform = admin.firestore.FieldValue.delete() as unknown as undefined;
+    } else if (isAllowedWebhookUrl(raw)) {
+      updates.integrationWebhookUrl = raw;
+      updates.integrationPlatform = detectPlatform(raw);
+    } else {
+      throw new functions.https.HttpsError('invalid-argument', 'Webhook URL must be a Slack or Microsoft Teams incoming-webhook URL');
+    }
+  }
 
   await ref.update(updates);
   return { ok: true };
@@ -147,6 +189,9 @@ export const deleteGame = loggedCallable('deleteGame', async (data, context) => 
   // doc delete would orphan those subcollections in Firestore.
   const runsSnap = await db.collection(`${gamePath(uid, gameId)}/runs`).get();
   await deleteRunsPhotos(runsSnap.docs.map((d) => d.id));
+  // Creator-authored task media (gameMedia/{uid}/games/{gameId}/…) would
+  // otherwise orphan in Storage forever once the game doc is gone.
+  await deleteGameMedia(uid, gameId);
 
   await db.recursiveDelete(ref);
   return { ok: true };
@@ -243,6 +288,9 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
       stageCount: game.stages.length,
       taskCount: allTasks.length,
       estimatedTotalMinutes,
+      // Marketplace instant play (marketplace-instant-play): surfaced so the public
+      // promo can show a "Play now" entry point. Never carries the webhook secret.
+      allowInstantPlay: game.allowInstantPlay ?? false,
       // Accurate GPS requirement derived from task trigger modes at publish time,
       // so the welcome screen never trusts free-text "no GPS" claims in copy.
       requirement: describeGameRequirements(game),

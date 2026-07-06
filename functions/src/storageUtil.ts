@@ -21,3 +21,15 @@ export async function deleteRunPhotos(runId: string): Promise<void> {
 export async function deleteRunsPhotos(runIds: string[]): Promise<void> {
   for (const id of runIds) await deleteRunPhotos(id);
 }
+
+// Remove creator-authored task media (change: task-media-attachments). Uploads
+// live under `gameMedia/{ownerUid}/games/{gameId}/…`; omit gameId to purge the
+// creator's entire media tree (account deletion / right to erasure).
+export async function deleteGameMedia(ownerUid: string, gameId?: string): Promise<void> {
+  const prefix = gameId ? `gameMedia/${ownerUid}/games/${gameId}/` : `gameMedia/${ownerUid}/`;
+  try {
+    await storage.bucket().deleteFiles({ prefix });
+  } catch (e) {
+    functions.logger.warn(`deleteGameMedia: failed for ${prefix}`, e);
+  }
+}

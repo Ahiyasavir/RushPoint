@@ -13,7 +13,7 @@
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
 import { db, auth } from '../firebase';
-import { deleteRunsPhotos } from '../storageUtil';
+import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
 import type { Game, Wallet } from '@rushpoint/shared';
 
@@ -144,6 +144,9 @@ export const deleteMyAccount = loggedCallable('deleteMyAccount', async (data, co
     for (const r of runs.docs) runIds.push(r.id);
   }
   await deleteRunsPhotos(runIds);
+  // Creator-authored task media lives under gameMedia/{uid}/… — purge the whole
+  // tree (right to erasure), not just run photos.
+  await deleteGameMedia(uid);
 
   // 3) Wallet + transactions, then the whole user tree (games → runs → teams).
   await db.recursiveDelete(db.doc(`wallets/${uid}`)).catch((e) => logBestEffort('wallet.recursiveDelete', { uid }, e));
