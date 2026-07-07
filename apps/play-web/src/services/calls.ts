@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -49,6 +49,9 @@ export interface PublicLeaderboard {
   frozen: boolean;
   updatedAt: string | null;
   rankings: LeaderboardEntry[];
+  // Ceremony mode (change: ceremony-mode): server-selected top-liked feed photos,
+  // published-gated; [] for unpublished/legacy/pruned runs.
+  ceremonyFeed: CeremonyFeedItem[];
 }
 export const getPublicLeaderboard = callable<{ code: string }, PublicLeaderboard>('getPublicLeaderboard');
 
@@ -73,6 +76,10 @@ export const joinRun = callable<
 export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps' | 'coordinates'> & {
   hasHint?: boolean;
   hintPenalty?: number;
+  // Hint auto escalation: server-computed display flag — the paid hint is FREE
+  // right now (time or wrong-attempt threshold met). The charge decision is
+  // re-made server-side inside requestTaskHint, so this can never mischarge.
+  hintFreeNow?: boolean;
   // Hidden-location tasks have their coordinates stripped server-side and carry
   // `locationHidden`; the client suppresses the pin and shows `locationClue`.
   coordinates?: Task['coordinates'];
@@ -101,7 +108,7 @@ export interface StageNarrative {
 export interface MyTeamState {
   team: RunTeam;
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
-  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number };
+  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean };
   activeStageTasks: SafeTask[];
   // Narrative chapters: intro/outro beats for stages the team has reached (active or
   // completed). The play UI shows an intro when a chapter opens, an outro when it ends.
@@ -130,11 +137,13 @@ export const requestNextTask = callable<Ctx & { lat?: number; lng?: number }, { 
 
 export const requestTaskHint = callable<
   Ctx & { taskId: string },
-  { hint: string; penalty: number; alreadyUsed: boolean }
+  { hint: string; penalty: number; alreadyUsed: boolean; free?: boolean }
 >('requestTaskHint');
 
 export const submitTaskAnswer = callable<
-  Ctx & { taskId: string; answer: string; lat?: number; lng?: number },
+  // quiz/numeric take `answer`; an ordering quiz takes `orderedAnswer` (the
+  // player's arrangement) instead — the server rejects a mixed/missing payload.
+  Ctx & { taskId: string; answer?: string; orderedAnswer?: string[]; lat?: number; lng?: number },
   { correct: boolean; nextTaskId?: string | null }
 >('submitTaskAnswer');
 
@@ -186,6 +195,19 @@ export const submitRunFeedback = callable<
   },
   { ok: boolean; already: boolean }
 >('submitRunFeedback');
+
+// ── Live photo feed (change: live-photo-feed) ──
+// One emoji reaction per uid per item; re-reacting switches the emoji.
+export const reactToFeedItem = callable<
+  Ctx & { itemId: string; emoji: string },
+  { ok: boolean; changed: boolean; reactions: Record<string, number> }
+>('reactToFeedItem');
+
+// Staff/owner moderation: hide a feed item (listeners filter active == true).
+export const hideFeedItem = callable<
+  Ctx & { itemId: string },
+  { ok: boolean }
+>('hideFeedItem');
 
 export const staffSignIn = callable<
   { ownerUid: string; gameId: string; runId: string; pin: string },

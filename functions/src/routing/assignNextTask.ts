@@ -11,7 +11,7 @@
 
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../firebase';
-import { haversineKm, isValidCoord, isReleased } from '@rushpoint/shared';
+import { haversineKm, isValidCoord, isReleased, isExpired, isUnlocked } from '@rushpoint/shared';
 import type { Task, GeoPoint, TaskRecommendation } from '@rushpoint/shared';
 
 // Runtime counter path for a task within a run
@@ -133,6 +133,10 @@ export async function buildRecommendations(
     if (t.status === 'paused' || t.status === 'closed') return false;
     // Scheduled-release gate: a not-yet-released task is not a candidate.
     if (!isReleased(t, launchedAt, nowMs)) return false;
+    // Task expiry gate (change: task-expiry): a closed task is never handed out.
+    if (isExpired(t, launchedAt, nowMs)) return false;
+    // Unlockable tasks (change: unlockable-tasks): unmet prerequisites hide it.
+    if (!isUnlocked(t, completedTaskIds)) return false;
     const current = taskCounts[t.id] ?? 0;
     if (current >= (t.maxConcurrentTeams ?? 3)) return false;
     return true;
@@ -219,6 +223,10 @@ export async function assignTask(
       if (t.status === 'paused' || t.status === 'closed') return false;
       // Scheduled-release gate: a not-yet-released task can't be assigned.
       if (!isReleased(t, launchedAt, nowMs)) return false;
+      // Task expiry gate (change: task-expiry): a closed task can't be assigned.
+      if (isExpired(t, launchedAt, nowMs)) return false;
+      // Unlockable tasks (change: unlockable-tasks): locked tasks can't be assigned.
+      if (!isUnlocked(t, completedTaskIds)) return false;
       const current = taskCounts[t.id] ?? 0;
       if (current >= (t.maxConcurrentTeams ?? 3)) return false;
       return true;

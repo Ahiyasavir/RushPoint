@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { ensureAuth } from './services/firebase';
 import { loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
@@ -13,6 +13,9 @@ import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 import { parseChallengeParam, TV_ROUTE_PARAM, RECAP_ROUTE_PARAM } from '@rushpoint/shared';
 import { I18nProvider, useT } from './i18nContext';
+// Ceremony mode (change: ceremony-mode): lazy so the slideshow/confetti code
+// stays out of the main bundle (same pattern as the MapLibre chunk).
+const CeremonyScreen = lazy(() => import('./screens/CeremonyScreen'));
 
 export default function App() {
   return (
@@ -37,6 +40,10 @@ function AppInner() {
   // A shared standings link (`?board=<code>`) shows the public leaderboard.
   const [boardCode, setBoardCode] = useState<string | null>(
     () => new URLSearchParams(window.location.search).get('board'),
+  );
+  // `?board=<code>&ceremony` plays the awards finale instead (ceremony-mode).
+  const [ceremony] = useState(
+    () => new URLSearchParams(window.location.search).has('ceremony'),
   );
   // A "challenge a friend" deep link (`?challenge=<gameId>:<taskId>`) opens the
   // standalone single-task teaser for brand-new (signed-out) visitors.
@@ -119,7 +126,17 @@ function AppInner() {
     return (
       <>
         <ConnectionBanner />
-        <PublicLeaderboardScreen code={boardCode} onJoin={() => setBoardCode(null)} />
+        {ceremony ? (
+          <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center bg-app-bg">
+              <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+            </div>
+          }>
+            <CeremonyScreen code={boardCode} />
+          </Suspense>
+        ) : (
+          <PublicLeaderboardScreen code={boardCode} onJoin={() => setBoardCode(null)} />
+        )}
         <DialogHost />
       </>
     );

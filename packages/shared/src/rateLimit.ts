@@ -73,6 +73,7 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   triggerSOS: { max: 5, windowMs: MIN },
   requestGuardianConsent: { max: 10, windowMs: MIN }, // writes a doc per call — bound token spam
   submitRunFeedback: { max: 3, windowMs: MIN }, // one real response per run; retries have headroom
+  reactToFeedItem: { max: 60, windowMs: MIN }, // taps on the live photo feed (live-photo-feed)
   getRunFeedbackSummary: { max: 30, windowMs: MIN }, // owner poll of the feedback panel
   // Read / poll endpoints (generous — play-web polls these)
   getMyTeamState: { max: 240, windowMs: MIN }, // ~4/s ceiling; normal poll is ~0.2/s

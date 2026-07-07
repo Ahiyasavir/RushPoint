@@ -106,6 +106,14 @@ export const FIRESTORE_PATHS = {
     `users/${ownerUid}/games/${gameId}/runs/${runId}/feedback/${uid}`,
   feedbackCol: (ownerUid: string, gameId: string, runId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/feedback`,
+
+  // Live photo feed (change: live-photo-feed): server-written on photo approval,
+  // any authed participant reads (announcements pattern); reactions go through
+  // reactToFeedItem. Pruned with the run's PII (holds photo URLs + team names).
+  feedItem: (ownerUid: string, gameId: string, runId: string, id: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems/${id}`,
+  feedItemsCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`,
 } as const;
 
 
@@ -259,12 +267,28 @@ export interface Task {
   // payload — only via the requestTaskHint callable, which charges once.
   hint?: string;
   hintPenalty?: number;
+  // Hint auto escalation (change: hint-auto-escalation): the paid hint becomes
+  // FREE once the team has held the task ≥ N minutes (from RunTaskRecord.startedAt,
+  // server clock — never a client clock) OR has recorded ≥ N wrong attempts
+  // (team.taskAttempts[taskId]). OR semantics — either threshold met frees it;
+  // evaluated server-side via isHintFree(). Fractional minutes honored. The
+  // thresholds carry no secret (they never reveal the hint text) → sanitizer
+  // passthrough. Absent = the hint stays paid forever.
+  hintAutoRevealMinutes?: number;
+  hintAutoRevealAttempts?: number;
   // ── Verification config by type. Answer keys (answers/numericAnswer/
   //    steps[].answer) are SERVER-SECRET — stripped from the participant payload. ──
   // quiz: render `choices` as buttons (if present) else a text box; correct
   //       when the answer matches any of `answers` (trimmed, case-insensitive).
   choices?: string[];
   answers?: string[];
+  // quiz (ordering variant, change: quiz-ordering): 3–10 items authored in the
+  // CORRECT order. The item TEXTS are public; the ORDER is the server-secret
+  // answer key — sanitizeTaskForParticipant never emits the authored order, only
+  // a per-team deterministically shuffled copy (seed teamId:taskId), and strips
+  // the field entirely when no seed is available (fail closed). Mutually
+  // exclusive with `choices`/`answers` on one task; graded via matchesOrderedAnswer.
+  orderItems?: string[];
   // numeric: correct when |entered − numericAnswer| ≤ numericTolerance (default 0).
   numericAnswer?: number;
   numericTolerance?: number;
@@ -283,6 +307,20 @@ export interface Task {
   // no secret → passed through by sanitizeTaskForParticipant for the countdown UI.
   releaseAt?: string;
   releaseAfterMinutes?: number;
+  // Task expiry (change: task-expiry) — the mirror of scheduled release: minutes
+  // after the run's `launchedAt` at which this task STOPS being available
+  // (dropped from routing, refused by completion callables, auto-skipped when in
+  // flight). Fractional minutes honored (lets tests exercise expiry without
+  // waiting). Evaluated server-side via isExpired(); absent = never expires.
+  // Carries no secret → sanitizer passthrough for the "expires in…" countdown UI.
+  expiresAfterMinutes?: number;
+  // Unlockable tasks (change: unlockable-tasks): ids of OTHER tasks in the SAME
+  // stage that must ALL be completed before this one becomes available (AND
+  // semantics). Evaluated server-side via isUnlocked(); validated at save time by
+  // validateUnlockGraph (no self-reference / cross-stage ids / cycles). Absent or
+  // empty = always unlocked. NOT a secret — the locked-task UI names its
+  // prerequisites — so it passes through sanitizeTaskForParticipant.
+  unlockAfterTaskIds?: string[];
   // Library metadata (for publicTasks index)
   tags?: string[];
 }
@@ -401,6 +439,16 @@ export interface Game {
   // is published, any player can start a free, self-guided solo run on demand via
   // startInstantPlay — no organizer, no access code, no credit consumed.
   allowInstantPlay?: boolean;
+  // Live photo feed (change: live-photo-feed): when false, approved photos are NOT
+  // broadcast to the run's shared feed. Default true (undefined ⇒ enabled), so
+  // every existing game keeps the feed on. Enforced write-side in the functions
+  // (rules cannot conditionally gate feedItems reads on this flag).
+  photoFeedEnabled?: boolean;
+  // Power-ups (change: power-ups): when true, each completed task has a
+  // seeded-deterministic ~25% chance to award a power-up (×2 next task or +15
+  // flat). Default false — existing games are untouched. Never rolls on the
+  // time_only preset (no task points to double; a flat bonus corrupts pure-time).
+  powerUpsEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -609,7 +657,16 @@ export interface RunTeam {
   status: TeamStatus;
   stages: RunStageRecord[];
   score: number;
+  // Sign convention: bonusPenalty is SUBTRACTED from the final score. A BONUS is a
+  // NEGATIVE penalty (a decrement); a fine is a positive penalty. adjustTeamScore
+  // (np = p - delta), zone-capture bonuses, and power-up bonuses all follow this.
   bonusPenalty: number;
+  // Power-ups (change: power-ups): seeded-award state. `active` is a single armed
+  // slot — at most one double_points pending; a second double rolled while one is
+  // armed converts to a bonus_points award. Server-write-only (rides the team doc;
+  // rules deny client writes). Not secret — it is the caller's own team state,
+  // returned by getMyTeamState.
+  powerUps?: import('./../powerUps').TeamPowerUps;
   // Guardian consent (change: guardian-consent-qr): present (with grantedAt) once
   // a guardian approves; gates start on runs that require consent.
   guardianConsent?: import('./../guardianConsent').GuardianConsent;
@@ -812,6 +869,20 @@ export interface Announcement {
   active: boolean;
   createdAt: string;
   operatorId?: string;
+  // Targeted announcements (change: targeted-announcements).
+  // `teamId` absent ⇒ global broadcast (every team sees it); present ⇒ addressed to
+  // that one team. NOT SECRET and NOT server-enforced: Firestore rules cannot filter
+  // documents within a collection read, so per-team visibility is a client courtesy
+  // (see `announcementVisibleTo`) — the field never contains an answer key or a
+  // scoring internal beyond the `delta` the audit log already records. Documented in
+  // the `match /announcements` rules comment.
+  teamId?: string;
+  // `kind` discriminates a normal announcement from a team-targeted score notice that
+  // `adjustTeamScore` writes so the team sees a toast. Absent ⇒ 'announcement' for
+  // every pre-existing doc (back-compat).
+  kind?: 'announcement' | 'score';
+  // kind==='score' only: the applied bonus/penalty adjustment (signed).
+  delta?: number;
 }
 
 export interface AdminAlert {
@@ -839,6 +910,31 @@ export interface FlashMission {
   isActive: boolean;
   createdAt?: string;
   winnerTeamId?: string;
+}
+
+// Live photo feed item (change: live-photo-feed). Written server-side on BOTH
+// photo-approval paths (submitStationPhoto autoApprove + reviewStationSubmission
+// approve); read by any authed participant of the run (announcements pattern).
+// Contains ONLY celebratory, non-secret data — no task config, no answer keys.
+export interface FeedItem {
+  id: string;
+  taskId: string;
+  /** Denormalized from the game doc at approval time. */
+  taskTitle: string;
+  teamId: string;
+  /** Denormalized team.displayName. */
+  teamName: string;
+  /** Already Storage-validated by requireStorageUrl at submit time. */
+  photoUrl: string;
+  /** emoji → count, e.g. { '🔥': 3 }. Zero-count keys are dropped. */
+  reactions: Record<string, number>;
+  /** uid → emoji: dedup/switch source of truth (one reaction per uid). */
+  reactedBy: Record<string, string>;
+  /** hideFeedItem sets false; listeners filter active == true. */
+  active: boolean;
+  createdAt: string;
+  hiddenAt?: string;
+  hiddenBy?: string;
 }
 
 export interface TeamLocation {
@@ -972,6 +1068,10 @@ export interface UpdateGamePayload {
   integrationWebhookUrl?: string | null;
   // Marketplace instant play (change: marketplace-instant-play).
   allowInstantPlay?: boolean;
+  // Live photo feed toggle (change: live-photo-feed). Default true when absent.
+  photoFeedEnabled?: boolean;
+  // Power-ups toggle (change: power-ups). Default false when absent.
+  powerUpsEnabled?: boolean;
 }
 
 // Run management

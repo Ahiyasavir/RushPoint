@@ -62,11 +62,25 @@ service cloud.firestore {
           // ── LIVE-OPS BROADCASTS ────────────────────────────────────────────
           //    Announcements + flash missions are readable by any authenticated
           //    participant in the run; written by Staff via Cloud Functions.
+          //    Targeted announcements (change: targeted-announcements): a doc may
+          //    carry a `teamId` addressing one team, but rules CANNOT filter
+          //    documents within a collection read — per-team visibility is enforced
+          //    CLIENT-SIDE only (announcementVisibleTo). The `teamId` field is NOT
+          //    secret: an announcement is operational copy, never an answer key.
           match /announcements/{docId} {
             allow read:  if isAuthenticated();
             allow write: if false;
           }
           match /flashMissions/{docId} {
+            allow read:  if isAuthenticated();
+            allow write: if false;
+          }
+          // Live photo feed (live-photo-feed): approved photos broadcast to the
+          // run. Same read surface as announcements. Rules cannot conditionally
+          // gate reads on Game.photoFeedEnabled — the flag is enforced WRITE-side
+          // (no items are ever written while the feed is off); hideFeedItem is
+          // the moderation recourse for already-written items.
+          match /feedItems/{docId} {
             allow read:  if isAuthenticated();
             allow write: if false;
           }

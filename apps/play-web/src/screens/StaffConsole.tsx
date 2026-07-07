@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { db, signInStaff } from '../services/firebase';
+import { db, signInStaff, uid } from '../services/firebase';
+// Live photo feed moderation (live-photo-feed): lazy, loads on first open.
+const FeedPanel = lazy(() => import('../components/FeedPanel'));
 import {
   staffSignIn,
   reviewStationSubmission,
@@ -331,9 +333,36 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           ))}
       </section>
 
+      {/* ── Live photo feed moderation ── */}
+      <StaffFeedSection ctx={ctx} />
+
       {/* ── Announcement composer ── */}
       <AnnouncementComposer ctx={ctx} />
     </div>
+  );
+}
+
+// Live photo feed (change: live-photo-feed): the run's feed with a hide button on
+// each card, so staff can pull an inappropriate photo the moment it appears.
+function StaffFeedSection({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const myUid = uid();
+  return (
+    <section className="mb-6">
+      <button
+        className="w-full flex items-center justify-between text-sm font-semibold text-zinc-300 mb-2"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span>📸 {t.feed.feedTitle}</span>
+        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && myUid && (
+        <Suspense fallback={<div className="h-24 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
+          <FeedPanel ctx={ctx} myUid={myUid} moderate />
+        </Suspense>
+      )}
+    </section>
   );
 }
 

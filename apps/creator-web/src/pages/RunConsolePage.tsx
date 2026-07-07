@@ -10,7 +10,7 @@ import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
-  createZone, deleteZone, getRunZones, type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult,
+  createZone, deleteZone, getRunZones, hideFeedItem, type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -216,6 +216,10 @@ export default function RunConsolePage() {
           {/* Territory zones — author capturable zones + see who holds them. */}
           {!finished && <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />}
 
+          {/* Live photo feed — approved photos broadcast to participants, with
+              a hide button per card for moderation (live-photo-feed). */}
+          <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />
+
           {/* Live standings — computed on demand mid-run without ending it. */}
           {!finished && run.leaderboard && run.leaderboard.rankings.length > 0 && (
             <Card className="p-4 mt-4">
@@ -263,7 +267,7 @@ export default function RunConsolePage() {
 
         {/* Live-ops */}
         <div className="space-y-4">
-          <Broadcast ctx={ctx} />
+          <Broadcast ctx={ctx} teams={teams} />
         </div>
       </div>
     </div>
@@ -296,14 +300,20 @@ function JoinShare({ accessCode }: { accessCode: string }) {
         <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(boardLink, 'board')}>
           {copied === 'board' ? 'Link copied ✓' : '🏆 Copy public leaderboard link'}
         </button>
+        {/* Ceremony mode (ceremony-mode): the same board link with &ceremony plays
+            the awards finale (slideshow → podium reveal → standings). */}
+        <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(`${boardLink}&ceremony`, 'ceremony')}>
+          {copied === 'ceremony' ? t.runConsole.linkCopied : t.runConsole.ceremonyLinkLabel}
+        </button>
       </div>
     </Card>
   );
 }
 
-function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; runId: string }; teams: RunTeamRow[] }) {
   const t = useT();
   const [msg, setMsg] = useState('');
+  const [teamTarget, setTeamTarget] = useState('');   // '' ⇒ all teams (global)
   const [flash, setFlash] = useState('');
   const [pts, setPts] = useState(50);
   const [busyMsg, setBusyMsg] = useState(false);
@@ -311,7 +321,10 @@ function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: st
 
   async function sendAnnouncement() {
     setBusyMsg(true);
-    try { await pushAnnouncement({ ...ctx, message: msg }); setMsg(''); }
+    try {
+      await pushAnnouncement({ ...ctx, message: msg, ...(teamTarget ? { teamId: teamTarget } : {}) });
+      setMsg('');
+    }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyMsg(false); }
   }
@@ -326,6 +339,16 @@ function Broadcast({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: st
     <>
       <Card className="p-4 space-y-2">
         <Label>{t.runConsole.announcementPersists}</Label>
+        <select
+          className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+          value={teamTarget}
+          onChange={(e) => setTeamTarget(e.target.value)}
+        >
+          <option value="">{t.runConsole.announceAllTeams}</option>
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>{t.runConsole.announceToTeam({ name: team.displayName })}</option>
+          ))}
+        </select>
         <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.runConsole.announcementPlaceholder} />
         <Button className="w-full" disabled={!msg || busyMsg} onClick={sendAnnouncement}>
           {t.runConsole.broadcast}
@@ -551,6 +574,58 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
           ))}
         </div>
       )}
+    </Card>
+  );
+}
+
+// Live photo feed console (change: live-photo-feed): the run's active feed items
+// (owner reads the collection directly; server writes only) with a hide action.
+function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: string; runId: string }) {
+  const rc = useT().runConsole;
+  const [items, setItems] = useState<{ id: string; taskTitle: string; teamName: string; photoUrl: string; reactions?: Record<string, number>; createdAt?: string }[]>([]);
+
+  useEffect(() => {
+    const ref = query(
+      collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`),
+      where('active', '==', true),
+    );
+    return onSnapshot(ref, (snap) => {
+      const rows = snap.docs.map((d) => ({ ...(d.data() as { taskTitle: string; teamName: string; photoUrl: string; reactions?: Record<string, number>; createdAt?: string }), id: d.id }));
+      rows.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+      setItems(rows);
+    }, () => undefined);
+  }, [ownerUid, gameId, runId]);
+
+  if (items.length === 0) return null;
+
+  async function hide(itemId: string) {
+    if (!(await dialog.confirm(rc.feedHideConfirm))) return;
+    await hideFeedItem({ ownerUid, gameId, runId, itemId }).catch(() => undefined);
+  }
+
+  return (
+    <Card className="p-4 mt-4">
+      <div className="text-sm font-medium mb-3">📸 {rc.feedTitle({ n: items.length })}</div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {items.map((item) => (
+          <div key={item.id} className="rounded-lg bg-app-bg overflow-hidden">
+            <img src={item.photoUrl} alt="" loading="lazy" className="w-full h-28 object-cover" />
+            <div className="p-2">
+              <div dir="auto" className="text-xs text-zinc-200 truncate">{item.teamName}</div>
+              <div dir="auto" className="text-[11px] text-zinc-500 truncate">{item.taskTitle}</div>
+              <div className="flex items-center justify-between mt-1">
+                <span className="text-[11px] text-zinc-500 font-mono">
+                  {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) || ''}
+                  {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) > 0 ? ' ❤' : ''}
+                </span>
+                <button className="text-[11px] text-neon-red" onClick={() => void hide(item.id)}>
+                  {rc.feedHideAction}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </Card>
   );
 }

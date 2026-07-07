@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, type Trackable, type CaptureZone } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, type Session } from '../store';
@@ -15,6 +15,8 @@ import type { NavTarget } from '../components/NavMap';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
 // join screen doesn't need it; it loads when the participant starts racing.
 const NavMap = lazy(() => import('../components/NavMap'));
+// Live photo feed (live-photo-feed): lazy so the feed chunk loads on first open.
+const FeedPanel = lazy(() => import('../components/FeedPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 import { shareStoryCard } from '../lib/storyCard';
@@ -31,6 +33,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
   const [sharing, setSharing] = useState(false);
+  // Power-ups (change: power-ups): a transient award toast fired when the team's
+  // powerUps.log grows across polls (ref-compared), for both award types.
+  const [powerUpToast, setPowerUpToast] = useState<'double_points' | 'bonus_points' | null>(null);
+  const powerUpLogLen = useRef<number | null>(null);
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
@@ -105,6 +111,23 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   // Keep the screen awake while actively racing (map open, navigating).
   useWakeLock(!!state && state.team.launched && state.team.status !== 'finished');
+
+  // Power-ups: fire a toast when the log grows. The FIRST observation only records
+  // the baseline length (so a mid-run reload doesn't replay every past award).
+  useEffect(() => {
+    const log = state?.team.powerUps?.log ?? [];
+    if (powerUpLogLen.current === null) { powerUpLogLen.current = log.length; return; }
+    if (log.length > powerUpLogLen.current) {
+      const latest = log[log.length - 1];
+      if (latest?.type) {
+        setPowerUpToast(latest.type);
+        powerUpLogLen.current = log.length;
+        const id = window.setTimeout(() => setPowerUpToast(null), 4000);
+        return () => window.clearTimeout(id);
+      }
+    }
+    powerUpLogLen.current = log.length;
+  }, [state?.team.powerUps?.log]);
 
   async function leave() {
     if (await dialog.confirm(t.play.leaveConfirm)) { clearSession(); onLeave(); }
@@ -254,10 +277,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         .filter((t): t is NavTarget => t !== null)
     : [];
 
+  const powerUpArmed = team.powerUps?.active === 'double_points';
+
   return (
     <Screen>
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
-      <Header game={game} score={team.score} accent={accent} onLeave={leave} />
+      <PowerUpToast type={powerUpToast} />
+      <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed} />
       <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
       <InRunAlerts hotZone={state.run.hotZone} outOfBounds={team.outOfBounds} />
       {streak >= 2 && (
@@ -274,6 +300,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       </button>
 
       <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
+
+      {state.game.photoFeedEnabled !== false && myUid && (
+        <FeedSection ctx={session} myUid={myUid} />
+      )}
 
       <TrackablesPanel ctx={session} myTeamId={team.id} isController={isController} />
 
@@ -296,7 +326,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
       <div className="flex-1">
         {activeStage ? (
-          <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} readOnly={!isController} />
+          <>
+            <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} readOnly={!isController} />
+            <LockedTasksList stage={activeStage} state={state} />
+          </>
         ) : state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now() ? (
           <StageDropCountdown releaseAt={state.nextStageReleaseAt} onOpen={refresh} />
         ) : (
@@ -354,6 +387,32 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
           <Button onClick={dismiss} className="w-full">{t.play.storyContinue}</Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Live photo feed (change: live-photo-feed): a collapsible section over the lazy
+// FeedPanel. The panel (and its listener) only mounts on first open, so a team
+// that never opens the feed pays zero bundle + zero snapshot cost.
+function FeedSection({ ctx, myUid }: { ctx: Session; myUid: string }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-3 rounded-xl bg-app-card border border-glass-border">
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span>{t.feed.feedToggle}</span>
+        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+            <FeedPanel ctx={ctx} myUid={myUid} />
+          </Suspense>
+        </div>
+      )}
     </div>
   );
 }
@@ -466,6 +525,45 @@ function ZonesPanel({ ctx, myTeamId, isController, me }: { ctx: Session; myTeamI
   );
 }
 
+// Unlockable tasks (change: unlockable-tasks): the active stage's still-LOCKED
+// tasks, shown under the runner so the chain is visible ("solve the cipher,
+// THEN the vault opens"). Locked-ness is computed with the SAME shared
+// isUnlocked used by the server routing + completion guard — display only, the
+// server independently refuses locked completions.
+function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTeamState }) {
+  const { t } = useT();
+  const completedIds = state.team.stages
+    .flatMap((s) => s.tasks)
+    .filter((rec) => rec.status === 'completed')
+    .map((rec) => rec.taskId);
+  const locked = stage.tasks
+    .filter((rec) => rec.status === 'unassigned')
+    .map((rec) => state.activeStageTasks.find((c) => c.id === rec.taskId))
+    .filter((c) => !!c && !isUnlocked(c, completedIds));
+  if (locked.length === 0) return null;
+  return (
+    <div className="mt-3 space-y-2">
+      {locked.map((c) => {
+        const names = (c!.unlockAfterTaskIds ?? [])
+          .filter((id) => !completedIds.includes(id))
+          .map((id) => state.activeStageTasks.find((x) => x.id === id)?.title)
+          .filter((n): n is string => !!n)
+          .join(', ');
+        return (
+          <div key={c!.id} dir="auto" className="rounded-lg bg-app-raised border border-glass-border px-3 py-2">
+            <div className="flex items-center gap-2 text-sm text-zinc-300">
+              <span aria-hidden>🔒</span>
+              <span className="font-medium truncate">{c!.title}</span>
+              <span className="ms-auto text-[10px] uppercase tracking-wide text-zinc-500 shrink-0">{t.play.lockedTaskLabel}</span>
+            </div>
+            {names && <p className="text-xs text-zinc-500 mt-0.5">{t.play.lockedCompleteFirst({ names })}</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: () => void }) {
   const { t } = useT();
   const [remainingMs, setRemainingMs] = useState(() => releaseAt - Date.now());
@@ -495,8 +593,8 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
   );
 }
 
-function Header({ game, score, accent, onLeave }: {
-  game: MyTeamState['game']; score: number; accent: string; onLeave: () => void;
+function Header({ game, score, accent, onLeave, powerUpArmed }: {
+  game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
 }) {
   const { t } = useT();
   return (
@@ -505,9 +603,30 @@ function Header({ game, score, accent, onLeave }: {
         <div dir="auto" className="font-brand font-extrabold text-lg" style={{ color: accent }}>
           {game.branding?.name ?? game.title}
         </div>
-        <div className="text-xs text-zinc-500">{t.play.score}: <span className="text-accent font-mono">{score}</span></div>
+        <div className="text-xs text-zinc-500 flex items-center gap-2">
+          <span>{t.play.score}: <span className="text-accent font-mono">{score}</span></span>
+          {powerUpArmed && (
+            <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-accent">
+              {t.play.powerUpArmedChip}
+            </span>
+          )}
+        </div>
       </div>
       <button onClick={onLeave} className="text-xs text-zinc-500">{t.play.leave}</button>
+    </div>
+  );
+}
+
+// Power-ups (change: power-ups): a transient award toast at the top of the screen.
+function PowerUpToast({ type }: { type: 'double_points' | 'bonus_points' | null }) {
+  const { t } = useT();
+  if (!type) return null;
+  const text = type === 'double_points' ? t.play.powerUpDoubleToast : t.play.powerUpBonusToast;
+  return (
+    <div className="fixed inset-x-0 top-3 z-50 flex justify-center px-4 pointer-events-none">
+      <div className="rounded-full bg-accent text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
+        {text}
+      </div>
     </div>
   );
 }

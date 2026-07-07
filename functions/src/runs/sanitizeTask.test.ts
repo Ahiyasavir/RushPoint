@@ -81,6 +81,62 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
   });
 });
 
+// quiz-ordering: the authored orderItems ORDER is the answer key. The sanitizer
+// must never emit the authored order — only a deterministically seeded shuffle
+// (seed teamId:taskId, passed by getMyTeamState) — and must strip the field
+// entirely when no seed is available (fail closed, never fail open).
+describe('sanitizeTaskForParticipant — ordering quiz (orderItems)', () => {
+  const AUTHORED = ['first', 'second', 'third', 'fourth'];
+  const orderingTask = () =>
+    baseTask({ type: 'quiz', orderItems: [...AUTHORED] } as Partial<Task>);
+
+  test('seeded call emits orderItems shuffled ≠ authored, same multiset', () => {
+    const out = sanitizeTaskForParticipant(orderingTask(), { shuffleSeed: 'team-1:t1' }) as Record<string, unknown>;
+    const items = out.orderItems as string[];
+    expect(Array.isArray(items)).toBe(true);
+    expect(items).not.toEqual(AUTHORED);
+    expect([...items].sort()).toEqual([...AUTHORED].sort());
+  });
+
+  test('same seed across two calls → identical (reload-stable) shuffle', () => {
+    const a = sanitizeTaskForParticipant(orderingTask(), { shuffleSeed: 'team-1:t1' }) as Record<string, unknown>;
+    const b = sanitizeTaskForParticipant(orderingTask(), { shuffleSeed: 'team-1:t1' }) as Record<string, unknown>;
+    expect(a.orderItems).toEqual(b.orderItems);
+  });
+
+  test('seedless call OMITS orderItems entirely (fail closed)', () => {
+    const out = sanitizeTaskForParticipant(orderingTask()) as Record<string, unknown>;
+    expect('orderItems' in out).toBe(false);
+  });
+
+  test('empty-seed call also strips orderItems (fail closed)', () => {
+    const out = sanitizeTaskForParticipant(orderingTask(), { shuffleSeed: '' }) as Record<string, unknown>;
+    expect('orderItems' in out).toBe(false);
+  });
+
+  test('a task without orderItems never grows the key', () => {
+    const out = sanitizeTaskForParticipant(baseTask(), { shuffleSeed: 'team-1:t1' }) as Record<string, unknown>;
+    expect('orderItems' in out).toBe(false);
+  });
+
+  test('existing secrecy invariants hold on an ordering task too', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'quiz',
+        orderItems: [...AUTHORED],
+        hint: 'paid secret',
+        answers: ['leak'],
+        numericAnswer: 7,
+      } as Partial<Task>),
+      { shuffleSeed: 'team-9:t1' },
+    ) as Record<string, unknown>;
+    expect(out.hint).toBeUndefined();
+    expect(out.answers).toBeUndefined();
+    expect(out.numericAnswer).toBeUndefined();
+    expect(out.hasHint).toBe(true);
+  });
+});
+
 describe('sanitizeTaskForParticipant — hidden location', () => {
   test('a hidden task strips coordinates and emits locationHidden:true', () => {
     const out = sanitizeTaskForParticipant(

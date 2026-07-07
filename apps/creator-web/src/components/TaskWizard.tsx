@@ -5,8 +5,13 @@
 import { useState, type ReactNode, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TriggerMode, TaskMedia } from '@rushpoint/shared';
-import { normalizeTriggerMode, defaultRadiusFor, parseYouTubeId, youTubeEmbedUrl } from '@rushpoint/shared';
+import {
+  normalizeTriggerMode, defaultRadiusFor, parseYouTubeId, youTubeEmbedUrl,
+  validateUnlockGraph, validateAvailabilityWindow,
+  validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
+} from '@rushpoint/shared';
 import { Button, Input, Label, Textarea } from './ui';
+import { dialog } from './dialog';
 import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
 import LocationStep from './LocationStep';
@@ -30,9 +35,13 @@ const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[]
   { key: 'hard', value: 8, test: (d) => d >= 7 },
 ];
 
-export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, closeLabel, gameId }: {
+export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings }: {
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
   onClose: () => void; closeLabel: string; gameId?: string;
+  // The other tasks of the SAME stage (change: unlockable-tasks) — the
+  // prerequisite multi-select offers exactly these, so cross-stage/unknown ids
+  // can't even be authored from the UI.
+  siblings?: Task[];
 }) {
   const t = useT();
   const b = t.builder;
@@ -81,7 +90,7 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
           grow to fill; steps 2 & 3 scroll only inside themselves if ever needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
         {step === 1 && <LocationStepBody task={task} mode={mode} located={located} setMode={setMode} set={set} b={b} />}
-        {step === 2 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} /></div>}
+        {step === 2 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} siblings={siblings} /></div>}
         {step === 3 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} b={b} /></div>}
       </div>
 
@@ -181,8 +190,116 @@ function LocationStepBody({ task, mode, located, setMode, set, b }: {
   );
 }
 
+// ── Quiz grading mode (change: quiz-ordering) ──
+// One grading mode per quiz task: classic (choices / typed answers) OR ordering
+// (players arrange 3 to 10 items). Switching modes clears the OTHER mode's
+// fields behind a confirm, so a task can never carry both answer keys at once
+// (updateGame rejects the mix server-side).
+function QuizModeSection({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
+  const [ordering, setOrdering] = useState(!!task.orderItems && task.orderItems.length > 0);
+
+  const switchMode = async (toOrdering: boolean) => {
+    if (toOrdering === ordering) return;
+    const losing = toOrdering
+      ? (task.choices?.length ?? 0) > 0 || (task.answers?.length ?? 0) > 0
+      : (task.orderItems?.length ?? 0) > 0;
+    if (losing && !(await dialog.confirm(b.orderingModeSwitchConfirm))) return;
+    setOrdering(toOrdering);
+    set(toOrdering ? { choices: undefined, answers: undefined } : { orderItems: undefined });
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1.5" role="tablist">
+        {([false, true] as const).map((mode) => (
+          <button key={String(mode)} role="tab" aria-selected={ordering === mode}
+            onClick={() => void switchMode(mode)}
+            className={`flex-1 rounded-lg border py-1.5 text-xs transition-colors ${
+              ordering === mode
+                ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+            {mode ? b.quizModeOrdering : b.quizModeChoices}
+          </button>
+        ))}
+      </div>
+      {ordering
+        ? <OrderingItemsEditor task={task} set={set} b={b} />
+        : <QuizChoicesEditor task={task} onChange={(p) => set(p)} />}
+    </div>
+  );
+}
+
+// Ordering list editor: rows are local UI state (a cleared field never vanishes
+// mid-typing); only a VALID cleaned list (3 to 10 distinct non-empty items, in
+// the authored = correct order) is pushed up as `orderItems` — an invalid
+// transient state pushes undefined so the debounced auto-save (updateGame
+// validates server-side) is never wedged, and the Done gate stays closed.
+function OrderingItemsEditor({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
+  const [rows, setRows] = useState<{ id: string; text: string }[]>(() => {
+    const initial = (task.orderItems ?? []).map((text) => ({ id: uuid(), text }));
+    while (initial.length < ORDER_ITEMS_MIN) initial.push({ id: uuid(), text: '' });
+    return initial;
+  });
+
+  const apply = (next: { id: string; text: string }[]) => {
+    setRows(next);
+    const clean = next.map((r) => r.text).filter((t2) => t2.trim() !== '');
+    if (clean.length >= ORDER_ITEMS_MIN && validateOrderItems(clean) === null) {
+      set({ orderItems: clean, choices: undefined, answers: undefined });
+    } else {
+      set({ orderItems: undefined, choices: undefined, answers: undefined });
+    }
+  };
+
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= rows.length) return;
+    const next = rows.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    apply(next);
+  };
+
+  const clean = rows.map((r) => r.text).filter((t2) => t2.trim() !== '');
+  const error =
+    clean.length < ORDER_ITEMS_MIN || clean.length > ORDER_ITEMS_MAX
+      ? b.orderingCountError
+      : validateOrderItems(clean) !== null
+        ? b.orderingDuplicateError
+        : null;
+
+  return (
+    <div className="space-y-1.5">
+      <Label>{b.orderingItemsLead}</Label>
+      <div className="space-y-1">
+        {rows.map((row, i) => (
+          <div key={row.id} className="flex items-center gap-1.5">
+            <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
+            <Input value={row.text} dir="auto" className="flex-1 min-w-0"
+              onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
+            <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${b.mediaMoveUp} ${i + 1}`}
+              className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↑</button>
+            <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} aria-label={`${b.mediaMoveDown} ${i + 1}`}
+              className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↓</button>
+            <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= 1}
+              aria-label={`${b.deleteTask} ${i + 1}`}
+              className="text-neon-red shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs">✕</button>
+          </div>
+        ))}
+      </div>
+      <Button variant="ghost" className="text-xs" disabled={rows.length >= ORDER_ITEMS_MAX}
+        onClick={() => apply([...rows, { id: uuid(), text: '' }])}>
+        + {b.orderingAddItem}
+      </Button>
+      <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{ORDER_ITEMS_MAX}</span>
+      {error && <p className="text-[11px] text-rp-amber">{error}</p>}
+    </div>
+  );
+}
+
 // ── Step 2: Details ──
-function DetailsStepBody({ task, set, b, gameId }: { task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string }) {
+function DetailsStepBody({ task, set, b, gameId, siblings }: {
+  task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string; siblings?: Task[];
+}) {
   const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
   // Optional hint collapses behind a toggle so the common (no-hint) form is short
   // enough to never scroll, even on small laptops.
@@ -224,7 +341,10 @@ function DetailsStepBody({ task, set, b, gameId }: { task: Task; set: (p: Partia
               <RichTooltip concept="hint" />
             </div>
             <button className="text-[11px] text-[--ink-3] hover:text-neon-red"
-              onClick={() => { setShowHint(false); set({ hint: undefined, hintPenalty: undefined }); }}>
+              onClick={() => {
+                setShowHint(false);
+                set({ hint: undefined, hintPenalty: undefined, hintAutoRevealMinutes: undefined, hintAutoRevealAttempts: undefined });
+              }}>
               {b.removeHint}
             </button>
           </div>
@@ -234,6 +354,26 @@ function DetailsStepBody({ task, set, b, gameId }: { task: Task; set: (p: Partia
             <Input type="number" min={0} className="w-24" value={task.hintPenalty ?? 25}
               onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
           </div>
+          {/* Hint auto escalation (change: hint-auto-escalation): optional free
+              thresholds — the hint stops costing points once the team has held
+              the task N minutes OR burned N wrong attempts. 0/empty = off. */}
+          <p className="text-[11px] text-[--ink-3] leading-snug">{b.hintEscalationLead}</p>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={0} step="0.5" className="w-20" value={task.hintAutoRevealMinutes ?? ''}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                set({ hintAutoRevealMinutes: Number.isFinite(v) && v > 0 ? v : undefined });
+              }} />
+            <InlineLabel>{b.hintFreeAfterMinutes}</InlineLabel>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input type="number" min={0} className="w-20" value={task.hintAutoRevealAttempts ?? ''}
+              onChange={(e) => {
+                const v = parseInt(e.target.value);
+                set({ hintAutoRevealAttempts: Number.isInteger(v) && v > 0 ? v : undefined });
+              }} />
+            <InlineLabel>{b.hintFreeAfterAttempts}</InlineLabel>
+          </div>
         </div>
       ) : (
         <button onClick={() => setShowHint(true)}
@@ -242,8 +382,80 @@ function DetailsStepBody({ task, set, b, gameId }: { task: Task; set: (p: Partia
         </button>
       )}
 
+      <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
+
       <MediaSection task={task} set={set} b={b} gameId={gameId} />
     </>
+  );
+}
+
+// ── Unlockable tasks (change: unlockable-tasks) — prerequisite multi-select ──
+// A collapsible "Unlocks only after…" section (like the hint toggle) with a
+// checkbox per sibling task of the SAME stage. Only sibling ids are offered
+// (self excluded), so self-reference / cross-stage / unknown ids can't be
+// authored; an option whose checking would create a dependency CYCLE is
+// disabled with an explanation — validateUnlockGraph is the single source of
+// truth, so the Builder can never produce a graph the server would reject.
+function UnlockSection({ task, siblings, set, b }: {
+  task: Task; siblings: Task[]; set: (p: Partial<Task>) => void; b: B;
+}) {
+  const selected = task.unlockAfterTaskIds ?? [];
+  const [show, setShow] = useState(selected.length > 0);
+  const others = siblings.filter((s) => s.id !== task.id);
+
+  // Would checking `id` make the stage graph invalid (i.e. create a cycle)?
+  const wouldBreak = (id: string): boolean => {
+    const hypothetical = siblings.map((s) =>
+      s.id === task.id ? { ...task, unlockAfterTaskIds: [...selected, id] } : s,
+    );
+    return validateUnlockGraph({ tasks: hypothetical }).errors.length > 0;
+  };
+
+  const toggle = (id: string, on: boolean) => {
+    const next = on ? [...selected, id] : selected.filter((x) => x !== id);
+    set({ unlockAfterTaskIds: next.length > 0 ? next : undefined });
+  };
+
+  if (!show) {
+    return (
+      <button onClick={() => setShow(true)} className="self-start text-xs text-rp-fire hover:underline">
+        + {b.unlockAfterLead}
+      </button>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
+      <div className="flex items-center justify-between">
+        <InlineLabel>🔒 {b.unlockAfterLead}</InlineLabel>
+        <button aria-label={b.closePanel} className="text-[11px] text-[--ink-3] hover:text-neon-red"
+          onClick={() => { setShow(false); set({ unlockAfterTaskIds: undefined }); }}>
+          ✕
+        </button>
+      </div>
+      <p className="text-[11px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
+      {others.length === 0 ? (
+        <p className="text-[11px] text-[--ink-3]">{b.unlockAfterNone}</p>
+      ) : (
+        <div className="space-y-1">
+          {others.map((s) => {
+            const checked = selected.includes(s.id);
+            const blocked = !checked && wouldBreak(s.id);
+            return (
+              <label key={s.id}
+                className={`flex items-start gap-2 text-sm ${blocked ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer text-[--ink-1]'}`}
+                title={blocked ? b.unlockCycleError : undefined}>
+                <input type="checkbox" className="mt-0.5" checked={checked} disabled={blocked}
+                  onChange={(e) => toggle(s.id, e.target.checked)} />
+                <span dir="auto" className="min-w-0 truncate">
+                  <span className="text-[--ink-3] me-1">{siblings.indexOf(s) + 1}.</span>
+                  {s.title || b.untitledTask}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -533,7 +745,7 @@ function InteractionStepBody({ task, set, setSmart, b }: {
             {b.autoApprove}
           </label>
         )}
-        {task.type === 'quiz' && <QuizChoicesEditor task={task} onChange={(p) => set(p)} />}
+        {task.type === 'quiz' && <QuizModeSection task={task} set={set} b={b} />}
         {task.type === 'numeric' && (
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -628,6 +840,26 @@ function InteractionStepBody({ task, set, setSmart, b }: {
               </div>
             );
           })()}
+        </div>
+        {/* Task expiry (change: task-expiry): the task closes N minutes after the
+            run starts — dropped from routing, refused on completion, auto-skipped
+            when in flight. Empty/0 = never expires. */}
+        <div className="mt-2">
+          <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+            <InlineLabel>⏳ {b.expiryLead}</InlineLabel>
+            <Input type="number" min={0} className="w-24 py-1" value={task.expiresAfterMinutes ?? ''}
+              placeholder="0"
+              onChange={(e) => {
+                const n = parseFloat(e.target.value);
+                set({ expiresAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined });
+              }} />
+            <span>{b.expiryAfterUnit}</span>
+          </div>
+          {validateAvailabilityWindow(task) !== null ? (
+            <p className="text-[11px] text-rp-fire mt-1">{b.expiryWindowError}</p>
+          ) : task.releaseAt && task.expiresAfterMinutes ? (
+            <p className="text-[11px] text-[--ink-3] mt-1">⚠ {b.expiryReleaseAtWarn}</p>
+          ) : null}
         </div>
       </details>
     </>

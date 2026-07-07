@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -379,18 +379,34 @@ export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, 
 
 export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, context) => {
   assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
-  const { ownerUid, gameId, runId, message, messageHe } = data as {
+  const { ownerUid, gameId, runId, message, messageHe, teamId } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     message: string;
     messageHe?: string;
+    teamId?: string;   // targeted-announcements: absent ⇒ global broadcast
   };
 
   // Bound the broadcast text: it is pushed to every participant's screen, so an
   // oversized message would disrupt the whole run (and bloat the doc).
   const cleanMsg = validate(() => requireString(message, 'message', MAX_MESSAGE_LEN));
   const cleanMsgHe = validate(() => optionalString(messageHe, 'messageHe', MAX_MESSAGE_LEN));
+
+  // Targeted announcements (change: targeted-announcements): when a teamId is given,
+  // validate it and verify the team doc exists so a typo'd console call fails loud
+  // (`not-found`) instead of silently addressing nobody. Client-side visibility is a
+  // courtesy, not access control — see `announcementVisibleTo` + the rules comment.
+  let cleanTeamId: string | undefined;
+  let teamName: string | undefined;
+  if (teamId !== undefined && teamId !== '') {
+    cleanTeamId = validate(() => requireString(teamId, 'teamId', 128));
+    const teamSnap = await db.doc(FIRESTORE_PATHS.team(ownerUid, gameId, runId, cleanTeamId)).get();
+    if (!teamSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Team not found');
+    }
+    teamName = (teamSnap.data() as { displayName?: string } | undefined)?.displayName;
+  }
 
   const ref = db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/announcements`)
@@ -400,13 +416,18 @@ export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, 
     id: ref.id,
     message: cleanMsg,
     messageHe: cleanMsgHe ?? cleanMsg,
+    kind: 'announcement',
     active: true,
     createdAt: new Date().toISOString(),
     createdBy: context.auth!.uid,
+    ...(cleanTeamId ? { teamId: cleanTeamId } : {}),
   });
 
-  // Mirror to Slack/Teams if the game has a webhook configured (best-effort).
-  await mirrorToChat(ownerUid, gameId, { kind: 'announcement', message: cleanMsg });
+  // Mirror to Slack/Teams if the game has a webhook configured (best-effort). A
+  // targeted announcement prefixes the addressed team so the ops channel sees who
+  // it went to.
+  const mirrorMsg = cleanTeamId ? `[→ ${teamName || cleanTeamId}] ${cleanMsg}` : cleanMsg;
+  await mirrorToChat(ownerUid, gameId, { kind: 'announcement', message: mirrorMsg });
 
   return { announcementId: ref.id };
 });
@@ -487,6 +508,108 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
 });
 
 
+// ─── Live photo feed (change: live-photo-feed) ─────────────────────────────────
+// Broadcast an APPROVED photo to the run's shared feed. Best-effort: a feed
+// failure must never fail (or slow-fail) the photo approval itself — the task
+// completion already happened. Plain `.set()` on a brand-new doc; no transaction
+// is added to the photo-approval paths (hot-path lesson: never txn in the
+// completeTask path).
+async function writeFeedItem(
+  ownerUid: string,
+  gameId: string,
+  runId: string,
+  entry: { taskId: string; taskTitle: string; teamId: string; teamName: string; photoUrl: string },
+): Promise<void> {
+  try {
+    const ref = db.collection(FIRESTORE_PATHS.feedItemsCol(ownerUid, gameId, runId)).doc();
+    const item: FeedItem = {
+      id: ref.id,
+      taskId: entry.taskId,
+      taskTitle: entry.taskTitle,
+      teamId: entry.teamId,
+      teamName: entry.teamName,
+      photoUrl: entry.photoUrl,
+      reactions: {},
+      reactedBy: {},
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+    await ref.set(item);
+  } catch (e) {
+    functions.logger.warn('writeFeedItem failed (feed is best-effort)', { runId, err: String(e) });
+  }
+}
+
+
+// ─── reactToFeedItem (change: live-photo-feed) ─────────────────────────────────
+// One emoji reaction per uid per feed item; re-reacting switches the emoji and
+// never double-counts (pure applyReaction reducer inside a transaction).
+export const reactToFeedItem = loggedCallable('reactToFeedItem', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'reactToFeedItem');
+  const { ownerUid, gameId, runId, itemId, emoji } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    itemId: string;
+    emoji: string;
+  };
+  if (!ownerUid || !gameId || !runId || !itemId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId, itemId required');
+  }
+
+  // Run membership: a participant of THIS run (any attached device) may react;
+  // the owner and run-scoped staff may too. Strangers are denied.
+  try {
+    await resolveCallerTeam(uid, { ownerUid, gameId, runId });
+  } catch {
+    assertStaffOrOwner(context, ownerUid, runId);
+  }
+
+  const itemRef = db.doc(FIRESTORE_PATHS.feedItem(ownerUid, gameId, runId, itemId));
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(itemRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Feed item not found');
+    const item = snap.data() as FeedItem;
+    if (item.active === false) throw new functions.https.HttpsError('not-found', 'Feed item not found');
+    let applied;
+    try {
+      applied = applyReaction(item, uid, emoji);
+    } catch {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid reaction emoji');
+    }
+    if (applied.changed) {
+      // Real nested objects (whole-map replace) — never dotted .set({merge}) keys.
+      tx.update(itemRef, { reactions: applied.reactions, reactedBy: applied.reactedBy });
+    }
+    return { changed: applied.changed, reactions: applied.reactions };
+  });
+
+  return { ok: true, ...result };
+});
+
+
+// ─── hideFeedItem (change: live-photo-feed) ────────────────────────────────────
+// Moderation: staff/owner hides a feed item (listener filters active == true).
+// Same shape as deactivateAnnouncement.
+export const hideFeedItem = loggedCallable('hideFeedItem', async (data, context) => {
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  const { ownerUid, gameId, runId, itemId } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    itemId: string;
+  };
+  if (!itemId) throw new functions.https.HttpsError('invalid-argument', 'itemId required');
+
+  await db
+    .doc(FIRESTORE_PATHS.feedItem(ownerUid, gameId, runId, itemId))
+    .update({ active: false, hiddenAt: new Date().toISOString(), hiddenBy: context.auth!.uid });
+
+  return { ok: true };
+});
+
+
 // ─── Station callables ────────────────────────────────────────────────────────
 
 export const verifyStationCode = loggedCallable('verifyStationCode', async (data, context) => {
@@ -518,24 +641,42 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
 
   const game = gameSnap.data() as {
-    stages: { tasks: { id: string; smart?: { secretCode?: string } }[] }[];
+    stages: {
+      tasks: {
+        id: string;
+        hintAutoRevealAttempts?: number;
+        smart?: { secretCode?: string; attemptLimit?: number };
+      }[];
+    }[];
   };
-  let taskFound = false;
-  let expectedCode: string | undefined;
+  let stationTask: (typeof game.stages)[number]['tasks'][number] | undefined;
   for (const stage of game.stages) {
     const task = stage.tasks.find((t) => t.id === taskId);
-    if (task) { taskFound = true; expectedCode = task.smart?.secretCode; break; }
+    if (task) { stationTask = task; break; }
   }
 
-  if (!taskFound) {
+  if (!stationTask) {
     throw new functions.https.HttpsError('not-found', 'Task not found in game');
   }
+  const expectedCode = stationTask.smart?.secretCode;
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
   if (!expectedCode || expectedCode.trim().toLowerCase() !== code.trim().toLowerCase()) {
+    // Hint auto escalation (change: hint-auto-escalation): a wrong station code
+    // is a wrong ATTEMPT — record it (real nested map, never a dotted key in
+    // .set({merge})) before rejecting, so a struggling team's free-hint
+    // threshold can be reached at a station too. Tracked when a consumer needs
+    // it: the task's escalation threshold or its attemptLimit (counting only —
+    // enforcing a station attempt cap stays out of scope).
+    if ((stationTask.hintAutoRevealAttempts ?? 0) > 0 || (stationTask.smart?.attemptLimit ?? 0) > 0) {
+      await teamRef.set(
+        { taskAttempts: { [taskId]: admin.firestore.FieldValue.increment(1) } },
+        { merge: true },
+      );
+    }
     throw new functions.https.HttpsError('failed-precondition', 'Incorrect code');
   }
 
   const now = new Date().toISOString();
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
   // NB: nest under the `taskVerifications` map via a real nested object. Dotted
   // keys in .set({merge}) become *literal* top-level field names, not map paths.
   await teamRef.set(
@@ -565,7 +706,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   };
 
   // Shared team devices: resolve the caller's team + require the controller role.
-  const { teamId: resolvedTeamId } = await resolveCallerTeam(
+  const { teamId: resolvedTeamId, team } = await resolveCallerTeam(
     uid, { ownerUid, gameId, runId }, { requireController: true },
   );
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
@@ -577,14 +718,26 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // (not just any bucket URL) — scoped to runId + uid. Throws invalid-argument.
   validate(() => requireStorageUrl(photoUrl, runId, uid));
 
-  // Check the task's smart config for autoApprove (staffless events).
+  // Check the task's smart config for autoApprove (staffless events). The same
+  // snapshot also yields the task title + the photoFeedEnabled gate for the
+  // live photo feed (live-photo-feed) — no extra read on this hot path.
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   let autoApprove = false;
+  let taskTitle = '';
+  let feedEnabled = true;
   if (gameSnap.exists) {
-    const game = gameSnap.data() as { stages: { tasks: { id: string; smart?: { autoApprove?: boolean } }[] }[] };
+    const game = gameSnap.data() as {
+      photoFeedEnabled?: boolean;
+      stages: { tasks: { id: string; title?: string; smart?: { autoApprove?: boolean } }[] }[];
+    };
+    feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
       const task = stage.tasks.find((t) => t.id === taskId);
-      if (task) { autoApprove = task.smart?.autoApprove === true; break; }
+      if (task) {
+        autoApprove = task.smart?.autoApprove === true;
+        taskTitle = task.title ?? '';
+        break;
+      }
     }
   }
 
@@ -606,6 +759,17 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // autoApprove: the photo is logged but does not block progression.
   if (autoApprove) {
     await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
+    // when the game disables the feed; best-effort (never fails the submission).
+    if (feedEnabled) {
+      await writeFeedItem(ownerUid, gameId, runId, {
+        taskId,
+        taskTitle,
+        teamId: resolvedTeamId,
+        teamName: team.displayName ?? '',
+        photoUrl: photoUrl.trim(),
+      });
+    }
   }
 
   return { submitted: true, autoApproved: autoApprove };
@@ -645,6 +809,40 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
   // Approved photo = task complete → score it + advance the team.
   if (approved) {
     await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+
+    // Live photo feed (live-photo-feed): broadcast the approved photo. This path
+    // adds a game-doc read (staff review, not a hot path) for the task title +
+    // the photoFeedEnabled gate; best-effort — never fails the review.
+    try {
+      const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
+      const game = gameSnap.data() as {
+        photoFeedEnabled?: boolean;
+        stages?: { tasks: { id: string; title?: string }[] }[];
+      } | undefined;
+      if (game && game.photoFeedEnabled !== false) {
+        let taskTitle = '';
+        for (const stage of game.stages ?? []) {
+          const task = stage.tasks.find((t) => t.id === taskId);
+          if (task) { taskTitle = task.title ?? ''; break; }
+        }
+        const teamData = (await teamRef.get()).data() as {
+          displayName?: string;
+          taskSubmissions?: Record<string, { photoUrl?: string }>;
+        } | undefined;
+        const submittedPhotoUrl = teamData?.taskSubmissions?.[taskId]?.photoUrl;
+        if (submittedPhotoUrl) {
+          await writeFeedItem(ownerUid, gameId, runId, {
+            taskId,
+            taskTitle,
+            teamId,
+            teamName: teamData?.displayName ?? '',
+            photoUrl: submittedPhotoUrl,
+          });
+        }
+      }
+    } catch (e) {
+      functions.logger.warn('reviewStationSubmission: feed write skipped', { runId, err: String(e) });
+    }
   }
 
   return { ok: true, approved };
@@ -680,14 +878,43 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     return { prev: p, newPenalty: np };
   });
 
+  const cleanReason = validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '';
+
   await writeAuditLog({
     ownerUid, gameId, runId, teamId,
     operatorId: context.auth!.uid,
     actionType: delta >= 0 ? 'bonus' : 'fine',
     previousValue: -prev,
     newValue: -newPenalty,
-    reason: validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '',
+    reason: cleanReason,
   });
+
+  // Targeted announcements (change: targeted-announcements): make the adjustment
+  // visible to the team. AFTER the scoring transaction + audit log (both untouched —
+  // score integrity first), write a team-targeted `kind:'score'` notice into the run's
+  // existing announcements collection so play-web renders a toast. Plain create, no
+  // transaction added, no `buildRankings` change; best-effort (the adjustment already
+  // landed even if this write fails).
+  try {
+    const nowIso = new Date().toISOString();
+    const noticeRef = db
+      .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/announcements`)
+      .doc();
+    await noticeRef.set({
+      id: noticeRef.id,
+      kind: 'score',
+      teamId,
+      delta,
+      reason: cleanReason,
+      message: formatScoreNotice(delta, cleanReason, 'en'),
+      messageHe: formatScoreNotice(delta, cleanReason, 'he'),
+      active: true,
+      createdAt: nowIso,
+      createdBy: context.auth!.uid,
+    });
+  } catch (e) {
+    functions.logger.warn('adjustTeamScore score-notice write failed', { ownerUid, gameId, runId, teamId, err: String(e) });
+  }
 
   return { ok: true, newBonusPenalty: newPenalty };
 });

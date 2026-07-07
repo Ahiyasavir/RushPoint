@@ -20,7 +20,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
-import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc, collection, getDocs } from 'firebase/firestore';
 import adminSdk from 'firebase-admin';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -88,6 +88,7 @@ function makeParty(name) {
     },
     setDocAt: (path, data) => setDoc(doc(db, path), data),
     getDocAt: (path) => getDoc(doc(db, path)).then((s) => ({ exists: s.exists(), data: s.data() })),
+    getColAt: (path) => getDocs(collection(db, path)).then((s) => s.docs.map((d) => d.data())),
   };
 }
 
@@ -176,8 +177,16 @@ const ALLOWED_TASK_KEYS = new Set([
   'locationClueHe', 'hintPenalty', 'choices', 'numericTolerance',
   'geofenceRadiusMeters', 'steps', 'tags', 'media',
   'releaseAt', 'releaseAfterMinutes',
+  'expiresAfterMinutes', // task-expiry: the countdown UI needs it — no secret
+  'unlockAfterTaskIds',  // unlockable-tasks: the locked row names prerequisites — no secret
+  // hint-auto-escalation: free-hint thresholds — they never reveal the hint text
+  'hintAutoRevealMinutes', 'hintAutoRevealAttempts',
+  // quiz-ordering: ALLOWED, but only as a seeded per-team shuffle — the scenario
+  // additionally asserts payload order ≠ authored order (same multiset), so an
+  // authored-order passthrough regression fails even though the key is listed.
+  'orderItems',
   // added by the sanitizer itself:
-  'hasHint', 'locationHidden',
+  'hasHint', 'locationHidden', 'hintFreeNow',
 ]);
 const ALLOWED_SMART_KEYS = new Set([
   'enabled', 'verificationType', 'longInstructions', 'longInstructionsHe',
@@ -577,6 +586,10 @@ async function main() {
   const boardBefore = await player.call('getPublicLeaderboard', { code: accessCode });
   check('public leaderboard hides rankings until published',
     boardBefore?.published === false && (boardBefore?.rankings?.length ?? 0) === 0);
+  // Ceremony mode: photos are gated exactly like rankings — [] until published.
+  check('ceremony: ceremonyFeed is [] before publish',
+    Array.isArray(boardBefore?.ceremonyFeed) && boardBefore.ceremonyFeed.length === 0,
+    JSON.stringify(boardBefore?.ceremonyFeed));
 
   const lbShown = await creator.call('refreshLeaderboard', { ...lbCtx, publish: true });
   check('refreshLeaderboard can publish to teams', lbShown?.published === true);
@@ -831,6 +844,174 @@ async function main() {
 
   }); // scenario: paid hints
 
+  await scenario('hint auto escalation (attempts path → free hint)', async () => {
+
+  // ── Hint auto escalation (change: hint-auto-escalation) ─────────────────────
+  // The ATTEMPTS path is driven here (the TIME path is covered by the pure
+  // scripts/test-hint-escalation.ts — an e2e can't wait minutes): 2 wrong answers
+  // on a task with hintAutoRevealAttempts: 2 flips hintFreeNow and makes
+  // requestTaskHint charge 0; a control task without thresholds still charges.
+  const { gameId: gE } = await creator.call('createGame', { title: 'Hint Escalation Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gE,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      {
+        id: 'st-e1', order: 0, title: 'Struggle here',
+        tasks: [{
+          id: 'e-1', title: 'Name the city', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
+          answers: ['jerusalem'],
+          hint: 'Look for the golden dome.', hintPenalty: 25, hintAutoRevealAttempts: 2,
+        }],
+      },
+      {
+        id: 'st-e2', order: 1, title: 'Control', isFinal: true,
+        tasks: [{
+          id: 'e-2', title: 'Control quiz', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
+          answers: ['haifa'],
+          hint: 'Control hint text.', hintPenalty: 25,
+        }],
+      },
+    ],
+  });
+  const { runId: rE, accessCode: cE } = await creator.call('launchRun', { gameId: gE });
+  const playerE = makeParty('playerE');
+  await signInAnonymously(playerE.auth);
+  await playerE.call('joinRun', { code: cE, displayName: 'Stuck Team' });
+  await creator.call('startTeams', { gameId: gE, runId: rE });
+  const CE = { ownerUid: creatorCred.user.uid, gameId: gE, runId: rE };
+  await playerE.call('requestNextTask', CE); // ensure e-1 is assigned (startedAt written)
+
+  const sE1 = await playerE.call('getMyTeamState', { code: cE });
+  const taskE = sE1?.activeStageTasks?.find((t) => t.id === 'e-1');
+  check('escalation thresholds pass through the sanitized payload', taskE?.hintAutoRevealAttempts === 2, JSON.stringify(taskE?.hintAutoRevealAttempts));
+  check('hint text still stripped on an escalating task', taskE?.hint === undefined && taskE?.hasHint === true, JSON.stringify({ hint: taskE?.hint }));
+  check('no hintFreeNow before any wrong attempt', taskE?.hintFreeNow !== true, JSON.stringify(taskE?.hintFreeNow));
+  assertTaskPayloadAllowlisted('sanitizer(hint-escalation)', taskE);
+
+  // Two wrong answers → the attempts threshold is met.
+  const wrongE1 = await playerE.call('submitTaskAnswer', { ...CE, taskId: 'e-1', answer: 'rome' });
+  const wrongE2 = await playerE.call('submitTaskAnswer', { ...CE, taskId: 'e-1', answer: 'athens' });
+  check('both wrong answers rejected', wrongE1?.correct === false && wrongE2?.correct === false, JSON.stringify({ wrongE1, wrongE2 }));
+
+  const sE2 = await playerE.call('getMyTeamState', { code: cE });
+  const taskEAfter = sE2?.activeStageTasks?.find((t) => t.id === 'e-1');
+  check('hintFreeNow flips after the 2nd wrong attempt', taskEAfter?.hintFreeNow === true, JSON.stringify(taskEAfter?.hintFreeNow));
+  assertTaskPayloadAllowlisted('sanitizer(hint-escalation, free)', taskEAfter);
+  const bonusBefore = sE2?.team?.bonusPenalty ?? 0;
+
+  const freeHint = await playerE.call('requestTaskHint', { ...CE, taskId: 'e-1' });
+  check('escalated hint is FREE (penalty 0, text revealed)',
+    freeHint?.hint === 'Look for the golden dome.' && freeHint?.penalty === 0 && freeHint?.free === true,
+    JSON.stringify(freeHint));
+  const sE3 = await playerE.call('getMyTeamState', { code: cE });
+  check('bonusPenalty untouched by the free reveal', (sE3?.team?.bonusPenalty ?? 0) === bonusBefore, String(sE3?.team?.bonusPenalty));
+
+  const freeAgain = await playerE.call('requestTaskHint', { ...CE, taskId: 'e-1' });
+  check('second request stays idempotent (alreadyUsed, charged 0)', freeAgain?.alreadyUsed === true && freeAgain?.penalty === 0, JSON.stringify(freeAgain));
+
+  // Control: a hint WITHOUT thresholds still charges its full cost.
+  const paidHint = await playerE.call('requestTaskHint', { ...CE, taskId: 'e-2' });
+  check('control task without thresholds still charges 25', paidHint?.penalty === 25 && paidHint?.free !== true, JSON.stringify(paidHint));
+  const sE4 = await playerE.call('getMyTeamState', { code: cE });
+  check('control charge landed on bonusPenalty', (sE4?.team?.bonusPenalty ?? 0) === bonusBefore + 25, String(sE4?.team?.bonusPenalty));
+
+  }); // scenario: hint auto escalation
+
+  await scenario('quiz ordering (seeded shuffle + orderedAnswer)', async () => {
+
+  // ── Ordering quiz (change: quiz-ordering) ────────────────────────────────────
+  // The authored orderItems ORDER is the answer key: the participant payload must
+  // carry a per-team seeded shuffle — shuffled ≠ authored AND the same multiset,
+  // stable across polls — and grading happens only via submitTaskAnswer's
+  // orderedAnswer path (normalization-tolerant, all-or-nothing).
+  const AUTHORED_ORDER = ['Abraham', 'Moses', 'King David', 'Herzl'];
+  const { gameId: gO } = await creator.call('createGame', { title: 'Ordering Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gO,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      {
+        id: 'st-o1', order: 0, title: 'Timeline',
+        tasks: [{
+          id: 'o-1', title: 'Order the figures', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 90, maxConcurrentTeams: 3,
+          orderItems: AUTHORED_ORDER,
+        }],
+      },
+      {
+        id: 'st-o2', order: 1, title: 'Plain quiz', isFinal: true,
+        tasks: [{
+          id: 'o-2', title: 'Classic question', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3,
+          answers: ['yes'],
+        }],
+      },
+    ],
+  });
+  const { runId: rO, accessCode: cO } = await creator.call('launchRun', { gameId: gO });
+  const playerO = makeParty('playerO');
+  await signInAnonymously(playerO.auth);
+  await playerO.call('joinRun', { code: cO, displayName: 'Sorters' });
+  await creator.call('startTeams', { gameId: gO, runId: rO });
+  const CO = { ownerUid: creatorCred.user.uid, gameId: gO, runId: rO };
+  await playerO.call('requestNextTask', CO);
+
+  const sO1 = await playerO.call('getMyTeamState', { code: cO });
+  const taskO = sO1?.activeStageTasks?.find((t) => t.id === 'o-1');
+  const shuffled = taskO?.orderItems;
+  const sameArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
+  check('payload carries the 4 ordering items', Array.isArray(shuffled) && shuffled.length === 4, JSON.stringify(shuffled));
+  check('payload order ≠ authored order (answer key never leaks)', !sameArr(shuffled, AUTHORED_ORDER), JSON.stringify(shuffled));
+  check('payload is the same multiset as authored', sameArr([...(shuffled ?? [])].sort(), [...AUTHORED_ORDER].sort()), JSON.stringify(shuffled));
+  assertTaskPayloadAllowlisted('sanitizer(ordering)', taskO);
+
+  const sO2 = await playerO.call('getMyTeamState', { code: cO });
+  const shuffledAgain = sO2?.activeStageTasks?.find((t) => t.id === 'o-1')?.orderItems;
+  check('shuffle is stable across polls (no reshuffle-to-solve)', sameArr(shuffled, shuffledAgain), JSON.stringify({ shuffled, shuffledAgain }));
+
+  // A plain `answer` on an ordering task is refused loud.
+  await expectError('ordering task without orderedAnswer is rejected',
+    playerO.call('submitTaskAnswer', { ...CO, taskId: 'o-1', answer: 'Abraham' }),
+    { codeIn: ['functions/invalid-argument'] });
+
+  // Submitting the SHUFFLED order is guaranteed wrong (identity guard) → counted, not completed.
+  const wrongO = await playerO.call('submitTaskAnswer', { ...CO, taskId: 'o-1', orderedAnswer: shuffled });
+  check('the shuffled arrangement grades wrong', wrongO?.correct === false, JSON.stringify(wrongO));
+
+  // A case/whitespace-mangled copy of the AUTHORED order grades correct + completes.
+  const mangled = AUTHORED_ORDER.map((s) => `  ${s.toUpperCase()}   `.replace(' ', '  '));
+  const rightO = await playerO.call('submitTaskAnswer', { ...CO, taskId: 'o-1', orderedAnswer: mangled });
+  check('the authored order (mangled case/whitespace) grades correct', rightO?.correct === true, JSON.stringify(rightO));
+  const sO3 = await playerO.call('getMyTeamState', { code: cO });
+  const recO = sO3?.team?.stages?.[0]?.tasks?.find((r) => r.taskId === 'o-1');
+  check('ordering task completed + scored by the normal preset', recO?.status === 'completed' && (recO?.earnedScore ?? 0) > 0, JSON.stringify(recO));
+
+  // orderedAnswer on a PLAIN quiz is refused loud (no silent ignore).
+  await expectError('orderedAnswer on a plain quiz is rejected',
+    playerO.call('submitTaskAnswer', { ...CO, taskId: 'o-2', orderedAnswer: ['yes'] }),
+    { codeIn: ['functions/invalid-argument'] });
+
+  // Save-time validation: too few items / non-quiz / mixed modes all rejected.
+  const badStage = (task) => [{ id: 'st-bad', order: 0, title: 'Bad', isFinal: true, tasks: [task] }];
+  const baseBad = {
+    id: 'bad-1', title: 'Bad ordering', locationless: true, coordinates: { lat: 0, lng: 0 },
+    difficulty: 3, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3,
+  };
+  await expectError('updateGame rejects a 2-item ordering quiz',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz', orderItems: ['a', 'b'] }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects orderItems on a non-quiz task',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'field', orderItems: ['a', 'b', 'c'] }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects orderItems mixed with answers',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz', orderItems: ['a', 'b', 'c'], answers: ['a'] }) }),
+    { codeIn: ['functions/invalid-argument'] });
+
+  }); // scenario: quiz ordering
+
   await scenario('post-game feedback (survey + owner summary)', async () => {
 
   // A team-mode game so a second phone can attach (shared-team-devices) and each
@@ -905,6 +1086,147 @@ async function main() {
     { codeIn: ['functions/permission-denied'] });
 
   }); // scenario: post-game feedback
+
+  await scenario('live photo feed (approve → broadcast → react → hide → prune)', async () => {
+    const OWNER = creatorCred.user.uid;
+
+    // Game: stage 1 = autoApprove photo, stage 2 (final) = staff-reviewed photo.
+    const { gameId: fg } = await creator.call('createGame', { title: 'Feed Game', mode: 'individual' });
+    const photoTask = (id, title, order) => ({
+      id, title, type: 'photo',
+      coordinates: { lat: 31.79 + order * 0.005, lng: 35.2 + order * 0.005 },
+      difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3,
+      smart: { enabled: true, verificationType: 'photo_upload', autoApprove: order === 0 },
+    });
+    await creator.call('updateGame', {
+      gameId: fg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'fs-1', order: 0, title: 'Auto photo', tasks: [photoTask('fp-auto', 'Snap the mural', 0)] },
+        { id: 'fs-2', order: 1, title: 'Reviewed photo', isFinal: true, tasks: [photoTask('fp-rev', 'Team at the gate', 1)] },
+      ],
+    });
+    const { game: feedGame } = await creator.call('getGame', { gameId: fg });
+    check('photoFeedEnabled defaults to on (absent ⇒ enabled)', feedGame?.photoFeedEnabled !== false);
+
+    const { runId: fr, accessCode: fc } = await creator.call('launchRun', { gameId: fg });
+    const fp = makeParty('feedPlayer');
+    const fpCred = await signInAnonymously(fp.auth);
+    const fUid = fpCred.user.uid;
+    await fp.call('joinRun', { code: fc, displayName: 'Feed Lions' });
+    await creator.call('startTeams', { gameId: fg, runId: fr });
+    const FCTX = { ownerUid: OWNER, gameId: fg, runId: fr };
+    const feedCol = `users/${OWNER}/games/${fg}/runs/${fr}/feedItems`;
+    const feedPhotoUrl = (name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${fr}/teams/${fUid}/${name}`)}?alt=media`;
+
+    // 1) Auto-approved photo → a feed item appears, with the denormalized fields.
+    const auto = await fp.call('submitStationPhoto', { ...FCTX, teamId: fUid, taskId: 'fp-auto', photoUrl: feedPhotoUrl('a.jpg') });
+    check('feed: autoApprove photo is approved', auto?.autoApproved === true, JSON.stringify(auto));
+    const afterAuto = await fp.getColAt(feedCol);
+    check('feed: auto-approval broadcast exactly one item', afterAuto.length === 1, String(afterAuto.length));
+    const item1 = afterAuto[0];
+    check('feed: item carries taskTitle + teamName + photoUrl + active',
+      item1?.taskTitle === 'Snap the mural' && item1?.teamName === 'Feed Lions'
+        && item1?.photoUrl === feedPhotoUrl('a.jpg') && item1?.active === true
+        && item1?.taskId === 'fp-auto' && item1?.teamId === fUid,
+      JSON.stringify(item1));
+
+    // 2) Staff-review approve path → a second item (game-doc read on the staff path).
+    await fp.call('submitStationPhoto', { ...FCTX, teamId: fUid, taskId: 'fp-rev', photoUrl: feedPhotoUrl('b.jpg') });
+    const rev = await creator.call('reviewStationSubmission', { ...FCTX, teamId: fUid, taskId: 'fp-rev', approved: true });
+    check('feed: staff review approves', rev?.approved === true);
+    const afterReview = await fp.getColAt(feedCol);
+    check('feed: staff approval broadcast a second item', afterReview.length === 2, String(afterReview.length));
+    const item2 = afterReview.find((d) => d.taskId === 'fp-rev');
+    check('feed: reviewed item carries the submitted photo + title',
+      item2?.photoUrl === feedPhotoUrl('b.jpg') && item2?.taskTitle === 'Team at the gate' && item2?.active === true,
+      JSON.stringify(item2));
+
+    // 3) Reaction semantics: dedup (same emoji is a no-op) + switch (count moves).
+    const r1 = await fp.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' });
+    check('react: first reaction counts', r1?.changed === true && r1?.reactions?.['👍'] === 1, JSON.stringify(r1));
+    const r2 = await fp.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' });
+    check('react: same emoji again is a no-op (never double-counts)',
+      r2?.changed === false && r2?.reactions?.['👍'] === 1, JSON.stringify(r2));
+    const r3 = await fp.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '🔥' });
+    check('react: switching emoji moves the count (old key dropped)',
+      r3?.changed === true && r3?.reactions?.['🔥'] === 1 && r3?.reactions?.['👍'] === undefined,
+      JSON.stringify(r3));
+    const rOwner = await creator.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' });
+    check('react: a second identity (owner fallback) accumulates independently',
+      rOwner?.reactions?.['🔥'] === 1 && rOwner?.reactions?.['👍'] === 1, JSON.stringify(rOwner?.reactions));
+
+    // 4) Denials: invalid emoji, stranger, participant moderation.
+    await expectError('react: emoji outside the closed set is rejected',
+      fp.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '💀' }),
+      { codeIn: ['functions/invalid-argument'] });
+    const feedStranger = makeParty('feedStranger');
+    await signInAnonymously(feedStranger.auth);
+    await expectError('react: a stranger (not in the run, not staff) is denied',
+      feedStranger.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' }),
+      { codeIn: ['functions/permission-denied', 'functions/not-found'] });
+    await expectError('hide: a participant cannot hide a feed item',
+      fp.call('hideFeedItem', { ...FCTX, itemId: item2.id }),
+      { codeIn: ['functions/permission-denied'] });
+
+    // 5) Owner hides an item; a hidden item no longer accepts reactions.
+    const hid = await creator.call('hideFeedItem', { ...FCTX, itemId: item2.id });
+    check('hide: owner hides the item', hid?.ok === true);
+    const afterHide = await fp.getColAt(feedCol);
+    const hidden = afterHide.find((d) => d.id === item2.id);
+    check('hide: item flips active:false (listeners filter it out)', hidden?.active === false, JSON.stringify(hidden));
+    await expectError('react: a hidden item rejects reactions',
+      fp.call('reactToFeedItem', { ...FCTX, itemId: item2.id, emoji: '👍' }),
+      { codeIn: ['functions/not-found'] });
+
+    // 5b) Ceremony mode (ceremony-mode): getPublicLeaderboard carries the
+    //     server-selected top-liked ceremonyFeed — published-gated, hidden items
+    //     excluded, and shaped exactly {taskTitle,teamName,photoUrl,totalReactions}.
+    const preCeremony = await fp.call('getPublicLeaderboard', { code: fc });
+    check('ceremony: feed run pre-publish ceremonyFeed is []',
+      Array.isArray(preCeremony?.ceremonyFeed) && preCeremony.ceremonyFeed.length === 0,
+      JSON.stringify(preCeremony?.ceremonyFeed));
+    await creator.call('refreshLeaderboard', { ...FCTX, publish: true });
+    const postCeremony = await fp.call('getPublicLeaderboard', { code: fc });
+    const cf = postCeremony?.ceremonyFeed ?? [];
+    check('ceremony: post-publish ceremonyFeed carries the liked item only (hidden excluded)',
+      cf.length === 1 && cf[0]?.taskTitle === 'Snap the mural' && cf[0]?.totalReactions === 2,
+      JSON.stringify(cf));
+    check('ceremony: feed is capped at 20', cf.length <= 20, String(cf.length));
+    check('ceremony: sorted by totalReactions desc',
+      cf.every((x, i) => i === 0 || cf[i - 1].totalReactions >= x.totalReactions));
+    const cfKeys = Object.keys(cf[0] ?? {}).sort().join(',');
+    check('ceremony: item shape leaks no reactedBy/active/ids',
+      cfKeys === 'photoUrl,taskTitle,teamName,totalReactions', cfKeys);
+
+    // 6) photoFeedEnabled:false gates ALL feed writes (enforced write-side —
+    //    rules cannot conditionally gate reads on the flag).
+    const { gameId: offGame } = await creator.call('createGame', { title: 'Feed Off Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: offGame, scoringPreset: 'fixed_points_speed', photoFeedEnabled: false,
+      stages: [{ id: 'fo-s', order: 0, title: 'S', isFinal: true, tasks: [photoTask('fo-auto', 'Quiet photo', 0)] }],
+    });
+    const { game: offGameDoc } = await creator.call('getGame', { gameId: offGame });
+    check('feed off: updateGame persists photoFeedEnabled:false', offGameDoc?.photoFeedEnabled === false);
+    const { runId: offRun, accessCode: offCode } = await creator.call('launchRun', { gameId: offGame });
+    const offP = makeParty('feedOffPlayer');
+    const offCred = await signInAnonymously(offP.auth);
+    await offP.call('joinRun', { code: offCode, displayName: 'Quiet Team' });
+    await creator.call('startTeams', { gameId: offGame, runId: offRun });
+    const offUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${offRun}/teams/${offCred.user.uid}/q.jpg`)}?alt=media`;
+    const offSubmit = await offP.call('submitStationPhoto', {
+      ownerUid: OWNER, gameId: offGame, runId: offRun, teamId: offCred.user.uid, taskId: 'fo-auto', photoUrl: offUrl,
+    });
+    check('feed off: photo still auto-approves (completion unaffected)', offSubmit?.autoApproved === true);
+    const offItems = await offP.getColAt(`users/${OWNER}/games/${offGame}/runs/${offRun}/feedItems`);
+    check('feed off: NO feed item is written when the game disables the feed', offItems.length === 0, String(offItems.length));
+
+    // 7) Retention: feed items (photo URLs + team names) die with the run's PII.
+    const prunedFeed = await platformAdmin.call('pruneRunNow', { ...FCTX });
+    check('feed: pruneRunNow succeeds on the feed run', prunedFeed?.ok === true, JSON.stringify(prunedFeed));
+    const afterPrune = await fp.getColAt(feedCol);
+    check('feed: prune deletes every feed item', afterPrune.length === 0, String(afterPrune.length));
+  });
 
   await scenario('task types: quiz · numeric · geofence · sequence · trigger modes', async () => {
 
@@ -1099,6 +1421,170 @@ async function main() {
     const spF = await pP.call('getMyTeamState', { code: cP });
     check('scheduled: past-release run completes to finished', spF?.team?.status === 'finished', spF?.team?.status);
   }); // scenario: scheduled release
+
+  await scenario('unlockable tasks (same-stage prerequisites)', async () => {
+    // A 2-task stage where B unlocks only after A. Routing must never hand out
+    // B first, a direct completeTask(B) is refused, and once A completes B is
+    // assigned and completable. The gate ids pass the sanitizer (not a secret).
+    const { gameId: gU } = await creator.call('createGame', { title: 'Unlock Chain', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gU,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'us0', order: 0, title: 'Chain', isFinal: true, tasks: [
+          { id: 'u-a', title: 'Solve the cipher', type: 'field', triggerMode: 'instant',
+            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+          { id: 'u-b', title: 'Open the vault', type: 'field', triggerMode: 'instant',
+            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+            unlockAfterTaskIds: ['u-a'] },
+        ] },
+      ],
+    });
+    const { runId: rU, accessCode: cU } = await creator.call('launchRun', { gameId: gU });
+    const pU = makeParty('playerUnlock');
+    await signInAnonymously(pU.auth);
+    await pU.call('joinRun', { code: cU, displayName: 'Unlocker' });
+    await creator.call('startTeams', { gameId: gU, runId: rU });
+    const CU = { ownerUid: creatorCred.user.uid, gameId: gU, runId: rU };
+
+    // Sanitizer passthrough: the locked task still names its prerequisites, and
+    // the payload stays allowlisted (unlockAfterTaskIds is a known-safe key).
+    const s0 = await pU.call('getMyTeamState', { code: cU });
+    const lockedB = s0?.activeStageTasks?.find((t) => t.id === 'u-b');
+    check('unlock: unlockAfterTaskIds survives the sanitizer',
+      JSON.stringify(lockedB?.unlockAfterTaskIds) === JSON.stringify(['u-a']),
+      JSON.stringify(lockedB?.unlockAfterTaskIds));
+    assertTaskPayloadAllowlisted('unlock: locked task', lockedB);
+
+    // Anti-cheat: a hand-crafted completion of the locked task is refused.
+    await expectError('unlock: direct completeTask on a locked task is refused',
+      pU.call('completeTask', { ...CU, taskId: 'u-b' }),
+      { match: /locked|prerequisite/i });
+
+    // Routing hands out A (never the locked B).
+    const asg = await pU.call('requestNextTask', { ...CU, lat: 0, lng: 0 });
+    check('unlock: routing assigns the prerequisite-free task first', asg?.taskId === 'u-a', asg?.taskId);
+
+    // Completing A opens B: the follow-up assignment picks it up and it completes.
+    const doneA = await pU.call('completeTask', { ...CU, taskId: 'u-a' });
+    check('unlock: after A, B is assigned', doneA?.nextTaskId === 'u-b', doneA?.nextTaskId);
+    await pU.call('completeTask', { ...CU, taskId: 'u-b' });
+    const s1 = await pU.call('getMyTeamState', { code: cU });
+    check('unlock: chain completes to finished', s1?.team?.status === 'finished', s1?.team?.status);
+
+    // Save-time validation: a prerequisite cycle is rejected loud.
+    await expectError('unlock: cyclic prerequisite graph is rejected',
+      creator.call('updateGame', {
+        gameId: gU,
+        stages: [
+          { id: 'us0', order: 0, title: 'Cycle', isFinal: true, tasks: [
+            { id: 'u-b', title: 'B', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+              unlockAfterTaskIds: ['u-c'] },
+            { id: 'u-c', title: 'C', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+              unlockAfterTaskIds: ['u-b'] },
+          ] },
+        ],
+      }),
+      { match: /cycle/i });
+
+    // Self-reference and unknown/cross-stage ids are rejected too.
+    await expectError('unlock: self-referencing prerequisite is rejected',
+      creator.call('updateGame', {
+        gameId: gU,
+        stages: [
+          { id: 'us0', order: 0, title: 'Selfie', isFinal: true, tasks: [
+            { id: 'u-s', title: 'S', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+              unlockAfterTaskIds: ['u-s'] },
+          ] },
+        ],
+      }),
+      { match: /itself|unknown/i });
+  }); // scenario: unlockable tasks
+
+  await scenario('task expiry (timed close + in-flight auto-skip)', async () => {
+    // A 2-task stage where E expires 12s after launch (fractional minutes are
+    // honored exactly so tests don't wait whole minutes; the window still leaves
+    // room for the join/start round-trips — launchedAt is set at launchRun). E is
+    // at the team's location so routing picks it first; F is far away with a
+    // generous expiry (sanitizer passthrough check). After E closes:
+    // completeTask(E) is refused, then the next requestNextTask sweeps the stuck
+    // task (skipped + station slot freed) and reroutes the team.
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gX } = await creator.call('createGame', { title: 'Expiry Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gX,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'xs0', order: 0, title: 'Pop-up stations', isFinal: true, tasks: [
+          { id: 'x-e', title: 'Flash bonus', type: 'field', triggerMode: 'instant',
+            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+            expiresAfterMinutes: 0.2 }, // 12s
+          { id: 'x-f', title: 'Steady station', type: 'field', triggerMode: 'instant',
+            coordinates: { lat: 1, lng: 1 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+            expiresAfterMinutes: 120 },
+        ] },
+      ],
+    });
+    const { runId: rX, accessCode: cX } = await creator.call('launchRun', { gameId: gX });
+    const pX = makeParty('playerExpiry');
+    await signInAnonymously(pX.auth);
+    await pX.call('joinRun', { code: cX, displayName: 'Sprinter' });
+    await creator.call('startTeams', { gameId: gX, runId: rX });
+    const CX = { ownerUid: OWNER, gameId: gX, runId: rX };
+
+    // The nearby flash task is assigned while its window is open.
+    const asg = await pX.call('requestNextTask', { ...CX, lat: 0, lng: 0 });
+    check('expiry: open flash task is assigned first', asg?.taskId === 'x-e', asg?.taskId);
+
+    // Sanitizer passthrough: expiresAfterMinutes reaches the client (countdown UI).
+    const s0 = await pX.call('getMyTeamState', { code: cX });
+    const fTask = s0?.activeStageTasks?.find((t) => t.id === 'x-f');
+    check('expiry: expiresAfterMinutes survives the sanitizer', fTask?.expiresAfterMinutes === 120, fTask?.expiresAfterMinutes);
+    assertTaskPayloadAllowlisted('expiry: generous-expiry task', fTask);
+
+    // Let the flash window close (server clock decides, not the client). Wait
+    // relative to the run's actual launchedAt, not a blind sleep.
+    const launchedMs = Date.parse((await creator.getDocAt(`users/${OWNER}/games/${gX}/runs/${rX}`)).data?.launchedAt);
+    const closeAt = launchedMs + 0.2 * 60_000 + 500; // +0.5s server-clock margin
+    if (Date.now() < closeAt) await new Promise((r) => setTimeout(r, closeAt - Date.now()));
+
+    // A closed task cannot be completed even by a direct call.
+    await expectError('expiry: completing an expired task is refused',
+      pX.call('completeTask', { ...CX, taskId: 'x-e' }),
+      { match: /expired/i });
+
+    // The next poll sweeps the stuck in-flight task: skipped, slot freed, rerouted.
+    const next = await pX.call('requestNextTask', { ...CX, lat: 0, lng: 0 });
+    check('expiry: stuck team is rerouted to the remaining task', next?.taskId === 'x-f', next?.taskId);
+    const s1 = await pX.call('getMyTeamState', { code: cX });
+    const eRec = s1?.team?.stages?.[0]?.tasks?.find((t) => t.taskId === 'x-e');
+    check('expiry: expired in-flight task is auto-skipped', eRec?.status === 'skipped', eRec?.status);
+    const runDoc = await creator.getDocAt(`users/${OWNER}/games/${gX}/runs/${rX}`);
+    const counts = runDoc.data?.taskCounts ?? {};
+    check('expiry: expired task\'s station slot is released', (counts['x-e'] ?? 0) === 0, JSON.stringify(counts));
+
+    // Finishing the surviving task completes the run (skipped ≠ blocked).
+    await pX.call('completeTask', { ...CX, taskId: 'x-f' });
+    const s2 = await pX.call('getMyTeamState', { code: cX });
+    check('expiry: run completes with the expired task skipped', s2?.team?.status === 'finished', s2?.team?.status);
+
+    // Save-time validation: an empty availability window is rejected loud.
+    await expectError('expiry: empty availability window (expiry ≤ release) is rejected',
+      creator.call('updateGame', {
+        gameId: gX,
+        stages: [
+          { id: 'xs0', order: 0, title: 'Empty window', isFinal: true, tasks: [
+            { id: 'x-w', title: 'Never playable', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+              releaseAfterMinutes: 30, expiresAfterMinutes: 10 },
+          ] },
+        ],
+      }),
+      { match: /window|expire/i });
+  }); // scenario: task expiry
 
   await scenario('chat integration webhook (Slack/Teams URL validation)', async () => {
     const { gameId: gW } = await creator.call('createGame', { title: 'Webhook Game', mode: 'individual' });
@@ -1807,6 +2293,211 @@ async function main() {
     check('hot-zone: deactivate clears the zone', deact?.ok === true);
   }); // scenario: hot zone
 
+  // ── Power-ups (change: power-ups) ───────────────────────────────────────────
+  // Predicts the deterministic award sequence from the seeded roll, then audits
+  // that consumption (×2), the flat bonus (−15 bonusPenalty), idempotence, and the
+  // leaderboard invariants all hold. Embedded FNV-1a copy — PINNED by the vitest
+  // known vectors in functions/src/__property__/powerUps.property.test.ts (the two
+  // copies can never silently diverge). NEVER import Math.random here.
+  const POWER_UP_RATE_E2E = 25;
+  const POWER_UP_BONUS_E2E = 15;
+  function puHash(runId, teamId, taskId) {
+    const input = `${runId}:${teamId}:${taskId}`;
+    let h = 0x811c9dc5;
+    for (let i = 0; i < input.length; i++) {
+      h ^= input.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h >>> 0;
+  }
+  function puRoll(runId, teamId, taskId) {
+    const h = puHash(runId, teamId, taskId);
+    if (h % 100 >= POWER_UP_RATE_E2E) return null;
+    return (h >>> 8) % 2 === 0 ? 'double_points' : 'bonus_points';
+  }
+  await scenario('power-ups (seeded award + consume + invariants)', async () => {
+    // Anti-drift self-check: the embedded copy must reproduce the pinned vectors.
+    check('power-ups: embedded FNV matches pinned vectors',
+      puHash('run1', 'teamA', 't13') === 1474030213 &&
+      puRoll('run1', 'teamA', 't13') === 'double_points' &&
+      puRoll('run1', 'teamA', 't6') === 'bonus_points' &&
+      puRoll('run1', 'teamA', 't0') === null,
+      `${puHash('run1', 'teamA', 't13')} ${puRoll('run1', 'teamA', 't6')}`);
+    const AT = { lat: 31.78, lng: 35.21 };
+    // 12 fixed-points tasks in one non-partial stage so ALL get completed and each
+    // gets a roll. Distinct ids drive distinct rolls.
+    const taskIds = Array.from({ length: 12 }, (_, i) => `pu-${i}`);
+    const { gameId: puGame } = await creator.call('createGame', { title: 'Power-ups Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: puGame,
+      scoringPreset: 'fixed_points_speed',
+      powerUpsEnabled: true,
+      stages: [{
+        id: 'pu-stage', order: 0, title: 'Power stage', isFinal: true,
+        tasks: taskIds.map((id) => ({
+          id, title: id, type: 'field', coordinates: AT,
+          difficulty: 3, estimatedMinutes: 5, pointValue: 100, maxConcurrentTeams: 12,
+        })),
+      }],
+    });
+    const { runId: puRun, accessCode: puCode } = await creator.call('launchRun', { gameId: puGame });
+    const puPlayer = makeParty('puPlayer');
+    await signInAnonymously(puPlayer.auth);
+    const puJoin = await puPlayer.call('joinRun', { code: puCode, displayName: 'Charged' });
+    const puTeam = puJoin.teamId;
+    await creator.call('startTeams', { gameId: puGame, runId: puRun });
+
+    // Complete every task, following routing one-at-a-time, recording the ACTUAL
+    // completion order (the double consumes on the next scoring completion, so the
+    // order matters and we verify against what the server actually did).
+    const completionOrder = [];
+    for (let i = 0; i < taskIds.length + 2 && completionOrder.length < taskIds.length; i++) {
+      let st = await puPlayer.call('getMyTeamState', { code: puCode });
+      let assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      if (!assigned) {
+        await puPlayer.call('requestNextTask', { code: puCode, lat: AT.lat, lng: AT.lng });
+        st = await puPlayer.call('getMyTeamState', { code: puCode });
+        assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      }
+      if (!assigned) break;
+      await puPlayer.call('completeTask', { taskId: assigned.taskId, code: puCode, lat: AT.lat, lng: AT.lng });
+      completionOrder.push(assigned.taskId);
+    }
+    check('power-ups: completed all 12 tasks', completionOrder.length === 12, String(completionOrder.length));
+
+    const finState = await puPlayer.call('getMyTeamState', { code: puCode });
+    const finTeam = finState?.team;
+    const recs = finTeam?.stages?.[0]?.tasks ?? [];
+    const recById = Object.fromEntries(recs.map((t) => [t.taskId, t]));
+
+    // Predict per-task awards from the deterministic roll, applied over the OBSERVED
+    // completion order with the single-armed-slot rule, and predict which task each
+    // double consumes on (the next >0-point completion).
+    let armed = false;               // is a double currently armed?
+    const predicted = { bonuses: [], doubles: [] }; // doubles: {awardTask, consumedBy}
+    let pendingDoubleAward = null;
+    for (const tid of completionOrder) {
+      // Consume first (this completion earns >0 for a fixed_points task).
+      if (armed) {
+        predicted.doubles.push({ awardTask: pendingDoubleAward, consumedBy: tid });
+        armed = false;
+        pendingDoubleAward = null;
+      }
+      // Then roll.
+      let won = puRoll(puRun, puTeam, tid);
+      if (won === 'double_points' && armed) won = 'bonus_points'; // single slot
+      if (won === 'bonus_points') predicted.bonuses.push(tid);
+      else if (won === 'double_points') { armed = true; pendingDoubleAward = tid; }
+    }
+
+    // Assert the log matches the prediction exactly (order-independent set compare).
+    const log = finTeam?.powerUps?.log ?? [];
+    const bonusLog = log.filter((e) => e.type === 'bonus_points').map((e) => e.taskId).sort();
+    const doubleLog = log.filter((e) => e.type === 'double_points');
+    check('power-ups: bonus awards match the predicted set',
+      JSON.stringify(bonusLog) === JSON.stringify([...predicted.bonuses].sort()),
+      `got ${JSON.stringify(bonusLog)} want ${JSON.stringify([...predicted.bonuses].sort())}`);
+    check('power-ups: double awards match the predicted set',
+      JSON.stringify(doubleLog.map((e) => e.taskId).sort()) === JSON.stringify(predicted.doubles.map((d) => d.awardTask).sort()),
+      `got ${JSON.stringify(doubleLog.map((e) => e.taskId))} want ${JSON.stringify(predicted.doubles.map((d) => d.awardTask))}`);
+
+    // Each bonus decremented bonusPenalty by 15 (bonus is a negative penalty).
+    check('power-ups: bonusPenalty == -15 * bonus count',
+      (finTeam?.bonusPenalty ?? 0) === -POWER_UP_BONUS_E2E * predicted.bonuses.length,
+      `bonusPenalty=${finTeam?.bonusPenalty} bonuses=${predicted.bonuses.length}`);
+
+    // Each consumed double exactly doubled the NEXT completed task's earnedScore, and
+    // recorded powerUpMultiplier:2 in its breakdown; the double log entry stamped
+    // consumedByTaskId + amount (the pre-double points).
+    for (const d of predicted.doubles) {
+      const consumedRec = recById[d.consumedBy];
+      check(`power-ups: task ${d.consumedBy} was doubled (×2 breakdown)`,
+        consumedRec?.scoreBreakdown?.powerUpMultiplier === 2 &&
+        consumedRec?.scoreBreakdown?.total === consumedRec?.scoreBreakdown?.taskScore * 2,
+        JSON.stringify(consumedRec?.scoreBreakdown));
+      const logEntry = doubleLog.find((e) => e.taskId === d.awardTask);
+      check(`power-ups: double from ${d.awardTask} stamped consumedByTaskId=${d.consumedBy}`,
+        logEntry?.consumedByTaskId === d.consumedBy && logEntry?.amount === consumedRec?.scoreBreakdown?.taskScore,
+        JSON.stringify(logEntry));
+    }
+    // The armed slot is cleared once every double consumed (all tasks done).
+    check('power-ups: no double left armed after all completions',
+      !finTeam?.powerUps?.active || finTeam?.powerUps?.active === null,
+      JSON.stringify(finTeam?.powerUps?.active));
+
+    // Σ earned == score still holds (doubled values flow through stage roll-up).
+    assertScoreConservation('power-ups', finTeam);
+
+    // Idempotence: re-submitting a completed task changes nothing.
+    const before = JSON.stringify({ log: finTeam?.powerUps?.log, bp: finTeam?.bonusPenalty, score: finTeam?.score });
+    await puPlayer.call('completeTask', { taskId: completionOrder[0], code: puCode, lat: AT.lat, lng: AT.lng });
+    const afterDup = (await puPlayer.call('getMyTeamState', { code: puCode }))?.team;
+    check('power-ups: duplicate completion is a no-op (no double-award)',
+      JSON.stringify({ log: afterDup?.powerUps?.log, bp: afterDup?.bonusPenalty, score: afterDup?.score }) === before);
+
+    // Live leaderboard invariants + live/final parity (bonusPenalty reflected both).
+    const puLive = await creator.call('refreshLeaderboard', { gameId: puGame, runId: puRun, publish: false });
+    assertLeaderboardInvariants('power-ups live', puLive?.rankings, [puTeam]);
+    const puLiveScore = puLive?.rankings?.[0]?.score;
+    const puFinal = await creator.call('finalizeRun', { gameId: puGame, runId: puRun });
+    const puFinalScore = (puFinal?.rankings ?? puFinal?.leaderboard?.rankings ?? [])[0]?.score;
+    check('power-ups: live and final score agree (bonusPenalty parity)',
+      puLiveScore === puFinalScore, `live=${puLiveScore} final=${puFinalScore}`);
+
+    // ── Negative control A: flag ABSENT ⇒ powerUps never appears ───────────────
+    const { gameId: ncGame } = await creator.call('createGame', { title: 'No Power-ups', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: ncGame,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 'nc-stage', order: 0, title: 'Plain', isFinal: true,
+        tasks: [{ id: 'nc-0', title: 'Plain task', type: 'field', coordinates: AT, difficulty: 3, estimatedMinutes: 5, pointValue: 100, maxConcurrentTeams: 3 }],
+      }],
+    });
+    const { runId: ncRun, accessCode: ncCode } = await creator.call('launchRun', { gameId: ncGame });
+    const ncP = makeParty('ncPlayer');
+    await signInAnonymously(ncP.auth);
+    await ncP.call('joinRun', { code: ncCode, displayName: 'Plain' });
+    await creator.call('startTeams', { gameId: ncGame, runId: ncRun });
+    {
+      let st = await ncP.call('getMyTeamState', { code: ncCode });
+      let a = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      if (a) await ncP.call('completeTask', { taskId: a.taskId, code: ncCode, lat: AT.lat, lng: AT.lng });
+    }
+    const ncTeam = (await ncP.call('getMyTeamState', { code: ncCode }))?.team;
+    check('power-ups: flag-absent game never grows powerUps',
+      ncTeam?.powerUps === undefined || (ncTeam?.powerUps?.log?.length ?? 0) === 0,
+      JSON.stringify(ncTeam?.powerUps));
+
+    // ── Negative control B: time_only + flag on ⇒ no rolls ─────────────────────
+    const { gameId: toGame } = await creator.call('createGame', { title: 'Time-only Power', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: toGame,
+      scoringPreset: 'time_only',
+      powerUpsEnabled: true,
+      stages: [{
+        id: 'to-stage', order: 0, title: 'Timed', isFinal: true,
+        tasks: Array.from({ length: 6 }, (_, i) => ({ id: `to-${i}`, title: `T${i}`, type: 'field', coordinates: AT, difficulty: 3, estimatedMinutes: 5, pointValue: 100, maxConcurrentTeams: 6 })),
+      }],
+    });
+    const { runId: toRun, accessCode: toCode } = await creator.call('launchRun', { gameId: toGame });
+    const toP = makeParty('toPlayer');
+    await signInAnonymously(toP.auth);
+    await toP.call('joinRun', { code: toCode, displayName: 'Ticker' });
+    await creator.call('startTeams', { gameId: toGame, runId: toRun });
+    for (let i = 0; i < 8; i++) {
+      let st = await toP.call('getMyTeamState', { code: toCode });
+      let a = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      if (!a) { await toP.call('requestNextTask', { code: toCode, lat: AT.lat, lng: AT.lng }); st = await toP.call('getMyTeamState', { code: toCode }); a = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned'); }
+      if (!a) break;
+      await toP.call('completeTask', { taskId: a.taskId, code: toCode, lat: AT.lat, lng: AT.lng });
+    }
+    const toTeam = (await toP.call('getMyTeamState', { code: toCode }))?.team;
+    check('power-ups: time_only never rolls even with the flag on',
+      (toTeam?.powerUps?.log?.length ?? 0) === 0 && (toTeam?.bonusPenalty ?? 0) === 0,
+      JSON.stringify({ log: toTeam?.powerUps?.log, bp: toTeam?.bonusPenalty }));
+  }); // scenario: power-ups
+
   // ── Challenge a friend (checkChallengeAnswer) ───────────────────────────────
   // Isolated published quiz game so the main lifecycle is untouched.
   await scenario('challenge a friend (viral teaser)', async () => {
@@ -2172,6 +2863,43 @@ async function main() {
     // Live-ops broadcasts: push then tear down.
     const ann = await creator.call('pushAnnouncement', { ...CV, title: 'Heads up', message: 'Move to zone B' });
     check('pushAnnouncement returns an id', !!ann?.announcementId, ann?.announcementId);
+
+    // Targeted announcements (change: targeted-announcements).
+    const annCol = `users/${OWNER}/games/${cvGame}/runs/${cvRun}/announcements`;
+    // Untargeted doc carries no teamId and kind:'announcement'.
+    {
+      const doc = (await creator.getColAt(annCol)).find((a) => a.id === ann.announcementId);
+      check('untargeted announcement carries no teamId', doc && doc.teamId === undefined, JSON.stringify(doc?.teamId));
+      check('untargeted announcement kind is announcement', doc?.kind === 'announcement', doc?.kind);
+    }
+    // Targeted at a real joined team persists teamId + kind.
+    const tann = await creator.call('pushAnnouncement', { ...CV, message: 'Team-only heads up', teamId: cvUid });
+    check('targeted pushAnnouncement returns an id', !!tann?.announcementId, tann?.announcementId);
+    {
+      const doc = (await creator.getColAt(annCol)).find((a) => a.id === tann.announcementId);
+      check('targeted announcement persists teamId', doc?.teamId === cvUid, doc?.teamId);
+      check('targeted announcement kind is announcement', doc?.kind === 'announcement', doc?.kind);
+    }
+    // Bogus teamId ⇒ not-found (a typo can't silently broadcast to nobody).
+    {
+      let denied = false;
+      try {
+        await creator.call('pushAnnouncement', { ...CV, message: 'nope', teamId: 'no-such-team-xyz' });
+      } catch (e) { denied = /not-found/i.test(String(e?.code || e?.message || e)); }
+      check('bogus teamId is rejected not-found', denied);
+    }
+
+    // adjustTeamScore: existing scoring behavior PLUS a new kind:'score' notice.
+    const adj = await creator.call('adjustTeamScore', { ...CV, teamId: cvUid, delta: 50, reason: 'great teamwork' });
+    check('adjustTeamScore decrements bonusPenalty by delta', adj?.newBonusPenalty === -50, JSON.stringify(adj));
+    {
+      const teamDoc = await creator.getDocAt(`users/${OWNER}/games/${cvGame}/runs/${cvRun}/teams/${cvUid}`);
+      check('adjustTeamScore wrote bonusPenalty on the team', (teamDoc.data?.bonusPenalty ?? 0) === -50, String(teamDoc.data?.bonusPenalty));
+      const notice = (await creator.getColAt(annCol)).find((a) => a.kind === 'score' && a.teamId === cvUid && a.delta === 50);
+      check('adjustTeamScore wrote a kind:score notice', !!notice, JSON.stringify(notice));
+      check('score notice carries a bilingual message', !!notice?.message && !!notice?.messageHe && notice?.active === true, JSON.stringify(notice));
+    }
+
     const deactAnn = await creator.call('deactivateAnnouncement', { ...CV, announcementId: ann.announcementId });
     check('deactivateAnnouncement acks', deactAnn?.ok === true);
     const flash = await creator.call('pushFlashMission', { ...CV, title: 'Bonus!', description: 'First to the gate', bonusPoints: 50, ttlSeconds: 600 });

@@ -61,8 +61,10 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   }
   // Capture zones carry the owning team's display name (mild PII) — purge them too.
   const zonesSnap = await db.collection(`${runPath}/zones`).get();
+  // Live photo feed items carry photo URLs + team names (live-photo-feed) — purge.
+  const feedSnap = await db.collection(`${runPath}/feedItems`).get();
   const locationsDeleted = await deleteDocsInChunks(
-    [...locSnap.docs, ...trackSnap.docs, ...zonesSnap.docs].map((d) => d.ref).concat(trackableLogRefs),
+    [...locSnap.docs, ...trackSnap.docs, ...zonesSnap.docs, ...feedSnap.docs].map((d) => d.ref).concat(trackableLogRefs),
   );
 
   // 2) Clear photo URLs from each team's submissions (keep scores/answers), and

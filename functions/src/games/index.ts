@@ -26,6 +26,9 @@ import {
   type TaskMedia,
   isAllowedWebhookUrl,
   detectPlatform,
+  validateUnlockGraph,
+  validateAvailabilityWindow,
+  validateOrderItems,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
@@ -110,7 +113,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     title, description, mode, stages, scoringPreset, scoringOptions,
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
-    integrationWebhookUrl, allowInstantPlay,
+    integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
   } = data as UpdateGamePayload;
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -126,7 +129,39 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (title !== undefined)              updates.title = title.trim();
   if (description !== undefined)        updates.description = description?.trim();
   if (mode !== undefined)               updates.mode = mode;
-  if (stages !== undefined)             updates.stages = normalizeStagesMedia(stages);
+  if (stages !== undefined) {
+    // Save-time validation. Unlockable tasks (change: unlockable-tasks): the
+    // per-stage prerequisite graph must be sound — no self-reference, no
+    // cross-stage/unknown ids, no cycles (a cycle-free graph always leaves at
+    // least one prerequisite-free task, so the stage stays routable). Task
+    // expiry (change: task-expiry): a relative expiry at or before a relative
+    // release is an empty availability window and can never be played.
+    const problems: string[] = [];
+    for (const stage of stages ?? []) {
+      problems.push(...validateUnlockGraph(stage).errors);
+      for (const task of stage.tasks ?? []) {
+        const windowError = validateAvailabilityWindow(task);
+        if (windowError) problems.push(`Task "${task.title || task.id}": ${windowError}`);
+        // Ordering quiz (change: quiz-ordering): orderItems only on a quiz task,
+        // never mixed with choices/typed answers (one grading mode per task), and
+        // the item list itself must be valid (3 to 10 non-empty distinct items).
+        if (task.orderItems !== undefined) {
+          const label = `Task "${task.title || task.id}"`;
+          if (task.type !== 'quiz') {
+            problems.push(`${label}: ordering items are only valid on a quiz task`);
+          } else if ((task.choices?.length ?? 0) > 0 || (task.answers?.length ?? 0) > 0) {
+            problems.push(`${label}: a quiz cannot mix ordering items with choices or typed answers`);
+          }
+          const orderError = validateOrderItems(task.orderItems);
+          if (orderError) problems.push(`${label}: ${orderError}`);
+        }
+      }
+    }
+    if (problems.length > 0) {
+      throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
+    }
+    updates.stages = normalizeStagesMedia(stages);
+  }
   if (scoringPreset !== undefined)      updates.scoringPreset = scoringPreset;
   if (scoringOptions !== undefined)     updates.scoringOptions = scoringOptions;
   if (registrationFields !== undefined) updates.registrationFields = registrationFields;
@@ -139,6 +174,8 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (safeZone !== undefined)           updates.safeZone = safeZone ?? undefined;
   if (benchmarkOptOut !== undefined)    updates.benchmarkOptOut = benchmarkOptOut;
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
+  if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
+  if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
   // Chat integration (change: chat-integrations): validate the owner-supplied
   // webhook URL against the SSRF allow-list. An empty string clears it; a non-empty
   // off-allowlist URL is rejected loud (never silently persisted).

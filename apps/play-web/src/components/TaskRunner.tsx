@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm } from '@rushpoint/shared';
+import { haversineKm, expiryInstantMs } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint,
@@ -161,6 +161,19 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } finally { setBusy(false); }
   }
 
+  // ordering quiz (change: quiz-ordering) — submit the player's arrangement.
+  // A wrong arrangement keeps their layout (they refine, not restart).
+  async function submitOrdered(items: string[]) {
+    setBusy(true); setMsg('');
+    try {
+      const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items });
+      if (res.correct) onChanged();
+      else setMsg(t.task.orderingWrong);
+    } catch (e) {
+      setMsg(submitError(e, t.task.failed));
+    } finally { setBusy(false); }
+  }
+
   // sequence — submit the current ordered step. Returns whether the step was
   // accepted so the input is cleared only on success (P3).
   async function sequenceStep(stepIndex: number, ans: string): Promise<boolean> {
@@ -189,12 +202,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   async function revealHint() {
     if (hint) return;
-    const cost = task!.hintPenalty ?? 25;
-    if (!(await dialog.confirm(t.task.hintConfirm({ cost }), { confirmLabel: t.task.hintConfirmBtn }))) return;
+    // Hint auto escalation: when the server flagged the hint FREE, skip the
+    // cost confirmation (the charge decision is re-made server-side anyway).
+    if (!task!.hintFreeNow) {
+      const cost = task!.hintPenalty ?? 25;
+      if (!(await dialog.confirm(t.task.hintConfirm({ cost }), { confirmLabel: t.task.hintConfirmBtn }))) return;
+    }
     setBusy(true);
     try {
       const res = await requestTaskHint({ ...ctx, taskId: task!.id });
       setHint(res.hint);
+      if (res.penalty === 0 && res.free) setMsg(t.task.hintRevealedFree);
     } catch (e) {
       setMsg(submitError(e, t.task.noHint));
     } finally { setBusy(false); }
@@ -215,6 +233,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
       {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
       {task.smart?.longInstructions && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
+
+      <ExpiryCountdown key={task.id} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
@@ -241,7 +261,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         ) : task.type === 'smart_station' ? (
           <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
-          <QuizEntry task={task} busy={frozen} onSubmit={answer} />
+          task.orderItems && task.orderItems.length > 0
+            // Ordering quiz: the items arrive server-shuffled (per-team seed);
+            // key by task id so a new task reseeds the local arrangement.
+            ? <OrderingEntry key={task.id} items={task.orderItems} busy={frozen} onSubmit={submitOrdered} />
+            : <QuizEntry task={task} busy={frozen} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
           <NumericEntry busy={frozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
@@ -257,14 +281,61 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         <div className="mt-3">
           {hint
             ? <p dir="auto" className="text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
-            : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
-                💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
-              </button>}
+            : task.hintFreeNow
+              // Hint auto escalation: the server says this hint is free right now —
+              // highlight it so a stuck team actually takes the help.
+              ? <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintFreeNow}
+                  className="text-xs font-semibold text-accent bg-accent/10 border border-accent/30 rounded-full px-3 py-1.5 hover:bg-accent/20 disabled:opacity-40">
+                  🎁 {t.task.hintFreeNow}
+                </button>
+              : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+                  💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+                </button>}
         </div>
       )}
 
       {msg && <p className="text-center text-sm mt-3 text-zinc-300">{msg}</p>}
     </Card>
+  );
+}
+
+// Task expiry (change: task-expiry): a ticking "expires in mm:ss" badge once
+// fewer than 10 minutes remain, computed from the sanitizer-passthrough
+// `expiresAfterMinutes` + the run's launchedAt (both already in the payload).
+// On hitting zero it triggers the state refresh, so the server sweep skips the
+// closed task and reroutes the team. The server clock decides — this is display.
+function ExpiryCountdown({ task, launchedAt, onExpired }: {
+  task: SafeTask; launchedAt?: string | null; onExpired: () => void;
+}) {
+  const { t } = useT();
+  const closesAt = expiryInstantMs(task, launchedAt ?? undefined);
+  const [now, setNow] = useState(() => Date.now());
+  const fired = useRef(false);
+  useEffect(() => {
+    if (closesAt == null) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [closesAt]);
+  useEffect(() => {
+    if (closesAt != null && now >= closesAt && !fired.current) {
+      fired.current = true;
+      onExpired();
+    }
+  }, [now, closesAt, onExpired]);
+
+  if (closesAt == null) return null;
+  const remaining = closesAt - now;
+  if (remaining >= 10 * 60_000) return null; // countdown only inside the last 10 min
+  if (remaining <= 0) {
+    return <p className="mt-2 text-sm text-rp-alert font-medium">⌛ {t.task.taskExpiredNotice}</p>;
+  }
+  const totalS = Math.ceil(remaining / 1000);
+  const mm = String(Math.floor(totalS / 60)).padStart(2, '0');
+  const ss = String(totalS % 60).padStart(2, '0');
+  return (
+    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-rp-alert tabular-nums">
+      ⏳ {t.task.expiresInLabel({ time: `${mm}:${ss}` })}
+    </div>
   );
 }
 
@@ -321,6 +392,44 @@ function QuizEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; on
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer}
         onKeyDown={(e) => e.key === 'Enter' && val.trim() && onSubmit(val.trim())} />
       <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())}>{t.task.submitAnswer}</Button>
+    </div>
+  );
+}
+
+// Ordering quiz (change: quiz-ordering) — arrange the server-shuffled items with
+// up/down buttons (touch-first, RTL-safe; no drag-and-drop) and submit the
+// arrangement. The parent keeps a wrong arrangement on screen (no reset), so the
+// team refines instead of restarting.
+function OrderingEntry({ items, busy, onSubmit }: {
+  items: string[]; busy: boolean; onSubmit: (arrangement: string[]) => void;
+}) {
+  const { t } = useT();
+  const [arranged, setArranged] = useState<string[]>(items);
+  function move(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= arranged.length) return;
+    const next = arranged.slice();
+    [next[i], next[j]] = [next[j], next[i]];
+    setArranged(next);
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-500">{t.task.orderingInstruction}</p>
+      <ol className="space-y-1.5">
+        {arranged.map((item, i) => (
+          <li key={item} className="flex items-center gap-2 rounded-lg bg-app-raised border border-glass-border px-3 py-2">
+            <span className="text-xs font-bold text-accent w-5 shrink-0 tabular-nums">{i + 1}</span>
+            <span dir="auto" className="flex-1 min-w-0 text-sm text-zinc-100">{item}</span>
+            <button onClick={() => move(i, -1)} disabled={busy || i === 0}
+              aria-label={`${t.task.orderingMoveUp} ${i + 1}`}
+              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
+            <button onClick={() => move(i, 1)} disabled={busy || i === arranged.length - 1}
+              aria-label={`${t.task.orderingMoveDown} ${i + 1}`}
+              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
+          </li>
+        ))}
+      </ol>
+      <Button disabled={busy} onClick={() => onSubmit(arranged)}>{t.task.orderingSubmit}</Button>
     </div>
   );
 }

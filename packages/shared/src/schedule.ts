@@ -73,3 +73,70 @@ export function releaseInstantMs(
   if (candidates.length === 0) return null;
   return Math.max(...candidates);
 }
+
+// ─── Task expiry (change: task-expiry) — the mirror of scheduled release ──────
+// A task may carry `expiresAfterMinutes`: minutes after the run's `launchedAt`
+// at which it STOPS being available. Relative-only in v1 (statically validatable
+// against `releaseAfterMinutes`); fractional minutes honored so tests can use
+// ~1s expiries. Availability everywhere is:
+//   isReleased(t, launchedAt, now) && !isExpired(t, launchedAt, now)
+
+/** A thing that may carry an expiry gate (a Task). */
+export interface ExpiryGate {
+  expiresAfterMinutes?: number; // minutes after run start; closed once elapsed >= it
+}
+
+/**
+ * Whether a gated item has expired at `nowMs`. No gate / non-finite / ≤ 0 ⇒
+ * never expired. No known run start ⇒ NOT expired — nothing can expire before
+ * the run exists (the mirror of isReleased's "no start ⇒ locked": both fail
+ * safe, the task is simply not yet in play).
+ */
+export function isExpired(
+  gate: ExpiryGate | null | undefined,
+  runStartedAt: string | number | null | undefined,
+  nowMs: number,
+): boolean {
+  const after = gate?.expiresAfterMinutes;
+  if (typeof after !== 'number' || !Number.isFinite(after) || after <= 0) return false;
+  const startMs = typeof runStartedAt === 'number'
+    ? runStartedAt
+    : (runStartedAt ? Date.parse(runStartedAt) : NaN);
+  if (Number.isNaN(startMs)) return false; // no run start → nothing can have expired
+  return (nowMs - startMs) >= after * 60_000;
+}
+
+/**
+ * The instant (ms epoch) a gated item closes, for rendering an "expires in…"
+ * countdown. Returns null when there is no expiry gate or no known run start.
+ */
+export function expiryInstantMs(
+  gate: ExpiryGate | null | undefined,
+  runStartedAt: string | number | null | undefined,
+): number | null {
+  const after = gate?.expiresAfterMinutes;
+  if (typeof after !== 'number' || !Number.isFinite(after) || after <= 0) return null;
+  const startMs = typeof runStartedAt === 'number'
+    ? runStartedAt
+    : (runStartedAt ? Date.parse(runStartedAt) : NaN);
+  if (Number.isNaN(startMs)) return null;
+  return startMs + after * 60_000;
+}
+
+/**
+ * Static save-time validation of a release+expiry window. Returns an error
+ * string when BOTH `releaseAfterMinutes` and `expiresAfterMinutes` are set and
+ * the expiry is ≤ the release (an empty window — the task could never be
+ * played). A wall-clock `releaseAt` combined with a relative expiry is NOT an
+ * error (the launch time is unknown statically) — the Builder warns instead.
+ */
+export function validateAvailabilityWindow(gate: ReleaseGate & ExpiryGate): string | null {
+  const release = gate.releaseAfterMinutes;
+  const expiry = gate.expiresAfterMinutes;
+  const hasRelease = typeof release === 'number' && Number.isFinite(release) && release > 0;
+  const hasExpiry = typeof expiry === 'number' && Number.isFinite(expiry) && expiry > 0;
+  if (hasRelease && hasExpiry && (expiry as number) <= (release as number)) {
+    return `Empty availability window: the task would expire (${expiry} min) at or before it releases (${release} min)`;
+  }
+  return null;
+}

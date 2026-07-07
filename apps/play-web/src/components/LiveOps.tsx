@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import type { RunLeaderboard } from '@rushpoint/shared';
+import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@rushpoint/shared';
 import { db } from '../services/firebase';
+import { translations } from '../i18n';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
-interface AnnouncementDoc { id: string; message: string; messageHe?: string; active: boolean; createdAt?: string }
+// Score notices (kind:'score') auto-hide once older than this so a stale bonus
+// doesn't pile up on late joiners; global announcements persist until dismissed.
+const SCORE_NOTICE_TTL_MS = 10 * 60 * 1000;
+
+interface AnnouncementDoc {
+  id: string; message: string; messageHe?: string; active: boolean; createdAt?: string;
+  // Targeted announcements (change: targeted-announcements).
+  teamId?: string; kind?: 'announcement' | 'score'; delta?: number; reason?: string;
+}
 interface FlashDoc { id: string; title: string; titleHe?: string; description?: string; descriptionHe?: string; bonusPoints?: number; expiresAt: string; isActive: boolean }
 
 // Non-blocking live-ops banners + a collapsible leaderboard peek. Rendered above
@@ -52,7 +61,15 @@ export default function LiveOps({
   }, []);
 
   const liveFlashes = flashes.filter((f) => new Date(f.expiresAt).getTime() > now && !dismissed.has(f.id));
-  const liveAnnouncements = announcements.filter((a) => !dismissed.has(a.id));
+  // Targeted announcements: only show a doc that is global or addressed to my team
+  // (client-side courtesy filter — the field is not secret). Score notices also
+  // auto-hide once older than SCORE_NOTICE_TTL_MS.
+  const liveAnnouncements = announcements.filter((a) => {
+    if (dismissed.has(a.id)) return false;
+    if (!announcementVisibleTo(a, myTeamId)) return false;
+    if (a.kind === 'score' && a.createdAt && now - new Date(a.createdAt).getTime() > SCORE_NOTICE_TTL_MS) return false;
+    return true;
+  });
 
   function dismiss(id: string) {
     setDismissed((prev) => new Set(prev).add(id));
@@ -66,13 +83,36 @@ export default function LiveOps({
 
   return (
     <div className="space-y-2 mb-3">
-      {liveAnnouncements.map((a) => (
-        <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/10 border border-accent/30 px-3 py-2">
-          <span className="text-sm">📢</span>
-          <p dir="auto" className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
-          <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
-        </div>
-      ))}
+      {liveAnnouncements.map((a) => {
+        // Score notice (change: targeted-announcements): a distinct toast-style banner
+        // with a sign-aware mono delta + reason. Falls back to the stored bilingual
+        // message; recomputes locally if the delta is present but the message is not.
+        if (a.kind === 'score') {
+          const positive = (a.delta ?? 0) >= 0;
+          const label = positive
+            ? translations[lang].liveOps.scoreBonusToast
+            : translations[lang].liveOps.scorePenaltyToast;
+          const notice = (lang === 'he' && a.messageHe ? a.messageHe : a.message)
+            || (a.delta != null ? formatScoreNotice(a.delta, a.reason, lang) : '');
+          return (
+            <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/15 border-2 border-accent/40 px-3 py-2">
+              <span className="text-sm">💯</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-zinc-400">{label}</p>
+                <p dir="auto" className="text-sm font-mono text-accent">{notice}</p>
+              </div>
+              <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
+            </div>
+          );
+        }
+        return (
+          <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/10 border border-accent/30 px-3 py-2">
+            <span className="text-sm">📢</span>
+            <p dir="auto" className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
+            <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
+          </div>
+        );
+      })}
 
       {liveFlashes.map((f) => {
         const secsLeft = Math.max(0, Math.round((new Date(f.expiresAt).getTime() - now) / 1000));

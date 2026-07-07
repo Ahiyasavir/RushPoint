@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -55,6 +55,10 @@ function buildSavePayload(g: Game) {
     integrationWebhookUrl: g.integrationWebhookUrl,
     // Marketplace instant play (change: marketplace-instant-play).
     allowInstantPlay: g.allowInstantPlay,
+    // Live photo feed (change: live-photo-feed). Undefined means on (default).
+    photoFeedEnabled: g.photoFeedEnabled,
+    // Power-ups (change: power-ups). Undefined means off (default).
+    powerUpsEnabled: g.powerUpsEnabled,
   };
 }
 const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
@@ -370,6 +374,22 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
       </label>
       <p className="text-xs text-zinc-500 -mt-2">{b.instantPlayHelp}</p>
 
+      {/* Live photo feed (change: live-photo-feed): default ON; absent = enabled. */}
+      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <input type="checkbox" checked={game.photoFeedEnabled !== false}
+          onChange={(e) => patch({ photoFeedEnabled: e.target.checked })} />
+        {b.photoFeedLabel}
+      </label>
+      <p className="text-xs text-zinc-500 -mt-2">{b.photoFeedHint}</p>
+
+      {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
+      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <input type="checkbox" checked={!!game.powerUpsEnabled}
+          onChange={(e) => patch({ powerUpsEnabled: e.target.checked })} />
+        {b.powerUpsLabel}
+      </label>
+      <p className="text-xs text-zinc-500 -mt-2">{b.powerUpsHint}</p>
+
       <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
         <Label>{b.scoringPreset}</Label>
         <div className="space-y-2">
@@ -623,6 +643,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               </div>
             )}
 
+            {/* Unlockable tasks (change: unlockable-tasks): warn when the required
+                completion count exceeds the tasks that can actually complete. */}
+            {validateUnlockGraph(activeStage).warnings.length > 0 && (
+              <p className="text-xs text-amber-400">⚠ {b.unlockRequiredCountWarn}</p>
+            )}
+
             {/* Scheduled release — a timed drop of this stage (change: scheduled-release) */}
             {!isFirstStage && (
               <div className="flex items-center flex-wrap gap-2 text-xs text-zinc-400">
@@ -671,9 +697,24 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
           key={editingTask.id}
           task={editingTask}
           gameId={game.id}
+          siblings={editingStage.tasks}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
-            ? () => { updateStage(editingStage.id, { tasks: editingStage.tasks.filter((x) => x.id !== editingTask.id) }); setEditing(null); }
+            ? () => {
+                // Also strip the removed task's id from any sibling's prerequisite
+                // gate (unlockable-tasks) — a dangling id would fail save-time
+                // validation and wedge the autosave.
+                updateStage(editingStage.id, {
+                  tasks: editingStage.tasks
+                    .filter((x) => x.id !== editingTask.id)
+                    .map((x) => {
+                      if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
+                      const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
+                      return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
+                    }),
+                });
+                setEditing(null);
+              }
             : undefined}
           onClose={() => setEditing(null)}
         />
@@ -689,8 +730,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
+  siblings?: Task[];
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -748,7 +790,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId }: {
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <div className="flex-1 min-h-0 p-2.5">
-          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} />
+          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} />
           {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
         </div>
       </div>

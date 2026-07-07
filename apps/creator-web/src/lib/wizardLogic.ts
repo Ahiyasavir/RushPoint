@@ -3,6 +3,7 @@
 // unit-testable without rendering. Steps are ordered by decision priority:
 //   1 Location → 2 Details → 3 Interaction.
 import type { Task, TaskType } from '@rushpoint/shared';
+import { validateOrderItems } from '@rushpoint/shared';
 
 export const WIZARD_STEPS = [1, 2, 3] as const;
 export type WizardStep = (typeof WIZARD_STEPS)[number];
@@ -61,6 +62,10 @@ export function canGoBack(step: WizardStep): boolean {
 // Other types self-validate or have safe defaults.
 export function isTaskInteractionValid(task: Task): boolean {
   if (task.type === 'quiz') {
+    // Ordering variant (change: quiz-ordering): valid orderItems replace answers.
+    if (task.orderItems && task.orderItems.length > 0) {
+      return validateOrderItems(task.orderItems) === null;
+    }
     return !!task.answers && task.answers.some((a) => a.trim() !== '');
   }
   if (task.type === 'numeric') {

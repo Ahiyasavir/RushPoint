@@ -14,8 +14,15 @@
 //   - task.smart.secretCode + task.smart.adminNotes (and any field NOT in the
 //     explicit allow-list below)
 import type { Task } from '@rushpoint/shared';
+import { seededShuffle } from '@rushpoint/shared';
 
-export function sanitizeTaskForParticipant(task: Task) {
+export function sanitizeTaskForParticipant(
+  task: Task,
+  // quiz-ordering: the caller (getMyTeamState) passes a per-team, per-task seed
+  // (`${teamId}:${taskId}`) so ordering items reach the client deterministically
+  // SHUFFLED — never in the authored (answer-key) order. No seed ⇒ fail closed.
+  opts?: { shuffleSeed?: string },
+) {
   // Strip every server-secret answer key: the hint text (paid reveal only),
   // quiz answers, the numeric target, and each sequence step's answer. The UI
   // still gets choices / tolerance / radius / step prompts so it can render.
@@ -23,7 +30,19 @@ export function sanitizeTaskForParticipant(task: Task) {
   // it stays in `...rest` and is passed through to the participant unchanged. It is
   // validated + canonicalized server-side at write time (normalizeTaskMedia), so no
   // sanitization is needed here. Listed in the e2e ALLOWED_TASK_KEYS allowlist.
-  const { smart, hint, answers, numericAnswer, steps, ...rest } = task;
+  //
+  // `orderItems` is destructured OUT of `...rest` on purpose: its authored ORDER
+  // is the answer key (change: quiz-ordering), so it may only re-enter the payload
+  // as a seeded shuffle below — never via passthrough.
+  const { smart, hint, answers, numericAnswer, steps, orderItems, ...rest } = task;
+
+  // Ordering quiz: with a seed, emit a deterministic per-team shuffle (stable
+  // across reloads/polls, so it can't be diffed to recover the order); without
+  // one, strip the field entirely — fail closed, never leak the authored order.
+  const shuffledOrderItems =
+    Array.isArray(orderItems) && orderItems.length > 0 && opts?.shuffleSeed
+      ? seededShuffle(orderItems, opts.shuffleSeed)
+      : undefined;
 
   // Hidden-location (treasure-hunt) tasks keep their coordinates + radius SERVER-
   // SIDE only — the participant is guided by `locationClue` and discovers the spot
@@ -39,6 +58,7 @@ export function sanitizeTaskForParticipant(task: Task) {
 
   return {
     ...rest,
+    ...(shuffledOrderItems ? { orderItems: shuffledOrderItems } : {}),
     ...(hidden ? { locationHidden: true as const } : {}),
     hasHint: !!hint && hint.trim().length > 0,
     hintPenalty: task.hintPenalty ?? 25,
