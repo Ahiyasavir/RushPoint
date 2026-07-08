@@ -550,7 +550,15 @@ export async function completeTaskForTeam(
   const launchedAt = runData?.launchedAt;
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
 
+  // Station-occupancy slots held by tasks that get auto-skipped when a partial
+  // stage completes early. assignTask incremented taskCounts for an ASSIGNED
+  // task; the skip below must release it or the slot leaks. Released AFTER the
+  // transaction (releaseTask opens its own txn — can't nest). Reset per attempt
+  // so a transaction retry never double-releases.
+  let skippedHeldTaskIds: string[] = [];
+
   await db.runTransaction(async (tx) => {
+    skippedHeldTaskIds = [];
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) return;
     const team = teamSnap.data() as RunTeam;
@@ -699,9 +707,14 @@ export async function completeTaskForTeam(
     const allTerminal = stages[stageIdx].tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
     const stageDone = completedCount >= required || allTerminal;
     if (stageDone) {
-      // Auto-skip any tasks the team didn't need to do.
+      // Auto-skip any tasks the team didn't need to do. A task still ASSIGNED
+      // holds a station-occupancy slot (assignTask incremented taskCounts), so
+      // record it for release after the transaction — otherwise the slot leaks.
       for (const t of stages[stageIdx].tasks) {
-        if (t.status !== 'completed') t.status = 'skipped';
+        if (t.status !== 'completed') {
+          if (t.status === 'assigned') skippedHeldTaskIds.push(t.taskId);
+          t.status = 'skipped';
+        }
       }
       stages[stageIdx].status = 'completed';
       stages[stageIdx].completedAt = now;
@@ -747,6 +760,12 @@ export async function completeTaskForTeam(
       updatedAt: now,
     });
   });
+
+  // Release station slots held by assigned-but-auto-skipped tasks (guarded:
+  // releaseTask no-ops when the counter is already 0, so it's safe on retry).
+  for (const id of skippedHeldTaskIds) {
+    await releaseTask(id, ownerUid, gameId, runId);
+  }
 }
 
 // Read-modify-write a player's cross-run profile (change: player-profile-badges).
@@ -792,7 +811,12 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
   const teamRef = db.doc(teamPath(uid, gameId, runId, teamId));
   const now = new Date().toISOString();
 
+  // Station slots held by an assigned task that gets skipped here — released
+  // after the transaction (same reason as completeTaskForTeam). Reset per attempt.
+  let skippedHeldTaskIds: string[] = [];
+
   await db.runTransaction(async (tx) => {
+    skippedHeldTaskIds = [];
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const team = teamSnap.data() as RunTeam;
@@ -805,6 +829,7 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
     let awardTotal = 0;
     for (const taskRec of stages[activeIdx].tasks) {
       if (taskRec.status !== 'completed') {
+        if (taskRec.status === 'assigned') skippedHeldTaskIds.push(taskRec.taskId);
         const gameTask = game.stages[activeIdx]?.tasks[taskRec.taskIndex];
         const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
         taskRec.status = 'skipped';
@@ -831,6 +856,11 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
       updatedAt: now,
     });
   });
+
+  // Release any station slot held by a skipped-while-assigned task (guarded no-op at 0).
+  for (const id of skippedHeldTaskIds) {
+    await releaseTask(id, uid, gameId, runId);
+  }
 
   return { ok: true };
 });
