@@ -539,7 +539,12 @@ export async function completeTaskForTeam(
   // survey-tasks: optional per-completion extras stamped onto the team's task
   // record INSIDE the existing transaction (no new transaction, no new reads).
   extras?: { surveyResponse?: string },
-): Promise<void> {
+): Promise<boolean> {
+  // Returns TRUE only when this call actually transitioned the task to completed.
+  // A duplicate/idempotent no-op (already completed, team/task missing) returns
+  // FALSE so callers can skip the follow-on releaseTask + next-task assignment —
+  // otherwise two concurrent duplicate completions each assign the next task and
+  // leak a station-occupancy slot (adversarial-smoke "leaked station slots").
   const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   const game = gameSnap.data() as Game;
   // Hot Zone (if any) is read-only here — used to multiply the earned score for
@@ -557,10 +562,10 @@ export async function completeTaskForTeam(
   // so a transaction retry never double-releases.
   let skippedHeldTaskIds: string[] = [];
 
-  await db.runTransaction(async (tx) => {
+  const didComplete = await db.runTransaction<boolean>(async (tx) => {
     skippedHeldTaskIds = [];
     const teamSnap = await tx.get(teamRef);
-    if (!teamSnap.exists) return;
+    if (!teamSnap.exists) return false;
     const team = teamSnap.data() as RunTeam;
 
     const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
@@ -571,10 +576,10 @@ export async function completeTaskForTeam(
       const ti = stages[si].tasks.findIndex((t) => t.taskId === taskId);
       if (ti >= 0) { stageIdx = si; taskIdx = ti; break; }
     }
-    if (stageIdx < 0) return;
+    if (stageIdx < 0) return false;
 
     const taskRec = stages[stageIdx].tasks[taskIdx];
-    if (taskRec.status === 'completed') return; // idempotent
+    if (taskRec.status === 'completed') return false; // idempotent
 
     const startedAt = taskRec.startedAt ?? team.startedAt ?? now;
     const actualMinutes = (new Date(now).getTime() - new Date(startedAt).getTime()) / 60_000;
@@ -759,6 +764,7 @@ export async function completeTaskForTeam(
       activeTaskId: null,
       updatedAt: now,
     });
+    return true;
   });
 
   // Release station slots held by assigned-but-auto-skipped tasks (guarded:
@@ -766,6 +772,7 @@ export async function completeTaskForTeam(
   for (const id of skippedHeldTaskIds) {
     await releaseTask(id, ownerUid, gameId, runId);
   }
+  return didComplete;
 }
 
 // Read-modify-write a player's cross-run profile (change: player-profile-badges).
@@ -2159,7 +2166,10 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     }
   }
 
-  await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  // A duplicate/idempotent completion must NOT release or re-assign: a concurrent
+  // real completion already did, and doubling the assignment leaks a station slot.
+  if (!completed) return { ok: true, nextTaskId: null };
   await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
 
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
@@ -2314,7 +2324,8 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     // Task expiry still applies (a closed task takes no more responses).
     await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
     const now = new Date().toISOString();
-    await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
+    const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
+    if (!completed) return { correct: true, nextTaskId: null };
     await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
     const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
     const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
@@ -2370,7 +2381,8 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   }
 
   const now = new Date().toISOString();
-  await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  if (!completed) return { correct: true, nextTaskId: null };
   await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
@@ -2418,10 +2430,12 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   await teamRef.update({ [`taskStepProgress.${taskId}`]: newDone, updatedAt: now });
 
   if (taskComplete) {
-    await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
-    await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
-    const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
-    await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+    const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    if (completed) {
+      await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+      const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+      await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+    }
   }
   return { stepCorrect: true, stepsDone: newDone, totalSteps: task.steps.length, taskComplete };
 });
