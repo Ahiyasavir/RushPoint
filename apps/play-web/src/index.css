@@ -43,3 +43,24 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
+
+/* Skeleton (loading placeholder) — warm-tinted to sit on the #FFFCF7 page */
+.rp-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #FFF0E0;
+}
+.rp-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent);
+  animation: rp-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes rp-shimmer {
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-skeleton::after { animation: none; }
+}

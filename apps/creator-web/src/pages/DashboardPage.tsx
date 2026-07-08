@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Game } from '@rushpoint/shared';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
-import { Badge, Button, Card, Spinner } from '../components/ui';
+import { Badge, Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
@@ -25,7 +25,7 @@ function getAccentBar(g: Game): string {
 
 const TASK_TYPE_EMOJI: Record<string, string> = {
   field: '📍', self_report: '✅', smart_station: '🔢',
-  photo: '📷', quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩',
+  photo: '📷', quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩', survey: '🗳️',
 };
 
 export default function DashboardPage() {
@@ -68,11 +68,11 @@ export default function DashboardPage() {
     } finally { setBusy(false); }
   }
 
-  async function launch(g: Game) {
+  async function launch(g: Game, opts?: { testDrive?: boolean }) {
     if (g.stages.length === 0) { await dialog.alert(d.emptyBody); return; }
     setBusy(true);
     try {
-      const { runId } = await launchRun({ gameId: g.id });
+      const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Launch failed';
@@ -97,7 +97,7 @@ export default function DashboardPage() {
     void load(true);
   }
 
-  if (!games) return <Spinner label={d.loadingGames} />;
+  if (!games) return <DashboardSkeleton />;
 
   const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
   const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'יוצר';
@@ -222,21 +222,29 @@ export default function DashboardPage() {
                       </Button>
                     </div>
 
-                    <div className="flex gap-1 border-t border-[--rp-border] pt-3 -mb-1">
+                    <div className="flex flex-wrap gap-1 border-t border-[--rp-border] pt-3 -mb-1">
                       <button
-                        className="flex-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+                        disabled={busy}
+                        title={d.cardTestRunHint}
+                        onClick={() => launch(g, { testDrive: true })}
+                      >
+                        {d.cardTestRun}
+                      </button>
+                      <button
+                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
                         onClick={() => togglePublish(g)}
                       >
                         {g.visibility === 'public' ? d.cardUnpublish : d.cardPublish}
                       </button>
                       <button
-                        className="flex-1 px-2 py-1.5 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
                         onClick={() => setSharing(g)}
                       >
                         {d.cardShare}
                       </button>
                       <button
-                        className="px-2 py-1.5 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors"
+                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
                         onClick={() => remove(g)}
                       >
                         {d.cardDelete}
@@ -358,6 +366,44 @@ export default function DashboardPage() {
           onClose={() => setSharing(null)}
         />
       )}
+    </div>
+  );
+}
+
+// Content-shaped loading placeholder mirroring the hero + stats + card grid, so
+// the first paint has the same footprint as the loaded dashboard (no layout jump).
+function DashboardSkeleton() {
+  return (
+    <div className="animate-fade-up">
+      <div className="mb-10 pb-10 border-b border-[--rp-border]">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+          <div className="space-y-3">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-12 w-64" />
+            <Skeleton className="h-4 w-72" />
+          </div>
+          <Skeleton className="h-11 w-36 rounded-xl" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-8">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[68px] rounded-2xl" />)}
+        </div>
+      </div>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-[--rp-border] p-5 flex flex-col gap-4">
+            <div className="flex items-start justify-between gap-3">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-5 w-14" />
+            </div>
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-4 w-40" />
+            <div className="flex gap-2 mt-auto">
+              <Skeleton className="h-9 flex-1" />
+              <Skeleton className="h-9 flex-1" />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

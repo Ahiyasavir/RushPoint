@@ -198,6 +198,30 @@ html.dark ::selection { background: rgba(255,87,34,0.28); color: #FFB300; }
 }
 .grad-border:hover::before { opacity: 1; }
 
+/* ── Skeleton (loading placeholder) ──────────────────────────────────────── */
+.rp-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.rp-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+  animation: rp-shimmer 1.4s ease-in-out infinite;
+}
+html.dark .rp-skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+}
+@keyframes rp-shimmer {
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-skeleton::after { animation: none; }
+}
+
 /* ── Glass card ──────────────────────────────────────────────────────────── */
 html.dark .glass-card {
   background: rgba(255,255,255,0.035);

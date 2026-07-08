@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useT } from '../i18nContext';
+import { haptic } from '../lib/haptics';
 
 // Thin top banner shown when the device is offline. Reads/live-state keep
 // working from the Firestore cache, but actions (verify, submit, SOS) need a
@@ -10,7 +11,7 @@ export default function ConnectionBanner() {
 
   useEffect(() => {
     const up = () => setOnline(true);
-    const down = () => setOnline(false);
+    const down = () => { setOnline(false); haptic('error'); };
     window.addEventListener('online', up);
     window.addEventListener('offline', down);
     return () => {

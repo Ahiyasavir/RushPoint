@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { hotZoneMultiplier, type HotZone } from '@rushpoint/shared';
 import { useT } from '../i18nContext';
+import { haptic } from '../lib/haptics';
 
 // Live in-run banners (deferred UI for hot-zone-bonus + safe-zone-boundary):
 //   • 🔥 Hot Zone — active multiplier + countdown to expiry
@@ -29,6 +30,13 @@ export default function InRunAlerts({ hotZone, outOfBounds }: { hotZone: HotZone
   // centre within the window). We pass the centre so radius never excludes it.
   const active = !!hotZone && hotZoneMultiplier(hotZone, hotZone.center, now) > 1;
   const remainMs = hotZone ? Date.parse(hotZone.expiresAt) - now : 0;
+
+  // Buzz once on the false→true transition (a zone opening), never on each tick.
+  const wasActive = useRef(false);
+  useEffect(() => {
+    if (active && !wasActive.current) haptic('warn');
+    wasActive.current = active;
+  }, [active]);
 
   if (!active && !outOfBounds) return null;
 

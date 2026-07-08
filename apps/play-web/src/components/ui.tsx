@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { useT } from '../i18nContext';
 
 export function Button({
-  variant = 'primary', className = '', children, ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' }) {
+  variant = 'primary', className = '', children, loading = false, disabled, ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger'; loading?: boolean }) {
   const map: Record<string, string> = {
     primary: `
       bg-gradient-to-r from-rp-fire to-rp-amber
@@ -27,30 +27,38 @@ export function Button({
   };
   return (
     <button
-      className={`w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:opacity-40 ${map[variant]} ${className}`}
+      className={`inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${map[variant]} ${className}`}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
       {...rest}
     >
+      {loading && (
+        <span className="me-2 w-5 h-5 rounded-full border-2 border-current/30 border-t-current animate-spin shrink-0" aria-hidden="true" />
+      )}
       {children}
     </button>
   );
 }
 
-export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      className={`
-        w-full px-4 py-4 rounded-2xl text-base
-        bg-white border border-glass-border
-        text-zinc-100 placeholder:text-zinc-600
-        shadow-[0_1px_4px_rgba(26,10,0,0.06)]
-        focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40
-        transition-all duration-150
-        ${className}
-      `}
-      {...rest}
-    />
-  );
-}
+export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  function Input({ className = '', ...rest }, ref) {
+    return (
+      <input
+        ref={ref}
+        className={`
+          w-full px-4 py-4 rounded-2xl text-base
+          bg-white border border-glass-border
+          text-zinc-100 placeholder:text-zinc-600
+          shadow-[0_1px_4px_rgba(26,10,0,0.06)]
+          focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40
+          transition-all duration-150
+          ${className}
+        `}
+        {...rest}
+      />
+    );
+  },
+);
 
 export function Card({ children, className = '', style }: {
   children: ReactNode; className?: string; style?: React.CSSProperties;
@@ -96,4 +104,10 @@ export function Progress({ done, total }: { done: number; total: number }) {
 
 export function Screen({ children }: { children: ReactNode }) {
   return <div className="min-h-screen flex flex-col px-5 py-6 max-w-md mx-auto w-full">{children}</div>;
+}
+
+// Content-shaped loading placeholder. Size via `className` (e.g. "h-4 w-24").
+// Shimmer + reduced-motion handling live in index.css (.rp-skeleton).
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <div aria-hidden="true" className={`rp-skeleton rounded-xl ${className}`} />;
 }

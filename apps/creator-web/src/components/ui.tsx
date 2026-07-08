@@ -26,8 +26,8 @@ export function Card({ children, className = '', glow = false }: {
 
 // ── Button ────────────────────────────────────────────────────────────────────
 export function Button({
-  variant = 'primary', className = '', children, ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' | 'subtle' }) {
+  variant = 'primary', className = '', children, loading = false, disabled, ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' | 'subtle'; loading?: boolean }) {
   const styles: Record<string, string> = {
     primary: `
       relative overflow-hidden
@@ -56,9 +56,14 @@ export function Button({
   };
   return (
     <button
-      className={`px-4 py-2 rounded-xl text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed ${styles[variant]} ${className}`}
+      className={`inline-flex items-center justify-center min-h-[40px] px-4 py-2 rounded-xl text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1] ${styles[variant]} ${className}`}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
       {...rest}
     >
+      {loading && (
+        <span className="me-2 w-4 h-4 rounded-full border-2 border-current/30 border-t-current animate-spin shrink-0" aria-hidden="true" />
+      )}
       {children}
     </button>
   );
@@ -169,6 +174,28 @@ export function Spinner({ label }: { label?: string }) {
     <div className="flex flex-col items-center justify-center gap-3 py-20 text-[--ink-3]">
       <div className="w-7 h-7 rounded-full border-2 border-rp-fire/20 border-t-rp-fire animate-spin" />
       {label && <span className="text-xs font-medium">{label}</span>}
+    </div>
+  );
+}
+
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+// Content-shaped loading placeholder. Size it via `className` (e.g. "h-4 w-24").
+// The shimmer + reduced-motion handling live in index.css (.rp-skeleton).
+export function Skeleton({ className = '' }: { className?: string }) {
+  return <div aria-hidden="true" className={`rp-skeleton rounded-xl ${className}`} />;
+}
+
+// ── EmptyState ────────────────────────────────────────────────────────────────
+// Reusable "nothing here yet" block: icon + title + optional body + optional CTA.
+export function EmptyState({ icon, title, body, action }: {
+  icon?: ReactNode; title: string; body?: string; action?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center gap-3 py-16 px-6">
+      {icon && <div aria-hidden="true" className="text-4xl">{icon}</div>}
+      <h3 className="text-lg font-semibold text-[--ink-1]">{title}</h3>
+      {body && <p className="text-sm text-[--ink-3] max-w-sm">{body}</p>}
+      {action && <div className="mt-1">{action}</div>}
     </div>
   );
 }

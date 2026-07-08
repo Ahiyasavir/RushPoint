@@ -4,7 +4,7 @@ import { FIRESTORE_PATHS, selectGameDescription, type PublicGame } from '@rushpo
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
-import { Button, Card, Screen } from '../components/ui';
+import { Button, Card, Screen, Skeleton } from '../components/ui';
 import { useT } from '../i18nContext';
 
 const CREATOR_URL = import.meta.env.DEV
@@ -15,6 +15,15 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
   const { t } = useT();
   const [game, setGame] = useState<PublicGame | null | undefined>(undefined);
   const [starting, setStarting] = useState(false);
+  const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
+  const [copied, setCopied] = useState(false);
+
+  async function shareGame() {
+    const url = window.location.href;
+    const nav = navigator as Navigator & { share?: (d: { title?: string; url?: string }) => Promise<void> };
+    if (nav.share) { try { await nav.share({ title: game?.title ?? 'RushPoint', url }); return; } catch { /* cancelled */ } }
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
+  }
 
   async function playNow() {
     setStarting(true);
@@ -33,6 +42,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
 
   useEffect(() => {
     let alive = true;
+    setImgState('loading');
     getDoc(doc(db, FIRESTORE_PATHS.publicGame(gameId)))
       .then((snap) => { if (alive) setGame(snap.exists() ? (snap.data() as PublicGame) : null); })
       .catch(() => { if (alive) setGame(null); });
@@ -72,8 +82,17 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
       <div className="flex-1 flex flex-col animate-race-in">
         {/* Hero */}
         <div className="relative mb-6">
-          {game.coverImage ? (
-            <img src={game.coverImage} alt="" className="w-full h-44 object-cover rounded-2xl shadow-task-card" />
+          {game.coverImage && imgState !== 'error' ? (
+            <div className="relative w-full h-44 rounded-2xl overflow-hidden shadow-task-card">
+              {imgState === 'loading' && <Skeleton className="absolute inset-0 rounded-2xl" />}
+              <img
+                src={game.coverImage}
+                alt=""
+                onLoad={() => setImgState('loaded')}
+                onError={() => setImgState('error')}
+                className={`w-full h-44 object-cover transition-opacity duration-300 ${imgState === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+              />
+            </div>
           ) : (
             <div className="w-full h-44 rounded-2xl bg-gradient-to-br from-rp-fire/20 to-rp-amber/10 flex items-center justify-center">
               <span className="text-6xl">🗺️</span>
@@ -140,6 +159,13 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             </Button>
           )}
           <Button variant={game.allowInstantPlay ? 'ghost' : 'primary'} onClick={onPlay}>{t.promo.haveCode}</Button>
+          <button
+            type="button"
+            onClick={shareGame}
+            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-rp-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
+          >
+            {copied ? t.promo.linkCopied : `🔗 ${t.promo.shareGame}`}
+          </button>
         </Card>
       </div>
 

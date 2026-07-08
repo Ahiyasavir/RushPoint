@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import type { MyTeamState } from '../services/calls';
 import { getMyProfile } from '../services/calls';
@@ -11,6 +11,7 @@ import { selectPodium } from '@rushpoint/shared';
 import { shareStoryCard } from '../lib/storyCard';
 import { sharePhoto } from '../lib/sharePhoto';
 import { sharePodium } from '../lib/podiumCard';
+import { fireConfetti } from '../lib/confetti';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
@@ -52,6 +53,17 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
   const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Celebrate the finish once — a brand-colored confetti burst timed to land with
+  // the score-pop. Reduced-motion is honored inside fireConfetti(); the ref guard
+  // stops any re-render (live leaderboard updates, survey steps) from re-firing it.
+  const confettiFired = useRef(false);
+  useEffect(() => {
+    if (confettiFired.current) return;
+    confettiFired.current = true;
+    const id = window.setTimeout(() => fireConfetti(), 350);
+    return () => window.clearTimeout(id);
+  }, []);
 
   // A team photo to offer as a branded individual share (share-branding).
   const firstPhotoUrl = (() => {
@@ -225,7 +237,11 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     `}
                     style={{ animationDelay: `${i * 60}ms` }}
                   >
-                    <span className="w-6 text-center">{MEDAL[i] ?? <span className="text-zinc-500 text-xs">{r.rank}</span>}</span>
+                    <span className="w-6 flex items-center justify-center">
+                      {MEDAL[i] ?? (
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/10 text-zinc-400 text-xs font-mono font-semibold">{r.rank}</span>
+                      )}
+                    </span>
                     <span dir="auto" className="flex-1 text-start font-medium">{r.teamName}</span>
                     <span className="font-mono text-xs font-semibold" style={{ color: isMe ? accent : undefined }}>{r.score}</span>
                   </div>
@@ -236,7 +252,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         )}
 
         {!run.leaderboard && (
-          <p className="text-zinc-500 text-sm">{t.final.waitingFinalize}</p>
+          <div className="flex items-center justify-center gap-2.5 text-zinc-500 text-sm py-2">
+            <span aria-hidden="true" className="w-4 h-4 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin shrink-0" />
+            <span>{t.final.waitingFinalize}</span>
+          </div>
         )}
       </div>
 

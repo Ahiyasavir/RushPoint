@@ -57,7 +57,9 @@ export default function ChallengeTeaser({
   }, [task, result]);
 
   async function submit() {
-    if (!answer.trim() || busy) return;
+    // Guard against a late Enter after the countdown expires (defense-in-depth;
+    // the input is also disabled once time is up).
+    if (!answer.trim() || busy || left === 0) return;
     setBusy(true);
     try {
       const { correct } = await checkChallengeAnswer({ gameId, taskId, answer: answer.trim() });
@@ -134,12 +136,13 @@ export default function ChallengeTeaser({
             <input
               dir="auto"
               value={answer}
+              disabled={timesUp}
               onChange={(e) => setAnswer(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
               placeholder={t.challenge.yourAnswer}
-              className="w-full bg-app-raised rounded-xl px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-rp-fire/40"
+              className="w-full bg-app-raised rounded-xl px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-rp-fire/40 disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <Button className="mt-3 w-full" disabled={busy || !answer.trim()} onClick={submit}>
+            <Button className="mt-3 w-full" disabled={busy || !answer.trim() || timesUp} onClick={submit}>
               {t.challenge.submit}
             </Button>
           </Card>

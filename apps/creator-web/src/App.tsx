@@ -5,6 +5,7 @@ import { useAuth } from './components/AuthGate';
 import { useT } from './components/LanguageContext';
 import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
+import { ToastHost } from './components/toast';
 
 const DashboardPage  = lazy(() => import('./pages/DashboardPage'));
 const BuilderPage    = lazy(() => import('./pages/BuilderPage'));
@@ -87,12 +88,13 @@ export default function App() {
           <span className="text-xs text-[--ink-3] hidden sm:block truncate max-w-[160px]">{user?.displayName ?? user?.email}</span>
           <button
             onClick={() => setDark((d) => !d)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-sm hover:bg-[--surface-2] transition-colors"
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-sm hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+            aria-label={dark ? t.common.lightMode : t.common.darkMode}
             title={dark ? t.common.lightMode : t.common.darkMode}
           >
             {dark ? '☀️' : '🌙'}
           </button>
-          <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-rp-alert transition-colors">
+          <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-rp-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
             {t.common.signOut}
           </button>
         </div>
@@ -115,6 +117,7 @@ export default function App() {
         </Suspense>
       </main>
       <DialogHost />
+      <ToastHost />
     </div>
   );
 }

@@ -18,19 +18,31 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   const { t } = useT();
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const [err, setErr] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [nowTick, setNowTick] = useState(() => Date.now());
 
   const load = useCallback(async () => {
-    try { setData(await getPublicLeaderboard({ code })); setErr(''); }
+    setRefreshing(true);
+    try { setData(await getPublicLeaderboard({ code })); setErr(''); setUpdatedAt(Date.now()); setNowTick(Date.now()); }
     catch (e) { setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.board.couldNotLoad); setData(null); }
+    finally { setRefreshing(false); }
   }, [code, t]);
 
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     if (data?.runStatus === 'finished' || data?.frozen) return;
-    const t = window.setInterval(load, 8000);
-    return () => window.clearInterval(t);
+    const id = window.setInterval(load, 8000);
+    return () => window.clearInterval(id);
   }, [data?.runStatus, data?.frozen, load]);
+
+  // Tick once a second so the "updated Ns ago" stamp stays accurate between polls.
+  useEffect(() => {
+    if (data?.runStatus === 'finished' || data?.frozen) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [data?.runStatus, data?.frozen]);
 
   const accent = data?.branding?.primaryColor ?? '#FF5722';
 
@@ -79,6 +91,25 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
           </span>
         </div>
         <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: accent }}>{data.title}</h1>
+        {isLive && (
+          <div className="flex items-center justify-center gap-2 mt-2 text-[11px] text-zinc-500">
+            <span>
+              {updatedAt == null
+                ? t.board.justNow
+                : t.board.updatedAgo({ s: Math.max(0, Math.round((nowTick - updatedAt) / 1000)) })}
+            </span>
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={refreshing}
+              aria-label={t.board.refresh}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:text-rp-fire disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            >
+              <span aria-hidden="true" className={refreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
+              {t.board.refresh}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
 import { saveSession, type Session } from '../store';
@@ -21,11 +21,28 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const [joinMode, setJoinMode] = useState<'create' | 'attach'>('create');
   const [teamCode, setTeamCode] = useState('');
   const [memberName, setMemberName] = useState('');
+  // Auto-focus the code field and animate/focus a newly-added member row.
+  const codeRef = useRef<HTMLInputElement>(null);
+  const memberRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [justAdded, setJustAdded] = useState<number | null>(null);
 
   useEffect(() => {
     if (linkCode.length >= 4) void lookup();
+    // Only grab focus on the code step (no deep link took us to registration).
+    else codeRef.current?.focus({ preventScroll: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Focus the freshly-added member input so it's obvious which field is new.
+  useEffect(() => {
+    if (justAdded == null) return;
+    memberRefs.current[justAdded]?.focus({ preventScroll: true });
+  }, [justAdded]);
+
+  function addMember() {
+    setJustAdded(members.length);
+    setMembers([...members, '']);
+  }
 
   async function lookup() {
     setErr(''); setBusy(true);
@@ -61,6 +78,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: code.trim().toUpperCase(), displayName,
         teamId: res.teamId,
+        isTestDrive: info.isTestDrive ?? false,
       };
       saveSession(session);
       onJoined(session);
@@ -83,6 +101,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: code.trim().toUpperCase(), displayName: memberName.trim(),
         teamId: res.teamId,
+        isTestDrive: info.isTestDrive ?? false,
       };
       saveSession(session);
       onJoined(session);
@@ -151,6 +170,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
         <div className="flex-1 flex flex-col px-5 pb-8">
           <div className="relative mb-4">
             <input
+              ref={codeRef}
               value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               placeholder={t.join.codePlaceholder}
@@ -314,15 +334,17 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           ) : (
             <>
               {members.map((m, i) => (
-                <div key={i} className="flex gap-2 mb-2.5">
-                  <Input value={m} placeholder={t.join.memberPlaceholder(i + 1)}
+                <div key={i} className={`flex gap-2 mb-2.5 ${i === justAdded ? 'animate-task-appear motion-reduce:animate-none' : ''}`}>
+                  <Input
+                    ref={(el: HTMLInputElement | null) => { memberRefs.current[i] = el; }}
+                    value={m} placeholder={t.join.memberPlaceholder(i + 1)}
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
                     <button aria-label={lang === 'he' ? `הסר ${m}` : `Remove ${m}`} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
                   )}
                 </div>
               ))}
-              <button className="text-rp-fire text-sm mt-1 font-bold flex items-center gap-1" onClick={() => setMembers([...members, ''])}>
+              <button className="text-rp-fire text-sm mt-1 font-bold flex items-center gap-1" onClick={addMember}>
                 ＋ {t.join.addMember}
               </button>
             </>

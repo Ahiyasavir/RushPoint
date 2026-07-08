@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { translations } from '../i18n';
+import { haptic } from '../lib/haptics';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -74,6 +75,25 @@ export default function LiveOps({
   function dismiss(id: string) {
     setDismissed((prev) => new Set(prev).add(id));
   }
+
+  // Haptic buzz when a NEW score notice arrives — success for a gain, warn for a
+  // penalty. The backlog present on first mount is seeded silently (no buzz), so
+  // late joiners aren't spammed; only genuinely-new notices vibrate, once each.
+  const seenScore = useRef<Set<string>>(new Set());
+  const scoreMounted = useRef(false);
+  useEffect(() => {
+    const scores = liveAnnouncements.filter((a) => a.kind === 'score');
+    if (!scoreMounted.current) {
+      scores.forEach((a) => seenScore.current.add(a.id));
+      scoreMounted.current = true;
+      return;
+    }
+    for (const a of scores) {
+      if (seenScore.current.has(a.id)) continue;
+      seenScore.current.add(a.id);
+      haptic((a.delta ?? 0) >= 0 ? 'success' : 'warn');
+    }
+  }, [liveAnnouncements]);
 
   const hasBanners = liveAnnouncements.length > 0 || liveFlashes.length > 0;
   // Standings are only shown to participants once the organizer publishes them

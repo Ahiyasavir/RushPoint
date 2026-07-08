@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { PublicGame, PublicTask } from '@rushpoint/shared';
 import { searchGallery, searchTaskLibrary, duplicateGame } from '../services/calls';
-import { Badge, Button, Card, Input, Spinner } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { toast } from '../components/toast';
 import GalleryMap from '../components/GalleryMap';
 import { useT } from '../components/LanguageContext';
 
@@ -17,6 +18,7 @@ export default function GalleryPage() {
   const [games, setGames] = useState<PublicGame[] | null>(null);
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copyingId, setCopyingId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
 
   function focusGame(id: string) {
@@ -24,7 +26,12 @@ export default function GalleryPage() {
     document.getElementById(`game-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  // Show the loading skeleton whenever a query is in flight (search-as-you-type).
+  const [searching, setSearching] = useState(false);
+
   async function run() {
+    setSearching(true);
+    if (tab === 'games') setGames(null); else setTasks(null);
     try {
       if (tab === 'games') { const { games } = await searchGallery({ query: q }); setGames(games); }
       else { const { tasks } = await searchTaskLibrary({ query: q }); setTasks(tasks); }
@@ -33,17 +40,27 @@ export default function GalleryPage() {
       // the error and settle to an empty result the user can retry from.
       await dialog.alert(e instanceof Error ? e.message : 'Search failed');
       if (tab === 'games') setGames([]); else setTasks([]);
-    }
+    } finally { setSearching(false); }
   }
-  useEffect(() => { void run(); /* eslint-disable-next-line */ }, [tab]);
+  const runRef = useRef(run);
+  runRef.current = run;
+
+  // Reload when the tab changes AND debounce search-as-you-type on the query.
+  // A single 350ms debounce covers both first mount and every keystroke, so we
+  // never double-fetch; Enter / the button still fire immediately via run().
+  useEffect(() => {
+    const id = setTimeout(() => void runRef.current(), 350);
+    return () => clearTimeout(id);
+  }, [q, tab]);
 
   async function copy(g: PublicGame) {
     setBusy(true);
+    setCopyingId(g.id);
     try {
       const { gameId } = await duplicateGame({ gameId: g.id, sourceOwnerUid: g.ownerUid });
       nav(`/build/${gameId}`);
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Copy failed'); }
-    finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : gl.copyFailed); }
+    finally { setBusy(false); setCopyingId(null); }
   }
 
   return (
@@ -80,7 +97,10 @@ export default function GalleryPage() {
         <div className="mb-4"><GalleryMap games={games} onSelect={focusGame} className="h-72" /></div>
       )}
 
-      {tab === 'games' && (!games ? <Spinner /> : games.length === 0 ? <Empty text={gl.emptyText} /> : (
+      {tab === 'games' && ((!games || searching) ? <CardSkeletonGrid /> : games.length === 0 ? (
+        <EmptyState icon="🔭" title={gl.emptyTitle} body={gl.emptyText}
+          action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
+      ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((pg) => (
             <Card key={pg.id} className={`p-4 flex flex-col gap-2 scroll-mt-20 transition ${focusId === pg.id ? 'ring-2 ring-neon-green' : ''}`}>
@@ -93,13 +113,16 @@ export default function GalleryPage() {
                 <span>{gl.stages(pg.stageCount)}</span>·<span>{gl.tasks(pg.taskCount)}</span>·<span>~{pg.estimatedTotalMinutes}m</span>·<span>{gl.plays(pg.playCount)}</span>
               </div>
               {pg.approxLocation?.label && <span className="text-[11px] text-zinc-600">📍 {pg.approxLocation.label}</span>}
-              <Button disabled={busy} className="mt-1" onClick={() => copy(pg)}>{gl.copyBtn}</Button>
+              <Button disabled={busy} loading={copyingId === pg.id} className="mt-1" onClick={() => copy(pg)}>{gl.copyBtn}</Button>
             </Card>
           ))}
         </div>
       ))}
 
-      {tab === 'tasks' && (!tasks ? <Spinner /> : tasks.length === 0 ? <Empty text={gl.emptyText} /> : (
+      {tab === 'tasks' && ((!tasks || searching) ? <CardSkeletonGrid /> : tasks.length === 0 ? (
+        <EmptyState icon="🔭" title={gl.emptyTitle} body={gl.emptyText}
+          action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
+      ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {tasks.map((tk) => (
             <Card key={tk.id} className="p-4 flex flex-col gap-2">
@@ -117,6 +140,20 @@ export default function GalleryPage() {
   );
 }
 
-function Empty({ text }: { text: string }) {
-  return <Card className="p-12 text-center text-zinc-500">{text}</Card>;
+function CardSkeletonGrid() {
+  return (
+    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Card key={i} className="p-4 flex flex-col gap-3">
+          <div className="flex items-start justify-between gap-2">
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-5 w-12" />
+          </div>
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-3 w-40" />
+          <Skeleton className="h-9 w-full mt-1" />
+        </Card>
+      ))}
+    </div>
+  );
 }
