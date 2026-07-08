@@ -50,3 +50,6 @@ autopilot/
 playwright-report/
 test-results/
 .last-run.json
+
+# ngrok playtest tunnel secrets
+.tunnel.env
