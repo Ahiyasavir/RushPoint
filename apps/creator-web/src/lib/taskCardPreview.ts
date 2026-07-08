@@ -19,6 +19,7 @@ export const TYPE_FAMILY_COLOR: Record<TaskType, string> = {
   field: '#BA7517',         // amber — presence check-in
   self_report: '#BA7517',
   geofence: '#D85A30',      // coral — automatic GPS
+  survey: '#378ADD',        // blue — a question (no right answer)
 };
 
 export const TYPE_LABEL: Record<TaskType, string> = {
@@ -30,6 +31,7 @@ export const TYPE_LABEL: Record<TaskType, string> = {
   numeric: 'Numeric',
   geofence: 'Geofence',
   sequence: 'Sequence',
+  survey: 'Survey',
 };
 
 // Translatable label set for the preview line. Defaults to English so the pure
@@ -49,6 +51,8 @@ export interface PreviewLabels {
   sequence: (n: number) => string;
   field: string;
   selfReport: string;
+  surveyChoices: (n: number) => string;
+  surveyText: string;
 }
 
 const EN_PREVIEW: PreviewLabels = {
@@ -65,6 +69,8 @@ const EN_PREVIEW: PreviewLabels = {
   sequence: (n) => `${n} ordered ${n === 1 ? 'step' : 'steps'}`,
   field: 'Tap to check in',
   selfReport: 'Team self report',
+  surveyChoices: (n) => `Poll, ${n} ${n === 1 ? 'option' : 'options'}`,
+  surveyText: 'Free-text response',
 };
 
 export function taskPreviewLine(task: Task, L: PreviewLabels = EN_PREVIEW): string {
@@ -94,5 +100,9 @@ export function taskPreviewLine(task: Task, L: PreviewLabels = EN_PREVIEW): stri
       return L.field;
     case 'self_report':
       return L.selfReport;
+    case 'survey': {
+      const n = task.surveyChoices?.length ?? 0;
+      return n > 0 ? L.surveyChoices(n) : L.surveyText;
+    }
   }
 }

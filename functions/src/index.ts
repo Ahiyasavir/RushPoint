@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -40,6 +40,7 @@ export {
   createZone, deleteZone, getRunZones, captureZone,
   joinTeamAsDevice, transferController, claimController,
   submitRunFeedback, getRunFeedbackSummary,
+  getRunSurveyResults,
   requestGuardianConsent, grantGuardianConsent,
   activateHotZone, deactivateHotZone,
   getRunDiscoveryPois, claimDiscoveryPoi,
@@ -349,6 +350,110 @@ export const triggerSOS = loggedCallable('triggerSOS', async (data, context) => 
   });
 
   return { alertId: ref.id };
+});
+
+
+// ─── sendTeamChatMessage (team ↔ HQ chat) ─────────────────────────────────────
+// A single thread doc per team. EITHER side may send: a participant (any attached
+// device — no requireController, same rationale as triggerSOS) writes a `team`
+// message attributed to the team; the owner / platform-admin / run-scoped staff
+// writes an `hq` message into an explicit teamId's thread. Server-write-only doc;
+// clients only read it. Rate-limited per sender uid; rejected on a finished run.
+export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (data, context) => {
+  requireAuth(context);
+  const uid = context.auth!.uid;
+  await enforceRateLimit(uid, 'sendTeamChatMessage');
+
+  const { ownerUid, gameId, runId, teamId: rawTeamId, senderName: rawSenderName } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    teamId?: string;
+    senderName?: string;
+    text?: string;
+  };
+  if (!ownerUid || !gameId || !runId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
+  }
+
+  const text = sanitizeChatText((data as { text?: unknown }).text);
+  if (text === null) {
+    throw new functions.https.HttpsError('invalid-argument', 'Message must be 1 to 500 characters.');
+  }
+
+  // ── Resolve sender role ──────────────────────────────────────────────────────
+  // HQ path — owner / platform admin / run-scoped staff. Detect via a non-throwing
+  // probe, then enforce with assertStaffOrOwner (the claims check IS the authz; the
+  // senderName label is display-only). Everyone else is a participant.
+  const token = context.auth!.token as { admin?: boolean; staff?: boolean; ownerUid?: string; runId?: string };
+  const isHq = uid === ownerUid
+    || token.admin === true
+    || (token.staff === true && token.ownerUid === ownerUid && token.runId === runId);
+
+  let resolvedTeamId: string;
+  let from: 'team' | 'hq';
+  let senderName: string;
+  let deviceUids: string[] | undefined;
+
+  if (isHq) {
+    assertStaffOrOwner(context, ownerUid, runId);
+    if (rawTeamId === undefined || rawTeamId === '') {
+      throw new functions.https.HttpsError('invalid-argument', 'teamId required');
+    }
+    const cleanTeamId = validate(() => requireString(rawTeamId, 'teamId', 128));
+    const teamSnap = await db.doc(FIRESTORE_PATHS.team(ownerUid, gameId, runId, cleanTeamId)).get();
+    if (!teamSnap.exists) {
+      throw new functions.https.HttpsError('not-found', 'Team not found');
+    }
+    resolvedTeamId = cleanTeamId;
+    from = 'hq';
+    senderName = validate(() => optionalString(rawSenderName, 'senderName', 64)) ?? 'HQ';
+    // deviceUids left undefined on the HQ path — preserve the previously mirrored
+    // value from the existing doc inside the transaction below.
+  } else {
+    // Participant path — server-resolved identity only; a supplied teamId is
+    // ignored. No requireController (any attached device may chat — triggerSOS
+    // rationale: communication beats role discipline, message attributed to team).
+    const { teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId });
+    resolvedTeamId = teamId;
+    from = 'team';
+    senderName = (team as { displayName?: string }).displayName ?? 'Team';
+    deviceUids = (team as { deviceUids?: string[] }).deviceUids ?? [];
+  }
+
+  // ── Run gate — no chatting on a finished run ─────────────────────────────────
+  const runSnap = await db.doc(FIRESTORE_PATHS.run(ownerUid, gameId, runId)).get();
+  if (!runSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Run not found');
+  }
+  if ((runSnap.data() as { status?: string }).status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This race has already finished.');
+  }
+
+  // ── Transactional append (concurrent sends must not lose messages) ───────────
+  const chatRef = db.doc(FIRESTORE_PATHS.runChat(ownerUid, gameId, runId, resolvedTeamId));
+  const messageId = db.collection('_').doc().id;
+  const at = new Date().toISOString();
+  const msg: ChatMessage = { id: messageId, from, senderName, text, at };
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(chatRef);
+    const prev = (snap.data() as TeamChatDoc | undefined)?.messages ?? [];
+    // HQ path preserves the mirror already on the doc (defaulting []); participant
+    // path re-mirrors the live team deviceUids. Whole-doc set (never merge / dotted
+    // array update) — this doc IS the thread, nothing else lives here.
+    const mirroredDeviceUids = deviceUids
+      ?? (snap.data() as TeamChatDoc | undefined)?.deviceUids
+      ?? [];
+    tx.set(chatRef, {
+      teamId: resolvedTeamId,
+      deviceUids: mirroredDeviceUids,
+      messages: appendCapped(prev, msg),
+      updatedAt: at,
+    });
+  });
+
+  return { messageId };
 });
 
 
@@ -696,13 +801,16 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
 export const submitStationPhoto = loggedCallable('submitStationPhoto', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'submitStationPhoto');
-  const { ownerUid, gameId, runId, teamId, taskId, photoUrl } = data as {
+  const { ownerUid, gameId, runId, teamId, taskId, photoUrl, contentType } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     teamId: string;
     taskId: string;
     photoUrl: string;
+    // audio-tasks: the declared blob content-type. Validated against the task's
+    // captureKind below. Photo clients that never send it stay accepted.
+    contentType?: string;
   };
 
   // Shared team devices: resolve the caller's team + require the controller role.
@@ -725,10 +833,12 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   let autoApprove = false;
   let taskTitle = '';
   let feedEnabled = true;
+  // audio-tasks: the task's captureKind rides the SAME snapshot (no extra read).
+  let kind: MediaKind = 'photo';
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; smart?: { autoApprove?: boolean } }[] }[];
+      stages: { tasks: { id: string; title?: string; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
@@ -736,10 +846,24 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       if (task) {
         autoApprove = task.smart?.autoApprove === true;
         taskTitle = task.title ?? '';
+        kind = task.smart?.captureKind === 'audio' ? 'audio' : 'photo';
         break;
       }
     }
   }
+
+  // audio-tasks: the declared content-type must match the task's captureKind. An
+  // audio task requires a declared audio type; a photo task rejects an audio type
+  // (a photo task with contentType omitted stays accepted — back-compat). The
+  // actual uploaded bytes are gated by storage.rules against the same allowlist.
+  validate(() => {
+    if (!isAllowedSubmissionContentType(kind, contentType)) {
+      throw new functions.https.HttpsError(
+        'invalid-argument',
+        `Submission content-type does not match the task's capture kind (${kind})`,
+      );
+    }
+  });
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
@@ -750,18 +874,22 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
           photoUrl: photoUrl.trim(),
           submittedAt: now,
           status: autoApprove ? 'approved' : 'pending',
+          // audio-tasks: server-derived from the task (never client-claimed) so
+          // review UIs know whether to render an <img> or an <audio> player.
+          mediaKind: kind,
         },
       },
     },
     { merge: true },
   );
 
-  // autoApprove: the photo is logged but does not block progression.
+  // autoApprove: the submission is logged but does not block progression.
   if (autoApprove) {
     await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
-    if (feedEnabled) {
+    // audio-tasks non-goal: audio submissions never enter the photo feed.
+    if (feedEnabled && kind !== 'audio') {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
@@ -827,10 +955,12 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         }
         const teamData = (await teamRef.get()).data() as {
           displayName?: string;
-          taskSubmissions?: Record<string, { photoUrl?: string }>;
+          taskSubmissions?: Record<string, { photoUrl?: string; mediaKind?: MediaKind }>;
         } | undefined;
-        const submittedPhotoUrl = teamData?.taskSubmissions?.[taskId]?.photoUrl;
-        if (submittedPhotoUrl) {
+        const submission = teamData?.taskSubmissions?.[taskId];
+        const submittedPhotoUrl = submission?.photoUrl;
+        // audio-tasks non-goal: audio submissions never enter the photo feed.
+        if (submittedPhotoUrl && submission?.mediaKind !== 'audio') {
           await writeFeedItem(ownerUid, gameId, runId, {
             taskId,
             taskTitle,

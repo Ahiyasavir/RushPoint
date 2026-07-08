@@ -69,9 +69,9 @@ ok(isTaskInteractionValid({ ...fresh, type: 'photo' }) === true, 'photo task alw
 
 // ── TASK_TYPE_META ───────────────────────────────────────────────────────────
 const metaKeys = Object.keys(TASK_TYPE_META);
-ok(metaKeys.length === 8, `TASK_TYPE_META has exactly 8 task types (got ${metaKeys.length})`);
+ok(metaKeys.length === 9, `TASK_TYPE_META has exactly 9 task types (got ${metaKeys.length})`);
 ok(Object.values(TASK_TYPE_META).every((m) => m.label.trim() && m.description.trim() && m.emoji), 'every type has emoji + label + description');
-ok(TYPE_PICKER_ORDER.length === 8 && new Set(TYPE_PICKER_ORDER).size === 8, 'TYPE_PICKER_ORDER lists all 8 types once');
+ok(TYPE_PICKER_ORDER.length === 9 && new Set(TYPE_PICKER_ORDER).size === 9, 'TYPE_PICKER_ORDER lists all 9 types once');
 ok(TYPE_PICKER_ORDER.every((t) => t in TASK_TYPE_META), 'every picker-order type has metadata');
 
 // ── steps / labels ───────────────────────────────────────────────────────────

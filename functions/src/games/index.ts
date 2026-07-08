@@ -29,6 +29,7 @@ import {
   validateUnlockGraph,
   validateAvailabilityWindow,
   validateOrderItems,
+  validateSurveyChoices,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
@@ -154,6 +155,12 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
           }
           const orderError = validateOrderItems(task.orderItems);
           if (orderError) problems.push(`${label}: ${orderError}`);
+        }
+        // Survey (change: survey-tasks): surveyChoices, when present, must be a
+        // 2–8 non-empty-string list (absent ⇒ a free-text survey).
+        if (task.surveyChoices !== undefined) {
+          const choiceError = validateSurveyChoices(task.surveyChoices);
+          if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
         }
       }
     }

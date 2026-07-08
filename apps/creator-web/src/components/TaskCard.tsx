@@ -29,6 +29,7 @@ export default function TaskCard({ task, active, onClick }: { task: Task; active
   const typeLabel: Record<TaskType, string> = {
     field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation, photo: b.typePhoto,
     quiz: b.typeQuiz, numeric: b.typeNumeric, geofence: b.typeGeofence, sequence: b.typeSequence,
+    survey: b.typeSurvey,
   };
   const previewLabels: PreviewLabels = {
     quizChoices: b.prevQuizChoices, quizTyped: b.prevQuizTyped, quizNone: b.prevQuizNone,
@@ -36,6 +37,7 @@ export default function TaskCard({ task, active, onClick }: { task: Task; active
     photoAuto: b.prevPhotoAuto, photoStaff: b.prevPhotoStaff,
     numericAnswer: b.prevNumericAnswer, numericNone: b.prevNumericNone,
     geofence: b.prevGeofence, sequence: b.prevSequence, field: b.prevField, selfReport: b.prevSelfReport,
+    surveyChoices: b.prevSurveyChoices, surveyText: b.prevSurveyText,
   };
   return (
     <button

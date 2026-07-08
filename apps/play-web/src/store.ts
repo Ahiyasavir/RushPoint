@@ -8,6 +8,9 @@ export interface Session {
   // Shared team devices: the team this phone belongs to. Absent on sessions
   // saved before the feature — those are founding devices, so teamId == uid.
   teamId?: string;
+  // Test-drive (rehearsal) run flag (change: test-drive-mode): drives the
+  // persistent "TEST RUN" banner. Absent on normal runs → treated as false.
+  isTestDrive?: boolean;
 }
 
 const KEY = 'rushpoint.session';
@@ -88,4 +91,24 @@ export function saveStaffSession(s: StaffSession) {
 
 export function clearStaffSession() {
   try { localStorage.removeItem(STAFF_KEY); } catch { /* ignore */ }
+}
+
+// ── Team ↔ HQ chat: last-seen message count (change: team-hq-chat) ──
+// Unread is a purely client-local comparison: messages.length vs the count last
+// seen when this device opened the chat panel. Keyed per run+team so multiple
+// runs / teams on one device don't clobber each other. Best-effort like the rest.
+const CHAT_SEEN_PREFIX = 'rushpoint.chatSeen.';
+
+export function loadChatSeen(runId: string, teamId: string): number {
+  try {
+    const raw = localStorage.getItem(`${CHAT_SEEN_PREFIX}${runId}.${teamId}`);
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function saveChatSeen(runId: string, teamId: string, n: number) {
+  try { localStorage.setItem(`${CHAT_SEEN_PREFIX}${runId}.${teamId}`, String(n)); } catch { /* best-effort */ }
 }

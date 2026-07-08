@@ -217,7 +217,7 @@ export default function BuilderPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
-  async function saveAndLaunch() {
+  async function saveAndLaunch(testDrive = false) {
     if (!game) return;
     window.clearTimeout(saveTimer.current);
     // Don't launch on top of a failed save — the run would use stale/unsaved data.
@@ -226,7 +226,7 @@ export default function BuilderPage() {
       await dialog.alert(b.everyStageNeedsTask); return;
     }
     try {
-      const { runId } = await launchRun({ gameId: game.id });
+      const { runId } = await launchRun({ gameId: game.id, testDrive });
       nav(`/run/${game.id}/${runId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Launch failed';
@@ -314,7 +314,8 @@ export default function BuilderPage() {
           ))}
         </nav>
 
-        <Button onClick={saveAndLaunch} className="shrink-0">{b.launchRun}</Button>
+        <Button variant="ghost" onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
+        <Button onClick={() => saveAndLaunch(false)} className="shrink-0">{b.launchRun}</Button>
       </header>
 
       <div className="flex-1 min-h-0 p-2 overflow-hidden">

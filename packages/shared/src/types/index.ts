@@ -86,6 +86,13 @@ export const FIRESTORE_PATHS = {
   runAlert: (ownerUid: string, gameId: string, runId: string, id: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/adminAlerts/${id}`,
 
+  // Team ↔ HQ chat (change: team-hq-chat): one thread doc per team, server-write
+  // only. Participants read their own doc; staff/owner read the collection.
+  runChat: (ownerUid: string, gameId: string, runId: string, teamId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/chat/${teamId}`,
+  runChatCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/chat`,
+
   teamLocation: (ownerUid: string, gameId: string, runId: string, teamId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
 
@@ -127,7 +134,7 @@ export interface GeoPoint {
 export type GameMode        = 'individual' | 'team';
 export type ScoringPreset   = 'time_only' | 'fixed_points_speed' | 'smart_weighted';
 export type TaskType        = 'field' | 'smart_station' | 'photo' | 'self_report'
-                            | 'quiz' | 'numeric' | 'geofence' | 'sequence';
+                            | 'quiz' | 'numeric' | 'geofence' | 'sequence' | 'survey';
 // How a task is triggered/completed (change: task-trigger-modes). Default 'radius'.
 //   radius       — fires within a creator-set radius (default 40m, editable)
 //   exact        — fires only on precise arrival (tight default 4m, editable)
@@ -199,6 +206,11 @@ export interface SmartStationConfig {
   canSkip?: boolean;
   autoCompleteOnSuccess?: boolean;
   autoApprove?: boolean;   // photo_upload: approve without staff review (staffless events)
+  // audio-tasks: on a photo-type task, capture an audio clip instead of a photo
+  // (rides the same ingest/review pipeline). Default absent = 'photo'; only
+  // meaningful on photo-type tasks. NOT secret — the client needs it to render the
+  // right capture widget, so the sanitizer must pass it through.
+  captureKind?: 'photo' | 'audio';
 
   geofenceRadiusMeters?: number;
   stationCoords?: GeoPoint;  // injected by assignTask; never authored
@@ -289,6 +301,16 @@ export interface Task {
   // the field entirely when no seed is available (fail closed). Mutually
   // exclusive with `choices`/`answers` on one task; graded via matchesOrderedAnswer.
   orderItems?: string[];
+  // survey (change: survey-tasks): a no-right-answer data-collection task. When
+  // `surveyChoices` (2–8 non-empty options) is present the player picks one;
+  // ABSENT ⇒ a free-text response (trimmed, ≤ 500 chars). NOT a secret — there is
+  // no answer key to protect, so sanitizeTaskForParticipant passes it through so
+  // the choice buttons can render. Mutually exclusive with `answers`/`orderItems`/
+  // `numericAnswer`. Any valid non-empty response completes the task for its fixed
+  // `pointValue` (0 is a fine default — pure data collection). Validated via
+  // validateSurveyResponse; the team's own response is stored on its task record
+  // (RunTaskRecord.surveyResponse) — first response is final.
+  surveyChoices?: string[];
   // numeric: correct when |entered − numericAnswer| ≤ numericTolerance (default 0).
   numericAnswer?: number;
   numericTolerance?: number;
@@ -539,8 +561,12 @@ export interface Run {
   launchedAt?: string;
   finishedAt?: string;
   // ── Billing (Event Credits model) ──
-  billingType: 'free' | 'credit' | 'pro';
+  billingType: 'free' | 'credit' | 'pro' | 'test';
   maxParticipants: number;       // ceiling fixed at launch (from plan/package)
+  // Test-drive (rehearsal) run (change: test-drive-mode): free, capped at 2,
+  // excluded from cross-run aggregates (benchmarks, player profiles, playCount).
+  // Absent on every normal run; every consumer treats absent as false.
+  isTestDrive?: boolean;
   participantCount: number;      // grows with each joinRun
   freeParticipantsUsed?: number; // legacy (pre-migration runs)
   leaderboard?: RunLeaderboard;
@@ -622,6 +648,11 @@ export interface RunTaskRecord {
   // Smart station
   verificationOutcome?: 'correct' | 'photo_pending' | 'approved' | 'rejected';
   photoUrl?: string;
+  // survey (change: survey-tasks): the team's own submitted survey response
+  // (trimmed, ≤ 500 chars). Server-write-only like the whole team doc; first
+  // response is final (the already-completed guard never overwrites it). Not
+  // secret to its own team, so it flows through getMyTeamState unchanged.
+  surveyResponse?: string;
 }
 
 export interface RunStageRecord {

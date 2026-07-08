@@ -25,9 +25,12 @@ service firebase.storage {
         request.auth.uid == teamId
         || (request.auth.token.staff == true && request.auth.token.runId == runId)
       );
+      // audio-tasks: a photo task may capture an audio clip instead (same path,
+      // same 10MB cap). The client normalizes the blob type (strips codec params)
+      // before upload, so the allowed audio types stay exact-match.
       allow write: if request.auth != null && request.auth.uid == teamId
         && request.resource.size < 10 * 1024 * 1024  // 10MB max
-        && request.resource.contentType.matches('image/.*');
+        && request.resource.contentType.matches('image/.*|audio/(webm|mp4|mpeg|ogg)');
     }
     // Creator-authored task media (change: task-media-attachments): images/videos a
     // creator attaches to a task in the Builder. Only the owning creator may write

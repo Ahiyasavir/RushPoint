@@ -7,6 +7,7 @@
 import {
   PAYMENTS_ENABLED,
   FREE_MODE_MAX_PARTICIPANTS,
+  TEST_DRIVE_MAX_PARTICIPANTS,
   resolveLaunchBilling,
   isFeatureUnlocked,
   FREE_RUNS_LIFETIME,
@@ -59,6 +60,41 @@ function check(label: string, cond: boolean, detail = ''): void {
 
   const refuse = resolveLaunchBilling(true, { plan: 'free', lifetimeFreeRunsUsed: FREE_RUNS_LIFETIME, eventCredits: 0 });
   check('payments on, no free runs and no credits → refuse', refuse.ok === false);
+}
+
+// ── resolveLaunchBilling — testDrive short-circuits FIRST, wallet-independent ──
+// (change: test-drive-mode) A test drive is free, capped at 2, consumes nothing,
+// and returns the SAME decision regardless of the wallet or the payments flag.
+{
+  check('TEST_DRIVE_MAX_PARTICIPANTS is 2', TEST_DRIVE_MAX_PARTICIPANTS === 2,
+    `value=${TEST_DRIVE_MAX_PARTICIPANTS}`);
+
+  const expectTest = (r: ReturnType<typeof resolveLaunchBilling>, label: string): void => {
+    check(`${label} → ok`, r.ok === true);
+    check(`${label} → billingType "test"`, r.ok && r.billingType === 'test');
+    check(`${label} → consume "none"`, r.ok && r.consume === 'none');
+    check(`${label} → maxParticipants 2`, r.ok && r.maxParticipants === TEST_DRIVE_MAX_PARTICIPANTS);
+  };
+
+  // (a) payments off + empty wallet
+  expectTest(resolveLaunchBilling(false, {}, { testDrive: true }), 'testDrive, payments off, empty wallet');
+  // (b) payments on + zero-credit free wallet
+  expectTest(
+    resolveLaunchBilling(true, { plan: 'free', eventCredits: 0, lifetimeFreeRunsUsed: FREE_RUNS_LIFETIME }, { testDrive: true }),
+    'testDrive, payments on, zero-credit wallet',
+  );
+  // (c) payments on + active-pro wallet
+  expectTest(resolveLaunchBilling(true, { plan: 'pro' }, { testDrive: true }), 'testDrive, payments on, pro wallet');
+
+  // testDrive absent/false leaves every existing decision unchanged.
+  const proNormal = resolveLaunchBilling(true, { plan: 'pro' });
+  const proFalse = resolveLaunchBilling(true, { plan: 'pro' }, { testDrive: false });
+  check('testDrive:false is identical to omitting opts (pro)',
+    JSON.stringify(proNormal) === JSON.stringify(proFalse));
+  const offNormal = resolveLaunchBilling(false, {});
+  const offNoOpts = resolveLaunchBilling(false, {}, {});
+  check('empty opts is identical to omitting opts (payments off)',
+    JSON.stringify(offNormal) === JSON.stringify(offNoOpts));
 }
 
 // ── isFeatureUnlocked — off unlocks everything; on restores the Pro gate ──────

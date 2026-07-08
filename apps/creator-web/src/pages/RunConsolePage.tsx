@@ -3,14 +3,16 @@ import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES } from '@rushpoint/shared';
+import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
-  createZone, deleteZone, getRunZones, hideFeedItem, type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult,
+  createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
+  sendTeamChatMessage,
+  type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult, type SurveyResultRow,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -111,8 +113,11 @@ export default function RunConsolePage() {
           <div className="flex items-center gap-2 mt-1">
             <Badge color={finished ? 'zinc' : 'green'}>{run.status}</Badge>
             {run.billingType && (
-              <Badge color={run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
-                {run.billingType === 'free' ? t.runConsole.freeRun : run.billingType === 'pro' ? t.runConsole.proRun : t.runConsole.creditRun}
+              <Badge color={run.billingType === 'test' ? 'gold' : run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
+                {run.billingType === 'test' ? t.runConsole.testRun
+                  : run.billingType === 'free' ? t.runConsole.freeRun
+                  : run.billingType === 'pro' ? t.runConsole.proRun
+                  : t.runConsole.creditRun}
               </Badge>
             )}
             <span className="text-zinc-500 text-sm">
@@ -120,7 +125,10 @@ export default function RunConsolePage() {
             </span>
           </div>
         </div>
-        <JoinShare accessCode={run.accessCode} />
+        <div className="flex flex-col items-stretch gap-2">
+          <JoinShare accessCode={run.accessCode} />
+          <StationQrPrint gameId={gameId!} />
+        </div>
       </div>
 
       {/* Live SOS / alerts — the organizer sees these the moment a team raises one */}
@@ -165,6 +173,7 @@ export default function RunConsolePage() {
       {finished && <AnalyticsPanel accessCode={run.accessCode} />}
       {finished && <HeatmapPanel accessCode={run.accessCode} />}
       {finished && <FeedbackPanel gameId={gameId} runId={runId} />}
+      <SurveyResultsPanel gameId={gameId} runId={runId} />
 
       <div className="grid lg:grid-cols-3 gap-5">
         {/* Teams */}
@@ -219,6 +228,10 @@ export default function RunConsolePage() {
           {/* Live photo feed — approved photos broadcast to participants, with
               a hide button per card for moderation (live-photo-feed). */}
           <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />
+
+          {/* Team ↔ HQ chat — per-team threads with unread badges; HQ replies
+              as from:'hq' (team-hq-chat). */}
+          {!finished && <ChatConsole ctx={ctx} teams={teams} />}
 
           {/* Live standings — computed on demand mid-run without ending it. */}
           {!finished && run.leaderboard && run.leaderboard.rankings.length > 0 && (
@@ -307,6 +320,81 @@ function JoinShare({ accessCode }: { accessCode: string }) {
         </button>
       </div>
     </Card>
+  );
+}
+
+// Printable station QR sheet (change: qr-station-scan). One-shot owner-scoped
+// getGame (the owner already legally holds the secret codes), then a printable
+// window listing every smart_station: title + QR (RP1: payload the play-web
+// scanner decodes) + the human-readable code beneath as a manual fallback. No
+// new callable, no sanitizer change — the QR only carries the existing code.
+function StationQrPrint({ gameId }: { gameId: string }) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+
+  function escapeHtml(s: string): string {
+    return s.replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string
+    ));
+  }
+
+  async function print() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { game } = await getGame({ gameId });
+      const stations = (game.stages ?? [])
+        .flatMap((s) => s.tasks ?? [])
+        .filter((task) => task.type === 'smart_station' && !!task.smart?.secretCode);
+      if (stations.length === 0) {
+        await dialog.alert(t.runConsole.printQrEmpty);
+        return;
+      }
+      const cards = await Promise.all(stations.map(async (task) => {
+        const code = task.smart!.secretCode!;
+        const img = await QRCode.toDataURL(buildStationQrPayload(code), { margin: 1, width: 256 });
+        return `
+          <section class="station">
+            <h2 dir="auto">${escapeHtml(task.title)}</h2>
+            <img src="${img}" alt="" />
+            <p class="fallback">${escapeHtml(t.runConsole.printQrCodeFallback)}</p>
+            <p class="code">${escapeHtml(code)}</p>
+          </section>`;
+      }));
+      const win = window.open('', '_blank');
+      if (!win) {
+        await dialog.alert(t.runConsole.printQrBlocked);
+        return;
+      }
+      win.document.write(`<!doctype html><html><head><meta charset="utf-8" />
+        <title>${escapeHtml(t.runConsole.printQrHeading)}</title>
+        <style>
+          body { font-family: system-ui, sans-serif; margin: 24px; color: #111; }
+          h1 { font-size: 20px; text-align: center; margin-bottom: 24px; }
+          .station { text-align: center; page-break-inside: avoid; margin-bottom: 40px; }
+          .station h2 { font-size: 18px; margin: 0 0 12px; }
+          .station img { width: 256px; height: 256px; }
+          .fallback { font-size: 11px; color: #666; margin: 8px 0 2px; text-transform: uppercase; letter-spacing: 0.1em; }
+          .code { font-family: monospace; font-size: 18px; font-weight: bold; margin: 0; }
+        </style></head><body>
+        <h1>${escapeHtml(t.runConsole.printQrHeading)}</h1>
+        ${cards.join('')}
+      </body></html>`);
+      win.document.close();
+      // Print after the images have loaded.
+      win.focus();
+      win.onload = () => win.print();
+      // onload may already have fired for a fast data: URL sheet.
+      if (win.document.readyState === 'complete') win.print();
+    } catch {
+      await dialog.alert(t.runConsole.printQrBlocked);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Button variant="subtle" onClick={print} loading={busy}>{t.runConsole.printQr}</Button>
   );
 }
 
@@ -462,7 +550,7 @@ function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: 
 // ── Post-run per-task analytics (run-analytics-heatmap) ───────────────────────
 const TYPE_EMOJI: Record<string, string> = {
   smart_station: '🔑', photo: '📸', quiz: '❓', numeric: '🔢',
-  field: '✅', self_report: '🙋', geofence: '📡', sequence: '📋',
+  field: '✅', self_report: '🙋', geofence: '📡', sequence: '📋', survey: '🗳️',
 };
 function fmtMs(ms: number): string {
   if (!ms) return '—';
@@ -625,6 +713,114 @@ function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: st
             </div>
           </div>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+// Team ↔ HQ chat (change: team-hq-chat): per-team threads. The owner reads the
+// whole chat collection (rules grant it) via one snapshot and replies as HQ. A
+// thread with new messages since it was last opened shows an unread badge (local).
+interface ChatThreadRow { teamId: string; messages: ChatMessage[]; updatedAt: string }
+
+function ChatConsole({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; runId: string }; teams: RunTeamRow[] }) {
+  const rc = useT().runConsole;
+  const [threads, setThreads] = useState<ChatThreadRow[]>([]);
+  const [openTeam, setOpenTeam] = useState<string | null>(null);
+  const [seen, setSeen] = useState<Record<string, number>>({});
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const ref = collection(db, FIRESTORE_PATHS.runChatCol(ctx.ownerUid, ctx.gameId, ctx.runId));
+    return onSnapshot(ref, (snap) => {
+      const rows = snap.docs.map((d) => {
+        const data = d.data() as { messages?: ChatMessage[]; updatedAt?: string };
+        return { teamId: d.id, messages: data.messages ?? [], updatedAt: data.updatedAt ?? '' };
+      });
+      rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      setThreads(rows);
+    }, () => undefined);
+  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  if (threads.length === 0) return null;
+
+  const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
+
+  function expand(teamId: string, count: number) {
+    setOpenTeam((cur) => {
+      const next = cur === teamId ? null : teamId;
+      if (next) setSeen((s) => ({ ...s, [teamId]: count }));
+      return next;
+    });
+    setDraft('');
+  }
+
+  async function reply(teamId: string) {
+    const clean = draft.trim();
+    if (!clean || busy) return;
+    setBusy(true);
+    try {
+      await sendTeamChatMessage({ ...ctx, teamId, text: clean });
+      setDraft('');
+    } catch { /* the listener reconciles; keep the draft for a retry */ }
+    finally { setBusy(false); }
+  }
+
+  const totalUnread = threads.reduce((n, th) => n + (th.messages.length > (seen[th.teamId] ?? 0) ? 1 : 0), 0);
+
+  return (
+    <Card className="p-4 mt-4">
+      <div className="text-sm font-medium mb-3">
+        💬 {rc.chatTitle}
+        {totalUnread > 0 && (
+          <span className="ms-2 inline-flex items-center rounded-full bg-neon-blue/20 text-neon-blue px-2 py-0.5 text-[11px] font-semibold">{totalUnread}</span>
+        )}
+      </div>
+      <div className="space-y-2">
+        {threads.map((th) => {
+          const last = th.messages[th.messages.length - 1];
+          const unread = th.messages.length > (seen[th.teamId] ?? 0);
+          const expanded = openTeam === th.teamId;
+          return (
+            <div key={th.teamId} className="rounded-lg bg-app-bg p-3">
+              <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages.length)}>
+                <div className="flex items-center justify-between gap-2">
+                  <span dir="auto" className="text-sm font-medium text-zinc-200 truncate">{nameFor(th.teamId)}</span>
+                  {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-neon-blue/20 text-neon-blue px-2 py-0.5 text-[11px] font-semibold">{rc.chatUnread}</span>}
+                </div>
+                {last && <div dir="auto" className="text-[11px] text-zinc-500 truncate mt-0.5">{last.from === 'hq' ? `${rc.chatHq}: ` : ''}{last.text}</div>}
+              </button>
+              {expanded && (
+                <div className="mt-2 space-y-2">
+                  <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
+                    {th.messages.map((m) => (
+                      <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
+                        <span className="text-[11px] text-zinc-500">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
+                        <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-neon-blue/15 border border-neon-blue/40 text-zinc-100' : 'bg-app-card border border-zinc-700 text-zinc-200'}`}>{m.text}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void reply(th.teamId); } }}
+                      maxLength={CHAT_TEXT_MAX_LEN}
+                      dir="auto"
+                      disabled={busy}
+                      placeholder={rc.chatReplyPlaceholder}
+                      className="flex-1"
+                    />
+                    <Button onClick={() => void reply(th.teamId)} disabled={busy || !draft.trim()}>
+                      {rc.chatSend}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </Card>
   );
@@ -925,5 +1121,71 @@ function Distribution({ title, bars }: { title: string; bars: [string, number][]
         ))}
       </div>
     </div>
+  );
+}
+
+// ── Survey results (change: survey-tasks) — owner/staff read-only aggregation ──
+// Per-choice bar counts for choice surveys; a {teamName, response} list for
+// free-text. Fetched on mount + a manual refresh (live poll results during a run).
+function SurveyResultsPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
+  const t = useT();
+  const [results, setResults] = useState<SurveyResultRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(() => {
+    if (!gameId || !runId) return;
+    setLoading(true);
+    getRunSurveyResults({ gameId, runId })
+      .then((d) => setResults(d.results))
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+  }, [gameId, runId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  // No survey tasks in this game ⇒ render nothing (keep the console uncluttered).
+  if (results !== null && results.length === 0) return null;
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">{t.runConsole.surveyTitle}</div>
+        <Button variant="ghost" className="text-xs" disabled={loading} onClick={load}>
+          {loading ? t.runConsole.surveyRefreshing : t.runConsole.surveyRefresh}
+        </Button>
+      </div>
+
+      {results === null ? (
+        <div className="text-sm text-zinc-500">{t.runConsole.surveyLoading}</div>
+      ) : (
+        <div className="space-y-5">
+          {results.map((r) => (
+            <div key={r.taskId} className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div dir="auto" className="text-sm font-medium truncate">{r.title}</div>
+                <div className="text-xs text-zinc-500 shrink-0">{t.runConsole.surveyResponseCount({ n: r.responseCount })}</div>
+              </div>
+              {r.counts && r.surveyChoices ? (
+                <Distribution
+                  title={t.runConsole.surveyChoiceCounts}
+                  bars={r.surveyChoices.map((c) => [c, r.counts![c] ?? 0])}
+                />
+              ) : r.responseCount === 0 ? (
+                <div className="text-sm text-zinc-500">{t.runConsole.surveyNoResponses}</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {(r.responses ?? []).map((row, i) => (
+                    <div key={i} className="rounded-lg bg-[--rp-raised] px-3 py-2">
+                      <div dir="auto" className="text-xs text-zinc-500 mb-0.5 truncate">{row.teamName}</div>
+                      <div dir="auto" className="text-sm">{row.response}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

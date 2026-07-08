@@ -77,6 +77,10 @@ export function isTaskInteractionValid(task: Task): boolean {
   if (task.type === 'sequence') {
     return !!task.steps && task.steps.length > 0;
   }
+  // survey (change: survey-tasks): no right answer — a free-text survey (no
+  // choices) or a valid choice list both complete. The editor pushes only a
+  // valid 2–8 choice list (else undefined ⇒ free-text), so a survey is always
+  // completable.
   return true;
 }
 
@@ -96,9 +100,10 @@ export const TASK_TYPE_META: Record<TaskType, TaskTypeMeta> = {
   self_report:   { emoji: '🙋', label: 'Self report', description: 'Finish a challenge and rate yourselves.' },
   geofence:      { emoji: '📡', label: 'Geofence',   description: 'Auto check in by GPS within a radius.' },
   sequence:      { emoji: '📋', label: 'Sequence',   description: 'Several ordered steps at one stop.' },
+  survey:        { emoji: '🗳️', label: 'Survey',     description: 'Ask a question with no right answer.' },
 };
 
 // Order the picker grid presents types (most common first).
 export const TYPE_PICKER_ORDER: TaskType[] = [
-  'smart_station', 'photo', 'quiz', 'numeric', 'field', 'self_report', 'geofence', 'sequence',
+  'smart_station', 'photo', 'quiz', 'numeric', 'field', 'self_report', 'geofence', 'sequence', 'survey',
 ];

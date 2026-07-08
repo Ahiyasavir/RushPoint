@@ -64,6 +64,7 @@ import {
   isHintFree,
   isOrderingTask,
   matchesOrderedAnswer,
+  validateSurveyResponse,
   pickCeremonyFeed,
   type FeedItem,
   type CeremonyFeedItem,
@@ -158,7 +159,7 @@ function buildInitialStages(game: Game): RunStageRecord[] {
 
 export const launchRun = loggedCallable('launchRun', async (data, context) => {
   const uid = requireAuth(context);
-  const { gameId } = data as { gameId: string };
+  const { gameId, testDrive } = data as { gameId: string; testDrive?: boolean };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
@@ -179,6 +180,8 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   const buildRun = (billingType: Run['billingType'], maxParticipants: number): Run => ({
     id: runRef.id, gameId, ownerUid: uid, status: 'live', accessCode: code,
     billingType, maxParticipants, participantCount: 0,
+    // Only test-drive runs carry the flag — normal runs stay free of the field.
+    ...(testDrive ? { isTestDrive: true } : {}),
     launchedAt: now, createdAt: now, updatedAt: now,
   });
   const accessCode: AccessCode = { code, ownerUid: uid, gameId, runId: runRef.id, status: 'unused', createdAt: now };
@@ -188,7 +191,31 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   //    failure can never burn a paid credit without producing a run. The decision
   //    (pro / free-run / credit / refuse) is the pure resolveLaunchBilling helper.
   //    Free mode (PAYMENTS_ENABLED === false) touches the wallet not at all. ──
-  if (!PAYMENTS_ENABLED) {
+  if (testDrive) {
+    // Test-drive (rehearsal) launch (change: test-drive-mode): free, capped at 2,
+    // wallet never touched — SAME path in both payment modes. Always a transaction
+    // (even in free mode, which normally uses a batch) because the abuse guard
+    // needs a read phase.
+    const decision = resolveLaunchBilling(PAYMENTS_ENABLED, {}, { testDrive: true });
+    const billingType = decision.ok ? decision.billingType : 'test';
+    const maxParticipants = decision.ok ? decision.maxParticipants : 2;
+    await db.runTransaction(async (t) => {
+      // Abuse guard: at most ONE live (not finished) test-drive run per game.
+      // Equality-only query (no '!=' → no composite index, txn-safe via
+      // t.get(Query)); the tiny result set is status-filtered in code.
+      const liveTests = await t.get(
+        db.collection(`users/${uid}/games/${gameId}/runs`).where('isTestDrive', '==', true),
+      );
+      if (liveTests.docs.some((d) => (d.data() as Run).status !== 'finished')) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'A test run for this game is already live. Finalize it before launching another.',
+        );
+      }
+      t.set(runRef, buildRun(billingType, maxParticipants));
+      t.set(accessCodeRef, accessCode);
+    });
+  } else if (!PAYMENTS_ENABLED) {
     const free = resolveLaunchBilling(false, {});
     const billingType = free.ok ? free.billingType : 'free';
     const maxParticipants = free.ok ? free.maxParticipants : FREE_PARTICIPANTS_PER_FREE_RUN;
@@ -236,8 +263,11 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
     });
   }
 
-  // Increment game.playCount (best-effort, outside the atomic launch).
-  db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
+  // Increment game.playCount (best-effort, outside the atomic launch). A test
+  // drive is a rehearsal, not a play, so it is excluded (change: test-drive-mode).
+  if (!testDrive) {
+    db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
+  }
 
   return { runId: runRef.id, accessCode: code };
 });
@@ -272,6 +302,9 @@ export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) =
     branding: game.branding ?? null,
     registrationFields: game.registrationFields,
     runStatus: run?.status ?? 'live',
+    // Test-drive flag so play-web can show a persistent "TEST RUN" banner
+    // (change: test-drive-mode). Absent on normal runs → false.
+    isTestDrive: run?.isTestDrive ?? false,
     // Accurate GPS requirement derived from the game's task trigger modes.
     requirement: describeGameRequirements(game),
   };
@@ -372,9 +405,11 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     const used = r.participantCount ?? r.freeParticipantsUsed ?? 0;
     const cap = r.maxParticipants ?? FREE_PARTICIPANTS_PER_FREE_RUN;
     if (used >= cap) {
-      const msg = r.billingType === 'free'
-        ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
-        : `This run is full (${cap} participants max).`;
+      const msg = r.billingType === 'test'
+        ? `This is a ${cap}-person test run. Launch a real run to invite more players.`
+        : r.billingType === 'free'
+          ? `This free run is full (${cap} participants max). The host can add an Event Credit or go Pro for more.`
+          : `This run is full (${cap} participants max).`;
       throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
     }
     t.set(teamRef, team);
@@ -501,6 +536,9 @@ export async function completeTaskForTeam(
   teamId: string,
   taskId: string,
   now: string,
+  // survey-tasks: optional per-completion extras stamped onto the team's task
+  // record INSIDE the existing transaction (no new transaction, no new reads).
+  extras?: { surveyResponse?: string },
 ): Promise<void> {
   const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   const game = gameSnap.data() as Game;
@@ -581,6 +619,13 @@ export async function completeTaskForTeam(
     taskRec.status = 'completed';
     taskRec.completedAt = now;
     taskRec.actualMinutes = actualMinutes;
+    // survey-tasks: stamp the team's own response on its task record via the same
+    // whole-object stage rewrite the record already gets (never a dotted array
+    // path). The already-completed guard above makes duplicate submissions a
+    // no-op, so the first response is final and is never overwritten.
+    if (extras?.surveyResponse != null) {
+      taskRec.surveyResponse = extras.surveyResponse;
+    }
 
     // Power-ups (change: power-ups) — ALL inside this existing transaction; no new
     // transaction, no new reads (game/run docs already fetched above). Two phases:
@@ -1016,7 +1061,8 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   const runRef = db.doc(runPath(uid, gameId, runId));
   const runSnap = await runRef.get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  if ((runSnap.data() as Run).ownerUid !== uid) {
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
 
@@ -1041,7 +1087,9 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   // into the player's cross-run profile. Done here as a batch — OFF the hot completeTask
   // path — and made idempotent by `profileRecorded` on the team so a re-finalize never
   // double-counts. Best-effort: a profile write must never fail finalize.
-  try {
+  // A test-drive run is a rehearsal — excluded from cross-run player profiles
+  // (change: test-drive-mode).
+  if (!run.isTestDrive) try {
     const scoreByTeam = new Map(rankings.map((r) => [r.teamId, r.score]));
     for (const d of teamsSnap.docs) {
       const team = d.data() as RunTeam & { profileRecorded?: boolean };
@@ -1064,8 +1112,10 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   // Platform benchmark contribution (platform-benchmark): fold anonymized,
   // per-task-type aggregates (median completion time + completion rate) into
   // benchmarks/{taskType}. No per-run identifiers are written. Opt-outable via
-  // game.benchmarkOptOut. Best-effort — never blocks finalize.
-  if (!game.benchmarkOptOut) {
+  // game.benchmarkOptOut. Best-effort — never blocks finalize. A test-drive run
+  // is excluded so a rehearsal never pollutes platform benchmarks
+  // (change: test-drive-mode).
+  if (!game.benchmarkOptOut && !run.isTestDrive) {
     try {
       const typeOf = new Map<string, string>();
       for (const s of game.stages) for (const t of s.tasks) typeOf.set(t.id, t.type);
@@ -1212,6 +1262,9 @@ export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async
     updatedAt: board?.updatedAt ?? null,
     rankings: published ? board!.rankings : [],
     ceremonyFeed,
+    // Labeling flag so shared surfaces can watermark test-drive data
+    // (change: test-drive-mode).
+    isTestDrive: run?.isTestDrive ?? false,
   };
 });
 
@@ -1250,6 +1303,7 @@ export const getRunRecap = loggedCallable('getRunRecap', async (data, context) =
     branding: game?.branding ?? null,
     runStatus: run?.status ?? 'live',
     published,
+    isTestDrive: run?.isTestDrive ?? false,
     ...recap,
   };
 });
@@ -1318,6 +1372,7 @@ export const getRunAnalytics = loggedCallable('getRunAnalytics', async (data, co
   return {
     title: game?.branding?.name ?? game?.title ?? 'RushPoint',
     runStatus: run?.status ?? 'live',
+    isTestDrive: run?.isTestDrive ?? false,
     ...computeRunAnalytics(teams, gameTasks),
   };
 });
@@ -2209,9 +2264,33 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const task = findGameTask(gameSnap.data() as Game, taskId);
   if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
-  if (task.type !== 'quiz' && task.type !== 'numeric') {
+  if (task.type !== 'quiz' && task.type !== 'numeric' && task.type !== 'survey') {
     throw new functions.https.HttpsError('failed-precondition', 'Task does not take an answer');
   }
+
+  // Survey (change: survey-tasks): NO right answer — validation is shape-only via
+  // the shared validateSurveyResponse (trims; choice mode must match a listed
+  // choice; free-text ≤ 500 chars). Any valid response completes the task for its
+  // fixed pointValue through the EXISTING completion path. No attempt tracking,
+  // no wrong-answer path, and a survey never carries an ordering arrangement.
+  if (task.type === 'survey') {
+    if (orderedAnswer !== undefined) {
+      throw new functions.https.HttpsError('invalid-argument', 'orderedAnswer only applies to an ordering task');
+    }
+    const resp = validateSurveyResponse(answer, task.surveyChoices);
+    if (resp == null) {
+      throw new functions.https.HttpsError('invalid-argument', 'Valid survey response required');
+    }
+    // Task expiry still applies (a closed task takes no more responses).
+    await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
+    const now = new Date().toISOString();
+    await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
+    await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+    const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+    const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
+    return { correct: true, nextTaskId: next.taskId ?? null };
+  }
+
   // Ordering variant (change: quiz-ordering): an ordering task is graded ONLY
   // from `orderedAnswer` (a string[] arrangement); a classic quiz/numeric task
   // must NOT carry one (loud invalid-argument instead of a silent ignore).
@@ -2677,4 +2756,106 @@ export const getRunFeedbackSummary = loggedCallable('getRunFeedbackSummary', asy
     summary: computeFeedbackSummary(responses, participantCount),
     responses,
   };
+});
+
+
+// ─── getRunSurveyResults (change: survey-tasks) ────────────────────────────────
+// Owner / run-scoped-staff read-only aggregation of every survey task in the run.
+// One game-doc read (to collect the survey tasks + their choices) + one teams
+// scan (the team docs already carry `surveyResponse` on completed survey task
+// records). No writes, no transaction. Choice surveys → 0-filled per-choice
+// counts; free-text surveys → {teamName, response} rows.
+
+export const getRunSurveyResults = loggedCallable('getRunSurveyResults', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'getRunSurveyResults');
+  const { ownerUid, gameId, runId } = data as {
+    ownerUid?: string; gameId?: string; runId?: string;
+  };
+  if (!gameId || !runId) {
+    throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
+  }
+  // The creator console calls with {gameId, runId} (owner == caller, like
+  // listRunTeams). The run doc's own ownerUid is the authority for the gate.
+  const resolvedOwner = ownerUid ?? uid;
+  const runSnap = await db.doc(runPath(resolvedOwner, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+
+  // Authz: owner OR admin OR staff scoped to THIS run — same contract as
+  // assertStaffOrOwner (functions/src/index.ts). A staff PIN minted for another
+  // run (or a participant / stranger) gets permission-denied (e2e authz matrix).
+  const token = context.auth!.token;
+  const isOwner = uid === run.ownerUid;
+  const isAdmin = token.admin === true;
+  const isRunStaff = token.staff === true && token.ownerUid === run.ownerUid && token.runId === runId;
+  if (!isOwner && !isAdmin && !isRunStaff) {
+    throw new functions.https.HttpsError('permission-denied', 'Staff or owner access required');
+  }
+
+  const gameSnap = await db.doc(gamePath(run.ownerUid, gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+
+  // Collect the survey tasks (id → {title, choices?}), preserving builder order.
+  const surveyTasks: { taskId: string; title: string; surveyChoices?: string[] }[] = [];
+  for (const stage of [...(game.stages ?? [])].sort((a, b) => a.order - b.order)) {
+    for (const task of stage.tasks ?? []) {
+      if (task.type === 'survey') {
+        surveyTasks.push({
+          taskId: task.id,
+          title: task.title,
+          ...(Array.isArray(task.surveyChoices) && task.surveyChoices.length > 0
+            ? { surveyChoices: task.surveyChoices }
+            : {}),
+        });
+      }
+    }
+  }
+  if (surveyTasks.length === 0) return { results: [] };
+
+  // One teams scan. Each completed survey task record carries the team's own
+  // `surveyResponse`. Index responses by taskId.
+  const teamsSnap = await db.collection(teamsCol(run.ownerUid, gameId, runId)).get();
+  const byTask = new Map<string, { teamName: string; response: string }[]>();
+  for (const st of surveyTasks) byTask.set(st.taskId, []);
+  for (const doc of teamsSnap.docs) {
+    const team = doc.data() as RunTeam;
+    const teamName = team.displayName ?? team.id;
+    for (const stage of team.stages ?? []) {
+      for (const rec of stage.tasks ?? []) {
+        if (rec.status === 'completed' && typeof rec.surveyResponse === 'string' && byTask.has(rec.taskId)) {
+          byTask.get(rec.taskId)!.push({ teamName, response: rec.surveyResponse });
+        }
+      }
+    }
+  }
+
+  const results = surveyTasks.map((st) => {
+    const rows = byTask.get(st.taskId) ?? [];
+    if (st.surveyChoices) {
+      // 0-filled per-choice tally; responses outside the choice set are ignored
+      // (validateSurveyResponse already rejects them at submit time).
+      const counts: Record<string, number> = {};
+      for (const choice of st.surveyChoices) counts[choice] = 0;
+      for (const r of rows) {
+        if (counts[r.response] !== undefined) counts[r.response] += 1;
+      }
+      return {
+        taskId: st.taskId,
+        title: st.title,
+        surveyChoices: st.surveyChoices,
+        counts,
+        responseCount: rows.length,
+      };
+    }
+    return {
+      taskId: st.taskId,
+      title: st.title,
+      responses: rows,
+      responseCount: rows.length,
+    };
+  });
+
+  return { results };
 });

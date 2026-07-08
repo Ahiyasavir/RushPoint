@@ -85,6 +85,21 @@ service cloud.firestore {
             allow write: if false;
           }
 
+          // ── TEAM ↔ HQ CHAT (team-hq-chat) ──────────────────────────────────
+          //    One thread doc per team. Same read surface as the team doc itself:
+          //    founder (uid == teamId), attached devices, run-scoped staff, owner.
+          //    deviceUids is mirrored onto this doc by sendTeamChatMessage so
+          //    isAttachedDevice() works without a rules get(). All writes CF-only.
+          //    List semantics: staff/owner clauses hold for every doc (HQ consoles
+          //    listen to the whole collection); a participant's clauses depend on
+          //    doc id / resource.data, so they can only get/listen to their own doc.
+          match /chat/{teamId} {
+            allow read:  if isOwner(uid) || isOwner(teamId)
+                          || isAttachedDevice()
+                          || isStaffForRun(uid, gameId, runId);
+            allow write: if false;
+          }
+
           // ── OPERATIONAL (alerts, locations, staffInvites) ──────────────────
           //    Owner reads; all writes + staff/participant reads go through CFs.
           match /alerts/{docId} {

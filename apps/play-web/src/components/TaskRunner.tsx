@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { haversineKm, expiryInstantMs } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
@@ -6,12 +6,15 @@ import {
   submitTaskAnswer, submitSequenceStep,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
-import { uploadTaskPhoto } from '../services/firebase';
+import { uploadTaskPhoto, uploadTaskAudio } from '../services/firebase';
 import { withLocation } from '../utils/withLocation';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
+
+// Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
+const QrScanner = lazy(() => import('./QrScanner'));
 
 // Creator-authored task media (change: task-media-attachments): images render as
 // <img>, uploaded videos as inline <video controls>, YouTube as a lazy iframe embed
@@ -149,6 +152,26 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } finally { setBusy(false); }
   }
 
+  // audio-tasks: a recorded clip rides the SAME photo pipeline — upload the blob
+  // to Storage, then submitStationPhoto with the declared contentType so the
+  // server validates it against the task's captureKind.
+  async function audio(blob: Blob, contentType: string) {
+    setBusy(true); setMsg('');
+    try {
+      setMsg(t.task.uploadingAudio);
+      const up = await uploadTaskAudio(blob, {
+        runId: session.runId, teamId: state.team.id, taskId: task!.id, contentType,
+      });
+      const res = await submitStationPhoto({
+        ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
+      });
+      setMsg(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      onChanged();
+    } catch (e) {
+      setMsg(submitError(e, t.task.uploadFailed));
+    } finally { setBusy(false); }
+  }
+
   // quiz / numeric — submit a typed or chosen answer
   async function answer(text: string) {
     setBusy(true); setMsg('');
@@ -272,6 +295,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <GeofenceAuto task={task} onArrive={geofenceArrive} />
         ) : task.type === 'sequence' ? (
           <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen} onSubmit={sequenceStep} />
+        ) : task.type === 'survey' ? (
+          <SurveyEntry task={task} busy={frozen} onSubmit={answer} />
+        ) : task.smart?.captureKind === 'audio' ? (
+          <AudioEntry busy={frozen} onSubmit={audio} />
         ) : (
           <PhotoEntry busy={frozen} onSubmit={photo} />
         )}
@@ -363,11 +390,27 @@ function DistanceBadge({ task }: { task: SafeTask }) {
 function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; onSubmit: (code: string) => void }) {
   const { t } = useT();
   const [code, setCode] = useState('');
+  const [scanning, setScanning] = useState(false);
+  // Only offer the scanner where a camera API exists (feature-detect).
+  const canScan = typeof navigator !== 'undefined' && !!navigator.mediaDevices;
+  if (scanning) {
+    return (
+      <Suspense fallback={<div className="h-64 rounded-2xl bg-app-raised animate-pulse" />}>
+        <QrScanner
+          onClose={() => setScanning(false)}
+          onDecode={(scanned) => { setCode(scanned); setScanning(false); onSubmit(scanned); }}
+        />
+      </Suspense>
+    );
+  }
   return (
     <div className="space-y-3">
       <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder={label}
         className="text-center font-mono tracking-widest" />
       <Button disabled={busy || !code} onClick={() => onSubmit(code)}>{t.task.verify}</Button>
+      {canScan && (
+        <Button variant="ghost" disabled={busy} onClick={() => setScanning(true)}>📷 {t.task.scanQr}</Button>
+      )}
     </div>
   );
 }
@@ -392,6 +435,36 @@ function QuizEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; on
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer}
         onKeyDown={(e) => e.key === 'Enter' && val.trim() && onSubmit(val.trim())} />
       <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())}>{t.task.submitAnswer}</Button>
+    </div>
+  );
+}
+
+// Survey (change: survey-tasks) — a question with no right answer. With
+// surveyChoices, tap one option to submit; without, write a free-text response
+// (≤ 500 chars). Submits via the same answer() helper as the quiz. No anonymity
+// claim (responses are attributed to the team for the creator).
+function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; onSubmit: (a: string) => void }) {
+  const { t } = useT();
+  const [val, setVal] = useState('');
+  if (task.surveyChoices && task.surveyChoices.length > 0) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs text-zinc-500">{t.task.surveyChoicePrompt}</p>
+        {task.surveyChoices.map((c) => (
+          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full">
+            <span dir="auto">{c}</span>
+          </Button>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-500">{t.task.surveyTextPrompt}</p>
+      <textarea value={val} dir="auto" rows={3} maxLength={500}
+        onChange={(e) => setVal(e.target.value)} placeholder={t.task.surveyPlaceholder}
+        className="w-full px-4 py-3 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 placeholder:text-zinc-600 shadow-[0_1px_4px_rgba(26,10,0,0.06)] focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40 transition-all duration-150 resize-none" />
+      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())}>{t.task.surveySubmit}</Button>
     </div>
   );
 }
@@ -574,6 +647,144 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File 
       <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())}>
         {busy ? t.task.working : t.task.submitPhoto}
       </Button>
+    </div>
+  );
+}
+
+// audio-tasks: record a short clip with MediaRecorder — record / stop / re-record
+// with a 60s hard cap (auto-stop + live countdown), <audio> playback before
+// submit. Prefers audio/webm;codecs=opus, falls back to audio/mp4 (Safari). All
+// MediaStream tracks are stopped on unmount so the mic indicator clears.
+const MAX_AUDIO_SECONDS = 60;
+const MAX_AUDIO_BYTES = 12 * 1024 * 1024; // mirrors the photo cap; 60s opus « 1MB
+
+function pickAudioMimeType(): string | null {
+  const rec = (typeof window !== 'undefined' ? window.MediaRecorder : undefined) as
+    | (typeof MediaRecorder & { isTypeSupported?: (t: string) => boolean }) | undefined;
+  if (!rec) return null;
+  const supports = (t: string) => typeof rec.isTypeSupported === 'function' && rec.isTypeSupported(t);
+  if (supports('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+  if (supports('audio/webm')) return 'audio/webm';
+  if (supports('audio/mp4')) return 'audio/mp4'; // Safari
+  return null;
+}
+
+function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, contentType: string) => void }) {
+  const { t } = useT();
+  const [recording, setRecording] = useState(false);
+  const [remaining, setRemaining] = useState(MAX_AUDIO_SECONDS);
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [err, setErr] = useState('');
+  const [unsupported, setUnsupported] = useState(false);
+
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const mimeRef = useRef<string>('audio/webm');
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevPreviewRef = useRef<string | null>(null);
+
+  function setPreview(next: string | null) {
+    if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current);
+    prevPreviewRef.current = next;
+    setPreviewUrl(next);
+  }
+
+  function stopTracks() {
+    streamRef.current?.getTracks().forEach((tr) => tr.stop());
+    streamRef.current = null;
+  }
+  function clearTimers() {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (stopTimeoutRef.current) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
+  }
+
+  // Clean up mic + timers + blob URL on unmount.
+  useEffect(() => () => {
+    clearTimers();
+    try { recorderRef.current?.stop(); } catch { /* already stopped */ }
+    stopTracks();
+    if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current);
+  }, []);
+
+  function stop() {
+    clearTimers();
+    try { recorderRef.current?.stop(); } catch { /* already stopped */ }
+  }
+
+  async function start() {
+    setErr('');
+    const mime = pickAudioMimeType();
+    if (!mime || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setUnsupported(true);
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setErr(t.task.micDenied);
+      return;
+    }
+    streamRef.current = stream;
+    mimeRef.current = mime;
+    chunksRef.current = [];
+    setBlob(null);
+    setPreview(null);
+
+    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    recorderRef.current = recorder;
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.onstop = () => {
+      clearTimers();
+      stopTracks();
+      setRecording(false);
+      const out = new Blob(chunksRef.current, { type: mimeRef.current });
+      if (out.size > MAX_AUDIO_BYTES) {
+        setErr(t.task.audioTooLarge({ mb: Math.round(MAX_AUDIO_BYTES / 1024 / 1024) }));
+        return;
+      }
+      setBlob(out);
+      setPreview(URL.createObjectURL(out));
+    };
+
+    setRecording(true);
+    setRemaining(MAX_AUDIO_SECONDS);
+    recorder.start();
+    timerRef.current = setInterval(() => {
+      setRemaining((r) => (r > 0 ? r - 1 : 0));
+    }, 1000);
+    // Hard 60s cap — auto-stop.
+    stopTimeoutRef.current = setTimeout(() => stop(), MAX_AUDIO_SECONDS * 1000);
+  }
+
+  if (unsupported) {
+    return <p className="text-rp-alert text-sm">{t.task.audioUnsupported}</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {err && <p className="text-rp-alert text-sm">{err}</p>}
+      {recording ? (
+        <div className="space-y-2">
+          <p className="text-sm text-zinc-300">{t.task.recording({ sec: remaining })}</p>
+          <Button variant="ghost" onClick={stop}>{t.task.stopRecording}</Button>
+        </div>
+      ) : blob && previewUrl ? (
+        <div className="space-y-2">
+          <audio controls src={previewUrl} className="w-full" />
+          <div className="flex gap-2">
+            <Button variant="ghost" disabled={busy} onClick={start}>{t.task.reRecord}</Button>
+            <Button disabled={busy} onClick={() => onSubmit(blob, mimeRef.current)}>
+              {busy ? t.task.working : t.task.submitAudio}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button disabled={busy} onClick={start}>{t.task.startRecording}</Button>
+      )}
     </div>
   );
 }

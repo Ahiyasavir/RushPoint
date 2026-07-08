@@ -71,6 +71,7 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   checkOutTask: { max: 60, windowMs: MIN },
   joinRun: { max: 10, windowMs: MIN },
   triggerSOS: { max: 5, windowMs: MIN },
+  sendTeamChatMessage: { max: 10, windowMs: MIN }, // per-sender uid; one spammer can't starve teammates/HQ
   requestGuardianConsent: { max: 10, windowMs: MIN }, // writes a doc per call — bound token spam
   submitRunFeedback: { max: 3, windowMs: MIN }, // one real response per run; retries have headroom
   reactToFeedItem: { max: 60, windowMs: MIN }, // taps on the live photo feed (live-photo-feed)

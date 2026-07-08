@@ -92,7 +92,7 @@ check('sequence singular', taskPreviewLine(task({ type: 'sequence', steps: [{ id
 
   // Every type ships at least one well-formed sample.
   const types = Object.keys(TASK_SAMPLES) as TaskType[];
-  check('all 8 types have a sample', types.length === 8 && types.every((t) => TASK_SAMPLES[t].length >= 1), String(types.length));
+  check('all 9 types have a sample', types.length === 9 && types.every((t) => TASK_SAMPLES[t].length >= 1), String(types.length));
   const wellFormed = types.every((t) => TASK_SAMPLES[t].every((s) => s.label.trim() !== '' && (s.patch.title ?? '').trim() !== ''));
   check('every sample has label + title', wellFormed);
 }

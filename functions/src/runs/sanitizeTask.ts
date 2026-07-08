@@ -34,6 +34,11 @@ export function sanitizeTaskForParticipant(
   // `orderItems` is destructured OUT of `...rest` on purpose: its authored ORDER
   // is the answer key (change: quiz-ordering), so it may only re-enter the payload
   // as a seeded shuffle below — never via passthrough.
+  //
+  // `surveyChoices` (change: survey-tasks) is DELIBERATELY left in `...rest` and
+  // passed through: a survey has no right answer, so the options are not a secret —
+  // the participant needs them to render the choice buttons. Listed in the e2e
+  // ALLOWED_TASK_KEYS allowlist.
   const { smart, hint, answers, numericAnswer, steps, orderItems, ...rest } = task;
 
   // Ordering quiz: with a seed, emit a deterministic per-team shuffle (stable
@@ -80,6 +85,9 @@ export function sanitizeTaskForParticipant(
           stationCoords: hidden ? undefined : smart.stationCoords,
           timeLimitSeconds: smart.timeLimitSeconds,
           autoApprove: smart.autoApprove,
+          // audio-tasks: which capture widget the client must render (photo vs
+          // audio recorder). Not a secret — the client needs it.
+          captureKind: smart.captureKind,
           attemptLimit: smart.attemptLimit,
           // secretCode intentionally omitted
         }

@@ -3,7 +3,7 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { db, ensureAuth, uid } from '../services/firebase';
-import { clearSession, type Session } from '../store';
+import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
@@ -17,6 +17,8 @@ import type { NavTarget } from '../components/NavMap';
 const NavMap = lazy(() => import('../components/NavMap'));
 // Live photo feed (live-photo-feed): lazy so the feed chunk loads on first open.
 const FeedPanel = lazy(() => import('../components/FeedPanel'));
+// Team ↔ HQ chat (team-hq-chat): lazy so the chat chunk + listener load on first open.
+const ChatPanel = lazy(() => import('../components/ChatPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 import { shareStoryCard } from '../lib/storyCard';
@@ -284,6 +286,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed} />
+      {session.isTestDrive && (
+        <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-rp-amber flex items-center gap-2">
+          🧪 {t.play.testRunBanner}
+        </div>
+      )}
       <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
       <InRunAlerts hotZone={state.run.hotZone} outOfBounds={team.outOfBounds} />
       {streak >= 2 && (
@@ -304,6 +311,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       {state.game.photoFeedEnabled !== false && myUid && (
         <FeedSection ctx={session} myUid={myUid} />
       )}
+
+      <ChatSection ctx={session} teamId={team.id} />
 
       <TrackablesPanel ctx={session} myTeamId={team.id} isController={isController} />
 
@@ -410,6 +419,64 @@ function FeedSection({ ctx, myUid }: { ctx: Session; myUid: string }) {
         <div className="px-3 pb-3">
           <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
             <FeedPanel ctx={ctx} myUid={myUid} />
+          </Suspense>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Team ↔ HQ chat (change: team-hq-chat): a collapsible section with an unread dot.
+// A cheap single-doc listener tracks the message count even while collapsed so the
+// dot can appear; the full ChatPanel (list + send box) only mounts on first open.
+function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [count, setCount] = useState(0);
+  const [seen, setSeen] = useState(() => loadChatSeen(ctx.runId, teamId));
+
+  useEffect(() => {
+    const ref = doc(db, FIRESTORE_PATHS.runChat(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
+    return onSnapshot(ref, (snap) => {
+      const n = (snap.data() as { messages?: unknown[] } | undefined)?.messages?.length ?? 0;
+      setCount(n);
+    }, () => setCount(0));
+  }, [ctx.ownerUid, ctx.gameId, ctx.runId, teamId]);
+
+  const unread = count > seen;
+
+  function toggle() {
+    setOpen((o) => {
+      const next = !o;
+      if (next) {
+        // Opening marks everything currently in the thread as seen.
+        saveChatSeen(ctx.runId, teamId, count);
+        setSeen(count);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <div className="mb-3 rounded-xl bg-app-card border border-glass-border">
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
+        onClick={toggle}
+      >
+        <span className="flex items-center gap-2">
+          {t.chat.chatTitle}
+          {unread && !open && (
+            <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-white">
+              {t.chat.chatUnread}
+            </span>
+          )}
+        </span>
+        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+            <ChatPanel ctx={ctx} teamId={teamId} />
           </Suspense>
         </div>
       )}

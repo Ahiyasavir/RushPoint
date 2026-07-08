@@ -9,7 +9,9 @@ import {
   acknowledgeAlert,
   pushAnnouncement,
   adjustTeamScore,
+  sendTeamChatMessage,
 } from '../services/calls';
+import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
 import {
   loadStaffSession,
   saveStaffSession,
@@ -26,6 +28,8 @@ interface PendingSubmission {
   taskId: string;
   photoUrl: string;
   submittedAt: string;
+  // audio-tasks: how to render the submission (absent ⇒ 'photo' for legacy rows).
+  mediaKind?: 'photo' | 'audio';
 }
 
 interface Alert {
@@ -135,7 +139,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         const td = doc.data() as {
           displayName?: string;
           score?: number;
-          taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string }>;
+          taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' }>;
         };
         teamRows.push({ id: doc.id, displayName: td.displayName ?? doc.id, score: td.score ?? 0 });
         const subs = td.taskSubmissions ?? {};
@@ -147,6 +151,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               taskId,
               photoUrl: sub.photoUrl ?? '',
               submittedAt: sub.submittedAt ?? '',
+              mediaKind: sub.mediaKind,
             });
           }
         }
@@ -272,12 +277,17 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           ? <p className="text-zinc-600 text-sm">{t.staff.noSubmissions}</p>
           : pending.map((s) => {
             const key = `${s.teamId}:${s.taskId}`;
-            const isImage = /^https?:\/\//.test(s.photoUrl);
+            const hasUrl = /^https?:\/\//.test(s.photoUrl);
+            // audio-tasks: an audio submission plays inline; everything else falls
+            // back to the existing photo <img> (or a plain link for non-URLs).
+            const isAudio = s.mediaKind === 'audio';
             return (
               <Card key={key} className="p-3 mb-2">
                 <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
                 <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} {s.taskId.slice(0, 10)}</div>
-                {isImage
+                {hasUrl && isAudio
+                  ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
+                  : hasUrl
                   ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-cover" />
                   : <div className="text-xs text-zinc-600 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
                 <div className="flex gap-2">
@@ -333,12 +343,140 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           ))}
       </section>
 
+      {/* ── Team ↔ HQ chat threads ── */}
+      <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />
+
       {/* ── Live photo feed moderation ── */}
       <StaffFeedSection ctx={ctx} />
 
       {/* ── Announcement composer ── */}
       <AnnouncementComposer ctx={ctx} />
     </div>
+  );
+}
+
+// Team ↔ HQ chat (change: team-hq-chat): staff see every team's thread (the rules
+// grant staff the whole chat collection) and reply as HQ. Threads with new activity
+// since this device last opened them show an unread badge (a local per-thread map).
+interface ChatThread { teamId: string; messages: ChatMessage[]; updatedAt: string }
+
+function StaffChatSection({
+  ctx, teams, senderName,
+}: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  teams: TeamRow[];
+  senderName: string;
+}) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [threads, setThreads] = useState<ChatThread[]>([]);
+  const [openTeam, setOpenTeam] = useState<string | null>(null);
+  const [seen, setSeen] = useState<Record<string, number>>({});
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const ref = collection(db, FIRESTORE_PATHS.runChatCol(ctx.ownerUid, ctx.gameId, ctx.runId));
+    return onSnapshot(ref, (snap) => {
+      const rows = snap.docs.map((d) => {
+        const data = d.data() as { messages?: ChatMessage[]; updatedAt?: string };
+        return { teamId: d.id, messages: data.messages ?? [], updatedAt: data.updatedAt ?? '' };
+      });
+      rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      setThreads(rows);
+    }, () => setThreads([]));
+  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
+
+  function expand(teamId: string, count: number) {
+    setOpenTeam((cur) => {
+      const next = cur === teamId ? null : teamId;
+      if (next) setSeen((s) => ({ ...s, [teamId]: count }));
+      return next;
+    });
+    setDraft('');
+  }
+
+  async function reply(teamId: string) {
+    const clean = draft.trim();
+    if (!clean || busy) return;
+    setBusy(true);
+    try {
+      await sendTeamChatMessage({ ...ctx, teamId, text: clean, senderName });
+      setDraft('');
+    } catch { /* the listener reconciles; keep the draft for a retry */ }
+    finally { setBusy(false); }
+  }
+
+  const totalUnread = threads.reduce((n, th) => n + (th.messages.length > (seen[th.teamId] ?? 0) ? 1 : 0), 0);
+
+  return (
+    <section className="mb-6">
+      <button
+        className="w-full flex items-center justify-between text-sm font-semibold text-zinc-300 mb-2"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="flex items-center gap-2">
+          💬 {t.chat.chatTitle}
+          {totalUnread > 0 && (
+            <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{totalUnread}</span>
+          )}
+        </span>
+        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        threads.length === 0
+          ? <p className="text-zinc-600 text-sm">{t.chat.chatEmpty}</p>
+          : threads.map((th) => {
+            const last = th.messages[th.messages.length - 1];
+            const unread = th.messages.length > (seen[th.teamId] ?? 0);
+            const expanded = openTeam === th.teamId;
+            return (
+              <Card key={th.teamId} className="p-3 mb-2">
+                <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages.length)}>
+                  <div className="flex items-center justify-between gap-2">
+                    <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{nameFor(th.teamId)}</div>
+                    {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{t.chat.chatUnread}</span>}
+                  </div>
+                  {last && <div dir="auto" className="text-xs text-zinc-500 truncate mt-0.5">{last.from === 'hq' ? `${t.chat.chatHq}: ` : ''}{last.text}</div>}
+                </button>
+                {expanded && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
+                      {th.messages.map((m) => (
+                        <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
+                          <span className="text-[11px] text-zinc-500">{m.from === 'hq' ? t.chat.chatHq : m.senderName}</span>
+                          <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-accent/15 border border-accent/40 text-zinc-100' : 'bg-app-raised border border-glass-border text-zinc-200'}`}>{m.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void reply(th.teamId); } }}
+                        maxLength={CHAT_TEXT_MAX_LEN}
+                        dir="auto"
+                        disabled={busy}
+                        placeholder={t.chat.chatReplyPlaceholder}
+                        className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+                      />
+                      <button
+                        onClick={() => void reply(th.teamId)}
+                        disabled={busy || !draft.trim()}
+                        className="shrink-0 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
+                      >
+                        {t.chat.chatSend}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            );
+          })
+      )}
+    </section>
   );
 }
 

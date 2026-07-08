@@ -33,7 +33,7 @@ export const getGame       = callable<{ gameId: string }, { game: Game }>('getGa
 export const listGames     = callable<void, { games: Game[] }>('listGames');
 
 // ── Runs ──
-export const launchRun     = callable<{ gameId: string }, { runId: string; accessCode: string }>('launchRun');
+export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, { runId: string; accessCode: string }>('launchRun');
 export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number }>('startTeams');
 export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
@@ -58,6 +58,19 @@ export const getRunFeedbackSummary = callable<
   { gameId: string; runId: string },
   { summary: RunFeedbackSummary; responses: RunFeedback[] }
 >('getRunFeedbackSummary');
+// Survey results (change: survey-tasks) — owner / run-staff read-only aggregation.
+export interface SurveyResultRow {
+  taskId: string;
+  title: string;
+  surveyChoices?: string[];                          // present ⇒ choice survey
+  counts?: Record<string, number>;                   // choice: per-choice tally (0-filled)
+  responses?: { teamName: string; response: string }[]; // free-text rows
+  responseCount: number;
+}
+export const getRunSurveyResults = callable<
+  { gameId: string; runId: string },
+  { results: SurveyResultRow[] }
+>('getRunSurveyResults');
 export const translateGame   = callable<{ gameId: string; targetLang: string }, { gameId: string; targetLang: string }>('translateGame');
 // Multi-run GM overview (change: multi-run-gm-panel).
 export const listLiveRuns    = callable<Record<string, never>, { runs: LiveRunSummary[] }>('listLiveRuns');
@@ -124,6 +137,8 @@ export const claimReferral   = callable<{ referrerUid: string }, { ok: boolean; 
 // ── Staff / live-ops ──
 export const inviteStaff           = callable<{ ownerUid: string; gameId: string; runId: string; name: string; permissions: string[] }, { inviteId: string; pin: string }>('inviteStaff');
 export const pushAnnouncement      = callable<{ ownerUid: string; gameId: string; runId: string; message: string; messageHe?: string; teamId?: string }, { announcementId: string }>('pushAnnouncement');
+// Team ↔ HQ chat (change: team-hq-chat): HQ replies into one team's thread as from:'hq'.
+export const sendTeamChatMessage   = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; text: string; senderName?: string }, { messageId: string }>('sendTeamChatMessage');
 export const pushFlashMission      = callable<{ ownerUid: string; gameId: string; runId: string; title: string; description?: string; bonusPoints: number; ttlSeconds: number }, { id: string; expiresAt: string }>('pushFlashMission');
 export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string; runId: string; alertId: string }, { ok: boolean }>('acknowledgeAlert');
 export const reviewStationSubmission = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; taskId: string; approved: boolean; note?: string }, { ok: boolean; approved: boolean }>('reviewStationSubmission');

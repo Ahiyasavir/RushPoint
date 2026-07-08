@@ -8,7 +8,7 @@ import type { TaskType, TriggerMode } from '@rushpoint/shared';
 
 export type BuilderIconName =
   | 'radius' | 'exact' | 'instant' | 'anywhere'
-  | 'station' | 'photo' | 'quiz' | 'numeric' | 'field' | 'selfReport' | 'geofence' | 'sequence';
+  | 'station' | 'photo' | 'quiz' | 'numeric' | 'field' | 'selfReport' | 'geofence' | 'sequence' | 'survey';
 
 const PATHS: Record<BuilderIconName, ReactNode> = {
   // ── Trigger modes ──
@@ -94,6 +94,14 @@ const PATHS: Record<BuilderIconName, ReactNode> = {
       <path d="M8.5 6.5H20M8.5 12H20M8.5 17.5H20" />
     </>
   ),
+  // Survey: a ballot box with a slot (a poll / no-right-answer question).
+  survey: (
+    <>
+      <path d="M4 9.5 12 6l8 3.5V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5Z" />
+      <path d="M9 9.2h6" />
+      <path d="M11 13h2" />
+    </>
+  ),
 };
 
 export function BuilderIcon({
@@ -116,4 +124,5 @@ export const TRIGGER_ICON_NAME: Record<TriggerMode, BuilderIconName> = {
 export const TYPE_ICON_NAME: Record<TaskType, BuilderIconName> = {
   smart_station: 'station', photo: 'photo', quiz: 'quiz', numeric: 'numeric',
   field: 'field', self_report: 'selfReport', geofence: 'geofence', sequence: 'sequence',
+  survey: 'survey',
 };

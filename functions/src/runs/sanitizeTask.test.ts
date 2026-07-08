@@ -69,6 +69,38 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(out.hasHint).toBe(false);
   });
 
+  // survey-tasks: a survey has no answer key, so its surveyChoices are
+  // participant-visible (the choice buttons render from them) and must survive
+  // the sanitizer intact — while a task carrying every secret is still stripped.
+  test('survey surveyChoices passes through to the participant intact', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({ type: 'survey', surveyChoices: ['Pizza', 'Falafel', 'Sushi'] } as Partial<Task>),
+    ) as Record<string, unknown>;
+    expect(out.surveyChoices).toEqual(['Pizza', 'Falafel', 'Sushi']);
+  });
+
+  // audio-tasks: captureKind lives under smart and is participant-visible (the
+  // client must know to render the audio recorder instead of the photo picker),
+  // so it must survive the sanitizer while smart secrets are still stripped.
+  test('smart.captureKind passes through while secretCode/adminNotes are stripped', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'photo',
+        smart: {
+          enabled: true,
+          verificationType: 'photo_upload',
+          captureKind: 'audio',
+          secretCode: 'OPEN-SESAME',
+          adminNotes: 'internal only',
+        },
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    const smart = out.smart as Record<string, unknown> | undefined;
+    expect(smart?.captureKind).toBe('audio');
+    expect(smart?.secretCode).toBeUndefined();
+    expect(smart?.adminNotes).toBeUndefined();
+  });
+
   // task-media-attachments: general media is participant-visible (no secret) and
   // must survive the sanitizer intact so the TaskRunner can render it.
   test('task media (image + youtube) passes through to the participant unchanged', () => {

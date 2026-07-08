@@ -175,4 +175,27 @@ export const TASK_SAMPLES: Record<TaskType, TaskSample[]> = {
       },
     },
   ],
+  survey: [
+    {
+      label: 'סקר בחירה',
+      patch: {
+        title: 'מה האתר האהוב עליכם?',
+        description: 'בחרו תשובה אחת — אין תשובה נכונה, אנחנו רק סקרנים.',
+        surveyChoices: ['הכיכר', 'המזרקה', 'השוק', 'החומה'],
+        pointValue: 0,
+        estimatedMinutes: 1,
+        difficulty: 1,
+      },
+    },
+    {
+      label: 'סקר טקסט חופשי',
+      patch: {
+        title: 'ספרו לנו על הרגע הכי כיף',
+        description: 'כתבו בכמה מילים — התשובות נשמרות למארגן.',
+        pointValue: 0,
+        estimatedMinutes: 1,
+        difficulty: 1,
+      },
+    },
+  ],
 };

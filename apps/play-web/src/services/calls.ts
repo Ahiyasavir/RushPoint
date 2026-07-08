@@ -28,6 +28,9 @@ export interface JoinInfo {
   branding: GameBranding | null;
   registrationFields: RegistrationField[];
   runStatus: string;
+  // Test-drive (rehearsal) run flag (change: test-drive-mode): play-web shows a
+  // persistent "TEST RUN" banner while playing one. Absent on normal runs → false.
+  isTestDrive?: boolean;
   // Accurate GPS requirement derived from task trigger modes (change:
   // fix-live-launch-demo-text). Optional until the server populates it.
   requirement?: GameRequirement;
@@ -92,6 +95,8 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
     codeInputLabel?: string;
     hasCode?: boolean;
     autoApprove?: boolean;
+    // audio-tasks: on a photo task, capture an audio clip instead of a photo.
+    captureKind?: 'photo' | 'audio';
     stationCoords?: { lat: number; lng: number };
   };
 };
@@ -158,7 +163,9 @@ export const verifyStationCode = callable<
 >('verifyStationCode');
 
 export const submitStationPhoto = callable<
-  Ctx & { teamId: string; taskId: string; photoUrl: string },
+  // audio-tasks: contentType is optional (photo clients may omit it) and is
+  // validated server-side against the task's captureKind.
+  Ctx & { teamId: string; taskId: string; photoUrl: string; contentType?: string },
   { submitted: boolean; autoApproved: boolean }
 >('submitStationPhoto');
 
@@ -168,6 +175,16 @@ export const triggerSOS = callable<
 >('triggerSOS');
 
 export const updateLocation = callable<Ctx & { lat: number; lng: number }, { ok: boolean }>('updateLocation');
+
+// ── Team ↔ HQ chat (change: team-hq-chat) ──
+// Participants (any attached device, no controller gating like SOS) send with just
+// text — the server resolves their team and sets from:'team'. The STAFF console
+// (also hosted in play-web) sends as HQ with an explicit teamId + senderName; the
+// server enforces the role, so these fields are optional on the wrapper.
+export const sendTeamChatMessage = callable<
+  Ctx & { text: string; teamId?: string; senderName?: string },
+  { messageId: string }
+>('sendTeamChatMessage');
 
 // ── Shared team devices (change: shared-team-devices) ──
 // Attach this phone to an existing team via the run access code + the team's

@@ -21,7 +21,7 @@ import {
   uploadBytes,
   getDownloadURL,
 } from 'firebase/storage';
-import { resolveEmulatorHost } from '@rushpoint/shared';
+import { resolveEmulatorHost, normalizeContentType } from '@rushpoint/shared';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -105,6 +105,28 @@ export async function uploadTaskPhoto(
   const r = storageRef(storage, path);
   await uploadBytes(r, file, { contentType: file.type || 'image/jpeg' });
   return getDownloadURL(r);
+}
+
+// Upload an audio-mission clip (audio-tasks). Shares the SAME path scheme as
+// photos (runs/{runId}/teams/{teamId}/…) so storage rules confine writes to the
+// authenticated participant; uploads with the NORMALIZED content-type so the
+// widened storage.rules content-type match (audio/webm|mp4|mpeg|ogg) succeeds.
+// Returns { url, contentType } — the caller passes the type to submitStationPhoto.
+export async function uploadTaskAudio(
+  blob: Blob,
+  p: { runId: string; teamId: string; taskId: string; contentType: string },
+): Promise<{ url: string; contentType: string }> {
+  await ensureAuth();
+  const contentType = normalizeContentType(p.contentType || blob.type || 'audio/webm');
+  const ext = contentType === 'audio/mp4' ? 'm4a'
+    : contentType === 'audio/mpeg' ? 'mp3'
+    : contentType === 'audio/ogg' ? 'ogg'
+    : 'webm';
+  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
+  const r = storageRef(storage, path);
+  await uploadBytes(r, blob, { contentType });
+  return { url: await getDownloadURL(r), contentType };
 }
 
 export function callable<Req = void, Res = unknown>(name: string): (data?: Req) => Promise<Res> {

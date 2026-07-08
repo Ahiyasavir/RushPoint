@@ -21,6 +21,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { getStorage, connectStorageEmulator, ref as storageRef, uploadBytes } from 'firebase/storage';
 import adminSdk from 'firebase-admin';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -67,17 +68,25 @@ function recordLatency(fn, ms) {
 
 function makeParty(name) {
   const app = initializeApp(
-    { apiKey: 'emulator-key', projectId: PROJECT, appId: `emu-${name}` },
+    // storageBucket is required for getStorage()/uploadBytes to resolve a default
+    // bucket against the Storage emulator (audio-tasks upload assertion).
+    { apiKey: 'emulator-key', projectId: PROJECT, appId: `emu-${name}`, storageBucket: `${PROJECT}.appspot.com` },
     name,
   );
   const auth = getAuth(app);
   const functions = getFunctions(app);
   const db = getFirestore(app);
+  const storage = getStorage(app);
   connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
   connectFunctionsEmulator(functions, '127.0.0.1', 5001);
   connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectStorageEmulator(storage, '127.0.0.1', 9199);
   return {
     auth,
+    // audio-tasks: upload real bytes to the Storage emulator to exercise the
+    // widened storage.rules content-type match (image/* | audio/...).
+    uploadBytesAt: (path, bytes, contentType) =>
+      uploadBytes(storageRef(storage, path), bytes, { contentType }),
     call: async (fn, data) => {
       const t0 = Date.now();
       try {
@@ -185,6 +194,9 @@ const ALLOWED_TASK_KEYS = new Set([
   // additionally asserts payload order ≠ authored order (same multiset), so an
   // authored-order passthrough regression fails even though the key is listed.
   'orderItems',
+  // survey-tasks: the choice buttons render from surveyChoices — no answer key,
+  // so it is participant-visible (passed through the sanitizer).
+  'surveyChoices',
   // added by the sanitizer itself:
   'hasHint', 'locationHidden', 'hintFreeNow',
 ]);
@@ -193,6 +205,9 @@ const ALLOWED_SMART_KEYS = new Set([
   'extraInfo', 'mediaUrl', 'imageUrl', 'codeInputLabel', 'hasCode',
   'geofenceRadiusMeters', 'stationCoords', 'timeLimitSeconds', 'autoApprove',
   'attemptLimit',
+  // audio-tasks: which capture widget the client renders (photo vs audio) — not
+  // a secret, so it passes through the sanitizer.
+  'captureKind',
 ]);
 
 function assertTaskPayloadAllowlisted(label, task) {
@@ -303,6 +318,7 @@ async function main() {
 
   const CODE_TASK_ID = 'task-code-1';
   const PHOTO_TASK_ID = 'task-photo-1';
+  const AUDIO_TASK_ID = 'task-audio-1'; // audio-tasks: photo pipeline, captureKind:'audio'
   const PLAIN_TASK_ID = 'task-plain-1';
   const stages = [
     {
@@ -333,6 +349,10 @@ async function main() {
       id: 'stage-2',
       order: 1,
       title: 'Stage Two — photo station (staff review)',
+      // audio-tasks: two tasks in this stage but only ONE is required, so the
+      // existing photo-approval flow still completes the stage while the audio
+      // task can be submitted + reviewed independently in the same scenario.
+      requiredTaskCount: 1,
       tasks: [
         {
           id: PHOTO_TASK_ID,
@@ -346,6 +366,24 @@ async function main() {
           smart: {
             enabled: true,
             verificationType: 'photo_upload',
+            autoApprove: false, // requires a staff approval
+          },
+        },
+        {
+          // audio-tasks: rides the SAME photo pipeline (submitStationPhoto →
+          // review), differing only by smart.captureKind = 'audio'.
+          id: AUDIO_TASK_ID,
+          title: 'Record your team chant',
+          type: 'photo',
+          coordinates: { lat: 31.796, lng: 35.166 },
+          difficulty: 2,
+          estimatedMinutes: 4,
+          pointValue: 60,
+          maxConcurrentTeams: 3,
+          smart: {
+            enabled: true,
+            verificationType: 'photo_upload',
+            captureKind: 'audio',
             autoApprove: false, // requires a staff approval
           },
         },
@@ -635,6 +673,12 @@ async function main() {
   check('photo stage stays active until reviewed', state?.team?.stages?.[1]?.status === 'active',
     state?.team?.stages?.[1]?.status);
 
+  // audio-tasks: while stage-2 is active, the sanitized audio task must expose
+  // smart.captureKind so the client renders the recorder instead of the picker.
+  const audioTaskSan = (state?.activeStageTasks ?? []).find((t) => t.id === AUDIO_TASK_ID);
+  check('sanitized audio task exposes smart.captureKind === "audio"',
+    audioTaskSan?.smart?.captureKind === 'audio', JSON.stringify(audioTaskSan?.smart ?? {}));
+
   // Staff joins via PIN and approves the photo
   const { pin } = await creator.call('inviteStaff', {
     ownerUid: creatorCred.user.uid, gameId, runId, name: 'E2E Marshal', permissions: ['review_photos'],
@@ -675,6 +719,70 @@ async function main() {
     state?.team?.stages?.[1]?.status);
   check('final stage unlocked after photo', state?.team?.stages?.[2]?.status === 'active',
     state?.team?.stages?.[2]?.status);
+
+  // ── 8d. Audio task (audio-tasks): same photo pipeline, captureKind:'audio' ────
+  // Upload real audio bytes to the Storage emulator under the caller's OWN
+  // run/team path — exercises the widened storage.rules content-type match.
+  const audioObjectPath = `runs/${runId}/teams/${playerCred.user.uid}/chant-1.webm`;
+  const AUDIO_URL =
+    `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(audioObjectPath)}?alt=media`;
+  let audioUploadOk = false;
+  try {
+    await player.uploadBytesAt(audioObjectPath, new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0, 1, 2, 3]), 'audio/webm');
+    audioUploadOk = true;
+  } catch (e) { audioUploadOk = false; console.log('  audio upload err ::', e.message); }
+  check('storage.rules accept an audio/webm upload to the team folder', audioUploadOk);
+
+  // Negatives: kind/content-type mismatches must be rejected (invalid-argument).
+  const submitAudio = (contentType, taskId = AUDIO_TASK_ID, photoUrl = AUDIO_URL) =>
+    player.call('submitStationPhoto', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: playerCred.user.uid, taskId, photoUrl, contentType,
+    });
+  const isInvalidArg = (e) => e.code === 'functions/invalid-argument';
+
+  let audioImageRejected = false;
+  try { await submitAudio('image/jpeg'); } catch (e) { audioImageRejected = isInvalidArg(e); }
+  check('audio task rejects an image content-type', audioImageRejected);
+
+  let audioMissingRejected = false;
+  try { await submitAudio(undefined); } catch (e) { audioMissingRejected = isInvalidArg(e); }
+  check('audio task rejects a missing content-type', audioMissingRejected);
+
+  let photoAudioRejected = false;
+  try {
+    await submitAudio('audio/webm', PHOTO_TASK_ID, STORAGE_PHOTO_URL);
+  } catch (e) { photoAudioRejected = isInvalidArg(e); }
+  check('photo task rejects an audio content-type', photoAudioRejected);
+
+  // Happy path: a proper audio/webm submission → pending + mediaKind 'audio'.
+  const audioSubmit = await submitAudio('audio/webm');
+  check('submitStationPhoto accepts an audio submission (pending)',
+    audioSubmit?.submitted === true && audioSubmit?.autoApproved === false, JSON.stringify(audioSubmit));
+
+  state = await player.call('getMyTeamState', { code: accessCode });
+  check('audio submission records mediaKind === "audio" (server-derived)',
+    state?.team?.taskSubmissions?.[AUDIO_TASK_ID]?.mediaKind === 'audio',
+    JSON.stringify(state?.team?.taskSubmissions?.[AUDIO_TASK_ID] ?? {}));
+
+  const audioReview = await staff.call('reviewStationSubmission', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, taskId: AUDIO_TASK_ID, approved: true,
+  });
+  check('reviewStationSubmission approves the audio submission',
+    audioReview?.ok === true && audioReview?.approved === true);
+
+  state = await player.call('getMyTeamState', { code: accessCode });
+  check('audio submission marked approved after review',
+    state?.team?.taskSubmissions?.[AUDIO_TASK_ID]?.status === 'approved',
+    state?.team?.taskSubmissions?.[AUDIO_TASK_ID]?.status);
+
+  // Non-goal: audio submissions never enter the live photo feed.
+  const feedItems = await player.getColAt(
+    `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/feedItems`,
+  ).catch(() => []);
+  check('no photo-feed item was written for the audio submission',
+    !feedItems.some((f) => f?.taskId === AUDIO_TASK_ID), JSON.stringify(feedItems.map((f) => f?.taskId)));
 
   // ── 9. Complete the final plain task ────────────────────────────────────────
   const completeRes = await player.call('completeTask', {
@@ -844,6 +952,99 @@ async function main() {
 
   }); // scenario: paid hints
 
+  await scenario('test drive (free rehearsal, cap 2, one-live guard, aggregate exclusion)', async () => {
+
+  // ── Test drive (change: test-drive-mode) ────────────────────────────────────
+  // A rehearsal launch: free (wallet never touched), capped at 2, at most one
+  // live test run per game, and excluded from cross-run aggregates (benchmarks,
+  // player profiles). It resolves runs the same way as a real run otherwise.
+  const adminDb = adminSdk.firestore();
+  const creatorUid = creatorCred.user.uid;
+
+  const { gameId: gTD } = await creator.call('createGame', { title: 'Test Drive Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gTD,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-td', order: 0, title: 'Rehearse', isFinal: true,
+      tasks: [{
+        id: 'td-1', title: 'Walk the route', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 3, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3,
+      }],
+    }],
+  });
+
+  // Snapshot the wallet + the task-type benchmark BEFORE any test launch.
+  const walletBefore = await creator.call('getWalletStatus');
+  const txBefore = (await adminDb.collection(`wallets/${creatorUid}/transactions`).get()).size;
+  const benchBefore = (await adminDb.doc('benchmarks/self_report').get()).data() ?? null;
+
+  // (a) Test launch → wallet BYTE-UNCHANGED, run doc marked test/isTestDrive.
+  const { runId: rTD, accessCode: cTD } = await creator.call('launchRun', { gameId: gTD, testDrive: true });
+  check('test launch returns runId + accessCode', !!rTD && !!cTD, cTD);
+  const walletAfter = await creator.call('getWalletStatus');
+  check('test launch did NOT decrement credits',
+    walletAfter?.eventCredits === walletBefore?.eventCredits, JSON.stringify(walletAfter));
+  check('test launch did NOT increment the free-run counter',
+    (walletAfter?.lifetimeFreeRunsUsed ?? 0) === (walletBefore?.lifetimeFreeRunsUsed ?? 0), JSON.stringify(walletAfter));
+  const txAfter = (await adminDb.collection(`wallets/${creatorUid}/transactions`).get()).size;
+  check('test launch wrote NO wallet transaction doc', txAfter === txBefore, `before=${txBefore} after=${txAfter}`);
+  const runDocTD = (await adminDb.doc(`users/${creatorUid}/games/${gTD}/runs/${rTD}`).get()).data();
+  check('test run doc has billingType "test"', runDocTD?.billingType === 'test', runDocTD?.billingType);
+  check('test run doc has isTestDrive:true', runDocTD?.isTestDrive === true, JSON.stringify(runDocTD?.isTestDrive));
+  check('test run cap is 2', runDocTD?.maxParticipants === 2, String(runDocTD?.maxParticipants));
+
+  // (b) getJoinInfo surfaces isTestDrive.
+  const joinInfoTD = await creator.call('getJoinInfo', { code: cTD });
+  check('getJoinInfo surfaces isTestDrive:true', joinInfoTD?.isTestDrive === true, JSON.stringify(joinInfoTD?.isTestDrive));
+
+  // (c) 2 joins OK, 3rd rejected (cap 2).
+  const tdA = makeParty('tdA');
+  const tdB = makeParty('tdB');
+  const tdC = makeParty('tdC');
+  await signInAnonymously(tdA.auth);
+  await signInAnonymously(tdB.auth);
+  await signInAnonymously(tdC.auth);
+  await tdA.call('joinRun', { code: cTD, displayName: 'Creator phone' });
+  await tdB.call('joinRun', { code: cTD, displayName: 'Companion phone' });
+  await expectError('3rd join into a test run is rejected (cap 2)',
+    tdC.call('joinRun', { code: cTD, displayName: 'One too many' }),
+    { codeIn: ['functions/resource-exhausted'] });
+
+  // (d) A second LIVE test launch for the same game is rejected; a NORMAL launch
+  //     of the same game still succeeds (the guard is test-drive-scoped).
+  await expectError('second live test launch for the same game is rejected',
+    creator.call('launchRun', { gameId: gTD, testDrive: true }),
+    { codeIn: ['functions/failed-precondition'], match: /finaliz/i });
+  const { runId: rNormal } = await creator.call('launchRun', { gameId: gTD });
+  check('a normal launch of the same game still succeeds', !!rNormal, rNormal);
+  await creator.call('finalizeRun', { gameId: gTD, runId: rNormal });
+
+  // (e) Play a task, finalize the test run — benchmarks + player profiles untouched.
+  await creator.call('startTeams', { gameId: gTD, runId: rTD });
+  const sTD = await tdA.call('getMyTeamState', { code: cTD });
+  const assignedTD = sTD?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+  check('test run routes a task normally', !!assignedTD, assignedTD?.taskId);
+  await tdA.call('completeTask', { taskId: assignedTD.taskId, code: cTD, lat: 31.78, lng: 35.21 });
+  const finTD = await creator.call('finalizeRun', { gameId: gTD, runId: rTD });
+  check('finalizeRun on a test run returns rankings', Array.isArray(finTD?.rankings), JSON.stringify(finTD?.rankings?.length));
+
+  const benchAfter = (await adminDb.doc('benchmarks/self_report').get()).data() ?? null;
+  check('test run did NOT contribute to benchmarks/self_report',
+    JSON.stringify(benchAfter) === JSON.stringify(benchBefore), JSON.stringify({ before: benchBefore, after: benchAfter }));
+  // Confirm no player profile was written for the test run's participant.
+  const tdAuid = tdA.auth.currentUser?.uid;
+  const tdAProfile = tdAuid ? (await adminDb.doc(`players/${tdAuid}`).get()) : { exists: false };
+  check('test run wrote NO player profile', tdAuid ? tdAProfile.exists === false : true,
+    JSON.stringify({ tdAuid, exists: tdAProfile.exists }));
+
+  // (f) With the first test run FINISHED, a fresh test launch now succeeds.
+  const { runId: rTD2, accessCode: cTD2 } = await creator.call('launchRun', { gameId: gTD, testDrive: true });
+  check('a fresh test launch succeeds once the prior one is finalized', !!rTD2 && !!cTD2, cTD2);
+  await creator.call('finalizeRun', { gameId: gTD, runId: rTD2 });
+
+  }); // scenario: test drive
+
   await scenario('hint auto escalation (attempts path → free hint)', async () => {
 
   // ── Hint auto escalation (change: hint-auto-escalation) ─────────────────────
@@ -1011,6 +1212,134 @@ async function main() {
     { codeIn: ['functions/invalid-argument'] });
 
   }); // scenario: quiz ordering
+
+  await scenario('survey tasks (choice + free-text, results aggregation)', async () => {
+
+  // ── Survey tasks (change: survey-tasks) ──────────────────────────────────────
+  // A survey has NO right answer: any valid response completes the task for its
+  // fixed pointValue via the EXISTING submitTaskAnswer/completeTaskForTeam path.
+  // surveyChoices is participant-visible (allowlisted); the team's own response
+  // is echoed in getMyTeamState; getRunSurveyResults aggregates for owner/staff.
+  const OWNER = creatorCred.user.uid;
+  const { gameId: gS } = await creator.call('createGame', { title: 'Survey Game', mode: 'individual' });
+  const C1 = 'Pizza', C2 = 'Falafel', C3 = 'Sushi';
+  await creator.call('updateGame', {
+    gameId: gS,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      {
+        id: 'sv-s1', order: 0, title: 'Poll', isFinal: true,
+        tasks: [
+          {
+            id: 'sv-choice', title: 'Favorite food?', type: 'survey',
+            triggerMode: 'instant', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1,
+            pointValue: 20, maxConcurrentTeams: 9, surveyChoices: [C1, C2, C3],
+          },
+          {
+            id: 'sv-text', title: 'Say anything', type: 'survey',
+            triggerMode: 'instant', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1,
+            pointValue: 0, maxConcurrentTeams: 9,
+          },
+        ],
+      },
+    ],
+  });
+  const { runId: rS, accessCode: cS } = await creator.call('launchRun', { gameId: gS });
+  const CTX = { ownerUid: OWNER, gameId: gS, runId: rS };
+
+  const svA = makeParty('surveyA');
+  const svB = makeParty('surveyB');
+  await signInAnonymously(svA.auth);
+  await signInAnonymously(svB.auth);
+  await svA.call('joinRun', { code: cS, displayName: 'TeamA' });
+  await svB.call('joinRun', { code: cS, displayName: 'TeamB' });
+  await creator.call('startTeams', { gameId: gS, runId: rS });
+  const uidA = svA.auth.currentUser.uid;
+  const uidB = svB.auth.currentUser.uid;
+
+  // Sanitized payload: surveyChoices present, allowlist green.
+  const stateA0 = await svA.call('getMyTeamState', { code: cS });
+  const choiceTask = stateA0?.activeStageTasks?.find((t) => t.id === 'sv-choice');
+  check('survey choice task exposes surveyChoices to the participant',
+    Array.isArray(choiceTask?.surveyChoices) && choiceTask.surveyChoices.length === 3, JSON.stringify(choiceTask?.surveyChoices));
+  assertTaskPayloadAllowlisted('sanitizer(survey)', choiceTask);
+  const textTask = stateA0?.activeStageTasks?.find((t) => t.id === 'sv-text');
+  check('free-text survey task carries no surveyChoices', textTask?.surveyChoices === undefined, JSON.stringify(textTask?.surveyChoices));
+
+  // Team A picks C1, Team B picks C2; both send free-text.
+  const rA1 = await svA.call('submitTaskAnswer', { ...CTX, taskId: 'sv-choice', answer: C1 });
+  check('choice survey completes correct for team A', rA1?.correct === true, JSON.stringify(rA1));
+  const rB1 = await svB.call('submitTaskAnswer', { ...CTX, taskId: 'sv-choice', answer: C2 });
+  check('choice survey completes correct for team B', rB1?.correct === true, JSON.stringify(rB1));
+  await svA.call('submitTaskAnswer', { ...CTX, taskId: 'sv-text', answer: '  We loved the fountain!  ' });
+  await svB.call('submitTaskAnswer', { ...CTX, taskId: 'sv-text', answer: 'Best day ever' });
+
+  // Completion + fixed pointValue scoring + own surveyResponse echoed back.
+  const stateA1 = await svA.call('getMyTeamState', { code: cS });
+  const recChoiceA = stateA1?.team?.stages?.[0]?.tasks?.find((r) => r.taskId === 'sv-choice');
+  const recTextA = stateA1?.team?.stages?.[0]?.tasks?.find((r) => r.taskId === 'sv-text');
+  check('choice survey scored its fixed 20 points', recChoiceA?.status === 'completed' && recChoiceA?.earnedScore === 20, JSON.stringify(recChoiceA));
+  check('free-text survey scored its fixed 0 points', recTextA?.status === 'completed' && (recTextA?.earnedScore ?? 0) === 0, JSON.stringify(recTextA));
+  check("team A's own choice response echoes in getMyTeamState", recChoiceA?.surveyResponse === C1, JSON.stringify(recChoiceA?.surveyResponse));
+  check("team A's own free-text response is trimmed + echoed", recTextA?.surveyResponse === 'We loved the fountain!', JSON.stringify(recTextA?.surveyResponse));
+
+  // Duplicate submission ⇒ idempotent no-op (response + score unchanged).
+  const dupA = await svA.call('submitTaskAnswer', { ...CTX, taskId: 'sv-choice', answer: C2 });
+  check('duplicate survey submission still returns correct', dupA?.correct === true, JSON.stringify(dupA));
+  const stateA2 = await svA.call('getMyTeamState', { code: cS });
+  const recChoiceA2 = stateA2?.team?.stages?.[0]?.tasks?.find((r) => r.taskId === 'sv-choice');
+  check('first survey response is final (duplicate never overwrites)', recChoiceA2?.surveyResponse === C1 && recChoiceA2?.earnedScore === 20, JSON.stringify(recChoiceA2));
+
+  // Invalid responses ⇒ invalid-argument. Use team B's still-fresh choice task?
+  // Both teams already completed; use a fresh third team so the guard doesn't
+  // short-circuit the validation path.
+  const svC = makeParty('surveyC');
+  await signInAnonymously(svC.auth);
+  await svC.call('joinRun', { code: cS, displayName: 'TeamC' });
+  await creator.call('startTeams', { gameId: gS, runId: rS });
+  await expectError('unlisted choice ⇒ invalid-argument',
+    svC.call('submitTaskAnswer', { ...CTX, taskId: 'sv-choice', answer: 'Tacos' }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('empty response ⇒ invalid-argument',
+    svC.call('submitTaskAnswer', { ...CTX, taskId: 'sv-text', answer: '   ' }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('501-char response ⇒ invalid-argument',
+    svC.call('submitTaskAnswer', { ...CTX, taskId: 'sv-text', answer: 'a'.repeat(501) }),
+    { codeIn: ['functions/invalid-argument'] });
+
+  // getRunSurveyResults as OWNER: choice counts {c1:1,c2:1,c3:0}; free-text rows
+  // carry both team names + responses.
+  const resOwner = await creator.call('getRunSurveyResults', { gameId: gS, runId: rS });
+  const choiceRes = resOwner?.results?.find((r) => r.taskId === 'sv-choice');
+  const textRes = resOwner?.results?.find((r) => r.taskId === 'sv-text');
+  check('owner survey results: per-choice counts are 0-filled + tallied',
+    choiceRes?.counts?.[C1] === 1 && choiceRes?.counts?.[C2] === 1 && choiceRes?.counts?.[C3] === 0,
+    JSON.stringify(choiceRes?.counts));
+  check('owner survey results: choice responseCount is 2', choiceRes?.responseCount === 2, JSON.stringify(choiceRes?.responseCount));
+  const textNames = (textRes?.responses ?? []).map((r) => r.teamName).sort();
+  check('owner survey results: free-text rows carry both team names',
+    JSON.stringify(textNames) === JSON.stringify(['TeamA', 'TeamB']), JSON.stringify(textNames));
+  check('owner survey results: a free-text response text is present',
+    (textRes?.responses ?? []).some((r) => r.response === 'We loved the fountain!'), JSON.stringify(textRes?.responses));
+
+  // getRunSurveyResults as RUN-SCOPED STAFF: allowed.
+  const { pin: svPin } = await creator.call('inviteStaff', {
+    ownerUid: OWNER, gameId: gS, runId: rS, name: 'Survey Marshal', permissions: ['review_photos'],
+  });
+  const svStaff = makeParty('surveyStaff');
+  await signInAnonymously(svStaff.auth);
+  const svStok = await svStaff.call('staffSignIn', { ownerUid: OWNER, gameId: gS, runId: rS, pin: svPin });
+  await signInWithCustomToken(svStaff.auth, svStok.customToken);
+  const resStaff = await svStaff.call('getRunSurveyResults', { ownerUid: OWNER, gameId: gS, runId: rS });
+  check('run staff can read survey results', Array.isArray(resStaff?.results) && resStaff.results.length === 2, JSON.stringify(resStaff?.results?.length));
+
+  // Leaderboard invariant oracle stays green (survey points flow earnedScore).
+  const svBoard = await creator.call('refreshLeaderboard', { gameId: gS, runId: rS, publish: false });
+  assertLeaderboardInvariants('survey board', svBoard?.rankings ?? [], [uidA, uidB, svC.auth.currentUser.uid]);
+
+  }); // scenario: survey tasks
 
   await scenario('post-game feedback (survey + owner summary)', async () => {
 
@@ -2672,6 +3001,140 @@ async function main() {
       `score=${dstate?.team?.score} earned=${drec?.earnedScore}`);
   });
 
+  // ═══ Team ↔ HQ chat (team-hq-chat) ══════════════════════════════════════════
+  // A single thread doc per team; either side sends. Covers: both directions,
+  // ordering, cap (>100 → oldest dropped), validation, rate-limit, finished-run,
+  // and a non-controller attached device sending. deviceUids is mirrored so rules
+  // reuse isAttachedDevice(); the doc is server-write-only.
+  await scenario('team ↔ HQ chat (send · reply · cap · validation)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: cg } = await creator.call('createGame', { title: 'Chat Game', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: cg, scoringPreset: 'time_only',
+      stages: [{ id: 'ch-s', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'ch-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+
+    const founder = makeParty('chatFounder');
+    await signInAnonymously(founder.auth);
+    await founder.call('joinRun', { code: cc, displayName: 'Chat Team' });
+    const founderUid = founder.auth.currentUser.uid;
+    const s0 = await founder.call('getMyTeamState', { code: cc });
+    const teamCode = s0?.team?.deviceJoinCode;
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+
+    const CTX = { ownerUid: OWNER, gameId: cg, runId: cr };
+    const chatPath = `users/${OWNER}/games/${cg}/runs/${cr}/chat/${founderUid}`;
+
+    // 1. Team sends → doc holds 1 msg (from:'team', senderName == team name).
+    const sent = await founder.call('sendTeamChatMessage', { ...CTX, text: 'Stuck at the bridge' });
+    check('chat: team send returns a messageId', !!sent?.messageId, JSON.stringify(sent));
+    let chat = (await creator.getDocAt(chatPath)).data;
+    check('chat: doc holds 1 message after team send', chat?.messages?.length === 1, JSON.stringify(chat?.messages?.length));
+    check('chat: team message is from:team', chat?.messages?.[0]?.from === 'team', chat?.messages?.[0]?.from);
+    check('chat: team message senderName == team name', chat?.messages?.[0]?.senderName === 'Chat Team', chat?.messages?.[0]?.senderName);
+    check('chat: deviceUids mirrored onto the doc', Array.isArray(chat?.deviceUids) && chat.deviceUids.includes(founderUid), JSON.stringify(chat?.deviceUids));
+
+    // 2. Owner (HQ) replies with an explicit teamId → 2 msgs, from:'hq'.
+    await creator.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: 'Use code 4712', senderName: 'HQ' });
+    chat = (await creator.getDocAt(chatPath)).data;
+    check('chat: doc holds 2 messages after HQ reply', chat?.messages?.length === 2, JSON.stringify(chat?.messages?.length));
+    check('chat: HQ message is from:hq', chat?.messages?.[1]?.from === 'hq', chat?.messages?.[1]?.from);
+    check('chat: order is chronological (team then hq)',
+      chat?.messages?.[0]?.from === 'team' && chat?.messages?.[1]?.from === 'hq',
+      chat?.messages?.map((m) => m.from).join(','));
+
+    // 3. A staff token also replies as HQ.
+    const { pin: chatPin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: cg, runId: cr, name: 'Chat Marshal', permissions: ['review_photos'],
+    });
+    const chatStaff = makeParty('chatStaff');
+    await signInAnonymously(chatStaff.auth);
+    const cstok = await chatStaff.call('staffSignIn', { ownerUid: OWNER, gameId: cg, runId: cr, pin: chatPin });
+    await signInWithCustomToken(chatStaff.auth, cstok.customToken);
+    await chatStaff.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: 'Marshal on the way', senderName: 'Chat Marshal' });
+    chat = (await creator.getDocAt(chatPath)).data;
+    check('chat: staff reply appended as hq', chat?.messages?.length === 3 && chat.messages[2].from === 'hq', JSON.stringify(chat?.messages?.length));
+
+    // 4. Validation: 501-char, whitespace-only rejected; control chars stripped.
+    await expectError('chat: 501-char text rejected',
+      founder.call('sendTeamChatMessage', { ...CTX, text: 'x'.repeat(501) }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('chat: whitespace-only text rejected',
+      founder.call('sendTeamChatMessage', { ...CTX, text: '   ' }),
+      { codeIn: ['functions/invalid-argument'] });
+    await founder.call('sendTeamChatMessage', { ...CTX, text: 'cleantext' });
+    chat = (await creator.getDocAt(chatPath)).data;
+    check('chat: control chars stripped from stored message',
+      chat?.messages?.[chat.messages.length - 1]?.text === 'cleantext',
+      chat?.messages?.[chat.messages.length - 1]?.text);
+
+    // 5. Client-supplied `from` is ignored (server always sets it).
+    await founder.call('sendTeamChatMessage', { ...CTX, text: 'forge attempt', from: 'hq', senderName: 'Fake HQ' });
+    chat = (await creator.getDocAt(chatPath)).data;
+    const forged = chat?.messages?.[chat.messages.length - 1];
+    check('chat: client-supplied from is ignored (still from:team)', forged?.from === 'team', forged?.from);
+    check('chat: participant cannot forge senderName', forged?.senderName === 'Chat Team', forged?.senderName);
+
+    // 6. A non-controller attached device CAN send (triggerSOS rationale).
+    const device = makeParty('chatDevice');
+    await signInAnonymously(device.auth);
+    await device.call('joinTeamAsDevice', { code: cc, teamCode, memberName: 'Back-of-group phone' });
+    await device.call('sendTeamChatMessage', { ...CTX, text: 'From my phone' });
+    chat = (await creator.getDocAt(chatPath)).data;
+    const deviceMsg = chat?.messages?.[chat.messages.length - 1];
+    check('chat: attached (non-controller) device can send', deviceMsg?.text === 'From my phone' && deviceMsg?.from === 'team',
+      JSON.stringify({ text: deviceMsg?.text, from: deviceMsg?.from }));
+    check('chat: device message attributed to the team', deviceMsg?.senderName === 'Chat Team', deviceMsg?.senderName);
+
+    // 7. Rate limit: the 11th send from one uid inside a minute is rejected.
+    const rl = makeParty('chatRate');
+    await signInAnonymously(rl.auth);
+    await rl.call('joinTeamAsDevice', { code: cc, teamCode, memberName: 'Rate phone' });
+    let rateTripped = false;
+    for (let i = 0; i < 12; i++) {
+      try { await rl.call('sendTeamChatMessage', { ...CTX, text: `spam ${i}` }); }
+      catch (e) { if (e.code === 'functions/resource-exhausted') { rateTripped = true; break; } }
+    }
+    check('chat: 11th send in a minute from one uid is rate-limited', rateTripped);
+
+    // 8. Cap: drive total > 100 across many HQ sender uids (10/min per uid) → the
+    //    doc retains exactly 100, oldest dropped, newest intact. HQ staff carry the
+    //    volume: 11 distinct staff tokens × up to 10 each = 110 > 100.
+    const NEWEST = 'THE-NEWEST-MESSAGE';
+    let capSent = chat?.messages?.length ?? 0;
+    let lastText = null;
+    for (let s = 0; s < 12 && capSent <= 110; s++) {
+      const { pin } = await creator.call('inviteStaff', {
+        ownerUid: OWNER, gameId: cg, runId: cr, name: `Cap ${s}`, permissions: ['review_photos'],
+      });
+      const capStaff = makeParty(`chatCap${s}`);
+      await signInAnonymously(capStaff.auth);
+      const tok = await capStaff.call('staffSignIn', { ownerUid: OWNER, gameId: cg, runId: cr, pin });
+      await signInWithCustomToken(capStaff.auth, tok.customToken);
+      for (let i = 0; i < 10 && capSent <= 110; i++) {
+        lastText = (capSent === 110) ? NEWEST : `cap ${s}-${i}`;
+        try { await capStaff.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: lastText, senderName: 'HQ' }); capSent++; }
+        catch (e) { if (e.code === 'functions/resource-exhausted') break; else throw e; }
+      }
+    }
+    chat = (await creator.getDocAt(chatPath)).data;
+    check('chat: message array capped at 100', chat?.messages?.length === 100, String(chat?.messages?.length));
+    check('chat: newest message retained at the tail', chat?.messages?.[chat.messages.length - 1]?.text === NEWEST,
+      chat?.messages?.[chat.messages.length - 1]?.text);
+    check('chat: the very first (oldest) message was dropped',
+      !chat?.messages?.some((m) => m.text === 'Stuck at the bridge'), 'oldest still present');
+
+    // 9. Finished run: after finalize, any send is rejected.
+    await creator.call('finalizeRun', { gameId: cg, runId: cr });
+    await expectError('chat: send into a finished run is rejected',
+      creator.call('sendTeamChatMessage', { ...CTX, teamId: founderUid, text: 'too late', senderName: 'HQ' }),
+      { codeIn: ['functions/failed-precondition'] });
+  });
+
   // ═══ Authorization denial matrix ════════════════════════════════════════════
   // Data-driven: wrong-role identities × privileged callables → typed denial.
   // Every row runs even if one fails; extend the table when adding a callable.
@@ -2737,10 +3200,34 @@ async function main() {
       ['participant', pl, 'deleteZone', { gameId: ag, runId: ar, zoneId: 'fake' }],
       ['participant', pl, 'createTrackable', { gameId: ag, runId: ar, name: 'pwn' }],
       ['participant', pl, 'getRunHeatmap', { code: ac }],
+      // survey-tasks: results are owner/run-staff only.
+      ['participant', pl, 'getRunSurveyResults', { gameId: ag, runId: ar }],
+      ['stranger', str, 'getRunSurveyResults', { ownerUid: OWNER, gameId: ag, runId: ar }],
+      ['other-run staff', staffB, 'getRunSurveyResults', { ownerUid: OWNER, gameId: ag, runId: ar }],
+      // team-hq-chat: a stranger (never joined) can't resolve a team to chat into;
+      // other-run staff isn't scoped to this run, so its HQ send is denied.
+      ['stranger', str, 'sendTeamChatMessage', { ownerUid: OWNER, gameId: ag, runId: ar, text: 'sneak in' }],
+      ['other-run staff', staffB, 'sendTeamChatMessage', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, text: 'not my run' }],
     ];
     for (const [who, party, fn, payload] of rows) {
       await expectError(`authz: ${who} is denied ${fn}`, party.call(fn, payload), { codeIn: DENY });
     }
+
+    // team-hq-chat isolation: a member of ANOTHER team sending (no teamId) lands
+    // ONLY in their own thread — the target team's thread is never touched.
+    const pl2 = makeParty('authzPlayer2');
+    await signInAnonymously(pl2.auth);
+    await pl2.call('joinRun', { code: ac, displayName: 'Other Team' });
+    const pl2Uid = pl2.auth.currentUser.uid;
+    await pl2.call('sendTeamChatMessage', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, text: 'wrong thread' });
+    const victimChat = await creator.getDocAt(`users/${OWNER}/games/${ag}/runs/${ar}/chat/${plUid}`);
+    check('authz: other-team send did NOT reach the target team thread',
+      !victimChat.exists || (victimChat.data?.messages ?? []).length === 0,
+      JSON.stringify(victimChat.data?.messages?.length ?? 'absent'));
+    const ownChat = await creator.getDocAt(`users/${OWNER}/games/${ag}/runs/${ar}/chat/${pl2Uid}`);
+    check('authz: other-team send landed in the sender\'s OWN thread',
+      ownChat.exists && (ownChat.data?.messages ?? []).length === 1,
+      JSON.stringify(ownChat.data?.messages?.length ?? 'absent'));
 
     // The sweep must have left the run untouched.
     const runDoc = await creator.getDocAt(`users/${OWNER}/games/${ag}/runs/${ar}`);

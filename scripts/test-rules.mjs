@@ -43,6 +43,7 @@ const OWNER = 'owner-uid';
 const OTHER = 'other-uid';
 const TEAM = 'team-uid';
 const TEAM2 = 'team2-uid';
+const DEVICE = 'device-uid'; // a phone attached to TEAM (listed in deviceUids)
 const GAME = 'game-1';
 const RUN = 'run-1';
 
@@ -70,6 +71,11 @@ async function main() {
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/teams/${TEAM}`), { score: 0 });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/teams/${TEAM2}`), { score: 0 });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/alerts/a1`), { type: 'sos' });
+    // team-hq-chat: one thread doc per team; deviceUids mirrored so isAttachedDevice() applies.
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/chat/${TEAM}`),
+      { teamId: TEAM, deviceUids: [TEAM, DEVICE], messages: [], updatedAt: '2020-01-01T00:00:00Z' });
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/chat/${TEAM2}`),
+      { teamId: TEAM2, deviceUids: [TEAM2], messages: [], updatedAt: '2020-01-01T00:00:00Z' });
     await setDoc(doc(db, `wallets/${OWNER}`), { eventCredits: 5 });
     await setDoc(doc(db, `publicGames/${GAME}`), { title: 'Public' });
     await setDoc(doc(db, `accessCodes/ABC123`), { ownerUid: OWNER, gameId: GAME, runId: RUN });
@@ -120,6 +126,23 @@ async function main() {
   await check('scoped staff CAN read a team in its run', assertSucceeds(getDoc(doc(staff, `${runPath}/teams/${TEAM}`))));
   await check('scoped staff CAN read alerts in its run', assertSucceeds(getDoc(doc(staff, `${runPath}/alerts/a1`))));
   await check('staff for a DIFFERENT run CANNOT read this run\'s team', assertFails(getDoc(doc(wrongStaff, `${runPath}/teams/${TEAM}`))));
+
+  console.log('\n── Team ↔ HQ chat: read surface mirrors the team doc; writes CF-only ──');
+  const device = testEnv.authenticatedContext(DEVICE).firestore();
+  const chatPath = `${runPath}/chat/${TEAM}`;
+  await check('founder CAN read its own chat doc', assertSucceeds(getDoc(doc(team, chatPath))));
+  await check('attached device CAN read the team chat doc', assertSucceeds(getDoc(doc(device, chatPath))));
+  await check('scoped staff CAN read a chat doc', assertSucceeds(getDoc(doc(staff, chatPath))));
+  await check('scoped staff CAN list the chat collection', assertSucceeds(getDocs(collection(staff, `${runPath}/chat`))));
+  await check('owner CAN read a chat doc', assertSucceeds(getDoc(doc(owner, chatPath))));
+  await check('owner CAN list the chat collection', assertSucceeds(getDocs(collection(owner, `${runPath}/chat`))));
+  await check('another team CANNOT read this team\'s chat doc', assertFails(getDoc(doc(team, `${runPath}/chat/${TEAM2}`))));
+  await check('stranger CANNOT read a chat doc', assertFails(getDoc(doc(other, chatPath))));
+  await check('staff for a DIFFERENT run CANNOT read a chat doc', assertFails(getDoc(doc(wrongStaff, chatPath))));
+  await check('participant CANNOT list the chat collection', assertFails(getDocs(collection(team, `${runPath}/chat`))));
+  await check('client CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(team, chatPath), { messages: [] })));
+  await check('owner CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(owner, chatPath), { messages: [] })));
+  await check('staff CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(staff, chatPath), { messages: [] })));
 
   console.log('\n── Public/join reads behave as designed ──');
   await check('anyone (even anon) CAN read publicGames', assertSucceeds(getDoc(doc(anon, `publicGames/${GAME}`))));

@@ -19,6 +19,12 @@ export const PAYMENTS_ENABLED = false;
 /** Per-run participant ceiling while the whole app is free. */
 export const FREE_MODE_MAX_PARTICIPANTS = 50;
 
+/**
+ * Participant ceiling for a test-drive (rehearsal) run: the creator plus one
+ * companion phone (change: test-drive-mode). A test drive is never billed.
+ */
+export const TEST_DRIVE_MAX_PARTICIPANTS = 2;
+
 /** The subset of a wallet that launch-billing depends on. */
 export interface LaunchBillingWallet {
   plan?: 'free' | 'pro';
@@ -33,7 +39,7 @@ export interface LaunchBillingWallet {
 export type LaunchBilling =
   | {
       ok: true;
-      billingType: 'free' | 'credit' | 'pro';
+      billingType: 'free' | 'credit' | 'pro' | 'test';
       maxParticipants: number;
       consume: 'none' | 'free_run' | 'credit';
     }
@@ -47,7 +53,14 @@ export type LaunchBilling =
 export function resolveLaunchBilling(
   paymentsEnabled: boolean,
   wallet: LaunchBillingWallet,
+  opts?: { testDrive?: boolean },
 ): LaunchBilling {
+  // Test-drive (rehearsal) launches short-circuit FIRST, before any billing
+  // ladder (change: test-drive-mode): free, capped at 2, wallet-independent —
+  // no Pro requirement, nothing to consume, wallet never read or written.
+  if (opts?.testDrive) {
+    return { ok: true, billingType: 'test', maxParticipants: TEST_DRIVE_MAX_PARTICIPANTS, consume: 'none' };
+  }
   if (!paymentsEnabled) {
     return { ok: true, billingType: 'free', maxParticipants: FREE_MODE_MAX_PARTICIPANTS, consume: 'none' };
   }

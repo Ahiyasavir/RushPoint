@@ -9,6 +9,7 @@ import {
   normalizeTriggerMode, defaultRadiusFor, parseYouTubeId, youTubeEmbedUrl,
   validateUnlockGraph, validateAvailabilityWindow,
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
+  validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
 } from '@rushpoint/shared';
 import { Button, Input, Label, Textarea } from './ui';
 import { dialog } from './dialog';
@@ -292,6 +293,76 @@ function OrderingItemsEditor({ task, set, b }: { task: Task; set: (p: Partial<Ta
       </Button>
       <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{ORDER_ITEMS_MAX}</span>
       {error && <p className="text-[11px] text-rp-amber">{error}</p>}
+    </div>
+  );
+}
+
+// ── Survey (change: survey-tasks) — optional choices editor ──
+// A survey has NO right answer. Leaving the list empty makes it a FREE-TEXT
+// survey; adding 2–8 options makes it a single-pick poll. Rows are local UI
+// state; only a VALID 2–8 non-empty list is pushed as `surveyChoices` (an
+// invalid/partial transient state pushes undefined ⇒ free-text, mirroring the
+// ordering editor and the server-side validateSurveyChoices gate).
+function SurveyChoicesSection({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
+  const [choices, setChoices] = useState(!!task.surveyChoices && task.surveyChoices.length > 0);
+  const [rows, setRows] = useState<{ id: string; text: string }[]>(() => {
+    const initial = (task.surveyChoices ?? []).map((text) => ({ id: uuid(), text }));
+    while (initial.length < SURVEY_CHOICES_MIN) initial.push({ id: uuid(), text: '' });
+    return initial;
+  });
+
+  const apply = (next: { id: string; text: string }[]) => {
+    setRows(next);
+    const clean = next.map((r) => r.text.trim()).filter((t2) => t2 !== '');
+    set({ surveyChoices: validateSurveyChoices(clean) === null ? clean : undefined });
+  };
+
+  const clean = rows.map((r) => r.text.trim()).filter((t2) => t2 !== '');
+  const error = choices ? validateSurveyChoices(clean) : null;
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-[--ink-3] leading-snug">{b.surveyLead}</p>
+      <div className="flex gap-1.5" role="tablist">
+        {([false, true] as const).map((mode) => (
+          <button key={String(mode)} role="tab" aria-selected={choices === mode}
+            onClick={() => {
+              setChoices(mode);
+              if (!mode) set({ surveyChoices: undefined });
+              else apply(rows);
+            }}
+            className={`flex-1 rounded-lg border py-1.5 text-xs transition-colors ${
+              choices === mode
+                ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+            {mode ? b.surveyModeChoices : b.surveyModeText}
+          </button>
+        ))}
+      </div>
+      {choices && (
+        <div className="space-y-1.5">
+          <Label>{b.surveyChoicesLead}</Label>
+          <div className="space-y-1">
+            {rows.map((row, i) => (
+              <div key={row.id} className="flex items-center gap-1.5">
+                <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
+                <Input value={row.text} dir="auto" className="flex-1 min-w-0"
+                  placeholder={b.surveyChoicePlaceholder(i + 1)}
+                  onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
+                <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= SURVEY_CHOICES_MIN}
+                  aria-label={`${b.deleteTask} ${i + 1}`}
+                  className="text-neon-red shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-neon-red/10 disabled:opacity-30 disabled:hover:bg-transparent text-xs">✕</button>
+              </div>
+            ))}
+          </div>
+          <Button variant="ghost" className="text-xs" disabled={rows.length >= SURVEY_CHOICES_MAX}
+            onClick={() => apply([...rows, { id: uuid(), text: '' }])}>
+            + {b.surveyAddChoice}
+          </Button>
+          <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{SURVEY_CHOICES_MAX}</span>
+          {error && <p className="text-[11px] text-rp-amber">{b.surveyChoicesError}</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -687,6 +758,18 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
       <text x="100" y="34" textAnchor="middle" fontSize="10" fill="white" fontWeight="bold">3</text>
     </svg>
   ),
+  survey: (
+    <svg viewBox="0 0 120 60" className="w-full h-14">
+      <rect x="20" y="9" width="80" height="12" rx="3" fill="#88888815" stroke="#888" strokeWidth="1" />
+      <rect x="20" y="25" width="80" height="12" rx="3" fill="#378ADD22" stroke="#378ADD" strokeWidth="1.5" />
+      <rect x="20" y="41" width="80" height="12" rx="3" fill="#88888815" stroke="#888" strokeWidth="1" />
+      <circle cx="27" cy="15" r="2.5" fill="none" stroke="#888" strokeWidth="1" />
+      <circle cx="27" cy="31" r="2.5" fill="#378ADD">
+        <animate attributeName="opacity" values="0;1;1" keyTimes="0;0.4;1" dur="2s" repeatCount="indefinite" />
+      </circle>
+      <circle cx="27" cy="47" r="2.5" fill="none" stroke="#888" strokeWidth="1" />
+    </svg>
+  ),
 };
 
 // ── Step 3: Interaction ──
@@ -702,6 +785,7 @@ function InteractionStepBody({ task, set, setSmart, b }: {
     self_report: { label: b.typeSelfReport, desc: b.typeSelfReportDesc },
     geofence: { label: b.typeGeofence, desc: b.typeGeofenceDesc },
     sequence: { label: b.typeSequence, desc: b.typeSequenceDesc },
+    survey: { label: b.typeSurvey, desc: b.typeSurveyDesc },
   };
   return (
     <>
@@ -714,7 +798,13 @@ function InteractionStepBody({ task, set, setSmart, b }: {
             const active = task.type === ty;
             return (
               <div key={ty} className="relative">
-                <button onClick={() => set({ type: ty })}
+                <button onClick={() => set(
+                    // survey (change: survey-tasks): pure data collection defaults
+                    // to 0 points (only when leaving the blank-task default of 100).
+                    ty === 'survey' && task.type !== 'survey' && task.pointValue === 100
+                      ? { type: ty, pointValue: 0 }
+                      : { type: ty },
+                  )}
                   className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-5 py-1.5 text-start transition-colors ${
                     active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                   <BuilderIcon name={TYPE_ICON_NAME[ty]} className="w-4 h-4 shrink-0" />
@@ -739,11 +829,33 @@ function InteractionStepBody({ task, set, setSmart, b }: {
           </div>
         )}
         {task.type === 'photo' && (
-          <label className="flex items-center gap-2 text-xs text-[--ink-2]">
-            <input type="checkbox" checked={task.smart?.autoApprove ?? false}
-              onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
-            {b.autoApprove}
-          </label>
+          <div className="space-y-2">
+            {/* audio-tasks: capture a photo (default) or an audio clip. Writes to
+                task.smart.captureKind (never top-level). */}
+            <div>
+              <Label>{b.captureKindLabel}</Label>
+              <div className="flex gap-2">
+                {(['photo', 'audio'] as const).map((k) => {
+                  const active = (task.smart?.captureKind ?? 'photo') === k;
+                  return (
+                    <button key={k} type="button"
+                      onClick={() => setSmart({ verificationType: 'photo_upload', captureKind: k })}
+                      className={`px-3 py-1.5 rounded-lg text-sm border ${active ? 'bg-[--accent] text-white border-transparent' : 'border-[--line] text-[--ink-2]'}`}>
+                      {k === 'photo' ? `📷 ${b.captureKindPhoto}` : `🎙️ ${b.captureKindAudio}`}
+                    </button>
+                  );
+                })}
+              </div>
+              {(task.smart?.captureKind ?? 'photo') === 'audio' && (
+                <p className="text-xs text-[--ink-3] mt-1">{b.captureKindAudioHint}</p>
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-[--ink-2]">
+              <input type="checkbox" checked={task.smart?.autoApprove ?? false}
+                onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
+              {b.autoApprove}
+            </label>
+          </div>
         )}
         {task.type === 'quiz' && <QuizModeSection task={task} set={set} b={b} />}
         {task.type === 'numeric' && (
@@ -761,6 +873,7 @@ function InteractionStepBody({ task, set, setSmart, b }: {
           </div>
         )}
         {task.type === 'sequence' && <StepsEditor steps={task.steps ?? []} onChange={(steps) => set({ steps })} b={b} />}
+        {task.type === 'survey' && <SurveyChoicesSection task={task} set={set} b={b} />}
         {(task.type === 'smart_station' || task.type === 'photo') && (
           <div>
             <Label>{b.extendedInstructions}</Label>
