@@ -1,13 +1,19 @@
 {
   "projects": {
-    "default": "race-to-tzion-2026",
-    "dev":     "race-to-tzion-2026"
+    "default": "rushpoint-pwa-7daaa",
+    "dev": "rushpoint-pwa-7daaa"
   },
   "targets": {
-    "race-to-tzion-2026": {
+    "rushpoint-pwa-7daaa": {
       "hosting": {
-        "admin": ["race-to-tzion-2026"]
+        "creator": [
+          "rushpoint-creator"
+        ],
+        "play": [
+          "rushpoint-play"
+        ]
       }
     }
-  }
+  },
+  "etags": {}
 }

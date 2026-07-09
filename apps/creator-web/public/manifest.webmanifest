@@ -1,0 +1,21 @@
+{
+  "name": "RushPoint — Build a Field Game",
+  "short_name": "RushPoint",
+  "description": "Design real-world field games, launch live runs, and score teams automatically. No code.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050508",
+  "theme_color": "#050508",
+  "lang": "en",
+  "dir": "auto",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

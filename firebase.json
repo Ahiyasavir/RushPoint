@@ -8,14 +8,26 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs20"
+    "runtime": "nodejs20",
+    "predeploy": [
+      "npm run shared:build",
+      "npm run build --workspace=functions"
+    ]
   },
-  "hosting": {
-    "target": "admin",
-    "public": "apps/admin/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
-  },
+  "hosting": [
+    {
+      "target": "creator",
+      "public": "apps/creator-web/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    },
+    {
+      "target": "play",
+      "public": "apps/play-web/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    }
+  ],
   "emulators": {
     "singleProjectMode": true,
     "auth":      { "port": 9099 },

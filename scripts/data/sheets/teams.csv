@@ -1,0 +1,5 @@
+uid,name,code,captainPhone,members,state
+mock-team-a-uid,"The Rookies",ROOK1,+972-50-000-0001,"David Ben-Ami|Rachel Goldberg|Noam Fischer",start
+mock-team-b-uid,"The Explorers",EXPL2,+972-50-000-0002,"Tamar Shapiro|Yonatan Mizrahi|Liora Cohen|Eitan Peretz",midway
+mock-team-c-uid,"The Basket Finders",BSKT3,+972-50-000-0003,"Shira Levi|Avi Katz|Maya Friedman|Roi Ben-David|Noa Stern",park
+mock-team-d-uid,"The Champions",CHMP4,+972-50-000-0004,"Uri Avraham|Yael Cohen|Gal Levy|Nir Greenberg",finished

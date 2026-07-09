@@ -3,7 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../services/firebase.config';
 import type { Announcement } from '@rushpoint/shared';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 
 /**
  * Live sync of operational announcements (distinct from gamified flash missions).

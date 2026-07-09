@@ -1,12 +1,46 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Team photos: authenticated teams can upload to their own folder
+    // Team photos: authenticated teams can upload to their own folder.
+    // READ is scoped to the owning team — any-authed read let any player list
+    // every other team's checkin photos (faces, locations) by path. Legitimate
+    // display goes through tokenized getDownloadURL() links, which bypass rules.
     match /checkins/{teamId}/{allPaths=**} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && request.auth.uid == teamId;
       allow write: if request.auth != null && request.auth.uid == teamId
         && request.resource.size < 10 * 1024 * 1024  // 10MB max
         && request.resource.contentType.matches('image/.*');
+    }
+    // v2 platform — photo-mission uploads under a run. A participant (uid ==
+    // teamId) may write only into their own team folder.
+    //
+    // READ is restricted: a participant may read only their OWN team's photos,
+    // and staff scoped to THIS run may read them for review. The owner + the
+    // recap/share surfaces display photos via tokenized getDownloadURL() links
+    // (which bypass Storage rules), so this does NOT break legitimate display —
+    // it only stops a participant who knows the runId from listing/downloading
+    // every other team's photos (faces, locations) by path.
+    match /runs/{runId}/teams/{teamId}/{allPaths=**} {
+      allow read: if request.auth != null && (
+        request.auth.uid == teamId
+        || (request.auth.token.staff == true && request.auth.token.runId == runId)
+      );
+      // audio-tasks: a photo task may capture an audio clip instead (same path,
+      // same 10MB cap). The client normalizes the blob type (strips codec params)
+      // before upload, so the allowed audio types stay exact-match.
+      allow write: if request.auth != null && request.auth.uid == teamId
+        && request.resource.size < 10 * 1024 * 1024  // 10MB max
+        && request.resource.contentType.matches('image/.*|audio/(webm|mp4|mpeg|ogg)');
+    }
+    // Creator-authored task media (change: task-media-attachments): images/videos a
+    // creator attaches to a task in the Builder. Only the owning creator may write
+    // under their own uid prefix; read is PUBLIC because participants (anonymous /
+    // signed-out marketing viewers) render the media directly via the download URL.
+    match /gameMedia/{ownerUid}/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == ownerUid
+        && request.resource.size < 50 * 1024 * 1024  // 50MB max (short clips)
+        && request.resource.contentType.matches('(image|video)/.*');
     }
     // Public photo stream: readable by all authenticated users
     match /stream/{allPaths=**} {

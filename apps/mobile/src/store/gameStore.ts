@@ -40,16 +40,32 @@ export interface LiveGame {
   slots: LiveSlot[];
   score: number;
   bonusPenalty?: number;
+  // Staged start: false while the team waits to be launched by the admin.
+  // Absent (legacy/seed) counts as launched. launchAt drives the 10→0 countdown.
+  launched?: boolean;
+  launchAt?: unknown;
   judging?: LiveJudging | null;
   // Phase 3
   gateArrivedAt?: unknown;
   craftingStartedAt?: unknown;
   finalSprintStartedAt?: unknown;
   matchStatus?: MatchStatus;
+  gateCooldownUntil?: string | null; // ISO — post-loss 90s cooldown before re-queue
   teneSelection?: string[];
+  smartStreak?: number; // consecutive fast smart-station completions (≥3 ⇒ 1.5x "ON FIRE")
 }
 
 export type SyncState = 'loading' | 'live' | 'error';
+
+// A smart-station code submission awaiting a successful round-trip. Held here (not
+// in the screen) so it survives navigation away from smart-station.tsx and can be
+// auto-retried when connectivity returns. One station is active at a time → one slot.
+export interface PendingStationSubmission {
+  taskId: string;
+  code: string;
+  lat?: number;
+  lng?: number;
+}
 
 interface GameState {
   // Team
@@ -67,6 +83,9 @@ interface GameState {
   syncState: SyncState;
   fromCache: boolean;
 
+  // Smart-station submission awaiting retry (offline/latency); null when none.
+  pendingStationSubmission: PendingStationSubmission | null;
+
   // Actions
   initTeam: (teamId: string, teamName: string, members: string[]) => void;
   completeSlot: (index: number, taskTitle?: string) => void;
@@ -74,6 +93,7 @@ interface GameState {
   setOnline: (online: boolean) => void;
   applyLiveGame: (game: LiveGame, fromCache: boolean) => void;
   setSyncState: (state: SyncState) => void;
+  setPendingStationSubmission: (sub: PendingStationSubmission | null) => void;
   resetGame: () => void;
 }
 
@@ -117,6 +137,7 @@ export const useGameStore = create<GameState>((set) => ({
   live:        null,
   syncState:   'loading',
   fromCache:   false,
+  pendingStationSubmission: null,
 
   initTeam: (teamId, teamName, members) =>
     set({
@@ -133,6 +154,8 @@ export const useGameStore = create<GameState>((set) => ({
     set({ live: game, score: game.score, syncState: 'live', fromCache }),
 
   setSyncState: (state) => set({ syncState: state }),
+
+  setPendingStationSubmission: (sub) => set({ pendingStationSubmission: sub }),
 
   completeSlot: (index, taskTitle) =>
     set((state) => {
@@ -153,6 +176,7 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       teamId: null, teamName: '', memberNames: [], score: 0,
       slots: buildInitialSlots(), live: null, syncState: 'loading', fromCache: false,
+      pendingStationSubmission: null,
     }),
 }));
 

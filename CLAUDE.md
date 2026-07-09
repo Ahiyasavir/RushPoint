@@ -1,332 +1,252 @@
-# RushPoint – "Race to Tzion" (המירוץ לציון)
+# RushPoint — multi-tenant "field game" platform
 
-> Developer persona, coding guidelines, and Firestore path rules: see [INSTRUCTIONS.md](INSTRUCTIONS.md)
-> Full architecture reference: see [TECH_SPEC.md](TECH_SPEC.md) · Directory map: see [STRUCTURE.md](STRUCTURE.md)
+> Coding guidelines & Firestore path rules: [INSTRUCTIONS.md](INSTRUCTIONS.md) ·
+> Architecture: [TECH_SPEC.md](TECH_SPEC.md) · Directory map: [STRUCTURE.md](STRUCTURE.md) ·
+> **Going live + payments: [DEPLOY.md](DEPLOY.md)**
 
-Gamified real-time team management app powering the Race to Tzion adventure event in Jerusalem.
+## ⚙️ How we work — Spec-Driven Development + TDD (mandatory)
 
----
+Every non-trivial change goes through **OpenSpec** (spec-driven) and is built **test-first (TDD)**.
+Trivial one-liners (typo, copy tweak, obvious bugfix with an existing test) may skip the ceremony.
 
-## Current Status (Phases 1–3 ✅ complete — feature-complete on the local emulator)
+**The loop** (slash commands provided by OpenSpec, see `.claude/commands/opsx/`):
+1. `/opsx:propose "<what you want>"` — generates `openspec/changes/<name>/` with **proposal.md**
+   (what & why) → **design.md** (how + test strategy) → **tasks.md** (RED→GREEN→REFACTOR steps).
+2. Review/adjust the artifacts, then `/opsx:apply` — implement the tasks **strictly in order**.
+3. `/opsx:archive` — once all gates are green, fold the change into the living specs.
 
-> Live status & next steps: **[STATUS.md](STATUS.md)**. All Phase 2 blueprint math + Phase 3
-> gamification are implemented and verified e2e (`node scripts/e2e-verify.mjs` → 44/44 PASS).
+**TDD is enforced by the task ordering** (see `openspec/config.yaml` rules): the first task of any
+logic/callable change is *write a failing test*, then minimum code to green, then refactor. Test lanes:
+- **Pure logic** (scoring/geo/validation/routing) → co-located **vitest** `*.test.ts` in `functions/`
+  *or* a `scripts/test-*.ts` tsx assertion script — both run by `npm test` (vitest + the
+  `scripts/run-unit-tests.mjs` aggregator). No emulator needed. The planned v2.1 work has a
+  RED-phase blueprint in `functions/src/__planned__/v21-*.todo.test.ts` (`test.todo` per roadmap row).
+- **Callable behavior** → add failing assertions to `scripts/e2e-verify.mjs`, then implement (`npm run e2e`).
+- **UI** → verify via the preview tools (no component test runner).
 
-The full game lifecycle runs against the Firebase Emulator Suite:
+**Gates before any change is done:** `npm run typecheck` · `npm run lint` · `npm test` ·
+`npm run creator:build` · `npm run play:build` · `npm run e2e` — all green. Project context + per-artifact
+rules that drive proposals/designs/tasks live in [openspec/config.yaml](openspec/config.yaml).
 
-1. **Access code → Register** — server-side `registerTeam` validates/claims the code and seeds
-   the team profile + initial `gameState` (slot 0 active).
-2. **Dashboard** — live `gameState` mirror: 6 stages, score (effective = score − penalty), gate
-   card, crafting countdown, matchmaking, flash-mission overlay, SOS + clue-hint buttons.
-3. **Smart routing** — `requestNextTask` / `getRecommendedTasks` rank stations by load (Φ),
-   transit (haversine) and skill match (Ω); Teams admin page reflects live registrations.
-4. **Judge flow** — pending check-ins → check-in (freezes clock) → grade Tene basket + team
-   cohesion → finalize. Score = **sigmoid task score** + basket grade − cohesion penalty.
-5. **Phase 3 gamification** — gate matchmaking (1v1 duels), 3 basket zones, 20-min crafting +
-   90-sec sprint with exponential penalties, leaderboard freeze + Z-Score finalize + sequential
-   reveal, flash missions, SOS alerts, clue-hint penalties, Final Run celebration.
-6. **Bilingual UI** — every screen in both apps toggles English ⇄ Hebrew (RTL); dark neon theme.
+RushPoint is a **web platform where any creator builds and runs their own real-world team
+"field game"** (scavenger-hunt / amazing-race style). A creator designs a game
+(stages + geolocated tasks), launches a live run, shares an access code; participants join on
+their phones, get routed between tasks, and are scored automatically. The original "Race to
+Tzion" Jerusalem event is now just one game built on this platform.
 
-The whole stack boots with a single command (`npm run dev:all`). See **Local Development** below.
-**Remaining:** Wrapped/summary cards (deferred) + production deploy. See STATUS.md.
-
----
-
-## Architecture Overview
-
-**Monorepo** managed with npm workspaces:
-
-| Package | Tech | Purpose |
-|---|---|---|
-| `apps/mobile` | Expo (React Native SDK 52) | Team app — runs on iOS/Android **and web** (used for the demo) |
-| `apps/admin` | React + Vite | Web dashboard for judges & admins (Vite dev server on **:5180**) |
-| `functions/` | Node 20 + Firebase Functions (v1 `onCall`) | Registration, judging, routing, scoring |
-| `packages/shared` | TypeScript | Canonical types + Firestore path helpers (`@rushpoint/shared`) |
-| `scripts/` | Node (tsx / .mjs) | Emulator launcher, seeding, port cleanup |
-
-**Backend**: Firebase (Firestore, Auth (anonymous), Cloud Functions, Storage) — local Emulator Suite.
-**State (mobile)**: Zustand. **Styling**: NativeWind v4 (mobile) / Tailwind (admin).
-
-**Project ID** (`race-to-tzion-2026`) is used consistently as **both** the Firebase project id
-(`.firebaserc`, client configs, seed) **and** the Firestore `appId` path segment. Keep them aligned.
+> **History:** v1 was a single-event app (`apps/admin` + an Expo `apps/mobile` app, human judges,
+> an 8/6-slot system, Tene baskets). **v2 replaced it** with this generic multi-tenant web
+> platform — `apps/creator-web` + `apps/play-web`, automatic scoring, no judges. `apps/mobile`
+> still exists on disk but is **archived** (not in the npm workspaces). Ignore v1 concepts.
 
 ---
 
-## Local Development — one command
+## Architecture — monorepo (npm workspaces + Turborepo)
 
-```bash
-npm install          # once
-npm run dev:all      # boots EVERYTHING in one terminal
-```
-
-`dev:all` runs (via `concurrently`, after a `predev:all` port cleanup):
-
-| Pane | What | URL |
-|---|---|---|
-| **EMU** | `scripts/dev-emulator.mjs` → builds functions, then Emulator Suite | UI: http://127.0.0.1:4000 |
-| **SEED** | `wait-on` ports, then `scripts/seed-local.mjs` (seed-if-empty) | — |
-| **MOBILE** | `expo start --web` | http://localhost:8081 |
-| **ADMIN** | `vite --port 5180` | **http://localhost:5180** |
-
-**Emulator ports:** UI 4000 · Auth 9099 · Functions 5001 · Firestore 8080 · Storage 9199 · Hosting 5002.
-
-### What the dev scripts handle for you (hard-won; don't regress these)
-- **`scripts/dev-emulator.mjs`** — detects the Java *version* and **auto-switches to a JDK ≥ 21**
-  (the emulator requires 21+; an older Java first on PATH would otherwise break it). It **builds
-  Cloud Functions before** the emulator starts (mandatory — a stale/missing `functions/lib` was a
-  past failure). Data **persists** via `--import`/`--export-on-exit` to `.firebase/emulator-data`.
-- **`scripts/free-ports.mjs`** (runs as `predev:all`) — kills stale Metro/Vite/emulator processes so
-  a leftover server can't block startup. Includes 8081, 5173/5174/**5180**, and emulator ports.
-- **`scripts/seed-local.mjs`** — seeds **only if the DB is empty** (idempotent): tasks, access codes
-  (incl. `1234`), a test user, and a complete demo team **"The Lions" (LION1)** with a *pending
-  check-in* so the Judge/Check-in panel has data on first boot. For the full multi-team dataset run
-  `npm run seed:reset`.
-
-### Other commands
-```bash
-npm run emulator       # just the emulator (same launcher)
-npm run mobile         # expo start (native)        npm run mobile:web  # expo start --web
-npm run admin          # vite on :5180
-npm run functions:serve / functions:deploy
-npm run seed           # comprehensive seed (merge)  npm run seed:reset  # wipe + comprehensive seed
-npm run typecheck / lint / format
-```
-
-> ⚠️ **Stop with Ctrl+C** (not by closing the window) so `--export-on-exit` saves emulator data.
-> ⚠️ Client configs connect to the emulator over **`127.0.0.1`** (not `localhost`) to avoid the
-> Windows IPv6 (`::1`) mismatch — keep it that way.
-
----
-
-## Project Structure (current)
-
-```
-rushpoint/
-├── apps/
-│   ├── mobile/                 # Expo (web + native)
-│   │   ├── app/                # expo-router screens
-│   │   │   ├── _layout.tsx     # providers incl. <ToastProvider>
-│   │   │   ├── index.tsx       # anonymous auth gate
-│   │   │   ├── access-code.tsx # enter Access Code (validates against accessCodes)
-│   │   │   ├── register.tsx    # team form → calls registerTeam callable
-│   │   │   ├── dashboard.tsx   # 6 stages, score, gate/crafting/match, flash overlay, SOS+hint
-│   │   │   ├── map.tsx         # Mapbox static mission map
-│   │   │   ├── basket-zone.tsx # riddle + interactive Tene-fill menu + 20-min/sprint countdown
-│   │   │   ├── sos.tsx         # emergency alert (two-step confirm + GPS → triggerSOS)
-│   │   │   └── final-run.tsx   # race-complete celebration (animated trophy + synth fanfare)
-│   │   └── src/
-│   │       ├── components/      # Tier 1 kit: Text, Button, Card, Badge, Input, Toast, tokens.ts
-│   │       │                    # + SlotCard, ProgressBar, LanguageToggle, FlashMissionBanner,
-│   │       │                    # AnnouncementBanner (persistent operational marquee)
-│   │       ├── hooks/           # useGameSync, useOfflineToast, useFlashMissions, useSlotSound,
-│   │       │                    # useAnnouncements, useAdaptiveLocation (geo-throttled pings)
-│   │       ├── data/            # teneProducts.ts (crafting-menu mirror of the catalog)
-│   │       ├── services/        # firebase.config.ts (emulator-wired, 127.0.0.1, AsyncStorage auth)
-│   │       └── store/           # gameStore (Zustand mirror of gameState)
-│   └── admin/
-│       └── src/
-│           ├── pages/           # JudgePage (grading + cohesion + timeout warning), CheckInsPage,
-│           │                    # TeamsPage, LeaderboardPage (freeze/Z-Score/reveal),
-│           │                    # MatchmakingPage, HeatmapPage (+ live team markers),
-│           │                    # ManagerPage (stations + evacuate, broadcast, audit log)
-│           ├── data/            # teneProducts.ts (UI mirror of the scoring catalog)
-│           └── services/        # firebase.ts (emulator-wired + ensureAuth anonymous)
-├── functions/
-│   └── src/
-│       ├── index.ts            # 33 callables — see the Cloud Functions table below
-│       ├── firebase.ts          # Admin SDK init (ignoreUndefinedProperties enabled)
-│       ├── routing/assignNextTask.ts   # Phase 2 — priority routing (load/transit/skill) ✅
-│       └── scoring/
-│           ├── taskScore.ts            # Phase 2 — sigmoid per-task time multiplier ✅
-│           ├── calculateScore.ts       # transit/sprint penalties + Z-Score + completion bonus ✅
-│           └── teneProducts.ts         # authoritative Tene basket scoring catalog
-├── packages/shared/src/types/index.ts  # FIRESTORE_PATHS, COLLECTIONS, all interfaces (locked)
-└── scripts/
-    ├── dev-emulator.mjs        # Java-21-aware emulator launcher + persistence
-    ├── free-ports.mjs          # predev port cleanup
-    ├── seed-local.mjs          # seed-if-empty (minimal demo set)
-    ├── seed-emulator.ts        # comprehensive seed (npm run seed / seed:reset)
-    ├── e2e-verify.mjs          # end-to-end callable check vs emulator (44/44)
-    └── test-tiebreaker.ts      # tie-breaker unit test (npx tsx)
-```
-
----
-
-## Firestore Data Model ⚠️ (paths — never deviate)
-
-```
-PUBLIC  →  artifacts/{appId}/public/data/{collection}/{docId}     # tasks, events, leaderboard, …
-PRIVATE →  artifacts/{appId}/users/{userId}/{collection}/{docId}  # profile, gameState, checkIns, …
-CODES   →  artifacts/{appId}/accessCodes/{code}                   # pre-generated event codes
-```
-
-`{appId}` = `race-to-tzion-2026`. Always use the `FIRESTORE_PATHS` helpers from `@rushpoint/shared`
-— never hardcode path strings. (The old flat `teams/` `tasks/` model in earlier docs is obsolete.)
-
-Key documents:
-- `…/users/{uid}/profile/team` — `Team` (name, code, captainPhone, participants, memberNames, status…).
-- `…/users/{uid}/gameState/current` — `GameState` (8 `slots`, `score`, `judging` freeze state…).
-  **Server-write-only** — clients are blocked by `firestore.rules`; only Cloud Functions write it.
-- `…/users/{uid}/checkIns/{id}` — `CheckIn` (`status: 'pending' | 'approved' | 'rejected'`, judge fields).
-- `…/accessCodes/{code}` — `{ code, claimed, teamId }`. Readable by any authed client; the **claim**
-  (`claimed: true`) is written only by `registerTeam` (Admin SDK).
-
----
-
-## Auth & Registration (access-code system)
-
-1. App signs in **anonymously** (each browser/device gets its own uid).
-2. User enters an **Access Code**; the client reads `accessCodes/{code}` to validate it.
-3. Submitting the registration form calls the **`registerTeam`** Cloud Function, which (atomically,
-   Admin SDK) validates+claims the code, writes `profile/team`, and seeds `gameState/current` with
-   **slot 0 active and a task assigned** (so the dashboard skips the "stand by" screen).
-
-> Identity note: the mobile team is tied to the **anonymous browser uid**. Pre-seeded teams (e.g.
-> "The Lions") show in the Admin panel (which reads across all teams) but are a *different identity*
-> than whatever you register on the phone — that's expected, not a bug.
-
-## Cloud Functions (v1 `https.onCall`) — 30 callables
-
-| Function | Role |
-|---|---|
-| `registerTeam` | Claim access code + create profile + seed gameState |
-| `joinTeam` | Second device joins an already-claimed code → mints a custom token for the original team uid (same account, two devices) |
-| `listPendingArrivals` | Admin: list teams with `status:'pending'` check-ins (collectionGroup) |
-| `checkInArrival` | Judge: record arrival, freeze the team's mobile clock (`gameState.judging`) |
-| `finalizeJudgeEvaluation` | Judge: basket score **+ sigmoid task score − cohesion penalty**, complete slot, advance |
-| `requestNextTask` | Assign the best next task via priority routing (server reads completed slots + skill) |
-| `getRecommendedTasks` | Return a ranked task list (load/transit/skill) **without** committing an assignment |
-| `checkOutTask` | Release a station slot (`currentTeamCount` decrement) when a team leaves |
-| `listTeams` | Admin: all registered teams + live score/progress (collectionGroup, score-sorted) |
-| `skipTask` | Admin: skip the active slot, awarding the task average |
-| `checkInGate` | Arrive at the park (transit penalty) — kept for backend/e2e; not on the active mobile path |
-| `getBasketZone` | Mobile: assign the least-crowded basket zone + riddle |
-| `startCraftingTimer` | Mobile: start the 20-min crafting countdown (+ 90-sec sprint window) |
-| `joinMatchQueue` / `resolveMatch` / `bypassMatchmaking` | Gate 1v1 matchmaking. `resolveMatch`: **only the winner advances** (+150 + gate slot completes); the loser is re-queued (`waiting`). `joinMatchQueue` is idempotent (no double matches) |
-| `saveTeneSelection` | Mobile: persist the crafting-menu product picks to `gameState.teneSelection` (pre-fills the judge checklist) |
-| `triggerLeaderboardFreeze` | Admin: freeze/unfreeze the leaderboard |
-| `finalizeLeaderboard` | Admin: final ranking — completion bonus − bonusPenalty, then **Z-Score** normalization |
-| `pushFlashMission` | Admin: broadcast a time-limited bonus mission (canonical public path) |
-| `triggerSOS` / `acknowledgeAlert` | Mobile raises an emergency alert; admin clears it |
-| `requestClueHint` | Mobile: trade 50 pts (→ `bonusPenalty`) for a hint |
-| `setStationStatus` / `evacuateStation` | Manager: pause/close a station (excluded from routing) / release teams off a closed station without penalty (audited) |
-| `pushAnnouncement` / `deactivateAnnouncement` | Manager: global operational broadcast (persists until deactivated) — distinct from gamified flash missions |
-| `adjustTeamScore` | Manager: apply a fine (delta) or score override — writes an audit entry with prev/new |
-| `listAuditLogs` | Manager: read the immutable action log (admin-only path `artifacts/{appId}/auditLogs`) |
-| `updateLocation` | Mobile: lean per-team location ping (foreground geo-throttling) → `public/data/teamLocations` for the live heatmap |
-| `getStationTeams` | Station operator: teams currently at a station (active slot taskId match) + roster/phone |
-| `stationReleaseTeam` | Station operator: pass/fail a team's mission, apply missing-member cohesion penalty, advance + release the counter |
-| `stationCallHelp` | Station operator: summon roaming staff (writes a 'technical' admin alert tagged with the station) |
-
-> Note: `bypassMatchmaking` is retained but now **rejects** — teams must win a duel (no skip).
-> Role gating in the admin app is **client-side** (simple role selection, demo-grade); for
-> production swap for Firebase custom claims.
-
-Judge/admin callables require an authenticated caller; the admin-claim check (`assertJudge`) is
-**relaxed on the emulator** (`FUNCTIONS_EMULATOR`) so the demo runs with a plain anonymous sign-in.
-The full set is exercised by `node scripts/e2e-verify.mjs` against the emulator.
-
-## UI Component Kit (mobile, Tier 1)
-
-`Text · Button · Card · Badge · Input · Toast · LanguageToggle · SlotCard · ProgressBar ·
-FlashMissionBanner` + `tokens.ts` (GLOW, GLASS, GRADIENTS, BG — dark neon theme).
-`<ToastProvider>` is mounted in `app/_layout.tsx`; use `useToast()` for non-blocking messages.
-Follow NativeWind rules: static class strings only (no dynamic `bg-${x}`), native shadows via `style`.
-
-## Internationalisation (English / Hebrew) 🌐
-
-Both apps ship a full **EN/HE** toggle with RTL support. No heavy i18n dependency — a small typed
-dictionary + a `t(key, vars)` interpolator per app.
-
-| App | Module | State | Toggle |
+| Package | Tech | Purpose | Dev URL |
 |---|---|---|---|
-| `apps/admin` | `src/i18n/index.tsx` | React Context (`LanguageProvider` / `useI18n`) | button in the top nav |
-| `apps/mobile` | `src/i18n/index.ts` | Zustand store (`useTranslation`) | `<LanguageToggle>` on access-code + dashboard |
+| `apps/creator-web` | React + Vite (dark theme) | **Creator console** — real Firebase Auth (email/Google). Build games, launch & run live ops. | http://localhost:5180 |
+| `apps/play-web` | React + Vite PWA (light "Warm Trail" theme) | **Participant app** — anonymous auth (uid == teamId). Join, play, finish. Also hosts the **Staff console** (`?staff`). | http://localhost:5181 |
+| `functions/` | Node 20 + Firebase Functions (v1 `onCall`) | All game/run/scoring/payment logic. Clients never write game state. | :5001 |
+| `packages/shared` | TypeScript (`@rushpoint/shared`) | Canonical types, `FIRESTORE_PATHS`, scoring presets, geo/map helpers. | — |
+| `scripts/` | Node (mjs / tsx) | Emulator launcher, seed, port cleanup, e2e. | — |
 
-- Choice persists to `localStorage`; on web both set `document.documentElement.dir` so Tailwind
-  **logical** utilities (`ms-`/`me-`/`text-start`/`text-end`) mirror automatically. Prefer logical
-  classes over `ml-`/`text-left` in new UI so RTL keeps working.
-- Task content is already bilingual in Firestore (`title`/`titleHe`, `description`/`descriptionHe`).
-
----
-
-## Core Concepts
-
-### Slot System (6 stages)
-- Slots 0–2 (🟢 green): open-field missions, judge-advanced — slot 0 active on start.
-- Slot 3 (🔵 gate): matchmaking duel (זיווג). **Only the winner advances**; the loser is
-  sent back to the queue (`matchStatus:'lost'` → re-paired) until they win.
-- Slot 4 (🟠 orange): find the Tene basket + scan its QR (starts the 20-min crafting clock).
-- Slot 5 (🥇 gold): fill the Tene from the menu (20 min) + 90-sec sprint to the judges + judging.
-- Unlock rules: linear chain — each completed slot activates the next; all 6 done → Final Run.
-
-### Scoring
-Per-slot score = **task score + basket grade**, computed **authoritatively in the Cloud Function**:
-- **Task score** (`scoring/taskScore.ts`): `100·difficulty · M(x)` where `x = actual/target` minutes and
-  `M(x) = 0.2 + 1.3/(1+e^(3(x−1)))` — a sigmoid that rewards speed (~1.43×) but caps exploit-grade times.
-- **Basket grade** (`scoring/teneProducts.ts`): product checklist (weighted Tene catalog) + design (0–20)
-  + presentation (0–20).
-- **Penalties → `gameState.bonusPenalty`** (subtracted from the final score): clue hints (50 each),
-  team cohesion (100 per missing member at judging), exponential gate/sprint late penalties.
-- **Final ranking** (`finalizeLeaderboard`): `max(0, Σ earned + 500·allDone − bonusPenalty)`, then a
-  **Z-Score** time bonus/penalty (±200 pts per σ vs the field's completion times).
-
-### Smart routing (`routing/assignNextTask.ts`)
-`Priority = 0.5·load − 0.3·transit + 0.2·skillMatch`, higher is better. Load uses `currentTeamCount`
-vs `maxConcurrentTeams`; transit is haversine at ~5 km/h; skillMatch aligns the team's measured pace
-(`S_i ∈ [−1,1]`) to task difficulty. `requestNextTask` claims the top task with an atomic increment;
-`getRecommendedTasks` returns the ranked list without writing.
-
-### Operational features (Phase 3 advanced)
-- **Station control:** `Task.status` (`active`/`paused`/`closed`) — paused/closed stations are
-  excluded from routing. `evacuateStation` releases teams off a closed station (no penalty), clears
-  their slot, decrements the counter, and flags `gameState.evacuatedFrom` (mobile toasts once).
-- **Broadcast:** `announcements` (public) drive a persistent marquee on the mobile dashboard
-  (per-device dismissal), separate from gamified flash missions.
-- **Geo-throttling:** mobile `useAdaptiveLocation` pings `updateLocation` fast (~20 s) in transit,
-  slow (~4 min) when checked-in/crafting → `public/data/teamLocations` feeds the live heatmap.
-- **Audit trail:** every admin mutation writes to `artifacts/{appId}/auditLogs` (admin-read-only);
-  the Event Manager page (`/manager`) reads it via `listAuditLogs` and can fine/override scores.
-- **Timeout safety net:** `Task.maxDurationMinutes` drives a flashing warning on the Judge page once
-  a checked-in team exceeds it — the judge then extends or force-skips (judge decides).
-- **Tie-breaker:** `finalizeLeaderboard` breaks score ties via `compareForRanking`
-  (penalties → combined green time → transit time), a pure unit-tested comparator.
+**Backend:** Firebase (Firestore, Auth, Cloud Functions, Storage) — local Emulator Suite in dev.
+**Project id** `rushpoint-pwa-7daaa` (used as the Firebase project id everywhere).
 
 ---
 
-## Phase Roadmap (see STATUS.md for the live tracker)
+## Local development — one command
 
-| Phase | Status | Scope |
-|---|---|---|
-| **Phase 1 — MVP** | ✅ done | Access-code auth, dashboard, judge scoring slice, component kit |
-| **Phase 2 — Core Math & Routing** | ✅ done | Sigmoid task scoring, priority routing (load/transit/skill), `getRecommendedTasks`, real Teams list, **bilingual EN/HE UI**, admin skip-task |
-| **Phase 2 — Live & Maps** | ✅ done | Live Firestore sync (`useGameSync`), offline persistence + toast, slot audio cues (Web Audio), Mapbox admin heatmap + mobile mission map |
-| **Phase 3 — Gamification** | ✅ done | Gate matchmaking, basket zones, crafting/sprint penalties, leaderboard freeze + Z-Score + reveal, flash missions, SOS, clue-hints, team cohesion, Final Run |
-| **UI Overhaul** | ✅ done | Dark neon theme + glassmorphism (Inter/Outfit/JetBrains Mono) across both apps |
-| **Remaining** | ⬜ | Wrapped/summary cards (deferred) + **production deploy** (see STATUS.md → "הכנה לפרישה") |
-
-## Key Decisions & Caveats (things we already hit)
-
-- **gameState/score are server-only.** Never write them from a client; rules block it. Use Cloud Functions.
-- **Emulator needs Java ≥ 21** — the launcher auto-detects and switches; don't revert that logic.
-- **Admin dev server is on `:5180`** (moved off 5173 after a `--strictPort` collision left users on a
-  stale tab). Open whatever the `[ADMIN]` pane prints.
-- **Connect to emulators via `127.0.0.1`**, not `localhost` (Windows IPv6).
-- **Stop with Ctrl+C** to persist emulator data (`--export-on-exit`).
-- Expo prints version-mismatch warnings (expo-camera/image-picker/network, react-native) — non-fatal;
-  align later with `npx expo install --fix`.
-- `firestore.rules`: `accessCodes` is readable by authed users; `gameState` writes are closed to clients.
-
-## Key Constraints
-- Max concurrency per station: 3 teams (configurable per event).
-- Target devices: iOS 15+, Android 10+; judge UI must work in a phone browser, no install.
-- Leaderboard freezes 30 min before event end OR on first "Final Run" trigger (Phase 3).
-
-## Environment Files
+```bash
+npm install        # once
+npm run dev:all    # boots EVERYTHING in one terminal
 ```
-apps/mobile/.env   # EXPO_PUBLIC_FIREBASE_* (+ EXPO_PUBLIC_EMULATOR_HOST, EXPO_PUBLIC_MAPBOX_TOKEN)
-apps/admin/.env    # VITE_FIREBASE_* (+ VITE_RUSHPOINT_APP_ID, VITE_MAPBOX_TOKEN)
-functions/.env     # RUSHPOINT_APP_ID, QR_SECRET (server-side only)
+
+`dev:all` runs (via `concurrently`, after a `predev:all` port cleanup): **EMU** (emulator suite),
+**SEED** (seed-if-empty once Firestore+Auth are up), **CREATOR** (Vite :5180), **PLAY** (Vite :5181).
+
+**Emulator ports:** UI 4000 · Auth 9099 · Functions 5001 · Firestore 8080 · Storage 9199.
+
+### Required gates (run before declaring anything done)
+```bash
+npm run typecheck        # all workspaces — must pass
+npm test                 # pure-logic lane: scripts/test-*.ts aggregator + vitest in functions/
+npm run lint             # creator-web eslint — 0 errors (style warnings ok)
+npm run creator:build    # production build of creator-web — must pass
+npm run play:build       # production build of play-web — must pass (don't let a play-web break slip through)
+npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
+npm run i18n:check       # ⚠ MANDATORY AFTER ANY UI CHANGE — Hebrew↔English correctness
 ```
-All `.env` files are gitignored; emulator-safe defaults are baked into the client configs, so the
-stack boots without any `.env` present. See `*.env.example` in each package.
+`npm run e2e` runs as isolated **scenarios** (a throw fails one scenario, not the whole suite;
+ends with a per-scenario + per-callable-latency summary). Beyond the happy path it hunts bug
+classes directly: the createGame→…→finalize lifecycle, partial stages, locationless routing,
+paid hints, all task types, hidden-location, referral, consent, safe-zone; PLUS a **sanitizer
+allowlist** (a new `Task` field fails loud instead of leaking — update `ALLOWED_TASK_KEYS`/
+`ALLOWED_SMART_KEYS` in the script when you add one), a **leaderboard invariant oracle** +
+live/final parity, a **station-contention** race (concurrent `requestNextTask` can't exceed a
+station cap) + duplicate-submission idempotence, a **table-driven authz denial matrix**
+(participant/stranger/other-run-staff/owner × privileged callables), and **seeded boundary
+fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin` custom-token and
+real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
+run: it introspects the callables the emulator serves and fails if any was never invoked, so a
+**new callable ships RED until it has a test** (currently 66/66 covered — add a scenario, don't
+just add the callable). Keep it green; extend the relevant scenario (not just the lifecycle).
+`functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
+— seeded-random property tests for scoring/ranking/answer/geo/rate-limit; run via `npm test`.
+`npm run simulate` (scripts/simulate-run.mjs, `--teams=N`) is the v2 concurrent load sim — N
+teams play a real game at once, then it audits leaderboard invariants + that every station
+counter returns to 0. (`simulate:v1` is the archived v1 tournament script.)
+**One-command gauntlets for agents:** `npm run verify` (typecheck·lint·test·builds·i18n, no
+emulator) and `npm run verify:emulator` (builds → e2e → rules → 8-team simulate under a
+self-booted suite — no long-running emulator needed).
+
+> 🌐 **i18n gate — if you touch ANY UI (text, JSX, components, `i18n.ts`), you MUST run
+> `npm run i18n:check` and it MUST come out clean.** It guarantees Hebrew copy is really Hebrew
+> and English copy is really English, and that no component hardcodes a UI string that won't switch
+> language (the recurring "English text showing while the app is in Hebrew" bug, especially in the
+> Builder). **PART A (dictionaries) is a hard gate — never ship with a PART A error.** PART B lists
+> hardcoded strings that bypass `t.*`: fix the ones your change touches (route the text through
+> `t.*`), or, for a deliberate non-switchable literal (brand mockup, sample data), add a trailing
+> `// i18n-ignore` on that line with a reason. New UI must add **zero** new PART B warnings — verify
+> with `npm run i18n:check:strict`. See [scripts/check-i18n.ts](scripts/check-i18n.ts).
+
+### What the dev scripts handle (hard-won — don't regress)
+- **`scripts/dev-emulator.mjs`** — detects Java and **auto-switches to a JDK ≥ 21** (the emulator
+  needs 21+). **Builds Cloud Functions before** the emulator starts (a stale `functions/lib` was a
+  past failure). Data persists via `--import`/`--export-on-exit` to `.firebase/emulator-data`.
+- **`scripts/free-ports.mjs`** (`predev:all`) — kills stale Vite/emulator processes.
+- **`scripts/seed-local.mjs`** — seeds only if empty (idempotent): a demo creator (`demo-creator`),
+  the "Old City Treasure Hunt" demo game, a live run + access code. `npm run seed:reset` re-seeds.
+
+> ⚠️ **Stop with Ctrl+C** so `--export-on-exit` persists emulator data.
+> ⚠️ Client configs connect over **`127.0.0.1`** (not `localhost`) to avoid the Windows IPv6 mismatch.
+
+---
+
+## Firestore data model ⚠️ (multi-tenant — never deviate)
+
+```
+users/{ownerUid}                                              creator profile + wallet ref
+users/{ownerUid}/games/{gameId}                              private game template (the Builder edits this)
+users/{ownerUid}/games/{gameId}/runs/{runId}                 a live run (CF-written only)
+       …/runs/{runId}/teams/{teamId}                         a team/individual's full progress (teamId == participant uid)
+       …/runs/{runId}/{announcements|flashMissions}          live-ops broadcasts (read: any authed)
+       …/runs/{runId}/{alerts|teamLocations|staffInvites}    SOS, live map pings, staff PINs
+publicGames/{gameId}, publicTasks/{taskId}                   denormalized gallery (public read)
+wallets/{uid}, wallets/{uid}/transactions/{txId}             creator credit ledger
+accessCodes/{CODE}                                           join-code → {ownerUid, gameId, runId}
+auditLogs/{id}                                               immutable admin trail (CF only)
+```
+
+**Run / team / score / leaderboard docs are SERVER-WRITE-ONLY.** `firestore.rules` deny client
+writes; only Cloud Functions (Admin SDK) write them. To add a mutation, write a **callable** in
+`functions/` and a typed wrapper in the app's `services/calls.ts` — never a client write.
+Always use `FIRESTORE_PATHS` from `@rushpoint/shared`; never hardcode path strings.
+
+**Auth:** creator-web = real Firebase Auth (email/Google). play-web = anonymous (uid == teamId).
+**Staff** sign in with a one-time PIN → `staffSignIn` mints a custom token (claims: `staff`,
+`ownerUid/gameId/runId`) → scoped Firestore read of that one run's teams + alerts.
+
+---
+
+## Cloud Functions — by domain module
+
+All callables are re-exported from `functions/src/index.ts`. `completeTaskForTeam` and the routing
+helpers are **internal** (not triggers) — never re-export them.
+
+| Module | Callables |
+|---|---|
+| `games/index.ts` | createGame · updateGame · deleteGame · duplicateGame · publishGame · getGame · listGames |
+| `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · finalizeRun · **refreshLeaderboard** · **getPublicLeaderboard** · listRunTeams · completeTask · requestNextTask · **requestTaskHint** · getRecommendedTasks · checkOutTask · getMyTeamState |
+| `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount |
+| `payments/index.ts` | getWallet · **getWalletStatus** · **purchaseCredits** · **subscribePro** · **claimReferral** · stripeWebhook (onRequest) |
+| `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · acknowledgeAlert · pushAnnouncement · deactivateAnnouncement · pushFlashMission · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore · listAuditLogs |
+| `routing/assignNextTask.ts` | (internal) `assignTask` · `buildRecommendations` · `computeSkillRatio` · `releaseTask` |
+| `scoring/` | `taskScore.ts`, `calculateScore.ts`, `scoringPresets.ts` (in shared), `stationVerification.ts` |
+
+---
+
+## Core concepts
+
+### Game → Stage → Task
+A **Game** has ordered **Stages**; each Stage has 1+ **Tasks**. A stage unlocks the next when
+complete; the `isFinal` stage triggers the Final screen. Task **types**: `field` (check-in),
+`self_report`, `smart_station` (secret code), `photo` (upload → staff review or auto-approve),
+`quiz` (multiple-choice or typed answer; `answers[]`), `numeric` (`numericAnswer` ± `numericTolerance`),
+`geofence` (auto check-in within `geofenceRadiusMeters` — server validates GPS), `sequence`
+(ordered `steps[]` at one stop). **Answer keys are server-secret** — the participant sanitizer
+strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify via `submitTaskAnswer`
+/ `submitSequenceStep` / `verifyStationCode`.
+
+- **Partial-completion stages** — `Stage.requiredTaskCount`: a team completes only N of M tasks;
+  routing picks the best-suited subset and the rest auto-skip. Undefined = all tasks.
+- **Locationless tasks** — `Task.locationless`: a general task with no map pin, done from anywhere
+  (zero transit in routing, off the map + distance badge).
+- **Paid hints** — `Task.hint` + `hintPenalty`: participants reveal a hint for a point cost
+  (`requestTaskHint`, charged once per team/task). The hint **text is never** in the task payload —
+  the sanitizer exposes only `hasHint` + cost.
+
+### Scoring — 3 automatic presets (NO human judge), see `packages/shared/scoringPresets.ts`
+- `time_only` — ranked purely by completion time.
+- `fixed_points_speed` — fixed points per task + a speed bonus.
+- `smart_weighted` — sigmoid time multiplier × difficulty.
+Final ranking (`finalizeRun`): `Σ earned + completion bonus − bonusPenalty`, then a Z-Score time
+normalization. `bonusPenalty` absorbs hints + adjustments. `buildRankings()` is shared by
+`finalizeRun` and `refreshLeaderboard` so live and final standings can't drift.
+
+### Smart routing (`routing/assignNextTask.ts`) — **preset-aware**
+`smart_weighted`: `0.5·load − 0.3·transit + 0.2·skill` (load = station availability, transit =
+walking haversine, skill = difficulty fit to the team's measured pace). `fixed_points_speed` /
+`time_only`: `0.6·load − 0.4·transit` (nearest available, no skill target). Locationless ⇒ transit 0.
+
+### Live ops & resilience
+Staff/creator push **announcements** + **flash missions** (bilingual EN/HE) + a **live leaderboard**
+(`refreshLeaderboard`, organizer-only until `published`). Participant app is offline-hardened:
+Firestore `persistentLocalCache`, a service worker (offline app shell), an offline banner, a crash
+ErrorBoundary, screen wake-lock while racing, and a lazy-loaded map chunk. User-authored content
+uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
+
+---
+
+## Where things live (navigation)
+
+- **Add/realize a backend mutation** → callable in the right `functions/src/<domain>/index.ts`
+  + re-export in `functions/src/index.ts` + wrapper in the app's `services/calls.ts`.
+- **Creator UI** → `apps/creator-web/src/pages/*` (Dashboard, Builder, Gallery, Wallet, RunConsole);
+  shared kit in `components/ui.tsx`; data layer `services/api.ts` (`callable()`) + `services/calls.ts`.
+  Builder is tile + modal (`BuilderPage` `TaskEditor`); quick-start templates in `templates.ts`;
+  whole-route `RoutePreviewMap` on the Preview step. New-game flow seeds a template via updateGame.
+- **Participant UI** → `apps/play-web/src/screens/*` (Join, Play, Final, StaffConsole,
+  GamePromo, PublicLeaderboard) + `components/*` (TaskRunner, NavMap, LiveOps, ConnectionBanner).
+  Session in `store.ts`. **Public marketing routes** (no router; `App.tsx` reads query params):
+  `?game=<id>` → game promo/teaser (public `publicGames` read), `?board=<accessCode>` → public
+  shareable leaderboard (`getPublicLeaderboard`, published-only). Shareable "story" images are
+  canvas-drawn in `lib/storyCard.ts` (`shareStoryCard()` — finish + in-run brag cards).
+- **Marketing & virality** — branded OG images at `apps/*/public/og.jpg` (see
+  [scripts/og-cards.README.md](scripts/og-cards.README.md)); creator landing page is the
+  logged-out `AuthGate`; `ShareSheet` (QR + copy + native share) powers game-promo and referral
+  invites; referral program = `claimReferral` + `?ref=<uid>` capture in `AuthGate` (grants a free run to
+  both sides, `REFERRAL_BONUS_FREE_RUNS`). The play-web finish screen also carries a `?ref=<ownerUid>`
+  "Powered by RushPoint" footer on non-Pro runs.
+- **Types / paths / scoring / geo** → `packages/shared/src` (`types/index.ts`, `scoringPresets.ts`,
+  `geo.ts`, `mapStyle.ts`, `validation.ts`).
+- **Maps** — MapLibre + MapTiler `outdoor` with a keyless OpenTopoMap fallback; style via
+  `resolveMapStyle()` in `@rushpoint/shared/mapStyle`.
+
+## Conventions & gotchas (already hit — don't repeat)
+- **Server-only state:** never write run/team/score/leaderboard from a client; rules block it.
+- **`.set({merge})` + dotted keys is a footgun:** `{['a.b']: v}` in `.set()` writes a *literal*
+  top-level field named "a.b", NOT a nested path. Use a real nested object. (`.update()` dotted keys
+  ARE nested paths — but never dotted-update an **array** element; it coerces the array to a map.)
+- **Tailwind:** static class strings only (no `bg-${x}`). play-web reverses the zinc scale so
+  `text-zinc-100` reads dark-on-light. Prefer logical classes (`ms-`/`text-start`) for RTL.
+- **Emulator:** needs Java ≥ 21 (launcher auto-switches); connect via `127.0.0.1`; Ctrl+C to persist.
+- **Bundle:** keep heavy deps (MapLibre) behind `React.lazy`.
+
+## Environment files (all gitignored; emulator-safe defaults baked into client configs)
+```
+apps/creator-web/.env   # VITE_FIREBASE_* (+ VITE_MAPTILER_KEY)
+apps/play-web/.env      # VITE_FIREBASE_* (+ VITE_MAPTILER_KEY)
+functions/.env          # STRIPE_*, QR_SECRET (server-only)
+```

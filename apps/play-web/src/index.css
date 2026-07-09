@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --rp-fire:   #FF5722;
+  --rp-amber:  #FFB300;
+  --rp-go:     #10B981;
+  --rp-alert:  #EF4444;
+  color: #1A0A00;
+  background-color: #FFFCF7;
+}
+
+html, body, #root {
+  min-height: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #FFFCF7;
+  color: #1A0A00;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  /* Dot grid — gives the page subtle depth */
+  background-image: radial-gradient(rgba(90,70,45,0.10) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
+}
+
+/* Selection */
+::selection { background: rgba(255,87,34,0.22); color: #9A3412; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(90,70,45,0.2); border-radius: 2px; }
+
+/* Glass task card */
+.task-card-glass {
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Skeleton (loading placeholder) — warm-tinted to sit on the #FFFCF7 page */
+.rp-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #FFF0E0;
+}
+.rp-skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.65), transparent);
+  animation: rp-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes rp-shimmer {
+  100% { transform: translateX(100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-skeleton::after { animation: none; }
+}

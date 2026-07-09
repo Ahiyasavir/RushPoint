@@ -1,22 +1,45 @@
 import React from 'react';
-import { View, ScrollView, Image, Pressable, useWindowDimensions } from 'react-native';
+import { View, ScrollView, Pressable, useWindowDimensions } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Text } from '../src/components/Text';
-import { Card } from '../src/components/Card';
+import { TopoMap } from '../src/components/TopoMap';
 import { useTranslation } from '../src/i18n';
-import { buildStaticMapUrl } from '../src/data/stations';
-
-const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN;
+import { useDeviceLocation } from '../src/hooks/useDeviceLocation';
+import { useRaceConfig } from '../src/hooks/useRaceConfig';
+import { useGameStore } from '../src/store/gameStore';
 
 export default function MapScreen() {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
 
-  // Static map sized to the screen (capped for the Mapbox API limits).
+  // Map sized to the screen.
   const mapW = Math.min(Math.round(width - 32), 1280);
   const mapH = Math.round(mapW * 0.66);
+
+  // Live race geography (editable in the admin Race Builder) → drives the map
+  // frame and the GPS-dot projection.
+  const { config, stations } = useRaceConfig();
+
+  // Progressive reveal: the map only shows the stations the team has unlocked, so
+  // they can't "scout ahead". Granularity is per station TYPE (the mission map
+  // markers carry no per-task id):
+  //   • green  — field missions, always shown.
+  //   • orange — the Tene hideouts are NEVER drawn on the map: teams must find
+  //     them from the riddle (smart-assigned), and a marker would both spoil the
+  //     search and let teams share the location with friends.
+  //   • gold   — the crafting/judge location, shown only once the 20-min clock
+  //     has started (i.e. after the Tene is in hand).
+  const live = useGameStore((s) => s.live);
+  const craftingStarted = live?.craftingStartedAt != null;
+  const visibleStations = stations.filter((s) =>
+    s.type === 'green' || (s.type === 'gold' && craftingStarted),
+  );
+
+  // Live device location → projected onto the map frame so the "You Are Here"
+  // dot lines up (TopoMap uses the same frame internally).
+  const coords = useDeviceLocation(true);
 
   return (
     <View className="flex-1 bg-app-bg">
@@ -29,19 +52,20 @@ export default function MapScreen() {
       </View>
 
       <ScrollView className="flex-1" contentContainerClassName="px-4 pb-16">
-        {MAPBOX_TOKEN ? (
-          <Image
-            source={{ uri: buildStaticMapUrl(MAPBOX_TOKEN, mapW, mapH) }}
-            style={{ width: mapW, height: mapH, borderRadius: 16, borderColor: 'rgba(0,255,170,0.15)', borderWidth: 1 }}
-            resizeMode="cover"
-            accessibilityLabel={t('map.title')}
-          />
-        ) : (
-          <Card className="p-6 items-center justify-center h-80 border border-glass-border">
-            <Text variant="bodySmall" className="text-zinc-500 text-center">
-              {t('map.noToken')}
-            </Text>
-          </Card>
+        {/* Keyless topographic map (OpenTopoMap tiles + route + markers + GPS dot). */}
+        <TopoMap
+          width={mapW}
+          height={mapH}
+          config={config}
+          stations={visibleStations}
+          coords={coords}
+          label={t('map.offMap')}
+        />
+
+        {coords && (
+          <Text variant="caption" className="text-zinc-600 mt-3 text-center">
+            📍 {t('map.youAreHere')}
+          </Text>
         )}
       </ScrollView>
     </View>

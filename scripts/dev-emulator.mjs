@@ -17,7 +17,7 @@ import process from 'node:process';
 
 const ROOT       = process.cwd();
 const DATA_DIR   = join(ROOT, '.firebase', 'emulator-data');
-const PROJECT_ID = 'race-to-tzion-2026';
+const PROJECT_ID = 'rushpoint-pwa-7daaa';
 const isWin      = process.platform === 'win32';
 const MIN_JAVA   = 21;
 
@@ -120,7 +120,21 @@ if (hasSnapshot) {
 
 // â”€â”€ Spawn + forward signals so --export-on-exit fires on Ctrl+C â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const child = spawn(cmd, { env, shell: true, stdio: 'inherit' });
-const forward = (sig) => { if (!child.killed) child.kill(sig); };
+
+// â”€â”€ Optional crash-safe backup loop (emulator-data-backup) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Gated behind RUSHPOINT_BACKUP so normal dev:all is unaffected. It snapshots
+// into .firebase/backups/ (never DATA_DIR) on its own interval and is torn down
+// with the emulator. `npm run playtest` enables it via its own BACKUP process.
+let backup = null;
+if (process.env.RUSHPOINT_BACKUP === '1' || process.env.RUSHPOINT_BACKUP === 'true') {
+  backup = spawn('node', [join(ROOT, 'scripts', 'emulator-backup.mjs')], { env, shell: true, stdio: 'inherit' });
+  console.log('[dev-emulator] RUSHPOINT_BACKUP enabled â†’ crash-safe snapshot loop started');
+}
+
+const forward = (sig) => {
+  if (backup && !backup.killed) backup.kill(sig);
+  if (!child.killed) child.kill(sig);
+};
 process.on('SIGINT', () => forward('SIGINT'));
 process.on('SIGTERM', () => forward('SIGTERM'));
-child.on('exit', (code) => process.exit(code ?? 0));
+child.on('exit', (code) => { if (backup && !backup.killed) backup.kill('SIGTERM'); process.exit(code ?? 0); });

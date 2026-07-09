@@ -1,0 +1,4 @@
+id,name,nameHe,riddle,riddleHe,lat,lng,maxTeams
+zone-a,"Arazim Lookout","מצפה ארזים","Where the valley opens to the hills, find your Tene by the lookout stones.","במקום שהעמק נפתח אל ההרים — מצאו את הטנא ליד אבני התצפית.",31.8135,35.1855,3
+zone-b,"Pine Grove","חורשת האורנים","Under the pines on the climb to Ramot, your basket waits in the shade.","בין האורנים בעלייה לרמות — הסל מחכה בצל.",31.8145,35.187,3
+zone-c,"Spring Terrace","מדרגות המעיין","Follow the old water channel; your Tene rests where the terrace meets the spring.","עקבו אחר תעלת המים העתיקה — הטנא נח במפגש המדרגה עם המעיין.",31.8125,35.1845,3

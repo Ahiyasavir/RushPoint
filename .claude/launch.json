@@ -2,16 +2,28 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "admin",
+      "name": "creator",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "admin"],
+      "runtimeArgs": ["run", "creator"],
       "port": 5180
     },
     {
-      "name": "mobile",
+      "name": "play",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "mobile:web"],
-      "port": 8081
+      "runtimeArgs": ["run", "play"],
+      "port": 5181
+    },
+    {
+      "name": "creator-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:preview", "--workspace=apps/creator-web"],
+      "port": 5185
+    },
+    {
+      "name": "dev:all",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:all"],
+      "port": 5180
     }
   ]
 }

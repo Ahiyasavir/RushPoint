@@ -3,13 +3,14 @@ import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-nat
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { httpsCallable } from 'firebase/functions';
-import { addDoc, collection } from 'firebase/firestore';
+import { addDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
 import { functions, db } from '../src/services/firebase.config';
 
-const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'race-to-tzion-2026';
+const APP_ID = process.env.EXPO_PUBLIC_RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
 import { useGameStore, type LiveSlot, type LiveJudging, type MatchStatus } from '../src/store/gameStore';
 import { useGameSync } from '../src/hooks/useGameSync';
 import { useAdaptiveLocation } from '../src/hooks/useAdaptiveLocation';
+import { useWakeLock } from '../src/hooks/useWakeLock';
 import { useAnnouncements } from '../src/hooks/useAnnouncements';
 import { AnnouncementBanner } from '../src/components/AnnouncementBanner';
 import { Text } from '../src/components/Text';
@@ -24,15 +25,25 @@ import { useFlashMissions } from '../src/hooks/useFlashMissions';
 import { FlashMissionBanner, useDismissableFlash } from '../src/components/FlashMissionBanner';
 import { useTranslation } from '../src/i18n';
 import { GLOW } from '../src/components/tokens';
+import Animated, {
+  FadeInDown,
+  ZoomIn,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 
 // Slot shape is mirrored from the store (LiveSlot / LiveJudging).
 type SlotType   = 'green' | 'gate' | 'orange' | 'gold';
-type SlotStatus = 'locked' | 'active' | 'completed' | 'skipped';
 type FirestoreSlot = LiveSlot;
 type JudgingState  = LiveJudging;
 
 const CRAFTING_DURATION_SECS = 20 * 60;
 const SPRINT_BUDGET_SECS     = 90;
+// Smart-station speed streak: 3 fast completions in a row latch a 1.5x multiplier.
+const STREAK_THRESHOLD       = 3;
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -72,13 +83,6 @@ const SLOT_GLOW_COLOR: Record<SlotType, 'green' | 'orange' | 'gold'> = {
   gold:   'gold',
 };
 
-const DOT_COLOR: Record<SlotType, Record<SlotStatus, string>> = {
-  green:  { completed: 'bg-neon-green',  active: 'bg-neon-green',  locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-  gate:   { completed: 'bg-neon-blue',   active: 'bg-neon-blue',   locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-  orange: { completed: 'bg-neon-orange', active: 'bg-neon-orange', locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-  gold:   { completed: 'bg-neon-gold',   active: 'bg-neon-gold',   locked: 'bg-app-raised', skipped: 'bg-zinc-700' },
-};
-
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function DashboardScreen() {
@@ -88,6 +92,7 @@ export default function DashboardScreen() {
   const teamName = useGameStore((s) => s.teamName);
   const gameState = useGameStore((s) => s.live);
   const syncState = useGameStore((s) => s.syncState);
+  const isOnline  = useGameStore((s) => s.isOnline);
 
   const [nowMs, setNowMs] = useState(Date.now());
   const { show: showToast } = useToast();
@@ -97,6 +102,8 @@ export default function DashboardScreen() {
   useOfflineToast();
   // Battery-aware location pings (fast in transit, slow when stationary).
   useAdaptiveLocation(teamId);
+  // Keep the screen awake while racing — teams glance at this scoreboard for hours.
+  useWakeLock(true);
 
   // Live flash-mission broadcast (admin-pushed), with local dismissal.
   const flashMission = useFlashMissions();
@@ -105,11 +112,38 @@ export default function DashboardScreen() {
   // Operational announcements (persistent marquee until dismissed per-device).
   const announcements = useAnnouncements();
 
+  // Declared-arrival freeze: once the team taps "arrived at the judge" it creates
+  // a pending check-in and joins the queue. The server already locks the sprint
+  // penalty to that check-in timestamp, so the displayed crafting/sprint clocks
+  // must freeze there too — otherwise they keep ticking (and flash "LATE") while
+  // the team waits for a judge, which doesn't match the score and causes panic.
+  const [declaredArrivalMs, setDeclaredArrivalMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!teamId) { setDeclaredArrivalMs(null); return; }
+    const q = query(
+      collection(db, `artifacts/${APP_ID}/users/${teamId}/checkIns`),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      let earliest: number | null = null;
+      snap.forEach((d) => {
+        const ts = toMillis((d.data() as { timestamp?: unknown }).timestamp);
+        if (ts != null && (earliest == null || ts < earliest)) earliest = ts;
+      });
+      setDeclaredArrivalMs(earliest);
+    }, () => setDeclaredArrivalMs(null));
+    return unsub;
+  }, [teamId]);
+
   // Auto-request task assignment when a green slot becomes active without a taskId.
   // requestNextTask writes the result back to gameState (server-authoritative),
   // so useGameSync picks it up via onSnapshot — no local state needed.
+  // Only request a mission once the race is live for this team (post-launch).
+  const launchedForAssign = gameState ? gameState.launched !== false : true;
+  const launchAtMsForAssign = toMillis(gameState?.launchAt);
+  const raceLiveForAssign = launchedForAssign && !(launchAtMsForAssign != null && launchAtMsForAssign > nowMs);
   const activeSlotForAssignment = gameState?.slots.find((s) => s.status === 'active');
-  const needsAssignment = activeSlotForAssignment?.type === 'green' && !activeSlotForAssignment?.taskId;
+  const needsAssignment = raceLiveForAssign && activeSlotForAssignment?.type === 'green' && !activeSlotForAssignment?.taskId;
   const assignmentKey   = `${activeSlotForAssignment?.index ?? -1}-${activeSlotForAssignment?.taskId ?? 'none'}`;
   useEffect(() => {
     if (!needsAssignment || !teamId) return;
@@ -151,6 +185,18 @@ export default function DashboardScreen() {
     if (!evacuatedFrom) lastEvacRef.current = null;
   }, [evacuatedFrom, showToast, t]);
 
+  // Smart-station speed streak (server-authoritative). Fire a celebration toast
+  // exactly once on the 2→3 transition; the badge itself is rendered in the header.
+  const smartStreak = gameState?.smartStreak ?? 0;
+  const onFire = smartStreak >= STREAK_THRESHOLD;
+  const prevStreakRef = useRef(smartStreak);
+  useEffect(() => {
+    if (prevStreakRef.current < STREAK_THRESHOLD && smartStreak >= STREAK_THRESHOLD) {
+      showToast(t('dash.comboToast'), 'success');
+    }
+    prevStreakRef.current = smartStreak;
+  }, [smartStreak, showToast, t]);
+
   // Tick once per second to drive the live elapsed-time clock.
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -169,6 +215,21 @@ export default function DashboardScreen() {
     }
   }, [gameState?.slots]);
 
+  // Reconnect banner: show a brief "Back online" confirmation for ~2s after the
+  // connection is restored, then auto-dismiss. Tracks the previous online state
+  // so the green flash only fires on an offline→online transition.
+  const [showRestored, setShowRestored] = useState(false);
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    if (!wasOnlineRef.current && isOnline) {
+      setShowRestored(true);
+      const id = setTimeout(() => setShowRestored(false), 2000);
+      wasOnlineRef.current = isOnline;
+      return () => clearTimeout(id);
+    }
+    wasOnlineRef.current = isOnline;
+  }, [isOnline]);
+
   const loading         = syncState === 'loading' && !gameState;
   const snapError       = syncState === 'error' && !gameState;
   const activeSlot      = gameState?.slots.find((s) => s.status === 'active') ?? null;
@@ -176,6 +237,15 @@ export default function DashboardScreen() {
   const score           = gameState?.score ?? 0;
   const penalty         = gameState?.bonusPenalty ?? 0;
   const effectiveScore  = Math.max(0, score - penalty);
+
+  // Staged start: a team stands by after registering until the admin launches it,
+  // then a short countdown, then the race goes live. Absent `launched` (legacy /
+  // seeded teams) counts as live, so this only gates freshly-registered teams.
+  const launched      = gameState ? gameState.launched !== false : true;
+  const launchAtMs    = toMillis(gameState?.launchAt);
+  const counting      = launched && launchAtMs != null && launchAtMs > nowMs;
+  const launchLeftSec = counting ? Math.max(0, Math.ceil((launchAtMs! - nowMs) / 1000)) : 0;
+  const raceLive      = launched && !counting;
 
   // Phase 3 derived state
   function toMs(v: unknown): number | null {
@@ -191,11 +261,46 @@ export default function DashboardScreen() {
 
   const craftingStartMs = toMs(gameState?.craftingStartedAt);
   const craftingActive  = craftingStartMs != null;
-  const craftingElapsed = craftingActive ? Math.max(0, Math.floor((nowMs - craftingStartMs!) / 1000)) : 0;
+  // Freeze the clock once arrival is declared (pending check-in) or a judge has
+  // taken the team (gameState.judging) — matches the server's penalty basis.
+  const arrivalFreezeMs = toMillis(gameState?.judging?.arrivedAt) ?? declaredArrivalMs;
+  const craftingClockMs = arrivalFreezeMs ?? nowMs;
+  const craftingFrozen  = arrivalFreezeMs != null;
+  const craftingElapsed = craftingActive ? Math.max(0, Math.floor((craftingClockMs - craftingStartMs!) / 1000)) : 0;
   const craftingLeft    = Math.max(0, CRAFTING_DURATION_SECS - craftingElapsed);
   const craftingDone    = craftingElapsed >= CRAFTING_DURATION_SECS;
   const sprintElapsed   = craftingDone ? Math.max(0, craftingElapsed - CRAFTING_DURATION_SECS) : 0;
   const sprintLeft      = Math.max(0, SPRINT_BUDGET_SECS - sprintElapsed);
+
+  // Standby / countdown: until the admin launches this team, replace the whole
+  // dashboard with a calm "waiting for the start" screen; then a 10→0 countdown.
+  if (gameState && !raceLive) {
+    return (
+      <View className="flex-1 bg-app-bg items-center justify-center px-8" style={{ paddingTop: insets.top }}>
+        <View className="absolute top-0 left-0 right-0 flex-row justify-end px-5" style={{ paddingTop: insets.top + 8 }}>
+          <LanguageToggle />
+        </View>
+        <Text variant="label" className="text-zinc-500 mb-2">{teamName || '—'}</Text>
+        {counting ? (
+          <>
+            <Text variant="label" className="text-neon-green tracking-[0.3em] mb-3">{t('launch.getReady')}</Text>
+            <Text variant="display" className="font-brand text-neon-green" style={[GLOW.green, { fontSize: 96, lineHeight: 104 }]}>
+              {launchLeftSec}
+            </Text>
+            <Text variant="bodySmall" className="text-zinc-400 mt-3 text-center">{t('launch.countdownHint')}</Text>
+          </>
+        ) : (
+          <>
+            <Text className="text-6xl mb-5">⏳</Text>
+            <Text variant="heading" className="text-white text-center mb-2">{t('launch.waitTitle')}</Text>
+            <Text variant="bodySmall" className="text-zinc-400 text-center leading-relaxed">
+              {t('launch.waitBody')}
+            </Text>
+          </>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View className="flex-1 bg-app-bg">
@@ -213,15 +318,15 @@ export default function DashboardScreen() {
           <View className="flex-row items-center gap-2">
             <Pressable
               onPress={() => router.push('/map')}
-              hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20"
+              hitSlop={12}
+              className="px-3 py-2 rounded-full border border-neon-green/30 bg-neon-green/10 active:bg-neon-green/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-green font-mono">🗺  {t('map.open')}</Text>
             </Pressable>
             <Pressable
               onPress={() => router.push('/sos')}
-              hitSlop={8}
-              className="px-3 py-1.5 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20"
+              hitSlop={12}
+              className="px-3 py-2 rounded-full border border-neon-red/30 bg-neon-red/10 active:bg-neon-red/20 active:scale-95 transition-all duration-200"
             >
               <Text variant="caption" className="text-neon-red font-mono">📣 {t('staff.open')}</Text>
             </Pressable>
@@ -237,7 +342,8 @@ export default function DashboardScreen() {
 
           <View className="items-end">
             <Text variant="label" className="text-zinc-600">{t('dash.score')}</Text>
-            <Text variant="display" className="text-neon-green leading-tight font-brand" style={GLOW.green}>
+            {/* Telemetry — giant glanceable monospace numerals (readable mid-run) */}
+            <Text className="text-neon-green font-mono text-5xl font-extrabold tracking-wider leading-tight" style={GLOW.green}>
               {effectiveScore}
             </Text>
             {penalty > 0 ? (
@@ -248,6 +354,8 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        {onFire && <OnFireBadge label={t('dash.onFire')} />}
+
         <Text variant="caption" className="text-zinc-600 mt-2">
           {t('dash.slotsCompleted', { n: completedCount })}
         </Text>
@@ -255,6 +363,22 @@ export default function DashboardScreen() {
 
       {/* ── Operational announcement (persistent, until dismissed) ────── */}
       <AnnouncementBanner announcements={announcements} />
+
+      {/* ── Reconnect strip: sticky, non-blocking, slim (<36px). Only when
+          cached state is available; otherwise the loading spinner shows. ─ */}
+      {gameState && !isOnline ? (
+        <View className="bg-yellow-500/20 border-b border-yellow-500/40 px-4 py-2">
+          <Text variant="caption" className="text-yellow-300 font-mono text-start">
+            ⟳ {t('offline.reconnecting')}
+          </Text>
+        </View>
+      ) : gameState && showRestored ? (
+        <View className="bg-green-500/20 border-b border-green-500/40 px-4 py-2">
+          <Text variant="caption" className="text-green-300 font-mono text-start">
+            ✓ {t('offline.backOnline')}
+          </Text>
+        </View>
+      ) : null}
 
       {/* ── Body ─────────────────────────────────────────────────────── */}
       <ScrollView
@@ -266,7 +390,7 @@ export default function DashboardScreen() {
 
         {loading ? (
           <View className="py-10 items-center">
-            <ActivityIndicator color="#00ffaa" />
+            <ActivityIndicator color="#F59E0B" />
           </View>
         ) : snapError ? (
           <Card className="p-6 items-center">
@@ -275,13 +399,13 @@ export default function DashboardScreen() {
             </Text>
           </Card>
         ) : activeSlot?.type === 'gate' ? (
-          <GateCard matchStatus={gameState?.matchStatus} />
+          <GateCard slot={activeSlot} matchStatus={gameState?.matchStatus} gateCooldownUntil={gameState?.gateCooldownUntil ?? null} nowMs={nowMs} />
         ) : activeSlot ? (
-          <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} />
+          <ActiveTaskCard slot={activeSlot} judging={gameState?.judging ?? null} nowMs={nowMs} craftingActive={craftingActive} />
         ) : (
           <Card className="p-6 items-center">
             <Text variant="bodySmall" className="text-zinc-500 text-center">
-              {t('dash.noMission')}
+              {completedCount === 6 ? t('dash.noMission.done') : t('dash.noMission.waiting')}
             </Text>
           </Card>
         )}
@@ -294,28 +418,40 @@ export default function DashboardScreen() {
               craftingDone={craftingDone}
               sprintLeft={sprintLeft}
               sprintExpired={sprintElapsed > SPRINT_BUDGET_SECS}
+              frozen={craftingFrozen}
             />
           </View>
+        )}
+
+        {/* ── Smart station: interactive task on the active slot ──────── */}
+        {(activeSlot as (LiveSlot & { smart?: { enabled?: boolean } }) | null)?.smart?.enabled && (
+          <Pressable
+            onPress={() => router.push('/smart-station')}
+            className="mt-4 rounded-2xl border border-neon-gold/30 bg-neon-gold/5 p-4 active:opacity-70 active:scale-95 transition-all duration-200"
+          >
+            <Text variant="label" className="text-neon-gold">🎯 {t('station.open')}</Text>
+            <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('station.openHint')}</Text>
+          </Pressable>
         )}
 
         {/* ── Phase 3: Basket zone link ─────────────────────────────── */}
         {activeSlot?.type === 'orange' && !craftingActive && (
           <Pressable
             onPress={() => router.push('/basket-zone')}
-            className="mt-4 rounded-2xl border border-neon-orange/30 bg-neon-orange/5 p-4 active:opacity-70"
+            className="mt-4 rounded-2xl border border-neon-orange/30 bg-neon-orange/5 p-4 active:opacity-70 active:scale-95 transition-all duration-200"
           >
             <Text variant="label" className="text-neon-orange">🧺 {t('basket.title')}</Text>
             <Text variant="bodySmall" className="text-zinc-500 mt-1">{t('basket.scanPrompt')}</Text>
           </Pressable>
         )}
 
-        {/* ── Slot progress dots ────────────────────────────────────── */}
+        {/* ── Race progress — 6-slot structural badge board ─────────── */}
         {gameState && (
           <View className="mt-10">
             <Text variant="label" className="mb-3">{t('dash.raceProgress')}</Text>
-            <View className="flex-row gap-2 flex-wrap">
-              {gameState.slots.map((s) => (
-                <SlotDot key={s.index} slot={s} />
+            <View className="flex-row gap-2">
+              {gameState.slots.map((s, i) => (
+                <SlotBadge key={s.index} slot={s} index={i} />
               ))}
             </View>
           </View>
@@ -325,14 +461,75 @@ export default function DashboardScreen() {
   );
 }
 
+// ─── Contextual next-step hint (what to physically DO on the active slot) ──────
+
+function NextStepHint({
+  slot, judging, craftingActive, matchStatus,
+}: {
+  slot: FirestoreSlot;
+  judging: JudgingState | null;
+  craftingActive: boolean;
+  matchStatus?: MatchStatus;
+}) {
+  const { t } = useTranslation();
+  const frozen = !!judging && judging.slotIndex === slot.index;
+
+  let key: string | null = null;
+  if (slot.type === 'green') {
+    key = slot.taskId ? 'dash.hint.greenTask' : 'dash.hint.greenAssigning';
+  } else if (slot.type === 'gold') {
+    if (frozen) key = 'dash.hint.goldFrozen';
+    else if (craftingActive) key = 'dash.hint.goldCrafting';
+  } else if (slot.type === 'orange') {
+    key = 'dash.hint.orange';
+  } else if (slot.type === 'gate' && matchStatus !== 'waiting' && matchStatus !== 'matched') {
+    // GateNextStepHint covers the in-queue states; this is the approach/pre-queue fallback.
+    key = 'dash.hint.gate';
+  }
+  if (!key) return null;
+
+  return (
+    <Text variant="bodySmall" className="text-zinc-400 mb-3">
+      📍 {t(key)}
+    </Text>
+  );
+}
+
+// ─── "ON FIRE" speed-streak badge (subtle pulse — UI-thread only) ─────────────
+
+function OnFireBadge({ label }: { label: string }) {
+  const pulse = useSharedValue(0);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+  }, [pulse]);
+  const style = useAnimatedStyle(() => ({
+    opacity: 0.78 + pulse.value * 0.22,
+    transform: [{ scale: 1 + pulse.value * 0.03 }],
+  }));
+  return (
+    <Animated.View
+      entering={ZoomIn.duration(300)}
+      style={style}
+      className="mt-3 self-start flex-row items-center px-3 py-1.5 rounded-full border border-neon-orange/50 bg-neon-orange/10"
+    >
+      <Text variant="caption" className="text-neon-orange font-mono font-bold">{label}</Text>
+    </Animated.View>
+  );
+}
+
 // ─── Active task card ─────────────────────────────────────────────────────────
 
 function ActiveTaskCard({
-  slot, judging, nowMs,
+  slot, judging, nowMs, craftingActive,
 }: {
   slot: FirestoreSlot;
   judging: JudgingState | null;
   nowMs: number;
+  craftingActive: boolean;
 }) {
   const { t } = useTranslation();
   const frozen  = !!judging && judging.slotIndex === slot.index;
@@ -353,11 +550,16 @@ function ActiveTaskCard({
         {slot.taskTitle ?? t('dash.activeMission')}
       </Text>
 
-      <Text variant="bodySmall" className="text-zinc-400 mb-4">
-        {slot.taskId
-          ? t('dash.taskLabel', { id: slot.taskId })
-          : t('dash.assigning')}
-      </Text>
+      {/* Contextual next-step guidance so the team knows what to physically do. */}
+      <NextStepHint slot={slot} judging={judging} craftingActive={craftingActive} />
+
+      {/* Only surface the friendly "assigning" hint when no task is set yet —
+          never the raw task id (the title + badge already name the mission). */}
+      {!slot.taskId && (
+        <Text variant="bodySmall" className="text-zinc-400 mb-4">
+          {t('dash.assigning')}
+        </Text>
+      )}
 
       {/* Elapsed-time clock — freezes while a judge is evaluating */}
       {elapsedSec != null && (
@@ -374,8 +576,11 @@ function ActiveTaskCard({
         </View>
       )}
 
-      {/* Arrived at the judge → enter the pending queue for grading */}
-      {!frozen && (slot.type === 'green' || slot.type === 'gold') && (
+      {/* Arrived at the judge → enter the pending queue for grading. ONLY for the
+          gold stage, and ONLY once crafting has started (team has the Tene + the
+          20-min fill timer). Green field missions are graded by the station
+          operator, so they must NOT expose a self-serve "arrived at judge" button. */}
+      {!frozen && slot.type === 'gold' && craftingActive && (
         <RequestCheckInButton slot={slot} />
       )}
 
@@ -442,7 +647,8 @@ function RequestCheckInButton({ slot }: { slot: FirestoreSlot }) {
       <Pressable
         onPress={() => void request()}
         disabled={busy}
-        className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20"
+        hitSlop={8}
+        className="py-2.5 rounded-xl bg-neon-green/10 border border-neon-green/30 items-center active:bg-neon-green/20 active:scale-95 transition-all duration-200"
       >
         <Text variant="bodySmall" className="text-neon-green font-semibold">
           {busy ? '…' : t('checkin.arrived')}
@@ -459,8 +665,13 @@ function ClueHintButton() {
   const { show } = useToast();
   const [armed, setArmed]   = useState(false);
   const [busy, setBusy]     = useState(false);
+  // Ref guard: a rapid double-tap can fire two onPress events before `busy`
+  // re-renders the disabled state, so block re-entry synchronously here too.
+  const inFlight = useRef(false);
 
   async function request() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       await httpsCallable(functions, 'requestClueHint')({});
@@ -468,6 +679,7 @@ function ClueHintButton() {
     } catch {
       show(t('hint.error'), 'error');
     } finally {
+      inFlight.current = false;
       setBusy(false);
       setArmed(false);
     }
@@ -485,6 +697,7 @@ function ClueHintButton() {
           <Pressable
             onPress={() => void request()}
             disabled={busy}
+            hitSlop={8}
             className="flex-1 py-2.5 rounded-xl bg-neon-gold/10 border border-neon-gold/30 items-center active:bg-neon-gold/20"
           >
             <Text variant="bodySmall" className="text-neon-gold font-semibold">
@@ -500,24 +713,64 @@ function ClueHintButton() {
   );
 }
 
-// ─── Slot progress dot ────────────────────────────────────────────────────────
+// ─── Stage tracker row ─────────────────────────────────────────────────────────
+// One labeled row per stage: status marker + stage name + status chip. Replaces
+// the old anonymous colour dots so a participant can read exactly where they are.
 
-function SlotDot({ slot }: { slot: FirestoreSlot }) {
-  const dotColor = DOT_COLOR[slot.type][slot.status];
-  const sizeClass = slot.status === 'active' ? 'w-4 h-4' : 'w-2.5 h-2.5';
-  const isActive = slot.status === 'active';
-  return <View className={`${sizeClass} rounded-full ${dotColor} ${isActive ? 'animate-pulse-neon' : ''}`} />;
+// Stage-type identity glyph for the progress board badges.
+const SLOT_TYPE_GLYPH: Record<SlotType, string> = {
+  green: '⛳', gate: '⚔️', orange: '🧺', gold: '🏆',
+};
+
+/**
+ * One structural progress-board badge. Locked → dark & clean; active → sharp
+ * amber border + bright number; completed → solid slate with a subtle gold ✓;
+ * skipped → muted dash. No glow — crisp borders only (premium look).
+ */
+function SlotBadge({ slot, index }: { slot: FirestoreSlot; index: number }) {
+  const active  = slot.status === 'active';
+  const done    = slot.status === 'completed';
+  const skipped = slot.status === 'skipped';
+  const locked  = slot.status === 'locked';
+
+  return (
+    <Animated.View entering={FadeInDown.delay(index * 45).duration(300)} className="flex-1 items-center">
+      <View
+        className={`w-full h-14 rounded-2xl items-center justify-center border ${
+          active
+            ? 'border-2 border-neon-green bg-neon-green/10'
+            : done
+              ? 'border border-glass-border bg-app-raised'
+              : 'border border-glass-border bg-app-card/40'
+        } ${active ? 'animate-pulse-neon' : ''}`}
+      >
+        {done ? (
+          <Text className="text-neon-gold text-lg font-bold">✓</Text>
+        ) : skipped ? (
+          <Text className="text-zinc-600 text-base">–</Text>
+        ) : locked ? (
+          <Text className="text-zinc-600 text-xs">🔒</Text>
+        ) : (
+          <Text className={`font-mono font-black text-base ${active ? 'text-neon-green' : 'text-zinc-400'}`}>
+            {index + 1}
+          </Text>
+        )}
+      </View>
+      <Text className="text-[10px] mt-1 opacity-80">{SLOT_TYPE_GLYPH[slot.type]}</Text>
+    </Animated.View>
+  );
 }
 
 // ─── Crafting countdown card ──────────────────────────────────────────────────
 
 function CraftingCountdownCard({
-  craftingLeft, craftingDone, sprintLeft, sprintExpired,
+  craftingLeft, craftingDone, sprintLeft, sprintExpired, frozen,
 }: {
   craftingLeft: number;
   craftingDone: boolean;
   sprintLeft: number;
   sprintExpired: boolean;
+  frozen: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -526,7 +779,19 @@ function CraftingCountdownCard({
         <Badge label={t('craft.title')} variant="gold" />
         <Text variant="mono" className="text-zinc-600">🧺</Text>
       </View>
-      {!craftingDone ? (
+      {/* Arrival declared / judge engaged → clock is paused. Show a calm "waiting"
+          state instead of a ticking or LATE timer (the score is already locked). */}
+      {frozen ? (
+        <View className="items-center">
+          <Text variant="label" className="text-neon-blue mb-1">{t('craft.paused')}</Text>
+          <Text variant="mono" className="text-3xl font-bold text-neon-blue">
+            {craftingDone ? formatElapsed(Math.max(0, sprintLeft)) : formatElapsed(craftingLeft)}
+          </Text>
+          <Text variant="caption" className="text-zinc-500 mt-1 text-center">
+            {t('craft.waitingJudge')}
+          </Text>
+        </View>
+      ) : !craftingDone ? (
         <View className="items-center">
           <Text variant="label" className="text-zinc-500 mb-1">{t('craft.timeLeft')}</Text>
           <Text
@@ -546,7 +811,7 @@ function CraftingCountdownCard({
             variant="mono"
             className={`text-3xl font-bold ${sprintExpired ? 'text-neon-red animate-pulse-neon' : 'text-neon-orange'}`}
           >
-            {sprintExpired ? '⚠️ LATE' : formatElapsed(sprintLeft)}
+            {sprintExpired ? t('craft.late') : formatElapsed(sprintLeft)}
           </Text>
           {!sprintExpired && (
             <Text variant="caption" className="text-zinc-500 mt-1 text-center">
@@ -559,12 +824,52 @@ function CraftingCountdownCard({
   );
 }
 
+// ─── Matchmaking radar (rotating sapphire sweep — UI-thread only) ─────────────
+
+function MatchRadar() {
+  const spin = useSharedValue(0);
+  useEffect(() => {
+    spin.value = withRepeat(withTiming(360, { duration: 2600, easing: Easing.linear }), -1, false);
+  }, [spin]);
+  const sweep = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value}deg` }] }));
+  const ring = (size: number) => ({
+    position: 'absolute' as const,
+    width: size, height: size, borderRadius: size / 2,
+    borderWidth: 1, borderColor: 'rgba(37,99,235,0.30)',
+  });
+  return (
+    <View className="items-center my-4">
+      <View style={{ width: 132, height: 132, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={ring(132)} />
+        <View style={ring(88)} />
+        <View style={ring(44)} />
+        {/* rotating arm — a blip orbits the rings */}
+        <Animated.View style={[sweep, { position: 'absolute', width: 132, height: 132, alignItems: 'center' }]}>
+          <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#2563EB', marginTop: 2 }} />
+        </Animated.View>
+        {/* center pulse */}
+        <View className="animate-pulse-neon" style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#2563EB' }} />
+      </View>
+    </View>
+  );
+}
+
 // ─── Gate card (matchmaking filter) ──────────────────────────────────────────
 
-function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
+function GateCard({ slot, matchStatus, gateCooldownUntil, nowMs }: {
+  slot: FirestoreSlot;
+  matchStatus?: MatchStatus;
+  gateCooldownUntil?: string | null;
+  nowMs: number;
+}) {
   const { t } = useTranslation();
   const [joining, setJoining]     = useState(false);
-  const rejoinedAfterLoss = useRef(false);
+  const rejoinedAfterCooldown = useRef(false);
+
+  // Seconds left on the post-loss cooldown (0 when none / elapsed).
+  const cooldownLeft = gateCooldownUntil
+    ? Math.max(0, Math.ceil((new Date(gateCooldownUntil).getTime() - nowMs) / 1000))
+    : 0;
 
   async function handleJoin() {
     setJoining(true);
@@ -576,23 +881,23 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
         Alert.alert(t('match.title'), t('match.matched', { opponent: data.opponentName ?? '?' }));
       }
     } catch {
-      Alert.alert('Error', 'Could not join match queue. Try again.');
+      Alert.alert(t('match.errorTitle'), t('match.joinError'));
     } finally {
       setJoining(false);
     }
   }
 
-  // After a loss the team must face a new opponent. Re-enter the queue once
-  // (the server keeps them 'waiting'); reset the guard when they leave 'lost'.
+  // After a loss the team waits out a 90s cooldown, THEN auto re-enters the queue
+  // exactly once. The guard resets whenever they leave the 'lost' state.
   useEffect(() => {
-    if (matchStatus === 'lost' && !rejoinedAfterLoss.current) {
-      rejoinedAfterLoss.current = true;
+    if (matchStatus === 'lost' && cooldownLeft === 0 && !rejoinedAfterCooldown.current) {
+      rejoinedAfterCooldown.current = true;
       void handleJoin();
     } else if (matchStatus !== 'lost') {
-      rejoinedAfterLoss.current = false;
+      rejoinedAfterCooldown.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchStatus]);
+  }, [matchStatus, cooldownLeft]);
 
   return (
     <Card glowColor="orange" className="p-5">
@@ -611,9 +916,23 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
           </Button>
         </>
       ) : matchStatus === 'waiting' ? (
-        <Text variant="bodySmall" className="text-neon-blue mb-2 animate-pulse-neon">{t('match.waiting')}</Text>
+        <View className="items-center">
+          <MatchRadar />
+          <Text variant="bodySmall" className="text-neon-cyan animate-pulse-neon">{t('match.waiting')}</Text>
+        </View>
       ) : matchStatus === 'matched' ? (
-        <Text variant="bodySmall" className="text-neon-blue">{t('match.matched', { opponent: '?' })}</Text>
+        <Animated.View entering={ZoomIn.duration(280)} className="items-center py-3">
+          <View className="flex-row items-center gap-4">
+            <View className="px-4 py-2 rounded-xl border border-neon-cyan/50 bg-neon-cyan/10">
+              <Text variant="label" className="text-neon-cyan">{t('dash.team')}</Text>
+            </View>
+            <Text className="text-neon-cyan font-mono font-black text-3xl tracking-tight">VS</Text>
+            <View className="px-4 py-2 rounded-xl border border-neon-red/50 bg-neon-red/10">
+              <Text variant="label" className="text-neon-red">{t('match.rival')}</Text>
+            </View>
+          </View>
+          <Text variant="bodySmall" className="text-neon-cyan mt-3 animate-pulse-neon">{t('match.matchedShort')}</Text>
+        </Animated.View>
       ) : matchStatus === 'won' ? (
         <>
           <Text variant="bodySmall" className="text-neon-green mb-4">{t('match.won', { bonus: '150' })}</Text>
@@ -624,11 +943,51 @@ function GateCard({ matchStatus }: { matchStatus?: MatchStatus }) {
       ) : matchStatus === 'lost' ? (
         <View className="items-center py-2">
           <Text variant="subheading" className="text-neon-red mb-1 text-center">{t('match.lostTitle')}</Text>
-          <Text variant="bodySmall" className="text-neon-blue text-center animate-pulse-neon">
-            {t('match.rematchWaiting')}
-          </Text>
+          {cooldownLeft > 0 ? (
+            <>
+              <Text variant="mono" className="text-neon-orange text-2xl text-center mb-2 font-black tracking-tight">
+                {Math.floor(cooldownLeft / 60)}:{String(cooldownLeft % 60).padStart(2, '0')}
+              </Text>
+              {/* Depleting "energy shield" — drains each second toward re-queue */}
+              <View className="w-full h-2 rounded-full bg-app-raised overflow-hidden mb-2">
+                <View
+                  className="h-full rounded-full bg-neon-cyan"
+                  style={{ width: `${Math.min(100, Math.max(0, (cooldownLeft / 90) * 100))}%` }}
+                />
+              </View>
+              <Text variant="bodySmall" className="text-zinc-400 text-center">
+                {t('match.cooldown')}
+              </Text>
+            </>
+          ) : (
+            <Text variant="bodySmall" className="text-neon-blue text-center animate-pulse-neon">
+              {t('match.rematchWaiting')}
+            </Text>
+          )}
         </View>
+      ) : matchStatus === 'bypassed' ? (
+        <>
+          <Text variant="bodySmall" className="text-neon-green mb-4">{t('match.soloClear')}</Text>
+          <Button onPress={() => router.push('/basket-zone')} fullWidth>
+            {t('basket.title')} →
+          </Button>
+        </>
       ) : null}
+
+      <GateNextStepHint matchStatus={matchStatus} />
+      <NextStepHint slot={slot} judging={null} craftingActive={false} matchStatus={matchStatus} />
     </Card>
+  );
+}
+
+// ─── Gate next-step hint (physical prompt, only while waiting / matched) ───────
+
+function GateNextStepHint({ matchStatus }: { matchStatus?: MatchStatus }) {
+  const { t } = useTranslation();
+  if (matchStatus !== 'waiting' && matchStatus !== 'matched') return null;
+  return (
+    <Text variant="caption" className="text-zinc-500 mt-3 text-center">
+      📍 {t('dash.hint.gate')}
+    </Text>
   );
 }

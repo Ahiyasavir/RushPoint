@@ -17,7 +17,7 @@ const STORAGE_KEY = 'rushpoint.dismissedAnnouncements';
 const LEVEL_STYLE: Record<AnnouncementLevel, { bg: string; border: string; text: string; glow: string; icon: string }> = {
   info:     { bg: 'rgba(0,170,255,0.12)',  border: 'rgba(0,170,255,0.45)',  text: 'text-neon-blue',   glow: '#00aaff', icon: 'ℹ️' },
   warning:  { bg: 'rgba(255,170,0,0.12)',  border: 'rgba(255,170,0,0.5)',   text: 'text-neon-gold',   glow: '#ffaa00', icon: '⚠️' },
-  critical: { bg: 'rgba(255,61,0,0.15)',   border: 'rgba(255,61,0,0.6)',    text: 'text-neon-red',    glow: '#ff3d00', icon: '🚨' },
+  critical: { bg: 'rgba(255,61,0,0.15)',   border: 'rgba(255,61,0,0.6)',    text: 'text-neon-red',    glow: '#EF4444', icon: '🚨' },
 };
 
 function readDismissed(): Set<string> {

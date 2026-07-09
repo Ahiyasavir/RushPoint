@@ -1,0 +1,159 @@
+# CI — enforces the project's documented "Required gates" (see CLAUDE.md) on every
+# pull request and on pushes to main, so the documented standard becomes the
+# enforced standard. Process/infra only; runs the existing npm scripts unchanged.
+#
+# Two jobs run in parallel:
+#   • fast      — the no-emulator gates (typecheck/lint/test/builds/i18n). Quick
+#                 feedback; a broken typecheck doesn't wait on an emulator boot.
+#   • emulator  — the gates that need Java 21 + the Firebase Emulator Suite
+#                 (e2e + rules), which mirror the local lifecycle.
+#
+# EMULATOR-LIFECYCLE DECISION (tasks.md #1):
+#   `npm run e2e` (node scripts/e2e-verify.mjs) and `npm run test:rules`
+#   (node scripts/test-rules.mjs) are emulator *clients* — they connect to a
+#   suite already listening on 127.0.0.1:8080/9099/5001/9199 and do NOT start or
+#   stop it themselves. (scripts/dev-emulator.mjs is the launcher, but it's a
+#   long-running foreground dev process, unsuitable for a run-then-exit CI step.)
+#   Therefore CI owns the emulator lifecycle via the Firebase CLI:
+#     firebase emulators:exec --only firestore,auth,functions,storage "<cmd>"
+#   which boots the suite, runs the command, and tears the suite down cleanly.
+#   Cloud Functions are BUILT BEFORE the emulator starts (the documented stale
+#   `functions/lib` footgun) so the emulator loads current code.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. a force-push to a PR branch).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast:
+    name: Fast gates (typecheck · lint · test · builds · i18n)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run creator:build
+      - run: npm run play:build
+
+      # PART A i18n parity (HE is HE, EN is EN) — a hard gate on every PR.
+      - name: i18n parity (PART A — required)
+        run: npm run i18n:check
+
+      # Detect whether this change touches UI surfaces (dictionaries or any
+      # component). Only UI-touching PRs must be hardcoded-string-clean, matching
+      # the repo rule "new UI must add zero new PART B warnings".
+      - name: Detect UI changes
+        id: ui
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ui:
+              - '**/i18n.ts'
+              - '**/components/**'
+
+      # PART B strict i18n (zero new hardcoded strings) — gated on UI changes.
+      - name: i18n strict (PART B — required on UI PRs)
+        if: steps.ui.outputs.ui == 'true'
+        run: npm run i18n:check:strict
+
+  emulator:
+    name: Emulator gates (e2e + rules)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The Firebase Emulator Suite requires Java >= 21 (mirrors the local
+      # auto-switch in scripts/dev-emulator.mjs).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: npm ci
+
+      # Cache the downloaded emulator binaries to shave boot time on reruns.
+      - name: Cache Firebase emulator binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ runner.os }}
+
+      # Build the shared package and Cloud Functions BEFORE the emulator starts.
+      # The emulator loads functions/lib/index.js; a stale/missing lib was a past
+      # failure, so this is mandatory and must run first.
+      - run: npm run shared:build
+      - run: npm run build --workspace=functions
+
+      # e2e + rules are emulator clients (see decision comment above), so the
+      # Firebase CLI owns the suite lifecycle around each run.
+      - name: e2e lifecycle (createGame → … → finalizeRun)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/e2e-verify.mjs"
+
+      - name: Security-rules tests (anti-cheat + tenant isolation)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/test-rules.mjs"
+
+      # Concurrent load smoke: 8 teams play a real game at once, then the run's
+      # leaderboard invariants + station-slot accounting are audited. Catches
+      # concurrency regressions (station-cap races, lock-timeout handling, score
+      # drift) that a single-player e2e can't see. Fresh suite = clean taskCounts.
+      - name: Concurrent load smoke (8 teams)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/simulate-run.mjs --teams=8"
+
+      # Adversarial smoke: honest + cheater teams (brute-force answers, GPS spoof,
+      # duplicate submissions, cross-team IDOR) play the SAME stations concurrently.
+      # Asserts every cheat is rebuffed AND the honest run stays consistent (no
+      # double-count, no leaked/negative station counters) — anti-cheat under load,
+      # which neither the single-actor e2e nor the all-honest load sim exercises.
+      - name: Adversarial concurrent smoke (cheaters + honest)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/simulate-adversarial.mjs --teams=9 --cheaters=0.5"
+
+  ui:
+    name: UI smoke (Playwright — real browser render)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # The apps' shared package must be built for the Vite dev servers to resolve
+      # @rushpoint/shared.
+      - run: npm run shared:build
+
+      # Only Chromium is needed for the headless smoke.
+      - name: Install Playwright Chromium
+        run: npx --yes playwright install --with-deps chromium
+
+      # Boots creator-web (:5180) + play-web (:5181) via the config's webServer and
+      # asserts both apps RENDER in a real browser (no white-screen crash, critical
+      # controls present, Hebrew-first UI mounts). The seeded join round-trip is gated
+      # on PLAY_CODE (needs the emulator) and auto-skips here — the render smokes need
+      # no backend. This is the ONLY layer that drives the React apps in a browser.
+      - name: Playwright UI render smoke
+        run: npm run test:ui

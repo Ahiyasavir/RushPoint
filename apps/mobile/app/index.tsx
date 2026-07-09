@@ -35,7 +35,7 @@ export default function IndexScreen() {
           alignItems: 'center', justifyContent: 'center',
         }}
       >
-        <ActivityIndicator size="large" color="#00ffaa" />
+        <ActivityIndicator size="large" color="#F59E0B" />
       </View>
     </View>
   );

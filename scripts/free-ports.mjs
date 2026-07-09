@@ -15,6 +15,7 @@ const PORTS = [
   5173, 5174, 5180,           // Vite (admin)
   4000, 4400, 4500,           // Firebase emulator UI / hub / logging
   5001, 8080, 9099, 9199, 5002, // functions / firestore / auth / storage / hosting
+  3000,                       // reverse proxy (tunnel)
 ];
 const isWin = process.platform === 'win32';
 

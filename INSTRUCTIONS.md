@@ -56,6 +56,53 @@ collection(db, 'artifacts', appId, 'users', userId, collectionName)
 
 - **No Complex Queries:** Avoid compound queries requiring custom indexes. Filter and sort in-memory if needed.
 
+### C. UI Text Standard: no dashes/hyphens as separators (change: ui-no-dashes)
+
+User-facing copy MUST NOT use an em-dash (`—`), en-dash (`–`), or a spaced hyphen (` - `) as a
+sentence separator. Use a comma, a period, or a line break instead. The wording is otherwise
+unchanged; clauses just join with normal punctuation. This keeps the product's typography clean and
+consistent across both apps.
+
+- **Rationale:** decorative dashes read inconsistently across RTL (Hebrew) and LTR, and creep back in
+  over time; a single comma/period standard is calmer and unambiguous.
+- **Scope:** app-shipped copy only, i.e. the translation maps (`apps/*/src/i18n.ts`) and visible JSX
+  text literals. **Exempt:** code comments, file paths, CLI flags, CSS/class names, and JS
+  expressions (`a - b`); hyphens there are valid.
+- **Enforced by** [`scripts/test-no-dashes.ts`](scripts/test-no-dashes.ts) (in `npm test`): it scans
+  both apps' translation-map string leaves and fails on any `—`, `–`, or ` - `. Add new copy without
+  dash separators so the lint stays green.
+
+### D. UI Language Standard: Hebrew is Hebrew, English is English (change: i18n-correctness-gate)
+
+Every user-facing string MUST come from the translation maps (`apps/*/src/i18n.ts`, accessed via
+`useT()` / `t.*`). A creator switching the app to Hebrew must see **100% Hebrew**; switching to
+English must see **100% English**. The recurring bug this prevents: English text leaking into the
+Hebrew UI (most often in the **Builder** and **Run console**) because a string was hardcoded in a
+component or a Hebrew dictionary value was accidentally left in English.
+
+**Hard rules:**
+- Never hardcode a visible UI string in a component. Add a key to BOTH `he` and `en` in `i18n.ts`
+  and read it via `t.<namespace>.<key>`. The `EN: typeof HE` typing already forces key parity.
+- A Hebrew dictionary value must contain no English words; an English value must contain no Hebrew
+  letters. (Brand/units like `RushPoint`, `Pro`, `QR`, `GPS`, `₪` are allowed; the language toggle
+  showing the *other* language's name is allowed.)
+- For a deliberately non-switchable literal (a decorative brand mockup, sample/demo data, an email
+  placeholder), put a trailing `// i18n-ignore` comment on that line with a one-word reason.
+
+**MANDATORY after ANY UI change** (edit to a `.tsx`/component or to `i18n.ts`):
+```bash
+npm run i18n:check          # PART A (dictionaries) must be clean — hard gate
+npm run i18n:check:strict   # use while building new UI: also fails on any hardcoded string
+```
+If it does not come out OK, **you must fix it before the change is done** — route the offending text
+through `t.*`, or justify it with `// i18n-ignore`. New UI must introduce **zero** new findings.
+
+- **Enforced by** [`scripts/check-i18n.ts`](scripts/check-i18n.ts). PART A (key parity + HE/EN
+  language purity, covering string AND function entries, both apps) is deterministic and is the hard
+  gate. PART B parses each component with the TypeScript compiler and lists hardcoded UI text
+  (JSX text, `placeholder`/`title`/`aria-label`/`alt`/`label` attrs, and `alert`/`confirm`/`*Err`
+  call args) that bypasses `t.*`.
+
 ---
 
 ## 4. Implementation Stages (Work in this order)

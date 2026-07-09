@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(if \\(-not $?\\) { \"Directory is empty or doesn't exist yet\" })"
+      "PowerShell(if \\(-not $?\\) { \"Directory is empty or doesn't exist yet\" })",
+      "Bash(openspec new *)",
+      "Bash(npx openspec *)",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }

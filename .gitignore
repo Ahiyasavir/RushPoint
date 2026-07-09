@@ -7,8 +7,10 @@ node_modules/
 apps/mobile/.expo/
 apps/mobile/dist/
 
-# Admin build
+# Web app builds
 apps/admin/dist/
+apps/creator-web/dist/
+apps/play-web/dist/
 
 # Firebase
 functions/lib/
@@ -38,3 +40,16 @@ packages/shared/dist/
 
 # local emulator log
 .emulator-log.txt
+
+# Autopilot agent experiment (not part of the product) — tooling + state live on disk only
+autopilot/
+.autopilot-tooling-snapshot/
+.claude/scheduled_tasks.lock
+
+# Playwright UI smoke artifacts
+playwright-report/
+test-results/
+.last-run.json
+
+# ngrok playtest tunnel secrets
+.tunnel.env

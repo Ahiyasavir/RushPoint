@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, ScrollView, ActivityIndicator, Pressable, Alert } from 'react-native';
+import { View, ScrollView, ActivityIndicator, Pressable } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { httpsCallable } from 'firebase/functions';
@@ -7,9 +7,12 @@ import { functions } from '../src/services/firebase.config';
 import { useGameStore } from '../src/store/gameStore';
 import { Text } from '../src/components/Text';
 import { Card } from '../src/components/Card';
-import { Button } from '../src/components/Button';
 import { useTranslation } from '../src/i18n';
+import { useSlotSound } from '../src/hooks/useSlotSound';
 import { TENE_PRODUCTS } from '../src/data/teneProducts';
+
+// The 20-min crafting window is the "weight" budget — picking products spends it.
+const WEIGHT_CAP_MIN = 20;
 
 interface ZoneInfo {
   zoneId: string;
@@ -31,10 +34,10 @@ export default function BasketZoneScreen() {
   const insets  = useSafeAreaInsets();
   const { t, isRtl } = useTranslation();
   const live    = useGameStore((s) => s.live);
+  const { playUnlock } = useSlotSound();
 
   const [zone, setZone]         = useState<ZoneInfo | null>(null);
   const [loading, setLoading]   = useState(true);
-  const [starting, setStarting] = useState(false);
   const [error, setError]       = useState('');
 
   // Crafting timer state (derived from live.craftingStartedAt).
@@ -79,8 +82,12 @@ export default function BasketZoneScreen() {
 
   async function toggleProduct(id: string) {
     const next = new Set(picked);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+      void playUnlock('gold'); // tactile chime when adding an item
+    }
     setPicked(next);
     try {
       await httpsCallable(functions, 'saveTeneSelection')({ productIds: Array.from(next) });
@@ -100,19 +107,11 @@ export default function BasketZoneScreen() {
       .catch(() => { setError('Could not load basket zone. Check connection.'); setLoading(false); });
   }, [craftingActive]);
 
-  async function handleStartTimer() {
-    if (!zone) return;
-    setStarting(true);
-    try {
-      const fn = httpsCallable(functions, 'startCraftingTimer');
-      await fn({ zoneId: zone.zoneId });
-      // gameStore will mirror the update via useGameSync
-    } catch {
-      Alert.alert('Error', 'Could not start the timer. Try again.');
-    } finally {
-      setStarting(false);
-    }
-  }
+  // The 20-min clock is NOT started by the team. They find the Tene from the
+  // riddle; the Tene-warehouse volunteer hands it over and confirms receipt
+  // (startCraftingForTeam, from the admin Tene page), which stamps
+  // craftingStartedAt — useGameSync mirrors it and this screen flips to the
+  // crafting view automatically. This prevents teams self-starting the clock.
 
   // ── Crafting countdown + Tene menu screen ──────────────────────────────────
   if (craftingActive) {
@@ -154,7 +153,28 @@ export default function BasketZoneScreen() {
 
           {/* ── Tene fill menu ──────────────────────────────────────────── */}
           <Text variant="label" className="text-neon-gold mb-1">{t('craft.menuTitle')}</Text>
-          <Text variant="caption" className="text-zinc-500 mb-4">{t('craft.menuHint')}</Text>
+          <Text variant="caption" className="text-zinc-500 mb-3">{t('craft.menuHint')}</Text>
+
+          {/* Basket "weight" bar — fills gold → amber → red as picks fill the
+              20-minute crafting window. */}
+          {(() => {
+            const pct  = Math.min(100, (pickedTotalMinutes / WEIGHT_CAP_MIN) * 100);
+            const over = pickedTotalMinutes > WEIGHT_CAP_MIN;
+            const fill = over ? 'bg-neon-red' : pickedTotalMinutes > WEIGHT_CAP_MIN * 0.75 ? 'bg-neon-orange' : 'bg-neon-gold';
+            const label = over ? 'text-neon-red' : 'text-zinc-400';
+            return (
+              <View className="mb-4">
+                <View className="flex-row justify-between mb-1.5">
+                  <Text variant="caption" className="text-zinc-500">{t('craft.basketLoad')}</Text>
+                  <Text variant="caption" className={`font-mono ${label}`}>{pickedTotalMinutes}/{WEIGHT_CAP_MIN} {t('craft.minShort')}</Text>
+                </View>
+                <View className="w-full h-2.5 rounded-full bg-app-raised overflow-hidden">
+                  <View className={`h-full rounded-full ${fill}`} style={{ width: `${pct}%` }} />
+                </View>
+                {over && <Text variant="caption" className="text-neon-red mt-1">{t('craft.basketOver')}</Text>}
+              </View>
+            );
+          })()}
 
           <View className="gap-2">
             {TENE_PRODUCTS.map((p) => {
@@ -163,9 +183,9 @@ export default function BasketZoneScreen() {
                 <Pressable
                   key={p.id}
                   onPress={() => void toggleProduct(p.id)}
-                  className={`flex-row items-center justify-between px-4 py-3 rounded-xl border ${
+                  className={`flex-row items-center justify-between px-4 py-3 rounded-xl border active:scale-[0.97] transition-all duration-150 ${
                     on ? 'bg-neon-gold/10 border-neon-gold/40' : 'bg-app-card border-glass-border'
-                  } active:opacity-80`}
+                  }`}
                 >
                   <View className="flex-row items-center gap-3 flex-1">
                     <View className={`w-5 h-5 rounded items-center justify-center border ${on ? 'bg-neon-gold border-neon-gold' : 'border-zinc-600'}`}>
@@ -196,7 +216,7 @@ export default function BasketZoneScreen() {
           {/* ── Go to the judge (available once the Tene is found) ───────── */}
           <Pressable
             onPress={() => router.push('/dashboard')}
-            className="mt-6 rounded-2xl bg-neon-green/10 border border-neon-green/40 p-4 items-center active:opacity-80"
+            className="mt-6 rounded-2xl bg-neon-green/10 border border-neon-green/40 p-4 items-center active:opacity-80 active:scale-[0.97] transition-all duration-150"
           >
             <Text variant="subheading" className="text-neon-green">🏃 {t('craft.goToJudge')}</Text>
             <Text variant="caption" className="text-zinc-400 text-center mt-1">
@@ -212,7 +232,7 @@ export default function BasketZoneScreen() {
   if (loading) {
     return (
       <View className="flex-1 bg-app-bg items-center justify-center">
-        <ActivityIndicator color="#00ffaa" />
+        <ActivityIndicator color="#F59E0B" />
       </View>
     );
   }
@@ -250,17 +270,14 @@ export default function BasketZoneScreen() {
               </Text>
             </Card>
 
-            <Text variant="bodySmall" className="text-zinc-500 text-center mb-6">
-              {t('basket.scanPrompt')}
-            </Text>
-
-            <Button
-              onPress={handleStartTimer}
-              disabled={starting}
-              fullWidth
-            >
-              {starting ? '…' : t('basket.startTimer')}
-            </Button>
+            {/* The team does NOT start the clock — the Tene-warehouse volunteer
+                confirms handover, which starts the 20-min timer automatically. */}
+            <Card className="p-5 border border-neon-blue/30 bg-neon-blue/5">
+              <Text variant="label" className="text-neon-blue mb-2">⏳ {t('basket.waitTitle')}</Text>
+              <Text variant="bodySmall" className="text-zinc-300 leading-relaxed">
+                {t('basket.waitBody')}
+              </Text>
+            </Card>
           </>
         )}
       </View>

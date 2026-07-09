@@ -20,6 +20,41 @@ export function computeSprintPenalty(secondsLate: number): number {
 }
 
 
+// ─── Dynamic difficulty-adjusted time bonus ───────────────────────────────────
+
+/** Points awarded per minute a team beats its personal Route Target. */
+export const TIME_BONUS_PER_MINUTE = 10;
+/** Hard cap so the time bonus can never dominate product/judging score. */
+export const TIME_BONUS_CAP = 200;
+
+/**
+ * Dynamic Time-Bonus (fairness across uneven route difficulty).
+ *
+ *   ΔT = T_expected − T_actual   (minutes)
+ *   ΔT > 0  → beat the personalised target → +perMin · ΔT  (capped)
+ *   ΔT ≤ 0  → delayed → 0 (a mild "cap at zero", never a negative bonus)
+ *
+ * `expectedMinutes` is the SUM of the team's 6 assigned slots'
+ * `expectedDurationMinutes`, so a team given harder tasks gets a larger target
+ * and is not penalised for the route they were dealt.
+ *
+ * Balance note: the bonus is intentionally small and capped (≤200) so that
+ * staying the full 20-minute crafting window to maximise product collection
+ * (hundreds of points) remains mathematically superior to rushing the judge.
+ */
+export function computeTimeBonus(
+  expectedMinutes: number,
+  actualMinutes: number,
+  perMinute: number = TIME_BONUS_PER_MINUTE,
+  cap: number = TIME_BONUS_CAP,
+): number {
+  if (!(expectedMinutes > 0) || !(actualMinutes > 0)) return 0;
+  const deltaMinutes = expectedMinutes - actualMinutes;
+  if (deltaMinutes <= 0) return 0;
+  return Math.min(cap, Math.round(deltaMinutes * perMinute));
+}
+
+
 // ─── Z-Score normalization ────────────────────────────────────────────────────
 
 /**
