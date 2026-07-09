@@ -20,6 +20,12 @@
       "port": 5185
     },
     {
+      "name": "play-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=apps/play-web", "--", "--port", "5186", "--strictPort"],
+      "port": 5186
+    },
+    {
       "name": "dev:all",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:all"],

@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, type MapMode, type HotZone } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
 
@@ -17,12 +17,14 @@ export interface NavTarget {
 }
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
+const HOT_ZONE_SOURCE = 'hot-zone';
 
 export default function NavMap({
-  targets, me, accent = '#F97316', className = '',
+  targets, me, hotZone = null, accent = '#F97316', className = '',
 }: {
   targets: NavTarget[];
   me?: { lat: number; lng: number } | null;
+  hotZone?: HotZone | null;
   accent?: string;
   className?: string;
 }) {
@@ -35,6 +37,36 @@ export default function NavMap({
   const [mode, setMode] = useState<MapMode>('topo');
 
   const valid = targets.filter((t) => isValidCoord(t.lat, t.lng) && (t.lat !== 0 || t.lng !== 0));
+
+  // Latest hot zone, read inside styledata (which fires on setStyle) so the
+  // overlay is re-applied after a tile-style switch wipes GeoJSON layers.
+  const hotZoneRef = useRef<HotZone | null>(hotZone);
+  hotZoneRef.current = hotZone;
+
+  // Draw / update / remove the active hot-zone circle. A metres-radius circle
+  // needs a geographic polygon (a fixed-pixel marker wouldn't scale with zoom).
+  function applyHotZone(m: maplibregl.Map) {
+    if (!m.isStyleLoaded()) return;
+    const hz = hotZoneRef.current;
+    const active = isHotZoneActive(hz, Date.now());
+    const src = m.getSource(HOT_ZONE_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (active && hz) {
+      const data = circlePolygonGeoJSON(hz.center, hz.radiusMeters) as GeoJSON.Feature;
+      if (src) {
+        src.setData(data);
+      } else {
+        m.addSource(HOT_ZONE_SOURCE, { type: 'geojson', data });
+        m.addLayer({ id: `${HOT_ZONE_SOURCE}-fill`, type: 'fill', source: HOT_ZONE_SOURCE,
+          paint: { 'fill-color': '#F97316', 'fill-opacity': 0.15 } });
+        m.addLayer({ id: `${HOT_ZONE_SOURCE}-line`, type: 'line', source: HOT_ZONE_SOURCE,
+          paint: { 'line-color': '#F97316', 'line-width': 2 } });
+      }
+    } else {
+      if (m.getLayer(`${HOT_ZONE_SOURCE}-fill`)) m.removeLayer(`${HOT_ZONE_SOURCE}-fill`);
+      if (m.getLayer(`${HOT_ZONE_SOURCE}-line`)) m.removeLayer(`${HOT_ZONE_SOURCE}-line`);
+      if (src) m.removeSource(HOT_ZONE_SOURCE);
+    }
+  }
 
   // Create the map once.
   useEffect(() => {
@@ -52,6 +84,9 @@ export default function NavMap({
       new maplibregl.GeolocateControl({ trackUserLocation: true }),
       'top-right',
     );
+    // styledata fires on initial load AND after each setStyle (mode toggle),
+    // which wipes GeoJSON sources/layers — re-apply the overlay each time.
+    map.current.on('styledata', () => { if (map.current) applyHotZone(map.current); });
     return () => { map.current?.remove(); map.current = null; };
     // Re-run when the map container appears/disappears: while `valid` is empty the
     // component renders a placeholder with NO ref div, so a NavMap that mounts
@@ -66,6 +101,15 @@ export default function NavMap({
   useEffect(() => {
     map.current?.setStyle(resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string);
   }, [mode]);
+
+  // Re-apply the hot-zone overlay when the zone is activated/expired/moved
+  // (no style change involved). Keyed on active-state + centre + radius so it
+  // fires only on a real change, not on every GPS ping.
+  const hzActive = isHotZoneActive(hotZone, Date.now());
+  useEffect(() => {
+    if (map.current) applyHotZone(map.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hzActive, hotZone?.center.lat, hotZone?.center.lng, hotZone?.radiusMeters]);
 
   // Sync target markers.
   useEffect(() => {

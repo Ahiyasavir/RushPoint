@@ -22,6 +22,7 @@ const ChatPanel = lazy(() => import('../components/ChatPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 import { shareStoryCard } from '../lib/storyCard';
+import { feedback, isRankUp } from '../lib/sound';
 
 // Creator app — viral CTA baked into every shared progress card.
 const CREATOR_URL = import.meta.env.DEV
@@ -39,6 +40,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // powerUps.log grows across polls (ref-compared), for both award types.
   const [powerUpToast, setPowerUpToast] = useState<'double_points' | 'bonus_points' | null>(null);
   const powerUpLogLen = useRef<number | null>(null);
+  // Audio/haptic cue baselines (change: audio-haptic-feedback) — ref-compared
+  // across polls, like the power-up toast. null/undefined = not yet observed, so a
+  // mid-run reload records the baseline instead of replaying past events.
+  const taskDoneCount = useRef<number | null>(null);
+  const stageDoneCount = useRef<number | null>(null);
+  const lastRank = useRef<number | undefined>(undefined);
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
@@ -131,6 +138,37 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     powerUpLogLen.current = log.length;
   }, [state?.team.powerUps?.log]);
 
+  // Task-complete cue: fire when the total count of completed tasks grows across
+  // polls. Counting the server-confirmed 'completed' status (not the callable
+  // return) covers every task type from one place AND correctly stays silent for a
+  // photo/audio submission that is still pending staff review (not yet completed).
+  useEffect(() => {
+    const done = state?.team.stages.reduce(
+      (n, s) => n + s.tasks.filter((tk) => tk.status === 'completed').length, 0) ?? 0;
+    if (taskDoneCount.current === null) { taskDoneCount.current = done; return; }
+    if (done > taskDoneCount.current) feedback('task');
+    taskDoneCount.current = done;
+  }, [state?.team.stages]);
+
+  // Stage-complete cue: fire when the count of completed stages grows across polls.
+  // First observation only records the baseline (a reload mid-run doesn't replay).
+  useEffect(() => {
+    const done = state?.team.stages.filter((s) => s.status === 'completed').length ?? 0;
+    if (stageDoneCount.current === null) { stageDoneCount.current = done; return; }
+    if (done > stageDoneCount.current) feedback('stage');
+    stageDoneCount.current = done;
+  }, [state?.team.stages]);
+
+  // Rank-up cue: fire only when our leaderboard rank strictly improves. Rank is
+  // present only once the board carries our team; undefined ranks never cue.
+  useEffect(() => {
+    const board = state?.run.leaderboard;
+    const teamId = state?.team.id;
+    const rank = board?.rankings.find((r) => r.teamId === teamId)?.rank;
+    if (isRankUp(lastRank.current, rank)) feedback('rankUp');
+    lastRank.current = rank;
+  }, [state?.run.leaderboard, state?.team.id]);
+
   async function leave() {
     if (await dialog.confirm(t.play.leaveConfirm)) { clearSession(); onLeave(); }
   }
@@ -151,6 +189,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     });
     try {
       await triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, ...(coords ?? {}) });
+      feedback('alert');
       await dialog.alert(t.play.sosSent);
     } catch {
       await dialog.alert(t.play.sosFailed);
@@ -182,7 +221,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         teamName: team.displayName,
         score: team.score,
         rank,
-        stagesDone: `${done}/${game.stageCount}`,
+        stagesDone: `${done}/${team.stages.length}`,
         ctaUrl: CREATOR_URL,
         headline,
         scoreLabel: t.play.pointsSoFar,
@@ -291,7 +330,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           🧪 {t.play.testRunBanner}
         </div>
       )}
-      <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
+      <div className="mt-4 mb-2"><Progress done={completedStages} total={team.stages.length} /></div>
       <InRunAlerts hotZone={state.run.hotZone} outOfBounds={team.outOfBounds} />
       {streak >= 2 && (
         <div
@@ -329,7 +368,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
       {activeStage && (
         <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <NavMap targets={targets} me={me} accent={accent} className="h-52 mb-4" />
+          <NavMap targets={targets} me={me} hotZone={state.run.hotZone} accent={accent} className="h-52 mb-4" />
         </Suspense>
       )}
 

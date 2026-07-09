@@ -283,6 +283,37 @@ export function routeGeoJSON(points: readonly GeoPoint[]) {
   };
 }
 
+/**
+ * A GeoJSON Polygon Feature approximating a circle of `radiusMeters` around
+ * `center`, as a closed ring of `points + 1` [lng, lat] vertices (used to draw
+ * a hot-zone overlay on the participant map — a fixed-pixel marker wouldn't
+ * scale with real-world metres across zoom levels). Longitude spacing is scaled
+ * by cos(lat) so the ring stays circular away from the equator.
+ */
+export function circlePolygonGeoJSON(center: GeoPoint, radiusMeters: number, points = 64) {
+  const R = 6371000; // earth radius, metres
+  const latRad = (center.lat * Math.PI) / 180;
+  const dLat = (radiusMeters / R) * (180 / Math.PI);
+  const dLng = (radiusMeters / (R * Math.cos(latRad))) * (180 / Math.PI);
+  const ring: [number, number][] = [];
+  for (let i = 0; i < points; i++) {
+    const theta = (i / points) * 2 * Math.PI;
+    ring.push([
+      center.lng + dLng * Math.cos(theta),
+      center.lat + dLat * Math.sin(theta),
+    ]);
+  }
+  ring.push(ring[0]); // close the ring
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: {
+      type: 'Polygon' as const,
+      coordinates: [ring],
+    },
+  };
+}
+
 /** Compute a center + zoom that frames all task coordinates in a game. */
 export function gameMapView(
   stages: Array<{ tasks: Array<{ coordinates?: GeoPoint }> }>,

@@ -19,6 +19,8 @@ import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
 import HeatmapMap from '../components/HeatmapMap';
+import LocationStep from '../components/LocationStep';
+import { isValidCoord } from '@rushpoint/shared';
 
 // Where the participant app lives (for the shareable join link/QR).
 const PLAY_URL = import.meta.env.DEV
@@ -99,10 +101,25 @@ export default function RunConsolePage() {
   async function ack(alertId: string) {
     try { await acknowledgeAlert({ ...ctx, alertId }); } catch { /* listener will reflect state */ }
   }
+  // Sharing a board/TV link implies the audience should see standings — publish
+  // on share so the projection screen never sits on "not yet available".
+  async function ensureBoardPublished() {
+    if (run?.leaderboard?.published) return;
+    try { await refreshLeaderboard({ ...ctx, publish: true }); } catch { /* board stays hidden; toggle still works */ }
+  }
 
   if (!run) return <Spinner label={t.runConsole.loadingRun} />;
 
   const finished = run.status === 'finished';
+
+  // Single source of truth for the number we show organizers: the ranked score
+  // from the (auto-refreshed) leaderboard snapshot — the SAME value the live
+  // standings panel, the TV screen, and the public board render. The teams
+  // table joins each row to its ranking entry by teamId so it can never show a
+  // different number than the panel right below it.
+  const rankedScoreById = new Map<string, number>(
+    (run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]),
+  );
 
   return (
     <div className="space-y-5">
@@ -126,7 +143,7 @@ export default function RunConsolePage() {
           </div>
         </div>
         <div className="flex flex-col items-stretch gap-2">
-          <JoinShare accessCode={run.accessCode} />
+          <JoinShare accessCode={run.accessCode} onShareBoard={ensureBoardPublished} />
           <StationQrPrint gameId={gameId!} />
         </div>
       </div>
@@ -168,7 +185,7 @@ export default function RunConsolePage() {
       {/* Live-ops + post-run organizer tools (deferred-UI wiring) */}
       <div className="grid md:grid-cols-2 gap-5">
         {!finished && <HotZonePanel ctx={ctx} hotZone={run.hotZone ?? null} />}
-        <PostRunLinks accessCode={run.accessCode} finished={finished} />
+        <PostRunLinks accessCode={run.accessCode} finished={finished} onShareBoard={ensureBoardPublished} />
       </div>
       {finished && <AnalyticsPanel accessCode={run.accessCode} />}
       {finished && <HeatmapPanel accessCode={run.accessCode} />}
@@ -189,11 +206,22 @@ export default function RunConsolePage() {
                     <div className="flex-1">
                       <div className="text-sm text-zinc-200">{team.displayName}</div>
                       <div className="text-[11px] text-zinc-500">
-                        {team.finished ? 'finished' : team.launched ? `stage ${(team.activeStageOrder ?? 0) + 1}` : 'waiting'}
+                        {team.finished
+                          ? t.runConsole.teamStatusFinished
+                          : !team.launched
+                            ? t.runConsole.teamStatusWaiting
+                            : team.activeStageOrder != null
+                              ? t.runConsole.teamStageLabel({ n: team.activeStageOrder + 1 })
+                              : t.runConsole.teamStatusBetween}
                         {' · '}{t.runConsole.stageDone({ n: team.completedStages })}
                       </div>
                     </div>
-                    <div className="text-neon-green font-mono font-semibold">{team.score}</div>
+                    {/* Ranked score from the leaderboard snapshot — identical to
+                        the live-standings panel + TV. Falls back to the raw earned
+                        tally only until the first snapshot exists for this run. */}
+                    <div className="text-neon-green font-mono font-semibold">
+                      {rankedScoreById.get(team.id) ?? team.score}
+                    </div>
                     <button className="text-[11px] text-zinc-400 hover:text-zinc-200"
                       onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }}>
                       {t.runConsole.skip}
@@ -289,7 +317,7 @@ export default function RunConsolePage() {
 
 // Access code + shareable join link + QR — participants scan to land in the app
 // with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
-function JoinShare({ accessCode }: { accessCode: string }) {
+function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBoard?: () => Promise<void> }) {
   const t = useT();
   const link = `${PLAY_URL}/?code=${accessCode}`;
   const boardLink = `${PLAY_URL}/?board=${accessCode}`;
@@ -299,7 +327,10 @@ function JoinShare({ accessCode }: { accessCode: string }) {
     QRCode.toDataURL(link, { margin: 1, width: 200 }).then(setQr).catch(() => setQr(''));
   }, [link]);
   async function copy(url: string, which: string) {
+    // Copy synchronously with the click (clipboard needs the user gesture),
+    // THEN publish the board for audience-facing links.
     try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { /* no clipboard */ }
+    if (which !== 'join') await onShareBoard?.();
   }
   return (
     <Card className="px-5 py-4 text-center">
@@ -460,8 +491,8 @@ function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; ru
 // ── Hot Zone activate panel (hot-zone-bonus) ──────────────────────────────────
 function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: string; runId: string }; hotZone: HotZone | null }) {
   const t = useT();
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
+  const [lat, setLat] = useState(0);
+  const [lng, setLng] = useState(0);
   const [radius, setRadius] = useState(200);
   const [mult, setMult] = useState(2);
   const [minutes, setMinutes] = useState(10);
@@ -469,19 +500,12 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
 
   const active = !!hotZone && hotZoneMultiplier(hotZone, hotZone.center, Date.now()) > 1;
 
-  function useMyLocation() {
-    navigator.geolocation?.getCurrentPosition(
-      (p) => { setLat(p.coords.latitude.toFixed(5)); setLng(p.coords.longitude.toFixed(5)); },
-      () => dialog.alert(t.runConsole.hotZoneNeedsCenter),
-    );
-  }
-
   async function activate() {
-    const la = parseFloat(lat), ln = parseFloat(lng);
-    if (!Number.isFinite(la) || !Number.isFinite(ln)) { void dialog.alert(t.runConsole.hotZoneNeedsCenter); return; }
+    // A hot zone is inherently geographic — require a real point (0,0 = unset).
+    if (!isValidCoord(lat, lng) || (lat === 0 && lng === 0)) { void dialog.alert(t.runConsole.hotZoneNeedsCenter); return; }
     setBusy(true);
     try {
-      await activateHotZone({ gameId: ctx.gameId, runId: ctx.runId, center: { lat: la, lng: ln }, radiusMeters: radius, multiplier: mult, durationMinutes: minutes });
+      await activateHotZone({ gameId: ctx.gameId, runId: ctx.runId, center: { lat, lng }, radiusMeters: radius, multiplier: mult, durationMinutes: minutes });
     } finally { setBusy(false); }
   }
   async function deactivate() {
@@ -492,6 +516,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
   return (
     <Card className="p-4 space-y-3">
       <div className="text-sm font-semibold">{t.runConsole.hotZoneTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed">{t.runConsole.hotZoneHelp}</p>
       {active && hotZone ? (
         <div className="space-y-2 text-sm">
           <div className="text-neon-green font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
@@ -501,11 +526,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
       ) : (
         <div className="space-y-2">
           <Label>{t.runConsole.hotZoneCenter}</Label>
-          <div className="flex gap-2">
-            <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="31.79" inputMode="decimal" />
-            <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="35.16" inputMode="decimal" />
-            <Button variant="ghost" type="button" onClick={useMyLocation}>{t.runConsole.hotZoneUseLocation}</Button>
-          </div>
+          <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" />
           <div className="grid grid-cols-3 gap-2">
             <div><Label>{t.runConsole.hotZoneRadius}</Label><Input type="number" value={radius} onChange={(e) => setRadius(Math.max(1, Number(e.target.value)))} /></div>
             <div><Label>{t.runConsole.hotZoneMultiplier}</Label><Input type="number" value={mult} min={2} max={5} onChange={(e) => setMult(Math.min(5, Math.max(2, Number(e.target.value))))} /></div>
@@ -519,7 +540,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
 }
 
 // ── Post-run shareable links (tv-leaderboard / run-recap) ─────────────────────
-function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: boolean }) {
+function PostRunLinks({ accessCode, finished, onShareBoard }: { accessCode: string; finished: boolean; onShareBoard?: () => Promise<void> }) {
   const t = useT();
   const [copied, setCopied] = useState('');
   const tvUrl = `${PLAY_URL}/?${TV_ROUTE_PARAM}=${accessCode}`;
@@ -527,13 +548,14 @@ function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: 
 
   async function copy(url: string, which: string) {
     try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { window.open(url, '_blank'); }
+    if (which === 'tv') await onShareBoard?.();
   }
 
   return (
     <Card className="p-4 space-y-3">
       <div className="text-sm font-semibold">{t.runConsole.postRunTitle}</div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => window.open(tvUrl, '_blank')}>{t.runConsole.tvScreen}</Button>
+        <Button variant="ghost" onClick={async () => { window.open(tvUrl, '_blank'); await onShareBoard?.(); }}>{t.runConsole.tvScreen}</Button>
         <Button variant="ghost" onClick={() => copy(tvUrl, 'tv')}>{copied === 'tv' ? t.runConsole.linkCopied : '🔗'}</Button>
         {finished && (
           <>
@@ -584,7 +606,8 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
 
   return (
     <Card className="p-4 mt-4">
-      <div className="text-sm font-medium mb-3">🎒 {rc.trackablesTitle}</div>
+      <div className="text-sm font-medium mb-1">🎒 {rc.trackablesTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.trackablesHelp}</p>
       <div className="flex gap-2 mb-3">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={rc.trackablesPlaceholder} dir="auto" className="flex-1" />
         <Button variant="ghost" disabled={busy || !name.trim()} onClick={create}>{rc.trackablesAdd}</Button>
@@ -608,14 +631,15 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
 }
 
 // Territory zones console (change: territory-capture): author capturable zones and
-// see which team currently holds each. Center is entered as lat/lng (or 0,0 for a
-// locationless zone). Capturing is validated server-side against the player's GPS.
+// see which team currently holds each. Center is picked on the map; leaving it
+// unset (0,0) makes a locationless zone. Capturing is validated server-side
+// against the player's GPS.
 function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: string; runId: string }) {
   const rc = useT().runConsole;
   const [zones, setZones] = useState<CaptureZone[]>([]);
   const [title, setTitle] = useState('');
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
+  const [lat, setLat] = useState(0);
+  const [lng, setLng] = useState(0);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
 
@@ -628,10 +652,10 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
   }, [ownerUid, gameId, runId, tick]);
 
   async function create() {
-    const la = parseFloat(lat), ln = parseFloat(lng);
-    if (!title.trim() || !Number.isFinite(la) || !Number.isFinite(ln)) return;
+    // No map pick (0,0) is allowed on purpose — it authors a locationless zone.
+    if (!title.trim() || !isValidCoord(lat, lng)) return;
     setBusy(true);
-    try { await createZone({ gameId, runId, title: title.trim(), lat: la, lng: ln }); setTitle(''); setLat(''); setLng(''); setTick((x) => x + 1); }
+    try { await createZone({ gameId, runId, title: title.trim(), lat, lng }); setTitle(''); setLat(0); setLng(0); setTick((x) => x + 1); }
     finally { setBusy(false); }
   }
   async function remove(zoneId: string) {
@@ -642,12 +666,14 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
 
   return (
     <Card className="p-4 mt-4">
-      <div className="text-sm font-medium mb-3">🚩 {rc.zonesTitle}</div>
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className="text-sm font-medium mb-1">🚩 {rc.zonesTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.zonesHelp}</p>
+      <div className="flex flex-wrap gap-2 mb-2">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={rc.zonesTitlePlaceholder} dir="auto" className="flex-1 min-w-[8rem]" />
-        <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder={rc.zonesLat} className="w-24" />
-        <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder={rc.zonesLng} className="w-24" />
         <Button variant="ghost" disabled={busy || !title.trim()} onClick={create}>{rc.zonesAdd}</Button>
+      </div>
+      <div className="mb-3">
+        <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" />
       </div>
       {zones.length === 0 ? (
         <div className="text-sm text-zinc-500">{rc.zonesEmpty}</div>

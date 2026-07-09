@@ -53,10 +53,13 @@ function listDeployedCallables() {
   }
 }
 
-// The Admin SDK is used ONLY to mint auth custom tokens against the Auth
-// emulator (a platform-admin identity for the admin-only callables). It never
-// touches Firestore — all game/run state still flows through the callables.
+// The Admin SDK mints auth custom tokens against the Auth emulator (a
+// platform-admin identity for the admin-only callables) and reads Firestore
+// docs the clients can't (server-only state oracles: wallet transactions,
+// run.leaderboard snapshots). All game/run MUTATIONS still flow through the
+// callables only.
 process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
+process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080';
 adminSdk.initializeApp({ projectId: PROJECT });
 
 // ── Per-callable latency sampling (reported at the end) ───────────────────────
@@ -610,6 +613,18 @@ async function main() {
   check('code task scored > 0', (state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore ?? 0) > 0,
     String(state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore));
 
+  // ── 8a. Leaderboard auto-refresh (change: live-leaderboard-auto-refresh) ────
+  // The first scoring completion must refresh run.leaderboard server-side — at
+  // this point NO refreshLeaderboard call has ever been made for this run, so a
+  // stale/missing snapshot here means the auto-refresh didn't fire.
+  const runDocPath = `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}`;
+  const lbAuto = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbAutoEntry = lbAuto?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('leaderboard auto-refreshes after a task completion (no manual refresh)',
+    (lbAutoEntry?.score ?? 0) > 0, JSON.stringify(lbAuto ?? null));
+  check('auto-refreshed leaderboard stays unpublished',
+    (lbAuto?.published ?? false) === false, String(lbAuto?.published));
+
   // ── 8b. Live leaderboard mid-run (refreshLeaderboard) ───────────────────────
   const lbCtx = { ownerUid: creatorCred.user.uid, gameId, runId };
   const lbHidden = await creator.call('refreshLeaderboard', { ...lbCtx, publish: false });
@@ -638,6 +653,54 @@ async function main() {
   check('public leaderboard exposes rankings once published',
     boardAfter?.published === true && (boardAfter?.rankings?.length ?? 0) === 1,
     JSON.stringify(boardAfter?.rankings?.[0]));
+
+  // ── 8b2. adjustTeamScore is immediately visible (live-leaderboard-auto-refresh)
+  const rowBeforeAdj = (await creator.call('listRunTeams', { gameId, runId }))
+    ?.teams?.find((t) => t.id === playerCred.user.uid);
+  const lbScoreBeforeAdj = lbShown?.rankings?.find((r) => r.teamId === playerCred.user.uid)?.score ?? 0;
+  // Deltas stay small: applyPenalties clamps the ranked score at 0, so the
+  // team's live score (one ~43-pt task at this point) must stay positive for
+  // the relative assertions to hold.
+  await creator.call('adjustTeamScore', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, delta: -20, reason: 'e2e visibility probe',
+  });
+  const lbAfterAdj = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbAdjEntry = lbAfterAdj?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('adjustTeamScore refreshes the leaderboard immediately (−20 visible)',
+    lbAdjEntry?.score === lbScoreBeforeAdj - 20,
+    JSON.stringify({ before: lbScoreBeforeAdj, after: lbAdjEntry?.score }));
+  check('adjustment auto-refresh preserves the published flag',
+    lbAfterAdj?.published === true, String(lbAfterAdj?.published));
+  const teamsAfterAdj = (await creator.call('listRunTeams', { gameId, runId }))?.teams ?? [];
+  const rowAfterAdj = teamsAfterAdj.find((t) => t.id === playerCred.user.uid);
+  check('listRunTeams exposes bonusPenalty (+20 after a −20 adjustment)',
+    (rowAfterAdj?.bonusPenalty ?? 0) - (rowBeforeAdj?.bonusPenalty ?? 0) === 20,
+    JSON.stringify({ before: rowBeforeAdj?.bonusPenalty, after: rowAfterAdj?.bonusPenalty }));
+
+  // Single-source-of-truth guardrail (score-consistency sweep): once scoring has
+  // begun, EVERY team the console lists must have a ranked leaderboard entry, so
+  // the console teams table always shows the ranked score (never the raw-earned
+  // fallback) — i.e. the organizer's table can't disagree with the TV/board.
+  const rankedIds = new Set((lbAfterAdj?.rankings ?? []).map((r) => r.teamId));
+  check('every listed team has a ranked leaderboard entry (console==board source)',
+    teamsAfterAdj.length > 0 && teamsAfterAdj.every((tm) => rankedIds.has(tm.id)),
+    JSON.stringify({ teams: teamsAfterAdj.map((tm) => tm.id), ranked: [...rankedIds] }));
+
+  // A frozen board is never auto-overwritten: freeze, adjust again (forced
+  // refresh path), and assert the frozen rankings did not move. Then unfreeze
+  // so the rest of the lifecycle sees live standings again.
+  await creator.call('refreshLeaderboard', { ...lbCtx, frozen: true });
+  await creator.call('adjustTeamScore', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, delta: -5, reason: 'frozen probe',
+  });
+  const lbFrozen = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbFrozenEntry = lbFrozen?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('frozen leaderboard is not auto-overwritten by a scoring event',
+    lbFrozen?.frozen === true && lbFrozenEntry?.score === lbScoreBeforeAdj - 20,
+    JSON.stringify({ frozen: lbFrozen?.frozen, score: lbFrozenEntry?.score, expected: lbScoreBeforeAdj - 20 }));
+  await creator.call('refreshLeaderboard', { ...lbCtx, frozen: false });
 
   // ── 8c. Photo task: submit → staff review → advance ─────────────────────────
   // M3: submitStationPhoto only accepts Firebase Storage URLs from our bucket.
@@ -2622,6 +2685,49 @@ async function main() {
     check('hot-zone: deactivate clears the zone', deact?.ok === true);
   }); // scenario: hot zone
 
+  // ── Hot Zone routing bias (change: hot-zone-routing-bias) ────────────────────
+  // An active hot zone should pull auto-routing toward in-zone tasks. To prove
+  // the bias actually changes the outcome (not just breaks ties), the in-zone
+  // task is placed FARTHER from the team than a closer out-of-zone task — so
+  // without the bias the closer out-of-zone task would win on transit, but the
+  // in-zone bonus flips the assignment.
+  await scenario('hot zone routing bias (in-zone task is assigned first)', async () => {
+    const { gameId: rbGame } = await creator.call('createGame', { title: 'Routing Bias Game', mode: 'individual' });
+    const RB_CENTER = { lat: 31.79, lng: 35.16 };  // zone centre; in-zone task lives here
+    const RB_TEAM = { lat: 31.80, lng: 35.16 };     // team ~1.1km N of centre
+    const RB_NEAR_OUT = { lat: 31.799, lng: 35.16 };// ~110m from team, ~1km from centre → OUT of a 250m zone
+    await creator.call('updateGame', {
+      gameId: rbGame,
+      scoringPreset: 'smart_weighted',
+      stages: [{
+        id: 'rb-stage', order: 0, title: 'Routing bias stage', isFinal: true, requiredTaskCount: 1,
+        tasks: [
+          { id: 'rb-in', title: 'Far but in zone', type: 'field', coordinates: RB_CENTER, difficulty: 5, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3 },
+          { id: 'rb-out', title: 'Near but out of zone', type: 'field', coordinates: RB_NEAR_OUT, difficulty: 5, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3 },
+        ],
+      }],
+    });
+    const { runId: rbRun, accessCode: rbCode } = await creator.call('launchRun', { gameId: rbGame });
+    const rbPlayer = makeParty('rbPlayer');
+    await signInAnonymously(rbPlayer.auth);
+    await rbPlayer.call('joinRun', { code: rbCode, displayName: 'Router' });
+    await creator.call('startTeams', { gameId: rbGame, runId: rbRun });
+
+    await creator.call('activateHotZone', {
+      gameId: rbGame, runId: rbRun, center: RB_CENTER, radiusMeters: 250, multiplier: 2, durationMinutes: 10,
+    });
+
+    // Ask for the next task from the team's location; the bias should route the
+    // team to the (farther) in-zone task over the (closer) out-of-zone task.
+    await rbPlayer.call('requestNextTask', { code: rbCode, lat: RB_TEAM.lat, lng: RB_TEAM.lng });
+    const st = await rbPlayer.call('getMyTeamState', { code: rbCode });
+    const assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+    check('hot-zone routing: the in-zone task is assigned despite being farther',
+      assigned?.taskId === 'rb-in', JSON.stringify(assigned));
+
+    await creator.call('deactivateHotZone', { gameId: rbGame, runId: rbRun });
+  }); // scenario: hot zone routing bias
+
   // ── Power-ups (change: power-ups) ───────────────────────────────────────────
   // Predicts the deterministic award sequence from the seeded roll, then audits
   // that consumption (×2), the flat bonus (−15 bonusPenalty), idempotence, and the
@@ -3406,6 +3512,26 @@ async function main() {
     check('searchTaskLibrary returns a tasks array', Array.isArray(lib?.tasks));
     const inc = await creator.call('incrementTaskCopyCount', { publicTaskId: `${cvGame}_cv-a` });
     check('incrementTaskCopyCount bumps a published task', inc?.ok === true);
+
+    // C2 (consistency sweep): editing a PUBLISHED game must re-sync the gallery
+    // summary doc (stageCount/taskCount) WITHOUT a republish, so the public card
+    // can't disagree with the live Dashboard. playCount (a live counter) and the
+    // publicTasks copyCount must NOT be clobbered by the re-sync.
+    const pubBefore = await creator.getDocAt(`publicGames/${cvGame}`);
+    const playCountBefore = pubBefore.data?.playCount ?? 0;
+    await creator.call('updateGame', { gameId: cvGame, stages: [
+      { id: 'cv-s', order: 0, title: 'S', isFinal: false, requiredTaskCount: 1, tasks: [
+        { id: 'cv-a', title: 'A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3 } ] },
+      { id: 'cv-s2', order: 1, title: 'S2', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'cv-b', title: 'B', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 20, maxConcurrentTeams: 3 } ] },
+    ] });
+    const pubAfter = await creator.getDocAt(`publicGames/${cvGame}`);
+    check('editing a published game re-syncs gallery counts (no republish)',
+      pubAfter.data?.stageCount === 2 && pubAfter.data?.taskCount === 2,
+      JSON.stringify({ stageCount: pubAfter.data?.stageCount, taskCount: pubAfter.data?.taskCount }));
+    check('gallery re-sync preserves the live playCount counter',
+      (pubAfter.data?.playCount ?? 0) === playCountBefore,
+      JSON.stringify({ before: playCountBefore, after: pubAfter.data?.playCount }));
 
     // Account self-service on a throwaway identity (deleteMyAccount is terminal).
     const acct = makeParty('coverageAcct');

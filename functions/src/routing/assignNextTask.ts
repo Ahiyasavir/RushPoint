@@ -11,8 +11,18 @@
 
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../firebase';
-import { haversineKm, isValidCoord, isReleased, isExpired, isUnlocked } from '@rushpoint/shared';
-import type { Task, GeoPoint, TaskRecommendation } from '@rushpoint/shared';
+import {
+  haversineKm, isValidCoord, isReleased, isExpired, isUnlocked,
+  isHotZoneActive, isWithinHotZoneRadius,
+} from '@rushpoint/shared';
+import type { Task, GeoPoint, TaskRecommendation, HotZone } from '@rushpoint/shared';
+
+// Additive routing bonus (change: hot-zone-routing-bias) applied to a candidate
+// task whose location is inside an ACTIVE hot zone, so teams tend to be routed
+// there while the multiplier is live. Additive — not a hard filter: it dominates
+// close contests (load/transit/skill deltas are usually < this) but a badly
+// loaded or far in-zone task can still lose to a great out-of-zone one.
+export const HOT_ZONE_ROUTING_BONUS = 0.35;
 
 // Runtime counter path for a task within a run
 // (stored as a flat map on the Run doc: run.taskCounts[taskId])
@@ -40,25 +50,41 @@ function skillMatch(skillRatio: number, difficulty: number): number {
   return 1 - Math.abs(skillRatio - normalizedDifficulty);
 }
 
+// The hot-zone bonus for a single candidate: HOT_ZONE_ROUTING_BONUS when the
+// zone is active at `nowMs` and this task has a real location inside its radius,
+// else 0. Locationless tasks have no coordinates to test → never bonused.
+function hotZoneBonus(task: Task, hotZone: HotZone | null | undefined, nowMs: number): number {
+  if (task.locationless) return 0;
+  if (!task.coordinates) return 0;
+  if (!isHotZoneActive(hotZone, nowMs)) return 0;
+  return isWithinHotZoneRadius(hotZone, task.coordinates) ? HOT_ZONE_ROUTING_BONUS : 0;
+}
+
 // When `skillAware` (the smart_weighted preset) the routing balances station
 // load, walking distance AND skill-difficulty fit + the team's pace history.
 // Otherwise (fixed-points / time presets) there's no per-team difficulty target,
 // so we route purely to the nearest available station — distance + load only.
-function priorityScore(
+// Either way, an active hot zone adds an additive bonus for in-zone tasks
+// (change: hot-zone-routing-bias) so teams tend to be routed into it.
+export function priorityScore(
   task: Task,
   teamLocation: GeoPoint,
   skillRatio: number,
   taskCounts: Record<string, number>,
   skillAware: boolean,
+  hotZone?: HotZone | null,
+  nowMs: number = Date.now(),
 ): number {
   const transitNorm = Math.min(transitMinutes(teamLocation, task), 30) / 30;
+  const zoneBonus = hotZoneBonus(task, hotZone, nowMs);
   if (!skillAware) {
-    return 0.6 * loadFactor(task, taskCounts) - 0.4 * transitNorm;
+    return 0.6 * loadFactor(task, taskCounts) - 0.4 * transitNorm + zoneBonus;
   }
   return (
     0.5 * loadFactor(task, taskCounts) -
     0.3 * transitNorm +
-    0.2 * skillMatch(skillRatio, task.difficulty ?? 5)
+    0.2 * skillMatch(skillRatio, task.difficulty ?? 5) +
+    zoneBonus
   );
 }
 
@@ -104,11 +130,11 @@ async function getRunRouting(
   ownerUid: string,
   gameId: string,
   runId: string,
-): Promise<{ taskCounts: Record<string, number>; launchedAt?: string }> {
+): Promise<{ taskCounts: Record<string, number>; launchedAt?: string; hotZone?: HotZone | null }> {
   const snap = await db.doc(runPath(ownerUid, gameId, runId)).get();
   if (!snap.exists) return { taskCounts: {} };
-  const data = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string };
-  return { taskCounts: data.taskCounts ?? {}, launchedAt: data.launchedAt };
+  const data = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string; hotZone?: HotZone | null };
+  return { taskCounts: data.taskCounts ?? {}, launchedAt: data.launchedAt, hotZone: data.hotZone ?? null };
 }
 
 
@@ -125,7 +151,7 @@ export async function buildRecommendations(
   limit = 5,
   skillAware = true,
 ): Promise<TaskRecommendation[]> {
-  const { taskCounts, launchedAt } = await getRunRouting(ownerUid, gameId, runId);
+  const { taskCounts, launchedAt, hotZone } = await getRunRouting(ownerUid, gameId, runId);
   const nowMs = Date.now();
 
   const candidates = tasks.filter((t) => {
@@ -145,7 +171,7 @@ export async function buildRecommendations(
   return candidates
     .map((task) => ({
       task,
-      priority: priorityScore(task, teamLocation, skillRatio, taskCounts, skillAware),
+      priority: priorityScore(task, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs),
       distanceKm:
         !task.locationless && task.coordinates && isValidCoord(task.coordinates.lat, task.coordinates.lng)
           ? haversineKm(teamLocation, task.coordinates)
@@ -213,9 +239,10 @@ export async function assignTask(
   // run-doc lock contention (see withLockRetry).
   return withLockRetry(() => db.runTransaction(async (tx) => {
     const snap = await tx.get(runRef);
-    const runData = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string } | undefined;
+    const runData = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string; hotZone?: HotZone | null } | undefined;
     const taskCounts = runData?.taskCounts ?? {};
     const launchedAt = runData?.launchedAt;
+    const hotZone = runData?.hotZone ?? null;
     const nowMs = Date.now();
 
     const candidates = tasks.filter((t) => {
@@ -236,8 +263,8 @@ export async function assignTask(
 
     const chosen = candidates.sort(
       (a, b) =>
-        priorityScore(b, teamLocation, skillRatio, taskCounts, skillAware) -
-        priorityScore(a, teamLocation, skillRatio, taskCounts, skillAware),
+        priorityScore(b, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs) -
+        priorityScore(a, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs),
     )[0];
 
     tx.update(runRef, {

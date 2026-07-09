@@ -8,31 +8,60 @@ import { haversineKm } from './geo';
 export type { HotZone };
 
 /**
+ * Whether a hot zone is "active" at `nowMs`: a zone exists, its multiplier is a
+ * real bonus (> 1), and now falls within [startedAt, expiresAt]. This is the
+ * time-window + eligibility half of the multiplier rule, with no radius check —
+ * so it can answer "is a hot zone running right now?" independent of any point
+ * (used by the routing bias and the participant map overlay).
+ */
+export function isHotZoneActive(
+  zone: HotZone | null | undefined,
+  nowMs: number,
+): boolean {
+  if (!zone) return false;
+  if (!(zone.multiplier > 1)) return false;
+
+  const start = Date.parse(zone.startedAt);
+  const end = Date.parse(zone.expiresAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return false;
+  return nowMs >= start && nowMs <= end;
+}
+
+/**
+ * Whether `point` falls within the zone's radius of its centre. This is the
+ * geographic half of the multiplier rule, with no time-window check. Returns
+ * false for a missing zone/point or invalid coordinates (never throws).
+ */
+export function isWithinHotZoneRadius(
+  zone: HotZone | null | undefined,
+  point: GeoPoint | null | undefined,
+): boolean {
+  if (!zone || !point) return false;
+  let distM: number;
+  try {
+    distM = haversineKm(zone.center, point) * 1000;
+  } catch {
+    return false; // invalid centre/point → not within
+  }
+  if (!Number.isFinite(distM)) return false;
+  return distM <= zone.radiusMeters;
+}
+
+/**
  * The score multiplier to apply to a completion at `coords` at `nowMs`. Returns
- * the zone multiplier only when a zone exists, coords are present, now is within
- * [startedAt, expiresAt], and coords are within radiusMeters of the centre.
- * Returns 1 (no bonus) in every other case.
+ * the zone multiplier only when the zone is active (see isHotZoneActive) and
+ * `coords` are within its radius (see isWithinHotZoneRadius); returns 1 (no
+ * bonus) in every other case. Composed from the two predicates so "is this
+ * point, right now, in the hot zone?" has a single definition shared with the
+ * routing bias.
  */
 export function hotZoneMultiplier(
   zone: HotZone | null | undefined,
   coords: GeoPoint | null | undefined,
   nowMs: number,
 ): number {
-  if (!zone || !coords) return 1;
-  if (!(zone.multiplier > 1)) return 1;
-
-  const start = Date.parse(zone.startedAt);
-  const end = Date.parse(zone.expiresAt);
-  if (Number.isNaN(start) || Number.isNaN(end)) return 1;
-  if (nowMs < start || nowMs > end) return 1;
-
-  let distM: number;
-  try {
-    distM = haversineKm(zone.center, coords) * 1000;
-  } catch {
-    return 1; // invalid centre/coords → no bonus
+  if (isHotZoneActive(zone, nowMs) && isWithinHotZoneRadius(zone, coords)) {
+    return zone!.multiplier;
   }
-  if (distM > zone.radiusMeters) return 1;
-
-  return zone.multiplier;
+  return 1;
 }
