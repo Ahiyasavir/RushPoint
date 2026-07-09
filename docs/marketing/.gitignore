@@ -1,0 +1,4 @@
+# Rendered video outputs — regenerate from video-remotion/ (Remotion render).
+# Kept out of git to avoid multi-MB binary blobs in history. Track them via a
+# release/asset store if you need to share without rendering.
+*.mp4
