@@ -21,4 +21,24 @@ test.describe('creator-web AuthGate', () => {
     // No uncaught exception tore the page down.
     expect(pageErrors, `uncaught page errors: ${pageErrors.join(' | ')}`).toHaveLength(0);
   });
+
+  // Regression: "שכחת סיסמה?" appeared to do nothing because its success confirmation
+  // uses dialog.alert, but DialogHost was only mounted in App.tsx (logged-in). On the
+  // logged-out screen the dialog silently no-op'd. This drives the real button and
+  // asserts the confirmation renders. Hermetic: we fulfill the reset request ourselves
+  // so it needs no emulator.
+  test('forgot-password shows a visible confirmation (dialog host on logged-out screen)', async ({ page }) => {
+    // Make the Firebase password-reset request (accounts:sendOobCode) succeed offline.
+    await page.route('**/accounts:sendOobCode**', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{"email":"creator@rushpoint.dev","kind":"identitytoolkit#GetOobConfirmationCodeResponse"}' }),
+    );
+
+    await page.goto('/');
+    await page.locator('input[type="email"]').fill('creator@rushpoint.dev');
+    await page.getByRole('button', { name: 'שכחת סיסמה?' }).click();
+
+    // The resetSent confirmation must become visible (RED before DialogHost is mounted
+    // on the auth screen, GREEN after).
+    await expect(page.getByText(/שלחנו קישור לאיפוס סיסמה/)).toBeVisible();
+  });
 });

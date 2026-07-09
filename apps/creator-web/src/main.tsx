@@ -11,11 +11,15 @@ import './index.css';
 // Install global crash/rejection handlers + (DSN-gated) crash reporter before render.
 initTelemetry();
 
+// In playtest the app is served under Vite base `/creator/` (single-origin
+// tunnel); the router must know that prefix. `/` for normal dev.
+const BASENAME = import.meta.env.BASE_URL.replace(/\/$/, '') || '/';
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <LanguageProvider>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <BrowserRouter basename={BASENAME} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AuthProvider>
             <App />
           </AuthProvider>

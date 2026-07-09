@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
+import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, type ChatMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -22,7 +22,7 @@ import HeatmapMap from '../components/HeatmapMap';
 
 // Where the participant app lives (for the shareable join link/QR).
 const PLAY_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
 export default function RunConsolePage() {

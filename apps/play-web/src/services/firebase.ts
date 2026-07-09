@@ -34,17 +34,29 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
+// Playtest tunnel detection — see the creator-web copy for the full rationale:
+// behind a single https tunnel origin every emulator service is reached through
+// that origin (the proxy routes each path signature); a one-port tunnel can't
+// expose :8080/:9099/etc and an https page can't call http://host:8080. Local
+// dev:all (localhost/127.0.0.1) keeps the direct port-based wiring.
+const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+const originHost = typeof window !== 'undefined' ? window.location.hostname : '';
+const tunnelMode =
+  import.meta.env.DEV && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
+
 // Offline-first cache: live run/team state is served from IndexedDB when the
 // participant briefly loses signal in the field, and listeners reconnect
 // automatically. Multi-tab manager keeps several open tabs consistent.
 // Cached on globalThis so a Vite HMR re-execution of this module reuses the
 // same instance instead of calling initializeFirestore() twice (which throws).
+// In tunnel mode Firestore also needs host/ssl at creation (routes via the proxy).
 const dbHolder = globalThis as unknown as { __rpPlayDb?: ReturnType<typeof getFirestore> };
 function initDb() {
   if (dbHolder.__rpPlayDb) return dbHolder.__rpPlayDb;
   try {
     dbHolder.__rpPlayDb = initializeFirestore(app, {
       localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      ...(tunnelMode ? { host: originHost, ssl: true, experimentalAutoDetectLongPolling: true } : {}),
     });
   } catch {
     dbHolder.__rpPlayDb = getFirestore(app);
@@ -59,13 +71,23 @@ export const storage   = getStorage(app);
 const emuFlag = globalThis as unknown as { __rpPlayEmu?: boolean };
 if (import.meta.env.DEV && !emuFlag.__rpPlayEmu) {
   emuFlag.__rpPlayEmu = true;
-  // Emulator host: 127.0.0.1 for normal dev; the tunnel origin in playtest so a
-  // remote phone reaches the backend (playtest-shareable-links).
-  const host = resolveEmulatorHost(import.meta.env, typeof window !== 'undefined' ? window.location.origin : null);
-  connectFirestoreEmulator(db, host, 8080);
-  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
-  connectFunctionsEmulator(functions, host, 5001);
-  connectStorageEmulator(storage, host, 9199);
+  if (tunnelMode) {
+    // Single-origin routing through the tunnel (https, no explicit port); the
+    // proxy forwards each path to the right emulator. Firestore host/ssl was set
+    // in initDb() above. Functions/Storage lack an https-origin emulator API in
+    // firebase 10.x, so set the (SDK-verified) internal fields directly.
+    connectAuthEmulator(auth, pageOrigin, { disableWarnings: true });
+    (functions as unknown as { emulatorOrigin: string }).emulatorOrigin = pageOrigin;
+    (storage as unknown as { host: string; _protocol: string }).host = originHost;
+    (storage as unknown as { host: string; _protocol: string })._protocol = 'https';
+  } else {
+    // Emulator host: 127.0.0.1 for normal dev. Default keeps dev:all unchanged.
+    const host = resolveEmulatorHost(import.meta.env, pageOrigin || null);
+    connectFirestoreEmulator(db, host, 8080);
+    connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+    connectFunctionsEmulator(functions, host, 5001);
+    connectStorageEmulator(storage, host, 9199);
+  }
 }
 
 // Participants play anonymously (uid == teamId). Each device/browser is a team.

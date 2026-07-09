@@ -13,8 +13,9 @@ import {
 } from '../services/firebase';
 import { Button, Card, Input, Label, Spinner } from './ui';
 import { claimReferral } from '../services/calls';
-import { dialog } from './dialog';
-import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN } from '@rushpoint/shared';
+import { dialog, DialogHost } from './dialog';
+import { ToastHost } from './toast';
+import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 
 const LegalPage = lazy(() => import('../pages/LegalPage'));
@@ -24,7 +25,7 @@ const LEGAL_PATHS = ['/privacy', '/terms'];
 // The participant app, for the no-signup "try a sample game" demo link. The seed
 // always keeps a live demo run reachable with the PLAY01 access code.
 const PLAY_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 const DEMO_URL = `${PLAY_URL}/?code=PLAY01`;
 
@@ -297,7 +298,18 @@ function LoginScreen() {
     </Card>
   );
 
-  return <Landing authCard={authCard} />;
+  // The logged-in App mounts its own DialogHost/ToastHost, but the logged-out screen
+  // renders instead of App — so without these, dialog.*/toast.* calls made here (the
+  // forgot-password confirmation, the referral-bonus alert) silently no-op. Mounting
+  // them here makes that pre-signin feedback actually render. These two branches are
+  // mutually exclusive with App, so the module-singleton host is never double-owned.
+  return (
+    <>
+      <Landing authCard={authCard} />
+      <DialogHost />
+      <ToastHost />
+    </>
+  );
 }
 
 function Landing({ authCard }: { authCard: ReactNode }) {
