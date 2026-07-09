@@ -49,10 +49,7 @@ export {
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────
 
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  return context.auth.uid;
-}
+import { requireAuth } from './auth';
 
 function assertAdmin(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');

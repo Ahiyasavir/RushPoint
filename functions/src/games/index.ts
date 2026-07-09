@@ -43,12 +43,7 @@ function gamePath(uid: string, gameId: string) {
   return `users/${uid}/games/${gameId}`;
 }
 
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  }
-  return context.auth.uid;
-}
+import { requireAuth } from '../auth';
 
 // Enforce the task-media trust boundary on every write: run each task's `media`
 // through normalizeTaskMedia so a client can never persist an off-origin image/video

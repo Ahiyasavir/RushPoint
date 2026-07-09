@@ -158,10 +158,10 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
             </button>
             <button
               onClick={toggleLang}
-              aria-label={lang === 'he' ? 'Switch to English' : 'עבור לעברית'}
+              aria-label={t.join.langToggleAria}
               className="text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
             >
-              {lang === 'he' ? 'English' : 'עברית'}
+              {lang === 'he' ? 'English' : 'עברית'} {/* i18n-ignore — language switcher shows the target language in its own script */}
             </button>
           </div>
         </div>
@@ -340,7 +340,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
                     value={m} placeholder={t.join.memberPlaceholder(i + 1)}
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
-                    <button aria-label={lang === 'he' ? `הסר ${m}` : `Remove ${m}`} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                    <button aria-label={t.join.removeMember(m)} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
                   )}
                 </div>
               ))}

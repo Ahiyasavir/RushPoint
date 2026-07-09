@@ -94,12 +94,10 @@ import {
 } from './teamDevices';
 import type { RunFeedback } from '@rushpoint/shared';
 import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
-import { validate } from '../validation';
-
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  return context.auth.uid;
-}
+import { validate, parseStored } from '../validation';
+import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
+import { requireAuth } from '../auth';
+import { applyStageCompletion } from './helpers';
 
 function gamePath(ownerUid: string, gameId: string) {
   return `users/${ownerUid}/games/${gameId}`;
@@ -700,46 +698,13 @@ export async function completeTaskForTeam(
       }
     }
 
-    // Stage completion: a stage may require only a SUBSET of its tasks
-    // (requiredTaskCount). It's done when that many are completed, OR when no
-    // task remains to do. When it finishes early, the leftover tasks are
-    // auto-skipped for this team so they aren't routed again.
-    const completedCount = stages[stageIdx].tasks.filter((t) => t.status === 'completed').length;
-    const required = Math.min(
-      stages[stageIdx].requiredTaskCount ?? stages[stageIdx].tasks.length,
-      stages[stageIdx].tasks.length,
-    );
-    const allTerminal = stages[stageIdx].tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
-    const stageDone = completedCount >= required || allTerminal;
-    if (stageDone) {
-      // Auto-skip any tasks the team didn't need to do. A task still ASSIGNED
-      // holds a station-occupancy slot (assignTask incremented taskCounts), so
-      // record it for release after the transaction — otherwise the slot leaks.
-      for (const t of stages[stageIdx].tasks) {
-        if (t.status !== 'completed') {
-          if (t.status === 'assigned') skippedHeldTaskIds.push(t.taskId);
-          t.status = 'skipped';
-        }
-      }
-      stages[stageIdx].status = 'completed';
-      stages[stageIdx].completedAt = now;
-      stages[stageIdx].earnedScore = stages[stageIdx].tasks.reduce((s, t) => s + (t.earnedScore ?? 0), 0);
-
-      // Check if final stage (triggers Final Run)
-      const isLastStage = game.stages.find((s) => s.id === stages[stageIdx].stageId)?.isFinal ?? (stageIdx === stages.length - 1);
-
-      // Unlock next stage if not final — UNLESS it has a scheduled-release gate
-      // that hasn't opened yet (change: scheduled-release). A gated next stage
-      // stays `locked`; a later requestNextTask/getMyTeamState poll unlocks it
-      // once its gate opens (see computeStageUnlock).
-      if (!isLastStage && stageIdx + 1 < stages.length) {
-        const nextGameStage = game.stages.find((s) => s.id === stages[stageIdx + 1].stageId);
-        if (isReleased(nextGameStage, launchedAt, new Date(now).getTime())) {
-          stages[stageIdx + 1].status = 'active';
-          stages[stageIdx + 1].startedAt = now;
-        }
-      }
-    }
+    // Stage completion via the shared single-source helper (applyStageCompletion):
+    // a stage may require only a SUBSET of its tasks (requiredTaskCount); when it
+    // finishes, leftover tasks are auto-skipped, the next stage unlocks (unless
+    // scheduled-release-gated), and any leftover that was still ASSIGNED holds a
+    // station slot — collect those for release after the transaction.
+    const { heldAssignedTaskIds } = applyStageCompletion(stages, stageIdx, game, launchedAt, now);
+    skippedHeldTaskIds.push(...heldAssignedTaskIds);
 
     const allDone = stages.every((s) => s.status === 'completed');
     const newScore = (team.score ?? 0) + earnedScore;
@@ -1098,16 +1063,18 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   const runRef = db.doc(runPath(uid, gameId, runId));
   const runSnap = await runRef.get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  const run = runSnap.data() as Run;
+  // Validate the stored docs that feed buildRankings — a corrupt run/game/team
+  // fails loud (internal) rather than skewing the final standings (parse-boundary).
+  const run = parseStored(() => parseRun(runSnap.data()));
   if (run.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
-  const game = gameSnap.data() as Game;
+  const game = parseStored(() => parseGame(gameSnap.data()));
 
   const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
-  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+  const teams = teamsSnap.docs.map((d) => parseStored(() => parseRunTeam(d.data())));
 
   const now = new Date().toISOString();
   const rankings = buildRankings(game, teams, now);
@@ -1214,16 +1181,19 @@ export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (da
   const runRef = db.doc(runPath(uid, gameId, runId));
   const runSnap = await runRef.get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  const run = runSnap.data() as Run;
+  // Validate the stored docs that feed buildRankings — buildRankings is shared by
+  // finalizeRun + refreshLeaderboard, so a corrupt doc here would drift live vs
+  // final standings; fail loud (internal) instead (parse-boundary).
+  const run = parseStored(() => parseRun(runSnap.data()));
   if (run.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
-  const game = gameSnap.data() as Game;
+  const game = parseStored(() => parseGame(gameSnap.data()));
 
   const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
-  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+  const teams = teamsSnap.docs.map((d) => parseStored(() => parseRunTeam(d.data())));
 
   const now = new Date().toISOString();
   const rankings = buildRankings(game, teams, now);
@@ -1981,31 +1951,11 @@ function sweepExpiredInFlight(
   rec.status = 'skipped'; // expired mid-work → skipped, not scored (no partial credit)
   rec.completedAt = now;
 
-  // Stage completion — mirror of completeTaskForTeam's stageDone block.
-  const completedCount = stages[activeIdx].tasks.filter((t) => t.status === 'completed').length;
-  const required = Math.min(
-    stages[activeIdx].requiredTaskCount ?? stages[activeIdx].tasks.length,
-    stages[activeIdx].tasks.length,
-  );
-  const allTerminal = stages[activeIdx].tasks.every((t) => t.status === 'completed' || t.status === 'skipped');
-  if (completedCount >= required || allTerminal) {
-    for (const t of stages[activeIdx].tasks) {
-      if (t.status !== 'completed') t.status = 'skipped';
-    }
-    stages[activeIdx].status = 'completed';
-    stages[activeIdx].completedAt = now;
-    stages[activeIdx].earnedScore = stages[activeIdx].tasks.reduce((s, t) => s + (t.earnedScore ?? 0), 0);
-
-    const isLastStage = game.stages.find((s) => s.id === stages[activeIdx].stageId)?.isFinal
-      ?? (activeIdx === stages.length - 1);
-    if (!isLastStage && activeIdx + 1 < stages.length) {
-      const nextGameStage = game.stages.find((s) => s.id === stages[activeIdx + 1].stageId);
-      if (isReleased(nextGameStage, launchedAt, nowMs)) {
-        stages[activeIdx + 1].status = 'active';
-        stages[activeIdx + 1].startedAt = now;
-      }
-    }
-  }
+  // Stage completion via the shared single-source helper (same logic/ordering as
+  // completeTaskForTeam, including the scheduled-release gate). The sweep path
+  // historically releases no station slots, so the helper's returned
+  // held-assigned-task ids are intentionally ignored — behavior preserved exactly.
+  applyStageCompletion(stages, activeIdx, game, launchedAt, now);
   return { stages, expiredTaskId: assignedRec.taskId };
 }
 

@@ -27,6 +27,8 @@ const HE = {
     offline: '⚠ אין חיבור. ההתקדמות נשמרה. פעולות יתחדשו כשהקליטה תחזור.',
   },
   join: {
+    langToggleAria: 'החלף שפה',
+    removeMember: (name: string) => `הסר ${name}`,
     subtitle: 'הזינו את קוד הגישה מהמארגן כדי להצטרף למירוץ',
     codePlaceholder: 'הקוד שלכם',
     lookingUp: 'מחפש…',
@@ -428,6 +430,8 @@ const EN: typeof HE = {
     offline: "⚠ You're offline. Progress saved. Actions will resume when signal returns.",
   },
   join: {
+    langToggleAria: 'Switch language',
+    removeMember: (name: string) => `Remove ${name}`,
     subtitle: 'Enter the access code from your host to join the race',
     codePlaceholder: 'ABC 123',
     lookingUp: 'Looking up…',
