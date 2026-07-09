@@ -110,7 +110,7 @@ export default function DashboardPage() {
   if (!games) return <DashboardSkeleton />;
 
   const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
-  const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'יוצר';
+  const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? d.creatorFallback;
 
   return (
     <div className="animate-fade-up">
@@ -194,12 +194,12 @@ export default function DashboardPage() {
                     <div className="flex items-start justify-between gap-3">
                       <h3 className="font-brand font-bold text-[--ink-1] text-base leading-snug flex-1">{g.title}</h3>
                       <Badge color={g.visibility === 'public' ? 'cyan' : 'zinc'}>
-                        {g.visibility === 'public' ? 'ציבורי' : 'פרטי'}
+                        {g.visibility === 'public' ? d.visPublic : d.visPrivate}
                       </Badge>
                     </div>
 
                     <p className="text-xs text-[--ink-3] line-clamp-2 leading-relaxed min-h-[2.5rem]">
-                      {g.description || 'אין תיאור עדיין.'}
+                      {g.description || d.noDescription}
                     </p>
 
                     {allTaskTypes.length > 0 && (

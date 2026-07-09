@@ -34,8 +34,8 @@ function MapSkeleton({ className = 'h-44' }: { className?: string }) {
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
-function blankStage(order: number): Stage {
-  return { id: uuid(), order, title: `Stage ${order + 1}`, tasks: [blankTask()] };
+function blankStage(order: number, title: string): Stage {
+  return { id: uuid(), order, title, tasks: [blankTask()] };
 }
 
 // The exact fields persisted by updateGame — kept in one place so the auto-save
@@ -554,7 +554,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
     setStages(moveItem(game.stages, from, to).map((s, i) => ({ ...s, order: i })));
   }
   function addStage() {
-    const s = blankStage(game.stages.length);
+    const s = blankStage(game.stages.length, b.stageDefaultTitle(game.stages.length + 1));
     setStages([...game.stages, s]);
     setActiveStageId(s.id);
   }

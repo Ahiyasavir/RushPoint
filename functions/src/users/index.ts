@@ -17,12 +17,7 @@ import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
 import type { Game, Wallet } from '@rushpoint/shared';
 
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  }
-  return context.auth.uid;
-}
+import { requireAuth } from '../auth';
 
 
 // ─── updateMyProfile ────────────────────────────────────────────────────────

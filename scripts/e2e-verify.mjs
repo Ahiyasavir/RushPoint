@@ -1557,6 +1557,17 @@ async function main() {
     await expectError('react: a stranger (not in the run, not staff) is denied',
       feedStranger.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' }),
       { codeIn: ['functions/permission-denied', 'functions/not-found'] });
+    // Cross-tenant READ: the feed carries participant photo URLs + team names, so a
+    // stranger who is not a participant/staff/owner of THIS run must be denied the
+    // direct collection read (rules-enforced — getColAt itself is rejected).
+    await expectError('feed read: a stranger is denied reading another run\'s feed',
+      feedStranger.getColAt(feedCol),
+      { codeIn: ['permission-denied'] });
+    // Allow-path regression guards: the run participant and the run owner still read it.
+    const partFeedRead = await fp.getColAt(feedCol);
+    check('feed read: a run participant still reads the feed', Array.isArray(partFeedRead) && partFeedRead.length >= 1, String(partFeedRead?.length));
+    const ownerFeedRead = await creator.getColAt(feedCol);
+    check('feed read: the run owner still reads the feed', Array.isArray(ownerFeedRead) && ownerFeedRead.length >= 1, String(ownerFeedRead?.length));
     await expectError('hide: a participant cannot hide a feed item',
       fp.call('hideFeedItem', { ...FCTX, itemId: item2.id }),
       { codeIn: ['functions/permission-denied'] });

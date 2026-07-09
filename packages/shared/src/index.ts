@@ -45,3 +45,4 @@ export * from './powerUps';
 export * from './qrPayload';
 export * from './chat';
 export * from './mediaKinds';
+export * from './storedDocs';
