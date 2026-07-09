@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game } from '@rushpoint/shared';
-import { PAYMENTS_ENABLED } from '@rushpoint/shared';
+import { PAYMENTS_ENABLED, resolvePlayOrigin } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -15,7 +16,7 @@ let _gamesCache: { data: Game[]; ts: number } | null = null;
 const CACHE_TTL = 45_000;
 
 const PLAY_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
 function getAccentBar(g: Game): string {
@@ -56,6 +57,15 @@ export default function DashboardPage() {
     }
   }
   useEffect(() => { void load(); }, []);
+
+  // Lock background scroll while the (portalled) template picker is open, so the
+  // page behind can't scroll under the full-screen overlay.
+  useEffect(() => {
+    if (!picking) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [picking]);
 
   async function newGame(tpl: GameTemplate) {
     setBusy(true); setPicking(false);
@@ -321,35 +331,42 @@ export default function DashboardPage() {
       )}
 
       {/* ── Template picker modal ─────────────────────────────────────────── */}
-      {picking && (
+      {picking && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setPicking(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-lg shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
+            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
-                  <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
-                </div>
-                <button onClick={() => setPicking(false)}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+            {/* Header — fixed; never scrolls away. */}
+            <div className="flex items-start justify-between gap-4 p-5 pb-4 shrink-0 border-b border-[--rp-border]">
+              <div>
+                <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
+                <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
               </div>
-              <div className="grid sm:grid-cols-2 gap-3">
+              <button onClick={() => setPicking(false)}
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+            </div>
+            {/* Body — bounded to the modal; the compact cards fit without scrolling
+                on a normal screen, and only this region (never the page) scrolls on
+                a very short viewport. */}
+            <div className="overflow-y-auto p-5 pt-4">
+              <div className="grid sm:grid-cols-2 gap-2.5">
                 {TEMPLATES.map((tpl) => (
                   <button key={tpl.key} disabled={busy} onClick={() => newGame(tpl)}
-                    className="text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-4 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
-                    <div className="text-2xl mb-2.5">{tpl.emoji}</div>
-                    <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{tpl.label}</div>
-                    <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{tpl.description}</div>
+                    className="flex items-start gap-3 text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
+                    <div className="text-2xl leading-none shrink-0 mt-0.5">{tpl.emoji}</div>
+                    <div className="min-w-0">
+                      <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{tpl.label}</div>
+                      <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{tpl.description}</div>
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {sharing && (

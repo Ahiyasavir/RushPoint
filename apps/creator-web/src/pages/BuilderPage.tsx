@@ -607,10 +607,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
       />
 
       {/* ── Centre canvas: the active stage. No wrapping Card — the shell already
-          contains it; the task cards provide the structure. Scrolls on its own. ── */}
-      <div className="flex-1 min-w-0 h-full overflow-y-auto pe-1 space-y-3 pt-0.5">
+          contains it; the task cards provide the structure. A flex column: the
+          stage header is fixed, the task canvas flexes and owns the ONLY scroll
+          (no more nested double-scrollbar), the add-tiles stay pinned below. ── */}
+      <div className="flex-1 min-w-0 h-full flex flex-col gap-3 pe-1 pt-0.5">
         {activeStage && (
           <>
+            <div className="shrink-0 space-y-3">
             <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
@@ -672,13 +675,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
             )}
 
             <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
+            </div>
 
-            <TaskCanvas
-              tasks={activeStage.tasks}
-              activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
-              onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
-            />
-            <div className="flex gap-2">
+            <div className="flex-1 min-h-0">
+              <TaskCanvas
+                tasks={activeStage.tasks}
+                activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
+                onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
+              />
+            </div>
+            <div className="flex gap-2 shrink-0">
               <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
               <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>

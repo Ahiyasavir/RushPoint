@@ -1,9 +1,15 @@
 // Reusable rich tooltip for the Builder (change: v2.1-builder-shell-redesign).
 // Abstract config concepts (geofence radius, hint penalty, max concurrent teams,
-// difficulty routing weight) are hard to grasp from a label alone, so on hover/
-// focus we show a small card with a one-line explanation and an asset-light inline
-// SVG diagram. CSS-only show/hide (no portal, no JS positioning) keeps it cheap.
-import { useId, type ReactNode } from 'react';
+// difficulty routing weight) — and each task type's verification animation — are
+// hard to grasp from a label alone, so on hover/focus we show a small card with a
+// one-line explanation and an inline SVG diagram.
+//
+// The card is portalled to <body> and positioned with `position: fixed`, then
+// clamped into the viewport (and flipped above↔below when there isn't room). A
+// purely CSS-centered card can't know where the window edge is, so a trigger near
+// the modal edge would spill the card off-screen — this measures and keeps it in.
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useT } from './LanguageContext';
 
 export type TooltipConcept = 'geofence' | 'hint' | 'concurrent' | 'difficulty';
@@ -58,6 +64,13 @@ function buildSvgs(easyLabel: string, hardLabel: string): Record<TooltipConcept,
   };
 }
 
+// Card geometry (kept in sync with the classes below so we can measure-free clamp).
+const CARD_WIDTH = 224; // w-56
+const VIEWPORT_PAD = 8; // keep this much gap from the window edge
+const TRIGGER_GAP = 8; // gap between the ? button and the card
+
+type Coords = { top: number; left: number; placement: 'top' | 'bottom' };
+
 export default function RichTooltip({ concept, title: titleProp, body: bodyProp, svg: svgProp, children }: TooltipProps) {
   const id = useId();
   const b = useT().builder;
@@ -71,28 +84,97 @@ export default function RichTooltip({ concept, title: titleProp, body: bodyProp,
   const d = concept
     ? { ...TEXT[concept], svg: svgs[concept] }
     : { title: titleProp!, body: bodyProp!, svg: svgProp };
+
+  const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<Coords | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  // Position the (already-rendered, still-invisible) card relative to the trigger,
+  // clamped inside the viewport. Runs before paint so there is no visible jump.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const r = trigger.getBoundingClientRect();
+      const vw = document.documentElement.clientWidth;
+      const vh = document.documentElement.clientHeight;
+      const cardH = cardRef.current?.offsetHeight ?? 0;
+
+      // Center on the trigger, then clamp so neither edge leaves the window.
+      const centerX = r.left + r.width / 2;
+      const left = Math.min(
+        Math.max(centerX - CARD_WIDTH / 2, VIEWPORT_PAD),
+        vw - CARD_WIDTH - VIEWPORT_PAD,
+      );
+
+      // Prefer above; flip below when the card wouldn't fit over the trigger.
+      const fitsAbove = r.top - TRIGGER_GAP - cardH >= VIEWPORT_PAD;
+      const placement: Coords['placement'] = fitsAbove ? 'top' : 'bottom';
+      const top = placement === 'top'
+        ? Math.max(r.top - TRIGGER_GAP - cardH, VIEWPORT_PAD)
+        : Math.min(r.bottom + TRIGGER_GAP, vh - cardH - VIEWPORT_PAD);
+
+      setCoords({ top, left, placement });
+    };
+    place();
+    // Reposition if the page scrolls or resizes while the card is open.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
+  }, [open]);
+
+  // Dismiss on Escape for keyboard users.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const show = () => setOpen(true);
+  const hide = () => { setOpen(false); setCoords(null); };
+
   return (
-    <span className="relative inline-flex group align-middle">
+    <span className="relative inline-flex align-middle">
       <button
+        ref={triggerRef}
         type="button"
         aria-label={d.title}
-        aria-describedby={id}
+        aria-describedby={open ? id : undefined}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
         className="w-4 h-4 rounded-full bg-[--surface-2] text-[--ink-3] text-[10px] leading-none flex items-center justify-center hover:text-[--ink-1] focus:outline-none focus:ring-1 focus:ring-rp-fire"
       >
         {children ?? '?'}
       </button>
-      <span
-        id={id}
-        role="tooltip"
-        className="pointer-events-none absolute z-50 bottom-full mb-2 start-1/2 -translate-x-1/2 w-56
-          rounded-xl border border-[--rp-border] bg-[--surface-1] p-3 shadow-soft
-          opacity-0 invisible transition-opacity duration-150
-          group-hover:opacity-100 group-hover:visible group-focus-within:opacity-100 group-focus-within:visible"
-      >
-        <div className="text-xs font-semibold text-[--ink-1] mb-1">{d.title}</div>
-        <div className="rounded-lg bg-[--surface-2] text-[--ink-2] mb-1.5">{d.svg}</div>
-        <div className="text-[11px] text-[--ink-3] leading-snug">{d.body}</div>
-      </span>
+      {open && createPortal(
+        <div
+          ref={cardRef}
+          id={id}
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            top: coords?.top ?? 0,
+            left: coords?.left ?? 0,
+            width: CARD_WIDTH,
+            // Keep it out of the way (and unclickable) until we've measured+placed.
+            visibility: coords ? 'visible' : 'hidden',
+          }}
+          className="pointer-events-none z-[60] rounded-xl border border-[--rp-border] bg-[--surface-1] p-3 shadow-soft"
+        >
+          <div className="text-xs font-semibold text-[--ink-1] mb-1">{d.title}</div>
+          <div className="rounded-lg bg-[--surface-2] text-[--ink-2] mb-1.5">{d.svg}</div>
+          <div className="text-[11px] text-[--ink-3] leading-snug">{d.body}</div>
+        </div>,
+        document.body,
+      )}
     </span>
   );
 }
