@@ -11,6 +11,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { restartDelayMs, isQuickFailure } from './lib/tunnelRestart.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_FILE = path.join(ROOT, '.tunnel.env');
@@ -59,13 +60,32 @@ console.log('[ngrok]   creator : https://' + DOMAIN + '/creator/');
 console.log('[ngrok]   play    : https://' + DOMAIN + '/');
 console.log('[ngrok]   staff   : https://' + DOMAIN + '/?staff\n');
 
-const child = spawn(
-  NPX,
-  ['ngrok', 'http', String(PORT), '--domain', DOMAIN, '--log', 'stdout'],
-  { stdio: 'inherit', shell: isWin },
-);
+// Resilient tunnel: a dropped ngrok session (e.g. a transient CRL/IPv6 blip)
+// must RECONNECT on the same fixed domain, not exit — exiting would collapse the
+// whole `concurrently` playtest stack and strand orphaned emulators. We only
+// exit on an intentional stop (Ctrl+C / SIGTERM). Rapid back-to-back failures
+// back off (capped); a healthy run that later drops reconnects immediately.
+let shuttingDown = false;
+let child = null;
+let quickFailures = 0;
 
-const stop = () => { try { child.kill(); } catch {} };
+function startNgrok() {
+  const startedAt = Date.now();
+  child = spawn(
+    NPX,
+    ['ngrok', 'http', String(PORT), '--domain', DOMAIN, '--log', 'stdout'],
+    { stdio: 'inherit', shell: isWin },
+  );
+  child.on('exit', (code) => {
+    if (shuttingDown) { process.exit(code ?? 0); return; }
+    quickFailures = isQuickFailure(Date.now() - startedAt) ? quickFailures + 1 : 0;
+    const delay = restartDelayMs(quickFailures);
+    console.error(`[ngrok] tunnel exited (code ${code ?? 0}) — reconnecting on ${DOMAIN} in ${Math.round(delay / 1000)}s…`);
+    setTimeout(startNgrok, delay);
+  });
+}
+
+const stop = () => { shuttingDown = true; try { child?.kill(); } catch {} };
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
-child.on('exit', (code) => process.exit(code ?? 0));
+startNgrok();
