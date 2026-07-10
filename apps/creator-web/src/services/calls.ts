@@ -93,6 +93,8 @@ export interface RunTeamRow {
   memberCount: number;
   status: string;
   score: number;
+  /** Hints + staff adjustments; subtracted from score at ranking time. */
+  bonusPenalty: number;
   completedStages: number;
   activeStageOrder: number | null;
   finished: boolean;

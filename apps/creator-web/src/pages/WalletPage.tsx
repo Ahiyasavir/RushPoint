@@ -42,7 +42,7 @@ export default function WalletPage() {
       const res = await purchaseCredits({ packageId });
       if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
       await loadStatus(); // emulator grants instantly
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Purchase failed'); }
+    } catch (e) { await dialog.alert(e instanceof Error ? e.message : w.purchaseFailed); }
     finally { setBusy(null); }
   }
 
@@ -52,7 +52,7 @@ export default function WalletPage() {
       const res = await subscribePro({ interval });
       if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
       await loadStatus();
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : 'Subscription failed'); }
+    } catch (e) { await dialog.alert(e instanceof Error ? e.message : w.subscriptionFailed); }
     finally { setBusy(null); }
   }
 

@@ -18,13 +18,14 @@ interface DialogRequest {
   message: string;
   defaultValue?: string;
   confirmLabel?: string;
+  danger?: boolean;
   resolve: (value: boolean | string | null) => void;
 }
 
 let counter = 0;
 let listener: ((req: DialogRequest | null) => void) | null = null;
 
-function push(kind: DialogKind, message: string, opts?: { defaultValue?: string; confirmLabel?: string }) {
+function push(kind: DialogKind, message: string, opts?: { defaultValue?: string; confirmLabel?: string; danger?: boolean }) {
   return new Promise<boolean | string | null>((resolve) => {
     const req: DialogRequest = { id: ++counter, kind, message, resolve, ...opts };
     // No host mounted (e.g. very early) → fall back to a resolved default so nothing hangs.
@@ -35,8 +36,8 @@ function push(kind: DialogKind, message: string, opts?: { defaultValue?: string;
 
 export const dialog = {
   alert: (message: string) => push('alert', message).then(() => undefined),
-  confirm: (message: string, confirmLabel?: string) =>
-    push('confirm', message, { confirmLabel }) as Promise<boolean>,
+  confirm: (message: string, confirmLabel?: string, danger?: boolean) =>
+    push('confirm', message, { confirmLabel, danger }) as Promise<boolean>,
   prompt: (message: string, defaultValue = '') =>
     push('prompt', message, { defaultValue }) as Promise<string | null>,
 };
@@ -80,11 +81,14 @@ export function DialogHost() {
             <Button variant="ghost" onClick={onCancel}>{c.cancel}</Button>
           )}
           <Button
-            variant={req.confirmLabel?.toLowerCase().includes('delete') ? 'danger' : 'primary'}
+            // Prefer the explicit `danger` flag; fall back to sniffing an English
+            // label so callers that don't set it still get red for "delete" (the
+            // sniff never fires for a localized/Hebrew label, hence the flag).
+            variant={(req.danger ?? req.confirmLabel?.toLowerCase().includes('delete')) ? 'danger' : 'primary'}
             autoFocus={req.kind !== 'prompt'}
             onClick={onConfirm}
           >
-            {req.confirmLabel ?? (req.kind === 'alert' ? 'OK' : req.kind === 'confirm' ? 'Confirm' : 'Submit')}
+            {req.confirmLabel ?? (req.kind === 'alert' ? c.ok : req.kind === 'confirm' ? c.confirmLabel : c.submit)}
           </Button>
         </div>
       </Card>

@@ -8,6 +8,7 @@ import { Badge, Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
+import { isTaskInteractionValid } from '../lib/wizardLogic';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 
@@ -34,6 +35,14 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const t = useT();
   const d = t.dashboard;
+  const b = t.builder;
+  // Localized task-type chip labels (never show raw English enum values in a
+  // Hebrew UI). Mirrors the Builder's TaskCard type labels.
+  const TASK_TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+  };
 
   const [games, setGames] = useState<Game[] | null>(() => {
     if (_gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return _gamesCache.data;
@@ -53,7 +62,7 @@ export default function DashboardPage() {
       // Escape the spinner on a first-load failure, but never blank an already-
       // loaded dashboard if a post-mutation refresh fails.
       setGames((prev) => prev ?? []);
-      await dialog.alert(e instanceof Error ? e.message : 'Failed to load games');
+      await dialog.alert(e instanceof Error ? e.message : d.loadGamesFailed);
     }
   }
   useEffect(() => { void load(); }, []);
@@ -80,12 +89,16 @@ export default function DashboardPage() {
 
   async function launch(g: Game, opts?: { testDrive?: boolean }) {
     if (g.stages.length === 0) { await dialog.alert(d.emptyBody); return; }
+    // Don't launch an unplayable game: a quiz/numeric/station/sequence task missing
+    // its answer key can never be completed (updateGame doesn't reject these).
+    const badTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
+    if (badTask) { await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return; }
     setBusy(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Launch failed';
+      const msg = e instanceof Error ? e.message : d.launchFailed;
       // Out of free runs + credits → route the creator to buy more. In free
       // mode launches never fail for billing, so just surface other errors.
       if (PAYMENTS_ENABLED && /credit|pro/i.test(msg)) {
@@ -97,7 +110,7 @@ export default function DashboardPage() {
   }
 
   async function remove(g: Game) {
-    if (!(await dialog.confirm(d.deleteConfirm(g.title), d.deleteBtn))) return;
+    if (!(await dialog.confirm(d.deleteConfirm(g.title), d.deleteBtn, true))) return;
     await deleteGame({ gameId: g.id });
     void load(true);
   }
@@ -206,7 +219,7 @@ export default function DashboardPage() {
                       <div className="flex gap-1.5 flex-wrap">
                         {allTaskTypes.map(type => (
                           <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[10px] font-medium">
-                            {TASK_TYPE_EMOJI[type] ?? '●'} {type.replace('_', ' ')}
+                            {TASK_TYPE_EMOJI[type] ?? '●'} {TASK_TYPE_LABEL[type] ?? type}
                           </span>
                         ))}
                       </div>

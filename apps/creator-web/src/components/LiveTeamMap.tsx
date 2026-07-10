@@ -15,6 +15,14 @@ const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 // A few distinct hues so adjacent teams are visually separable.
 const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ec4899', '#eab308', '#14b8a6', '#ef4444'];
 
+// Stable color per team: derived from the teamId (not the snapshot array index),
+// so a team keeps the same hue even as other teams join and reorder the docs.
+function colorForTeam(teamId: string): string {
+  let h = 0;
+  for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) | 0;
+  return COLORS[Math.abs(h) % COLORS.length];
+}
+
 interface TeamLoc {
   teamId: string;
   lat: number;
@@ -79,8 +87,8 @@ export default function LiveTeamMap({
   useEffect(() => {
     if (!map.current) return;
     markers.current.forEach((m) => m.remove());
-    markers.current = locs.map((l, i) => {
-      const color = COLORS[i % COLORS.length];
+    markers.current = locs.map((l) => {
+      const color = colorForTeam(l.teamId);
       const el = document.createElement('div');
       el.style.cssText =
         `width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +

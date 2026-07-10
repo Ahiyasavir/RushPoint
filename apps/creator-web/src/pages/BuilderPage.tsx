@@ -15,7 +15,7 @@ import TaskWizard from '../components/TaskWizard';
 import { moveItem } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
-import { blankTask } from '../lib/wizardLogic';
+import { blankTask, isTaskInteractionValid } from '../lib/wizardLogic';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -225,11 +225,19 @@ export default function BuilderPage() {
     if (game.stages.length === 0 || game.stages.some((s) => s.tasks.length === 0)) {
       await dialog.alert(b.everyStageNeedsTask); return;
     }
+    // Block launching an unplayable game: a quiz/numeric/station/sequence task with
+    // no answer key can never be completed by a participant. The wizard's Done gate
+    // only covers closing via Done — a task closed with ✕/Esc, or edited then left
+    // incomplete, would otherwise ship. updateGame doesn't reject these server-side.
+    const badTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
+    if (badTask) {
+      await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return;
+    }
     try {
       const { runId } = await launchRun({ gameId: game.id, testDrive });
       nav(`/run/${game.id}/${runId}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Launch failed';
+      const msg = e instanceof Error ? e.message : b.launchFailed;
       // Out of free runs + credits → offer to open the wallet. In free mode
       // launches never fail for billing, so just surface any other error.
       if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, b.goToWallet)) {
@@ -398,8 +406,8 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
             <button key={p} onClick={() => patch({ scoringPreset: p })}
               className={`w-full text-left p-3 rounded-lg border ${
                 game.scoringPreset === p ? 'border-neon-green/50 bg-neon-green/10' : 'border-glass-border'}`}>
-              <div className="text-sm font-medium text-zinc-200">{PRESET_LABELS[p].en}</div>
-              <div className="text-xs text-zinc-500">{PRESET_LABELS[p].description}</div>
+              <div className="text-sm font-medium text-zinc-200">{b.presetLabels[p].name}</div>
+              <div className="text-xs text-zinc-500">{b.presetLabels[p].desc}</div>
             </button>
           ))}
         </div>
@@ -494,7 +502,7 @@ function StageStory({ stage, onChange }: { stage: Stage; onChange: (n: Stage['na
 function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
   const b = useT().builder;
   function add() {
-    const f: RegistrationField = { id: uuid(), label: 'New field', type: 'text', required: false, level: 'member' };
+    const f: RegistrationField = { id: uuid(), label: b.newFieldLabel, type: 'text', required: false, level: 'member' };
     patch({ registrationFields: [...game.registrationFields, f] });
   }
   function update(id: string, p: Partial<RegistrationField>) {
@@ -819,7 +827,7 @@ function StepPreview({ game }: { game: Game }) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge>{modeLabel[game.mode]}</Badge>
-        <Badge color="green">{PRESET_LABELS[game.scoringPreset].en}</Badge>
+        <Badge color="green">{b.presetLabels[game.scoringPreset].name}</Badge>
         <Badge>{b.badgeStages(game.stages.length)}</Badge>
         <Badge>{b.badgeTasks(taskCount)}</Badge>
         <Badge>{b.badgeMinutes(estMin)}</Badge>

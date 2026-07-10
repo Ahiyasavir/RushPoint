@@ -32,6 +32,13 @@ export default function TaskLibrary({ onInsert, onClose }: {
   const t = useT();
   const b = t.builder;
   const gl = t.gallery;
+  // Localized task-type labels so the library never shows raw English enum values
+  // (e.g. "smart_station") in a Hebrew UI — mirrors the Gallery/Dashboard cards.
+  const TASK_TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+  };
   const [q, setQ] = useState('');
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
 
@@ -42,7 +49,7 @@ export default function TaskLibrary({ onInsert, onClose }: {
       setTasks(tasks);
     } catch (e) {
       // Don't strand the modal on a spinner if the search fails.
-      await dialog.alert(e instanceof Error ? e.message : 'Search failed');
+      await dialog.alert(e instanceof Error ? e.message : gl.searchFailed);
       setTasks([]);
     }
   }
@@ -77,7 +84,7 @@ export default function TaskLibrary({ onInsert, onClose }: {
                 <div className="text-sm font-medium text-zinc-200 truncate">{t.title}</div>
                 <div className="text-xs text-zinc-500 truncate">{t.description}</div>
                 <div className="flex gap-2 text-[11px] text-zinc-600 mt-0.5">
-                  <span>{t.type}</span>·<span>{gl.metaDiff(t.difficulty)}</span>·<span>{gl.metaPts(t.pointValue)}</span>·<span>{gl.metaCopies(t.copyCount)}</span>
+                  <span>{TASK_TYPE_LABEL[t.type] ?? t.type}</span>·<span>{gl.metaDiff(t.difficulty)}</span>·<span>{gl.metaPts(t.pointValue)}</span>·<span>{gl.metaCopies(t.copyCount)}</span>
                   {t.sourceGameTitle && <span className="truncate">{b.libraryFrom(t.sourceGameTitle)}</span>}
                 </div>
               </div>

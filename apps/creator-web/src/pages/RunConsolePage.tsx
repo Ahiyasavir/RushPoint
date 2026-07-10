@@ -82,7 +82,7 @@ export default function RunConsolePage() {
     finally { setBusy(false); }
   }
   async function finalize() {
-    if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle))) return;
+    if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle, true))) return;
     setBusy(true);
     try { await finalizeRun({ gameId: gameId!, runId: runId! }); }
     finally { setBusy(false); }
@@ -128,7 +128,11 @@ export default function RunConsolePage() {
         <div>
           <h1 className="text-2xl font-bold">{t.runConsole.liveRun}</h1>
           <div className="flex items-center gap-2 mt-1">
-            <Badge color={finished ? 'zinc' : 'green'}>{run.status}</Badge>
+            <Badge color={finished ? 'zinc' : 'green'}>
+              {run.status === 'draft' ? t.runConsole.statusDraft
+                : run.status === 'finished' ? t.runConsole.statusFinished
+                : t.runConsole.statusLive}
+            </Badge>
             {run.billingType && (
               <Badge color={run.billingType === 'test' ? 'gold' : run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
                 {run.billingType === 'test' ? t.runConsole.testRun
@@ -271,7 +275,7 @@ export default function RunConsolePage() {
                   disabled={busy}
                   onClick={() => refreshStandings(!run.leaderboard!.published)}
                 >
-                  {run.leaderboard.published ? 'Visible to teams ✓' : 'Hidden from teams'}
+                  {run.leaderboard.published ? t.runConsole.standingsVisibleToTeams : t.runConsole.standingsHiddenFromTeams}
                 </button>
               </div>
               <div className="space-y-1">
@@ -339,10 +343,10 @@ function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBo
       {qr && <img src={qr} alt={t.runConsole.joinQrCode} className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
       <div className="mt-2 flex flex-col gap-1">
         <button className="text-xs text-neon-green hover:underline" onClick={() => copy(link, 'join')}>
-          {copied === 'join' ? 'Link copied ✓' : 'Copy join link'}
+          {copied === 'join' ? t.runConsole.linkCopied : t.runConsole.copyJoinLink}
         </button>
         <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(boardLink, 'board')}>
-          {copied === 'board' ? 'Link copied ✓' : '🏆 Copy public leaderboard link'}
+          {copied === 'board' ? t.runConsole.linkCopied : t.runConsole.copyBoardLink}
         </button>
         {/* Ceremony mode (ceremony-mode): the same board link with &ceremony plays
             the awards finale (slideshow → podium reveal → standings). */}
@@ -659,7 +663,7 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
     finally { setBusy(false); }
   }
   async function remove(zoneId: string) {
-    if (!(await dialog.confirm(rc.zonesDeleteConfirm))) return;
+    if (!(await dialog.confirm(rc.zonesDeleteConfirm, undefined, true))) return;
     await deleteZone({ gameId, runId, zoneId }).catch(() => undefined);
     setTick((x) => x + 1);
   }
@@ -713,7 +717,7 @@ function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: st
   if (items.length === 0) return null;
 
   async function hide(itemId: string) {
-    if (!(await dialog.confirm(rc.feedHideConfirm))) return;
+    if (!(await dialog.confirm(rc.feedHideConfirm, undefined, true))) return;
     await hideFeedItem({ ownerUid, gameId, runId, itemId }).catch(() => undefined);
   }
 
@@ -768,6 +772,16 @@ function ChatConsole({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; 
       setThreads(rows);
     }, () => undefined);
   }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  // Keep the currently-open thread marked read as its message count grows — an HQ
+  // reply (or a message that arrives while HQ is watching) must not re-badge the
+  // very thread being read. Without this, sending a reply flags it "unread".
+  useEffect(() => {
+    if (!openTeam) return;
+    const th = threads.find((x) => x.teamId === openTeam);
+    if (!th) return;
+    setSeen((s) => (s[openTeam] === th.messages.length ? s : { ...s, [openTeam]: th.messages.length }));
+  }, [openTeam, threads]);
 
   if (threads.length === 0) return null;
 
@@ -886,6 +900,13 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
 
 function AnalyticsPanel({ accessCode }: { accessCode: string }) {
   const t = useT();
+  const b = t.builder;
+  // Localized task-type labels — never show raw English enum values in a Hebrew UI.
+  const TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+  };
   const [data, setData] = useState<RunAnalyticsResult | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -954,7 +975,7 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
                 <tbody>
                   {data.tasks.map((task) => (
                     <tr key={task.taskId} className="border-t border-[--rp-border]">
-                      <td className="py-1.5">{TYPE_EMOJI[task.type] ?? '•'} {task.type}</td>
+                      <td className="py-1.5">{TYPE_EMOJI[task.type] ?? '•'} {TYPE_LABEL[task.type] ?? task.type}</td>
                       <td className="py-1.5">{task.completions}/{task.attempts}</td>
                       <td className="py-1.5">{Math.round(task.completionRate * 100)}%</td>
                       <td className="py-1.5 font-mono">{fmtMs(task.medianMs)}</td>

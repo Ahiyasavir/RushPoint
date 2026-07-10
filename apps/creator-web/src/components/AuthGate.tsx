@@ -143,7 +143,7 @@ function LoginScreen() {
         }, { merge: true });
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : 'Failed');
+      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.signInFailed);
     } finally {
       setBusy(false);
     }
@@ -153,7 +153,7 @@ function LoginScreen() {
     setErr(''); setBusy(true);
     try { await signInWithGoogle(); }
     catch (e) {
-      const msg = e instanceof Error ? e.message.replace(/^Firebase: /, '') : 'Google sign-in failed';
+      const msg = e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.googleSignInFailed;
       if (!/popup-closed-by-user|cancelled-popup-request|popup-blocked/.test(msg)) setErr(msg);
     }
     finally { setBusy(false); }
@@ -167,7 +167,7 @@ function LoginScreen() {
       await resetPassword(email.trim());
       await dialog.alert(t.auth.resetSent(email.trim()));
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : 'Reset failed');
+      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.resetFailed);
     } finally {
       setBusy(false);
     }
