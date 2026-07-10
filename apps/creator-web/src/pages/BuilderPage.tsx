@@ -414,7 +414,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <div className="space-y-2">
           {(Object.keys(PRESET_LABELS) as ScoringPreset[]).map((p) => (
             <button key={p} onClick={() => patch({ scoringPreset: p })}
-              className={`w-full text-left p-3 rounded-lg border ${
+              className={`w-full text-start p-3 rounded-lg border ${
                 game.scoringPreset === p ? 'border-neon-green/50 bg-neon-green/10' : 'border-glass-border'}`}>
               <div className="text-sm font-medium text-zinc-200">{b.presetLabels[p].name}</div>
               <div className="text-xs text-zinc-500">{b.presetLabels[p].desc}</div>

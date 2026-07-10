@@ -991,7 +991,7 @@ function StepsEditor({ steps, onChange, b }: { steps: TaskStep[]; onChange: (s: 
             <Input value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder={b.stepPrompt} dir="auto" />
             <Input value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder={b.stepAnswer} dir="auto" />
           </div>
-          <button className="text-neon-red text-sm mt-2.5" onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
+          <button className="text-neon-red text-sm mt-2.5" aria-label={`${b.deleteTask} ${i + 1}`} onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
         </div>
       ))}
       <Button variant="ghost" className="text-xs" onClick={() => onChange([...steps, { id: uuid(), prompt: '', answer: '' }])}>
