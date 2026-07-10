@@ -566,7 +566,18 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
-  function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
+  // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
+  // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
+  // the team on completion, runs/helpers.ts), so an isFinal flag left on a
+  // non-last stage after an add/reorder/delete would end the run early and make
+  // every later stage unreachable. Stripping it here (the single chokepoint all
+  // stage mutations flow through) keeps the flag pinned to the last stage; the
+  // real last stage still ends the run via the server's positional fallback.
+  function setStages(next: Stage[]) {
+    const last = next.length - 1;
+    const stages = next.map((s, i) => (i !== last && s.isFinal ? { ...s, isFinal: undefined } : s));
+    setGame({ ...game, stages });
+  }
   // Native HTML5 drag reorder: move a stage then re-sequence `order`.
   function moveStage(from: number, to: number) {
     setStages(moveItem(game.stages, from, to).map((s, i) => ({ ...s, order: i })));

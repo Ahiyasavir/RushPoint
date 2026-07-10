@@ -83,6 +83,9 @@ export default function DashboardPage() {
       const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
       const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
       await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
+      // Invalidate the games cache — otherwise returning to the dashboard within
+      // the TTL serves a stale list that's missing this just-created game.
+      _gamesCache = null;
       nav(`/build/${gameId}`);
     } finally { setBusy(false); }
   }
