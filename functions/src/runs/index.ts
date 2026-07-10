@@ -1160,6 +1160,15 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   if (run.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
+  // Double-finalize guard (state-machine): the leaderboard recompute below is
+  // deterministic from current team state, so re-running it is harmless — but
+  // the platform benchmark contribution further down is a ROLLING aggregate
+  // merge and is NOT idempotent. Without this flag, a double-click / retried
+  // finalizeRun call would fold the same run's stats into benchmarks/{taskType}
+  // twice, corrupting the cross-tenant median/completion-rate for every
+  // creator sharing that task type (player-profile writes are separately
+  // guarded by `profileRecorded` on each team, so they stay safe either way).
+  const alreadyFinalized = run.status === 'finished';
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
   const game = parseStored(() => parseGame(gameSnap.data()));
@@ -1210,7 +1219,7 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   // game.benchmarkOptOut. Best-effort — never blocks finalize. A test-drive run
   // is excluded so a rehearsal never pollutes platform benchmarks
   // (change: test-drive-mode).
-  if (!game.benchmarkOptOut && !run.isTestDrive) {
+  if (!game.benchmarkOptOut && !run.isTestDrive && !alreadyFinalized) {
     try {
       const typeOf = new Map<string, string>();
       for (const s of game.stages) for (const t of s.tasks) typeOf.set(t.id, t.type);

@@ -916,6 +916,19 @@ async function main() {
       && !('runId' in benchStation.data) && !('teamId' in benchStation.data) && !('ownerUid' in benchStation.data),
     JSON.stringify(benchStation.data));
 
+  // Double-finalize guard (state-machine): re-finalizing an already-finished
+  // run must not double-contribute to the platform-wide benchmark aggregate
+  // (that would corrupt medians/completion-rates for every creator sharing
+  // that task type, not just this run's owner).
+  {
+    const countBefore = benchStation.data?.count ?? 0;
+    const fin2 = await creator.call('finalizeRun', { gameId, runId }).catch((e) => e);
+    const benchAfterRefinalize = await creator.getDocAt('benchmarks/station');
+    const countAfter = benchAfterRefinalize.data?.count ?? 0;
+    check('re-finalizing an already-finished run does not double-contribute to benchmarks',
+      countAfter === countBefore, `before=${countBefore} after=${countAfter} fin2=${JSON.stringify(fin2?.rankings ?? fin2?.message ?? fin2)}`);
+  }
+
   // Opt-out skips contribution: a benchmarkOptOut game's finished run must not
   // bump the aggregate for its task type.
   {
