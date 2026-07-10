@@ -36,9 +36,12 @@ export const BuilderMock: React.FC = () => {
   const pinY = interpolate(pinDrop, [0, 1], [-260, 0]);
   // chip highlight cycles
   const activeChip = Math.min(4, Math.floor(interpolate(frame, [70, 190], [0, 5], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })));
-  // cursor path
-  const cx = interpolate(frame, [10, 45, 90, 150], [900, 560, 300, 300], { extrapolateRight: 'clamp' });
-  const cy = interpolate(frame, [10, 45, 90, 150], [180, 300, 470, 470], { extrapolateRight: 'clamp' });
+  // cursor with intent: glide to the pin spot (pin drops on arrival at ~40),
+  // hold, then travel to the Launch button and press it
+  const cx = interpolate(frame, [8, 38, 104, 150], [830, 560, 560, 640], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const cy = interpolate(frame, [8, 38, 104, 150], [200, 400, 400, 706], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  const press = spring({ frame: frame - 154, fps, config: { damping: 11, stiffness: 160 } });
+  const launchScale = 1 - Math.sin(Math.min(press, 1) * Math.PI) * 0.07;
   const stageReveal = (i: number) => spring({ frame: frame - 4 - i * 6, fps, config: { damping: 16 } });
 
   const basePins: { p: { x: number; y: number }; kind?: 'default' | 'active' | 'done' }[] = [
@@ -110,7 +113,7 @@ export const BuilderMock: React.FC = () => {
         </div>
 
         {/* Launch button */}
-        <div style={{ position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 12, padding: '18px 34px', borderRadius: 16, background: FIRE_GRAD, boxShadow: '0 12px 34px -8px rgba(255,87,34,0.6)', zIndex: 45 }}>
+        <div style={{ position: 'absolute', bottom: 30, left: '50%', transform: `translateX(-50%) scale(${launchScale})`, display: 'flex', alignItems: 'center', gap: 12, padding: '18px 34px', borderRadius: 16, background: FIRE_GRAD, boxShadow: '0 12px 34px -8px rgba(255,87,34,0.6)', zIndex: 45 }}>
           <span style={{ fontSize: 24 }}>🚀</span>
           <span style={{ fontFamily: FONT.display, fontWeight: 800, fontSize: 24, color: '#fff' }}>השקת ריצה</span>
         </div>
