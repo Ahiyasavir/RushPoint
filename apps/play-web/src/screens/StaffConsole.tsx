@@ -86,7 +86,15 @@ function StaffSignIn({
       saveStaffSession(session);
       onSignedIn(session);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.staff.signInFailed);
+      // Localize the server's English rejections by code instead of leaking them.
+      const code = (e && typeof e === 'object' && 'code' in e
+        ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
+      setErr(
+        code === 'not-found' ? t.staff.signInInvalidPin
+        : code === 'resource-exhausted' ? t.staff.signInLocked
+        : code === 'invalid-argument' ? t.staff.signInBadDetails
+        : t.staff.signInFailed,
+      );
     } finally { setBusy(false); }
   }
 

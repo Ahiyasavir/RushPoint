@@ -173,12 +173,19 @@ const RETRYABLE_CALLABLE_CODES = new Set([
 const CALLABLE_TIMEOUT_MS = 20_000;
 const CALLABLE_ATTEMPTS = 3;
 
-export function callable<Req = void, Res = unknown>(name: string): (data?: Req) => Promise<Res> {
+export function callable<Req = void, Res = unknown>(
+  name: string,
+  // Most privileged mutations are idempotent, so a timeout/transient retry is
+  // safe. A NON-idempotent callable (e.g. triggerSOS creates a new auto-id alert
+  // doc each call) must opt out, or a retry-after-timeout duplicates the write.
+  opts: { retry?: boolean } = {},
+): (data?: Req) => Promise<Res> {
   const fn = httpsCallable<Req, Res>(functions, name);
+  const maxAttempts = opts.retry === false ? 1 : CALLABLE_ATTEMPTS;
   return async (data?: Req) => {
     await ensureAuth();
     let lastErr: unknown;
-    for (let attempt = 0; attempt < CALLABLE_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
         const timeout = new Promise<never>((_, reject) => {
@@ -196,7 +203,7 @@ export function callable<Req = void, Res = unknown>(name: string): (data?: Req) 
       } catch (e) {
         lastErr = e;
         const code = String((e as { code?: string }).code ?? '');
-        const isLast = attempt === CALLABLE_ATTEMPTS - 1;
+        const isLast = attempt === maxAttempts - 1;
         if (isLast || !RETRYABLE_CALLABLE_CODES.has(code)) throw e;
         // Jittered backoff before the next attempt.
         await new Promise((r) => setTimeout(r, 150 * (attempt + 1) + Math.random() * 250));

@@ -6,6 +6,10 @@ import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { unlockAudio } from '../lib/sound';
 
+// Firebase callable codes that mean "transient / connectivity", not a bad code —
+// surfaced to the player as a single "check your connection" message.
+const CONNECTION_CODES = new Set(['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated']);
+
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
   const { t, toggleLang, lang, colorblind, setColorblind } = useT();
   // Evaluate the ?code= link param at mount time, not at module-parse time (P9).
@@ -54,6 +58,19 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     setMembers([...members, '']);
   }
 
+  // Map a callable failure to a localized, participant-safe message. Full-run
+  // (resource-exhausted) and network blips (unavailable/internal/…) get friendly
+  // copy instead of host-facing billing jargon or raw Firebase codes; a genuinely
+  // unexpected error still falls back to the provided message.
+  function joinError(e: unknown, fallback: string): string {
+    const code = (e && typeof e === 'object' && 'code' in e
+      ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
+    if (code === 'resource-exhausted') return t.join.gameFull;
+    if (CONNECTION_CODES.has(code)) return t.join.connectionError;
+    if (code === 'not-found' || code === 'invalid-argument') return t.join.invalidCode;
+    return e instanceof Error ? e.message.replace('Firebase: ', '') : fallback;
+  }
+
   async function lookup() {
     unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
     setErr(''); setBusy(true);
@@ -62,7 +79,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.invalidCode);
+      setErr(joinError(e, t.join.invalidCode));
     } finally { setBusy(false); }
   }
 
@@ -96,7 +113,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       saveSession(session);
       onJoined(session);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.joinFailed);
+      setErr(joinError(e, t.join.joinFailed));
     } finally { setBusy(false); }
   }
 

@@ -1,9 +1,9 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs } from '@rushpoint/shared';
+import { haversineKm, expiryInstantMs, isUnlocked } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint,
-  submitTaskAnswer, submitSequenceStep,
+  submitTaskAnswer, submitSequenceStep, triggerSOS,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
 import { uploadTaskPhoto, uploadTaskAudio } from '../services/firebase';
@@ -61,10 +61,23 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   const [hint, setHint] = useState<string | null>(null);
   const [routingError, setRoutingError] = useState(false);
   const [routingAttempt, setRoutingAttempt] = useState(0);
+  const [helpSent, setHelpSent] = useState(false);
 
   // The task currently assigned to this team within the active stage.
   const assignedRec = stage.tasks.find((t) => t.status === 'assigned');
   const unassigned  = stage.tasks.filter((t) => t.status === 'unassigned');
+
+  // M2: are ALL remaining (unassigned) tasks still unlock-gated? Uses the same
+  // shared `isUnlocked` the server routing/completion guard uses, so this display
+  // can't disagree with why routing handed back nothing.
+  const completedTaskIds = state.team.stages
+    .flatMap((s) => s.tasks)
+    .filter((rec) => rec.status === 'completed')
+    .map((rec) => rec.taskId);
+  const allRemainingLocked = unassigned.length > 0 && unassigned.every((rec) => {
+    const c = state.activeStageTasks.find((x) => x.id === rec.taskId);
+    return !!c && !isUnlocked(c, completedTaskIds);
+  });
 
   // If multi-task stage and nothing assigned yet, request a routing decision once.
   // A failed request surfaces a retryable error instead of an infinite spinner.
@@ -93,8 +106,30 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // race with a mid-flight control transfer maps to a friendly localized message.
   const frozen = busy || readOnly;
   function submitError(e: unknown, fallback: string): string {
-    if (e instanceof Error && e.message.includes('not-controller')) return t.devices.controlMoved;
-    return e instanceof Error ? e.message : fallback;
+    const raw = e instanceof Error ? e.message : '';
+    if (raw.includes('not-controller')) return t.devices.controlMoved;
+    // The common server rejections are stable English `failed-precondition`
+    // messages — localize them (keeping the distance number) instead of leaking
+    // untranslated text to the player.
+    const tooFar = raw.match(/Too far from the spot \((\d+)\s*m away\)/i);
+    if (tooFar) return t.task.tooFar({ m: Number(tooFar[1]) });
+    if (raw.includes('Not within the POI radius')) return t.task.notWithinRadius;
+    if (raw.includes('This task has expired')) return t.task.submitExpired;
+    if (raw.includes('Location required to check in here')) return t.task.locationRequired;
+    if (raw.includes('keep following the clue')) return t.task.notHereYet;
+    if (raw.includes('This task is not available yet')) return t.task.notAvailableYet;
+    return raw || fallback;
+  }
+
+  // M4: don't fire a submit while offline — the callable would fail with a raw
+  // network error on tap. Short-circuit with a localized nudge instead (the
+  // ConnectionBanner already shows the offline state). Returns true when blocked.
+  function blockedOffline(): boolean {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setMsg(t.task.offlineSubmit);
+      return true;
+    }
+    return false;
   }
 
   if (!task) {
@@ -108,10 +143,51 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         </Card>
       );
     }
+    // M1: the server soft-pauses routing while the team is outside the play area —
+    // say so explicitly instead of spinning on a neutral "finding next task".
+    if (state.team.outOfBounds) {
+      return (
+        <Card className="p-6 text-center space-y-2">
+          <div className="text-3xl">⚠️</div>
+          <p className="text-sm font-semibold text-amber-500">{t.task.outOfBoundsTitle}</p>
+          <p className="text-xs text-zinc-500">{t.task.outOfBoundsBody}</p>
+        </Card>
+      );
+    }
+    // M2: the only remaining tasks are unlock-gated (routing returns nothing) —
+    // explain the gate instead of spinning. The LockedTasksList below names them.
+    if (allRemainingLocked) {
+      return (
+        <Card className="p-6 text-center space-y-2">
+          <div className="text-3xl">🔒</div>
+          <p className="text-sm font-semibold text-zinc-200">{t.task.lockedOnlyTitle}</p>
+          <p className="text-xs text-zinc-500">{t.task.lockedOnlyBody}</p>
+        </Card>
+      );
+    }
     return <Card className="p-6 text-center text-zinc-500">{t.task.routing}</Card>;
   }
 
+  // H2: a stuck geofence player is never dead-ended — this raises an SOS/host
+  // alert (same channel as the SOS button) so the host can step in. Best-effort
+  // location, never blocks on it.
+  async function requestHelp() {
+    const coords = await new Promise<{ lat?: number; lng?: number }>((resolve) => {
+      if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve({});
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        () => resolve({}),
+        { timeout: 8000 },
+      );
+    });
+    try {
+      await triggerSOS({ ...ctx, ...coords });
+      setHelpSent(true);
+    } catch { /* let the player tap again; nothing persisted */ }
+  }
+
   async function field() {
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     withLocation(
       async (lat, lng) => {
@@ -124,6 +200,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   }
 
   async function verify(code: string) {
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     try {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
@@ -135,6 +212,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   // Accepts a picked File (uploaded to Storage) or a pasted URL.
   async function photo(input: File | string) {
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     try {
       let url: string;
@@ -156,6 +234,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // to Storage, then submitStationPhoto with the declared contentType so the
   // server validates it against the task's captureKind.
   async function audio(blob: Blob, contentType: string) {
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     try {
       setMsg(t.task.uploadingAudio);
@@ -174,6 +253,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   // quiz / numeric — submit a typed or chosen answer
   async function answer(text: string) {
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     try {
       const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text });
@@ -187,6 +267,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // ordering quiz (change: quiz-ordering) — submit the player's arrangement.
   // A wrong arrangement keeps their layout (they refine, not restart).
   async function submitOrdered(items: string[]) {
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     try {
       const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items });
@@ -200,6 +281,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // sequence — submit the current ordered step. Returns whether the step was
   // accepted so the input is cleared only on success (P3).
   async function sequenceStep(stepIndex: number, ans: string): Promise<boolean> {
+    if (blockedOffline()) return false;
     setBusy(true); setMsg('');
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
@@ -216,6 +298,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Viewer phones never auto-fire: the controller's arrival completes the task.
   function geofenceArrive(la: number, ln: number) {
     if (readOnly) return;
+    if (blockedOffline()) return;
     setBusy(true); setMsg('');
     completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
       .then(() => onChanged())
@@ -292,7 +375,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         ) : task.type === 'numeric' ? (
           <NumericEntry busy={frozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
-          <GeofenceAuto task={task} onArrive={geofenceArrive} />
+          <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp} helpSent={helpSent} />
         ) : task.type === 'sequence' ? (
           <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen} onSubmit={sequenceStep} />
         ) : task.type === 'survey' ? (
@@ -537,13 +620,27 @@ function NumericEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (a: string)
 }
 
 // Geofence — watch position, auto-check-in once inside the radius.
-function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: number, lng: number) => void }) {
+// H2: check-in is auto-only, so flaky GPS could otherwise trap a player on "walk
+// closer" forever. On a hard GPS error, or after ~40s still stuck outside the
+// radius, we surface a "request help" affordance (raises a host alert) so the
+// player is never dead-ended. We never fake location — the server validates.
+function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
+  task: SafeTask; onArrive: (lat: number, lng: number) => void;
+  onRequestHelp?: () => void; helpSent?: boolean;
+}) {
   const { t } = useT();
   const [dist, setDist] = useState<number | null>(null);
   const [gpsError, setGpsError] = useState(false);
+  const [stuckTooLong, setStuckTooLong] = useState(false);
   const fired = useRef(false);
   const radius = task.geofenceRadiusMeters ?? 50;
   const coords = task.coordinates;
+  // After ~40s on this task without an auto check-in, offer the escape hatch.
+  useEffect(() => {
+    setStuckTooLong(false);
+    const id = setTimeout(() => setStuckTooLong(true), 40_000);
+    return () => clearTimeout(id);
+  }, [coords?.lat, coords?.lng, radius]);
   useEffect(() => {
     if (!navigator.geolocation || !coords) { setGpsError(true); return; }
     // Reset per task: if this component instance is reused for a different
@@ -563,15 +660,32 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
     return () => navigator.geolocation.clearWatch(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords?.lat, coords?.lng, radius]);
+  // Escape hatch shown on a hard GPS error, or once the player has been stuck
+  // outside the radius too long. A "request help" button raises a host alert.
+  const helpBlock = onRequestHelp ? (
+    <div className="mt-2">
+      {helpSent
+        ? <p className="text-xs text-accent font-medium" data-testid="geofence-help-sent">{t.task.helpSent}</p>
+        : <button
+            onClick={onRequestHelp}
+            data-testid="geofence-help"
+            className="text-xs font-semibold text-rp-alert bg-rp-alert/10 border border-rp-alert/30 rounded-full px-3 py-1.5 hover:bg-rp-alert/20">
+            {t.task.requestHelp}
+          </button>}
+    </div>
+  ) : null;
+
   if (gpsError) {
     return (
       <div className="text-center py-2 space-y-2" data-testid="geofence-status" data-gps-error="true">
         <div className="text-3xl">📡</div>
         <p className="text-sm text-rp-alert font-medium">{t.task.gpsUnavailable}</p>
         <p className="text-xs text-zinc-500">{t.task.gpsContactHost}</p>
+        {helpBlock}
       </div>
     );
   }
+  const stuckOutside = dist != null && dist > radius && stuckTooLong;
   return (
     <div className="text-center py-2" data-testid="geofence-status" data-inside={dist != null && dist <= radius}>
       <div className="text-3xl mb-2">📡</div>
@@ -580,6 +694,12 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
         : dist <= radius
           ? <p className="text-sm text-accent font-medium">{t.task.youreHere}</p>
           : <p className="text-sm text-zinc-500">{t.task.walkCloser({ dist: Math.round(dist), radius })}</p>}
+      {stuckOutside && (
+        <>
+          <p className="text-xs text-zinc-500 mt-2">{t.task.gpsStuckHint}</p>
+          {helpBlock}
+        </>
+      )}
     </div>
   );
 }

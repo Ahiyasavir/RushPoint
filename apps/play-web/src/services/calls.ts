@@ -173,10 +173,12 @@ export const submitStationPhoto = callable<
   { submitted: boolean; autoApproved: boolean }
 >('submitStationPhoto');
 
+// Not idempotent — creates a fresh auto-id alert doc each call, so a retry after
+// a timeout would post a DUPLICATE SOS. Opt out of the client retry wrapper.
 export const triggerSOS = callable<
   Ctx & { lat?: number; lng?: number; message?: string },
   { alertId: string }
->('triggerSOS');
+>('triggerSOS', { retry: false });
 
 export const updateLocation = callable<Ctx & { lat: number; lng: number }, { ok: boolean }>('updateLocation');
 
