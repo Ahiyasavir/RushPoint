@@ -145,7 +145,7 @@ export default function LiveOps({
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-sm font-semibold text-purple-200">
                   {lang === 'he' && f.titleHe ? f.titleHe : f.title}
-                  {f.bonusPoints ? <span className="ml-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
+                  {f.bonusPoints ? <span className="ms-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
                 </div>
                 {(f.description || f.descriptionHe) && (
                   <p dir="auto" className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
@@ -178,8 +178,8 @@ function LeaderboardPeek({
         onClick={() => setOpen((o) => !o)}
       >
         <span>🏆 {translations[lang].liveOps.leaderboardHeading}
-          {leaderboard.frozen && <span className="ml-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
-          {mine && <span className="ml-2 text-accent font-mono">#{mine.rank}</span>}
+          {leaderboard.frozen && <span className="ms-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
+          {mine && <span className="ms-2 text-accent font-mono">#{mine.rank}</span>}
         </span>
         <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
       </button>

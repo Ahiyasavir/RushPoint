@@ -97,6 +97,8 @@ export default function FeedPanel({
                     <button
                       key={emoji}
                       onClick={() => void react(item, emoji)}
+                      aria-label={t.feed.feedReactAria({ emoji })}
+                      aria-pressed={selected}
                       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm transition-colors ${
                         selected
                           ? 'bg-accent/15 border-accent/40 text-accent'

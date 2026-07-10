@@ -61,6 +61,7 @@ const HE = {
     stages: 'שלבים',
     tasks: 'משימות',
     time: 'זמן',
+    minutesShort: ({ n }: { n: number }) => `~${n} דק׳`,
     playingTitle: 'משתתפים באירוע הזה?',
     playingSub: 'המארגן ישתף קוד גישה כשהמירוץ יעלה לאוויר.',
     haveCode: 'יש לי קוד',
@@ -325,6 +326,7 @@ const HE = {
     feedHide: 'הסתרה',
     feedHideConfirm: 'להסתיר את התמונה הזו מהפיד של כל המשתתפים?',
     feedItemCaption: ({ team, task }: { team: string; task: string }) => `${team} · ${task}`,
+    feedReactAria: ({ emoji }: { emoji: string }) => `הוספת תגובה ${emoji}`,
     feedReactFailed: 'התגובה לא נשלחה, נסו שוב',
   },
   chat: {
@@ -475,6 +477,7 @@ const EN: typeof HE = {
     stages: 'Stages',
     tasks: 'Tasks',
     time: 'Time',
+    minutesShort: ({ n }: { n: number }) => `~${n}m`,
     playingTitle: 'Playing in this event?',
     playingSub: 'Your host will share an access code when the game goes live.',
     haveCode: 'I have a code',
@@ -739,6 +742,7 @@ const EN: typeof HE = {
     feedHide: 'Hide',
     feedHideConfirm: 'Hide this photo from everyone\'s feed?',
     feedItemCaption: ({ team, task }: { team: string; task: string }) => `${team} · ${task}`,
+    feedReactAria: ({ emoji }: { emoji: string }) => `React ${emoji}`,
     feedReactFailed: 'Reaction did not send, try again',
   },
   chat: {

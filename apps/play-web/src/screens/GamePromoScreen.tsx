@@ -129,7 +129,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           {[
             { label: t.promo.stages, value: String(game.stageCount), emoji: '📋' },
             { label: t.promo.tasks, value: String(game.taskCount), emoji: '✅' },
-            { label: t.promo.time, value: mins ? `~${mins}m` : '?', emoji: '⏱️' },
+            { label: t.promo.time, value: mins ? t.promo.minutesShort({ n: mins }) : '?', emoji: '⏱️' },
           ].map((s) => (
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
               <div className="text-base mb-0.5">{s.emoji}</div>
