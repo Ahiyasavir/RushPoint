@@ -158,12 +158,51 @@ export async function uploadTaskAudio(
   return { url: await getDownloadURL(r), contentType };
 }
 
+// Under a ~20-player run over an ngrok tunnel, a momentary backend contention or
+// tunnel blip can reject a write straight to the player. These are the transient,
+// retry-SAFE Firebase callable error codes; our privileged mutations are
+// idempotent (e.g. completeTaskForTeam returns false on a repeat), so re-issuing
+// one is safe. A non-safe code (permission-denied, invalid-argument, …) still
+// throws immediately.
+const RETRYABLE_CALLABLE_CODES = new Set([
+  'functions/internal',
+  'functions/unavailable',
+  'functions/deadline-exceeded',
+  'functions/aborted',
+]);
+const CALLABLE_TIMEOUT_MS = 20_000;
+const CALLABLE_ATTEMPTS = 3;
+
 export function callable<Req = void, Res = unknown>(name: string): (data?: Req) => Promise<Res> {
   const fn = httpsCallable<Req, Res>(functions, name);
   return async (data?: Req) => {
     await ensureAuth();
-    const res = await fn(data as Req);
-    return res.data;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < CALLABLE_ATTEMPTS; attempt++) {
+      try {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(Object.assign(new Error(`callable ${name} timed out`), { code: 'functions/deadline-exceeded' })),
+            CALLABLE_TIMEOUT_MS,
+          );
+        });
+        try {
+          const res = await Promise.race([fn(data as Req), timeout]);
+          return (res as { data: Res }).data;
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      } catch (e) {
+        lastErr = e;
+        const code = String((e as { code?: string }).code ?? '');
+        const isLast = attempt === CALLABLE_ATTEMPTS - 1;
+        if (isLast || !RETRYABLE_CALLABLE_CODES.has(code)) throw e;
+        // Jittered backoff before the next attempt.
+        await new Promise((r) => setTimeout(r, 150 * (attempt + 1) + Math.random() * 250));
+      }
+    }
+    throw lastErr;
   };
 }
 

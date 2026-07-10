@@ -202,7 +202,7 @@ export async function buildRecommendations(
 // opaque INTERNAL (caught by scripts/simulate-run.mjs under 12 concurrent
 // teams). The lock frees in milliseconds; a short jittered backoff + retry
 // absorbs the burst instead of failing the player's completion.
-async function withLockRetry<T>(op: () => Promise<T>, attempts = 4): Promise<T> {
+async function withLockRetry<T>(op: () => Promise<T>, attempts = 8): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -213,7 +213,10 @@ async function withLockRetry<T>(op: () => Promise<T>, attempts = 4): Promise<T> 
       const contended = code === 10 || /ABORTED|lock timeout|too much contention/i.test(msg);
       if (!contended) throw e;
       lastErr = e;
-      await new Promise((r) => setTimeout(r, 75 * (i + 1) + Math.random() * 150));
+      // Jittered backoff with a wider ceiling: at ~20+ synchronized teams the
+      // single run-doc lock queues deep, so more attempts + more jitter spread
+      // the retries out instead of colliding on the same slot and failing.
+      await new Promise((r) => setTimeout(r, 75 * (i + 1) + Math.random() * 300));
     }
   }
   throw lastErr;
