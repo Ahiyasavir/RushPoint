@@ -3249,6 +3249,75 @@ async function main() {
       (counts[active] ?? 0) === 1, `active=${active} counts=${JSON.stringify(counts)}`);
   });
 
+  // ═══ Lost-response retry leaks no station slot (bug-hunt-2026-07-10) ═════════
+  // The play-web callable wrapper now retries a callable up to 3× on a transient/
+  // timeout code (the client can't tell "the server never got it" from "the
+  // response never got back") — so a SEQUENTIAL duplicate call (await the first
+  // call fully, THEN call again with identical args) must model a genuine
+  // lost-response retry, distinct from the true-concurrency race above. Covers
+  // both requestNextTask (assign path) and completeTask (release+reassign path)
+  // at a CAPPED (maxConcurrentTeams=1) station so a leak is visible immediately.
+  await scenario('lost-response retry leaks no station slot', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: rg } = await creator.call('createGame', { title: 'Retry Safety', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: rg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'rt-multi', order: 0, title: 'Two capped stations', requiredTaskCount: 1, tasks: [
+          { id: 'rt-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+          { id: 'rt-b', title: 'Station B', type: 'field', coordinates: { lat: 31.79, lng: 35.22 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+        ] },
+        { id: 'rt-final', order: 1, isFinal: true, tasks: [
+          { id: 'rt-c', title: 'Finish', type: 'field', coordinates: { lat: 31.80, lng: 35.23 },
+            difficulty: 1, estimatedMinutes: 5, pointValue: 10 },
+        ] },
+      ],
+    });
+    const { runId: rr, accessCode: rc } = await creator.call('launchRun', { gameId: rg });
+    const retrier = makeParty('retryTeam');
+    await signInAnonymously(retrier.auth);
+    await retrier.call('joinRun', { code: rc, displayName: 'Retrier' });
+    await creator.call('startTeams', { gameId: rg, runId: rr });
+
+    const RC = { ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 };
+
+    // 1) Assign path: call requestNextTask, await it fully, then call it AGAIN
+    //    with identical args — the in-flight guard should make this a no-op.
+    const first = await retrier.call('requestNextTask', RC);
+    const retry1 = await retrier.call('requestNextTask', RC);
+    check('retry requestNextTask returns the SAME task (no re-assignment)',
+      first?.taskId && first.taskId === retry1?.taskId, JSON.stringify({ first, retry1 }));
+
+    let runDoc = await creator.getDocAt(`users/${OWNER}/games/${rg}/runs/${rr}`);
+    let counts = runDoc.data?.taskCounts ?? {};
+    check('retry requestNextTask: capped station counter still exactly 1 (no leak)',
+      (counts[first.taskId] ?? 0) === 1, JSON.stringify(counts));
+
+    // 2) Release+reassign path: complete the held task, await it fully, then call
+    //    completeTask AGAIN with identical args (as a client would after a lost
+    //    response) — the already-completed guard should make this a pure no-op:
+    //    no second release, no second (extra) assignment.
+    const cDone = await retrier.call('completeTask', { taskId: first.taskId, ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 });
+    const cRetry = await retrier.call('completeTask', { taskId: first.taskId, ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 });
+    check('retry completeTask: duplicate call is a no-op (no nextTaskId)',
+      cRetry?.nextTaskId == null, JSON.stringify({ cDone, cRetry }));
+
+    runDoc = await creator.getDocAt(`users/${OWNER}/games/${rg}/runs/${rr}`);
+    counts = runDoc.data?.taskCounts ?? {};
+    check('retry completeTask: completed station released back to 0 (no negative leak either)',
+      (counts[first.taskId] ?? 0) === 0, JSON.stringify(counts));
+    const otherStationId = first.taskId === 'rt-a' ? 'rt-b' : 'rt-a';
+    check('retry completeTask: the OTHER capped station was never touched',
+      (counts[otherStationId] ?? 0) === 0, JSON.stringify(counts));
+
+    const state = await retrier.call('getMyTeamState', { code: rc });
+    check('retry completeTask: team advanced to the next task exactly once',
+      cDone?.nextTaskId != null && state?.team?.activeTaskId === cDone.nextTaskId,
+      JSON.stringify({ cDoneNext: cDone?.nextTaskId, active: state?.team?.activeTaskId }));
+  });
+
   // ═══ Team ↔ HQ chat (team-hq-chat) ══════════════════════════════════════════
   // A single thread doc per team; either side sends. Covers: both directions,
   // ordering, cap (>100 → oldest dropped), validation, rate-limit, finished-run,
