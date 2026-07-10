@@ -113,6 +113,11 @@ export default function CeremonyScreen({ code }: { code: string }) {
     );
   }
 
+  // time_only runs never award points — every team's `score` is a placeholder 0,
+  // so the ceremony must reveal the TIME, not a column of zeros (mirrors the TV /
+  // public / finish boards).
+  const isTimeOnly = data!.scoringPreset === 'time_only';
+
   // Tap/click anywhere advances early (operator escape hatch).
   return (
     <div className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col cursor-pointer select-none" onClick={advance}>
@@ -151,7 +156,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
       )}
 
       {(phase === 'podium3' || phase === 'podium2' || phase === 'podium1') && (
-        <Podium rankings={rankings} phase={phase} accent={accent} championLabel={t.ceremony.ceremonyChampion} />
+        <Podium rankings={rankings} phase={phase} accent={accent} championLabel={t.ceremony.ceremonyChampion} timeOnly={isTimeOnly} />
       )}
 
       {phase === 'standings' && (
@@ -172,8 +177,14 @@ export default function CeremonyScreen({ code }: { code: string }) {
                 </span>
                 <div dir="auto" className="flex-1 min-w-0 text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
                 <div className="text-right">
-                  <div className="text-3xl font-brand font-extrabold" style={{ color: accent }}>{r.score}</div>
-                  <div className="text-sm text-zinc-500 font-mono">{fmtTime(r)}</div>
+                  {isTimeOnly ? (
+                    <div className="text-3xl font-brand font-extrabold font-mono tabular-nums" style={{ color: accent }}>{fmtTime(r) || '—'}</div>
+                  ) : (
+                    <>
+                      <div className="text-3xl font-brand font-extrabold" style={{ color: accent }}>{r.score}</div>
+                      <div className="text-sm text-zinc-500 font-mono">{fmtTime(r)}</div>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -189,11 +200,12 @@ export default function CeremonyScreen({ code }: { code: string }) {
 // ── Podium reveal ─────────────────────────────────────────────────────────────
 // podium3 shows 3rd; podium2 adds 2nd; podium1 adds the champion. Each new row
 // animates up via the rp-podium-rise keyframes.
-function Podium({ rankings, phase, accent, championLabel }: {
+function Podium({ rankings, phase, accent, championLabel, timeOnly }: {
   rankings: PublicLeaderboard['rankings'];
   phase: 'podium3' | 'podium2' | 'podium1';
   accent: string;
   championLabel: string;
+  timeOnly: boolean;
 }) {
   const shown = phase === 'podium3' ? [3] : phase === 'podium2' ? [3, 2] : [3, 2, 1];
   return (
@@ -222,8 +234,8 @@ function Podium({ rankings, phase, accent, championLabel }: {
               <div dir="auto" className={`flex-1 min-w-0 font-bold text-zinc-100 truncate ${isChampion ? 'text-4xl' : 'text-3xl'}`}>
                 {r.teamName}
               </div>
-              <div className={`font-brand font-extrabold ${isChampion ? 'text-4xl' : 'text-3xl'}`} style={{ color: accent }}>
-                {r.score}
+              <div className={`font-brand font-extrabold ${isChampion ? 'text-4xl' : 'text-3xl'} ${timeOnly ? 'font-mono tabular-nums' : ''}`} style={{ color: accent }}>
+                {timeOnly ? (fmtTime(r) || '—') : r.score}
               </div>
             </div>
           );

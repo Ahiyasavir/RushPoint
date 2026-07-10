@@ -22,6 +22,7 @@ const ChatPanel = lazy(() => import('../components/ChatPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 import { shareStoryCard } from '../lib/storyCard';
+import { formatDuration } from '../lib/boardTime';
 import { feedback, isRankUp } from '../lib/sound';
 
 // Creator app — viral CTA baked into every shared progress card.
@@ -280,8 +281,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   if (!team.launched) {
     return (
       <Screen>
-        <Header game={game} score={team.score} accent={accent} onLeave={leave} />
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
+        <Header game={game} score={team.score} accent={accent} onLeave={leave}
+          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">⏳</div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
@@ -336,7 +338,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     <Screen>
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
-      <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed} />
+      <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
+        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
       {session.isTestDrive && (
         <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-rp-amber flex items-center gap-2">
           🧪 {t.play.testRunBanner}
@@ -357,7 +360,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {sharing ? t.play.creating : t.play.shareProgress}
       </button>
 
-      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
+      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
 
       {state.game.photoFeedEnabled !== false && myUid && (
         <FeedSection ctx={session} myUid={myUid} />
@@ -721,8 +724,12 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
   );
 }
 
-function Header({ game, score, accent, onLeave, powerUpArmed }: {
+function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
+  // time_only runs are ranked purely by time and never award points, so the
+  // in-run "score" is a permanent 0 that misreads as a total — show a live
+  // elapsed clock instead (mirrors the finish/TV/public boards).
+  timeOnly?: boolean; startedAt?: string;
 }) {
   const { t } = useT();
   return (
@@ -732,7 +739,9 @@ function Header({ game, score, accent, onLeave, powerUpArmed }: {
           {game.branding?.name ?? game.title}
         </div>
         <div className="text-xs text-zinc-500 flex items-center gap-2">
-          <span>{t.play.score}: <span className="text-accent font-mono">{score}</span></span>
+          {timeOnly
+            ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
+            : <span>{t.play.score}: <span className="text-accent font-mono">{score}</span></span>}
           {powerUpArmed && (
             <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-accent">
               {t.play.powerUpArmedChip}
@@ -743,6 +752,19 @@ function Header({ game, score, accent, onLeave, powerUpArmed }: {
       <button onClick={onLeave} className="text-xs text-zinc-500">{t.play.leave}</button>
     </div>
   );
+}
+
+// A live m:ss elapsed clock for time_only runs, ticking on its own so only this
+// node re-renders each second (not the whole header/screen). Before the race is
+// stamped (startedAt absent) it reads 0:00.
+function ElapsedClock({ startedAt }: { startedAt?: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const sec = startedAt ? Math.max(0, (now - new Date(startedAt).getTime()) / 1000) : 0;
+  return <span className="text-accent font-mono">{formatDuration(sec)}</span>;
 }
 
 // Power-ups (change: power-ups): a transient award toast at the top of the screen.

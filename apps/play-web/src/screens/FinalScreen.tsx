@@ -217,7 +217,11 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     style={{ animationDelay: `${place * 80}ms` }}>
                     <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
                     <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-accent' : 'text-zinc-200'}`}>{e.teamName}</div>
-                    <div className="text-[11px] text-zinc-400 mb-1">{e.score}</div>
+                    <div className="text-[11px] text-zinc-400 mb-1">
+                      {isTimeOnly
+                        ? (() => { const d = run.leaderboard?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
+                        : e.score}
+                    </div>
                     <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-accent' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
                   </div>
                 );
@@ -251,7 +255,9 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                       )}
                     </span>
                     <span dir="auto" className="flex-1 text-start font-medium">{r.teamName}</span>
-                    <span className="font-mono text-xs font-semibold" style={{ color: isMe ? accent : undefined }}>{r.score}</span>
+                    <span className="font-mono text-xs font-semibold" style={{ color: isMe ? accent : undefined }}>
+                      {isTimeOnly ? (r.durationSeconds != null ? fmtDuration(r.durationSeconds) : '—') : r.score}
+                    </span>
                   </div>
                 );
               })}

@@ -4,6 +4,7 @@ import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@
 import { db } from '../services/firebase';
 import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
+import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -21,12 +22,15 @@ interface FlashDoc { id: string; title: string; titleHe?: string; description?: 
 // Non-blocking live-ops banners + a collapsible leaderboard peek. Rendered above
 // the map/task card so it never covers the active mission UI.
 export default function LiveOps({
-  ctx, leaderboard, myTeamId, lang = 'en',
+  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false,
 }: {
   ctx: Ctx;
   leaderboard: RunLeaderboard | null;
   myTeamId: string;
   lang?: 'en' | 'he';
+  // time_only runs never award points, so the peek must show each team's time,
+  // not a column of zeros (mirrors the finish/TV/public boards).
+  timeOnly?: boolean;
 }) {
   const [announcements, setAnnouncements] = useState<AnnouncementDoc[]>([]);
   const [flashes, setFlashes] = useState<FlashDoc[]>([]);
@@ -157,15 +161,15 @@ export default function LiveOps({
         );
       })}
 
-      {hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} />}
+      {hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
     </div>
   );
 }
 
 function LeaderboardPeek({
-  leaderboard, myTeamId, lang,
+  leaderboard, myTeamId, lang, timeOnly,
 }: {
-  leaderboard: RunLeaderboard; myTeamId: string; lang: 'en' | 'he';
+  leaderboard: RunLeaderboard; myTeamId: string; lang: 'en' | 'he'; timeOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const top = leaderboard.rankings.slice(0, 5);
@@ -191,7 +195,9 @@ function LeaderboardPeek({
               className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-accent font-semibold' : 'text-zinc-400'}`}
             >
               <span dir="auto" className="truncate min-w-0"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
-              <span className="font-mono shrink-0">{r.score}</span>
+              <span className="font-mono shrink-0">
+                {timeOnly ? (() => { const s = boardTimeSeconds(r); return s != null ? formatDuration(s) : '—'; })() : r.score}
+              </span>
             </div>
           ))}
         </div>
