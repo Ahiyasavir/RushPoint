@@ -65,6 +65,19 @@ export function saveColorblind(on: boolean) {
   try { localStorage.setItem(COLORBLIND_KEY, on ? '1' : '0'); } catch { /* ignore */ }
 }
 
+// Sound / haptic feedback preference (change: audio-haptic-feedback). One toggle
+// governs both the synthesized cue sounds and their paired vibration. Persisted
+// like the language / colorblind preferences; defaults ON.
+const SOUND_KEY = 'rushpoint.sound';
+
+export function loadSound(): boolean {
+  try { return localStorage.getItem(SOUND_KEY) !== '0'; } catch { return true; }
+}
+
+export function saveSound(on: boolean) {
+  try { localStorage.setItem(SOUND_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+}
+
 // ── Staff session: which run a staff member signed in to (custom-token auth) ──
 export interface StaffSession {
   ownerUid: string;

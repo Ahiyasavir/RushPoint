@@ -13,6 +13,7 @@ import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 import { parseChallengeParam, TV_ROUTE_PARAM, RECAP_ROUTE_PARAM } from '@rushpoint/shared';
 import { I18nProvider, useT } from './i18nContext';
+import { unlockAudio } from './lib/sound';
 // Ceremony mode (change: ceremony-mode): lazy so the slideshow/confetti code
 // stays out of the main bundle (same pattern as the MapLibre chunk).
 const CeremonyScreen = lazy(() => import('./screens/CeremonyScreen'));
@@ -74,6 +75,24 @@ function AppInner() {
     document.documentElement.dir = dir;
     document.documentElement.lang = lang;
   }, [dir, lang]);
+
+  // Unlock the Web Audio context on the first user gesture (change:
+  // audio-haptic-feedback) so later cues are audible under the iOS/Safari autoplay
+  // policy. Covers staff + returning sessions that never pass through the Join tap.
+  // One-shot: the listeners remove themselves after the first interaction.
+  useEffect(() => {
+    const unlock = () => {
+      unlockAudio();
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock, { once: true });
+    window.addEventListener('keydown', unlock, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
 
   if (!ready) {
     return (

@@ -2,18 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { detectLeaderChange } from '@rushpoint/shared';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { useT } from '../i18nContext';
+import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const REFRESH_MS = 12_000; // ≤ 15s per spec
-
-function fmtTime(e: { durationSeconds?: number; totalMinutes?: number }): string {
-  const sec = e.durationSeconds ?? (e.totalMinutes != null ? e.totalMinutes * 60 : null);
-  if (sec == null) return '';
-  const s = Math.max(0, Math.round(sec));
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
-}
 
 /**
  * Full-screen, auto-refreshing standings for projection (`?tv=<accessCode>`).
@@ -60,6 +52,9 @@ export default function TvLeaderboard({ code }: { code: string }) {
   const accent = data?.branding?.primaryColor ?? '#FF5722';
   const published = !!data?.published;
   const rankings = published ? data!.rankings : [];
+  // time_only ranks purely by time; its `score` is a placeholder — surface the
+  // time as the primary value (mirrors FinalScreen / the public leaderboard).
+  const isTimeOnly = data?.scoringPreset === 'time_only';
 
   if (data === undefined) {
     return (
@@ -107,8 +102,45 @@ export default function TvLeaderboard({ code }: { code: string }) {
                 )}
               </div>
               <div className="text-right">
-                <div className="text-3xl font-brand font-extrabold" style={{ color: accent }}>{r.score}</div>
-                <div className="text-sm text-zinc-500 font-mono">{fmtTime(r)}</div>
+                {(() => {
+                  // A finished team shows its real completion time; a still-playing
+                  // team's time is an ever-growing ELAPSED value — mark it (⏱ prefix,
+                  // dimmer italic, labelled) so it can't be misread as a finish time
+                  // on the projection board (mirrors the public leaderboard).
+                  const sec = boardTimeSeconds(r);
+                  const final = isFinalTime(r);
+                  if (isTimeOnly) {
+                    // time_only: score is a placeholder — show the time as primary.
+                    return (
+                      <div
+                        title={final ? t.board.finalTime : t.board.elapsed}
+                        aria-label={final ? t.board.finalTime : t.board.elapsed}
+                        className={
+                          final
+                            ? 'text-3xl font-brand font-extrabold'
+                            : 'text-3xl font-brand font-extrabold italic opacity-80'
+                        }
+                        style={{ color: accent }}
+                      >
+                        {final ? '' : '⏱ '}{sec != null ? formatDuration(sec) : '—'}
+                      </div>
+                    );
+                  }
+                  return (
+                    <>
+                      <div className="text-3xl font-brand font-extrabold" style={{ color: accent }}>{r.score}</div>
+                      {sec != null && (
+                        <div
+                          title={final ? t.board.finalTime : t.board.elapsed}
+                          aria-label={final ? t.board.finalTime : t.board.elapsed}
+                          className={final ? 'text-sm text-zinc-500 font-mono' : 'text-sm text-zinc-600 italic font-mono'}
+                        >
+                          {final ? '' : '⏱ '}{formatDuration(sec)}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           );

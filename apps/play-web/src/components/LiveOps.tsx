@@ -79,19 +79,19 @@ export default function LiveOps({
   // Haptic buzz when a NEW score notice arrives — success for a gain, warn for a
   // penalty. The backlog present on first mount is seeded silently (no buzz), so
   // late joiners aren't spammed; only genuinely-new notices vibrate, once each.
+  // Announcements load ASYNC (Firestore snapshot), so a "first effect run" latch
+  // would trip on the still-empty list and then buzz the whole backlog once it
+  // arrives. Gate on the notice's own createdAt vs. our mount time instead: any
+  // notice authored before we mounted is pre-existing and seeded silently.
   const seenScore = useRef<Set<string>>(new Set());
-  const scoreMounted = useRef(false);
+  const mountedAt = useRef(Date.now());
   useEffect(() => {
-    const scores = liveAnnouncements.filter((a) => a.kind === 'score');
-    if (!scoreMounted.current) {
-      scores.forEach((a) => seenScore.current.add(a.id));
-      scoreMounted.current = true;
-      return;
-    }
-    for (const a of scores) {
+    for (const a of liveAnnouncements) {
+      if (a.kind !== 'score') continue;
       if (seenScore.current.has(a.id)) continue;
       seenScore.current.add(a.id);
-      haptic((a.delta ?? 0) >= 0 ? 'success' : 'warn');
+      const createdMs = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      if (createdMs > mountedAt.current) haptic((a.delta ?? 0) >= 0 ? 'success' : 'warn');
     }
   }, [liveAnnouncements]);
 
@@ -177,8 +177,8 @@ function LeaderboardPeek({
         className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
         onClick={() => setOpen((o) => !o)}
       >
-        <span>🏆 {lang === 'he' ? 'טבלת מובילים' : 'Leaderboard'}
-          {leaderboard.frozen && <span className="ml-2 text-xs text-zinc-500">{lang === 'he' ? '(קפואה)' : '(frozen)'}</span>}
+        <span>🏆 {translations[lang].liveOps.leaderboardHeading}
+          {leaderboard.frozen && <span className="ml-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
           {mine && <span className="ml-2 text-accent font-mono">#{mine.rank}</span>}
         </span>
         <span className="text-zinc-500">{open ? '▲' : '▼'}</span>

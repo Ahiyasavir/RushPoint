@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
-import { saveSession, type Session } from '../store';
+import { saveSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
+import { unlockAudio } from '../lib/sound';
 
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
   const { t, toggleLang, lang, colorblind, setColorblind } = useT();
@@ -25,6 +26,15 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const codeRef = useRef<HTMLInputElement>(null);
   const memberRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [justAdded, setJustAdded] = useState<number | null>(null);
+  // Sound/haptic feedback preference (change: audio-haptic-feedback). Persisted in
+  // the store; `feedback()` reads it live, so this state only drives the toggle UI.
+  const [sound, setSound] = useState<boolean>(() => loadSound());
+  function toggleSound() {
+    const next = !sound;
+    setSound(next);
+    saveSound(next);
+    if (next) unlockAudio(); // turning it on is a gesture — unlock so cues are audible
+  }
 
   useEffect(() => {
     if (linkCode.length >= 4) void lookup();
@@ -45,6 +55,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   }
 
   async function lookup() {
+    unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
     setErr(''); setBusy(true);
     try {
       const i = await getJoinInfo({ code: code.trim().toUpperCase() });
@@ -68,6 +79,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     // `members`, so values['name'] was always empty.)
     const memberNames = members.map((m) => m.trim()).filter(Boolean);
     const errors = validateRequiredFields(allFields.filter((f) => f.id !== 'name'), values);
+    // Team mode: each team must pick its own name (no defaulting to the first member).
+    if (info.mode === 'team' && !(values.teamName ?? '').trim()) { errors.add('teamName'); }
     if (memberNames.length === 0) { setBusy(false); return; } // guarded by the disabled Join button
     if (errors.size > 0) { setFieldErrors(errors); setBusy(false); return; }
     setFieldErrors(new Set());
@@ -144,6 +157,18 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
           {/* Language + accessibility toggles */}
           <div className="absolute top-4 end-4 flex items-center gap-2">
+            <button
+              onClick={toggleSound}
+              role="switch"
+              aria-checked={sound}
+              aria-label={sound ? t.common.soundOn : t.common.soundOff}
+              title={sound ? t.common.soundOn : t.common.soundOff}
+              className={`text-xs font-semibold border rounded-full w-7 h-7 flex items-center justify-center transition-colors ${
+                sound ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {sound ? '🔊' : '🔇'}
+            </button>
             <button
               onClick={() => setColorblind(!colorblind)}
               role="switch"
@@ -322,6 +347,25 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           <FieldInput key={f.id} field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} hasError={fieldErrors.has(f.id)} />
         ))}
 
+        {/* Team mode: each team picks its own name instead of defaulting to the
+            first member's name. Skipped if the creator already added a custom
+            teamName registration field (rendered above via teamFields). */}
+        {!isSolo && !teamFields.some((f) => f.id === 'teamName') && (
+          <Card className="p-5">
+            <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
+              <span>🏷️</span>
+              {t.join.teamName}
+            </div>
+            <Input
+              value={values.teamName ?? ''}
+              dir="auto"
+              placeholder={t.join.teamNamePlaceholder}
+              className={fieldErrors.has('teamName') ? 'border-rp-alert' : ''}
+              onChange={(e) => setValues({ ...values, teamName: e.target.value })}
+            />
+          </Card>
+        )}
+
         <Card className="p-5">
           <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
             <span>{isSolo ? '👤' : '👥'}</span>
@@ -329,7 +373,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           </div>
           {isSolo ? (
             // Solo: exactly one name input. No member list, no add-member.
-            <Input value={members[0] ?? ''} placeholder={t.join.yourName}
+            <Input value={members[0] ?? ''} placeholder={t.join.yourName} data-testid="join-name"
               onChange={(e) => setMembers([e.target.value])} />
           ) : (
             <>
@@ -360,8 +404,9 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
 
       <Button
-        disabled={busy || !members.some((m) => m.trim())}
+        disabled={busy || !members.some((m) => m.trim()) || (!isSolo && !(values.teamName ?? '').trim())}
         onClick={submit}
+        data-testid="join-submit"
         className="mt-5 !py-4 !text-lg !rounded-2xl"
       >
         {busy ? t.join.joining : t.join.joinCta}

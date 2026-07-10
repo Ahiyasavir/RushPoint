@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -55,6 +55,10 @@ export interface PublicLeaderboard {
   // Ceremony mode (change: ceremony-mode): server-selected top-liked feed photos,
   // published-gated; [] for unpublished/legacy/pruned runs.
   ceremonyFeed: CeremonyFeedItem[];
+  // The `time_only` preset's `score` is a meaningless placeholder (e.g. 500/0) —
+  // teams are ranked by time, not points. Public/TV leaderboard surfaces should
+  // hide the score column and show elapsed time instead when this is `time_only`.
+  scoringPreset: ScoringPreset;
 }
 export const getPublicLeaderboard = callable<{ code: string }, PublicLeaderboard>('getPublicLeaderboard');
 

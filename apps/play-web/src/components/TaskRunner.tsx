@@ -250,7 +250,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     : t.task.yourTask;
 
   return (
-    <Card className="p-5">
+    <Card className="p-5" data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
       <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
       <h2 dir="auto" className="text-xl font-bold mb-2">{task.title}</h2>
       {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
@@ -276,7 +276,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
       <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
-          <Button disabled={frozen} onClick={field}>
+          <Button disabled={frozen} onClick={field} data-testid="task-field-checkin">
             {task.type === 'self_report'
               ? t.task.markComplete
               : task.locationHidden ? t.task.hiddenCheckIn : t.task.imHere}
@@ -315,7 +315,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
                   className="text-xs font-semibold text-accent bg-accent/10 border border-accent/30 rounded-full px-3 py-1.5 hover:bg-accent/20 disabled:opacity-40">
                   🎁 {t.task.hintFreeNow}
                 </button>
-              : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 0 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+              : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
                   💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
                 </button>}
         </div>
@@ -340,7 +340,14 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
   const fired = useRef(false);
   useEffect(() => {
     if (closesAt == null) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    // Stop ticking once the deadline passes — the display is static from then on,
+    // so leaving the interval running would re-render this badge every second for
+    // as long as the (now-closed) task stays assigned. onExpired already fired.
+    const id = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= closesAt) clearInterval(id);
+    }, 1000);
     return () => clearInterval(id);
   }, [closesAt]);
   useEffect(() => {
@@ -367,6 +374,7 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
 }
 
 function DistanceBadge({ task }: { task: SafeTask }) {
+  const { t } = useT();
   const [dist, setDist] = useState<number | null>(null);
   const coords = task.locationless ? undefined : (task.smart?.stationCoords ?? task.coordinates);
   useEffect(() => {
@@ -378,11 +386,16 @@ function DistanceBadge({ task }: { task: SafeTask }) {
       setDist(haversineKm({ lat: p.coords.latitude, lng: p.coords.longitude }, coords));
     });
     return () => navigator.geolocation.clearWatch(id);
-  }, [coords]);
+    // Key on the coord PRIMITIVES, not the object: `coords` is re-derived from a
+    // freshly-fetched task on every poll, so an object dep would tear down and
+    // restart the geolocation watch every ~12s even when the target never moved
+    // (mirrors GeofenceAuto's primitive-keyed watcher).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coords?.lat, coords?.lng]);
   if (dist == null) return null;
   return (
     <div className="text-xs text-zinc-500">
-      📍 {dist < 1 ? `${Math.round(dist * 1000)} m away` : `${dist.toFixed(1)} km away`}
+      📍 {dist < 1 ? t.task.metersAway({ m: Math.round(dist * 1000) }) : t.task.kmAway({ km: dist.toFixed(1) })}
     </div>
   );
 }
@@ -406,8 +419,8 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
   return (
     <div className="space-y-3">
       <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder={label}
-        className="text-center font-mono tracking-widest" />
-      <Button disabled={busy || !code} onClick={() => onSubmit(code)}>{t.task.verify}</Button>
+        className="text-center font-mono tracking-widest" data-testid="task-code-input" />
+      <Button disabled={busy || !code} onClick={() => onSubmit(code)} data-testid="task-code-submit">{t.task.verify}</Button>
       {canScan && (
         <Button variant="ghost" disabled={busy} onClick={() => setScanning(true)}>📷 {t.task.scanQr}</Button>
       )}
@@ -423,7 +436,8 @@ function QuizEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; on
     return (
       <div className="space-y-2">
         {task.choices.map((c) => (
-          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full">
+          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full"
+            data-testid="quiz-choice" data-choice={c}>
             <span dir="auto">{c}</span>
           </Button>
         ))}
@@ -433,8 +447,8 @@ function QuizEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; on
   return (
     <div className="space-y-3">
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer}
-        onKeyDown={(e) => e.key === 'Enter' && val.trim() && onSubmit(val.trim())} />
-      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())}>{t.task.submitAnswer}</Button>
+        onKeyDown={(e) => e.key === 'Enter' && !busy && val.trim() && onSubmit(val.trim())} data-testid="quiz-text-input" />
+      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())} data-testid="quiz-text-submit">{t.task.submitAnswer}</Button>
     </div>
   );
 }
@@ -451,7 +465,8 @@ function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; 
       <div className="space-y-2">
         <p className="text-xs text-zinc-500">{t.task.surveyChoicePrompt}</p>
         {task.surveyChoices.map((c) => (
-          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full">
+          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full"
+            data-testid="survey-choice" data-choice={c}>
             <span dir="auto">{c}</span>
           </Button>
         ))}
@@ -461,10 +476,10 @@ function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; 
   return (
     <div className="space-y-3">
       <p className="text-xs text-zinc-500">{t.task.surveyTextPrompt}</p>
-      <textarea value={val} dir="auto" rows={3} maxLength={500}
+      <textarea value={val} dir="auto" rows={3} maxLength={500} data-testid="survey-text"
         onChange={(e) => setVal(e.target.value)} placeholder={t.task.surveyPlaceholder}
         className="w-full px-4 py-3 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 placeholder:text-zinc-600 shadow-[0_1px_4px_rgba(26,10,0,0.06)] focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40 transition-all duration-150 resize-none" />
-      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())}>{t.task.surveySubmit}</Button>
+      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())} data-testid="survey-submit">{t.task.surveySubmit}</Button>
     </div>
   );
 }
@@ -494,15 +509,15 @@ function OrderingEntry({ items, busy, onSubmit }: {
             <span className="text-xs font-bold text-accent w-5 shrink-0 tabular-nums">{i + 1}</span>
             <span dir="auto" className="flex-1 min-w-0 text-sm text-zinc-100">{item}</span>
             <button onClick={() => move(i, -1)} disabled={busy || i === 0}
-              aria-label={`${t.task.orderingMoveUp} ${i + 1}`}
+              aria-label={`${t.task.orderingMoveUp} ${i + 1}`} data-testid="ordering-up" data-item={item}
               className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
             <button onClick={() => move(i, 1)} disabled={busy || i === arranged.length - 1}
-              aria-label={`${t.task.orderingMoveDown} ${i + 1}`}
+              aria-label={`${t.task.orderingMoveDown} ${i + 1}`} data-testid="ordering-down" data-item={item}
               className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
           </li>
         ))}
       </ol>
-      <Button disabled={busy} onClick={() => onSubmit(arranged)}>{t.task.orderingSubmit}</Button>
+      <Button disabled={busy} onClick={() => onSubmit(arranged)} data-testid="ordering-submit">{t.task.orderingSubmit}</Button>
     </div>
   );
 }
@@ -514,9 +529,9 @@ function NumericEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (a: string)
   return (
     <div className="space-y-3">
       <Input type="number" value={val} onChange={(e) => setVal(e.target.value)} placeholder={t.task.enterNumber}
-        className="text-center text-xl font-mono"
-        onKeyDown={(e) => e.key === 'Enter' && val !== '' && onSubmit(val)} />
-      <Button disabled={busy || val === ''} onClick={() => onSubmit(val)}>{t.task.submit}</Button>
+        className="text-center text-xl font-mono" data-testid="numeric-input"
+        onKeyDown={(e) => e.key === 'Enter' && !busy && val !== '' && onSubmit(val)} />
+      <Button disabled={busy || val === ''} onClick={() => onSubmit(val)} data-testid="numeric-submit">{t.task.submit}</Button>
     </div>
   );
 }
@@ -550,7 +565,7 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
   }, [coords?.lat, coords?.lng, radius]);
   if (gpsError) {
     return (
-      <div className="text-center py-2 space-y-2">
+      <div className="text-center py-2 space-y-2" data-testid="geofence-status" data-gps-error="true">
         <div className="text-3xl">📡</div>
         <p className="text-sm text-rp-alert font-medium">{t.task.gpsUnavailable}</p>
         <p className="text-xs text-zinc-500">{t.task.gpsContactHost}</p>
@@ -558,7 +573,7 @@ function GeofenceAuto({ task, onArrive }: { task: SafeTask; onArrive: (lat: numb
     );
   }
   return (
-    <div className="text-center py-2">
+    <div className="text-center py-2" data-testid="geofence-status" data-inside={dist != null && dist <= radius}>
       <div className="text-3xl mb-2">📡</div>
       {dist == null
         ? <p className="text-sm text-zinc-500">{t.task.findingLocation}</p>
@@ -588,10 +603,10 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
     <div className="space-y-3">
       <Progress done={stepsDone} total={steps.length} />
       <div className="text-xs text-zinc-500">{t.task.stepOf({ step: idx + 1, total: steps.length })}</div>
-      <p dir="auto" className="text-sm text-zinc-200">{step.prompt}</p>
+      <p dir="auto" className="text-sm text-zinc-200" data-testid="sequence-prompt">{step.prompt}</p>
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.stepAnswer}
-        onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} />
-      <Button disabled={busy} onClick={submitStep}>{t.task.submitStep}</Button>
+        onKeyDown={(e) => { if (e.key === 'Enter' && !busy) submitStep(); }} data-testid="sequence-input" />
+      <Button disabled={busy} onClick={submitStep} data-testid="sequence-submit">{t.task.submitStep}</Button>
     </div>
   );
 }
@@ -638,13 +653,13 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File 
   const canSubmit = !busy && !fileErr && (!!file || !!url.trim());
   return (
     <div className="space-y-3">
-      <input type="file" accept="image/*" capture="environment" onChange={pickFile}
+      <input type="file" accept="image/*" capture="environment" onChange={pickFile} data-testid="photo-file"
         className="block w-full text-sm text-zinc-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-app-raised file:text-zinc-200" />
       {fileErr && <p className="text-rp-alert text-sm">{fileErr}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
       <Input value={url} onChange={(e) => { setUrl(e.target.value); if (e.target.value) { setFile(null); setPreviewUrl(null); setFileErr(''); } }}
-        placeholder={t.task.pastePhotoUrl} />
-      <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())}>
+        placeholder={t.task.pastePhotoUrl} data-testid="photo-url" />
+      <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())} data-testid="photo-submit">
         {busy ? t.task.working : t.task.submitPhoto}
       </Button>
     </div>

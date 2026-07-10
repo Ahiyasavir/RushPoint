@@ -74,7 +74,11 @@ export default function NavMap({
     const first = valid[0];
     map.current = new maplibregl.Map({
       container: ref.current,
-      style: resolveMapStyle(KEY) as maplibregl.StyleSpecification | string,
+      // Honor the current mode so a map RE-created after its targets briefly
+      // emptied (which tears the map down) comes back in the tile style the user
+      // last chose, instead of silently reverting to topo while the toggle still
+      // reads "satellite". First mount: mode is 'topo', so this is unchanged.
+      style: resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string,
       center: first ? [first.lng, first.lat] : [35.21, 31.77],
       zoom: first ? 14 : 7,
       attributionControl: { compact: true },

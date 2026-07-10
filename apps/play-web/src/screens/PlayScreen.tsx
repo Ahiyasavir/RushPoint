@@ -293,11 +293,17 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   // Streak/momentum: consecutive completions across the run, in play order. A
   // skip or a long idle gap resets it (computeStreak). Chip hidden below 2.
+  // computeStreak counts the TRAILING run and detects idle gaps via lastAt, so it
+  // must be fed in completion-TIME order — the stage→task-index order these records
+  // sit in can diverge from it (non-linear routing, or a partial-completion stage
+  // whose non-chosen tasks auto-skip at the end), which would reset or inflate the
+  // streak on the wrong element. Sort by completedAt first.
   const { streak, milestone } = computeStreak(
     team.stages
       .flatMap((s) => s.tasks)
       .filter((rec) => rec.status === 'completed' || rec.status === 'skipped')
-      .map((rec) => ({ status: rec.status, completedAt: rec.completedAt })),
+      .map((rec) => ({ status: rec.status, completedAt: rec.completedAt }))
+      .sort((a, b) => (a.completedAt ? Date.parse(a.completedAt) : 0) - (b.completedAt ? Date.parse(b.completedAt) : 0)),
     { now: new Date().toISOString() },
   );
 
@@ -481,6 +487,16 @@ function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
       setCount(n);
     }, () => setCount(0));
   }, [ctx.ownerUid, ctx.gameId, ctx.runId, teamId]);
+
+  // While the panel is open, arriving messages are being read — keep `seen` in
+  // step with the live count so they don't resurface as an "unread" dot the
+  // moment the panel is collapsed again.
+  useEffect(() => {
+    if (open && count > seen) {
+      saveChatSeen(ctx.runId, teamId, count);
+      setSeen(count);
+    }
+  }, [open, count, seen, ctx.runId, teamId]);
 
   const unread = count > seen;
 

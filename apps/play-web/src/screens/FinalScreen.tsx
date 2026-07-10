@@ -38,10 +38,16 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   const myEntry = run.leaderboard?.rankings.find((r) => r.teamId === team.id);
   const myRank = myEntry?.rank;
   const finalScore = myEntry?.score ?? team.score;
+  const isTimeOnly = game.scoringPreset === 'time_only';
 
-  const totalSec = team.startedAt && team.finishedAt
-    ? (new Date(team.finishedAt).getTime() - new Date(team.startedAt).getTime()) / 1000
-    : null;
+  // Prefer the server's ranked duration so this matches the TV / ceremony /
+  // recap boards exactly (a frozen-before-finish board would otherwise show a
+  // different completion time here than everywhere else). Fall back to the raw
+  // timestamps only if the team isn't in the snapshot yet.
+  const totalSec = myEntry?.durationSeconds
+    ?? (team.startedAt && team.finishedAt
+      ? (new Date(team.finishedAt).getTime() - new Date(team.startedAt).getTime()) / 1000
+      : null);
   const completedStages = team.stages.filter((s) => s.status === 'completed');
   let fastest: { order: number; dur: number } | null = null;
   for (const s of completedStages) {
@@ -127,7 +133,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         score: finalScore,
         rank: myRank,
         totalTime: totalSec != null ? fmtDuration(totalSec) : undefined,
-        stagesDone: `${completedStages.length}/${game.stageCount}`,
+        stagesDone: `${completedStages.length}/${team.stages.length}`,
         ctaUrl: CREATOR_URL,
       }, text);
       if (result === 'downloaded' || result === 'copied') { setShared(true); setTimeout(() => setShared(false), 2500); }
@@ -136,7 +142,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
 
   return (
     <Screen>
-      <div className="flex-1 flex flex-col items-center justify-center text-center gap-5">
+      <div data-testid="final-screen" className="flex-1 flex flex-col items-center justify-center text-center gap-5">
 
         {/* Trophy + title */}
         <div className="animate-score-pop">
@@ -150,14 +156,16 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           <p dir="auto" className="text-zinc-400 mt-1">{t.final.subtitle({ name: team.displayName })}</p>
         </div>
 
-        {/* Score card */}
+        {/* Score card — a time_only run isn't ranked by points (the "score" is just
+            a completion bonus and misreads as a leaderboard total), so the hero
+            metric there is the finish time instead. */}
         <Card className="p-6 w-full" style={{ borderColor: `${accent}30` }}>
-          <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">{t.final.scoreLabel}</div>
+          <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1">{isTimeOnly ? t.final.finishTimeLabel : t.final.scoreLabel}</div>
           <div
             className="text-6xl font-brand font-extrabold my-2 animate-score-pop bg-gradient-to-r bg-clip-text text-transparent"
             style={{ backgroundImage: `linear-gradient(135deg, ${accent}, ${accent}99)` }}
           >
-            {finalScore}
+            {isTimeOnly ? (totalSec != null ? fmtDuration(totalSec) : '—') : finalScore}
           </div>
           {myRank && (
             <div className="flex items-center justify-center gap-2">
@@ -172,7 +180,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🗂️ {t.final.recapTitle}</div>
           <div className="grid grid-cols-2 gap-2.5">
             <Stat label={t.final.statTotalTime} value={totalSec != null ? fmtDuration(totalSec) : '?'} accent={accent} />
-            <Stat label={t.final.statStages} value={`${completedStages.length}/${game.stageCount}`} accent={accent} />
+            <Stat label={t.final.statStages} value={`${completedStages.length}/${team.stages.length}`} accent={accent} />
             <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
             <Stat label={t.final.statHints} value={String(hintsUsed)} accent={accent} />
           </div>
