@@ -13,8 +13,17 @@ import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 
 // Module-level cache so navigating back to dashboard is instant (no spinner).
-let _gamesCache: { data: Game[]; ts: number } | null = null;
+// Scoped to the owner uid: sign-out doesn't reload the page, so without the uid
+// guard this cache would survive an account switch on the same device and leak
+// the previous user's game list to the next login for up to the TTL.
+let _gamesCache: { uid: string; data: Game[]; ts: number } | null = null;
 const CACHE_TTL = 45_000;
+
+function readGamesCache(uid: string | undefined): Game[] | null {
+  if (!uid || !_gamesCache || _gamesCache.uid !== uid) return null;
+  if (Date.now() - _gamesCache.ts >= CACHE_TTL) return null;
+  return _gamesCache.data;
+}
 
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
@@ -44,19 +53,16 @@ export default function DashboardPage() {
     geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
   };
 
-  const [games, setGames] = useState<Game[] | null>(() => {
-    if (_gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return _gamesCache.data;
-    return null;
-  });
+  const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [sharing, setSharing] = useState<Game | null>(null);
 
   async function load(invalidate = false) {
-    if (!invalidate && _gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return;
+    if (!invalidate && readGamesCache(user?.uid)) return;
     try {
       const { games } = await listGames();
-      _gamesCache = { data: games, ts: Date.now() };
+      if (user?.uid) _gamesCache = { uid: user.uid, data: games, ts: Date.now() };
       setGames(games);
     } catch (e) {
       // Escape the spinner on a first-load failure, but never blank an already-

@@ -1063,9 +1063,9 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
               <Distribution
                 title={t.runConsole.feedbackDifficulty}
                 bars={[
-                  [t.runConsole.feedbackDiffEasy, s.ratings.difficulty.distribution[0]],
-                  [t.runConsole.feedbackDiffRight, s.ratings.difficulty.distribution[1]],
-                  [t.runConsole.feedbackDiffHard, s.ratings.difficulty.distribution[2]],
+                  [t.runConsole.feedbackDiffEasy, s.ratings.difficulty.distribution[0] ?? 0],
+                  [t.runConsole.feedbackDiffRight, s.ratings.difficulty.distribution[1] ?? 0],
+                  [t.runConsole.feedbackDiffHard, s.ratings.difficulty.distribution[2] ?? 0],
                 ]}
               />
             )}
@@ -1073,9 +1073,9 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
               <Distribution
                 title={t.runConsole.feedbackSmoothness}
                 bars={[
-                  [t.runConsole.feedbackSmoothGood, s.ratings.smoothness.distribution[2]],
-                  [t.runConsole.feedbackSmoothSome, s.ratings.smoothness.distribution[1]],
-                  [t.runConsole.feedbackSmoothBad, s.ratings.smoothness.distribution[0]],
+                  [t.runConsole.feedbackSmoothGood, s.ratings.smoothness.distribution[2] ?? 0],
+                  [t.runConsole.feedbackSmoothSome, s.ratings.smoothness.distribution[1] ?? 0],
+                  [t.runConsole.feedbackSmoothBad, s.ratings.smoothness.distribution[0] ?? 0],
                 ]}
               />
             )}
@@ -1154,12 +1154,14 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
 }
 
 function Distribution({ title, bars }: { title: string; bars: [string, number][] }) {
-  const max = Math.max(1, ...bars.map(([, n]) => n));
+  const max = Math.max(1, ...bars.map(([, n]) => (Number.isFinite(n) ? n : 0)));
   return (
     <div className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
       <div className="text-[11px] text-zinc-500 mb-2">{title}</div>
       <div className="space-y-1.5">
-        {bars.map(([label, n]) => (
+        {bars.map(([label, rawN]) => {
+          const n = Number.isFinite(rawN) ? rawN : 0;
+          return (
           <div key={label} className="flex items-center gap-2 text-xs">
             <span className="w-24 shrink-0 text-zinc-400 truncate">{label}</span>
             <div className="flex-1 h-2 rounded-full bg-black/20 overflow-hidden">
@@ -1167,7 +1169,8 @@ function Distribution({ title, bars }: { title: string; bars: [string, number][]
             </div>
             <span className="w-5 text-end text-zinc-400">{n}</span>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
