@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -193,16 +193,31 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   // Brute-force throttle (row 40): too many failed PIN attempts within the
   // cooldown window locks this caller out of THIS run — even with a correct PIN.
   const attemptsRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffAttempts/${uid}`);
+  // Run-wide throttle: per-uid alone is bypassable by minting a fresh anonymous
+  // identity per guess (trivial client-side, no server control), which would
+  // otherwise let an attacker brute-force the 6-digit PIN space with no real
+  // limit. A SECOND counter keyed on the run itself (not the caller) catches
+  // that — deliberately a higher threshold so a few different legit staff
+  // mistyping a PIN in quick succession never trips it.
+  const runAttemptsRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffAttempts/_run`);
   const nowMs = Date.now();
-  const aSnap = await attemptsRef.get();
+  const [aSnap, runSnap] = await Promise.all([attemptsRef.get(), runAttemptsRef.get()]);
   const a = (aSnap.exists ? aSnap.data() : {}) as { count?: number; lastFailedAtMs?: number };
   const prevCount = a.count ?? 0;
   const lastFailedAt = a.lastFailedAtMs ?? 0;
+  const r = (runSnap.exists ? runSnap.data() : {}) as { count?: number; lastFailedAtMs?: number };
+  const prevRunCount = r.count ?? 0;
+  const lastRunFailedAt = r.lastFailedAtMs ?? 0;
+
   if (shouldLockout(prevCount) && isWithinCooldown(lastFailedAt, nowMs)) {
     throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.');
   }
+  if (shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS)) {
+    throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts for this run. Try again later.');
+  }
   // Cooldown expired → forgive prior failures.
   const baseCount = shouldLockout(prevCount) && !isWithinCooldown(lastFailedAt, nowMs) ? 0 : prevCount;
+  const baseRunCount = shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && !isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS) ? 0 : prevRunCount;
 
   const inviteSnap = await db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
@@ -212,7 +227,10 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     .get();
 
   if (inviteSnap.empty) {
-    await attemptsRef.set({ count: baseCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true });
+    await Promise.all([
+      attemptsRef.set({ count: baseCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true }),
+      runAttemptsRef.set({ count: baseRunCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true }),
+    ]);
     throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
   }
 
@@ -915,6 +933,16 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  // Existence guard: unlike submitStationPhoto (which resolves the caller's OWN
+  // team server-side and so is guaranteed to exist), this teamId is staff-
+  // supplied. Without this check a typo'd/stale teamId would `.set({merge})` a
+  // brand-new, malformed team doc into existence (only a `taskSubmissions` field,
+  // missing displayName/score/stages/…) — a phantom team that then corrupts
+  // listRunTeams / the leaderboard for the rest of the run. Fail loud instead.
+  const teamSnap = await teamRef.get();
+  if (!teamSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Team not found');
+  }
   // merge:true deep-merges this into the existing submission, preserving
   // photoUrl/submittedAt while updating the review subfields.
   await teamRef.set(

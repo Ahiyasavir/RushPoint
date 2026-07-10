@@ -793,6 +793,22 @@ async function main() {
   check('staffSignIn mints a custom token', !!staffTok?.customToken && staffTok?.name === 'E2E Marshal');
   await signInWithCustomToken(staff.auth, staffTok.customToken);
 
+  // A bogus/typo'd teamId must fail loud (not-found), never silently create a
+  // phantom team doc with just a `taskSubmissions` field (data-integrity guard).
+  let bogusTeamErr = null;
+  try {
+    await staff.call('reviewStationSubmission', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: 'this-team-does-not-exist', taskId: PHOTO_TASK_ID, approved: true,
+    });
+  } catch (e) { bogusTeamErr = e; }
+  check('reviewStationSubmission rejects an unknown teamId instead of creating a phantom team',
+    bogusTeamErr?.code === 'functions/not-found', bogusTeamErr?.code);
+  const phantomSnap = await staff
+    .getDocAt(`users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/teams/this-team-does-not-exist`)
+    .catch(() => null);
+  check('no phantom team doc was created', !phantomSnap || phantomSnap.exists === false);
+
   const review = await staff.call('reviewStationSubmission', {
     ownerUid: creatorCred.user.uid, gameId, runId,
     teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID, approved: true,
