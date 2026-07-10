@@ -103,6 +103,13 @@ export function ensureAuth(): Promise<void> {
         if (user) { resolve(); return; }
         signInAnonymously(auth).then(() => resolve(), reject);
       });
+    }).catch((e) => {
+      // A transient failure (network blip on the first anonymous sign-in) must
+      // not poison the cached promise forever: leaving a rejected promise cached
+      // makes every later ensureAuth() — and thus every callable / join attempt —
+      // reject without ever re-trying. Clear it so the next call starts fresh.
+      authReady = null;
+      throw e;
     });
   }
   return authReady;
