@@ -72,6 +72,12 @@ function killStaleHelpersWindows() {
   // cloudflared spawns worker exes whose command line may not carry the pattern;
   // sweep any leftover by image name (dev-only; safe in this workflow).
   spawnSync('taskkill', ['/IM', 'cloudflared.exe', '/F', '/T'], { stdio: 'ignore' });
+  // ngrok dials OUT (it doesn't listen on a swept port), so a leftover ngrok.exe
+  // from a previous run survives the port sweep and — because the free tier allows
+  // only ONE simultaneous agent session — wedges the new tunnel ("limited to 1
+  // simultaneous session", retrying forever). Sweep it by image name too. No-op
+  // (non-zero exit swallowed by stdio:'ignore') when no ngrok is running.
+  spawnSync('taskkill', ['/IM', 'ngrok.exe', '/F', '/T'], { stdio: 'ignore' });
 }
 
 function killStaleHelpersUnix() {
