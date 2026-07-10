@@ -112,7 +112,7 @@ const HE = {
     notAvailableYet: 'המשימה הזו עוד לא זמינה.',
     requestHelp: 'בקשו עזרה מהמארגן',
     helpSent: 'הבקשה נשלחה, המארגן קיבל התראה.',
-    gpsStuckHint: 'ה-GPS עלול לזוז. אם אי אפשר להתקרב, בקשו עזרה מהמארגן.',
+    gpsStuckHint: 'קליטת המיקום עלולה לזוז. אם אי אפשר להתקרב, בקשו עזרה מהמארגן.',
     expiresInLabel: ({ time }: { time: string }) => `נסגרת בעוד ${time}`,
     taskExpiredNotice: 'המשימה נסגרה, ממשיכים הלאה…',
     mapAppears: 'המפה תופיע ברגע שלמשימה יהיה מיקום.',
