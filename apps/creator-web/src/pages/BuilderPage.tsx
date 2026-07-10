@@ -15,7 +15,7 @@ import TaskWizard from '../components/TaskWizard';
 import { moveItem } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
-import { blankTask, isTaskInteractionValid } from '../lib/wizardLogic';
+import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -232,6 +232,14 @@ export default function BuilderPage() {
     const badTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
     if (badTask) {
       await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return;
+    }
+    // Block a located task left at the null island (0,0): a radius/exact task with
+    // no real pin would route every team to the Gulf of Guinea and can never be
+    // completed. The wizard's step-1 gate only blocks its own Next — a task closed
+    // via ✕/Esc or reached by jumping tabs can still ship with (0,0) coordinates.
+    const noPinTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskLocationValid(tk));
+    if (noPinTask) {
+      await dialog.alert(b.taskNeedsLocation(noPinTask.title || b.untitledTask)); return;
     }
     // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
     // actually complete (a stale count left after deleting tasks, or a broken

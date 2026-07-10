@@ -8,7 +8,7 @@ import { Badge, Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
-import { isTaskInteractionValid } from '../lib/wizardLogic';
+import { isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 
@@ -96,6 +96,10 @@ export default function DashboardPage() {
     // its answer key can never be completed (updateGame doesn't reject these).
     const badTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
     if (badTask) { await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return; }
+    // Block a located task left at (0,0): a radius/exact task with no real pin would
+    // route teams to the null island (Gulf of Guinea) and can never be completed.
+    const noPinTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskLocationValid(tk));
+    if (noPinTask) { await dialog.alert(b.taskNeedsLocation(noPinTask.title || b.untitledTask)); return; }
     // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
     // actually complete (the Builder only shows a soft warning; the Dashboard has
     // no stage view at all, so this is the only place it's caught from here).
