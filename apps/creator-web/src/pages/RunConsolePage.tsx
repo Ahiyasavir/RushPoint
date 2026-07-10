@@ -90,8 +90,10 @@ export default function RunConsolePage() {
   async function invite() {
     const name = await dialog.prompt(t.runConsole.staffNamePrompt);
     if (!name) return;
-    const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
-    setStaffPin(pin);
+    try {
+      const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
+      setStaffPin(pin);
+    } catch { await dialog.alert(t.runConsole.staffInviteFailed); }
   }
   async function refreshStandings(publish?: boolean) {
     setBusy(true);
@@ -159,7 +161,7 @@ export default function RunConsolePage() {
           <div className="space-y-2">
             {alerts.map((a) => (
               <div key={a.id} className="flex items-center gap-3 text-sm">
-                <span className="uppercase text-neon-red font-medium">{a.type}</span>
+                <span className="uppercase text-neon-red font-medium">{t.runConsole.alertType(a.type)}</span>
                 <span className="text-zinc-500 text-xs">{t.runConsole.team({ id: a.teamId.slice(0, 8) })}</span>
                 {a.message && <span className="text-zinc-300 flex-1 truncate">{a.message}</span>}
                 {a.lat != null && a.lng != null && (

@@ -233,6 +233,16 @@ export default function BuilderPage() {
     if (badTask) {
       await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return;
     }
+    // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
+    // actually complete (a stale count left after deleting tasks, or a broken
+    // unlock graph). The Builder shows a soft warning, but nothing stops launch.
+    const brokenStage = game.stages.find((s) => {
+      const r = validateUnlockGraph(s);
+      return r.warnings.length > 0 || r.errors.length > 0;
+    });
+    if (brokenStage) {
+      await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return;
+    }
     try {
       const { runId } = await launchRun({ gameId: game.id, testDrive });
       nav(`/run/${game.id}/${runId}`);
@@ -719,15 +729,20 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 // Also strip the removed task's id from any sibling's prerequisite
                 // gate (unlockable-tasks) — a dangling id would fail save-time
                 // validation and wedge the autosave.
-                updateStage(editingStage.id, {
-                  tasks: editingStage.tasks
-                    .filter((x) => x.id !== editingTask.id)
-                    .map((x) => {
-                      if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
-                      const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
-                      return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
-                    }),
-                });
+                const nextTasks = editingStage.tasks
+                  .filter((x) => x.id !== editingTask.id)
+                  .map((x) => {
+                    if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
+                    const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
+                    return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
+                  });
+                // Clamp a now-oversized requiredTaskCount: dropping a task below the
+                // required count would leave the stage unwinnable (and the count
+                // select would show a value not in its options). `undefined` = all.
+                const req = editingStage.requiredTaskCount;
+                const patch: Partial<Stage> = { tasks: nextTasks };
+                if (typeof req === 'number' && req >= nextTasks.length) patch.requiredTaskCount = undefined;
+                updateStage(editingStage.id, patch);
                 setEditing(null);
               }
             : undefined}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game } from '@rushpoint/shared';
-import { PAYMENTS_ENABLED, resolvePlayOrigin } from '@rushpoint/shared';
+import { PAYMENTS_ENABLED, resolvePlayOrigin, validateUnlockGraph } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -93,6 +93,14 @@ export default function DashboardPage() {
     // its answer key can never be completed (updateGame doesn't reject these).
     const badTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
     if (badTask) { await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return; }
+    // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
+    // actually complete (the Builder only shows a soft warning; the Dashboard has
+    // no stage view at all, so this is the only place it's caught from here).
+    const brokenStage = g.stages.find((s) => {
+      const r = validateUnlockGraph(s);
+      return r.warnings.length > 0 || r.errors.length > 0;
+    });
+    if (brokenStage) { await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return; }
     setBusy(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
