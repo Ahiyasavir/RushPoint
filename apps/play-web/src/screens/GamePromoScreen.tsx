@@ -99,7 +99,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             </div>
           )}
           {/* Badge */}
-          <div className="absolute top-3 left-3 bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
+          <div className="absolute top-3 start-3 bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
             {t.promo.badge}
           </div>
         </div>
