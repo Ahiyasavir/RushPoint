@@ -30,6 +30,8 @@ import {
   validateAvailabilityWindow,
   validateOrderItems,
   validateSurveyChoices,
+  sumEstimatedMinutes,
+  taskCompletabilityError,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
@@ -157,6 +159,14 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
           const choiceError = validateSurveyChoices(task.surveyChoices);
           if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
         }
+        // Unwinnable-task guard: mirrors the creator-web Wizard's client-side
+        // isTaskInteractionValid, but enforced server-side so a direct callable
+        // invocation (bypassing the Wizard) can't persist a quiz with no answer,
+        // numeric with no numericAnswer, smart_station with no secretCode, or
+        // sequence with no steps — every participant attempt at such a task
+        // would otherwise fail forever.
+        const completabilityError = taskCompletabilityError(task);
+        if (completabilityError) problems.push(completabilityError);
       }
     }
     if (problems.length > 0) {
@@ -195,6 +205,33 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   }
 
   await ref.update(updates);
+
+  // Consistency (consistency sweep C2): if the game is PUBLISHED, keep its
+  // gallery summary in sync with this edit so the public card can't drift from
+  // the live Dashboard. Best-effort PARTIAL update — never touches playCount (a
+  // live counter maintained by launchRun) or the publicTasks copyCount, and
+  // skips the auth lookup (ownerDisplayName doesn't change on a content edit).
+  const existing = snap.data() as Game;
+  if (existing.visibility === 'public') {
+    const merged = { ...existing, ...updates } as Game;
+    const allTasks = merged.stages.flatMap((s) => s.tasks);
+    db.doc(`publicGames/${gameId}`).update({
+      title: merged.title,
+      description: merged.description,
+      mode: merged.mode,
+      scoringPreset: merged.scoringPreset,
+      tags: merged.tags,
+      coverImage: merged.coverImage,
+      approxLocation: merged.approxLocation,
+      stageCount: merged.stages.length,
+      taskCount: allTasks.length,
+      estimatedTotalMinutes: sumEstimatedMinutes(allTasks),
+      allowInstantPlay: merged.allowInstantPlay ?? false,
+      requirement: describeGameRequirements(merged),
+      updatedAt: updates.updatedAt,
+    }).catch((e) => logBestEffort('publicGames.resync', { gameId }, e));
+  }
+
   return { ok: true };
 });
 
@@ -312,7 +349,7 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   if (visibility === 'public') {
     // Compute summary stats
     const allTasks = game.stages.flatMap((s) => s.tasks);
-    const estimatedTotalMinutes = allTasks.reduce((s, t) => s + t.estimatedMinutes, 0);
+    const estimatedTotalMinutes = sumEstimatedMinutes(allTasks);
 
     // Get creator display name
     const creatorSnap = await admin.auth().getUser(uid).catch((e) => { logBestEffort('auth.getUser', { uid }, e); return null; });

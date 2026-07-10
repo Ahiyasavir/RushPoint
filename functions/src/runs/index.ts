@@ -72,6 +72,7 @@ import {
   POWER_UP_BONUS,
   type TeamPowerUps,
   type PowerUpLogEntry,
+  taskCompletabilityError,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -86,6 +87,7 @@ import {
   COMPLETION_BONUS,
 } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN } from '@rushpoint/shared';
+import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 import {
@@ -96,6 +98,7 @@ import type { RunFeedback } from '@rushpoint/shared';
 import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
 import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
+
 import { requireAuth } from '../auth';
 import { applyStageCompletion } from './helpers';
 
@@ -166,6 +169,17 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
   if (game.stages.length === 0) {
     throw new functions.https.HttpsError('failed-precondition', 'Game has no stages — add at least one stage before launching');
+  }
+  // Unwinnable-task guard (defense in depth): updateGame rejects a task with no
+  // usable answer key going forward, but a game saved before that check existed
+  // (or edited by any other path) could still carry one. Catch it at launch —
+  // the last point before real participants start racing against it — rather
+  // than let every attempt fail forever.
+  for (const stage of game.stages) {
+    for (const task of stage.tasks ?? []) {
+      const err = taskCompletabilityError(task);
+      if (err) throw new functions.https.HttpsError('failed-precondition', err);
+    }
   }
 
   const code = await uniqueCode();
@@ -737,6 +751,10 @@ export async function completeTaskForTeam(
   for (const id of skippedHeldTaskIds) {
     await releaseTask(id, ownerUid, gameId, runId);
   }
+  // Keep the live leaderboard snapshot fresh (throttled; best-effort).
+  if (didComplete) {
+    await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId);
+  }
   return didComplete;
 }
 
@@ -834,6 +852,9 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
     await releaseTask(id, uid, gameId, runId);
   }
 
+  // Owner-triggered scoring event: surface the skip award immediately.
+  await maybeRefreshLeaderboardSnapshot(uid, gameId, runId, { force: true });
+
   return { ok: true };
 });
 
@@ -899,7 +920,18 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
       if (aDone !== bDone) return aDone - bDone;
       return b.completedStages - a.completedStages;
     }
-    return b.score - a.score;
+    if (b.score !== a.score) return b.score - a.score;
+    // Deterministic tie-break (equal score is common mid-run, e.g. two teams at 0
+    // points, and the team list is read via an unordered Firestore query — without
+    // this the live leaderboard could silently reorder tied teams on every
+    // refresh). Prefer more progress, then a finished team over an unfinished one,
+    // then less elapsed time, then teamId as a final stable fallback.
+    if (b.completedStages !== a.completedStages) return b.completedStages - a.completedStages;
+    const aFinished = a.finishedAt ? 1 : 0;
+    const bFinished = b.finishedAt ? 1 : 0;
+    if (bFinished !== aFinished) return bFinished - aFinished;
+    if (a.durationSeconds !== b.durationSeconds) return (a.durationSeconds ?? Infinity) - (b.durationSeconds ?? Infinity);
+    return a.teamId.localeCompare(b.teamId);
   });
 
   return scored.map((t, i) => ({
@@ -913,6 +945,65 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     totalMinutes: t.totalMinutes,
   }));
 }
+
+// ─── Live leaderboard auto-refresh (change: live-leaderboard-auto-refresh) ────
+// Recompute run.leaderboard after a scoring event so every surface that renders
+// the snapshot (console panel, TV/public boards, participant final screen) stays
+// fresh without the organizer clicking "Refresh standings". INTERNAL — called
+// from completeTaskForTeam / adjustTeamScore / skipStage, never re-exported as a
+// callable (like completeTaskForTeam itself).
+//
+// Best-effort by design: a refresh failure must never fail the completion or
+// adjustment that triggered it. Plain reads + one update(), NO transaction —
+// concurrent refreshes are idempotent recomputes from current team docs, so
+// last-write-wins is always a correct board.
+export async function maybeRefreshLeaderboardSnapshot(
+  ownerUid: string,
+  gameId: string,
+  runId: string,
+  opts?: { force?: boolean },
+): Promise<void> {
+  try {
+    const runRef = db.doc(runPath(ownerUid, gameId, runId));
+    const runSnap = await runRef.get();
+    if (!runSnap.exists) return;
+    const run = runSnap.data() as Run;
+
+    // A frozen board means "stop updating the reveal" — never auto-overwrite it.
+    if (run.leaderboard?.frozen) return;
+    if (!opts?.force && !shouldRefreshLeaderboard(run.leaderboard?.updatedAt, Date.now())) return;
+
+    const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+    if (!gameSnap.exists) return;
+    const game = gameSnap.data() as Game;
+
+    const teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
+    const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+    const now = new Date().toISOString();
+    const rankings = buildRankings(game, teams, now);
+
+    // Commit under a SHORT transaction that RE-READS the run doc. The game + teams
+    // reads above take tens of ms; an organizer publish (refreshLeaderboard
+    // publish:true / finalizeRun) or a freeze can land in that window. Re-reading
+    // here lets us respect a freeze that just landed, and writing via dotted FIELD
+    // PATHS (leaderboardRefreshFields) rewrites only rankings + timestamps so the
+    // organizer-controlled published/frozen flags are never clobbered. A plain
+    // full-object write would revert `published` to a stale value — silently
+    // un-publishing the public board at the exact moment of the reveal.
+    await db.runTransaction(async (tx) => {
+      const cur = await tx.get(runRef);
+      if (!cur.exists) return;
+      if ((cur.data() as Run).leaderboard?.frozen) return; // a freeze landed — respect it
+      tx.update(runRef, leaderboardRefreshFields(rankings, now));
+    });
+  } catch (e) {
+    functions.logger.warn('leaderboard auto-refresh skipped', {
+      ownerUid, gameId, runId, error: (e as Error).message,
+    });
+  }
+}
+
 
 // ─── activateHotZone / deactivateHotZone ──────────────────────────────────────
 // Organizer sets a timed, geofenced score multiplier on a run (hot-zone-bonus).
@@ -1272,6 +1363,11 @@ export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async
     // Labeling flag so shared surfaces can watermark test-drive data
     // (change: test-drive-mode).
     isTestDrive: run?.isTestDrive ?? false,
+    // The `time_only` preset's `score` field is a meaningless placeholder
+    // (e.g. 500/0) — it's time, not points, that ranks teams. Surface the
+    // preset so public/TV leaderboard surfaces can honestly hide the score
+    // column and show elapsed time instead, rather than a fake-looking number.
+    scoringPreset: game.scoringPreset,
   };
 });
 
@@ -1691,6 +1787,9 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       memberCount: t.memberCount ?? 1,
       status: t.status,
       score: t.score,
+      // Staff adjustments/hints live here (subtracted from score at ranking
+      // time); exposed so the console can show the effective score.
+      bonusPenalty: t.bonusPenalty ?? 0,
       completedStages: t.stages.filter((s) => s.status === 'completed').length,
       activeStageOrder,
       finished: t.status === 'finished',
@@ -2053,11 +2152,36 @@ async function assignNextInActiveStage(
     ownerUid, gameId, runId, game.scoringPreset === 'smart_weighted',
   );
   if (result.taskId) {
-    const localIdx = stageRec.tasks.findIndex((t) => t.taskId === result.taskId);
-    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-    stages[activeStageIdx].tasks[localIdx].status = 'assigned';
-    stages[activeStageIdx].tasks[localIdx].startedAt = now;
-    await teamRef.update({ stages, activeTaskId: result.taskId, updatedAt: now });
+    // assignTask has already reserved a station slot (run.taskCounts[result.taskId]++).
+    // Claim it onto the team ATOMICALLY: the read of `team` above and this write are
+    // NOT one operation, so a concurrent assignment for the SAME team (a controller
+    // double-tap, or completeTask's post-completion reassign racing a requestNextTask
+    // poll) could otherwise overwrite each other — leaving one reserved slot with no
+    // team on it (a permanent station-capacity leak). Re-read the team inside a
+    // transaction: if another task already went in-flight for this stage we LOST the
+    // race, so release our reserved slot instead of clobbering the winner.
+    const claim = await db.runTransaction(async (tx) => {
+      const cur = await tx.get(teamRef);
+      if (!cur.exists) return { taskId: undefined as string | undefined, mine: false };
+      const curTeam = cur.data() as RunTeam;
+      const curStage = curTeam.stages[activeStageIdx];
+      if (!curStage) return { taskId: undefined, mine: false };
+      const existing = curStage.tasks.find((t) => t.status === 'assigned');
+      if (existing) return { taskId: existing.taskId, mine: false };
+      const localIdx = curStage.tasks.findIndex((t) => t.taskId === result.taskId);
+      if (localIdx < 0) return { taskId: undefined, mine: false };
+      const stages = curTeam.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+      stages[activeStageIdx].tasks[localIdx].status = 'assigned';
+      stages[activeStageIdx].tasks[localIdx].startedAt = now;
+      tx.update(teamRef, { stages, activeTaskId: result.taskId, updatedAt: now });
+      return { taskId: result.taskId, mine: true };
+    });
+    if (!claim.mine) {
+      // Lost the race (or team/stage vanished): reverse assignTask's reservation so
+      // the slot doesn't leak, and hand back whatever is actually in flight.
+      await releaseTask(result.taskId, ownerUid, gameId, runId);
+      return { taskId: claim.taskId };
+    }
   }
   return { taskId: result.taskId };
 }

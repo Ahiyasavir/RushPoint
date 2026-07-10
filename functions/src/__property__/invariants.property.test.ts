@@ -253,6 +253,43 @@ describe('buildRankings — leaderboard invariants (all presets)', () => {
       }
     }
   });
+
+  test('non-time presets: mid-run ties (still-active teams, equal score) rank ' +
+    'deterministically by progress, not by input array order (leaderboard rank must ' +
+    'not depend on the unordered Firestore team query order — this shuffles the live ' +
+    'board between refreshes for any two teams that happen to be tied)', () => {
+    // Two ACTIVE (unfinished) teams with identical score but different progress —
+    // teamB has completed more stages, so is meaningfully "ahead" even though the
+    // raw point total happens to match right now.
+    const makeTeam = (id: string, completedStages: number, activeStages: number): RunTeam => {
+      const start = new Date(1_700_000_000_000).toISOString();
+      const stages = [
+        ...Array.from({ length: completedStages }, (_, s) => ({
+          stageId: `c${s}`, status: 'completed' as const,
+          tasks: [{ taskId: `c${s}t0`, taskIndex: 0, status: 'completed' as const, earnedScore: 0 }],
+        })),
+        ...Array.from({ length: activeStages }, (_, s) => ({
+          stageId: `a${s}`, status: 'active' as const,
+          tasks: [{ taskId: `a${s}t0`, taskIndex: 0, status: 'active' as const, earnedScore: 0 }],
+        })),
+      ];
+      return {
+        id, displayName: id, status: 'active', startedAt: start, finishedAt: undefined,
+        score: 0, bonusPenalty: 0, stages,
+      } as unknown as RunTeam;
+    };
+    const behind = makeTeam('behind', 1, 2);
+    const ahead = makeTeam('ahead', 2, 1);
+
+    for (const preset of ['fixed_points_speed', 'smart_weighted'] as const) {
+      const boardA = buildRankings(gameFor(preset), [behind, ahead], now);
+      const boardB = buildRankings(gameFor(preset), [ahead, behind], now);
+      // Both boards must agree on who ranks first, regardless of input order.
+      expect(boardA[0].teamId).toBe(boardB[0].teamId);
+      // The team with more completed stages should win the tie.
+      expect(boardA[0].teamId).toBe('ahead');
+    }
+  });
 });
 
 describe('haversineKm — metric invariants', () => {

@@ -15,7 +15,7 @@ import { validate } from './validation';
 function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
-import { completeTaskForTeam, resolveCallerTeam } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot } from './runs/index';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
@@ -1042,6 +1042,10 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   } catch (e) {
     functions.logger.warn('adjustTeamScore score-notice write failed', { ownerUid, gameId, runId, teamId, err: String(e) });
   }
+
+  // The operator expects the adjustment on the board NOW — forced (unthrottled)
+  // refresh; still skipped for a frozen board and best-effort like the notice.
+  await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId, { force: true });
 
   return { ok: true, newBonusPenalty: newPenalty };
 });
