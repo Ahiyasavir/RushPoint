@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
@@ -16,6 +16,8 @@ import {
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { toast } from '../components/toast';
+import { playAlert, unlockAudio } from '../lib/sound';
 import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
 import HeatmapMap from '../components/HeatmapMap';
@@ -46,6 +48,12 @@ export default function RunConsolePage() {
   }, [gameId, runId, ownerUid]);
 
   // Live unacknowledged SOS / alerts (owner reads its own run's alerts).
+  // Safety path: when a NEW alert arrives the organizer gets an audible cue + a
+  // document.title flash so a raised SOS never sits silent on a busy console.
+  // Ref-baseline the seen ids (null until the first snapshot) so a fresh mount
+  // doesn't replay existing alerts. Mirrors the StaffConsole cue.
+  const seenAlertIds = useRef<Set<string> | null>(null);
+  const baseTitle = useRef<string>(document.title);
   useEffect(() => {
     if (!gameId || !runId) return;
     const ref = query(
@@ -58,9 +66,28 @@ export default function RunConsolePage() {
         return { id: d.id, teamId: a.teamId ?? '', type: a.type ?? 'sos', message: a.message ?? '', lat: a.lat ?? null, lng: a.lng ?? null, createdAt: a.createdAt ?? '' };
       });
       rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const ids = new Set(rows.map((r) => r.id));
+      if (seenAlertIds.current === null) {
+        seenAlertIds.current = ids; // baseline: don't cue on first paint
+      } else if (rows.some((r) => !seenAlertIds.current!.has(r.id))) {
+        playAlert();
+      }
+      seenAlertIds.current = ids;
       setAlerts(rows);
     }, () => undefined);
   }, [gameId, runId, ownerUid]);
+
+  // Flash the browser-tab title while any alert is unacknowledged so the
+  // organizer notices even on another tab; restore it when all are cleared.
+  useEffect(() => {
+    if (alerts.length === 0) { document.title = baseTitle.current; return; }
+    const id = setInterval(() => {
+      document.title = document.title === baseTitle.current
+        ? t.runConsole.newAlertTitleFlash({ n: alerts.length })
+        : baseTitle.current;
+    }, 1000);
+    return () => { clearInterval(id); document.title = baseTitle.current; };
+  }, [alerts.length, t]);
 
   const loadTeams = useCallback(async () => {
     if (!gameId || !runId) return;
@@ -74,20 +101,41 @@ export default function RunConsolePage() {
     return () => clearInterval(id);
   }, [loadTeams]);
 
+  // Keep the leaderboard snapshot fresh mid-run so the teams table + live
+  // standings panel (both read the snapshot, the SAME source the TV/public board
+  // uses) don't look "stuck" between manual refreshes. Skips a finished run and a
+  // frozen board (the freeze feature must win — refreshLeaderboard recomputes even
+  // when frozen, so we simply don't call it while frozen). No busy flag: this must
+  // not disable the action buttons every interval.
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    if (run?.status === 'finished' || run?.leaderboard?.frozen) return;
+    const id = setInterval(() => {
+      refreshLeaderboard({ ownerUid, gameId, runId }).catch(() => undefined);
+    }, 15000);
+    return () => clearInterval(id);
+  }, [gameId, runId, ownerUid, run?.status, run?.leaderboard?.frozen]);
+
   const ctx = { ownerUid, gameId: gameId!, runId: runId! };
 
   async function startAll() {
+    // Unlock audio on this user gesture so the SOS cue can play later (autoplay).
+    unlockAudio();
     setBusy(true);
-    try { await startTeams({ gameId: gameId!, runId: runId! }); await loadTeams(); }
+    try { await startTeams({ gameId: gameId!, runId: runId! }); await loadTeams(); toast.success(t.runConsole.startedAllTeams); }
+    catch { await dialog.alert(t.runConsole.startFailed); }
     finally { setBusy(false); }
   }
   async function finalize() {
     if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle, true))) return;
     setBusy(true);
-    try { await finalizeRun({ gameId: gameId!, runId: runId! }); }
+    try { await finalizeRun({ gameId: gameId!, runId: runId! }); toast.success(t.runConsole.finalizedRun); }
+    catch { await dialog.alert(t.runConsole.finalizeFailed); }
     finally { setBusy(false); }
   }
   async function invite() {
+    // A click gesture — also unlock audio for the SOS cue.
+    unlockAudio();
     const name = await dialog.prompt(t.runConsole.staffNamePrompt);
     if (!name) return;
     try {
@@ -181,12 +229,7 @@ export default function RunConsolePage() {
         <Button variant="ghost" onClick={invite}>{t.runConsole.inviteStaffPin}</Button>
         <Button variant="danger" disabled={busy || finished} onClick={finalize}>{t.runConsole.finalizeRun}</Button>
       </div>
-      {staffPin && (
-        <Card className="p-3 text-sm">
-          {t.runConsole.staffPinLabel} <span className="font-mono text-neon-green text-lg tracking-widest">{staffPin}</span>
-          <span className="text-zinc-500"> {t.runConsole.staffPinShareNote}</span>
-        </Card>
-      )}
+      {staffPin && <StaffInviteCard ctx={ctx} pin={staffPin} />}
 
       {/* Live-ops + post-run organizer tools (deferred-UI wiring) */}
       <div className="grid md:grid-cols-2 gap-5">
@@ -229,7 +272,11 @@ export default function RunConsolePage() {
                       {rankedScoreById.get(team.id) ?? team.score}
                     </div>
                     <button className="text-[11px] text-zinc-400 hover:text-zinc-200"
-                      onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }}>
+                      onClick={async () => {
+                        if (!(await dialog.confirm(t.runConsole.skipConfirm, undefined, true))) return;
+                        try { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }
+                        catch { await dialog.alert(t.runConsole.skipFailed); }
+                      }}>
                       {t.runConsole.skip}
                     </button>
                     <button className="text-[11px] text-zinc-400 hover:text-neon-red"
@@ -280,8 +327,9 @@ export default function RunConsolePage() {
                   {run.leaderboard.published ? t.runConsole.standingsVisibleToTeams : t.runConsole.standingsHiddenFromTeams}
                 </button>
               </div>
+              {/* Show ALL teams — at 20 teams a slice(0,12) hid ranks 13-20 mid-run. */}
               <div className="space-y-1">
-                {run.leaderboard.rankings.slice(0, 12).map((r) => (
+                {run.leaderboard.rankings.map((r) => (
                   <div key={r.teamId} className="flex items-center gap-3 text-sm">
                     <span className="w-6 text-zinc-500">{r.rank}</span>
                     <span className="flex-1 text-zinc-200">{r.teamName}</span>
@@ -355,6 +403,38 @@ function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBo
         <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(`${boardLink}&ceremony`, 'ceremony')}>
           {copied === 'ceremony' ? t.runConsole.linkCopied : t.runConsole.ceremonyLinkLabel}
         </button>
+      </div>
+    </Card>
+  );
+}
+
+// Staff onboarding card — instead of hand-typing three Firebase IDs + the PIN,
+// the organizer shares a link/QR that lands staff in the play app's staff sign-in
+// with owner/game/run pre-filled (StaffSignIn reads ?owner/?game/?run). The PIN is
+// deliberately NOT in the link (it's a secret + play-web doesn't read it from the
+// URL) — staff read it off this card and type it once.
+function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string; runId: string }; pin: string }) {
+  const t = useT();
+  const link = `${PLAY_URL}/?staff&owner=${ctx.ownerUid}&game=${ctx.gameId}&run=${ctx.runId}`;
+  const [qr, setQr] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    QRCode.toDataURL(link, { margin: 1, width: 160 }).then(setQr).catch(() => setQr(''));
+  }, [link]);
+  async function copy() {
+    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
+  }
+  return (
+    <Card className="p-4 text-sm flex flex-wrap items-center gap-4">
+      {qr && <img src={qr} alt={t.runConsole.staffLinkQrAlt} className="rounded-lg bg-white p-1.5 w-28 h-28 shrink-0" />}
+      <div className="flex-1 min-w-[12rem] space-y-1.5">
+        <div>
+          {t.runConsole.staffPinLabel} <span className="font-mono text-neon-green text-lg tracking-widest">{pin}</span>
+        </div>
+        <button className="text-xs text-neon-green hover:underline" onClick={copy}>
+          {copied ? t.runConsole.linkCopied : t.runConsole.staffLinkCopy}
+        </button>
+        <div className="text-zinc-500 text-xs leading-relaxed">{t.runConsole.staffLinkNote}</div>
       </div>
     </Card>
   );
@@ -449,13 +529,14 @@ function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; ru
     try {
       await pushAnnouncement({ ...ctx, message: msg, ...(teamTarget ? { teamId: teamTarget } : {}) });
       setMsg('');
+      toast.success(t.runConsole.announcementSent);
     }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyMsg(false); }
   }
   async function sendFlash() {
     setBusyFlash(true);
-    try { await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: 600 }); setFlash(''); }
+    try { await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: 600 }); setFlash(''); toast.success(t.runConsole.flashSent); }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyFlash(false); }
   }
