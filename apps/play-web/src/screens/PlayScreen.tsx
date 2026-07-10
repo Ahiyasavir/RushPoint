@@ -128,15 +128,21 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     if (powerUpLogLen.current === null) { powerUpLogLen.current = log.length; return; }
     if (log.length > powerUpLogLen.current) {
       const latest = log[log.length - 1];
-      if (latest?.type) {
-        setPowerUpToast(latest.type);
-        powerUpLogLen.current = log.length;
-        const id = window.setTimeout(() => setPowerUpToast(null), 4000);
-        return () => window.clearTimeout(id);
-      }
+      if (latest?.type) setPowerUpToast(latest.type);
     }
     powerUpLogLen.current = log.length;
   }, [state?.team.powerUps?.log]);
+
+  // Auto-hide the toast ~4s after it appears. Keyed on the toast value itself, NOT
+  // on the team state — the detection effect above re-runs on every poll/snapshot
+  // (powerUps.log is a fresh array reference each fetch), so scheduling the timeout
+  // there let a refresh arriving inside the 4s window run that effect's cleanup and
+  // clear the pending timer, leaving the toast stuck on screen forever.
+  useEffect(() => {
+    if (!powerUpToast) return;
+    const id = window.setTimeout(() => setPowerUpToast(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [powerUpToast]);
 
   // Task-complete cue: fire when the total count of completed tasks grows across
   // polls. Counting the server-confirmed 'completed' status (not the callable
