@@ -243,6 +243,12 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `text-zinc-100` reads dark-on-light. Prefer logical classes (`ms-`/`text-start`) for RTL.
 - **Emulator:** needs Java ≥ 21 (launcher auto-switches); connect via `127.0.0.1`; Ctrl+C to persist.
 - **Bundle:** keep heavy deps (MapLibre) behind `React.lazy`.
+- **Never run `verify` and `verify:emulator` concurrently on the same working tree:** both invoke
+  `shared:build`, which rewrites `packages/shared/dist` **in place**. If one gauntlet's tsc is
+  rewriting `dist` while the other's typecheck/esbuild reads it, functions fails with a spurious
+  `No matching export … from './runs/index'` (a partial-`dist` read, not a real code error). Run the
+  two gauntlets **sequentially**; in CI keep them in **separate jobs / checkouts** so they never
+  share `dist`.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

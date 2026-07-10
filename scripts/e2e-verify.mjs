@@ -64,6 +64,9 @@ adminSdk.initializeApp({ projectId: PROJECT });
 
 // ── Per-callable latency sampling (reported at the end) ───────────────────────
 const latencySamples = new Map(); // fn → number[] (ms)
+// Transient internal/unavailable blips absorbed by the call() retry — reported
+// in the summary so emulator flakiness is visible, never silent.
+let transientRetries = 0;
 function recordLatency(fn, ms) {
   if (!latencySamples.has(fn)) latencySamples.set(fn, []);
   latencySamples.get(fn).push(ms);
@@ -93,7 +96,23 @@ function makeParty(name) {
     call: async (fn, data) => {
       const t0 = Date.now();
       try {
-        return (await httpsCallable(functions, fn)(data)).data;
+        // Real phones retry a transient network/server blip — so does the suite
+        // (max 2, counted + reported below; a NOISY retry tally is itself a
+        // finding, a hidden one isn't). Only `internal`/`unavailable` retry: no
+        // scenario expects those codes, so a deliberate denial (permission-denied,
+        // invalid-argument, …) is never masked. One emulator ECONNRESET blip used
+        // to abort a scenario and cascade `functions/internal` through every
+        // scenario after it.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return (await httpsCallable(functions, fn)(data)).data;
+          } catch (e) {
+            const transient = e.code === 'functions/internal' || e.code === 'functions/unavailable';
+            if (!transient || attempt >= 2) throw e;
+            transientRetries++;
+            await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+          }
+        }
       } finally {
         recordLatency(fn, Date.now() - t0);
       }
@@ -653,6 +672,12 @@ async function main() {
   check('public leaderboard exposes rankings once published',
     boardAfter?.published === true && (boardAfter?.rankings?.length ?? 0) === 1,
     JSON.stringify(boardAfter?.rankings?.[0]));
+  // getPublicLeaderboard must carry the run's scoringPreset so a `time_only`
+  // board can honestly hide the meaningless score column client-side, instead
+  // of showing a fake-looking 500/0 next to each team.
+  check('public leaderboard exposes the scoringPreset',
+    ['time_only', 'fixed_points_speed', 'smart_weighted'].includes(boardAfter?.scoringPreset),
+    String(boardAfter?.scoringPreset));
 
   // ── 8b2. adjustTeamScore is immediately visible (live-leaderboard-auto-refresh)
   const rowBeforeAdj = (await creator.call('listRunTeams', { gameId, runId }))
@@ -1273,6 +1298,35 @@ async function main() {
   await expectError('updateGame rejects orderItems mixed with answers',
     creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz', orderItems: ['a', 'b', 'c'], answers: ['a'] }) }),
     { codeIn: ['functions/invalid-argument'] });
+
+  // Unwinnable-task guard: a task with no usable answer key can never be
+  // completed by any participant (matchesTaskAnswer/verifyStationCode/
+  // submitSequenceStep all reject an empty answer). updateGame must refuse to
+  // persist one — bypassing the Wizard's client-side guard directly.
+  await expectError('updateGame rejects a quiz with no answers',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects a numeric task with no numericAnswer',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'numeric' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects a smart_station with no secretCode',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'smart_station' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects a sequence with no steps',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'sequence' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+
+  // Defense in depth: a game saved BEFORE this guard existed (or written by any
+  // other path) could still carry an unwinnable task. launchRun must catch it
+  // too, not just updateGame — write directly via the Admin SDK to bypass the
+  // callable's validation entirely, simulating that legacy-data case.
+  const { gameId: gLegacyBad } = await creator.call('createGame', { title: 'Legacy Bad Game', mode: 'individual' });
+  await adminSdk.firestore().doc(`users/${creatorCred.user.uid}/games/${gLegacyBad}`).update({
+    stages: badStage({ ...baseBad, type: 'quiz' }),
+  });
+  await expectError('launchRun rejects a legacy game with an unwinnable task',
+    creator.call('launchRun', { gameId: gLegacyBad }),
+    { codeIn: ['functions/failed-precondition'] });
 
   }); // scenario: quiz ordering
 
@@ -3118,6 +3172,54 @@ async function main() {
       `score=${dstate?.team?.score} earned=${drec?.earnedScore}`);
   });
 
+  // ═══ Same-team assignment race (fix-station-slot-same-team-race) ═════════════
+  // Two concurrent requestNextTask calls for the SAME team on a multi-task stage
+  // race to claim a station slot. The old code read the team, then wrote the
+  // assignment non-atomically, so both could reserve DIFFERENT slots and the
+  // second write would win — leaving one reserved slot with no team on it (a
+  // permanent station-capacity leak the different-team contention test can't see).
+  // The team must end holding exactly one task, and the total reserved across the
+  // stage's candidate stations must be exactly 1 (no leak). Rate-limiting one of
+  // the two calls doesn't invalidate the invariant — it must hold either way.
+  await scenario('same-team assignment race leaks no station slot', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: sg } = await creator.call('createGame', { title: 'Same-Team Race', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-multi', order: 0, title: 'Two stations, pick one', isFinal: true, requiredTaskCount: 1, tasks: [
+          { id: 'st-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3 },
+          { id: 'st-b', title: 'Station B', type: 'field', coordinates: { lat: 31.79, lng: 35.22 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3 },
+        ] },
+      ],
+    });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sg });
+    const solo = makeParty('sameTeamRacer');
+    await signInAnonymously(solo.auth);
+    await solo.call('joinRun', { code: sc, displayName: 'Racer' });
+    await creator.call('startTeams', { gameId: sg, runId: sr });
+
+    // Fire the initial assignment TWICE at once for the one team.
+    const CS = { ownerUid: OWNER, gameId: sg, runId: sr, code: sc, lat: 31.78, lng: 35.21 };
+    await Promise.allSettled([
+      solo.call('requestNextTask', CS),
+      solo.call('requestNextTask', CS),
+    ]);
+
+    const runDoc = await creator.getDocAt(`users/${OWNER}/games/${sg}/runs/${sr}`);
+    const counts = runDoc.data?.taskCounts ?? {};
+    const reserved = (counts['st-a'] ?? 0) + (counts['st-b'] ?? 0);
+    const state = await solo.call('getMyTeamState', { code: sc });
+    const active = state?.team?.activeTaskId;
+    check('same-team race: team holds exactly one task', !!active, JSON.stringify(active));
+    check('same-team race: exactly one slot reserved (no leaked station slot)',
+      reserved === 1, JSON.stringify(counts));
+    check('same-team race: the reserved slot matches the held task',
+      (counts[active] ?? 0) === 1, `active=${active} counts=${JSON.stringify(counts)}`);
+  });
+
   // ═══ Team ↔ HQ chat (team-hq-chat) ══════════════════════════════════════════
   // A single thread doc per team; either side sends. Covers: both directions,
   // ordering, cap (>100 → oldest dropped), validation, rate-limit, finished-run,
@@ -3536,7 +3638,14 @@ async function main() {
       { id: 'cv-s2', order: 1, title: 'S2', isFinal: true, requiredTaskCount: 1, tasks: [
         { id: 'cv-b', title: 'B', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 20, maxConcurrentTeams: 3 } ] },
     ] });
-    const pubAfter = await creator.getDocAt(`publicGames/${cvGame}`);
+    // The resync is deliberately fire-and-forget in updateGame (best-effort, no
+    // await) — poll briefly instead of a single racy read. The contract under
+    // test is "the gallery card converges quickly", not "synchronously".
+    let pubAfter = await creator.getDocAt(`publicGames/${cvGame}`);
+    for (let i = 0; i < 10 && !(pubAfter.data?.stageCount === 2 && pubAfter.data?.taskCount === 2); i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      pubAfter = await creator.getDocAt(`publicGames/${cvGame}`);
+    }
     check('editing a published game re-syncs gallery counts (no republish)',
       pubAfter.data?.stageCount === 2 && pubAfter.data?.taskCount === 2,
       JSON.stringify({ stageCount: pubAfter.data?.stageCount, taskCount: pubAfter.data?.taskCount }));
@@ -3584,6 +3693,7 @@ async function main() {
   });
 
   printSummary();
+  if (transientRetries > 0) console.log(`\n⚠ transient internal/unavailable retries absorbed: ${transientRetries}`);
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

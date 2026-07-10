@@ -11,85 +11,21 @@
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, mkdirSync } from 'node:fs';
-import { join, delimiter } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
+import { ensureModernJava, MIN_JAVA } from './lib/resolve-java.mjs';
 
 const ROOT       = process.cwd();
 const DATA_DIR   = join(ROOT, '.firebase', 'emulator-data');
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
-const isWin      = process.platform === 'win32';
-const MIN_JAVA   = 21;
 
-// `java -version` prints to stderr in formats like:
-//   openjdk version "21.0.11" 2024-...     -> 21
-//   java version "1.8.0_392"               -> 8
-function parseMajor(text) {
-  const m = (text || '').match(/version "(\d+)(?:\.(\d+))?/);
-  if (!m) return null;
-  let major = parseInt(m[1], 10);
-  if (major === 1 && m[2]) major = parseInt(m[2], 10);
-  return Number.isFinite(major) ? major : null;
-}
-
-function javaMajorOf(bin) {
-  const r = spawnSync(bin, ['-version'], { encoding: 'utf8' });
-  return parseMajor(`${r.stderr || ''}${r.stdout || ''}`);
-}
-
-function javaMajorOnPath(env) {
-  const r = spawnSync('java', ['-version'], { env, shell: true, encoding: 'utf8' });
-  return parseMajor(`${r.stderr || ''}${r.stdout || ''}`);
-}
-
-// Find a JDK >= MIN_JAVA: prefer a modern-enough JAVA_HOME, else scan common roots.
-function findModernJdk() {
-  const javaBin = isWin ? 'java.exe' : 'java';
-
-  if (process.env.JAVA_HOME) {
-    const bin = join(process.env.JAVA_HOME, 'bin', javaBin);
-    if (existsSync(bin)) {
-      const major = javaMajorOf(bin);
-      if (major && major >= MIN_JAVA) return process.env.JAVA_HOME;
-    }
-  }
-  if (!isWin) return null;
-
-  const roots = [
-    'C:\\Program Files\\Java',
-    'C:\\Program Files\\Eclipse Adoptium',
-    'C:\\Program Files\\Microsoft',
-    'C:\\Program Files\\Amazon Corretto',
-    'C:\\Program Files\\Zulu',
-    'C:\\Program Files\\BellSoft',
-  ];
-  for (const root of roots) {
-    if (!existsSync(root)) continue;
-    for (const dir of readdirSync(root)) {
-      const m = dir.match(/(?:jdk|jre|zulu)-?(\d+)/i);
-      if (!m || parseInt(m[1], 10) < MIN_JAVA) continue;
-      const bin = join(root, dir, 'bin', 'java.exe');
-      if (existsSync(bin) && (javaMajorOf(bin) ?? 0) >= MIN_JAVA) {
-        return join(root, dir);
-      }
-    }
-  }
-  return null;
-}
+// Java-version parsing + JDK discovery live in ./lib/resolve-java.mjs (shared
+// with emulator-exec.mjs — change: emulator-gate hardening).
 
 // â”€â”€ Resolve Java >= 21 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const env = { ...process.env };
-let major = javaMajorOnPath(env);
-
-if (!major || major < MIN_JAVA) {
-  const home = findModernJdk();
-  if (home) {
-    env.JAVA_HOME = home;
-    env.PATH = `${join(home, 'bin')}${delimiter}${env.PATH}`;
-    major = javaMajorOnPath(env);
-    console.log(`[dev-emulator] PATH Java was too old (or missing); switched to JDK ${major} at ${home}`);
-  }
-}
+const major = ensureModernJava(env, (msg) => console.log(`[dev-emulator] ${msg}`));
 
 if (!major || major < MIN_JAVA) {
   console.error(`[dev-emulator] ERROR: Firebase Emulator needs Java ${MIN_JAVA}+. Detected: ${major ? 'Java ' + major : 'none'}.`);
