@@ -2157,6 +2157,67 @@ async function main() {
     check('gm: owner isolation — outsider sees none of these runs', !strangerIds.includes(rB), JSON.stringify(strangerIds));
   }); // scenario: multi-run GM overview
 
+  await scenario('global per-run device cap (16 phones max, both join paths)', async () => {
+    // A hard global ceiling on total phones in one run (MAX_RUN_DEVICES = 16),
+    // layered on top of the billing participant cap (free mode = 50) and the
+    // per-team device cap (3). Free mode gives maxParticipants 50, so we can reach
+    // 16 phones via joinRun before the billing cap fires. The run.deviceCount
+    // counter grows on BOTH joinRun (a founding phone) and joinTeamAsDevice (an
+    // attached phone); the 17th phone is refused from either entry point.
+    const RUN_DEVICE_CAP = 16;
+    const { gameId: gDC } = await creator.call('createGame', { title: 'Device Cap Game', mode: 'team' });
+    await creator.call('updateGame', { gameId: gDC, stages: [{ id: 'dc-s', order: 0, title: 'S', isFinal: true, tasks: [{
+      id: 'dc-t', title: 'Go', type: 'field', triggerMode: 'instant',
+      coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 20 }] }] });
+    const { runId: rDC, accessCode: cDC } = await creator.call('launchRun', { gameId: gDC });
+    const runDocPath = `users/${creatorCred.user.uid}/games/${gDC}/runs/${rDC}`;
+
+    // Phone 1: the founding device of team 0 (joinRun path).
+    const p0 = makeParty('rdc-founder');
+    await signInAnonymously(p0.auth);
+    await p0.call('joinRun', { code: cDC, displayName: 'Cap Team 0' });
+    const p0State = await p0.call('getMyTeamState', { code: cDC });
+    const teamCode = p0State?.team?.deviceJoinCode;
+    check('device-cap: founder join set deviceCount to 1',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === 1);
+
+    // Phone 2: an attached teammate on team 0 (joinTeamAsDevice path → counter grows).
+    const pA = makeParty('rdc-attach');
+    await signInAnonymously(pA.auth);
+    const attachRes = await pA.call('joinTeamAsDevice', { code: cDC, teamCode, memberName: 'Phone 2' });
+    check('device-cap: joinTeamAsDevice attaches below the ceiling', attachRes?.role === 'viewer');
+    check('device-cap: attach grew deviceCount to 2',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === 2);
+
+    // Phones 3..16: fourteen more founding devices (joinRun path) → reach the cap.
+    for (let i = 1; i <= RUN_DEVICE_CAP - 2; i++) {
+      const p = makeParty(`rdc-f${i}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: cDC, displayName: `Cap Team ${i}` });
+    }
+    check('device-cap: run holds exactly MAX_RUN_DEVICES phones',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === RUN_DEVICE_CAP,
+      String((await creator.getDocAt(runDocPath)).data?.deviceCount));
+
+    // The 17th phone via joinRun is refused (run full) even though billing (50) allows it.
+    const pOver = makeParty('rdc-over');
+    await signInAnonymously(pOver.auth);
+    await expectError('device-cap: 17th phone via joinRun is refused',
+      pOver.call('joinRun', { code: cDC, displayName: 'Cap Team Over' }),
+      { codeIn: ['functions/resource-exhausted'], match: /16 devices/ });
+
+    // The 17th phone via joinTeamAsDevice is ALSO refused — team 0 still has room
+    // (2/3), so this exercises the ceiling on the device path, not the per-team cap.
+    const pOverDev = makeParty('rdc-over-dev');
+    await signInAnonymously(pOverDev.auth);
+    await expectError('device-cap: 17th phone via joinTeamAsDevice is refused',
+      pOverDev.call('joinTeamAsDevice', { code: cDC, teamCode, memberName: 'Phone Over' }),
+      { codeIn: ['functions/resource-exhausted'] });
+
+    check('device-cap: counter unchanged after both rejections (still 16)',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === RUN_DEVICE_CAP);
+  }); // scenario: global per-run device cap
+
   await scenario('movement heatmap (GPS track → density)', async () => {
     const { gameId: gH } = await creator.call('createGame', { title: 'Heatmap Game', mode: 'individual' });
     await creator.call('updateGame', { gameId: gH, stages: [{ id: 'h-s', order: 0, title: 'S', isFinal: true, tasks: [{

@@ -5,9 +5,11 @@ import {
   assertController,
   generateDeviceJoinCode,
   canAttachDevice,
+  canAddRunDevice,
   DEVICE_JOIN_CODE_ALPHABET,
   DEVICE_JOIN_CODE_LENGTH,
   MAX_TEAM_DEVICES,
+  MAX_RUN_DEVICES,
 } from './teamDevices';
 
 // Minimal team factory — only the fields the device helpers read.
@@ -144,5 +146,21 @@ describe('canAttachDevice', () => {
       ok: false,
       reason: 'finished',
     });
+  });
+});
+
+describe('canAddRunDevice (global per-run phone ceiling)', () => {
+  test('MAX_RUN_DEVICES is 16', () => {
+    expect(MAX_RUN_DEVICES).toBe(16);
+  });
+
+  test('admits a phone while the run is below the ceiling', () => {
+    expect(canAddRunDevice(0)).toEqual({ ok: true });
+    expect(canAddRunDevice(15)).toEqual({ ok: true });
+  });
+
+  test('refuses once the run already holds MAX_RUN_DEVICES phones', () => {
+    expect(canAddRunDevice(MAX_RUN_DEVICES)).toEqual({ ok: false, reason: 'run-full' });
+    expect(canAddRunDevice(MAX_RUN_DEVICES + 1)).toEqual({ ok: false, reason: 'run-full' });
   });
 });

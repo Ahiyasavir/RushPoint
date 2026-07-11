@@ -567,7 +567,11 @@ export interface Run {
   // excluded from cross-run aggregates (benchmarks, player profiles, playCount).
   // Absent on every normal run; every consumer treats absent as false.
   isTestDrive?: boolean;
-  participantCount: number;      // grows with each joinRun
+  participantCount: number;      // grows with each joinRun (counts TEAMS)
+  // Monotonic total phones (devices) across all teams — grows on every joinRun AND
+  // joinTeamAsDevice, enforced against MAX_RUN_DEVICES. No detach path, so it never
+  // decrements. Absent on legacy runs; consumers fall back to participantCount.
+  deviceCount?: number;
   freeParticipantsUsed?: number; // legacy (pre-migration runs)
   leaderboard?: RunLeaderboard;
   hotZone?: HotZone;             // active timed score multiplier (hot-zone-bonus)

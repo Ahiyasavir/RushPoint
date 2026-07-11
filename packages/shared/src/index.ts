@@ -47,4 +47,5 @@ export * from './chat';
 export * from './mediaKinds';
 export * from './storedDocs';
 export * from './gameStats';
+export * from './runCapacity';
 export * from './taskCompletability';

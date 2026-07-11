@@ -92,7 +92,7 @@ import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
-  attachedDeviceUids, controllerUidOf,
+  attachedDeviceUids, controllerUidOf, canAddRunDevice, MAX_RUN_DEVICES,
 } from './teamDevices';
 import type { RunFeedback } from '@rushpoint/shared';
 import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
@@ -424,8 +424,19 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
           : `This run is full (${cap} participants max).`;
       throw new functions.https.HttpsError('resource-exhausted', msg, { cap, used });
     }
+    // Global per-run phone ceiling — additive to the billing cap above. The founding
+    // phone counts as one device. Legacy runs (no deviceCount) fall back to the team
+    // count as a lower bound; the field becomes exact once written here.
+    const usedDevices = r.deviceCount ?? used;
+    if (!canAddRunDevice(usedDevices).ok) {
+      throw new functions.https.HttpsError(
+        'resource-exhausted',
+        `This run is full (${MAX_RUN_DEVICES} devices max).`,
+        { cap: MAX_RUN_DEVICES, used: usedDevices },
+      );
+    }
     t.set(teamRef, team);
-    t.update(runRef, { participantCount: used + 1, updatedAt: now });
+    t.update(runRef, { participantCount: used + 1, deviceCount: usedDevices + 1, updatedAt: now });
     return { already: false };
   });
 
@@ -1921,9 +1932,11 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
   if (teamQ.empty) throw new functions.https.HttpsError('not-found', 'No team with that device code');
   const teamRef = teamQ.docs[0].ref;
 
+  const runRef = db.doc(runPath(ownerUid, gameId, runId));
   const now = new Date().toISOString();
   await db.runTransaction(async (tx) => {
-    const snap = await tx.get(teamRef);
+    // All reads before any write (Firestore transaction rule).
+    const [snap, runFresh] = await Promise.all([tx.get(teamRef), tx.get(runRef)]);
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const team = snap.data() as RunTeam;
     const decision = canAttachDevice(team, uid);
@@ -1933,6 +1946,17 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
         throw new functions.https.HttpsError('resource-exhausted', 'This team already has the maximum number of phones');
       }
       throw new functions.https.HttpsError('failed-precondition', 'This team has already finished.');
+    }
+    // Global per-run phone ceiling — additive to the per-team cap above. Legacy runs
+    // fall back to the team count; the field becomes exact once written here.
+    const r = runFresh.data() as Run | undefined;
+    const usedDevices = r?.deviceCount ?? r?.participantCount ?? 0;
+    if (!canAddRunDevice(usedDevices).ok) {
+      throw new functions.https.HttpsError(
+        'resource-exhausted',
+        `This run is full (${MAX_RUN_DEVICES} devices max).`,
+        { cap: MAX_RUN_DEVICES, used: usedDevices },
+      );
     }
     // Rewrite the devices array wholesale (never dotted-path an array element)
     // and backfill the device fields on a legacy doc in the same write.
@@ -1946,6 +1970,7 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
       devices,
       updatedAt: now,
     });
+    tx.update(runRef, { deviceCount: usedDevices + 1, updatedAt: now });
   });
 
   return { ownerUid, gameId, runId, teamId: teamRef.id, role: 'viewer', alreadyAttached: false };

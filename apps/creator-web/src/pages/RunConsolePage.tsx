@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, type ChatMessage } from '@rushpoint/shared';
+import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, type ChatMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -404,6 +404,15 @@ function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBo
           {copied === 'ceremony' ? t.runConsole.linkCopied : t.runConsole.ceremonyLinkLabel}
         </button>
       </div>
+      {/* Temporary per-run phone ceiling (run-device-cap). Reads the SAME shared
+          constant the server enforces, so the number is always correct; hides
+          itself automatically once the cap is raised to Infinity (removed). */}
+      {isRunDeviceCapActive() && (
+        <p dir="auto" className="mt-3 pt-3 border-t border-zinc-800 text-[11px] leading-relaxed text-amber-300/80 flex items-start gap-1.5">
+          <span aria-hidden="true">⚠️</span>
+          <span>{t.runConsole.deviceCapNote({ max: MAX_RUN_DEVICES })}</span>
+        </p>
+      )}
     </Card>
   );
 }
