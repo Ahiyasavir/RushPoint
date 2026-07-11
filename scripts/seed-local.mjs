@@ -7,6 +7,7 @@
 //   Join codes:     PLAY01  (and 1234)
 
 import admin from 'firebase-admin';
+import { seedSansana } from './lib/sansana-game-def.mjs';
 
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
 
@@ -106,9 +107,15 @@ function buildGame(now) {
 }
 
 async function main() {
+  // The Sansana night field-game is seeded on EVERY boot (idempotent set/merge on
+  // fixed ids) so it is always in the public gallery + joinable with code SANSANA —
+  // "there from now on", independent of the demo's seed-if-empty guard below.
+  const sansana = await seedSansana(admin, db, auth, new Date().toISOString());
+  console.log(`[seed] Ensured "${'מפת האוצר של סנסנה'}" (${sansana.stageCount} stages) → gallery + join code ${sansana.code}.`);
+
   const existing = await db.collection('accessCodes').limit(1).get();
-  if (!existing.empty) {
-    console.log('[seed] accessCodes already present — skipping seed.');
+  if (existing.docs.some((d) => d.id !== 'SANSANA')) {
+    console.log('[seed] Demo accessCodes already present — skipping demo seed.');
     return;
   }
   console.log('[seed] Empty database — seeding v2 demo data…');
@@ -169,7 +176,7 @@ async function main() {
   }
   await cb.commit();
   console.log(`[seed] Launched run ${RUN_ID} with codes: ${CODES.join(', ')}`);
-  console.log('[seed] Done. Creator: creator@rushpoint.dev / test1234 · Join code: PLAY01');
+  console.log('[seed] Done. Creator: creator@rushpoint.dev / test1234 · Join codes: PLAY01, SANSANA');
 }
 
 main().catch((err) => { console.error('[seed] Seed failed:', err); process.exit(1); });
