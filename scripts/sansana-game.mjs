@@ -313,14 +313,42 @@ async function runSeed() {
   }, { merge: true });
 
   const stages = buildStages();
+  const tags = ['סנסנה', 'לילה', 'חידות'];
   const game = {
     id: GAME_ID, ownerUid: OWNER_UID, ...GAME_META, stages,
     registrationFields: [{ id: 'teamName', label: 'שם הקבוצה', type: 'text', required: true, level: 'team' }],
-    visibility: 'unlisted', tags: ['סנסנה', 'לילה', 'חידות'],
+    visibility: 'public', tags,
     approxLocation: { lat: LOC.home.lat, lng: LOC.home.lng, label: 'סנסנה' },
     playCount: 0, createdAt: now, updatedAt: now,
   };
   await db.doc(`users/${OWNER_UID}/games/${GAME_ID}`).set(game);
+
+  // ── Publish to the public gallery (the "everyone's library" the user asked
+  //    for): the denormalized publicGames card + a publicTasks library entry per
+  //    task. Hidden-location tasks are published with NULL-ISLAND coords so the
+  //    treasure-hunt spots never leak through the task library. ──
+  const allTasks = stages.flatMap((s) => s.tasks);
+  await db.doc(`publicGames/${GAME_ID}`).set({
+    id: GAME_ID, ownerUid: OWNER_UID, ownerDisplayName: 'Sansana Creator',
+    title: GAME_META.title, description: GAME_META.description, mode: GAME_META.mode,
+    scoringPreset: GAME_META.scoringPreset, tags, approxLocation: game.approxLocation,
+    playCount: 0, stageCount: stages.length, taskCount: allTasks.length,
+    estimatedTotalMinutes: allTasks.reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0),
+    requirement: 'gps',
+    createdAt: now, updatedAt: now,
+  });
+  const pb = db.batch();
+  for (const t of allTasks) {
+    pb.set(db.doc(`publicTasks/${GAME_ID}_${t.id}`), {
+      id: `${GAME_ID}_${t.id}`, sourceGameId: GAME_ID, sourceGameTitle: GAME_META.title,
+      ownerUid: OWNER_UID, ownerDisplayName: 'Sansana Creator',
+      title: t.title, description: t.description ?? '', type: t.type,
+      coordinates: t.hideLocation ? { lat: 0, lng: 0 } : t.coordinates,
+      difficulty: t.difficulty, estimatedMinutes: t.estimatedMinutes, pointValue: t.pointValue,
+      tags: t.tags ?? [], copyCount: 0, createdAt: now,
+    });
+  }
+  await pb.commit();
 
   await db.doc(`users/${OWNER_UID}/games/${GAME_ID}/runs/${RUN_ID}`).set({
     id: RUN_ID, gameId: GAME_ID, ownerUid: OWNER_UID, status: 'live',
@@ -331,9 +359,10 @@ async function runSeed() {
     code: CODE, ownerUid: OWNER_UID, gameId: GAME_ID, runId: RUN_ID, status: 'unused', createdAt: now,
   });
 
-  console.log('✅ נזרע המשחק "מפת האוצר של סנסנה" כ-run חי.');
+  console.log('✅ נזרע המשחק "מפת האוצר של סנסנה" כ-run חי + פורסם לגלריה הציבורית.');
   console.log(`   קוד הצטרפות: ${CODE}`);
   console.log(`   שלבים: ${stages.length} · קוד כספת: ${VAULT_CODE}`);
+  console.log('   מופיע כעת בספריית המשחקים של כולם (searchGallery / דף הגלריה).');
   console.log('   הצטרפו מהנייד עם הקוד SANSANA (הריצו npm run playtest:ngrok לקישור ציבורי).');
   process.exit(0);
 }

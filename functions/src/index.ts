@@ -16,6 +16,7 @@ function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
 import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot } from './runs/index';
+import { releaseTask } from './routing/assignNextTask';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
@@ -900,7 +901,14 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
 
   // autoApprove: the submission is logged but does not block progression.
   if (autoApprove) {
-    await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    const completed = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    // Release the completed task's own station slot (completeTaskForTeam only
+    // releases auto-skipped siblings — every caller releases its own task, like
+    // completeTask/submitTaskAnswer). Guarded on `completed` so an idempotent
+    // duplicate submission doesn't over-release. Without this a capped photo
+    // station leaks a slot on every completion (caught by the run-audit "no
+    // leaked station slots" oracle).
+    if (completed) await releaseTask(taskId, ownerUid, gameId, runId);
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
     // audio-tasks non-goal: audio submissions never enter the photo feed.
@@ -961,7 +969,10 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 
   // Approved photo = task complete → score it + advance the team.
   if (approved) {
-    await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+    const completed = await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+    // Release the completed task's own station slot (see submitStationPhoto note):
+    // a staff-approved photo must free its capped slot too, or it leaks.
+    if (completed) await releaseTask(taskId, ownerUid, gameId, runId);
 
     // Live photo feed (live-photo-feed): broadcast the approved photo. This path
     // adds a game-doc read (staff review, not a hot path) for the task title +
