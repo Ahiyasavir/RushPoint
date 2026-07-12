@@ -7,6 +7,7 @@
 //   Join codes:     PLAY01  (and 1234)
 
 import admin from 'firebase-admin';
+import { seedSansana, GAME_ID as SANSANA_GAME_ID } from './lib/sansana-game-def.mjs';
 
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
 
@@ -105,14 +106,24 @@ function buildGame(now) {
   };
 }
 
-async function main() {
-  const existing = await db.collection('accessCodes').limit(1).get();
-  if (!existing.empty) {
-    console.log('[seed] accessCodes already present — skipping seed.');
+// ── Sansana field-game (idempotent restore) ──────────────────────────────────
+// The emulator is restarted non-gracefully by the always-on supervisor, so any
+// data not in the persisted import is lost on reboot. Re-seed the real Sansana
+// night game on every boot (idempotent — no-op once its gallery card exists) so
+// it never disappears again. See scripts/lib/sansana-game-def.mjs.
+async function ensureSansana(now) {
+  const snap = await db.doc(`publicGames/${SANSANA_GAME_ID}`).get();
+  if (snap.exists) {
+    console.log('[seed] Sansana field-game already present — skipped.');
     return;
   }
+  console.log('[seed] Seeding the Sansana field-game…');
+  await seedSansana(admin, db, auth, now);
+  console.log('[seed] Sansana seeded — join code SANSANA, in the public gallery.');
+}
+
+async function seedDemo(now) {
   console.log('[seed] Empty database — seeding v2 demo data…');
-  const now = new Date().toISOString();
 
   await ensureUser(OWNER_UID, 'creator@rushpoint.dev', 'Demo Creator');
 
@@ -170,6 +181,17 @@ async function main() {
   await cb.commit();
   console.log(`[seed] Launched run ${RUN_ID} with codes: ${CODES.join(', ')}`);
   console.log('[seed] Done. Creator: creator@rushpoint.dev / test1234 · Join code: PLAY01');
+}
+
+async function main() {
+  const now = new Date().toISOString();
+
+  // Demo game is seed-if-empty; Sansana is ensured on every boot (idempotent).
+  const existing = await db.collection('accessCodes').limit(1).get();
+  if (existing.empty) await seedDemo(now);
+  else console.log('[seed] accessCodes already present — skipping demo seed.');
+
+  await ensureSansana(now);
 }
 
 main().catch((err) => { console.error('[seed] Seed failed:', err); process.exit(1); });
