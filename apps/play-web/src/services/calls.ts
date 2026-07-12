@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -117,7 +117,7 @@ export interface StageNarrative {
 export interface MyTeamState {
   team: RunTeam;
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
-  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean };
+  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
   activeStageTasks: SafeTask[];
   // Narrative chapters: intro/outro beats for stages the team has reached (active or
   // completed). The play UI shows an intro when a chapter opens, an outro when it ends.

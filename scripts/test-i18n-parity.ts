@@ -69,7 +69,7 @@ for (const [app, t] of [['creator-web', creatorT], ['play-web', playT]] as const
 
 // ── task + final namespaces (change: prelaunch-critical-fixes, M1/M2) ────────
 {
-  const TASK_KEYS = ['routing','routingError','retryRouting','yourTask','routedTask','stopOf','markComplete','imHere','verify','wrongCode','yourAnswer','submitAnswer','enterNumber','submit','uploadingPhoto','approved','pendingReview','submitPhoto','working','pastePhotoUrl','hintStuck','stepOf','stepAnswer','submitStep','findingLocation','youreHere','walkCloser','gpsWarning','gpsUnavailable','gpsContactHost'];
+  const TASK_KEYS = ['routing','routingError','retryRouting','yourTask','routedTask','stopOf','markComplete','imHere','verify','wrongCode','yourAnswer','submitAnswer','enterNumber','submit','uploadingPhoto','approved','pendingReview','submitPhoto','working','takePhoto','retakePhoto','photoSaveRetry','hintStuck','stepOf','stepAnswer','submitStep','findingLocation','youreHere','walkCloser','gpsWarning','gpsUnavailable','gpsContactHost'];
   const FINAL_KEYS = ['title','subtitle','scoreLabel','rankLabel','recapTitle','statTotalTime','statStages','statFastest','statHints','shareBtn','shareCreating','shareSaved','leaderboardTitle','waitingFinalize','poweredBy','buildOwn','leave','shareText','shareRankPart','shareTimePart'];
   const FN_KEYS = { task: ['stopOf','hintStuck','stepOf','walkCloser'], final: ['subtitle','rankLabel','shareText','shareRankPart','shareTimePart'] };
 

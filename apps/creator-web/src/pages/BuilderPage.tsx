@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode,
+  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
 } from '@rushpoint/shared';
 import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
@@ -59,6 +59,9 @@ function buildSavePayload(g: Game) {
     photoFeedEnabled: g.photoFeedEnabled,
     // Power-ups (change: power-ups). Undefined means off (default).
     powerUpsEnabled: g.powerUpsEnabled,
+    // Game intro primer (change: game-intro-instructions). Undefined when unset
+    // (skipped server-side); an empty/whitespace-only primer clears it on save.
+    instructions: g.instructions,
   };
 }
 const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
@@ -392,6 +395,8 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           placeholder={b.tagsPlaceholder} dir="auto" />
       </div>
 
+      <InstructionsField game={game} patch={patch} />
+
       <WebhookField game={game} patch={patch} />
 
       <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
@@ -435,6 +440,48 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <RegFields game={game} patch={patch} />
       </Advanced>
     </Card>
+  );
+}
+
+// Game intro primer (change: game-intro-instructions): an optional collapsible
+// "How to play" section (title + bilingual body + optional https image). Shown to
+// players before the run starts and behind a "How to play" button in-game. Rides
+// the existing updateGame wrapper; the server cleans/https-guards on save.
+function InstructionsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
+  const [open, setOpen] = useState(false);
+  const ins = game.instructions ?? {};
+  function set(p: Partial<GameInstructions>) {
+    patch({ instructions: { ...ins, ...p } });
+  }
+  return (
+    <Advanced title={b.instructionsSectionTitle} open={open} onToggle={() => setOpen(!open)}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">{b.instructionsHint}</p>
+        <div>
+          <Label>{b.instructionsTitleLabel}</Label>
+          <Input value={ins.title ?? ''} onChange={(e) => set({ title: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.instructionsBodyLabel}</Label>
+          <Textarea rows={3} value={ins.body ?? ''} onChange={(e) => set({ body: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.instructionsBodyHeLabel}</Label>
+          <Textarea rows={3} value={ins.bodyHe ?? ''} onChange={(e) => set({ bodyHe: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.instructionsImageLabel}</Label>
+          <Input
+            type="url"
+            value={ins.imageUrl ?? ''}
+            onChange={(e) => set({ imageUrl: e.target.value })}
+            placeholder="https://…" // i18n-ignore — canonical sample https URL, not translatable copy
+            dir="ltr"
+          />
+        </div>
+      </div>
+    </Advanced>
   );
 }
 

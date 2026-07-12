@@ -96,6 +96,36 @@ export function evaluateTrigger(
   return { ok: true };
 }
 
+// ─── Answer-task presence gate (change: quiz-location-verification) ───────────
+// Opt-in, LENIENT check so a quiz/numeric/survey answer can't be submitted from
+// anywhere when the creator turned on Task.requirePresence. Shared by the server
+// (submitTaskAnswer) so the rule stays unit-testable and can't drift.
+
+/** Lenient default presence radius (metres) for a requirePresence answer task. */
+export const PRESENCE_DEFAULT_RADIUS_M = 150;
+
+/**
+ * Whether an answer may be graded given the team's submitted GPS.
+ * - No valid task coordinates → pass (opt-in flag is a no-op, never a lockout).
+ * - Missing/invalid submitted GPS → refuse (no "disable location to bypass").
+ * - Else within `radiusM` (finite & > 0) else PRESENCE_DEFAULT_RADIUS_M.
+ * Reason carries NO distance and NO answer (safe for hidden-location tasks).
+ */
+export function evaluatePresence(
+  taskCoords: GeoPoint | undefined,
+  submitted: { lat?: number; lng?: number },
+  radiusM?: number,
+): { ok: boolean; reason?: string; distanceM?: number } {
+  if (!taskCoords || !isValidCoord(taskCoords.lat, taskCoords.lng)) return { ok: true };
+  if (!isValidCoord(submitted.lat, submitted.lng)) {
+    return { ok: false, reason: 'Location required to answer here' };
+  }
+  const distM = haversineKm(taskCoords, { lat: submitted.lat as number, lng: submitted.lng as number }) * 1000;
+  const limit = radiusM != null && Number.isFinite(radiusM) && radiusM > 0 ? radiusM : PRESENCE_DEFAULT_RADIUS_M;
+  if (distM > limit) return { ok: false, reason: 'Move closer to the location to answer', distanceM: distM };
+  return { ok: true, distanceM: distM };
+}
+
 /**
  * Resolve the effective trigger mode for a (possibly legacy) task. An explicit
  * `triggerMode` wins; otherwise `locationless` → 'locationless', a `geofence`

@@ -32,7 +32,7 @@ export {
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
-  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunHeatmap,
+  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState, listLiveRuns, getMyProfile,
@@ -1028,8 +1028,12 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     reason?: string;
   };
 
-  if (typeof delta !== 'number') {
-    throw new functions.https.HttpsError('invalid-argument', 'delta must be a number');
+  // `typeof NaN === 'number'` and `typeof Infinity === 'number'`, so a bare type
+  // check lets a non-finite delta through → it would write a non-finite
+  // bonusPenalty that bricks refreshLeaderboard/finalizeRun (parseRunTeam rejects
+  // it) and poisons run.leaderboard. Require a finite number (nightly hardening).
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) {
+    throw new functions.https.HttpsError('invalid-argument', 'delta must be a finite number');
   }
 
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);

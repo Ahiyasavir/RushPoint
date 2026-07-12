@@ -30,6 +30,7 @@ import {
   describeGameRequirements,
   normalizeTriggerMode,
   evaluateTrigger,
+  evaluatePresence,
   attemptLimitReached,
   matchesTaskAnswer,
   hotZoneMultiplier,
@@ -41,6 +42,8 @@ import {
   buildRunRecap,
   buildRunTimeline,
   computeRunAnalytics,
+  composeRunSummary,
+  type RunSummary,
   buildMovementDensity,
   mergePlayerResult,
   emptyProfile,
@@ -73,6 +76,7 @@ import {
   type TeamPowerUps,
   type PowerUpLogEntry,
   taskCompletabilityError,
+  cleanGameInstructions,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -96,6 +100,7 @@ import {
 } from './teamDevices';
 import type { RunFeedback } from '@rushpoint/shared';
 import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
+import { sendRunSummaryEmail } from './runSummaryEmail';
 import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
 
@@ -176,6 +181,12 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   // the last point before real participants start racing against it — rather
   // than let every attempt fail forever.
   for (const stage of game.stages) {
+    // Empty-stage guard (nightly hardening): a stage with no tasks becomes active
+    // but has nothing to assign or complete, so it never finishes and the next
+    // stage never unlocks — the team is stuck for the whole run. Reject at launch.
+    if ((stage.tasks?.length ?? 0) === 0) {
+      throw new functions.https.HttpsError('failed-precondition', 'Every stage needs at least one task before launching');
+    }
     for (const task of stage.tasks ?? []) {
       const err = taskCompletabilityError(task);
       if (err) throw new functions.https.HttpsError('failed-precondition', err);
@@ -605,7 +616,10 @@ export async function completeTaskForTeam(
     if (taskRec.status === 'completed') return false; // idempotent
 
     const startedAt = taskRec.startedAt ?? team.startedAt ?? now;
-    const actualMinutes = (new Date(now).getTime() - new Date(startedAt).getTime()) / 60_000;
+    // Guard against an unparsable stored timestamp: a NaN here would be persisted
+    // onto the team doc and later poison the benchmark aggregation (nightly hardening).
+    const rawMinutes = (new Date(now).getTime() - new Date(startedAt).getTime()) / 60_000;
+    const actualMinutes = Number.isFinite(rawMinutes) ? Math.max(0, rawMinutes) : 0;
 
     // Score this task. Look up the game task by id (not by [stageIdx][taskIdx]):
     // team.stages is order-sorted while game.stages is stored in the builder's
@@ -831,7 +845,11 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
     for (const taskRec of stages[activeIdx].tasks) {
       if (taskRec.status !== 'completed') {
         if (taskRec.status === 'assigned') skippedHeldTaskIds.push(taskRec.taskId);
-        const gameTask = game.stages[activeIdx]?.tasks[taskRec.taskIndex];
+        // Look the game task up by id, not by (activeIdx, taskIndex): team.stages is
+        // sorted by `order` but `game.stages` is builder-array order, so indexing can
+        // hit the wrong stage/task and mis-award. Same fix completeTaskForTeam already
+        // uses (nightly hardening).
+        const gameTask = findGameTask(game, taskRec.taskId);
         const award = gameTask ? skipAward(game.scoringPreset, gameTask) : 0;
         taskRec.status = 'skipped';
         taskRec.completedAt = now;
@@ -895,9 +913,18 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     }
 
     rawScore = applyCompletionBonus(rawScore, team.stages);
-    rawScore = applyPenalties(rawScore, team.bonusPenalty);
+    // Default a missing bonusPenalty to 0 (every other read of it in this file
+    // does) — the auto-refresh path reads teams with a raw cast (no parseRunTeam),
+    // so an absent field here would otherwise yield NaN in run.leaderboard.
+    rawScore = applyPenalties(rawScore, team.bonusPenalty ?? 0);
 
     const durSec = durationSeconds(team.startedAt, team.finishedAt ?? now);
+    // A joined-but-not-started team has no startedAt → durationSeconds returns
+    // Infinity. Never let a non-finite duration reach the (serialized) leaderboard
+    // — it would crash getMyTeamState/refreshLeaderboard at JSON-encode. Both sort
+    // comparators below already coalesce a missing durationSeconds with `?? Infinity`,
+    // so omitting the field keeps ordering identical.
+    const durFinite = Number.isFinite(durSec) ? durSec : undefined;
     return {
       rank: 0,
       teamId: team.id,
@@ -905,8 +932,8 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
       score: rawScore,
       completedStages: team.stages.filter((s) => s.status === 'completed').length,
       finishedAt: team.finishedAt,
-      durationSeconds: durSec,
-      totalMinutes: durSec / 60,
+      durationSeconds: durFinite,
+      totalMinutes: durFinite != null ? durFinite / 60 : undefined,
       durationMin: durSec / 60,
     };
   });
@@ -1195,6 +1222,11 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     status: 'finished',
     finishedAt: now,
     leaderboard: { rankings, frozen: false, published: true, updatedAt: now },
+    // Clear station reservations: the run is over, so any slot still held by a team
+    // that was mid-task at finalize (e.g. stuck on a quiz) must not linger. Harmless
+    // post-finalize (no more assignments) and keeps taskCounts honest — nightly
+    // hardening, needed once single-task stages also reserve slots (see R2 fix).
+    taskCounts: {},
     updatedAt: now,
   });
 
@@ -1272,6 +1304,29 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
       // log so a silent merge/transaction bug here is visible, not invisible.
       logBestEffort('finalize.benchmark', { runId }, e);
     }
+  }
+
+  // Run summary email seam (change: run-summary-report). Strictly last, post-commit,
+  // OUTSIDE any transaction: compose the organizer summary from the just-written
+  // standings + feedback and hand it to the single email seam. Recipient is an env
+  // override or the owner's stored email. Best-effort — never allowed to affect
+  // finalize's return. Disabled/no-provider ⇒ a logged no-op (no socket opened).
+  try {
+    const feedbackSnap = await db.collection(feedbackCol(uid, gameId, runId)).get();
+    const responses = feedbackSnap.docs.map((d) => d.data() as RunFeedback);
+    const summary = buildRunSummaryResult(
+      game,
+      { ...run, status: 'finished', finishedAt: now, leaderboard: { rankings, frozen: false, published: true, updatedAt: now } },
+      teams,
+      responses,
+    );
+    const ownerSnap = await db.doc(`users/${uid}`).get();
+    const recipient = process.env.RUN_SUMMARY_EMAIL_TO
+      ?? (ownerSnap.data() as { email?: string } | undefined)?.email
+      ?? null;
+    await sendRunSummaryEmail(summary, recipient);
+  } catch (e) {
+    logBestEffort('finalize.runSummaryEmail', { runId }, e);
   }
 
   return { rankings };
@@ -1498,6 +1553,67 @@ export const getRunAnalytics = loggedCallable('getRunAnalytics', async (data, co
     isTestDrive: run?.isTestDrive ?? false,
     ...computeRunAnalytics(teams, gameTasks),
   };
+});
+
+
+// ─── getRunSummary (run-summary-report) ───────────────────────────────────────
+// Owner-only, one-shot organizer report that folds the three existing post-run
+// aggregators (recap + analytics + feedback) into a single RunSummary via the pure
+// composeRunSummary. Resolves the run by access code and refuses non-owners —
+// exactly mirroring getRunAnalytics. Retention-safe: pruned teams/feedback just
+// contribute nothing. The same helper feeds the finalizeRun email seam so the two
+// can never drift.
+
+/**
+ * Assemble a RunSummary from the raw docs: run each of the three aggregators, then
+ * fold via composeRunSummary. Internal (not a callable) so the getRunSummary
+ * callable and the finalizeRun email seam share one code path and can't diverge.
+ * participantCount uses the same "distinct devices" rule as getRunFeedbackSummary.
+ */
+function buildRunSummaryResult(
+  game: Game | null,
+  run: (Pick<Run, 'leaderboard'> & Partial<Run>) | null,
+  teams: RunTeam[],
+  responses: RunFeedback[],
+): RunSummary {
+  const gameTasks = (game?.stages ?? []).flatMap((s) => s.tasks).map((t) => ({ id: t.id, type: t.type }));
+  const participantCount = teams.reduce((n, t) => n + (t.deviceUids?.length ?? 1), 0);
+  return composeRunSummary({
+    title: game?.branding?.name ?? game?.title ?? 'RushPoint',
+    runStatus: run?.status ?? 'live',
+    finishedAt: run?.finishedAt,
+    isTestDrive: run?.isTestDrive ?? false,
+    recap: buildRunRecap(teams, run ?? { leaderboard: undefined }),
+    analytics: computeRunAnalytics(teams, gameTasks),
+    feedback: computeFeedbackSummary(responses, participantCount),
+  });
+}
+
+export const getRunSummary = loggedCallable('getRunSummary', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  const uid = context.auth.uid;
+  const { code } = data as { code: string };
+  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+
+  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
+  const c = codeSnap.data() as AccessCode;
+  if (uid !== c.ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Summary is organizer-only');
+  }
+
+  const [gameSnap, runSnap, teamsSnap, fbSnap] = await Promise.all([
+    db.doc(gamePath(c.ownerUid, c.gameId)).get(),
+    db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get(),
+    db.collection(teamsCol(c.ownerUid, c.gameId, c.runId)).get(),
+    db.collection(feedbackCol(c.ownerUid, c.gameId, c.runId)).get(),
+  ]);
+  const game = gameSnap.exists ? (gameSnap.data() as Game) : null;
+  const run = runSnap.exists ? (runSnap.data() as Run) : null;
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+  const responses = fbSnap.docs.map((d) => d.data() as RunFeedback);
+
+  return buildRunSummaryResult(game, run, teams, responses);
 });
 
 
@@ -2092,6 +2208,72 @@ function sweepExpiredInFlight(
   return { stages, expiredTaskId: assignedRec.taskId };
 }
 
+// Advance a team's state on a POLL (getMyTeamState) — scheduled-release unlock and
+// task-expiry sweep (change: fix-getmyteamstate-hotpath-writes). getMyTeamState is
+// the hottest callable (every attached device, every few seconds); doing these
+// writes inline used to contend on the team doc (multiple devices of one team
+// racing the same write, plus the team's own completeTask/requestNextTask
+// transactions) → 20s lock timeouts that FAILED the read (the family-playtest
+// "frozen screen"). So:
+//   • the in-memory `team` is ALWAYS advanced (the response reflects it immediately);
+//   • persistence is BEST-EFFORT (a contended write is caught, never thrown — the
+//     poll still returns the advanced state; requestNextTask reconciles it durably);
+//   • persistence is CONTROLLER-ONLY (the ≤3 devices of a team no longer stampede
+//     the same write). requestNextTask's transactional write is the durable path.
+// `persist`/`release` are injected so the policy is unit-tested without the emulator.
+export async function advanceTeamStateOnPoll(args: {
+  team: RunTeam;
+  game: Game;
+  launchedAt: string | undefined;
+  nowMs: number;
+  isController: boolean;
+  persist: (patch: Record<string, unknown>) => Promise<unknown>;
+  release: (taskId: string) => Promise<unknown>;
+  onPersistError: (op: string, err: unknown) => void;
+}): Promise<void> {
+  const { team, game, launchedAt, nowMs, isController } = args;
+  const nowIso = new Date(nowMs).toISOString();
+
+  // (1) Scheduled-release unlock while between stages.
+  if (team.stages.findIndex((s) => s.status === 'active') < 0) {
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    if (computeStageUnlock(stages, game, launchedAt, nowMs)) {
+      team.stages = stages;
+      if (isController) {
+        try { await args.persist({ stages, updatedAt: nowIso }); }
+        catch (e) { args.onPersistError('poll.unlock', e); }
+      }
+    }
+  }
+
+  // (2) Task-expiry sweep of an in-flight expired task. The run doc (launchedAt)
+  // was already read by the caller; the sweep is a no-op unless the assigned task
+  // actually carries an expiry.
+  const idx = team.stages.findIndex((s) => s.status === 'active');
+  const assignedRec = idx >= 0 ? team.stages[idx].tasks.find((t) => t.status === 'assigned') : undefined;
+  const gt = assignedRec ? findGameTask(game, assignedRec.taskId) : undefined;
+  if (assignedRec && gt?.expiresAfterMinutes) {
+    const swept = sweepExpiredInFlight(team, game, launchedAt, nowMs);
+    if (swept) {
+      const allDone = swept.stages.every((s) => s.status === 'completed');
+      team.stages = swept.stages;
+      team.activeTaskId = null;
+      if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
+      if (isController) {
+        try {
+          await args.persist({
+            stages: swept.stages,
+            activeTaskId: null,
+            ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}),
+            updatedAt: nowIso,
+          });
+          await args.release(swept.expiredTaskId);
+        } catch (e) { args.onPersistError('poll.sweep', e); }
+      }
+    }
+  }
+}
+
 async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
@@ -2161,17 +2343,15 @@ async function assignNextInActiveStage(
     .filter((t) => t.status === 'completed')
     .map((t) => t.taskId);
 
-  if (gameStage.tasks.length === 1) {
-    // Mutate the full stages array (never dotted-path into an array — Firestore
-    // would coerce `stages` into a map keyed "0", "1", … and break .findIndex).
-    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-    stages[activeStageIdx].tasks[0].status = 'assigned';
-    stages[activeStageIdx].tasks[0].startedAt = now;
-    await teamRef.update({ stages, activeTaskId: gameStage.tasks[0].id, updatedAt: now });
-    return { taskId: gameStage.tasks[0].id };
-  }
+  // NOTE: single-task stages are NOT special-cased. A former fast path assigned the
+  // sole task directly, bypassing assignTask — which silently skipped the station
+  // cap (`maxConcurrentTeams`), the scheduled-release / expiry / unlock gates, and
+  // the paused/closed check (nightly hardening: single-task stages are the most
+  // common shape, so the cap was effectively a lie for stations). A 1-element
+  // candidate list flows through assignTask fine, so every stage now shares the
+  // same gated, cap-enforced, atomically-claimed assignment path.
 
-  // Multi-task: route among the still-unassigned tasks of this stage
+  // Route among the still-unassigned tasks of this stage
   const candidateTasks = gameStage.tasks.filter(
     (gt) => stageRec.tasks.find((tr) => tr.taskId === gt.id)?.status === 'unassigned',
   );
@@ -2257,11 +2437,17 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   }
   if (gtask) {
     const mode = normalizeTriggerMode(gtask);
-    if (mode === 'radius' || mode === 'exact') {
-      if (lat == null || lng == null || !isValidCoord(lat, lng) || !gtask.coordinates) {
+    // A task at (0,0) has no real location — coordinates were never placed. Every
+    // UI filters it out as the null-island sentinel (no pin, no distance badge), so
+    // enforcing proximity here makes it permanently unwinnable. Treat it as
+    // locationless server-side too (nightly hardening).
+    const c = gtask.coordinates;
+    const hasRealCoords = !!c && isValidCoord(c.lat, c.lng) && (c.lat !== 0 || c.lng !== 0);
+    if ((mode === 'radius' || mode === 'exact') && hasRealCoords) {
+      if (lat == null || lng == null || !isValidCoord(lat, lng)) {
         throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
       }
-      const distM = haversineKm({ lat, lng }, gtask.coordinates) * 1000;
+      const distM = haversineKm({ lat, lng }, c!) * 1000;
       // Hidden-location tasks gate identically but the rejection must not leak the
       // distance (otherwise the secret spot is triangulable by polling).
       const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters, { hidden: !!gtask.hideLocation });
@@ -2414,6 +2600,19 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
   if (task.type !== 'quiz' && task.type !== 'numeric' && task.type !== 'survey') {
     throw new functions.https.HttpsError('failed-precondition', 'Task does not take an answer');
+  }
+
+  // Optional presence gate (change: quiz-location-verification): when the creator
+  // opted this task into requirePresence AND it has real coordinates, the submitted
+  // GPS must be within a LENIENT radius before we grade — so a quiz/trivia can't be
+  // answered from anywhere. Default OFF ⇒ existing games unaffected. Placed BEFORE
+  // grading so an out-of-range attempt is not recorded as wrong and consumes no
+  // attempt-limit slot. The reason carries no distance and no answer (safe for hidden).
+  if (task.requirePresence) {
+    const verdict = evaluatePresence(task.coordinates, { lat, lng }, task.geofenceRadiusMeters);
+    if (!verdict.ok) {
+      throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? 'Move closer to answer this task');
+    }
   }
 
   // Survey (change: survey-tasks): NO right answer — validation is shape-only via
@@ -2605,43 +2804,22 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   const game = gameSnap.data() as Game;
   const run = runSnap.data() as Run;
 
-  // Scheduled-release (change: scheduled-release): unlock a due stage here too, so
-  // a team waiting on a timed drop advances the moment its gate opens even when it
-  // is only polling state (not requesting a task).
-  if (team.stages.findIndex((s) => s.status === 'active') < 0) {
-    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-    if (computeStageUnlock(stages, game, run.launchedAt, Date.now())) {
-      await db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id))
-        .update({ stages, updatedAt: new Date().toISOString() });
-      team.stages = stages;
-    }
-  }
-
-  // Task expiry sweep (change: task-expiry): a merely-polling team stuck ON an
-  // expired task is skipped + rerouted here too (play-web polls state, then
-  // requests a task once it sees nothing assigned).
-  {
-    const idx = team.stages.findIndex((s) => s.status === 'active');
-    const assignedRec = idx >= 0 ? team.stages[idx].tasks.find((t) => t.status === 'assigned') : undefined;
-    const gt = assignedRec ? findGameTask(game, assignedRec.taskId) : undefined;
-    if (assignedRec && gt?.expiresAfterMinutes) {
-      const swept = sweepExpiredInFlight(team, game, run.launchedAt, Date.now());
-      if (swept) {
-        const nowIso = new Date().toISOString();
-        const allDone = swept.stages.every((s) => s.status === 'completed');
-        await db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update({
-          stages: swept.stages,
-          activeTaskId: null,
-          ...(allDone ? { status: 'finished', finishedAt: nowIso } : {}),
-          updatedAt: nowIso,
-        });
-        await releaseTask(swept.expiredTaskId, ctx.ownerUid, ctx.gameId, ctx.runId);
-        team.stages = swept.stages;
-        team.activeTaskId = null;
-        if (allDone) { team.status = 'finished'; team.finishedAt = nowIso; }
-      }
-    }
-  }
+  // Advance the team on this poll — scheduled-release unlock (change:
+  // scheduled-release) + task-expiry sweep (change: task-expiry) — but WITHOUT
+  // letting a contended write fail or stall this hot read
+  // (change: fix-getmyteamstate-hotpath-writes). The in-memory `team` is advanced
+  // unconditionally (so the response reflects it), while persistence is
+  // best-effort and controller-only; requestNextTask reconciles durably.
+  await advanceTeamStateOnPoll({
+    team,
+    game,
+    launchedAt: run.launchedAt,
+    nowMs: Date.now(),
+    isController: resolveDeviceRole(team, uid) === 'controller',
+    persist: (patch) => db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, team.id)).update(patch),
+    release: (taskId) => releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId),
+    onPersistError: (op, e) => logBestEffort(op, { runId: ctx.runId, teamId: team.id }, e),
+  });
 
   // Build a map of taskId → sanitized content for tasks in the active stage.
   // quiz-ordering: the per-team, per-task shuffleSeed keeps ordering items
@@ -2741,6 +2919,10 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       // Live photo feed (live-photo-feed): whether the play app should show the
       // Feed panel. Not a secret; the write-side gate lives in the functions.
       photoFeedEnabled: game.photoFeedEnabled !== false,
+      // Game intro primer (change: game-intro-instructions): the "How to play"
+      // card/modal content. Cleaned at the echo boundary so even a legacy/hand-edited
+      // doc with a non-https image is https-guarded on the way out. null when unset.
+      instructions: cleanGameInstructions(game.instructions) ?? null,
     },
     activeStageTasks,
     // Shared team devices: who controls + this caller's own role, so every

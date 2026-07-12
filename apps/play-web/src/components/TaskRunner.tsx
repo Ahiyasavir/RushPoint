@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs, isUnlocked } from '@rushpoint/shared';
+import { haversineKm, expiryInstantMs, isUnlocked, defaultRadiusFor } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint,
@@ -7,6 +7,7 @@ import {
   type MyTeamState, type SafeTask,
 } from '../services/calls';
 import { uploadTaskPhoto, uploadTaskAudio } from '../services/firebase';
+import { compressImageFile } from '../lib/imageResize';
 import { withLocation } from '../utils/withLocation';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
@@ -105,6 +106,14 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
   const frozen = busy || readOnly;
+  // A residual storage-path rejection (change: fix-photo-camera-capture): normal
+  // camera capture always uploads to the team folder, but map any leftover
+  // storage-path error to plain "retake" copy rather than the developer message.
+  function isStoragePathError(e: unknown): boolean {
+    const raw = e instanceof Error ? e.message : '';
+    return /team folder|could not be saved|לתיקיית הקבוצה|לשמור את התמונה/.test(raw);
+  }
+
   function submitError(e: unknown, fallback: string): string {
     const raw = e instanceof Error ? e.message : '';
     if (raw.includes('not-controller')) return t.devices.controlMoved;
@@ -210,23 +219,21 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } finally { setBusy(false); }
   }
 
-  // Accepts a picked File (uploaded to Storage) or a pasted URL.
-  async function photo(input: File | string) {
+  // Camera capture → compressed upload → submit (change: fix-photo-camera-capture).
+  // No pasted-URL path any more, so the "own team folder" storage-path rejection
+  // can't be reached by a normal player; the guard maps any residual storage-path
+  // error to plain "retake" copy instead of the developer-oriented message.
+  async function photo(file: File) {
     if (blockedOffline()) return;
     setBusy(true); setMsg('');
     try {
-      let url: string;
-      if (typeof input === 'string') {
-        url = input;
-      } else {
-        setMsg(t.task.uploadingPhoto);
-        url = await uploadTaskPhoto(input, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
-      }
+      setMsg(t.task.uploadingPhoto);
+      const url = await uploadTaskPhoto(file, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
       const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
       setMsg(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
-      setMsg(submitError(e, t.task.uploadFailed));
+      setMsg(isStoragePathError(e) ? t.task.photoSaveRetry : submitError(e, t.task.uploadFailed));
     } finally { setBusy(false); }
   }
 
@@ -251,17 +258,35 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } finally { setBusy(false); }
   }
 
-  // quiz / numeric — submit a typed or chosen answer
+  // Presence-gated answer tasks (change: quiz-location-verification): when the
+  // creator required the team to be at the spot, the server gate needs GPS on the
+  // submit. Fetch it via withLocation and pass lat/lng; a GPS-denied device gets
+  // the same guidance as a field check-in instead of a bare server rejection.
+  // Tasks without requirePresence submit exactly as before (no GPS prompt).
+  function submitWithOptionalPresence(run: (coords: { lat: number; lng: number } | undefined) => Promise<void>): void {
+    if (task?.requirePresence) {
+      withLocation(
+        (lat, lng) => { void run({ lat, lng }); },
+        () => { setMsg(t.task.gpsWarning); setBusy(false); },
+      );
+    } else {
+      void run(undefined);
+    }
+  }
+
+  // quiz / numeric / survey — submit a typed or chosen answer
   async function answer(text: string) {
     if (blockedOffline()) return;
     setBusy(true); setMsg('');
-    try {
-      const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text });
-      if (res.correct) onChanged();
-      else setMsg(t.task.notQuite);
-    } catch (e) {
-      setMsg(submitError(e, t.task.failed));
-    } finally { setBusy(false); }
+    submitWithOptionalPresence(async (coords) => {
+      try {
+        const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text, ...(coords ?? {}) });
+        if (res.correct) onChanged();
+        else setMsg(t.task.notQuite);
+      } catch (e) {
+        setMsg(submitError(e, t.task.failed));
+      } finally { setBusy(false); }
+    });
   }
 
   // ordering quiz (change: quiz-ordering) — submit the player's arrangement.
@@ -269,13 +294,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function submitOrdered(items: string[]) {
     if (blockedOffline()) return;
     setBusy(true); setMsg('');
-    try {
-      const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items });
-      if (res.correct) onChanged();
-      else setMsg(t.task.orderingWrong);
-    } catch (e) {
-      setMsg(submitError(e, t.task.failed));
-    } finally { setBusy(false); }
+    submitWithOptionalPresence(async (coords) => {
+      try {
+        const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items, ...(coords ?? {}) });
+        if (res.correct) onChanged();
+        else setMsg(t.task.orderingWrong);
+      } catch (e) {
+        setMsg(submitError(e, t.task.failed));
+      } finally { setBusy(false); }
+    });
   }
 
   // sequence — submit the current ordered step. Returns whether the step was
@@ -296,13 +323,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   // geofence — auto check-in once the watcher reports we're inside the radius.
   // Viewer phones never auto-fire: the controller's arrival completes the task.
-  function geofenceArrive(la: number, ln: number) {
-    if (readOnly) return;
-    if (blockedOffline()) return;
+  // Returns whether the check-in SUCCEEDED so the watcher can un-latch and retry
+  // on a failed arrival (change: nightly geofence-latch fix) — otherwise a single
+  // transient/rejected completeTask would freeze auto check-in for good.
+  function geofenceArrive(la: number, ln: number): Promise<boolean> {
+    if (readOnly || blockedOffline()) return Promise.resolve(false);
     setBusy(true); setMsg('');
-    completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
-      .then(() => onChanged())
-      .catch((e) => setMsg(submitError(e, t.task.checkinFailed)))
+    return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
+      .then(() => { onChanged(); return true; })
+      .catch((e) => { setMsg(submitError(e, t.task.checkinFailed)); return false; })
       .finally(() => setBusy(false));
   }
 
@@ -335,10 +364,13 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   return (
     <Card className="p-5" data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
       <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
-      <h2 dir="auto" className="text-xl font-bold mb-2">{task.title}</h2>
-      {task.description && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.description}</p>}
+      {/* Legibility (change: fix-play-screen-hierarchy): the primary task text was
+          too small/low-contrast. Bigger title + higher-contrast body (play-web's
+          reversed zinc scale ⇒ zinc-300 is darker on the light theme). */}
+      <h2 dir="auto" className="text-2xl font-bold mb-2">{task.title}</h2>
+      {task.description && <p dir="auto" className="text-zinc-300 text-base leading-relaxed mb-3">{task.description}</p>}
       {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
-      {task.smart?.longInstructions && <p dir="auto" className="text-zinc-400 text-sm mb-3">{task.smart.longInstructions}</p>}
+      {task.smart?.longInstructions && <p dir="auto" className="text-zinc-300 text-base mb-3">{task.smart.longInstructions}</p>}
 
       <ExpiryCountdown key={task.id} task={task} launchedAt={state.run.launchedAt} onExpired={onChanged} />
 
@@ -625,7 +657,7 @@ function NumericEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (a: string)
 // radius, we surface a "request help" affordance (raises a host alert) so the
 // player is never dead-ended. We never fake location — the server validates.
 function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
-  task: SafeTask; onArrive: (lat: number, lng: number) => void;
+  task: SafeTask; onArrive: (lat: number, lng: number) => Promise<boolean> | void;
   onRequestHelp?: () => void; helpSent?: boolean;
 }) {
   const { t } = useT();
@@ -633,7 +665,10 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
   const [gpsError, setGpsError] = useState(false);
   const [stuckTooLong, setStuckTooLong] = useState(false);
   const fired = useRef(false);
-  const radius = task.geofenceRadiusMeters ?? 50;
+  // Match the SERVER's default radius (defaultRadiusFor('radius') = 40) so the
+  // client never auto-fires at a distance the server will reject (which used to
+  // latch `fired` and freeze check-in) — nightly geofence-radius-mismatch fix.
+  const radius = task.geofenceRadiusMeters ?? defaultRadiusFor('radius');
   const coords = task.coordinates;
   // After ~40s on this task without an auto check-in, offer the escape hatch.
   useEffect(() => {
@@ -652,7 +687,13 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
       (p) => {
         const d = haversineKm({ lat: p.coords.latitude, lng: p.coords.longitude }, coords) * 1000;
         setDist(d);
-        if (d <= radius && !fired.current) { fired.current = true; onArrive(p.coords.latitude, p.coords.longitude); }
+        if (d <= radius && !fired.current) {
+          fired.current = true;
+          // Un-latch on a failed arrival so the watcher retries as the player
+          // stays in range, instead of freezing after one transient failure.
+          Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude))
+            .then((ok) => { if (ok === false) fired.current = false; });
+        }
       },
       () => { setGpsError(true); navigator.geolocation.clearWatch(id); },
       { enableHighAccuracy: true, maximumAge: 5000 },
@@ -733,10 +774,10 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024; // 12 MB — generous for a phone photo
 
-function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File | string) => void }) {
+function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) => void }) {
   const { t } = useT();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [fileErr, setFileErr] = useState('');
   // Track the live object URL so we can revoke the previous one (and clean up on
@@ -750,36 +791,34 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (input: File 
   }
   useEffect(() => () => { if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current); }, []);
 
-  function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+  // Camera-capture only (change: fix-photo-camera-capture): a hidden
+  // `capture="environment"` input opens the camera; there is no gallery picker and
+  // no paste-a-URL field. The captured image is downscaled + JPEG-compressed in the
+  // browser BEFORE upload so it doesn't burn mobile data.
+  async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
     setFileErr('');
     const f = e.target.files?.[0] ?? null;
-    // Validate before we ever upload: type guard catches stray non-images, the
-    // size cap protects the UI and Storage from multi-hundred-MB files.
-    if (f && !f.type.startsWith('image/')) {
-      setFileErr(t.task.chooseImage);
-      e.target.value = ''; setFile(null); setPreviewUrl(null);
-      return;
-    }
-    if (f && f.size > MAX_PHOTO_BYTES) {
-      setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) }));
-      e.target.value = ''; setFile(null); setPreviewUrl(null);
-      return;
-    }
-    setFile(f);
-    setPreviewUrl(f ? URL.createObjectURL(f) : null);
-    if (f) setUrl(''); // a picked file takes precedence over a pasted URL
+    e.target.value = ''; // allow re-selecting the same capture
+    if (!f) { setFile(null); setPreviewUrl(null); return; }
+    if (!f.type.startsWith('image/')) { setFileErr(t.task.chooseImage); setFile(null); setPreviewUrl(null); return; }
+    if (f.size > MAX_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
+    const blob = await compressImageFile(f);
+    const compressed = new File([blob], `photo-${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+    setFile(compressed);
+    setPreviewUrl(URL.createObjectURL(compressed));
   }
 
-  const canSubmit = !busy && !fileErr && (!!file || !!url.trim());
+  const canSubmit = !busy && !fileErr && !!file;
   return (
     <div className="space-y-3">
-      <input type="file" accept="image/*" capture="environment" onChange={pickFile} data-testid="photo-file"
-        className="block w-full text-sm text-zinc-400 file:me-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-app-raised file:text-zinc-200" />
+      <input ref={inputRef} type="file" accept="image/*" capture="environment" onChange={pickFile}
+        data-testid="photo-file" className="hidden" />
+      <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
+        {file ? t.task.retakePhoto : t.task.takePhoto}
+      </Button>
       {fileErr && <p className="text-rp-alert text-sm">{fileErr}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
-      <Input value={url} onChange={(e) => { setUrl(e.target.value); if (e.target.value) { setFile(null); setPreviewUrl(null); setFileErr(''); } }}
-        placeholder={t.task.pastePhotoUrl} data-testid="photo-url" />
-      <Button disabled={!canSubmit} onClick={() => onSubmit(file ?? url.trim())} data-testid="photo-submit">
+      <Button disabled={!canSubmit} onClick={() => file && onSubmit(file)} data-testid="photo-submit">
         {busy ? t.task.working : t.task.submitPhoto}
       </Button>
     </div>

@@ -10,6 +10,7 @@ import {
   validateUnlockGraph, validateAvailabilityWindow,
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
+  locationLeakWarnings,
 } from '@rushpoint/shared';
 import { Button, Input, Label, Textarea } from './ui';
 import { dialog } from './dialog';
@@ -886,6 +887,22 @@ function InteractionStepBody({ task, set, setSmart, b }: {
         )}
       </div>
 
+      {/* Presence gate (change: quiz-location-verification): opt-in for ANSWER
+          tasks — a quiz/numeric/survey answer can only be submitted from within a
+          lenient radius of the task coordinates (default OFF). */}
+      {(task.type === 'quiz' || task.type === 'numeric' || task.type === 'survey') && (
+        <div className="rounded-lg border border-[--rp-border] bg-[--surface-2] px-3 py-2">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={!!task.requirePresence}
+              onChange={(e) => set({ requirePresence: e.target.checked || undefined })} />
+            <span>
+              <span className="text-sm font-medium text-[--ink-1]">{b.requirePresence}</span>
+              <span className="block text-[11px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
+            </span>
+          </label>
+        </div>
+      )}
+
       {/* Hidden-location (treasure hunt): only for located tasks (radius/exact).
           Hides the map pin from participants — they reach the spot from the clue. */}
       {(() => {
@@ -915,6 +932,19 @@ function InteractionStepBody({ task, set, setSmart, b }: {
                 ) : !task.locationClue?.trim() && (
                   <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
                 )}
+                {/* Leak guard (change: hidden-location-leak-guard): title/description
+                    still ship to players, so warn if they name the place. Advisory only. */}
+                {(() => {
+                  const leaks = locationLeakWarnings(task);
+                  if (leaks.length === 0) return null;
+                  return (
+                    <p className="text-[11px] text-rp-fire mt-1">
+                      {leaks.length === 2 ? b.hideLocationLeakBoth
+                        : leaks[0] === 'title' ? b.hideLocationLeakTitle
+                        : b.hideLocationLeakDesc}
+                    </p>
+                  );
+                })()}
               </div>
             )}
           </div>

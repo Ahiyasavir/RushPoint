@@ -124,15 +124,16 @@ export async function signInStaff(customToken: string) {
 // scoped to the team's own folder (runs/{runId}/teams/{teamId}/…) so storage
 // rules can confine writes to the authenticated participant.
 export async function uploadTaskPhoto(
-  file: File,
+  // Camera captures are compressed to JPEG before upload (change:
+  // fix-photo-camera-capture), so this accepts the resulting Blob too.
+  file: File | Blob,
   p: { runId: string; teamId: string; taskId: string },
 ): Promise<string> {
   await ensureAuth();
-  const ext = (file.name.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
   const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
+  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.jpg`;
   const r = storageRef(storage, path);
-  await uploadBytes(r, file, { contentType: file.type || 'image/jpeg' });
+  await uploadBytes(r, file, { contentType: 'image/jpeg' });
   return getDownloadURL(r);
 }
 

@@ -2,14 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
-import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
+import type { Run, HotZone, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
 import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, type ChatMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
-  getRunAnalytics, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
+  getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
   sendTeamChatMessage,
   type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult, type SurveyResultRow,
@@ -236,6 +236,7 @@ export default function RunConsolePage() {
         {!finished && <HotZonePanel ctx={ctx} hotZone={run.hotZone ?? null} />}
         <PostRunLinks accessCode={run.accessCode} finished={finished} onShareBoard={ensureBoardPublished} />
       </div>
+      {finished && <RunSummaryPanel accessCode={run.accessCode} />}
       {finished && <AnalyticsPanel accessCode={run.accessCode} />}
       {finished && <HeatmapPanel accessCode={run.accessCode} />}
       {finished && <FeedbackPanel gameId={gameId} runId={runId} />}
@@ -964,10 +965,16 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
   const t = useT();
   const [data, setData] = useState<RunHeatmapResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // Surface a failed load instead of a silent blank (change: fix-post-run-analytics-visibility).
+  // Kept opt-in (the GPS track can be heavy) — no auto-load.
+  const [err, setErr] = useState('');
 
   async function load() {
     setBusy(true);
-    try { setData(await getRunHeatmap({ code: accessCode })); } finally { setBusy(false); }
+    setErr('');
+    try { setData(await getRunHeatmap({ code: accessCode })); }
+    catch { setErr(t.runConsole.analyticsError); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -976,6 +983,7 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
         <div className="text-sm font-semibold">{t.runConsole.heatmapTitle}</div>
         {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.heatmapLoad}</Button>}
       </div>
+      {err && !data && <div className="text-sm text-danger">{err}</div>}
       {data && (
         data.pointCount === 0
           ? <div className="text-sm text-zinc-500">{t.runConsole.heatmapEmpty}</div>
@@ -990,6 +998,90 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
   );
 }
 
+// ─── Post-run summary panel (run-summary-report) ──────────────────────────────
+// Auto-loads once the run is finished: a one-glance organizer report folding
+// standings + completion + feedback digest, plus a note that the same summary is
+// emailed to the organizer. Mirrors AnalyticsPanel's load pattern.
+function RunSummaryPanel({ accessCode }: { accessCode: string }) {
+  const t = useT();
+  const [data, setData] = useState<RunSummary | null>(null);
+  const [err, setErr] = useState('');
+  // Localized issue labels (same mapping as FeedbackPanel) so a Hebrew UI never
+  // shows the raw English issue enum.
+  const issueLabel: Record<string, string> = {
+    gps: t.runConsole.feedbackIssueGps, photo: t.runConsole.feedbackIssuePhoto,
+    station_code: t.runConsole.feedbackIssueStationCode, task_unclear: t.runConsole.feedbackIssueTaskUnclear,
+    slow: t.runConsole.feedbackIssueSlow, other: t.runConsole.feedbackIssueOther,
+  };
+
+  useEffect(() => {
+    let alive = true;
+    getRunSummary({ code: accessCode })
+      .then((d) => { if (alive) setData(d); })
+      .catch(() => { if (alive) setErr(t.runConsole.analyticsError); });
+    return () => { alive = false; };
+  }, [accessCode, t]);
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="text-sm font-semibold">{t.runConsole.summaryTitle}</div>
+      {err && !data && <div className="text-sm text-danger">{err}</div>}
+      {!data && !err && <div className="text-sm text-zinc-500">{t.runConsole.summaryNoData}</div>}
+      {data && (
+        <div className="space-y-3">
+          {/* Standings */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryStandings}</div>
+            {data.standings.length === 0 ? (
+              <div className="text-sm text-zinc-500">{t.runConsole.summaryNoData}</div>
+            ) : (
+              <ol className="space-y-0.5">
+                {data.standings.slice(0, 5).map((s) => (
+                  <li key={s.teamId} className="flex items-center justify-between text-sm">
+                    <span>{s.rank}. {s.teamName}</span>
+                    <span className="font-mono text-zinc-400">{s.score}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+          {/* Completion headline */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryCompletion}</div>
+            <div className="text-sm text-zinc-400">
+              {t.runConsole.summaryTeams({ n: data.completion.teamCount })}
+              {' · '}
+              {t.runConsole.summaryCompletionRate({ pct: Math.round(data.completion.overallCompletionRate * 100) })}
+              {' · '}
+              {t.runConsole.summaryPhotos({ n: data.completion.photoCount })}
+            </div>
+          </div>
+          {/* Feedback digest */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryFeedback}</div>
+            <div className="text-sm text-zinc-400 space-y-1">
+              <div>
+                {t.runConsole.feedbackResponseRate({ n: data.feedback.responseCount, total: data.feedback.participantCount })}
+                {' · '}
+                {t.runConsole.feedbackRecommend({ pct: Math.round(data.feedback.recommendScore * 100) })}
+              </div>
+              {data.feedback.topIssues.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {data.feedback.topIssues.map((it) => (
+                    <Badge key={it.issue}>{issueLabel[it.issue] ?? it.issue} · {it.count}</Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="text-xs text-zinc-500">{t.runConsole.summaryEmailNote}</div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+
 function AnalyticsPanel({ accessCode }: { accessCode: string }) {
   const t = useT();
   const b = t.builder;
@@ -1001,11 +1093,20 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
   };
   const [data, setData] = useState<RunAnalyticsResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // Post-run visibility (change: fix-post-run-analytics-visibility): surface load
+  // failures instead of leaving a silently-blank card, and auto-load on mount so
+  // the creator sees the numbers without hunting for a button.
+  const [err, setErr] = useState('');
 
-  async function load() {
+  const load = useCallback(async () => {
     setBusy(true);
-    try { setData(await getRunAnalytics({ code: accessCode })); } finally { setBusy(false); }
-  }
+    setErr('');
+    try { setData(await getRunAnalytics({ code: accessCode })); }
+    catch { setErr(t.runConsole.analyticsError); }
+    finally { setBusy(false); }
+  }, [accessCode, t]);
+
+  useEffect(() => { void load(); }, [load]);
 
   // Export the loaded per-task analytics as a CSV file (pure client-side; no
   // callable). One row per task, header row included; downloaded via a blob URL.
@@ -1046,6 +1147,7 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
           {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.analyticsLoad}</Button>}
         </div>
       </div>
+      {err && !data && <div className="text-sm text-danger">{err}</div>}
       {data && (
         data.tasks.length === 0 ? (
           <div className="text-sm text-zinc-500">{t.runConsole.analyticsEmpty}</div>
@@ -1096,13 +1198,18 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
   const t = useT();
   const [data, setData] = useState<{ summary: RunFeedbackSummary; responses: RunFeedback[] } | null>(null);
   const [open, setOpen] = useState<RunFeedback | null>(null);
+  // Surface a failed load instead of a silent blank (change: fix-post-run-analytics-visibility).
+  const [err, setErr] = useState('');
 
   useEffect(() => {
     if (!gameId || !runId) return;
     let alive = true;
-    getRunFeedbackSummary({ gameId, runId }).then((d) => { if (alive) setData(d); }).catch(() => undefined);
+    setErr('');
+    getRunFeedbackSummary({ gameId, runId })
+      .then((d) => { if (alive) setData(d); })
+      .catch(() => { if (alive) setErr(t.runConsole.analyticsError); });
     return () => { alive = false; };
-  }, [gameId, runId]);
+  }, [gameId, runId, t]);
 
   const dimLabel: Record<FeedbackRatingKey, string> = {
     overall: t.runConsole.feedbackDimOverall, content: t.runConsole.feedbackDimContent,
@@ -1126,6 +1233,7 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
         {s && <div className="text-xs text-zinc-500">{t.runConsole.feedbackResponseRate({ n: s.responseCount, total: s.participantCount })}</div>}
       </div>
 
+      {err && !s && <div className="text-sm text-danger">{err}</div>}
       {!s ? null : s.responseCount === 0 ? (
         <div className="text-sm text-zinc-500">{t.runConsole.feedbackEmpty}</div>
       ) : (

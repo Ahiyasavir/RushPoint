@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, selectGameDescription, type PublicGame } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame } from '@rushpoint/shared';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
@@ -12,7 +12,7 @@ const CREATOR_URL = import.meta.env.DEV
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
-  const { t } = useT();
+  const { t, lang } = useT();
   const [game, setGame] = useState<PublicGame | null | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
@@ -116,6 +116,21 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
         <p dir="auto" className="text-zinc-400 text-sm mb-3 leading-relaxed">
           {selectGameDescription(game) || t.promo.noDescription}
         </p>
+
+        {/* Game intro primer (change: game-intro-instructions): a pre-join "How to
+            play" preview so a player deciding whether to join can see how it plays. */}
+        {gameInstructionsHasContent(game.instructions) && (
+          <Card className="p-3 mb-3 text-start">
+            <div className="text-xs font-bold text-accent uppercase tracking-wide mb-1">
+              {game.instructions!.title ?? t.play.howToPlayTitle}
+            </div>
+            {localizedInstructionsBody(game.instructions, lang) && (
+              <p dir="auto" className="text-sm text-zinc-400 whitespace-pre-line leading-relaxed">
+                {localizedInstructionsBody(game.instructions, lang)}
+              </p>
+            )}
+          </Card>
+        )}
 
         {/* Accurate GPS requirement derived server-side, when available. */}
         {game.requirement && (

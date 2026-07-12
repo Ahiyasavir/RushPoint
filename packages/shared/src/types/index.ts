@@ -317,6 +317,13 @@ export interface Task {
   // geofence: auto-checks-in when the participant is within this radius of
   //           `coordinates` (default 50m). Server validates the GPS distance.
   geofenceRadiusMeters?: number;
+  // change: quiz-location-verification. Opt-in presence gate for ANSWER tasks
+  // (quiz/numeric/survey). When true AND the task has valid `coordinates`,
+  // submitTaskAnswer grades only if the submitted GPS is within a LENIENT radius
+  // (`geofenceRadiusMeters` or PRESENCE_DEFAULT_RADIUS_M = 150m). Default absent =
+  // OFF. NOT secret — the client needs it to know it must send GPS; sanitizer
+  // passes it through via `...rest`.
+  requirePresence?: boolean;
   // sequence: ordered sub-steps done at one stop; the task completes after the last.
   steps?: TaskStep[];
   // General creator-authored media (images / videos / YouTube) shown with the task.
@@ -383,6 +390,17 @@ export interface StoryBeat {
   body?: string;
   bodyHe?: string;
   imageUrl?: string;
+}
+
+// Game-level "How to play" primer (change: game-intro-instructions). Same shape
+// as StoryBeat: bilingual body (bodyHe falls back to body) + an optional https-only
+// cosmetic image. Not a secret — echoed to participants and, when the game is public,
+// denormalized into publicGames. Cosmetic; never gates play.
+export interface GameInstructions {
+  title?: string;    // e.g. "How to play"
+  body?: string;     // English / default primer text (multiline)
+  bodyHe?: string;   // Hebrew primer (falls back to `body`)
+  imageUrl?: string; // https-only cosmetic image (a mechanics diagram, etc.)
 }
 
 export interface Stage {
@@ -471,6 +489,10 @@ export interface Game {
   // flat). Default false — existing games are untouched. Never rolls on the
   // time_only preset (no task points to double; a flat bonus corrupts pure-time).
   powerUpsEnabled?: boolean;
+  // Game-level intro/instructions primer (change: game-intro-instructions).
+  // Optional: absent games render no primer. Not secret — echoed to participants
+  // and, when public, denormalized into publicGames. Cosmetic; never gates play.
+  instructions?: GameInstructions;
   createdAt: string;
   updatedAt: string;
 }
@@ -500,6 +522,9 @@ export interface PublicGame {
   requirement?: GameRequirement;
   // Marketplace instant play (change: marketplace-instant-play): show a "Play now" CTA.
   allowInstantPlay?: boolean;
+  // Game intro primer (change: game-intro-instructions): denormalized for the
+  // pre-join promo teaser so a player can preview how the game plays before joining.
+  instructions?: GameInstructions;
   createdAt: string;
   updatedAt: string;
 }
@@ -1107,6 +1132,9 @@ export interface UpdateGamePayload {
   photoFeedEnabled?: boolean;
   // Power-ups toggle (change: power-ups). Default false when absent.
   powerUpsEnabled?: boolean;
+  // Game intro primer (change: game-intro-instructions). Empty/whitespace-only ⇒
+  // the field is cleared server-side; a non-https image is dropped on clean.
+  instructions?: GameInstructions | null;
 }
 
 // Run management

@@ -11,6 +11,7 @@
 // best-effort context is run through `redact()` to drop known-sensitive keys.
 
 import * as functions from 'firebase-functions';
+import { sanitizeFinite } from '@rushpoint/shared';
 
 export interface CallMeta {
   callable: string;
@@ -107,7 +108,10 @@ export function loggedCallable(name: string, handler: CallableHandler) {
   return functions.https.onCall(async (data, context) =>
     logCall(
       { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
-      async () => handler(data, context),
+      // Backstop: a callable must never return a non-finite number — one Infinity
+      // crashes the ENTIRE response at JSON-encode. Degrade any to null here so a
+      // computation bug becomes a benign null field, not a failed call.
+      async () => sanitizeFinite(await handler(data, context)),
     ),
   );
 }

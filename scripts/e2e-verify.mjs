@@ -219,6 +219,9 @@ const ALLOWED_TASK_KEYS = new Set([
   // survey-tasks: the choice buttons render from surveyChoices — no answer key,
   // so it is participant-visible (passed through the sanitizer).
   'surveyChoices',
+  // quiz-location-verification: opt-in presence gate — NOT a secret; the client
+  // needs it to know it must attach GPS to submitTaskAnswer.
+  'requirePresence',
   // added by the sanitizer itself:
   'hasHint', 'locationHidden', 'hintFreeNow',
 ]);
@@ -264,6 +267,23 @@ function assertLeaderboardInvariants(label, rankings, expectedTeamIds) {
   check(`${label}: scores are non-increasing down the board`,
     (rankings ?? []).every((r, i) => i === 0 || rankings[i - 1].score >= r.score),
     (rankings ?? []).map((r) => r.score).join(' ≥ '));
+}
+
+// Walk an arbitrary callable response and collect the dotted paths of any
+// non-finite number (Infinity/-Infinity/NaN). A callable that returns one crashes
+// the ENTIRE response at JSON-encode (the family-playtest bug); this asserts the
+// serialized boundary is clean (change: fix-nonfinite-callable-payload).
+function findNonFinite(value, path = '') {
+  if (typeof value === 'number') return Number.isFinite(value) ? [] : [`${path || '<root>'}=${value}`];
+  if (Array.isArray(value)) return value.flatMap((v, i) => findNonFinite(v, `${path}[${i}]`));
+  if (value && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    return Object.entries(value).flatMap(([k, v]) => findNonFinite(v, path ? `${path}.${k}` : k));
+  }
+  return [];
+}
+function assertAllFinite(label, payload) {
+  const bad = findNonFinite(payload);
+  check(`${label}: response has no non-finite numbers`, bad.length === 0, bad.join(', '));
 }
 
 // Score conservation for one team's state: every completed task's breakdown
@@ -1069,6 +1089,65 @@ async function main() {
 
   }); // scenario: paid hints
 
+  await scenario('game intro instructions (bilingual echo + non-https image strip + null when unset)', async () => {
+
+  // ── Game intro "How to play" primer (change: game-intro-instructions) ────────
+  // Guards the write→clean→echo seam: updateGame stores a cleaned primer, and
+  // getMyTeamState echoes title/body/bodyHe but https-strips a non-https image.
+  const { gameId: gGI } = await creator.call('createGame', { title: 'Primer Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gGI,
+    scoringPreset: 'fixed_points_speed',
+    instructions: {
+      title: 'How to play',
+      body: 'Walk to each pin and check in.',
+      bodyHe: 'לכו לכל נקודה ובצעו צ׳ק־אין.',
+      imageUrl: 'http://insecure.example.com/diagram.png', // non-https → must be stripped
+    },
+    stages: [{
+      id: 'st-gi', order: 0, title: 'Go', isFinal: true,
+      tasks: [{
+        id: 'gi-1', title: 'Check in', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 4, pointValue: 40, maxConcurrentTeams: 3,
+      }],
+    }],
+  });
+  const { runId: rGI, accessCode: cGI } = await creator.call('launchRun', { gameId: gGI });
+  const playerGI = makeParty('playerGI');
+  await signInAnonymously(playerGI.auth);
+  await playerGI.call('joinRun', { code: cGI, displayName: 'Primer Player' });
+  await creator.call('startTeams', { gameId: gGI, runId: rGI });
+
+  const sGI = await playerGI.call('getMyTeamState', { code: cGI });
+  const ins = sGI?.game?.instructions;
+  check('getMyTeamState echoes the bilingual primer',
+    ins?.title === 'How to play' && ins?.body === 'Walk to each pin and check in.' && ins?.bodyHe === 'לכו לכל נקודה ובצעו צ׳ק־אין.',
+    JSON.stringify(ins));
+  check('non-https primer image is stripped on echo', ins?.imageUrl === undefined, JSON.stringify(ins?.imageUrl));
+
+  // A game with NO primer echoes instructions === null.
+  const { gameId: gGI2 } = await creator.call('createGame', { title: 'No Primer Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gGI2,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-gi2', order: 0, title: 'Go', isFinal: true,
+      tasks: [{
+        id: 'gi2-1', title: 'Check in', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 4, pointValue: 40, maxConcurrentTeams: 3,
+      }],
+    }],
+  });
+  const { runId: rGI2, accessCode: cGI2 } = await creator.call('launchRun', { gameId: gGI2 });
+  const playerGI2 = makeParty('playerGI2');
+  await signInAnonymously(playerGI2.auth);
+  await playerGI2.call('joinRun', { code: cGI2, displayName: 'No Primer Player' });
+  await creator.call('startTeams', { gameId: gGI2, runId: rGI2 });
+  const sGI2 = await playerGI2.call('getMyTeamState', { code: cGI2 });
+  check('a game with no primer echoes instructions === null', sGI2?.game?.instructions === null, JSON.stringify(sGI2?.game?.instructions));
+
+  }); // scenario: game intro instructions
+
   await scenario('test drive (free rehearsal, cap 2, one-live guard, aggregate exclusion)', async () => {
 
   // ── Test drive (change: test-drive-mode) ────────────────────────────────────
@@ -1814,6 +1893,55 @@ async function main() {
 
   }); // scenario: task types
 
+  await scenario('quiz location verification (requirePresence gate)', async () => {
+
+  // ── requirePresence: an answer task with real coordinates + the opt-in flag can
+  // only be graded from WITHIN a lenient radius. A far submission (even with the
+  // correct answer) is refused BEFORE grading (failed-precondition), while the
+  // same correct answer at the coordinates grades normally. The sanitized payload
+  // exposes requirePresence (client needs it to attach GPS) but still no answers.
+  const { gameId: gP } = await creator.call('createGame', { title: 'Presence Quiz', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gP,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      { id: 'sp', order: 0, title: 'Presence', isFinal: true, tasks: [{
+        id: 'pq1', title: 'What color is the dome?', type: 'quiz', requirePresence: true,
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 2, pointValue: 50, maxConcurrentTeams: 9,
+        choices: ['Blue', 'Gold', 'Green'], answers: ['Blue'],
+      }] },
+    ],
+  });
+  const { runId: rP, accessCode: cP } = await creator.call('launchRun', { gameId: gP });
+  const playerP = makeParty('playerP');
+  await signInAnonymously(playerP.auth);
+  await playerP.call('joinRun', { code: cP, displayName: 'Pilgrim' });
+  await creator.call('startTeams', { gameId: gP, runId: rP });
+  const CP = { ownerUid: creatorCred.user.uid, gameId: gP, runId: rP };
+
+  // sanitized payload: requirePresence visible, answers stripped.
+  const sP = await playerP.call('getMyTeamState', { code: cP });
+  const pTask = sP?.activeStageTasks?.[0];
+  check('presence: requirePresence exposed to client', pTask?.requirePresence === true, JSON.stringify(pTask?.requirePresence));
+  check('presence: answers still stripped', pTask?.answers === undefined && pTask?.numericAnswer === undefined);
+
+  // far + correct answer → refused before grading (not graded as correct).
+  let farRefused = false;
+  let farLeak = '';
+  try {
+    const r = await playerP.call('submitTaskAnswer', { ...CP, taskId: 'pq1', answer: 'blue', lat: 32.10, lng: 34.85 });
+    farLeak = JSON.stringify(r); // must NOT reach here with { correct: true }
+  } catch (e) {
+    farRefused = /failed-precondition|move closer|location required/i.test(e.message);
+  }
+  check('presence: far answer refused (failed-precondition, not graded)', farRefused, farLeak);
+
+  // correct answer AT the coordinates → grades.
+  const nearP = await playerP.call('submitTaskAnswer', { ...CP, taskId: 'pq1', answer: 'blue', lat: 31.78, lng: 35.21 });
+  check('presence: in-range correct answer grades', nearP?.correct === true, JSON.stringify(nearP));
+
+  }); // scenario: quiz location verification
+
   await scenario('scheduled release (timed task + stage gates)', async () => {
     // A game with: stage 0 = an instant task gated by a FUTURE releaseAt (blocked),
     // plus a second instant task already released; stage 1 gated far in the future
@@ -1900,9 +2028,38 @@ async function main() {
     await creator.call('startTeams', { gameId: gP, runId: rP });
     const CP = { ownerUid: creatorCred.user.uid, gameId: gP, runId: rP };
     await pP.call('completeTask', { ...CP, taskId: 'p-a' });
+
+    // Controller-only poll persistence (change: fix-getmyteamstate-hotpath-writes):
+    // stage 0 is done and stage 1 is past-release due. Attach a VIEWER and let ONLY
+    // it poll — the response must reflect the unlock, but the persisted team doc must
+    // NOT advance from a viewer poll. Then the controller's poll persists it.
+    const teamDocPathP = `users/${creatorCred.user.uid}/games/${gP}/runs/${rP}/teams/${pP.auth.currentUser.uid}`;
+    const pcode = (await pP.call('getMyTeamState', { code: cP }))?.team?.deviceJoinCode;
+    // (that controller poll just persisted the unlock; re-lock via admin to isolate the viewer test)
+    await adminSdk.firestore().doc(teamDocPathP).update({
+      stages: [
+        { stageId: 'ps0', status: 'completed', tasks: [{ taskId: 'p-a', taskIndex: 0, status: 'completed', earnedScore: 50 }] },
+        { stageId: 'ps1', status: 'locked', tasks: [{ taskId: 'p-b', taskIndex: 0, status: 'unassigned' }] },
+      ],
+    });
+    const viewerP = makeParty('viewerPast');
+    await signInAnonymously(viewerP.auth);
+    await viewerP.call('joinTeamAsDevice', { code: cP, teamCode: pcode, memberName: 'Viewer' });
+    const vState = await viewerP.call('getMyTeamState', { code: cP });
+    check('scheduled: viewer poll response reflects the unlock',
+      vState?.activeStageTasks?.some((t) => t.id === 'p-b') === true, JSON.stringify(vState?.activeStageTasks?.map((t) => t.id)));
+    const afterViewer = (await adminSdk.firestore().doc(teamDocPathP).get()).data();
+    check('scheduled: a viewer poll does NOT persist the unlock (controller-only writes)',
+      afterViewer?.stages?.find((s) => s.stageId === 'ps1')?.status === 'locked',
+      afterViewer?.stages?.find((s) => s.stageId === 'ps1')?.status);
+
     const sp = await pP.call('getMyTeamState', { code: cP });
     check('scheduled: past-release stage unlocks (active task present)',
       sp?.activeStageTasks?.some((t) => t.id === 'p-b') === true, JSON.stringify(sp?.activeStageTasks?.map((t) => t.id)));
+    const afterController = (await adminSdk.firestore().doc(teamDocPathP).get()).data();
+    check('scheduled: the controller poll DOES persist the unlock',
+      afterController?.stages?.find((s) => s.stageId === 'ps1')?.status === 'active',
+      afterController?.stages?.find((s) => s.stageId === 'ps1')?.status);
     await pP.call('completeTask', { ...CP, taskId: 'p-b' });
     const spF = await pP.call('getMyTeamState', { code: cP });
     check('scheduled: past-release run completes to finished', spF?.team?.status === 'finished', spF?.team?.status);
@@ -2689,6 +2846,16 @@ async function main() {
     try { await recapViewer.call('getRunAnalytics', { code: accessCode }); }
     catch (e) { analyticsDenied = e.code === 'functions/permission-denied'; }
     check('analytics: non-owner is denied', analyticsDenied);
+
+    // ── Run summary (getRunSummary) — owner-only recap+analytics+feedback fold ──
+    const summary = await creator.call('getRunSummary', { code: accessCode });
+    check('summary: owner gets standings', (summary?.standings?.length ?? 0) > 0, `standings=${summary?.standings?.length}`);
+    check('summary: completion rate numeric', typeof summary?.completion?.overallCompletionRate === 'number');
+    check('summary: feedback digest present', summary?.feedback && Array.isArray(summary.feedback.topIssues));
+    let summaryDenied = false;
+    try { await recapViewer.call('getRunSummary', { code: accessCode }); }
+    catch (e) { summaryDenied = e.code === 'functions/permission-denied'; }
+    check('summary: non-owner denied', summaryDenied);
   }); // scenario: recap · replay · analytics
 
   // ── Duplicate & translate a game (translateGame) ────────────────────────────
@@ -3184,6 +3351,57 @@ async function main() {
       JSON.stringify((live?.rankings ?? []).map((r) => r.teamId)) ===
         JSON.stringify((finL?.rankings ?? []).map((r) => r.teamId)),
       JSON.stringify({ live: (live?.rankings ?? []).map((r) => r.teamName), final: (finL?.rankings ?? []).map((r) => r.teamName) }));
+  });
+
+  // ═══ Non-finite leaderboard guard (family-playtest regression) ══════════════
+  // A team that JOINED but was never STARTED has no startedAt → durationSeconds
+  // returns Infinity, which used to poison run.leaderboard and crash
+  // getMyTeamState / refreshLeaderboard at JSON-encode (51× in the 2026-07-11
+  // playtest). The board and the unstarted team's state must now be finite.
+  await scenario('non-finite leaderboard guard (joined-but-not-started team)', async () => {
+    const { gameId: nf } = await creator.call('createGame', { title: 'Non-Finite Guard', mode: 'individual' });
+    const mkTask = (id, pts) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: pts, maxConcurrentTeams: 9,
+    });
+    await creator.call('updateGame', {
+      gameId: nf, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'nf-1', order: 0, title: 'One', tasks: [mkTask('nf-t1', 30)] },
+        { id: 'nf-2', order: 1, title: 'Two', isFinal: true, tasks: [mkTask('nf-t2', 60)] },
+      ],
+    });
+    const { runId: nr, accessCode: nc } = await creator.call('launchRun', { gameId: nf });
+
+    // Alpha joins and is started; Bravo joins AFTER startTeams → never started
+    // (no startedAt) — the exact playtest condition.
+    const alpha = makeParty('nfAlpha');
+    await signInAnonymously(alpha.auth);
+    await alpha.call('joinRun', { code: nc, displayName: 'Alpha' });
+    await creator.call('startTeams', { gameId: nf, runId: nr });
+
+    const bravo = makeParty('nfBravo');
+    await signInAnonymously(bravo.auth);
+    await bravo.call('joinRun', { code: nc, displayName: 'Bravo' });
+
+    // A scoring event populates the board while Bravo sits unstarted.
+    await alpha.call('completeTask', { taskId: 'nf-t1', code: nc });
+
+    const board = await creator.call('refreshLeaderboard', { gameId: nf, runId: nr, publish: true });
+    check('refreshLeaderboard resolves with an unstarted team in the run',
+      Array.isArray(board?.rankings) && board.rankings.length === 2, JSON.stringify(board?.rankings?.length));
+    assertAllFinite('refreshLeaderboard', board);
+
+    // Both teams poll state; the published board is embedded in each response.
+    const alphaState = await alpha.call('getMyTeamState', { code: nc });
+    assertAllFinite('getMyTeamState(started)', alphaState);
+    const bravoState = await bravo.call('getMyTeamState', { code: nc });
+    check('getMyTeamState resolves for the unstarted team', bravoState?.team?.displayName === 'Bravo');
+    assertAllFinite('getMyTeamState(unstarted)', bravoState);
+
+    // Finalizing with an unstarted team present must also stay finite.
+    const finalBoard = await creator.call('finalizeRun', { gameId: nf, runId: nr });
+    assertAllFinite('finalizeRun', finalBoard);
   });
 
   // ═══ Station contention (concurrency) ═══════════════════════════════════════

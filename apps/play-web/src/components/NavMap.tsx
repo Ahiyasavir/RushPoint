@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, type MapMode, type HotZone } from '@rushpoint/shared';
+import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, type MapMode, type HotZone, type CaptureZone } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
 
@@ -18,13 +18,24 @@ export interface NavTarget {
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 const HOT_ZONE_SOURCE = 'hot-zone';
+const ZONES_SOURCE = 'capture-zones';
+
+// Capturable-territory circle color by holder (change: fix-territory-map-visibility):
+// mine = green, a rival's = red, unclaimed = slate. Static hex (painted by the map,
+// not Tailwind) so it never becomes a dynamic class string.
+function zoneColor(z: CaptureZone, myTeamId?: string): string {
+  if (!z.ownerTeamId) return '#94A3B8';
+  return z.ownerTeamId === myTeamId ? '#22C55E' : '#EF4444';
+}
 
 export default function NavMap({
-  targets, me, hotZone = null, accent = '#F97316', className = '',
+  targets, me, hotZone = null, zones = [], myTeamId, accent = '#F97316', className = '',
 }: {
   targets: NavTarget[];
   me?: { lat: number; lng: number } | null;
   hotZone?: HotZone | null;
+  zones?: CaptureZone[];
+  myTeamId?: string;
   accent?: string;
   className?: string;
 }) {
@@ -38,10 +49,59 @@ export default function NavMap({
 
   const valid = targets.filter((t) => isValidCoord(t.lat, t.lng) && (t.lat !== 0 || t.lng !== 0));
 
+  // Territory zones / hot zone are worth a map even when NO task has a pin
+  // (change: fix-territory-map-visibility): a zones-only moment, or a stage of
+  // only locationless/hidden tasks, must still show the capture circles. Without
+  // this the component early-returns a placeholder and the map is never created,
+  // so applyZones has nothing to draw on.
+  const overlayPts = [
+    ...(zones ?? []).filter((z) => z.center && isValidCoord(z.center.lat, z.center.lng)).map((z) => ({ lat: z.center.lat, lng: z.center.lng })),
+    ...(isHotZoneActive(hotZone, Date.now()) && hotZone ? [{ lat: hotZone.center.lat, lng: hotZone.center.lng }] : []),
+  ];
+  const hasOverlay = overlayPts.length > 0;
+
   // Latest hot zone, read inside styledata (which fires on setStyle) so the
   // overlay is re-applied after a tile-style switch wipes GeoJSON layers.
   const hotZoneRef = useRef<HotZone | null>(hotZone);
   hotZoneRef.current = hotZone;
+
+  // Latest capturable zones + my team, read inside styledata so the overlay is
+  // re-applied after a tile-style switch wipes GeoJSON layers.
+  const zonesRef = useRef<CaptureZone[]>(zones);
+  zonesRef.current = zones;
+  const myTeamIdRef = useRef<string | undefined>(myTeamId);
+  myTeamIdRef.current = myTeamId;
+
+  // Draw / update / remove the capturable-territory circles (metres-accurate,
+  // holder-colored). One data-driven fill+line pair reads `color` per feature.
+  function applyZones(m: maplibregl.Map) {
+    if (!m.isStyleLoaded()) return;
+    const zs = (zonesRef.current ?? []).filter((z) => z.center && isValidCoord(z.center.lat, z.center.lng));
+    const src = m.getSource(ZONES_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (zs.length > 0) {
+      const data: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: zs.map((z) => {
+          const f = circlePolygonGeoJSON(z.center, z.radiusMeters) as GeoJSON.Feature;
+          f.properties = { color: zoneColor(z, myTeamIdRef.current) };
+          return f;
+        }),
+      };
+      if (src) {
+        src.setData(data);
+      } else {
+        m.addSource(ZONES_SOURCE, { type: 'geojson', data });
+        m.addLayer({ id: `${ZONES_SOURCE}-fill`, type: 'fill', source: ZONES_SOURCE,
+          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.18 } });
+        m.addLayer({ id: `${ZONES_SOURCE}-line`, type: 'line', source: ZONES_SOURCE,
+          paint: { 'line-color': ['get', 'color'], 'line-width': 2 } });
+      }
+    } else {
+      if (m.getLayer(`${ZONES_SOURCE}-fill`)) m.removeLayer(`${ZONES_SOURCE}-fill`);
+      if (m.getLayer(`${ZONES_SOURCE}-line`)) m.removeLayer(`${ZONES_SOURCE}-line`);
+      if (src) m.removeSource(ZONES_SOURCE);
+    }
+  }
 
   // Draw / update / remove the active hot-zone circle. A metres-radius circle
   // needs a geographic polygon (a fixed-pixel marker wouldn't scale with zoom).
@@ -71,7 +131,7 @@ export default function NavMap({
   // Create the map once.
   useEffect(() => {
     if (!ref.current || map.current) return;
-    const first = valid[0];
+    const first = valid[0] ?? overlayPts[0];
     map.current = new maplibregl.Map({
       container: ref.current,
       // Honor the current mode so a map RE-created after its targets briefly
@@ -90,7 +150,7 @@ export default function NavMap({
     );
     // styledata fires on initial load AND after each setStyle (mode toggle),
     // which wipes GeoJSON sources/layers — re-apply the overlay each time.
-    map.current.on('styledata', () => { if (map.current) applyHotZone(map.current); });
+    map.current.on('styledata', () => { if (map.current) { applyHotZone(map.current); applyZones(map.current); } });
     return () => { map.current?.remove(); map.current = null; };
     // Re-run when the map container appears/disappears: while `valid` is empty the
     // component renders a placeholder with NO ref div, so a NavMap that mounts
@@ -99,7 +159,7 @@ export default function NavMap({
     // full target list) so the happy path, where targets are present throughout,
     // is byte-identical to `[]` (the value never changes, so it fires once).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valid.length === 0]);
+  }, [valid.length === 0 && !hasOverlay]);
 
   // Switch tile style on mode change (HTML markers persist across setStyle).
   useEffect(() => {
@@ -114,6 +174,14 @@ export default function NavMap({
     if (map.current) applyHotZone(map.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hzActive, hotZone?.center.lat, hotZone?.center.lng, hotZone?.radiusMeters]);
+
+  // Re-apply zone circles when a zone is added, moved, or changes holder
+  // (recolor after a capture). Keyed on a stable signature so it fires only on a
+  // real change, not on every GPS ping.
+  useEffect(() => {
+    if (map.current) applyZones(map.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify((zones ?? []).map((z) => [z.id, z.ownerTeamId, z.radiusMeters, z.center?.lat, z.center?.lng])), myTeamId]);
 
   // Sync target markers.
   useEffect(() => {
@@ -152,6 +220,7 @@ export default function NavMap({
   useEffect(() => {
     if (!map.current || fitted.current) return;
     const pts: [number, number][] = valid.map((t) => [t.lng, t.lat]);
+    overlayPts.forEach((p) => pts.push([p.lng, p.lat]));
     if (me && isValidCoord(me.lat, me.lng)) pts.push([me.lng, me.lat]);
     if (pts.length === 0) return;
     if (pts.length === 1) {
@@ -165,7 +234,7 @@ export default function NavMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valid.length, me?.lat, me?.lng]);
 
-  if (valid.length === 0) {
+  if (valid.length === 0 && !hasOverlay) {
     return (
       <div className={`rounded-2xl bg-app-card border border-glass-border flex items-center justify-center text-zinc-600 text-sm ${className}`}>
         {t.task.mapAppears}

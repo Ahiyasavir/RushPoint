@@ -42,6 +42,8 @@
         "playtest": "concurrently --names EMU,SEED,BACKUP,CREATOR,PLAY,PROXY,TUNNEL --prefix-colors blue,green,gray,cyan,magenta,white,red \"npm:emulator\" \"npm:dev:seed\" \"npm:emulator:backup\" \"npm:playtest:creator\" \"npm:playtest:play\" \"node scripts/proxy.mjs\" \"npx cloudflared tunnel --url http://localhost:3000\"",
         "preplaytest:ngrok": "node scripts/free-ports.mjs",
         "playtest:ngrok": "concurrently --names EMU,SEED,BACKUP,CREATOR,PLAY,PROXY,TUNNEL --prefix-colors blue,green,gray,cyan,magenta,white,red \"npm:emulator\" \"npm:dev:seed\" \"npm:emulator:backup\" \"npm:playtest:creator\" \"npm:playtest:play\" \"node scripts/proxy.mjs\" \"node scripts/ngrok-tunnel.mjs\"",
+        "playtest:forever": "node scripts/playtest-forever.mjs",
+        "playtest:stop": "node scripts/playtest-forever.mjs --stop",
         "predev:all:tunnel": "node scripts/free-ports.mjs",
         "dev:all:tunnel": "concurrently --names EMU,SEED,MIRROR,MOBILE,ADMIN,PROXY,TUNNEL --prefix-colors blue,green,yellow,magenta,cyan,white,red \"npm:emulator\" \"npm:dev:seed\" \"npm:dev:mirror\" \"npm:mobile:web\" \"npm:admin\" \"node scripts/proxy.mjs\" \"npx cloudflared tunnel --url http://localhost:3000\"",
         "//Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬ Firebase Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬Ã¢â€ â‚¬": "",

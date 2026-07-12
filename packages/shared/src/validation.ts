@@ -319,8 +319,8 @@ export function requireStorageUrl(url: unknown, runId: string, uid: string): str
   const expected = `runs/${runId}/teams/${uid}/`;
   if (!objectPath || !objectPath.startsWith(expected)) {
     fail('photoUrl', 'storagePath', [
-      'Photo must be uploaded to your own team folder.',
-      'יש להעלות את התמונה לתיקיית הקבוצה שלכם.',
+      'That photo could not be saved. Please retake the photo.',
+      'לא הצלחנו לשמור את התמונה. צלמו שוב.',
     ]);
   }
   return s;
