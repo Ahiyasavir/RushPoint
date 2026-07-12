@@ -43,9 +43,16 @@ const feedback: RunFeedbackSummary = {
   commentCount: 2,
 };
 
+const comments = [
+  { teamName: 'Alpha', text: 'Loved the hunt! <script>alert(1)</script> would play again & again.' },
+  { teamName: 'Bravo', text: 'Too hard near the fountain "hint".' },
+  { teamName: 'Charlie', text: 'C1' }, { teamName: 'Delta', text: 'C2' },
+  { teamName: 'Echo', text: 'C3' }, { teamName: 'Foxtrot', text: 'dropped (past cap of 5)' },
+];
+
 const summary = composeRunSummary({
   title: 'Old City Hunt', runStatus: 'finished', finishedAt: '2026-07-11T20:00:00.000Z',
-  recap, analytics, feedback,
+  recap, analytics, feedback, comments,
 });
 
 // (1) Standings pass through in input order with score + totalSeconds intact.
@@ -83,6 +90,15 @@ let threw = false;
 try { stringified = JSON.stringify(summary); } catch { threw = true; }
 ok(!threw && stringified.length > 0, 'composeRunSummary result JSON.stringifies');
 
+// (6) comments: capped at 5, in input order, past-cap entry dropped.
+ok(summary.feedback.comments.length === 5, 'comments capped at 5 (6 fed in)');
+ok(summary.feedback.comments[0].teamName === 'Alpha', 'comments preserve input order');
+ok(!summary.feedback.comments.some((c) => c.text.includes('dropped (past cap')), 'the 6th comment is dropped');
+// no comments fed in → empty array, never undefined/throws.
+const noCommentsSummary = composeRunSummary({ title: 'NoComments', runStatus: 'finished', recap, analytics, feedback });
+ok(Array.isArray(noCommentsSummary.feedback.comments) && noCommentsSummary.feedback.comments.length === 0,
+  'comments defaults to [] when none supplied');
+
 // ── formatRunSummaryEmail ────────────────────────────────────────────────────
 const email = formatRunSummaryEmail(summary);
 ok(email.subject.length > 0, 'email subject non-empty');
@@ -93,6 +109,18 @@ ok(/Would recommend/.test(email.text), 'email includes feedback digest');
 ok(email.text.includes('too_hard'), 'email includes top issue');
 ok(!/NaN/.test(email.subject) && !/NaN/.test(email.text), 'email never contains NaN');
 ok(!/Infinity/.test(email.subject) && !/Infinity/.test(email.text), 'email never contains Infinity');
+
+// (7) HTML email: designed, includes the new details, and safely escapes user content.
+ok(typeof email.html === 'string' && email.html.length > 0, 'email.html is a non-empty string');
+ok(email.html.includes('<table') || email.html.includes('<div'), 'html has real markup, not plain text dumped in');
+ok(email.html.includes('Alpha') && email.html.includes('Bravo'), 'html includes standings team names');
+ok(email.html.includes('too_hard'), 'html includes top issues');
+// XSS guard: a raw <script> from a player comment must never appear unescaped in the HTML.
+ok(!email.html.includes('<script>alert(1)</script>'), 'a raw <script> tag in a comment is escaped, not injected');
+ok(email.html.includes('&lt;script&gt;'), 'the escaped form of the malicious comment is present (content preserved, just safe)');
+// A comment with an unescaped double-quote must not break out of an HTML attribute.
+ok(!email.html.includes('fountain "hint"'), 'a raw double-quote in a comment is escaped');
+ok(!/NaN|Infinity/.test(email.html), 'html never contains NaN/Infinity');
 
 // Finite-safety: feed non-finite / negative numbers and confirm the email + summary stay clean.
 const nastyRecap: RunRecap = {

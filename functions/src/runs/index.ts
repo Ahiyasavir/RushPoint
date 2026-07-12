@@ -1578,6 +1578,11 @@ function buildRunSummaryResult(
 ): RunSummary {
   const gameTasks = (game?.stages ?? []).flatMap((s) => s.tasks).map((t) => ({ id: t.id, type: t.type }));
   const participantCount = teams.reduce((n, t) => n + (t.deviceUids?.length ?? 1), 0);
+  // A few real player comments give the organizer actual feedback text, not just
+  // counts. composeRunSummary caps this to 5; we just filter empties here.
+  const comments = responses
+    .filter((r) => r.comment && r.comment.trim())
+    .map((r) => ({ teamName: r.teamName, text: r.comment!.trim() }));
   return composeRunSummary({
     title: game?.branding?.name ?? game?.title ?? 'RushPoint',
     runStatus: run?.status ?? 'live',
@@ -1586,6 +1591,7 @@ function buildRunSummaryResult(
     recap: buildRunRecap(teams, run ?? { leaderboard: undefined }),
     analytics: computeRunAnalytics(teams, gameTasks),
     feedback: computeFeedbackSummary(responses, participantCount),
+    comments,
   });
 }
 

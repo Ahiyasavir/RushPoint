@@ -34,7 +34,7 @@ export async function sendRunSummaryEmail(
   recipient: string | null | undefined,
 ): Promise<void> {
   try {
-    const { subject, text } = formatRunSummaryEmail(summary);
+    const { subject, text, html } = formatRunSummaryEmail(summary);
 
     if (!RUN_SUMMARY_EMAIL_ENABLED || !recipient) {
       // Disabled or no recipient resolved — nothing to send.
@@ -57,7 +57,7 @@ export async function sendRunSummaryEmail(
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ from, to: [recipient], subject, text }),
+      body: JSON.stringify({ from, to: [recipient], subject, text, html }),
     });
 
     if (!res.ok) {
