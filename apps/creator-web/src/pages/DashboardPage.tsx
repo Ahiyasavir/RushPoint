@@ -68,7 +68,11 @@ export default function DashboardPage() {
       // Escape the spinner on a first-load failure, but never blank an already-
       // loaded dashboard if a post-mutation refresh fails.
       setGames((prev) => prev ?? []);
-      await dialog.alert(e instanceof Error ? e.message : d.loadGamesFailed);
+      // Never leak a raw Firebase error CODE ("not-found", "unavailable", …) into
+      // the UI — a load failure is always technical, not user-actionable. Show the
+      // friendly localized message and keep the real error in the console.
+      console.error('[dashboard] listGames failed:', e);
+      await dialog.alert(d.loadGamesFailed);
     }
   }
   useEffect(() => { void load(); }, []);

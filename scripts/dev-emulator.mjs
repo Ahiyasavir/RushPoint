@@ -27,6 +27,15 @@ const PROJECT_ID = 'rushpoint-pwa-7daaa';
 const env = { ...process.env };
 const major = ensureModernJava(env, (msg) => console.log(`[dev-emulator] ${msg}`));
 
+// â”€â”€ Functions discovery timeout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// The emulator loads functions by running the built bundle once to read its backend
+// spec, with a 10s default limit. On a cold/slow start (a fresh boot, or a stack
+// restart after a git auto-update) our large index can blow past 10s â†’ "Failed to
+// load function definition ... Timeout after 10000" â†’ every callable resolves as
+// `not-found` until the next reload. Give discovery generous headroom so functions
+// register reliably on the always-on runner. (firebase-tools reads this in seconds.)
+if (!env.FUNCTIONS_DISCOVERY_TIMEOUT) env.FUNCTIONS_DISCOVERY_TIMEOUT = '60';
+
 if (!major || major < MIN_JAVA) {
   console.error(`[dev-emulator] ERROR: Firebase Emulator needs Java ${MIN_JAVA}+. Detected: ${major ? 'Java ' + major : 'none'}.`);
   console.error('  Install Eclipse Temurin 21: https://adoptium.net/temurin/releases/?version=21');
