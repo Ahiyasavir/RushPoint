@@ -50,8 +50,12 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 // (localhost/127.0.0.1) keeps the direct port-based wiring unchanged.
 const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 const originHost = typeof window !== 'undefined' ? window.location.hostname : '';
+// Wire the emulator in `vite dev` (DEV) AND in the production `--mode playtest`
+// build the always-on tunnel host serves — otherwise the minified bundle hits real
+// Firebase and creator sign-in / all callables fail over the tunnel.
+const emulatorBuild = import.meta.env.DEV || import.meta.env.MODE === 'playtest';
 const tunnelMode =
-  import.meta.env.DEV && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
+  emulatorBuild && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
 
 // Firestore over a tunnel needs ssl + no port at creation time (settings can't be
 // changed after first use), so build it with host/ssl here; local dev uses the
@@ -71,7 +75,7 @@ export const storage   = getStorage(app);
 
 // ── Emulator wiring (dev only) ────────────────────────────────────────────────
 const emuFlag = globalThis as unknown as { __rushpointEmu?: boolean };
-if (import.meta.env.DEV && !emuFlag.__rushpointEmu) {
+if (emulatorBuild && !emuFlag.__rushpointEmu) {
   emuFlag.__rushpointEmu = true;
   if (tunnelMode) {
     // Single-origin routing through the tunnel (https, no explicit port).
@@ -138,7 +142,7 @@ const googleAuth = getAuth(googleApp);
 // googleAuth is intentionally NOT connected to the emulator.
 
 export async function signInWithGoogle() {
-  if (!import.meta.env.DEV) {
+  if (!emulatorBuild) {
     // Production: `auth` is real Firebase — the popup opens Google directly.
     return signInWithPopup(auth, googleProvider);
   }

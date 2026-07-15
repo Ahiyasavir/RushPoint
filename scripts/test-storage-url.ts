@@ -5,6 +5,9 @@
 //   npx tsx scripts/test-storage-url.ts
 import { requireStorageUrl, ValidationError, FIREBASE_STORAGE_ORIGIN } from '../packages/shared/src/validation';
 
+// The live client bucket is the firebasestorage.app form — the guard must accept it.
+const FBAPP_ORIGIN = 'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.firebasestorage.app/';
+
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${detail ? ' :: ' + detail : ''}`);
@@ -20,6 +23,9 @@ const ownGs = 'gs://rushpoint-pwa-7daaa.appspot.com/runs/run123/teams/uidABC/pho
 
 check('accepts the caller\'s own https download URL', requireStorageUrl(ownHttps, RUN, UID) === ownHttps);
 check('accepts the caller\'s own gs:// URL', requireStorageUrl(ownGs, RUN, UID) === ownGs);
+const ownFbApp = `${FBAPP_ORIGIN}o/runs%2Frun123%2Fteams%2FuidABC%2Fphoto-1.jpg?alt=media`;
+check('accepts the firebasestorage.app bucket download URL (real client bucket)', requireStorageUrl(ownFbApp, RUN, UID) === ownFbApp);
+check('still rejects another team on the firebasestorage.app bucket', rejected(() => requireStorageUrl(`${FBAPP_ORIGIN}o/runs%2Frun123%2Fteams%2FOTHER%2Fx.jpg?alt=media`, RUN, UID)));
 check('rejects a javascript: payload', rejected(() => requireStorageUrl('javascript:alert(1)', RUN, UID)));
 check('rejects another team\'s path', rejected(() => requireStorageUrl(`${FIREBASE_STORAGE_ORIGIN}o/runs%2Frun123%2Fteams%2FOTHER%2Fx.jpg?alt=media`, RUN, UID)));
 check('rejects another run\'s path', rejected(() => requireStorageUrl(`${FIREBASE_STORAGE_ORIGIN}o/runs%2FOTHER%2Fteams%2FuidABC%2Fx.jpg?alt=media`, RUN, UID)));

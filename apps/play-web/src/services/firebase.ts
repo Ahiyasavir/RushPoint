@@ -41,8 +41,14 @@ const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 // dev:all (localhost/127.0.0.1) keeps the direct port-based wiring.
 const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 const originHost = typeof window !== 'undefined' ? window.location.hostname : '';
+// Wire the local emulator not only in `vite dev` (DEV) but also in the PRODUCTION
+// `--mode playtest` build the always-on tunnel host serves. Without this, the
+// minified bundle drops all emulator wiring and hits real Firebase — where
+// anonymous auth is disabled (auth/admin-restricted-operation) — so no real phone
+// can join. MODE is 'playtest' for that build (see playtest:build).
+const emulatorBuild = import.meta.env.DEV || import.meta.env.MODE === 'playtest';
 const tunnelMode =
-  import.meta.env.DEV && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
+  emulatorBuild && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
 
 // Offline-first cache: live run/team state is served from IndexedDB when the
 // participant briefly loses signal in the field, and listeners reconnect
@@ -69,7 +75,7 @@ export const functions = getFunctions(app);
 export const storage   = getStorage(app);
 
 const emuFlag = globalThis as unknown as { __rpPlayEmu?: boolean };
-if (import.meta.env.DEV && !emuFlag.__rpPlayEmu) {
+if (emulatorBuild && !emuFlag.__rpPlayEmu) {
   emuFlag.__rpPlayEmu = true;
   if (tunnelMode) {
     // Single-origin routing through the tunnel (https, no explicit port); the
