@@ -1317,6 +1317,71 @@ async function main() {
 
   }); // scenario: hint auto escalation
 
+  await scenario('completeTask type gate (no answer-bypass on quiz)', async () => {
+
+  // ── completeTask anti-cheat type gate ───────────────────────────────────────
+  // completeTask is the check-in / self-report / geofence path ONLY. A quiz (and
+  // every other non-completeTask type) is graded exclusively by its own callable
+  // (submitTaskAnswer here). A participant who reads their own assigned taskId via
+  // getMyTeamState must NOT be able to score a quiz task by calling
+  // completeTask({ taskId }) with no answer. Positive control: field/self_report/
+  // geofence completions through completeTask are covered by the core lifecycle
+  // scenario and must stay green (the allowlist must not over-block them).
+  const { gameId: gZ } = await creator.call('createGame', { title: 'Type Gate Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gZ,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      {
+        id: 'st-z1', order: 0, title: 'Answer here',
+        tasks: [{
+          id: 'q-1', title: 'Name the city', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
+          answers: ['jerusalem'],
+        }],
+      },
+      {
+        id: 'st-z2', order: 1, title: 'Finish', isFinal: true,
+        tasks: [{
+          id: 'z-2', title: 'Wrap up', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 10, maxConcurrentTeams: 3,
+        }],
+      },
+    ],
+  });
+  const { runId: rZ, accessCode: cZ } = await creator.call('launchRun', { gameId: gZ });
+  const playerZ = makeParty('playerZ');
+  await signInAnonymously(playerZ.auth);
+  await playerZ.call('joinRun', { code: cZ, displayName: 'Cheater Team' });
+  await creator.call('startTeams', { gameId: gZ, runId: rZ });
+  const CZ = { ownerUid: creatorCred.user.uid, gameId: gZ, runId: rZ };
+  await playerZ.call('requestNextTask', CZ); // assign q-1 (writes startedAt)
+
+  // Attempt the exploit: complete a quiz task with a bare id, no answer.
+  let quizBypassRejected = false;
+  try {
+    await playerZ.call('completeTask', { ...CZ, taskId: 'q-1' });
+  } catch (e) {
+    quizBypassRejected =
+      e.code === 'functions/failed-precondition' ||
+      /different way|does not|answer/i.test(e.message);
+  }
+  check('completeTask refuses to score a quiz task (no answer bypass)', quizBypassRejected);
+
+  // Prove the task did not silently complete and no points were awarded.
+  const sZ = await playerZ.call('getMyTeamState', { code: cZ });
+  const qZ = sZ?.activeStageTasks?.find((t) => t.id === 'q-1');
+  check('quiz task remains incomplete after the bypass attempt',
+    qZ && qZ.status !== 'completed', JSON.stringify(qZ?.status));
+  check('no score awarded by the bypass attempt',
+    (sZ?.team?.score ?? 0) === 0, String(sZ?.team?.score));
+
+  // Positive control: the legitimate grading path still works on the quiz.
+  const okZ = await playerZ.call('submitTaskAnswer', { ...CZ, taskId: 'q-1', answer: 'jerusalem' });
+  check('submitTaskAnswer still grades the quiz correctly (control)', okZ?.correct === true, JSON.stringify(okZ));
+
+  }); // scenario: completeTask type gate
+
   await scenario('quiz ordering (seeded shuffle + orderedAnswer)', async () => {
 
   // ── Ordering quiz (change: quiz-ordering) ────────────────────────────────────

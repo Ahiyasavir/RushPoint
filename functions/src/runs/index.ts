@@ -2442,6 +2442,23 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     }
   }
   if (gtask) {
+    // Type gate (anti-cheat): completeTask is the check-in / self-report path
+    // only. Every other task type is graded exclusively by its own callable
+    // (quiz/numeric/survey → submitTaskAnswer, sequence → submitSequenceStep,
+    // smart_station → verifyStationCode, photo → submitStationPhoto). Without
+    // this, a participant who reads their own assigned taskId could call
+    // completeTask with a bare id and score a quiz/photo/etc. with no answer and
+    // no verification — completeTaskForTeam never checks task.type.
+    const COMPLETE_TASK_TYPES: ReadonlySet<Task['type']> = new Set([
+      'field', 'self_report', 'geofence',
+    ]);
+    if (!COMPLETE_TASK_TYPES.has(gtask.type)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'This task type is completed a different way',
+      );
+    }
+
     const mode = normalizeTriggerMode(gtask);
     // A task at (0,0) has no real location — coordinates were never placed. Every
     // UI filters it out as the null-island sentinel (no pin, no distance badge), so
