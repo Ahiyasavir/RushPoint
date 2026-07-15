@@ -3146,6 +3146,16 @@ async function main() {
       if (won === 'bonus_points') predicted.bonuses.push(tid);
       else if (won === 'double_points') { armed = true; pendingDoubleAward = tid; }
     }
+    // A double rolled on the FINAL completion arms a slot with nothing after it to
+    // consume, so it stays armed and is logged as an award WITHOUT a consumedByTaskId.
+    // It's still a legitimate award (the server logs it), so include it in the award
+    // set even though it never doubled a task. This is what makes the last-task-rolls-
+    // a-double case (runId-dependent) match instead of flaking.
+    const trailingArmedDouble = armed ? pendingDoubleAward : null;
+    const predictedDoubleAwards = [
+      ...predicted.doubles.map((d) => d.awardTask),
+      ...(trailingArmedDouble ? [trailingArmedDouble] : []),
+    ];
 
     // Assert the log matches the prediction exactly (order-independent set compare).
     const log = finTeam?.powerUps?.log ?? [];
@@ -3155,8 +3165,8 @@ async function main() {
       JSON.stringify(bonusLog) === JSON.stringify([...predicted.bonuses].sort()),
       `got ${JSON.stringify(bonusLog)} want ${JSON.stringify([...predicted.bonuses].sort())}`);
     check('power-ups: double awards match the predicted set',
-      JSON.stringify(doubleLog.map((e) => e.taskId).sort()) === JSON.stringify(predicted.doubles.map((d) => d.awardTask).sort()),
-      `got ${JSON.stringify(doubleLog.map((e) => e.taskId))} want ${JSON.stringify(predicted.doubles.map((d) => d.awardTask))}`);
+      JSON.stringify(doubleLog.map((e) => e.taskId).sort()) === JSON.stringify([...predictedDoubleAwards].sort()),
+      `got ${JSON.stringify(doubleLog.map((e) => e.taskId))} want ${JSON.stringify(predictedDoubleAwards)}`);
 
     // Each bonus decremented bonusPenalty by 15 (bonus is a negative penalty).
     check('power-ups: bonusPenalty == -15 * bonus count',
@@ -3177,10 +3187,19 @@ async function main() {
         logEntry?.consumedByTaskId === d.consumedBy && logEntry?.amount === consumedRec?.scoreBreakdown?.taskScore,
         JSON.stringify(logEntry));
     }
-    // The armed slot is cleared once every double consumed (all tasks done).
-    check('power-ups: no double left armed after all completions',
-      !finTeam?.powerUps?.active || finTeam?.powerUps?.active === null,
-      JSON.stringify(finTeam?.powerUps?.active));
+    // The armed slot is cleared once every double is consumed — UNLESS the final
+    // completion itself rolled a double (nothing after it to consume), in which case
+    // it legitimately stays armed. Both outcomes are seed-dependent, so assert the one
+    // the observed rolls predict rather than assuming the slot always ends empty.
+    if (trailingArmedDouble) {
+      check('power-ups: final-task double stays armed (nothing left to consume)',
+        finTeam?.powerUps?.active === 'double_points',
+        JSON.stringify(finTeam?.powerUps?.active));
+    } else {
+      check('power-ups: no double left armed after all completions',
+        !finTeam?.powerUps?.active || finTeam?.powerUps?.active === null,
+        JSON.stringify(finTeam?.powerUps?.active));
+    }
 
     // Σ earned == score still holds (doubled values flow through stage roll-up).
     assertScoreConservation('power-ups', finTeam);
