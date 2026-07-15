@@ -77,6 +77,7 @@ fs.writeFileSync(PIDF, String(process.pid));
 log(`supervisor up (pid ${process.pid}). Keeping playtest:ngrok alive until --stop / .stop file / SIGINT.`);
 
 let child = null;
+let buildChild = null;
 let stopping = false;
 
 // --- git auto-update -------------------------------------------------------
@@ -131,19 +132,34 @@ function freePorts() {
   });
 }
 
+// True once both apps have a production build on disk that `vite preview` can serve.
+function distReady() {
+  return fs.existsSync(path.join(ROOT, 'apps', 'creator-web', 'dist', 'index.html'))
+    && fs.existsSync(path.join(ROOT, 'apps', 'play-web', 'dist', 'index.html'));
+}
+
 // Build the production bundles the prod stack serves. Runs once at boot and again
-// after each git update (source may have changed). Blocking + non-fatal: a build
-// failure leaves the last good dist in place and we still serve it.
+// after each git update. Resolves TRUE only on a clean build — the caller keeps
+// needBuild armed on failure so it retries next loop instead of crash-looping on a
+// missing/stale dist (a fresh host has no dist until the first build succeeds).
 function buildProd() {
   return new Promise((resolve) => {
     log('building production bundles: npm run playtest:build…');
-    const p = spawn('npm', ['run', 'playtest:build'], {
+    buildChild = spawn('npm', ['run', 'playtest:build'], {
       cwd: ROOT,
       stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')],
       shell: process.platform === 'win32',
     });
-    p.on('exit', (code) => { log(`playtest:build finished (code=${code}).`); resolve(); });
-    p.on('error', (err) => { log(`playtest:build failed to spawn: ${err.message} — serving existing dist.`); resolve(); });
+    buildChild.on('exit', (code) => {
+      log(`playtest:build finished (code=${code}).`);
+      buildChild = null;
+      resolve(code === 0);
+    });
+    buildChild.on('error', (err) => {
+      log(`playtest:build failed to spawn: ${err.message} — will retry.`);
+      buildChild = null;
+      resolve(false);
+    });
   });
 }
 
@@ -174,6 +190,7 @@ async function stop() {
   log('stopping supervisor…');
   if (gitTimer) clearInterval(gitTimer);
   if (child) { try { child.kill(); } catch { /* ignore */ } }
+  if (buildChild) { try { buildChild.kill(); } catch { /* ignore */ } }
   await freePorts();
   try { fs.rmSync(PIDF, { force: true }); } catch { /* ignore */ }
   try { fs.rmSync(STOPF, { force: true }); } catch { /* ignore */ }
@@ -216,7 +233,21 @@ while (!stopping) {
   if (fs.existsSync(STOPF)) { await stop(); break; }
   if (updateFromGit()) needBuild = NEEDS_BUILD;   // new code pulled → rebuild (prod only)
   await freePorts();                  // start each attempt from clean ports (kills orphan Java)
-  if (needBuild) { await buildProd(); needBuild = false; }
+  // Build before serving prod. On a build failure: if a previous good dist exists,
+  // serve THAT (availability first — a broken push never blacks out the site) but
+  // keep needBuild armed to retry on the next restart/update; if there's no dist at
+  // all yet (fresh host), retry the build after a backoff instead of crash-looping
+  // vite-preview on a missing dist.
+  if (needBuild) {
+    const built = await buildProd();
+    needBuild = !built;
+    if (!distReady()) {
+      log('no serveable build yet (build failed, no dist) — retrying build after backoff.');
+      await new Promise((r) => setTimeout(r, RESTART_BACKOFF_MS));
+      continue;
+    }
+    if (!built) log('build failed — serving the previous good build; will retry on next restart/update.');
+  }
   await runOnce();                    // blocks until the stack exits
   if (fs.existsSync(STOPF) || stopping) { await stop(); break; }
   log(`restarting in ${RESTART_BACKOFF_MS / 1000}s…`);
