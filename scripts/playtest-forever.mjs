@@ -34,6 +34,11 @@ const PIDF = path.join(STATE_DIR, 'playtest-forever.pid');
 const STOPF = path.join(STATE_DIR, 'playtest-forever.stop');
 const RESTART_BACKOFF_MS = 4_000;
 const GIT_POLL_MS = 3 * 60_000;   // check origin for new commits every 3 minutes
+// The stack to serve. Default `playtest:prod` = pre-built + minified static apps
+// served via `vite preview` (dramatically faster over the tunnel than the dev
+// server). Override with PLAYTEST_TARGET=playtest:ngrok to fall back to dev mode.
+const TARGET = process.env.PLAYTEST_TARGET || 'playtest:prod';
+const NEEDS_BUILD = TARGET === 'playtest:prod';
 
 fs.mkdirSync(STATE_DIR, { recursive: true });
 
@@ -126,21 +131,37 @@ function freePorts() {
   });
 }
 
+// Build the production bundles the prod stack serves. Runs once at boot and again
+// after each git update (source may have changed). Blocking + non-fatal: a build
+// failure leaves the last good dist in place and we still serve it.
+function buildProd() {
+  return new Promise((resolve) => {
+    log('building production bundles: npm run playtest:build…');
+    const p = spawn('npm', ['run', 'playtest:build'], {
+      cwd: ROOT,
+      stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')],
+      shell: process.platform === 'win32',
+    });
+    p.on('exit', (code) => { log(`playtest:build finished (code=${code}).`); resolve(); });
+    p.on('error', (err) => { log(`playtest:build failed to spawn: ${err.message} — serving existing dist.`); resolve(); });
+  });
+}
+
 function runOnce() {
   return new Promise((resolve) => {
-    log('launching: npm run playtest:ngrok');
-    child = spawn('npm', ['run', 'playtest:ngrok'], {
+    log(`launching: npm run ${TARGET}`);
+    child = spawn('npm', ['run', TARGET], {
       cwd: ROOT,
       stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')],
       shell: process.platform === 'win32',
     });
     child.on('exit', (code, signal) => {
-      log(`playtest:ngrok exited (code=${code}, signal=${signal}).`);
+      log(`${TARGET} exited (code=${code}, signal=${signal}).`);
       child = null;
       resolve();
     });
     child.on('error', (err) => {
-      log(`failed to spawn playtest:ngrok: ${err.message}`);
+      log(`failed to spawn ${TARGET}: ${err.message}`);
       child = null;
       resolve();
     });
@@ -186,12 +207,16 @@ gitTimer = setInterval(() => {
   } finally { checking = false; }
 }, GIT_POLL_MS);
 
-// Supervisor loop: pull latest, run the stack, and whenever it dies, clean ports,
-// re-pull (in case the poll above triggered the exit), and relaunch.
+// Supervisor loop: pull latest, (re)build for prod when the code changed, run the
+// stack, and whenever it dies, clean ports, re-pull (in case the poll above
+// triggered the exit), and relaunch. A plain crash restart skips the rebuild for
+// fast recovery; only a fresh boot or a real git update rebuilds.
+let needBuild = NEEDS_BUILD;          // build once before the first prod launch
 while (!stopping) {
   if (fs.existsSync(STOPF)) { await stop(); break; }
-  updateFromGit();                    // ensure each launch runs the newest committed code
+  if (updateFromGit()) needBuild = NEEDS_BUILD;   // new code pulled → rebuild (prod only)
   await freePorts();                  // start each attempt from clean ports (kills orphan Java)
+  if (needBuild) { await buildProd(); needBuild = false; }
   await runOnce();                    // blocks until the stack exits
   if (fs.existsSync(STOPF) || stopping) { await stop(); break; }
   log(`restarting in ${RESTART_BACKOFF_MS / 1000}s…`);

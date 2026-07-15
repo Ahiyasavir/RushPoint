@@ -53,15 +53,29 @@ if (build.status !== 0) {
 
 // â”€â”€ Persistence (first-run safe) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 mkdirSync(DATA_DIR, { recursive: true });
-const hasSnapshot = existsSync(join(DATA_DIR, 'firebase-export-metadata.json'));
 
-let cmd = `firebase emulators:start --project ${PROJECT_ID} --export-on-exit "${DATA_DIR}"`;
-if (hasSnapshot) {
-  cmd += ` --import "${DATA_DIR}"`;
+// Pick an import source: the primary snapshot if present, otherwise the newest
+// crash-safe backup under .firebase/backups. This is what makes a non-graceful
+// restart safe — when the always-on supervisor kills the emulator to relaunch it
+// (so --export-on-exit never fired), we recover the last backup instead of coming
+// up empty. Worst case we lose one backup interval (~2 min), not everything.
+let importDir = null;
+if (existsSync(join(DATA_DIR, 'firebase-export-metadata.json'))) {
+  importDir = DATA_DIR;
   console.log(`[dev-emulator] Importing saved data from ${DATA_DIR}`);
 } else {
-  console.log('[dev-emulator] No saved snapshot yet - starting fresh (will export on exit).');
+  const latest = spawnSync('node', ['scripts/emulator-backup.mjs', '--latest'], { cwd: ROOT, env, encoding: 'utf8', shell: true });
+  const cand = (latest.stdout || '').trim().split(/\r?\n/).filter(Boolean).pop();
+  if (latest.status === 0 && cand && existsSync(join(cand, 'firebase-export-metadata.json'))) {
+    importDir = cand;
+    console.log(`[dev-emulator] No primary snapshot — restoring newest backup: ${cand}`);
+  } else {
+    console.log('[dev-emulator] No saved snapshot or backup yet - starting fresh (will export on exit).');
+  }
 }
+
+let cmd = `firebase emulators:start --project ${PROJECT_ID} --export-on-exit "${DATA_DIR}"`;
+if (importDir) cmd += ` --import "${importDir}"`;
 
 // â”€â”€ Spawn + forward signals so --export-on-exit fires on Ctrl+C â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const child = spawn(cmd, { env, shell: true, stdio: 'inherit' });
