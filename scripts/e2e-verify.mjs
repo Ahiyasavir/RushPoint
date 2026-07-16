@@ -371,7 +371,8 @@ async function main() {
         {
           id: CODE_TASK_ID,
           title: 'Find the codeword',
-          type: 'station',
+          // 'smart_station' is the canonical type; 'station' is not a valid TaskType.
+          type: 'smart_station',
           coordinates: { lat: 31.79, lng: 35.16 },
           difficulty: 3,
           estimatedMinutes: 10,
@@ -440,7 +441,11 @@ async function main() {
         {
           id: PLAIN_TASK_ID,
           title: 'Reach the summit',
-          type: 'navigation',
+          // A GPS check-in task completed via completeTask — must be a valid
+          // completeTask type ('navigation' is not a TaskType and the completeTask
+          // anti-cheat type-gate correctly rejects it; the old value only "worked"
+          // when a cold-start timing quirk left the task unresolved at the gate).
+          type: 'field',
           coordinates: { lat: 31.8, lng: 35.17 },
           difficulty: 2,
           estimatedMinutes: 8,
