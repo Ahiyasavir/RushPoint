@@ -933,8 +933,8 @@ async function main() {
 
   // ── 10a. Platform benchmark contribution (platform-benchmark) ───────────────
   // Finalizing the main run folds anonymized per-task-type aggregates into
-  // benchmarks/{taskType}. The main game has a 'station' task type.
-  const benchStation = await creator.getDocAt('benchmarks/station');
+  // benchmarks/{taskType}. The main game has a 'smart_station' task type.
+  const benchStation = await creator.getDocAt('benchmarks/smart_station');
   check('benchmark: finalize contributed a station aggregate', benchStation.exists && (benchStation.data?.count ?? 0) >= 1, JSON.stringify(benchStation.data));
   check('benchmark: aggregate is anonymized (no run/team ids)',
     benchStation.exists && typeof benchStation.data?.medianMsRolling === 'number'
@@ -948,7 +948,7 @@ async function main() {
   {
     const countBefore = benchStation.data?.count ?? 0;
     const fin2 = await creator.call('finalizeRun', { gameId, runId }).catch((e) => e);
-    const benchAfterRefinalize = await creator.getDocAt('benchmarks/station');
+    const benchAfterRefinalize = await creator.getDocAt('benchmarks/smart_station');
     const countAfter = benchAfterRefinalize.data?.count ?? 0;
     check('re-finalizing an already-finished run does not double-contribute to benchmarks',
       countAfter === countBefore, `before=${countBefore} after=${countAfter} fin2=${JSON.stringify(fin2?.rankings ?? fin2?.message ?? fin2)}`);
