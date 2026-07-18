@@ -3686,6 +3686,228 @@ async function main() {
       JSON.stringify({ cDoneNext: cDone?.nextTaskId, active: state?.team?.activeTaskId }));
   });
 
+  // ═══ Stage-lock enforcement (fix-stage-lock-bypass) ═════════════════════════
+  // A completion may only land in the team's ACTIVE stage. A task in a LOCKED
+  // (future) stage — reachable because a participant can read its own future
+  // task ids from getMyTeamState — must be rejected `failed-precondition`, not
+  // graded. The isUnlocked guard only covers intra-stage prerequisites, not
+  // stage ordering, so this closes all five funnel paths at once.
+  await scenario('stage-lock enforcement (no out-of-order grading in locked stages)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: sg } = await creator.call('createGame', { title: 'Stage Lock', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'sl-1', order: 0, title: 'Stage One', tasks: [
+          { id: 'sl-t1', title: 'Warm', type: 'self_report', triggerMode: 'locationless', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+        { id: 'sl-2', order: 1, title: 'Stage Two (locked)', isFinal: true, tasks: [
+          { id: 'sl-quiz', title: 'Locked quiz', type: 'quiz', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 9,
+            answers: ['open'] },
+          { id: 'sl-field', title: 'Locked check-in', type: 'field', triggerMode: 'locationless', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 9 },
+        ] },
+      ],
+    });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sg });
+    const p = makeParty('stageLockPlayer');
+    await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: sc, displayName: 'Locked Team' });
+    await creator.call('startTeams', { gameId: sg, runId: sr });
+
+    const before = await p.call('getMyTeamState', { code: sc });
+    check('stage-lock: stage 2 is locked while stage 1 is active',
+      before?.team?.stages?.[1]?.status === 'locked', before?.team?.stages?.[1]?.status);
+    const CS = { ownerUid: OWNER, gameId: sg, runId: sr, code: sc };
+
+    // completeTask against a locked-stage field task (passes the type gate) is rejected.
+    await expectError('stage-2 field task rejected via completeTask while stage 1 active',
+      p.call('completeTask', { ...CS, taskId: 'sl-field' }),
+      { codeIn: ['functions/failed-precondition'], match: /stage|locked|active/i });
+    // submitTaskAnswer with the CORRECT answer still can't grade a locked-stage quiz.
+    await expectError('stage-2 quiz rejected via submitTaskAnswer while stage 1 active',
+      p.call('submitTaskAnswer', { ...CS, taskId: 'sl-quiz', answer: 'open' }),
+      { codeIn: ['functions/failed-precondition'], match: /stage|locked|active/i });
+
+    const after = await p.call('getMyTeamState', { code: sc });
+    check('stage-lock: still exactly one active stage after the rejections',
+      (after?.team?.stages ?? []).filter((s) => s.status === 'active').length === 1,
+      JSON.stringify((after?.team?.stages ?? []).map((s) => s.status)));
+    check('stage-lock: the locked-stage tasks were NOT completed',
+      (after?.team?.stages?.[1]?.tasks ?? []).every((t) => t.status !== 'completed'),
+      JSON.stringify((after?.team?.stages?.[1]?.tasks ?? []).map((t) => t.status)));
+    check('stage-lock: no score awarded by the out-of-order attempts',
+      (after?.team?.score ?? 0) === 0, String(after?.team?.score));
+
+    // Finalizing must not have credited the never-legitimately-completed final task.
+    const fin = await creator.call('finalizeRun', { gameId: sg, runId: sr });
+    const entry = (fin?.rankings ?? []).find((r) => r.teamId === p.auth.currentUser.uid);
+    check('stage-lock: finalized team was not credited an out-of-order final completion',
+      (entry?.score ?? 0) === 0, JSON.stringify(entry));
+  });
+
+  // ═══ checkOutTask holds its own slot (fix-checkouttask-slot-theft) ══════════
+  // checkOutTask may only release a slot the caller's team actually holds. A
+  // replayed call (team no longer holds it) or a cross-team call (never held it)
+  // must be a no-op — otherwise run.taskCounts is drained for a slot the caller
+  // never owned, defeating station caps.
+  await scenario('checkOutTask holds its own slot (no cross-team cap drain)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: cg } = await creator.call('createGame', { title: 'Checkout Guard', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: cg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'co-1', order: 0, title: 'One capped station', tasks: [
+          { id: 'co-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 2 },
+        ] },
+        { id: 'co-2', order: 1, title: 'Finish', isFinal: true, tasks: [
+          { id: 'co-f', title: 'Finish', type: 'self_report', triggerMode: 'locationless', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+      ],
+    });
+    const { runId: cr, accessCode: cc } = await creator.call('launchRun', { gameId: cg });
+    const runDocPath = `users/${OWNER}/games/${cg}/runs/${cr}`;
+    const countsNow = async () => ((await creator.getDocAt(runDocPath)).data?.taskCounts ?? {});
+
+    // Team A joins + starts → startTeams auto-assigns the single stage-0 station.
+    const teamA = makeParty('coTeamA');
+    await signInAnonymously(teamA.auth);
+    await teamA.call('joinRun', { code: cc, displayName: 'Alpha' });
+    await creator.call('startTeams', { gameId: cg, runId: cr });
+    check('checkout: A holds the station after start (taskCounts co-a == 1)',
+      ((await countsNow())['co-a'] ?? 0) === 1, JSON.stringify(await countsNow()));
+
+    // Cross-team: B (does NOT hold co-a) tries to check it out — count must not move.
+    const teamB = makeParty('coTeamB');
+    await signInAnonymously(teamB.auth);
+    await teamB.call('joinRun', { code: cc, displayName: 'Bravo' });
+    await teamB.call('checkOutTask', { ownerUid: OWNER, gameId: cg, runId: cr, code: cc, taskId: 'co-a' });
+    check('checkout: cross-team call does NOT drain the slot it never owned',
+      ((await countsNow())['co-a'] ?? 0) === 1, JSON.stringify(await countsNow()));
+
+    // A checks out its own slot → count 0, activeTaskId cleared, record unassigned.
+    await teamA.call('checkOutTask', { ownerUid: OWNER, gameId: cg, runId: cr, code: cc, taskId: 'co-a' });
+    const aState = await teamA.call('getMyTeamState', { code: cc });
+    check('checkout: A released its slot (taskCounts co-a == 0)',
+      ((await countsNow())['co-a'] ?? 0) === 0, JSON.stringify(await countsNow()));
+    check('checkout: A activeTaskId cleared', aState?.team?.activeTaskId == null, JSON.stringify(aState?.team?.activeTaskId));
+    check('checkout: A task record is unassigned (not still assigned)',
+      aState?.team?.stages?.[0]?.tasks?.[0]?.status === 'unassigned',
+      aState?.team?.stages?.[0]?.tasks?.[0]?.status);
+
+    // Replayed checkout (A no longer holds it) resolves but never underflows.
+    await teamA.call('checkOutTask', { ownerUid: OWNER, gameId: cg, runId: cr, code: cc, taskId: 'co-a' });
+    check('checkout: replayed call does not underflow the counter',
+      ((await countsNow())['co-a'] ?? 0) >= 0 && ((await countsNow())['co-a'] ?? 0) === 0,
+      JSON.stringify(await countsNow()));
+  });
+
+  // ═══ joinRun registrationData type guard + poisoned-doc resilience ══════════
+  // (fix-joinrun-registrationdata-type) A non-plain-object registrationData is
+  // rejected at the boundary; and a single legacy/poisoned team doc (bypassing
+  // the guard) is QUARANTINED by scoring rather than aborting the whole run's
+  // leaderboard.
+  await scenario('joinRun registrationData type guard + scoring quarantine', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: qg } = await creator.call('createGame', { title: 'Reg Type Guard', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: qg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'q-1', order: 0, title: 'Only', isFinal: true, tasks: [
+        { id: 'q-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: qr, accessCode: qc } = await creator.call('launchRun', { gameId: qg });
+    const good = makeParty('regGoodPlayer');
+    await signInAnonymously(good.auth);
+    await good.call('joinRun', { code: qc, displayName: 'Valid Team' });
+    await creator.call('startTeams', { gameId: qg, runId: qr });
+
+    // A fresh party attempts non-object registrationData — rejected before any write.
+    const bad = makeParty('regBadPlayer');
+    await signInAnonymously(bad.auth);
+    for (const [label, reg] of [['array', [1, 2, 3]], ['string', 'iamastring'], ['number', 42]]) {
+      await expectError(`joinRun rejects ${label} registrationData`,
+        bad.call('joinRun', { code: qc, displayName: 'X', registrationData: reg }),
+        { codeIn: ['functions/invalid-argument'] });
+    }
+
+    // Seed a POISONED team doc directly (bypassing the guard) to simulate a
+    // legacy row, then prove scoring quarantines it instead of throwing INTERNAL.
+    await adminSdk.firestore()
+      .doc(`users/${OWNER}/games/${qg}/runs/${qr}/teams/poison-team`)
+      .set({
+        id: 'poison-team', runId: qr, gameId: qg, ownerUid: OWNER,
+        displayName: 'Poison', registrationData: 'not-an-object', status: 'registered',
+        stages: [], score: 0, bonusPenalty: 0, launched: false,
+        deviceUids: ['poison-team'], activeTaskId: null,
+        updatedAt: new Date().toISOString(),
+      });
+
+    const board = await creator.call('refreshLeaderboard', { gameId: qg, runId: qr, publish: false });
+    check('quarantine: refreshLeaderboard resolves despite a poisoned team doc',
+      Array.isArray(board?.rankings), JSON.stringify(board?.rankings?.length));
+    check('quarantine: the poisoned team is skipped (only the valid team ranks)',
+      (board?.rankings ?? []).length === 1 &&
+        board.rankings[0].teamId === good.auth.currentUser.uid,
+      JSON.stringify((board?.rankings ?? []).map((r) => r.teamId)));
+    assertAllFinite('refreshLeaderboard(poisoned)', board);
+
+    const fin = await creator.call('finalizeRun', { gameId: qg, runId: qr });
+    check('quarantine: finalizeRun resolves despite a poisoned team doc',
+      (fin?.rankings ?? []).length === 1, JSON.stringify(fin?.rankings?.length));
+    assertAllFinite('finalizeRun(poisoned)', fin);
+  });
+
+  // ═══ joinRun split-brain device guard (fix-joinrun-attached-device-splitbrain) ═
+  // A uid already ATTACHED as a device of a team must not mint a SECOND standalone
+  // team by calling joinRun — that double-counts participants and splits the uid
+  // across two teams. joinRun returns the attached team as alreadyJoined instead.
+  await scenario('joinRun rejects an already-attached device (no split-brain membership)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: bg } = await creator.call('createGame', { title: 'Split Brain', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: bg, scoringPreset: 'time_only',
+      stages: [{ id: 'b-1', order: 0, title: 'Only', isFinal: true, tasks: [
+        { id: 'b-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: br, accessCode: bc } = await creator.call('launchRun', { gameId: bg });
+    const runDocPath = `users/${OWNER}/games/${bg}/runs/${br}`;
+
+    // Team A founder joins; a second phone attaches as a device of A.
+    const founder = makeParty('sbFounder');
+    await signInAnonymously(founder.auth);
+    await founder.call('joinRun', { code: bc, displayName: 'Split Team' });
+    const founderUid = founder.auth.currentUser.uid;
+    const fState = await founder.call('getMyTeamState', { code: bc });
+    const teamCode = fState?.team?.deviceJoinCode;
+    const device = makeParty('sbDevice');
+    await signInAnonymously(device.auth);
+    const attach = await device.call('joinTeamAsDevice', { code: bc, teamCode, memberName: 'Phone 2' });
+    check('split-brain: device attached to the founding team', attach?.teamId === founderUid, JSON.stringify(attach));
+
+    const pcBefore = (await creator.getDocAt(runDocPath)).data?.participantCount ?? 0;
+
+    // The attached device now calls joinRun — must NOT create a second team.
+    const res = await device.call('joinRun', { code: bc, displayName: 'Sneaky Second Team' });
+    check('split-brain: joinRun returns the attached team as alreadyJoined',
+      res?.alreadyJoined === true && res?.teamId === founderUid, JSON.stringify(res));
+
+    const pcAfter = (await creator.getDocAt(runDocPath)).data?.participantCount ?? 0;
+    check('split-brain: participantCount did not increment on the duplicate joinRun',
+      pcAfter === pcBefore, `before=${pcBefore} after=${pcAfter}`);
+
+    const teams = (await creator.call('listRunTeams', { gameId: bg, runId: br }))?.teams ?? [];
+    check('split-brain: exactly one team exists (no phantom second team)',
+      teams.length === 1, JSON.stringify(teams.map((t) => t.id ?? t.teamId)));
+  });
+
   // ═══ Team ↔ HQ chat (team-hq-chat) ══════════════════════════════════════════
   // A single thread doc per team; either side sends. Covers: both directions,
   // ordering, cap (>100 → oldest dropped), validation, rate-limit, finished-run,

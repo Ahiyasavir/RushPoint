@@ -17,6 +17,7 @@ function generatePin(): string {
 }
 import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot } from './runs/index';
 import { releaseTask } from './routing/assignNextTask';
+import { nextBonusPenalty } from './scoring/bonusPenalty';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
@@ -1032,6 +1033,9 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   // check lets a non-finite delta through → it would write a non-finite
   // bonusPenalty that bricks refreshLeaderboard/finalizeRun (parseRunTeam rejects
   // it) and poisons run.leaderboard. Require a finite number (nightly hardening).
+  // The finite check below guards the INPUT; nextBonusPenalty (used inside the
+  // transaction) additionally validates the ACCUMULATED result — two large finite
+  // deltas can still sum to ±Infinity across calls — and clamps its magnitude.
   if (typeof delta !== 'number' || !Number.isFinite(delta)) {
     throw new functions.https.HttpsError('invalid-argument', 'delta must be a finite number');
   }
@@ -1043,7 +1047,7 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
     const p = (teamSnap.data() as { bonusPenalty?: number }).bonusPenalty ?? 0;
-    const np = p - delta;
+    const np = nextBonusPenalty(p, delta);
     tx.update(teamRef, { bonusPenalty: np, updatedAt: new Date().toISOString() });
     return { prev: p, newPenalty: np };
   });

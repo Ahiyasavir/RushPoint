@@ -120,6 +120,27 @@ function teamsCol(ownerUid: string, gameId: string, runId: string) {
   return `users/${ownerUid}/games/${gameId}/runs/${runId}/teams`;
 }
 
+// Parse a run's team docs for scoring, QUARANTINING (skipping) any single
+// unparseable row instead of aborting the whole run's leaderboard. A legacy /
+// poisoned team doc (e.g. a non-object registrationData written before the
+// joinRun type guard existed) must not brick refreshLeaderboard / finalizeRun
+// for every other team. Structural doc type so the pure-logic vitest can drive
+// it without Firestore snapshots. buildRankings is shared by finalize + refresh,
+// so both must quarantine identically or live vs final standings would drift.
+export function parseTeamsQuarantining(
+  docs: ReadonlyArray<{ id: string; data(): unknown }>,
+): RunTeam[] {
+  const out: RunTeam[] = [];
+  for (const d of docs) {
+    try {
+      out.push(parseStored(() => parseRunTeam(d.data())));
+    } catch (e) {
+      logBestEffort('parseRunTeam.quarantine', { teamId: d.id }, e); // one bad row can't abort scoring
+    }
+  }
+  return out;
+}
+
 // ─── Code generation ──────────────────────────────────────────────────────────
 
 function generateCode(len = 6): string {
@@ -362,6 +383,18 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   if (registrationData && JSON.stringify(registrationData).length > 4000) {
     throw new functions.https.HttpsError('invalid-argument', 'registrationData too large');
   }
+  // Type guard: a non-plain-object registrationData (array / string / number)
+  // would be stored and later make parseRunTeam throw when scoring the run
+  // (reqObject('RunTeam', …, 'registrationData')), bricking refreshLeaderboard/
+  // finalizeRun. Reject at the boundary; the quarantine below is the backstop.
+  if (
+    registrationData != null &&
+    (typeof registrationData !== 'object' ||
+      Array.isArray(registrationData) ||
+      Object.getPrototypeOf(registrationData) !== Object.prototype)
+  ) {
+    throw new functions.https.HttpsError('invalid-argument', 'registrationData must be an object');
+  }
 
   const normalizedCode = code.trim().toUpperCase();
   const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
@@ -377,10 +410,20 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
 
-  // Idempotent: team already registered in this run
+  // Idempotent: team already registered in this run (own-team fast path).
   const existingTeam = await db.doc(teamPath(ownerUid, gameId, runId, teamId)).get();
   if (existingTeam.exists) {
     return { teamId, runId, gameId, ownerUid, alreadyJoined: true };
+  }
+  // Split-brain guard: this uid may already be an ATTACHED DEVICE of another
+  // team in this run (joined via joinTeamAsDevice). Minting a second standalone
+  // team here makes the uid a member of two teams and double-counts
+  // participant/device totals. Mirror joinTeamAsDevice's array-contains guard.
+  const attachedQ = await db.collection(teamsCol(ownerUid, gameId, runId))
+    .where('deviceUids', 'array-contains', teamId).limit(1).get();
+  if (!attachedQ.empty) {
+    const t = attachedQ.docs[0].data() as RunTeam;
+    return { teamId: t.id, runId, gameId, ownerUid, alreadyJoined: true };
   }
 
   const runSnap = await runRef.get();
@@ -614,6 +657,21 @@ export async function completeTaskForTeam(
 
     const taskRec = stages[stageIdx].tasks[taskIdx];
     if (taskRec.status === 'completed') return false; // idempotent
+
+    // Stage-lock enforcement: a completion may only land in the team's ACTIVE
+    // stage. A task in a locked (future / scheduled-gated) or already-completed
+    // stage must be rejected — the only prior guard (isUnlocked) covers
+    // intra-stage prerequisites, not stage ordering. Central here so all five
+    // calling paths (completeTask, submitTaskAnswer, submitSequenceStep,
+    // verifyStationCode, submitStationPhoto autoApprove) are closed at once.
+    // Order matters: the already-completed no-op above stays BEFORE this throw so
+    // a duplicate submission of an already-graded task remains a silent no-op.
+    if (stages[stageIdx].status !== 'active') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'This stage is not active yet — finish your current stage first',
+      );
+    }
 
     const startedAt = taskRec.startedAt ?? team.startedAt ?? now;
     // Guard against an unparsable stored timestamp: a NaN here would be persisted
@@ -1212,7 +1270,7 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   const game = parseStored(() => parseGame(gameSnap.data()));
 
   const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
-  const teams = teamsSnap.docs.map((d) => parseStored(() => parseRunTeam(d.data())));
+  const teams = parseTeamsQuarantining(teamsSnap.docs);
 
   const now = new Date().toISOString();
   const rankings = buildRankings(game, teams, now);
@@ -1359,7 +1417,7 @@ export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (da
   const game = parseStored(() => parseGame(gameSnap.data()));
 
   const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
-  const teams = teamsSnap.docs.map((d) => parseStored(() => parseRunTeam(d.data())));
+  const teams = parseTeamsQuarantining(teamsSnap.docs);
 
   const now = new Date().toISOString();
   const rankings = buildRankings(game, teams, now);
@@ -3011,8 +3069,35 @@ export const checkOutTask = loggedCallable('checkOutTask', async (data, context)
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
-  const { ctx } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
-  await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  const { ctx, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+
+  // Only release a slot this team actually holds, and clear our own record —
+  // otherwise a replayed / cross-team call drains run.taskCounts for a slot it
+  // never owned (defeating station caps). Mirror completeTaskForTeam: no-op
+  // when not in-flight. releaseTask (its own txn) runs AFTER, never nested.
+  const held = await db.runTransaction<boolean>(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) return false;
+    const team = snap.data() as RunTeam;
+    const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+    let found: null | { s: number; t: number } = null;
+    for (let si = 0; si < stages.length; si++) {
+      const ti = stages[si].tasks.findIndex((t) => t.taskId === taskId);
+      if (ti >= 0) { found = { s: si, t: ti }; break; }
+    }
+    const rec = found ? stages[found.s].tasks[found.t] : null;
+    const inFlight = team.activeTaskId === taskId || rec?.status === 'assigned';
+    if (!inFlight) return false;
+    if (rec) rec.status = 'unassigned';
+    tx.update(teamRef, {
+      stages,
+      ...(team.activeTaskId === taskId ? { activeTaskId: null } : {}),
+      updatedAt: new Date().toISOString(),
+    });
+    return true;
+  });
+
+  if (held) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
   return { ok: true };
 });
 
