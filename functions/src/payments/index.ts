@@ -23,10 +23,7 @@ import {
 
 const EMULATOR = process.env.FUNCTIONS_EMULATOR === 'true';
 
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  return context.auth.uid;
-}
+import { requireAuth } from '../auth';
 
 // While payments are off (free mode) every buying path is rejected with a typed,
 // bilingual error. The billing code stays present (dark) — flipping the flag

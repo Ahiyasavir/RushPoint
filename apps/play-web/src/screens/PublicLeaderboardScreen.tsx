@@ -2,12 +2,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
+import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
+
 const MEDAL_BG = [
   'bg-gradient-to-r from-yellow-400/15 to-amber-300/5 border-yellow-400/25',
   'bg-gradient-to-r from-gray-300/15 to-gray-200/5 border-gray-300/25',
@@ -19,12 +21,11 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const [err, setErr] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     setRefreshing(true);
-    try { setData(await getPublicLeaderboard({ code })); setErr(''); setUpdatedAt(Date.now()); setNowTick(Date.now()); }
+    try { setData(await getPublicLeaderboard({ code })); setErr(''); setNowTick(Date.now()); }
     catch (e) { setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.board.couldNotLoad); setData(null); }
     finally { setRefreshing(false); }
   }, [code, t]);
@@ -79,6 +80,10 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   }
 
   const isLive = data.runStatus !== 'finished' && !data.frozen;
+  // The `time_only` preset ranks purely by time; its `score` is a meaningless
+  // placeholder (e.g. 500/0). Surface the time as the primary value and hide the
+  // score column, mirroring FinalScreen.
+  const isTimeOnly = data.scoringPreset === 'time_only';
 
   return (
     <Screen>
@@ -94,9 +99,11 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         {isLive && (
           <div className="flex items-center justify-center gap-2 mt-2 text-[11px] text-zinc-500">
             <span>
-              {updatedAt == null
+              {/* Age is measured from the SERVER snapshot time (data.updatedAt),
+                  not the client fetch, so a throttled/stale board reads honestly. */}
+              {data.updatedAt == null
                 ? t.board.justNow
-                : t.board.updatedAgo({ s: Math.max(0, Math.round((nowTick - updatedAt) / 1000)) })}
+                : t.board.updatedAgo({ s: Math.max(0, Math.round((nowTick - Date.parse(data.updatedAt)) / 1000)) })}
             </span>
             <button
               type="button"
@@ -140,7 +147,52 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                   <div dir="auto" className="truncate font-semibold text-zinc-100">{r.teamName}</div>
                   <div className="text-[11px] text-zinc-500">{t.board.stagesCount({ n: r.completedStages })}</div>
                 </div>
-                <span className="font-brand font-bold text-base" style={{ color: accent }}>{r.score}</span>
+                <div className="flex flex-col items-end">
+                  {(() => {
+                    const sec = boardTimeSeconds(r);
+                    const final = isFinalTime(r);
+                    // A finished team shows its real completion time (solid mono).
+                    // A still-playing team's time is an ever-growing ELAPSED value —
+                    // render it distinctly (italic, dimmer, ⏱ prefix) and labelled so
+                    // it can't be mistaken for a finisher's final time.
+                    if (isTimeOnly) {
+                      // time_only: the score is a placeholder — show the time as the
+                      // primary value instead.
+                      return (
+                        <span
+                          title={final ? t.board.finalTime : t.board.elapsed}
+                          aria-label={final ? t.board.finalTime : t.board.elapsed}
+                          className={
+                            final
+                              ? 'font-brand font-bold text-base tabular-nums'
+                              : 'font-brand font-bold text-base tabular-nums italic opacity-80'
+                          }
+                          style={{ color: accent }}
+                        >
+                          {final ? '' : '⏱ '}{sec != null ? formatDuration(sec) : '—'}
+                        </span>
+                      );
+                    }
+                    return (
+                      <>
+                        <span className="font-brand font-bold text-base" style={{ color: accent }}>{r.score}</span>
+                        {sec != null && (
+                          <span
+                            title={final ? t.board.finalTime : t.board.elapsed}
+                            aria-label={final ? t.board.finalTime : t.board.elapsed}
+                            className={
+                              final
+                                ? 'text-[11px] text-zinc-500 font-mono tabular-nums'
+                                : 'text-[11px] text-zinc-600 italic font-mono tabular-nums opacity-80'
+                            }
+                          >
+                            {final ? '' : '⏱ '}{formatDuration(sec)}
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             ))}
           </div>

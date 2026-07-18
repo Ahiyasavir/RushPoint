@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode,
+  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
 } from '@rushpoint/shared';
 import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
@@ -15,7 +15,7 @@ import TaskWizard from '../components/TaskWizard';
 import { moveItem } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
-import { blankTask } from '../lib/wizardLogic';
+import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -34,8 +34,8 @@ function MapSkeleton({ className = 'h-44' }: { className?: string }) {
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
-function blankStage(order: number): Stage {
-  return { id: uuid(), order, title: `Stage ${order + 1}`, tasks: [blankTask()] };
+function blankStage(order: number, title: string): Stage {
+  return { id: uuid(), order, title, tasks: [blankTask()] };
 }
 
 // The exact fields persisted by updateGame — kept in one place so the auto-save
@@ -59,6 +59,9 @@ function buildSavePayload(g: Game) {
     photoFeedEnabled: g.photoFeedEnabled,
     // Power-ups (change: power-ups). Undefined means off (default).
     powerUpsEnabled: g.powerUpsEnabled,
+    // Game intro primer (change: game-intro-instructions). Undefined when unset
+    // (skipped server-side); an empty/whitespace-only primer clears it on save.
+    instructions: g.instructions,
   };
 }
 const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
@@ -225,11 +228,37 @@ export default function BuilderPage() {
     if (game.stages.length === 0 || game.stages.some((s) => s.tasks.length === 0)) {
       await dialog.alert(b.everyStageNeedsTask); return;
     }
+    // Block launching an unplayable game: a quiz/numeric/station/sequence task with
+    // no answer key can never be completed by a participant. The wizard's Done gate
+    // only covers closing via Done — a task closed with ✕/Esc, or edited then left
+    // incomplete, would otherwise ship. updateGame doesn't reject these server-side.
+    const badTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
+    if (badTask) {
+      await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return;
+    }
+    // Block a located task left at the null island (0,0): a radius/exact task with
+    // no real pin would route every team to the Gulf of Guinea and can never be
+    // completed. The wizard's step-1 gate only blocks its own Next — a task closed
+    // via ✕/Esc or reached by jumping tabs can still ship with (0,0) coordinates.
+    const noPinTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskLocationValid(tk));
+    if (noPinTask) {
+      await dialog.alert(b.taskNeedsLocation(noPinTask.title || b.untitledTask)); return;
+    }
+    // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
+    // actually complete (a stale count left after deleting tasks, or a broken
+    // unlock graph). The Builder shows a soft warning, but nothing stops launch.
+    const brokenStage = game.stages.find((s) => {
+      const r = validateUnlockGraph(s);
+      return r.warnings.length > 0 || r.errors.length > 0;
+    });
+    if (brokenStage) {
+      await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return;
+    }
     try {
       const { runId } = await launchRun({ gameId: game.id, testDrive });
       nav(`/run/${game.id}/${runId}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Launch failed';
+      const msg = e instanceof Error ? e.message : b.launchFailed;
       // Out of free runs + credits → offer to open the wallet. In free mode
       // launches never fail for billing, so just surface any other error.
       if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, b.goToWallet)) {
@@ -366,6 +395,8 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           placeholder={b.tagsPlaceholder} dir="auto" />
       </div>
 
+      <InstructionsField game={game} patch={patch} />
+
       <WebhookField game={game} patch={patch} />
 
       <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
@@ -396,10 +427,10 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <div className="space-y-2">
           {(Object.keys(PRESET_LABELS) as ScoringPreset[]).map((p) => (
             <button key={p} onClick={() => patch({ scoringPreset: p })}
-              className={`w-full text-left p-3 rounded-lg border ${
+              className={`w-full text-start p-3 rounded-lg border ${
                 game.scoringPreset === p ? 'border-neon-green/50 bg-neon-green/10' : 'border-glass-border'}`}>
-              <div className="text-sm font-medium text-zinc-200">{PRESET_LABELS[p].en}</div>
-              <div className="text-xs text-zinc-500">{PRESET_LABELS[p].description}</div>
+              <div className="text-sm font-medium text-zinc-200">{b.presetLabels[p].name}</div>
+              <div className="text-xs text-zinc-500">{b.presetLabels[p].desc}</div>
             </button>
           ))}
         </div>
@@ -409,6 +440,48 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <RegFields game={game} patch={patch} />
       </Advanced>
     </Card>
+  );
+}
+
+// Game intro primer (change: game-intro-instructions): an optional collapsible
+// "How to play" section (title + bilingual body + optional https image). Shown to
+// players before the run starts and behind a "How to play" button in-game. Rides
+// the existing updateGame wrapper; the server cleans/https-guards on save.
+function InstructionsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
+  const [open, setOpen] = useState(false);
+  const ins = game.instructions ?? {};
+  function set(p: Partial<GameInstructions>) {
+    patch({ instructions: { ...ins, ...p } });
+  }
+  return (
+    <Advanced title={b.instructionsSectionTitle} open={open} onToggle={() => setOpen(!open)}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">{b.instructionsHint}</p>
+        <div>
+          <Label>{b.instructionsTitleLabel}</Label>
+          <Input value={ins.title ?? ''} onChange={(e) => set({ title: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.instructionsBodyLabel}</Label>
+          <Textarea rows={3} value={ins.body ?? ''} onChange={(e) => set({ body: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.instructionsBodyHeLabel}</Label>
+          <Textarea rows={3} value={ins.bodyHe ?? ''} onChange={(e) => set({ bodyHe: e.target.value })} dir="auto" />
+        </div>
+        <div>
+          <Label>{b.instructionsImageLabel}</Label>
+          <Input
+            type="url"
+            value={ins.imageUrl ?? ''}
+            onChange={(e) => set({ imageUrl: e.target.value })}
+            placeholder="https://…" // i18n-ignore — canonical sample https URL, not translatable copy
+            dir="ltr"
+          />
+        </div>
+      </div>
+    </Advanced>
   );
 }
 
@@ -494,7 +567,7 @@ function StageStory({ stage, onChange }: { stage: Stage; onChange: (n: Stage['na
 function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
   const b = useT().builder;
   function add() {
-    const f: RegistrationField = { id: uuid(), label: 'New field', type: 'text', required: false, level: 'member' };
+    const f: RegistrationField = { id: uuid(), label: b.newFieldLabel, type: 'text', required: false, level: 'member' };
     patch({ registrationFields: [...game.registrationFields, f] });
   }
   function update(id: string, p: Partial<RegistrationField>) {
@@ -548,13 +621,24 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
-  function setStages(stages: Stage[]) { setGame({ ...game, stages }); }
+  // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
+  // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
+  // the team on completion, runs/helpers.ts), so an isFinal flag left on a
+  // non-last stage after an add/reorder/delete would end the run early and make
+  // every later stage unreachable. Stripping it here (the single chokepoint all
+  // stage mutations flow through) keeps the flag pinned to the last stage; the
+  // real last stage still ends the run via the server's positional fallback.
+  function setStages(next: Stage[]) {
+    const last = next.length - 1;
+    const stages = next.map((s, i) => (i !== last && s.isFinal ? { ...s, isFinal: undefined } : s));
+    setGame({ ...game, stages });
+  }
   // Native HTML5 drag reorder: move a stage then re-sequence `order`.
   function moveStage(from: number, to: number) {
     setStages(moveItem(game.stages, from, to).map((s, i) => ({ ...s, order: i })));
   }
   function addStage() {
-    const s = blankStage(game.stages.length);
+    const s = blankStage(game.stages.length, b.stageDefaultTitle(game.stages.length + 1));
     setStages([...game.stages, s]);
     setActiveStageId(s.id);
   }
@@ -607,10 +691,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
       />
 
       {/* ── Centre canvas: the active stage. No wrapping Card — the shell already
-          contains it; the task cards provide the structure. Scrolls on its own. ── */}
-      <div className="flex-1 min-w-0 h-full overflow-y-auto pe-1 space-y-3 pt-0.5">
+          contains it; the task cards provide the structure. A flex column: the
+          stage header is fixed, the task canvas flexes and owns the ONLY scroll
+          (no more nested double-scrollbar), the add-tiles stay pinned below. ── */}
+      <div className="flex-1 min-w-0 h-full flex flex-col gap-3 pe-1 pt-0.5">
         {activeStage && (
           <>
+            <div className="shrink-0 space-y-3">
             <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
@@ -672,13 +759,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
             )}
 
             <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
+            </div>
 
-            <TaskCanvas
-              tasks={activeStage.tasks}
-              activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
-              onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
-            />
-            <div className="flex gap-2">
+            <div className="flex-1 min-h-0">
+              <TaskCanvas
+                tasks={activeStage.tasks}
+                activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
+                onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
+              />
+            </div>
+            <div className="flex gap-2 shrink-0">
               <AddTile label={b.addTask} onClick={() => addTask(activeStage.id)} />
               <AddTile label={b.fromLibrary} onClick={() => setLibraryFor(activeStage.id)} />
             </div>
@@ -705,15 +795,20 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 // Also strip the removed task's id from any sibling's prerequisite
                 // gate (unlockable-tasks) — a dangling id would fail save-time
                 // validation and wedge the autosave.
-                updateStage(editingStage.id, {
-                  tasks: editingStage.tasks
-                    .filter((x) => x.id !== editingTask.id)
-                    .map((x) => {
-                      if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
-                      const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
-                      return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
-                    }),
-                });
+                const nextTasks = editingStage.tasks
+                  .filter((x) => x.id !== editingTask.id)
+                  .map((x) => {
+                    if (!x.unlockAfterTaskIds?.includes(editingTask.id)) return x;
+                    const rest = x.unlockAfterTaskIds.filter((id) => id !== editingTask.id);
+                    return { ...x, unlockAfterTaskIds: rest.length > 0 ? rest : undefined };
+                  });
+                // Clamp a now-oversized requiredTaskCount: dropping a task below the
+                // required count would leave the stage unwinnable (and the count
+                // select would show a value not in its options). `undefined` = all.
+                const req = editingStage.requiredTaskCount;
+                const patch: Partial<Stage> = { tasks: nextTasks };
+                if (typeof req === 'number' && req >= nextTasks.length) patch.requiredTaskCount = undefined;
+                updateStage(editingStage.id, patch);
                 setEditing(null);
               }
             : undefined}
@@ -813,7 +908,7 @@ function StepPreview({ game }: { game: Game }) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge>{modeLabel[game.mode]}</Badge>
-        <Badge color="green">{PRESET_LABELS[game.scoringPreset].en}</Badge>
+        <Badge color="green">{b.presetLabels[game.scoringPreset].name}</Badge>
         <Badge>{b.badgeStages(game.stages.length)}</Badge>
         <Badge>{b.badgeTasks(taskCount)}</Badge>
         <Badge>{b.badgeMinutes(estMin)}</Badge>

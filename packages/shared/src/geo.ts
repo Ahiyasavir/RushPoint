@@ -96,6 +96,36 @@ export function evaluateTrigger(
   return { ok: true };
 }
 
+// ─── Answer-task presence gate (change: quiz-location-verification) ───────────
+// Opt-in, LENIENT check so a quiz/numeric/survey answer can't be submitted from
+// anywhere when the creator turned on Task.requirePresence. Shared by the server
+// (submitTaskAnswer) so the rule stays unit-testable and can't drift.
+
+/** Lenient default presence radius (metres) for a requirePresence answer task. */
+export const PRESENCE_DEFAULT_RADIUS_M = 150;
+
+/**
+ * Whether an answer may be graded given the team's submitted GPS.
+ * - No valid task coordinates → pass (opt-in flag is a no-op, never a lockout).
+ * - Missing/invalid submitted GPS → refuse (no "disable location to bypass").
+ * - Else within `radiusM` (finite & > 0) else PRESENCE_DEFAULT_RADIUS_M.
+ * Reason carries NO distance and NO answer (safe for hidden-location tasks).
+ */
+export function evaluatePresence(
+  taskCoords: GeoPoint | undefined,
+  submitted: { lat?: number; lng?: number },
+  radiusM?: number,
+): { ok: boolean; reason?: string; distanceM?: number } {
+  if (!taskCoords || !isValidCoord(taskCoords.lat, taskCoords.lng)) return { ok: true };
+  if (!isValidCoord(submitted.lat, submitted.lng)) {
+    return { ok: false, reason: 'Location required to answer here' };
+  }
+  const distM = haversineKm(taskCoords, { lat: submitted.lat as number, lng: submitted.lng as number }) * 1000;
+  const limit = radiusM != null && Number.isFinite(radiusM) && radiusM > 0 ? radiusM : PRESENCE_DEFAULT_RADIUS_M;
+  if (distM > limit) return { ok: false, reason: 'Move closer to the location to answer', distanceM: distM };
+  return { ok: true, distanceM: distM };
+}
+
 /**
  * Resolve the effective trigger mode for a (possibly legacy) task. An explicit
  * `triggerMode` wins; otherwise `locationless` → 'locationless', a `geofence`
@@ -279,6 +309,37 @@ export function routeGeoJSON(points: readonly GeoPoint[]) {
     geometry: {
       type: 'LineString' as const,
       coordinates: points.map((p) => [p.lng, p.lat]),
+    },
+  };
+}
+
+/**
+ * A GeoJSON Polygon Feature approximating a circle of `radiusMeters` around
+ * `center`, as a closed ring of `points + 1` [lng, lat] vertices (used to draw
+ * a hot-zone overlay on the participant map — a fixed-pixel marker wouldn't
+ * scale with real-world metres across zoom levels). Longitude spacing is scaled
+ * by cos(lat) so the ring stays circular away from the equator.
+ */
+export function circlePolygonGeoJSON(center: GeoPoint, radiusMeters: number, points = 64) {
+  const R = 6371000; // earth radius, metres
+  const latRad = (center.lat * Math.PI) / 180;
+  const dLat = (radiusMeters / R) * (180 / Math.PI);
+  const dLng = (radiusMeters / (R * Math.cos(latRad))) * (180 / Math.PI);
+  const ring: [number, number][] = [];
+  for (let i = 0; i < points; i++) {
+    const theta = (i / points) * 2 * Math.PI;
+    ring.push([
+      center.lng + dLng * Math.cos(theta),
+      center.lat + dLat * Math.sin(theta),
+    ]);
+  }
+  ring.push(ring[0]); // close the ring
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: {
+      type: 'Polygon' as const,
+      coordinates: [ring],
     },
   };
 }

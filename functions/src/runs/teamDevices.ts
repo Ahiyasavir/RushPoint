@@ -1,6 +1,12 @@
 import * as functions from 'firebase-functions';
 import type { RunTeam } from '@rushpoint/shared';
 
+// The GLOBAL per-run phone ceiling + its decision helper live in @rushpoint/shared
+// (the single knob — see runCapacity.ts) so the backend guard and the creator-web
+// warning read one value. Re-exported here for the existing call sites + tests.
+export { MAX_RUN_DEVICES, canAddRunDevice, isRunDeviceCapActive } from '@rushpoint/shared';
+export type { RunDeviceDecision } from '@rushpoint/shared';
+
 // ─── Shared team devices (change: shared-team-devices) ───────────────────────
 // Pure helpers for the multi-phone team model: several anonymous uids attach to
 // one team doc; exactly one (controllerUid) may mutate team state. Legacy team
@@ -12,7 +18,7 @@ export type DeviceRole = 'controller' | 'viewer';
 // Unambiguous alphabet: no 0/O, no 1/I/L — codes are read aloud between phones.
 export const DEVICE_JOIN_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const DEVICE_JOIN_CODE_LENGTH = 6;
-export const MAX_TEAM_DEVICES = 8;
+export const MAX_TEAM_DEVICES = 3;
 
 /** Every uid attached to the team; a legacy doc implies just the founding uid. */
 export function attachedDeviceUids(team: RunTeam): string[] {

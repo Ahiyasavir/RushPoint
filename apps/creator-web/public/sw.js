@@ -9,8 +9,11 @@
  * would serve stale game state, so we let every non-GET and every cross-origin
  * request fall straight through to the network.
  */
-const CACHE = 'rushpoint-admin-shell-v1';
-const SHELL = ['/', '/index.html', '/icon.svg', '/manifest.webmanifest'];
+const CACHE = 'rushpoint-admin-shell-v2';
+const SHELL = [
+  '/', '/index.html', '/manifest.webmanifest',
+  '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

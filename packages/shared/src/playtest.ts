@@ -55,14 +55,34 @@ export function resolveProxyTarget(path: string): number {
 export interface PlaytestLinks { creatorUrl: string; joinUrl: string; }
 
 /**
- * Build the two shareable links from the public base URL (e.g. the tunnel URL):
- * the creator console (`/creator`) and the participant join link
+ * Build the shareable links from the public base URL (e.g. the tunnel URL):
+ * the creator console (`/creator/`) and the participant join link
  * (`/?code=<accessCode>`, or just the base play URL when no code is known yet).
+ *
+ * The creator link keeps a trailing slash so the browser requests `/creator/`
+ * — creator-web is served under Vite `base: '/creator/'` in playtest, so every
+ * asset it pulls is prefixed `/creator/…` and the proxy routes it to creator-web
+ * (without the prefix the app's `/src/main.tsx` would fall through to play-web).
  */
 export function buildPlaytestLinks(baseUrl: string, accessCode?: string | null): PlaytestLinks {
   const base = String(baseUrl).replace(/\/+$/, '');
   return {
-    creatorUrl: `${base}/creator`,
+    creatorUrl: `${base}/creator/`,
     joinUrl: accessCode ? `${base}/?code=${encodeURIComponent(accessCode)}` : base,
   };
+}
+
+/**
+ * The play-web origin the creator UI should link to for join/demo links. On
+ * localhost dev the two apps live on separate ports (:5181); behind a single
+ * tunnel origin they share the origin (play-web at root), so a `:5181` port —
+ * unreachable through a one-port tunnel — must be dropped. Returns an origin
+ * with no trailing slash. `origin` is normally `window.location.origin`.
+ */
+export function resolvePlayOrigin(origin: string | null | undefined): string {
+  let u: URL | null = null;
+  if (origin) { try { u = new URL(origin); } catch { u = null; } }
+  if (!u) return 'http://127.0.0.1:5181';
+  const isLocal = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  return isLocal ? `${u.protocol}//${u.hostname}:5181` : `${u.protocol}//${u.host}`;
 }

@@ -12,6 +12,15 @@ export default function GalleryPage() {
   const nav = useNavigate();
   const t = useT();
   const gl = t.gallery;
+  const b = t.builder;
+  // Localized labels so gallery cards never surface raw English enum values in a
+  // Hebrew UI (mode + task type mirror the Builder's own labels).
+  const MODE_LABEL: Record<string, string> = { individual: b.modeIndividual, team: b.modeTeam };
+  const TASK_TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+  };
   const [tab, setTab] = useState<'games' | 'tasks'>('games');
   const [view, setView] = useState<'list' | 'map'>('list');
   const [q, setQ] = useState('');
@@ -38,7 +47,7 @@ export default function GalleryPage() {
     } catch (e) {
       // A failed search must not hang the gallery on an eternal spinner: surface
       // the error and settle to an empty result the user can retry from.
-      await dialog.alert(e instanceof Error ? e.message : 'Search failed');
+      await dialog.alert(e instanceof Error ? e.message : t.gallery.searchFailed);
       if (tab === 'games') setGames([]); else setTasks([]);
     } finally { setSearching(false); }
   }
@@ -106,7 +115,7 @@ export default function GalleryPage() {
             <Card key={pg.id} className={`p-4 flex flex-col gap-2 scroll-mt-20 transition ${focusId === pg.id ? 'ring-2 ring-neon-green' : ''}`}>
               <div id={`game-${pg.id}`} className="flex items-start justify-between">
                 <h3 className="font-semibold">{pg.title}</h3>
-                <Badge color="cyan">{pg.mode}</Badge>
+                <Badge color="cyan">{MODE_LABEL[pg.mode] ?? pg.mode}</Badge>
               </div>
               <p className="text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">{pg.description}</p>
               <div className="flex gap-2 text-[11px] text-zinc-500">
@@ -129,7 +138,7 @@ export default function GalleryPage() {
               <h3 className="font-semibold text-sm">{tk.title}</h3>
               <p className="text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">{tk.description}</p>
               <div className="flex gap-2 text-[11px] text-zinc-500">
-                <span>{tk.type}</span>·<span>{gl.metaDiff(tk.difficulty)}</span>·<span>{gl.metaPts(tk.pointValue)}</span>·<span>{gl.metaCopies(tk.copyCount)}</span>
+                <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>·<span>{gl.metaDiff(tk.difficulty)}</span>·<span>{gl.metaPts(tk.pointValue)}</span>·<span>{gl.metaCopies(tk.copyCount)}</span>
               </div>
               <span className="text-[11px] text-zinc-600">{gl.from(tk.sourceGameTitle ?? '')}</span>
             </Card>

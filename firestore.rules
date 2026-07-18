@@ -8,7 +8,7 @@ rules_version = '2';
 //   users/{uid}/games/{gameId}                          private game template (owner only)
 //   users/{uid}/games/{gameId}/runs/{runId}             live run (owner only; CF-written)
 //   …/runs/{runId}/teams/{teamId}                       a participating team/individual
-//   …/runs/{runId}/{announcements|flashMissions}        live-ops broadcasts (read: any auth)
+//   …/runs/{runId}/{announcements|flashMissions|feedItems}  live-ops (read: run participant/staff/owner)
 //   publicGames/{gameId}, publicTasks/{taskId}          denormalized gallery (read: any)
 //   wallets/{uid}, wallets/{uid}/transactions/{txId}    credit ledger (owner read only)
 //   accessCodes/{code}                                  join codes (any auth read)
@@ -60,28 +60,38 @@ service cloud.firestore {
           }
 
           // ── LIVE-OPS BROADCASTS ────────────────────────────────────────────
-          //    Announcements + flash missions are readable by any authenticated
-          //    participant in the run; written by Staff via Cloud Functions.
+          //    Announcements + flash missions are readable ONLY by the owner,
+          //    run-scoped staff, or a participant of THIS run (not any authed
+          //    user) — scoped to the run they belong to, matching their stated
+          //    intent. Written by Staff via Cloud Functions.
           //    Targeted announcements (change: targeted-announcements): a doc may
           //    carry a `teamId` addressing one team, but rules CANNOT filter
           //    documents within a collection read — per-team visibility is enforced
           //    CLIENT-SIDE only (announcementVisibleTo). The `teamId` field is NOT
           //    secret: an announcement is operational copy, never an answer key.
           match /announcements/{docId} {
-            allow read:  if isAuthenticated();
+            allow read:  if isOwner(uid)
+                          || isStaffForRun(uid, gameId, runId)
+                          || isRunParticipant(uid, gameId, runId);
             allow write: if false;
           }
           match /flashMissions/{docId} {
-            allow read:  if isAuthenticated();
+            allow read:  if isOwner(uid)
+                          || isStaffForRun(uid, gameId, runId)
+                          || isRunParticipant(uid, gameId, runId);
             allow write: if false;
           }
           // Live photo feed (live-photo-feed): approved photos broadcast to the
-          // run. Same read surface as announcements. Rules cannot conditionally
-          // gate reads on Game.photoFeedEnabled — the flag is enforced WRITE-side
-          // (no items are ever written while the feed is off); hideFeedItem is
-          // the moderation recourse for already-written items.
+          // run. Carries participant photo URLs + team names (PII), so reads are
+          // scoped to the run's owner / run-scoped staff / a participant of THIS
+          // run — NOT any authenticated user (fix-i18n-leaks-and-feed-authz).
+          // Rules cannot conditionally gate reads on Game.photoFeedEnabled — the
+          // flag is enforced WRITE-side (no items are ever written while the feed
+          // is off); hideFeedItem is the moderation recourse for written items.
           match /feedItems/{docId} {
-            allow read:  if isAuthenticated();
+            allow read:  if isOwner(uid)
+                          || isStaffForRun(uid, gameId, runId)
+                          || isRunParticipant(uid, gameId, runId);
             allow write: if false;
           }
 
@@ -246,6 +256,15 @@ service cloud.firestore {
           && request.auth.token.ownerUid == uid
           && request.auth.token.gameId == gameId
           && request.auth.token.runId == runId;
+    }
+    // A participant of THIS run: the caller owns a team doc under the run. Team
+    // docs are keyed by the founding uid (uid == teamId), so run membership for
+    // the founding device is exactly the existence of its team doc. Costs one
+    // document read per subscription. (Secondary attached devices — deviceUids —
+    // are NOT matched here; they read via the team/chat docs, not the raw feed.)
+    function isRunParticipant(uid, gameId, runId) {
+      return request.auth != null
+          && exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/teams/$(request.auth.uid));
     }
   }
 }

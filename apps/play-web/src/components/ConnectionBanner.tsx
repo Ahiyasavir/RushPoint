@@ -22,7 +22,7 @@ export default function ConnectionBanner() {
 
   if (online) return null;
   return (
-    <div className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-black text-center text-xs font-medium py-1.5 shadow">
+    <div data-testid="offline-banner" className="fixed top-0 inset-x-0 z-50 bg-amber-500 text-black text-center text-xs font-medium py-1.5 shadow">
       {t.common.offline}
     </div>
   );

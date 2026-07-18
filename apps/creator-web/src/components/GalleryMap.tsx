@@ -63,7 +63,7 @@ export default function GalleryMap({
         .setPopup(
           new maplibregl.Popup({ offset: 16, closeButton: false }).setHTML(
             `<div style="font-weight:600">${escapeHtml(g.title)}</div>` +
-              `<div style="font-size:11px;color:#64748b">${g.stageCount} stages · ${g.playCount} plays</div>`,
+              `<div style="font-size:11px;color:#64748b">${escapeHtml(gl.stages(g.stageCount))} · ${escapeHtml(gl.plays(g.playCount))}</div>`,
           ),
         )
         .addTo(map.current!);

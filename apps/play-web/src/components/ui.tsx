@@ -60,13 +60,14 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   },
 );
 
-export function Card({ children, className = '', style }: {
+export function Card({ children, className = '', style, ...rest }: {
   children: ReactNode; className?: string; style?: React.CSSProperties;
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       className={`bg-white border border-glass-border rounded-2xl shadow-[0_2px_12px_rgba(26,10,0,0.06),0_8px_32px_-8px_rgba(26,10,0,0.08)] ${className}`}
       style={style}
+      {...rest}
     >
       {children}
     </div>

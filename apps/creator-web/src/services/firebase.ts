@@ -1,11 +1,12 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 import {
   getAuth,
   connectAuthEmulator,
   GoogleAuthProvider,
   EmailAuthProvider,
   signInWithPopup,
+  signInWithCredential,
   reauthenticateWithCredential,
   updateProfile,
   updateEmail,
@@ -26,6 +27,7 @@ import {
   getDownloadURL,
 } from 'firebase/storage';
 import { resolveEmulatorHost } from '@rushpoint/shared';
+import { buildEmulatorGoogleClaims } from './authClaims';
 
 // Emulator-safe defaults: the Firebase SDK only needs non-empty apiKey/appId
 // strings to initialize locally. projectId MUST match .firebaserc + the seed.
@@ -40,22 +42,57 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
-export const db        = getFirestore(app);
+// Playtest tunnel detection: when the page is served from a remote origin (a
+// cloudflared/ngrok tunnel), every emulator service must be reached through that
+// single https origin — the proxy (scripts/proxy.mjs) routes each path signature
+// to the right local emulator. A one-port tunnel can't expose :8080/:9099/etc,
+// and an https page can't call http://host:8080 (mixed content). Local dev:all
+// (localhost/127.0.0.1) keeps the direct port-based wiring unchanged.
+const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+const originHost = typeof window !== 'undefined' ? window.location.hostname : '';
+// Wire the emulator in `vite dev` (DEV) AND in the production `--mode playtest`
+// build the always-on tunnel host serves — otherwise the minified bundle hits real
+// Firebase and creator sign-in / all callables fail over the tunnel.
+const emulatorBuild = import.meta.env.DEV || import.meta.env.MODE === 'playtest';
+const tunnelMode =
+  emulatorBuild && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
+
+// Firestore over a tunnel needs ssl + no port at creation time (settings can't be
+// changed after first use), so build it with host/ssl here; local dev uses the
+// default instance + connectFirestoreEmulator below.
+export const db = tunnelMode
+  ? (() => {
+      try {
+        return initializeFirestore(app, { host: originHost, ssl: true, experimentalAutoDetectLongPolling: true });
+      } catch {
+        return getFirestore(app);
+      }
+    })()
+  : getFirestore(app);
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
 export const storage   = getStorage(app);
 
 // ── Emulator wiring (dev only) ────────────────────────────────────────────────
 const emuFlag = globalThis as unknown as { __rushpointEmu?: boolean };
-if (import.meta.env.DEV && !emuFlag.__rushpointEmu) {
+if (emulatorBuild && !emuFlag.__rushpointEmu) {
   emuFlag.__rushpointEmu = true;
-  // Emulator host: 127.0.0.1 for normal dev; the tunnel origin in playtest
-  // (playtest-shareable-links). Default keeps dev:all unchanged.
-  const host = resolveEmulatorHost(import.meta.env, typeof window !== 'undefined' ? window.location.origin : null);
-  connectFirestoreEmulator(db, host, 8080);
-  connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
-  connectFunctionsEmulator(functions, host, 5001);
-  connectStorageEmulator(storage, host, 9199);
+  if (tunnelMode) {
+    // Single-origin routing through the tunnel (https, no explicit port).
+    connectAuthEmulator(auth, pageOrigin, { disableWarnings: true });
+    // Functions/Storage have no https-origin emulator API in firebase 10.x, so we
+    // set the documented internal fields directly (verified against the SDK).
+    (functions as unknown as { emulatorOrigin: string }).emulatorOrigin = pageOrigin;
+    (storage as unknown as { host: string; _protocol: string }).host = originHost;
+    (storage as unknown as { host: string; _protocol: string })._protocol = 'https';
+  } else {
+    // Emulator host: 127.0.0.1 for normal dev. Default keeps dev:all unchanged.
+    const host = resolveEmulatorHost(import.meta.env, pageOrigin || null);
+    connectFirestoreEmulator(db, host, 8080);
+    connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+    connectFunctionsEmulator(functions, host, 5001);
+    connectStorageEmulator(storage, host, 9199);
+  }
 }
 
 // ── Task-media upload (change: task-media-attachments) ────────────────────────
@@ -105,28 +142,27 @@ const googleAuth = getAuth(googleApp);
 // googleAuth is intentionally NOT connected to the emulator.
 
 export async function signInWithGoogle() {
-  if (!import.meta.env.DEV) {
+  if (!emulatorBuild) {
     // Production: `auth` is real Firebase — the popup opens Google directly.
     return signInWithPopup(auth, googleProvider);
   }
 
-  // Dev: real Google account chooser via the non-emulated instance.
+  // Dev (localhost OR playtest tunnel): open the REAL Google account chooser via
+  // the non-emulated instance, then bridge the identity into the emulated `auth`.
+  // Over a tunnel this requires the tunnel host to be in the Firebase project's
+  // Authorized Domains (Console → Authentication → Settings) — localhost is
+  // pre-authorized; a fixed ngrok domain must be added once. A random
+  // *.trycloudflare.com host can't be pre-authorized, so use playtest:ngrok.
   const { user } = await signInWithPopup(googleAuth, googleProvider);
 
-  // Bridge the real Google identity into the emulated auth so the rest of the
-  // app (Firestore/Functions on the emulator) sees a matching signed-in user.
-  const email = user.email!;
-  const devPassword = `__google_proxy_${user.uid}`;
-  try {
-    return await signInWithEmailAndPassword(auth, email, devPassword);
-  } catch {
-    const cred = await createUserWithEmailAndPassword(auth, email, devPassword);
-    await updateProfile(cred.user, {
-      displayName: user.displayName ?? email.split('@')[0],
-      photoURL: user.photoURL ?? undefined,
-    });
-    return cred;
-  }
+  // Bridge the real Google identity into the emulated auth as a Google *credential*
+  // (not a synthetic password). The Auth Emulator links google.com onto an existing
+  // account with the same email — so an account first registered with email+password
+  // resolves to that SAME account (same uid) instead of failing on email-already-in-use.
+  // If no account exists yet, it creates one. (unify-email-google-login)
+  const claims = JSON.stringify(buildEmulatorGoogleClaims(user));
+  const googleCredential = GoogleAuthProvider.credential(claims);
+  return signInWithCredential(auth, googleCredential);
 }
 
 export function signUpWithEmail(

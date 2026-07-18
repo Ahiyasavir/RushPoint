@@ -53,14 +53,20 @@ function listDeployedCallables() {
   }
 }
 
-// The Admin SDK is used ONLY to mint auth custom tokens against the Auth
-// emulator (a platform-admin identity for the admin-only callables). It never
-// touches Firestore — all game/run state still flows through the callables.
+// The Admin SDK mints auth custom tokens against the Auth emulator (a
+// platform-admin identity for the admin-only callables) and reads Firestore
+// docs the clients can't (server-only state oracles: wallet transactions,
+// run.leaderboard snapshots). All game/run MUTATIONS still flow through the
+// callables only.
 process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
+process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080';
 adminSdk.initializeApp({ projectId: PROJECT });
 
 // ── Per-callable latency sampling (reported at the end) ───────────────────────
 const latencySamples = new Map(); // fn → number[] (ms)
+// Transient internal/unavailable blips absorbed by the call() retry — reported
+// in the summary so emulator flakiness is visible, never silent.
+let transientRetries = 0;
 function recordLatency(fn, ms) {
   if (!latencySamples.has(fn)) latencySamples.set(fn, []);
   latencySamples.get(fn).push(ms);
@@ -90,7 +96,23 @@ function makeParty(name) {
     call: async (fn, data) => {
       const t0 = Date.now();
       try {
-        return (await httpsCallable(functions, fn)(data)).data;
+        // Real phones retry a transient network/server blip — so does the suite
+        // (max 2, counted + reported below; a NOISY retry tally is itself a
+        // finding, a hidden one isn't). Only `internal`/`unavailable` retry: no
+        // scenario expects those codes, so a deliberate denial (permission-denied,
+        // invalid-argument, …) is never masked. One emulator ECONNRESET blip used
+        // to abort a scenario and cascade `functions/internal` through every
+        // scenario after it.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            return (await httpsCallable(functions, fn)(data)).data;
+          } catch (e) {
+            const transient = e.code === 'functions/internal' || e.code === 'functions/unavailable';
+            if (!transient || attempt >= 2) throw e;
+            transientRetries++;
+            await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+          }
+        }
       } finally {
         recordLatency(fn, Date.now() - t0);
       }
@@ -197,6 +219,9 @@ const ALLOWED_TASK_KEYS = new Set([
   // survey-tasks: the choice buttons render from surveyChoices — no answer key,
   // so it is participant-visible (passed through the sanitizer).
   'surveyChoices',
+  // quiz-location-verification: opt-in presence gate — NOT a secret; the client
+  // needs it to know it must attach GPS to submitTaskAnswer.
+  'requirePresence',
   // added by the sanitizer itself:
   'hasHint', 'locationHidden', 'hintFreeNow',
 ]);
@@ -242,6 +267,23 @@ function assertLeaderboardInvariants(label, rankings, expectedTeamIds) {
   check(`${label}: scores are non-increasing down the board`,
     (rankings ?? []).every((r, i) => i === 0 || rankings[i - 1].score >= r.score),
     (rankings ?? []).map((r) => r.score).join(' ≥ '));
+}
+
+// Walk an arbitrary callable response and collect the dotted paths of any
+// non-finite number (Infinity/-Infinity/NaN). A callable that returns one crashes
+// the ENTIRE response at JSON-encode (the family-playtest bug); this asserts the
+// serialized boundary is clean (change: fix-nonfinite-callable-payload).
+function findNonFinite(value, path = '') {
+  if (typeof value === 'number') return Number.isFinite(value) ? [] : [`${path || '<root>'}=${value}`];
+  if (Array.isArray(value)) return value.flatMap((v, i) => findNonFinite(v, `${path}[${i}]`));
+  if (value && typeof value === 'object' && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    return Object.entries(value).flatMap(([k, v]) => findNonFinite(v, path ? `${path}.${k}` : k));
+  }
+  return [];
+}
+function assertAllFinite(label, payload) {
+  const bad = findNonFinite(payload);
+  check(`${label}: response has no non-finite numbers`, bad.length === 0, bad.join(', '));
 }
 
 // Score conservation for one team's state: every completed task's breakdown
@@ -329,7 +371,8 @@ async function main() {
         {
           id: CODE_TASK_ID,
           title: 'Find the codeword',
-          type: 'station',
+          // 'smart_station' is the canonical type; 'station' is not a valid TaskType.
+          type: 'smart_station',
           coordinates: { lat: 31.79, lng: 35.16 },
           difficulty: 3,
           estimatedMinutes: 10,
@@ -398,7 +441,11 @@ async function main() {
         {
           id: PLAIN_TASK_ID,
           title: 'Reach the summit',
-          type: 'navigation',
+          // A GPS check-in task completed via completeTask — must be a valid
+          // completeTask type ('navigation' is not a TaskType and the completeTask
+          // anti-cheat type-gate correctly rejects it; the old value only "worked"
+          // when a cold-start timing quirk left the task unresolved at the gate).
+          type: 'field',
           coordinates: { lat: 31.8, lng: 35.17 },
           difficulty: 2,
           estimatedMinutes: 8,
@@ -610,6 +657,18 @@ async function main() {
   check('code task scored > 0', (state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore ?? 0) > 0,
     String(state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore));
 
+  // ── 8a. Leaderboard auto-refresh (change: live-leaderboard-auto-refresh) ────
+  // The first scoring completion must refresh run.leaderboard server-side — at
+  // this point NO refreshLeaderboard call has ever been made for this run, so a
+  // stale/missing snapshot here means the auto-refresh didn't fire.
+  const runDocPath = `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}`;
+  const lbAuto = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbAutoEntry = lbAuto?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('leaderboard auto-refreshes after a task completion (no manual refresh)',
+    (lbAutoEntry?.score ?? 0) > 0, JSON.stringify(lbAuto ?? null));
+  check('auto-refreshed leaderboard stays unpublished',
+    (lbAuto?.published ?? false) === false, String(lbAuto?.published));
+
   // ── 8b. Live leaderboard mid-run (refreshLeaderboard) ───────────────────────
   const lbCtx = { ownerUid: creatorCred.user.uid, gameId, runId };
   const lbHidden = await creator.call('refreshLeaderboard', { ...lbCtx, publish: false });
@@ -638,6 +697,60 @@ async function main() {
   check('public leaderboard exposes rankings once published',
     boardAfter?.published === true && (boardAfter?.rankings?.length ?? 0) === 1,
     JSON.stringify(boardAfter?.rankings?.[0]));
+  // getPublicLeaderboard must carry the run's scoringPreset so a `time_only`
+  // board can honestly hide the meaningless score column client-side, instead
+  // of showing a fake-looking 500/0 next to each team.
+  check('public leaderboard exposes the scoringPreset',
+    ['time_only', 'fixed_points_speed', 'smart_weighted'].includes(boardAfter?.scoringPreset),
+    String(boardAfter?.scoringPreset));
+
+  // ── 8b2. adjustTeamScore is immediately visible (live-leaderboard-auto-refresh)
+  const rowBeforeAdj = (await creator.call('listRunTeams', { gameId, runId }))
+    ?.teams?.find((t) => t.id === playerCred.user.uid);
+  const lbScoreBeforeAdj = lbShown?.rankings?.find((r) => r.teamId === playerCred.user.uid)?.score ?? 0;
+  // Deltas stay small: applyPenalties clamps the ranked score at 0, so the
+  // team's live score (one ~43-pt task at this point) must stay positive for
+  // the relative assertions to hold.
+  await creator.call('adjustTeamScore', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, delta: -20, reason: 'e2e visibility probe',
+  });
+  const lbAfterAdj = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbAdjEntry = lbAfterAdj?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('adjustTeamScore refreshes the leaderboard immediately (−20 visible)',
+    lbAdjEntry?.score === lbScoreBeforeAdj - 20,
+    JSON.stringify({ before: lbScoreBeforeAdj, after: lbAdjEntry?.score }));
+  check('adjustment auto-refresh preserves the published flag',
+    lbAfterAdj?.published === true, String(lbAfterAdj?.published));
+  const teamsAfterAdj = (await creator.call('listRunTeams', { gameId, runId }))?.teams ?? [];
+  const rowAfterAdj = teamsAfterAdj.find((t) => t.id === playerCred.user.uid);
+  check('listRunTeams exposes bonusPenalty (+20 after a −20 adjustment)',
+    (rowAfterAdj?.bonusPenalty ?? 0) - (rowBeforeAdj?.bonusPenalty ?? 0) === 20,
+    JSON.stringify({ before: rowBeforeAdj?.bonusPenalty, after: rowAfterAdj?.bonusPenalty }));
+
+  // Single-source-of-truth guardrail (score-consistency sweep): once scoring has
+  // begun, EVERY team the console lists must have a ranked leaderboard entry, so
+  // the console teams table always shows the ranked score (never the raw-earned
+  // fallback) — i.e. the organizer's table can't disagree with the TV/board.
+  const rankedIds = new Set((lbAfterAdj?.rankings ?? []).map((r) => r.teamId));
+  check('every listed team has a ranked leaderboard entry (console==board source)',
+    teamsAfterAdj.length > 0 && teamsAfterAdj.every((tm) => rankedIds.has(tm.id)),
+    JSON.stringify({ teams: teamsAfterAdj.map((tm) => tm.id), ranked: [...rankedIds] }));
+
+  // A frozen board is never auto-overwritten: freeze, adjust again (forced
+  // refresh path), and assert the frozen rankings did not move. Then unfreeze
+  // so the rest of the lifecycle sees live standings again.
+  await creator.call('refreshLeaderboard', { ...lbCtx, frozen: true });
+  await creator.call('adjustTeamScore', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, delta: -5, reason: 'frozen probe',
+  });
+  const lbFrozen = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbFrozenEntry = lbFrozen?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('frozen leaderboard is not auto-overwritten by a scoring event',
+    lbFrozen?.frozen === true && lbFrozenEntry?.score === lbScoreBeforeAdj - 20,
+    JSON.stringify({ frozen: lbFrozen?.frozen, score: lbFrozenEntry?.score, expected: lbScoreBeforeAdj - 20 }));
+  await creator.call('refreshLeaderboard', { ...lbCtx, frozen: false });
 
   // ── 8c. Photo task: submit → staff review → advance ─────────────────────────
   // M3: submitStationPhoto only accepts Firebase Storage URLs from our bucket.
@@ -704,6 +817,22 @@ async function main() {
   });
   check('staffSignIn mints a custom token', !!staffTok?.customToken && staffTok?.name === 'E2E Marshal');
   await signInWithCustomToken(staff.auth, staffTok.customToken);
+
+  // A bogus/typo'd teamId must fail loud (not-found), never silently create a
+  // phantom team doc with just a `taskSubmissions` field (data-integrity guard).
+  let bogusTeamErr = null;
+  try {
+    await staff.call('reviewStationSubmission', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: 'this-team-does-not-exist', taskId: PHOTO_TASK_ID, approved: true,
+    });
+  } catch (e) { bogusTeamErr = e; }
+  check('reviewStationSubmission rejects an unknown teamId instead of creating a phantom team',
+    bogusTeamErr?.code === 'functions/not-found', bogusTeamErr?.code);
+  const phantomSnap = await staff
+    .getDocAt(`users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/teams/this-team-does-not-exist`)
+    .catch(() => null);
+  check('no phantom team doc was created', !phantomSnap || phantomSnap.exists === false);
 
   const review = await staff.call('reviewStationSubmission', {
     ownerUid: creatorCred.user.uid, gameId, runId,
@@ -804,13 +933,26 @@ async function main() {
 
   // ── 10a. Platform benchmark contribution (platform-benchmark) ───────────────
   // Finalizing the main run folds anonymized per-task-type aggregates into
-  // benchmarks/{taskType}. The main game has a 'station' task type.
-  const benchStation = await creator.getDocAt('benchmarks/station');
+  // benchmarks/{taskType}. The main game has a 'smart_station' task type.
+  const benchStation = await creator.getDocAt('benchmarks/smart_station');
   check('benchmark: finalize contributed a station aggregate', benchStation.exists && (benchStation.data?.count ?? 0) >= 1, JSON.stringify(benchStation.data));
   check('benchmark: aggregate is anonymized (no run/team ids)',
     benchStation.exists && typeof benchStation.data?.medianMsRolling === 'number'
       && !('runId' in benchStation.data) && !('teamId' in benchStation.data) && !('ownerUid' in benchStation.data),
     JSON.stringify(benchStation.data));
+
+  // Double-finalize guard (state-machine): re-finalizing an already-finished
+  // run must not double-contribute to the platform-wide benchmark aggregate
+  // (that would corrupt medians/completion-rates for every creator sharing
+  // that task type, not just this run's owner).
+  {
+    const countBefore = benchStation.data?.count ?? 0;
+    const fin2 = await creator.call('finalizeRun', { gameId, runId }).catch((e) => e);
+    const benchAfterRefinalize = await creator.getDocAt('benchmarks/smart_station');
+    const countAfter = benchAfterRefinalize.data?.count ?? 0;
+    check('re-finalizing an already-finished run does not double-contribute to benchmarks',
+      countAfter === countBefore, `before=${countBefore} after=${countAfter} fin2=${JSON.stringify(fin2?.rankings ?? fin2?.message ?? fin2)}`);
+  }
 
   // Opt-out skips contribution: a benchmarkOptOut game's finished run must not
   // bump the aggregate for its task type.
@@ -951,6 +1093,65 @@ async function main() {
   check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
 
   }); // scenario: paid hints
+
+  await scenario('game intro instructions (bilingual echo + non-https image strip + null when unset)', async () => {
+
+  // ── Game intro "How to play" primer (change: game-intro-instructions) ────────
+  // Guards the write→clean→echo seam: updateGame stores a cleaned primer, and
+  // getMyTeamState echoes title/body/bodyHe but https-strips a non-https image.
+  const { gameId: gGI } = await creator.call('createGame', { title: 'Primer Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gGI,
+    scoringPreset: 'fixed_points_speed',
+    instructions: {
+      title: 'How to play',
+      body: 'Walk to each pin and check in.',
+      bodyHe: 'לכו לכל נקודה ובצעו צ׳ק־אין.',
+      imageUrl: 'http://insecure.example.com/diagram.png', // non-https → must be stripped
+    },
+    stages: [{
+      id: 'st-gi', order: 0, title: 'Go', isFinal: true,
+      tasks: [{
+        id: 'gi-1', title: 'Check in', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 4, pointValue: 40, maxConcurrentTeams: 3,
+      }],
+    }],
+  });
+  const { runId: rGI, accessCode: cGI } = await creator.call('launchRun', { gameId: gGI });
+  const playerGI = makeParty('playerGI');
+  await signInAnonymously(playerGI.auth);
+  await playerGI.call('joinRun', { code: cGI, displayName: 'Primer Player' });
+  await creator.call('startTeams', { gameId: gGI, runId: rGI });
+
+  const sGI = await playerGI.call('getMyTeamState', { code: cGI });
+  const ins = sGI?.game?.instructions;
+  check('getMyTeamState echoes the bilingual primer',
+    ins?.title === 'How to play' && ins?.body === 'Walk to each pin and check in.' && ins?.bodyHe === 'לכו לכל נקודה ובצעו צ׳ק־אין.',
+    JSON.stringify(ins));
+  check('non-https primer image is stripped on echo', ins?.imageUrl === undefined, JSON.stringify(ins?.imageUrl));
+
+  // A game with NO primer echoes instructions === null.
+  const { gameId: gGI2 } = await creator.call('createGame', { title: 'No Primer Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gGI2,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-gi2', order: 0, title: 'Go', isFinal: true,
+      tasks: [{
+        id: 'gi2-1', title: 'Check in', type: 'self_report',
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 4, pointValue: 40, maxConcurrentTeams: 3,
+      }],
+    }],
+  });
+  const { runId: rGI2, accessCode: cGI2 } = await creator.call('launchRun', { gameId: gGI2 });
+  const playerGI2 = makeParty('playerGI2');
+  await signInAnonymously(playerGI2.auth);
+  await playerGI2.call('joinRun', { code: cGI2, displayName: 'No Primer Player' });
+  await creator.call('startTeams', { gameId: gGI2, runId: rGI2 });
+  const sGI2 = await playerGI2.call('getMyTeamState', { code: cGI2 });
+  check('a game with no primer echoes instructions === null', sGI2?.game?.instructions === null, JSON.stringify(sGI2?.game?.instructions));
+
+  }); // scenario: game intro instructions
 
   await scenario('test drive (free rehearsal, cap 2, one-live guard, aggregate exclusion)', async () => {
 
@@ -1121,6 +1322,71 @@ async function main() {
 
   }); // scenario: hint auto escalation
 
+  await scenario('completeTask type gate (no answer-bypass on quiz)', async () => {
+
+  // ── completeTask anti-cheat type gate ───────────────────────────────────────
+  // completeTask is the check-in / self-report / geofence path ONLY. A quiz (and
+  // every other non-completeTask type) is graded exclusively by its own callable
+  // (submitTaskAnswer here). A participant who reads their own assigned taskId via
+  // getMyTeamState must NOT be able to score a quiz task by calling
+  // completeTask({ taskId }) with no answer. Positive control: field/self_report/
+  // geofence completions through completeTask are covered by the core lifecycle
+  // scenario and must stay green (the allowlist must not over-block them).
+  const { gameId: gZ } = await creator.call('createGame', { title: 'Type Gate Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gZ,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      {
+        id: 'st-z1', order: 0, title: 'Answer here',
+        tasks: [{
+          id: 'q-1', title: 'Name the city', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
+          answers: ['jerusalem'],
+        }],
+      },
+      {
+        id: 'st-z2', order: 1, title: 'Finish', isFinal: true,
+        tasks: [{
+          id: 'z-2', title: 'Wrap up', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 10, maxConcurrentTeams: 3,
+        }],
+      },
+    ],
+  });
+  const { runId: rZ, accessCode: cZ } = await creator.call('launchRun', { gameId: gZ });
+  const playerZ = makeParty('playerZ');
+  await signInAnonymously(playerZ.auth);
+  await playerZ.call('joinRun', { code: cZ, displayName: 'Cheater Team' });
+  await creator.call('startTeams', { gameId: gZ, runId: rZ });
+  const CZ = { ownerUid: creatorCred.user.uid, gameId: gZ, runId: rZ };
+  await playerZ.call('requestNextTask', CZ); // assign q-1 (writes startedAt)
+
+  // Attempt the exploit: complete a quiz task with a bare id, no answer.
+  let quizBypassRejected = false;
+  try {
+    await playerZ.call('completeTask', { ...CZ, taskId: 'q-1' });
+  } catch (e) {
+    quizBypassRejected =
+      e.code === 'functions/failed-precondition' ||
+      /different way|does not|answer/i.test(e.message);
+  }
+  check('completeTask refuses to score a quiz task (no answer bypass)', quizBypassRejected);
+
+  // Prove the task did not silently complete and no points were awarded.
+  const sZ = await playerZ.call('getMyTeamState', { code: cZ });
+  const qZ = sZ?.activeStageTasks?.find((t) => t.id === 'q-1');
+  check('quiz task remains incomplete after the bypass attempt',
+    qZ && qZ.status !== 'completed', JSON.stringify(qZ?.status));
+  check('no score awarded by the bypass attempt',
+    (sZ?.team?.score ?? 0) === 0, String(sZ?.team?.score));
+
+  // Positive control: the legitimate grading path still works on the quiz.
+  const okZ = await playerZ.call('submitTaskAnswer', { ...CZ, taskId: 'q-1', answer: 'jerusalem' });
+  check('submitTaskAnswer still grades the quiz correctly (control)', okZ?.correct === true, JSON.stringify(okZ));
+
+  }); // scenario: completeTask type gate
+
   await scenario('quiz ordering (seeded shuffle + orderedAnswer)', async () => {
 
   // ── Ordering quiz (change: quiz-ordering) ────────────────────────────────────
@@ -1210,6 +1476,35 @@ async function main() {
   await expectError('updateGame rejects orderItems mixed with answers',
     creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz', orderItems: ['a', 'b', 'c'], answers: ['a'] }) }),
     { codeIn: ['functions/invalid-argument'] });
+
+  // Unwinnable-task guard: a task with no usable answer key can never be
+  // completed by any participant (matchesTaskAnswer/verifyStationCode/
+  // submitSequenceStep all reject an empty answer). updateGame must refuse to
+  // persist one — bypassing the Wizard's client-side guard directly.
+  await expectError('updateGame rejects a quiz with no answers',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects a numeric task with no numericAnswer',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'numeric' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects a smart_station with no secretCode',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'smart_station' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('updateGame rejects a sequence with no steps',
+    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'sequence' }) }),
+    { codeIn: ['functions/invalid-argument'] });
+
+  // Defense in depth: a game saved BEFORE this guard existed (or written by any
+  // other path) could still carry an unwinnable task. launchRun must catch it
+  // too, not just updateGame — write directly via the Admin SDK to bypass the
+  // callable's validation entirely, simulating that legacy-data case.
+  const { gameId: gLegacyBad } = await creator.call('createGame', { title: 'Legacy Bad Game', mode: 'individual' });
+  await adminSdk.firestore().doc(`users/${creatorCred.user.uid}/games/${gLegacyBad}`).update({
+    stages: badStage({ ...baseBad, type: 'quiz' }),
+  });
+  await expectError('launchRun rejects a legacy game with an unwinnable task',
+    creator.call('launchRun', { gameId: gLegacyBad }),
+    { codeIn: ['functions/failed-precondition'] });
 
   }); // scenario: quiz ordering
 
@@ -1494,6 +1789,17 @@ async function main() {
     await expectError('react: a stranger (not in the run, not staff) is denied',
       feedStranger.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' }),
       { codeIn: ['functions/permission-denied', 'functions/not-found'] });
+    // Cross-tenant READ: the feed carries participant photo URLs + team names, so a
+    // stranger who is not a participant/staff/owner of THIS run must be denied the
+    // direct collection read (rules-enforced — getColAt itself is rejected).
+    await expectError('feed read: a stranger is denied reading another run\'s feed',
+      feedStranger.getColAt(feedCol),
+      { codeIn: ['permission-denied'] });
+    // Allow-path regression guards: the run participant and the run owner still read it.
+    const partFeedRead = await fp.getColAt(feedCol);
+    check('feed read: a run participant still reads the feed', Array.isArray(partFeedRead) && partFeedRead.length >= 1, String(partFeedRead?.length));
+    const ownerFeedRead = await creator.getColAt(feedCol);
+    check('feed read: the run owner still reads the feed', Array.isArray(ownerFeedRead) && ownerFeedRead.length >= 1, String(ownerFeedRead?.length));
     await expectError('hide: a participant cannot hide a feed item',
       fp.call('hideFeedItem', { ...FCTX, itemId: item2.id }),
       { codeIn: ['functions/permission-denied'] });
@@ -1657,6 +1963,55 @@ async function main() {
 
   }); // scenario: task types
 
+  await scenario('quiz location verification (requirePresence gate)', async () => {
+
+  // ── requirePresence: an answer task with real coordinates + the opt-in flag can
+  // only be graded from WITHIN a lenient radius. A far submission (even with the
+  // correct answer) is refused BEFORE grading (failed-precondition), while the
+  // same correct answer at the coordinates grades normally. The sanitized payload
+  // exposes requirePresence (client needs it to attach GPS) but still no answers.
+  const { gameId: gP } = await creator.call('createGame', { title: 'Presence Quiz', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gP,
+    scoringPreset: 'fixed_points_speed',
+    stages: [
+      { id: 'sp', order: 0, title: 'Presence', isFinal: true, tasks: [{
+        id: 'pq1', title: 'What color is the dome?', type: 'quiz', requirePresence: true,
+        coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 2, pointValue: 50, maxConcurrentTeams: 9,
+        choices: ['Blue', 'Gold', 'Green'], answers: ['Blue'],
+      }] },
+    ],
+  });
+  const { runId: rP, accessCode: cP } = await creator.call('launchRun', { gameId: gP });
+  const playerP = makeParty('playerP');
+  await signInAnonymously(playerP.auth);
+  await playerP.call('joinRun', { code: cP, displayName: 'Pilgrim' });
+  await creator.call('startTeams', { gameId: gP, runId: rP });
+  const CP = { ownerUid: creatorCred.user.uid, gameId: gP, runId: rP };
+
+  // sanitized payload: requirePresence visible, answers stripped.
+  const sP = await playerP.call('getMyTeamState', { code: cP });
+  const pTask = sP?.activeStageTasks?.[0];
+  check('presence: requirePresence exposed to client', pTask?.requirePresence === true, JSON.stringify(pTask?.requirePresence));
+  check('presence: answers still stripped', pTask?.answers === undefined && pTask?.numericAnswer === undefined);
+
+  // far + correct answer → refused before grading (not graded as correct).
+  let farRefused = false;
+  let farLeak = '';
+  try {
+    const r = await playerP.call('submitTaskAnswer', { ...CP, taskId: 'pq1', answer: 'blue', lat: 32.10, lng: 34.85 });
+    farLeak = JSON.stringify(r); // must NOT reach here with { correct: true }
+  } catch (e) {
+    farRefused = /failed-precondition|move closer|location required/i.test(e.message);
+  }
+  check('presence: far answer refused (failed-precondition, not graded)', farRefused, farLeak);
+
+  // correct answer AT the coordinates → grades.
+  const nearP = await playerP.call('submitTaskAnswer', { ...CP, taskId: 'pq1', answer: 'blue', lat: 31.78, lng: 35.21 });
+  check('presence: in-range correct answer grades', nearP?.correct === true, JSON.stringify(nearP));
+
+  }); // scenario: quiz location verification
+
   await scenario('scheduled release (timed task + stage gates)', async () => {
     // A game with: stage 0 = an instant task gated by a FUTURE releaseAt (blocked),
     // plus a second instant task already released; stage 1 gated far in the future
@@ -1743,9 +2098,38 @@ async function main() {
     await creator.call('startTeams', { gameId: gP, runId: rP });
     const CP = { ownerUid: creatorCred.user.uid, gameId: gP, runId: rP };
     await pP.call('completeTask', { ...CP, taskId: 'p-a' });
+
+    // Controller-only poll persistence (change: fix-getmyteamstate-hotpath-writes):
+    // stage 0 is done and stage 1 is past-release due. Attach a VIEWER and let ONLY
+    // it poll — the response must reflect the unlock, but the persisted team doc must
+    // NOT advance from a viewer poll. Then the controller's poll persists it.
+    const teamDocPathP = `users/${creatorCred.user.uid}/games/${gP}/runs/${rP}/teams/${pP.auth.currentUser.uid}`;
+    const pcode = (await pP.call('getMyTeamState', { code: cP }))?.team?.deviceJoinCode;
+    // (that controller poll just persisted the unlock; re-lock via admin to isolate the viewer test)
+    await adminSdk.firestore().doc(teamDocPathP).update({
+      stages: [
+        { stageId: 'ps0', status: 'completed', tasks: [{ taskId: 'p-a', taskIndex: 0, status: 'completed', earnedScore: 50 }] },
+        { stageId: 'ps1', status: 'locked', tasks: [{ taskId: 'p-b', taskIndex: 0, status: 'unassigned' }] },
+      ],
+    });
+    const viewerP = makeParty('viewerPast');
+    await signInAnonymously(viewerP.auth);
+    await viewerP.call('joinTeamAsDevice', { code: cP, teamCode: pcode, memberName: 'Viewer' });
+    const vState = await viewerP.call('getMyTeamState', { code: cP });
+    check('scheduled: viewer poll response reflects the unlock',
+      vState?.activeStageTasks?.some((t) => t.id === 'p-b') === true, JSON.stringify(vState?.activeStageTasks?.map((t) => t.id)));
+    const afterViewer = (await adminSdk.firestore().doc(teamDocPathP).get()).data();
+    check('scheduled: a viewer poll does NOT persist the unlock (controller-only writes)',
+      afterViewer?.stages?.find((s) => s.stageId === 'ps1')?.status === 'locked',
+      afterViewer?.stages?.find((s) => s.stageId === 'ps1')?.status);
+
     const sp = await pP.call('getMyTeamState', { code: cP });
     check('scheduled: past-release stage unlocks (active task present)',
       sp?.activeStageTasks?.some((t) => t.id === 'p-b') === true, JSON.stringify(sp?.activeStageTasks?.map((t) => t.id)));
+    const afterController = (await adminSdk.firestore().doc(teamDocPathP).get()).data();
+    check('scheduled: the controller poll DOES persist the unlock',
+      afterController?.stages?.find((s) => s.stageId === 'ps1')?.status === 'active',
+      afterController?.stages?.find((s) => s.stageId === 'ps1')?.status);
     await pP.call('completeTask', { ...CP, taskId: 'p-b' });
     const spF = await pP.call('getMyTeamState', { code: cP });
     check('scheduled: past-release run completes to finished', spF?.team?.status === 'finished', spF?.team?.status);
@@ -1999,6 +2383,67 @@ async function main() {
     const strangerIds = (strangerView?.runs ?? []).map((x) => x.runId);
     check('gm: owner isolation — outsider sees none of these runs', !strangerIds.includes(rB), JSON.stringify(strangerIds));
   }); // scenario: multi-run GM overview
+
+  await scenario('global per-run device cap (16 phones max, both join paths)', async () => {
+    // A hard global ceiling on total phones in one run (MAX_RUN_DEVICES = 16),
+    // layered on top of the billing participant cap (free mode = 50) and the
+    // per-team device cap (3). Free mode gives maxParticipants 50, so we can reach
+    // 16 phones via joinRun before the billing cap fires. The run.deviceCount
+    // counter grows on BOTH joinRun (a founding phone) and joinTeamAsDevice (an
+    // attached phone); the 17th phone is refused from either entry point.
+    const RUN_DEVICE_CAP = 16;
+    const { gameId: gDC } = await creator.call('createGame', { title: 'Device Cap Game', mode: 'team' });
+    await creator.call('updateGame', { gameId: gDC, stages: [{ id: 'dc-s', order: 0, title: 'S', isFinal: true, tasks: [{
+      id: 'dc-t', title: 'Go', type: 'field', triggerMode: 'instant',
+      coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 20 }] }] });
+    const { runId: rDC, accessCode: cDC } = await creator.call('launchRun', { gameId: gDC });
+    const runDocPath = `users/${creatorCred.user.uid}/games/${gDC}/runs/${rDC}`;
+
+    // Phone 1: the founding device of team 0 (joinRun path).
+    const p0 = makeParty('rdc-founder');
+    await signInAnonymously(p0.auth);
+    await p0.call('joinRun', { code: cDC, displayName: 'Cap Team 0' });
+    const p0State = await p0.call('getMyTeamState', { code: cDC });
+    const teamCode = p0State?.team?.deviceJoinCode;
+    check('device-cap: founder join set deviceCount to 1',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === 1);
+
+    // Phone 2: an attached teammate on team 0 (joinTeamAsDevice path → counter grows).
+    const pA = makeParty('rdc-attach');
+    await signInAnonymously(pA.auth);
+    const attachRes = await pA.call('joinTeamAsDevice', { code: cDC, teamCode, memberName: 'Phone 2' });
+    check('device-cap: joinTeamAsDevice attaches below the ceiling', attachRes?.role === 'viewer');
+    check('device-cap: attach grew deviceCount to 2',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === 2);
+
+    // Phones 3..16: fourteen more founding devices (joinRun path) → reach the cap.
+    for (let i = 1; i <= RUN_DEVICE_CAP - 2; i++) {
+      const p = makeParty(`rdc-f${i}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: cDC, displayName: `Cap Team ${i}` });
+    }
+    check('device-cap: run holds exactly MAX_RUN_DEVICES phones',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === RUN_DEVICE_CAP,
+      String((await creator.getDocAt(runDocPath)).data?.deviceCount));
+
+    // The 17th phone via joinRun is refused (run full) even though billing (50) allows it.
+    const pOver = makeParty('rdc-over');
+    await signInAnonymously(pOver.auth);
+    await expectError('device-cap: 17th phone via joinRun is refused',
+      pOver.call('joinRun', { code: cDC, displayName: 'Cap Team Over' }),
+      { codeIn: ['functions/resource-exhausted'], match: /16 devices/ });
+
+    // The 17th phone via joinTeamAsDevice is ALSO refused — team 0 still has room
+    // (2/3), so this exercises the ceiling on the device path, not the per-team cap.
+    const pOverDev = makeParty('rdc-over-dev');
+    await signInAnonymously(pOverDev.auth);
+    await expectError('device-cap: 17th phone via joinTeamAsDevice is refused',
+      pOverDev.call('joinTeamAsDevice', { code: cDC, teamCode, memberName: 'Phone Over' }),
+      { codeIn: ['functions/resource-exhausted'] });
+
+    check('device-cap: counter unchanged after both rejections (still 16)',
+      (await creator.getDocAt(runDocPath)).data?.deviceCount === RUN_DEVICE_CAP);
+  }); // scenario: global per-run device cap
 
   await scenario('movement heatmap (GPS track → density)', async () => {
     const { gameId: gH } = await creator.call('createGame', { title: 'Heatmap Game', mode: 'individual' });
@@ -2471,6 +2916,16 @@ async function main() {
     try { await recapViewer.call('getRunAnalytics', { code: accessCode }); }
     catch (e) { analyticsDenied = e.code === 'functions/permission-denied'; }
     check('analytics: non-owner is denied', analyticsDenied);
+
+    // ── Run summary (getRunSummary) — owner-only recap+analytics+feedback fold ──
+    const summary = await creator.call('getRunSummary', { code: accessCode });
+    check('summary: owner gets standings', (summary?.standings?.length ?? 0) > 0, `standings=${summary?.standings?.length}`);
+    check('summary: completion rate numeric', typeof summary?.completion?.overallCompletionRate === 'number');
+    check('summary: feedback digest present', summary?.feedback && Array.isArray(summary.feedback.topIssues));
+    let summaryDenied = false;
+    try { await recapViewer.call('getRunSummary', { code: accessCode }); }
+    catch (e) { summaryDenied = e.code === 'functions/permission-denied'; }
+    check('summary: non-owner denied', summaryDenied);
   }); // scenario: recap · replay · analytics
 
   // ── Duplicate & translate a game (translateGame) ────────────────────────────
@@ -2622,6 +3077,49 @@ async function main() {
     check('hot-zone: deactivate clears the zone', deact?.ok === true);
   }); // scenario: hot zone
 
+  // ── Hot Zone routing bias (change: hot-zone-routing-bias) ────────────────────
+  // An active hot zone should pull auto-routing toward in-zone tasks. To prove
+  // the bias actually changes the outcome (not just breaks ties), the in-zone
+  // task is placed FARTHER from the team than a closer out-of-zone task — so
+  // without the bias the closer out-of-zone task would win on transit, but the
+  // in-zone bonus flips the assignment.
+  await scenario('hot zone routing bias (in-zone task is assigned first)', async () => {
+    const { gameId: rbGame } = await creator.call('createGame', { title: 'Routing Bias Game', mode: 'individual' });
+    const RB_CENTER = { lat: 31.79, lng: 35.16 };  // zone centre; in-zone task lives here
+    const RB_TEAM = { lat: 31.80, lng: 35.16 };     // team ~1.1km N of centre
+    const RB_NEAR_OUT = { lat: 31.799, lng: 35.16 };// ~110m from team, ~1km from centre → OUT of a 250m zone
+    await creator.call('updateGame', {
+      gameId: rbGame,
+      scoringPreset: 'smart_weighted',
+      stages: [{
+        id: 'rb-stage', order: 0, title: 'Routing bias stage', isFinal: true, requiredTaskCount: 1,
+        tasks: [
+          { id: 'rb-in', title: 'Far but in zone', type: 'field', coordinates: RB_CENTER, difficulty: 5, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3 },
+          { id: 'rb-out', title: 'Near but out of zone', type: 'field', coordinates: RB_NEAR_OUT, difficulty: 5, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3 },
+        ],
+      }],
+    });
+    const { runId: rbRun, accessCode: rbCode } = await creator.call('launchRun', { gameId: rbGame });
+    const rbPlayer = makeParty('rbPlayer');
+    await signInAnonymously(rbPlayer.auth);
+    await rbPlayer.call('joinRun', { code: rbCode, displayName: 'Router' });
+    await creator.call('startTeams', { gameId: rbGame, runId: rbRun });
+
+    await creator.call('activateHotZone', {
+      gameId: rbGame, runId: rbRun, center: RB_CENTER, radiusMeters: 250, multiplier: 2, durationMinutes: 10,
+    });
+
+    // Ask for the next task from the team's location; the bias should route the
+    // team to the (farther) in-zone task over the (closer) out-of-zone task.
+    await rbPlayer.call('requestNextTask', { code: rbCode, lat: RB_TEAM.lat, lng: RB_TEAM.lng });
+    const st = await rbPlayer.call('getMyTeamState', { code: rbCode });
+    const assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+    check('hot-zone routing: the in-zone task is assigned despite being farther',
+      assigned?.taskId === 'rb-in', JSON.stringify(assigned));
+
+    await creator.call('deactivateHotZone', { gameId: rbGame, runId: rbRun });
+  }); // scenario: hot zone routing bias
+
   // ── Power-ups (change: power-ups) ───────────────────────────────────────────
   // Predicts the deterministic award sequence from the seeded roll, then audits
   // that consumption (×2), the flat bonus (−15 bonusPenalty), idempotence, and the
@@ -2718,6 +3216,16 @@ async function main() {
       if (won === 'bonus_points') predicted.bonuses.push(tid);
       else if (won === 'double_points') { armed = true; pendingDoubleAward = tid; }
     }
+    // A double rolled on the FINAL completion arms a slot with nothing after it to
+    // consume, so it stays armed and is logged as an award WITHOUT a consumedByTaskId.
+    // It's still a legitimate award (the server logs it), so include it in the award
+    // set even though it never doubled a task. This is what makes the last-task-rolls-
+    // a-double case (runId-dependent) match instead of flaking.
+    const trailingArmedDouble = armed ? pendingDoubleAward : null;
+    const predictedDoubleAwards = [
+      ...predicted.doubles.map((d) => d.awardTask),
+      ...(trailingArmedDouble ? [trailingArmedDouble] : []),
+    ];
 
     // Assert the log matches the prediction exactly (order-independent set compare).
     const log = finTeam?.powerUps?.log ?? [];
@@ -2727,8 +3235,8 @@ async function main() {
       JSON.stringify(bonusLog) === JSON.stringify([...predicted.bonuses].sort()),
       `got ${JSON.stringify(bonusLog)} want ${JSON.stringify([...predicted.bonuses].sort())}`);
     check('power-ups: double awards match the predicted set',
-      JSON.stringify(doubleLog.map((e) => e.taskId).sort()) === JSON.stringify(predicted.doubles.map((d) => d.awardTask).sort()),
-      `got ${JSON.stringify(doubleLog.map((e) => e.taskId))} want ${JSON.stringify(predicted.doubles.map((d) => d.awardTask))}`);
+      JSON.stringify(doubleLog.map((e) => e.taskId).sort()) === JSON.stringify([...predictedDoubleAwards].sort()),
+      `got ${JSON.stringify(doubleLog.map((e) => e.taskId))} want ${JSON.stringify(predictedDoubleAwards)}`);
 
     // Each bonus decremented bonusPenalty by 15 (bonus is a negative penalty).
     check('power-ups: bonusPenalty == -15 * bonus count',
@@ -2749,10 +3257,19 @@ async function main() {
         logEntry?.consumedByTaskId === d.consumedBy && logEntry?.amount === consumedRec?.scoreBreakdown?.taskScore,
         JSON.stringify(logEntry));
     }
-    // The armed slot is cleared once every double consumed (all tasks done).
-    check('power-ups: no double left armed after all completions',
-      !finTeam?.powerUps?.active || finTeam?.powerUps?.active === null,
-      JSON.stringify(finTeam?.powerUps?.active));
+    // The armed slot is cleared once every double is consumed — UNLESS the final
+    // completion itself rolled a double (nothing after it to consume), in which case
+    // it legitimately stays armed. Both outcomes are seed-dependent, so assert the one
+    // the observed rolls predict rather than assuming the slot always ends empty.
+    if (trailingArmedDouble) {
+      check('power-ups: final-task double stays armed (nothing left to consume)',
+        finTeam?.powerUps?.active === 'double_points',
+        JSON.stringify(finTeam?.powerUps?.active));
+    } else {
+      check('power-ups: no double left armed after all completions',
+        !finTeam?.powerUps?.active || finTeam?.powerUps?.active === null,
+        JSON.stringify(finTeam?.powerUps?.active));
+    }
 
     // Σ earned == score still holds (doubled values flow through stage roll-up).
     assertScoreConservation('power-ups', finTeam);
@@ -2925,6 +3442,57 @@ async function main() {
       JSON.stringify({ live: (live?.rankings ?? []).map((r) => r.teamName), final: (finL?.rankings ?? []).map((r) => r.teamName) }));
   });
 
+  // ═══ Non-finite leaderboard guard (family-playtest regression) ══════════════
+  // A team that JOINED but was never STARTED has no startedAt → durationSeconds
+  // returns Infinity, which used to poison run.leaderboard and crash
+  // getMyTeamState / refreshLeaderboard at JSON-encode (51× in the 2026-07-11
+  // playtest). The board and the unstarted team's state must now be finite.
+  await scenario('non-finite leaderboard guard (joined-but-not-started team)', async () => {
+    const { gameId: nf } = await creator.call('createGame', { title: 'Non-Finite Guard', mode: 'individual' });
+    const mkTask = (id, pts) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: pts, maxConcurrentTeams: 9,
+    });
+    await creator.call('updateGame', {
+      gameId: nf, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'nf-1', order: 0, title: 'One', tasks: [mkTask('nf-t1', 30)] },
+        { id: 'nf-2', order: 1, title: 'Two', isFinal: true, tasks: [mkTask('nf-t2', 60)] },
+      ],
+    });
+    const { runId: nr, accessCode: nc } = await creator.call('launchRun', { gameId: nf });
+
+    // Alpha joins and is started; Bravo joins AFTER startTeams → never started
+    // (no startedAt) — the exact playtest condition.
+    const alpha = makeParty('nfAlpha');
+    await signInAnonymously(alpha.auth);
+    await alpha.call('joinRun', { code: nc, displayName: 'Alpha' });
+    await creator.call('startTeams', { gameId: nf, runId: nr });
+
+    const bravo = makeParty('nfBravo');
+    await signInAnonymously(bravo.auth);
+    await bravo.call('joinRun', { code: nc, displayName: 'Bravo' });
+
+    // A scoring event populates the board while Bravo sits unstarted.
+    await alpha.call('completeTask', { taskId: 'nf-t1', code: nc });
+
+    const board = await creator.call('refreshLeaderboard', { gameId: nf, runId: nr, publish: true });
+    check('refreshLeaderboard resolves with an unstarted team in the run',
+      Array.isArray(board?.rankings) && board.rankings.length === 2, JSON.stringify(board?.rankings?.length));
+    assertAllFinite('refreshLeaderboard', board);
+
+    // Both teams poll state; the published board is embedded in each response.
+    const alphaState = await alpha.call('getMyTeamState', { code: nc });
+    assertAllFinite('getMyTeamState(started)', alphaState);
+    const bravoState = await bravo.call('getMyTeamState', { code: nc });
+    check('getMyTeamState resolves for the unstarted team', bravoState?.team?.displayName === 'Bravo');
+    assertAllFinite('getMyTeamState(unstarted)', bravoState);
+
+    // Finalizing with an unstarted team present must also stay finite.
+    const finalBoard = await creator.call('finalizeRun', { gameId: nf, runId: nr });
+    assertAllFinite('finalizeRun', finalBoard);
+  });
+
   // ═══ Station contention (concurrency) ═══════════════════════════════════════
   // Three teams finish a warmup task SIMULTANEOUSLY, forcing three concurrent
   // assignTask calls to race for a stage of two cap-1 stations. The station cap
@@ -2999,6 +3567,123 @@ async function main() {
     check('double-submit: task scored exactly once (team.score == its earnedScore)',
       dstate?.team?.score === drec?.earnedScore && (drec?.earnedScore ?? 0) > 0,
       `score=${dstate?.team?.score} earned=${drec?.earnedScore}`);
+  });
+
+  // ═══ Same-team assignment race (fix-station-slot-same-team-race) ═════════════
+  // Two concurrent requestNextTask calls for the SAME team on a multi-task stage
+  // race to claim a station slot. The old code read the team, then wrote the
+  // assignment non-atomically, so both could reserve DIFFERENT slots and the
+  // second write would win — leaving one reserved slot with no team on it (a
+  // permanent station-capacity leak the different-team contention test can't see).
+  // The team must end holding exactly one task, and the total reserved across the
+  // stage's candidate stations must be exactly 1 (no leak). Rate-limiting one of
+  // the two calls doesn't invalidate the invariant — it must hold either way.
+  await scenario('same-team assignment race leaks no station slot', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: sg } = await creator.call('createGame', { title: 'Same-Team Race', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'st-multi', order: 0, title: 'Two stations, pick one', isFinal: true, requiredTaskCount: 1, tasks: [
+          { id: 'st-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3 },
+          { id: 'st-b', title: 'Station B', type: 'field', coordinates: { lat: 31.79, lng: 35.22 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 3 },
+        ] },
+      ],
+    });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sg });
+    const solo = makeParty('sameTeamRacer');
+    await signInAnonymously(solo.auth);
+    await solo.call('joinRun', { code: sc, displayName: 'Racer' });
+    await creator.call('startTeams', { gameId: sg, runId: sr });
+
+    // Fire the initial assignment TWICE at once for the one team.
+    const CS = { ownerUid: OWNER, gameId: sg, runId: sr, code: sc, lat: 31.78, lng: 35.21 };
+    await Promise.allSettled([
+      solo.call('requestNextTask', CS),
+      solo.call('requestNextTask', CS),
+    ]);
+
+    const runDoc = await creator.getDocAt(`users/${OWNER}/games/${sg}/runs/${sr}`);
+    const counts = runDoc.data?.taskCounts ?? {};
+    const reserved = (counts['st-a'] ?? 0) + (counts['st-b'] ?? 0);
+    const state = await solo.call('getMyTeamState', { code: sc });
+    const active = state?.team?.activeTaskId;
+    check('same-team race: team holds exactly one task', !!active, JSON.stringify(active));
+    check('same-team race: exactly one slot reserved (no leaked station slot)',
+      reserved === 1, JSON.stringify(counts));
+    check('same-team race: the reserved slot matches the held task',
+      (counts[active] ?? 0) === 1, `active=${active} counts=${JSON.stringify(counts)}`);
+  });
+
+  // ═══ Lost-response retry leaks no station slot (bug-hunt-2026-07-10) ═════════
+  // The play-web callable wrapper now retries a callable up to 3× on a transient/
+  // timeout code (the client can't tell "the server never got it" from "the
+  // response never got back") — so a SEQUENTIAL duplicate call (await the first
+  // call fully, THEN call again with identical args) must model a genuine
+  // lost-response retry, distinct from the true-concurrency race above. Covers
+  // both requestNextTask (assign path) and completeTask (release+reassign path)
+  // at a CAPPED (maxConcurrentTeams=1) station so a leak is visible immediately.
+  await scenario('lost-response retry leaks no station slot', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: rg } = await creator.call('createGame', { title: 'Retry Safety', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: rg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'rt-multi', order: 0, title: 'Two capped stations', requiredTaskCount: 1, tasks: [
+          { id: 'rt-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+          { id: 'rt-b', title: 'Station B', type: 'field', coordinates: { lat: 31.79, lng: 35.22 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+        ] },
+        { id: 'rt-final', order: 1, isFinal: true, tasks: [
+          { id: 'rt-c', title: 'Finish', type: 'field', coordinates: { lat: 31.80, lng: 35.23 },
+            difficulty: 1, estimatedMinutes: 5, pointValue: 10 },
+        ] },
+      ],
+    });
+    const { runId: rr, accessCode: rc } = await creator.call('launchRun', { gameId: rg });
+    const retrier = makeParty('retryTeam');
+    await signInAnonymously(retrier.auth);
+    await retrier.call('joinRun', { code: rc, displayName: 'Retrier' });
+    await creator.call('startTeams', { gameId: rg, runId: rr });
+
+    const RC = { ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 };
+
+    // 1) Assign path: call requestNextTask, await it fully, then call it AGAIN
+    //    with identical args — the in-flight guard should make this a no-op.
+    const first = await retrier.call('requestNextTask', RC);
+    const retry1 = await retrier.call('requestNextTask', RC);
+    check('retry requestNextTask returns the SAME task (no re-assignment)',
+      first?.taskId && first.taskId === retry1?.taskId, JSON.stringify({ first, retry1 }));
+
+    let runDoc = await creator.getDocAt(`users/${OWNER}/games/${rg}/runs/${rr}`);
+    let counts = runDoc.data?.taskCounts ?? {};
+    check('retry requestNextTask: capped station counter still exactly 1 (no leak)',
+      (counts[first.taskId] ?? 0) === 1, JSON.stringify(counts));
+
+    // 2) Release+reassign path: complete the held task, await it fully, then call
+    //    completeTask AGAIN with identical args (as a client would after a lost
+    //    response) — the already-completed guard should make this a pure no-op:
+    //    no second release, no second (extra) assignment.
+    const cDone = await retrier.call('completeTask', { taskId: first.taskId, ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 });
+    const cRetry = await retrier.call('completeTask', { taskId: first.taskId, ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 });
+    check('retry completeTask: duplicate call is a no-op (no nextTaskId)',
+      cRetry?.nextTaskId == null, JSON.stringify({ cDone, cRetry }));
+
+    runDoc = await creator.getDocAt(`users/${OWNER}/games/${rg}/runs/${rr}`);
+    counts = runDoc.data?.taskCounts ?? {};
+    check('retry completeTask: completed station released back to 0 (no negative leak either)',
+      (counts[first.taskId] ?? 0) === 0, JSON.stringify(counts));
+    const otherStationId = first.taskId === 'rt-a' ? 'rt-b' : 'rt-a';
+    check('retry completeTask: the OTHER capped station was never touched',
+      (counts[otherStationId] ?? 0) === 0, JSON.stringify(counts));
+
+    const state = await retrier.call('getMyTeamState', { code: rc });
+    check('retry completeTask: team advanced to the next task exactly once',
+      cDone?.nextTaskId != null && state?.team?.activeTaskId === cDone.nextTaskId,
+      JSON.stringify({ cDoneNext: cDone?.nextTaskId, active: state?.team?.activeTaskId }));
   });
 
   // ═══ Team ↔ HQ chat (team-hq-chat) ══════════════════════════════════════════
@@ -3407,6 +4092,33 @@ async function main() {
     const inc = await creator.call('incrementTaskCopyCount', { publicTaskId: `${cvGame}_cv-a` });
     check('incrementTaskCopyCount bumps a published task', inc?.ok === true);
 
+    // C2 (consistency sweep): editing a PUBLISHED game must re-sync the gallery
+    // summary doc (stageCount/taskCount) WITHOUT a republish, so the public card
+    // can't disagree with the live Dashboard. playCount (a live counter) and the
+    // publicTasks copyCount must NOT be clobbered by the re-sync.
+    const pubBefore = await creator.getDocAt(`publicGames/${cvGame}`);
+    const playCountBefore = pubBefore.data?.playCount ?? 0;
+    await creator.call('updateGame', { gameId: cvGame, stages: [
+      { id: 'cv-s', order: 0, title: 'S', isFinal: false, requiredTaskCount: 1, tasks: [
+        { id: 'cv-a', title: 'A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3 } ] },
+      { id: 'cv-s2', order: 1, title: 'S2', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'cv-b', title: 'B', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 20, maxConcurrentTeams: 3 } ] },
+    ] });
+    // The resync is deliberately fire-and-forget in updateGame (best-effort, no
+    // await) — poll briefly instead of a single racy read. The contract under
+    // test is "the gallery card converges quickly", not "synchronously".
+    let pubAfter = await creator.getDocAt(`publicGames/${cvGame}`);
+    for (let i = 0; i < 10 && !(pubAfter.data?.stageCount === 2 && pubAfter.data?.taskCount === 2); i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      pubAfter = await creator.getDocAt(`publicGames/${cvGame}`);
+    }
+    check('editing a published game re-syncs gallery counts (no republish)',
+      pubAfter.data?.stageCount === 2 && pubAfter.data?.taskCount === 2,
+      JSON.stringify({ stageCount: pubAfter.data?.stageCount, taskCount: pubAfter.data?.taskCount }));
+    check('gallery re-sync preserves the live playCount counter',
+      (pubAfter.data?.playCount ?? 0) === playCountBefore,
+      JSON.stringify({ before: playCountBefore, after: pubAfter.data?.playCount }));
+
     // Account self-service on a throwaway identity (deleteMyAccount is terminal).
     const acct = makeParty('coverageAcct');
     await signInAnonymously(acct.auth);
@@ -3447,6 +4159,7 @@ async function main() {
   });
 
   printSummary();
+  if (transientRetries > 0) console.log(`\n⚠ transient internal/unavailable retries absorbed: ${transientRetries}`);
   console.log(`\n${failures === 0 ? '✅ ALL PASS' : `❌ ${failures} FAILURE(S)`}`);
   process.exit(failures === 0 ? 0 : 1);
 }

@@ -8,14 +8,15 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
 function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
-import { completeTaskForTeam, resolveCallerTeam } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot } from './runs/index';
+import { releaseTask } from './routing/assignNextTask';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
@@ -31,7 +32,7 @@ export {
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
-  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunHeatmap,
+  refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState, listLiveRuns, getMyProfile,
@@ -49,10 +50,7 @@ export {
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────
 
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  return context.auth.uid;
-}
+import { requireAuth } from './auth';
 
 function assertAdmin(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
@@ -196,16 +194,31 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   // Brute-force throttle (row 40): too many failed PIN attempts within the
   // cooldown window locks this caller out of THIS run — even with a correct PIN.
   const attemptsRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffAttempts/${uid}`);
+  // Run-wide throttle: per-uid alone is bypassable by minting a fresh anonymous
+  // identity per guess (trivial client-side, no server control), which would
+  // otherwise let an attacker brute-force the 6-digit PIN space with no real
+  // limit. A SECOND counter keyed on the run itself (not the caller) catches
+  // that — deliberately a higher threshold so a few different legit staff
+  // mistyping a PIN in quick succession never trips it.
+  const runAttemptsRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffAttempts/_run`);
   const nowMs = Date.now();
-  const aSnap = await attemptsRef.get();
+  const [aSnap, runSnap] = await Promise.all([attemptsRef.get(), runAttemptsRef.get()]);
   const a = (aSnap.exists ? aSnap.data() : {}) as { count?: number; lastFailedAtMs?: number };
   const prevCount = a.count ?? 0;
   const lastFailedAt = a.lastFailedAtMs ?? 0;
+  const r = (runSnap.exists ? runSnap.data() : {}) as { count?: number; lastFailedAtMs?: number };
+  const prevRunCount = r.count ?? 0;
+  const lastRunFailedAt = r.lastFailedAtMs ?? 0;
+
   if (shouldLockout(prevCount) && isWithinCooldown(lastFailedAt, nowMs)) {
     throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.');
   }
+  if (shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS)) {
+    throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts for this run. Try again later.');
+  }
   // Cooldown expired → forgive prior failures.
   const baseCount = shouldLockout(prevCount) && !isWithinCooldown(lastFailedAt, nowMs) ? 0 : prevCount;
+  const baseRunCount = shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && !isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS) ? 0 : prevRunCount;
 
   const inviteSnap = await db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
@@ -215,7 +228,10 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     .get();
 
   if (inviteSnap.empty) {
-    await attemptsRef.set({ count: baseCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true });
+    await Promise.all([
+      attemptsRef.set({ count: baseCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true }),
+      runAttemptsRef.set({ count: baseRunCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true }),
+    ]);
     throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
   }
 
@@ -885,7 +901,14 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
 
   // autoApprove: the submission is logged but does not block progression.
   if (autoApprove) {
-    await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    const completed = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    // Release the completed task's own station slot (completeTaskForTeam only
+    // releases auto-skipped siblings — every caller releases its own task, like
+    // completeTask/submitTaskAnswer). Guarded on `completed` so an idempotent
+    // duplicate submission doesn't over-release. Without this a capped photo
+    // station leaks a slot on every completion (caught by the run-audit "no
+    // leaked station slots" oracle).
+    if (completed) await releaseTask(taskId, ownerUid, gameId, runId);
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
     // audio-tasks non-goal: audio submissions never enter the photo feed.
@@ -918,6 +941,16 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  // Existence guard: unlike submitStationPhoto (which resolves the caller's OWN
+  // team server-side and so is guaranteed to exist), this teamId is staff-
+  // supplied. Without this check a typo'd/stale teamId would `.set({merge})` a
+  // brand-new, malformed team doc into existence (only a `taskSubmissions` field,
+  // missing displayName/score/stages/…) — a phantom team that then corrupts
+  // listRunTeams / the leaderboard for the rest of the run. Fail loud instead.
+  const teamSnap = await teamRef.get();
+  if (!teamSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Team not found');
+  }
   // merge:true deep-merges this into the existing submission, preserving
   // photoUrl/submittedAt while updating the review subfields.
   await teamRef.set(
@@ -936,7 +969,10 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 
   // Approved photo = task complete → score it + advance the team.
   if (approved) {
-    await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+    const completed = await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+    // Release the completed task's own station slot (see submitStationPhoto note):
+    // a staff-approved photo must free its capped slot too, or it leaks.
+    if (completed) await releaseTask(taskId, ownerUid, gameId, runId);
 
     // Live photo feed (live-photo-feed): broadcast the approved photo. This path
     // adds a game-doc read (staff review, not a hot path) for the task title +
@@ -992,8 +1028,12 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
     reason?: string;
   };
 
-  if (typeof delta !== 'number') {
-    throw new functions.https.HttpsError('invalid-argument', 'delta must be a number');
+  // `typeof NaN === 'number'` and `typeof Infinity === 'number'`, so a bare type
+  // check lets a non-finite delta through → it would write a non-finite
+  // bonusPenalty that bricks refreshLeaderboard/finalizeRun (parseRunTeam rejects
+  // it) and poisons run.leaderboard. Require a finite number (nightly hardening).
+  if (typeof delta !== 'number' || !Number.isFinite(delta)) {
+    throw new functions.https.HttpsError('invalid-argument', 'delta must be a finite number');
   }
 
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
@@ -1045,6 +1085,10 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   } catch (e) {
     functions.logger.warn('adjustTeamScore score-notice write failed', { ownerUid, gameId, runId, teamId, err: String(e) });
   }
+
+  // The operator expects the adjustment on the board NOW — forced (unthrottled)
+  // refresh; still skipped for a frozen board and best-effort like the notice.
+  await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId, { force: true });
 
   return { ok: true, newBonusPenalty: newPenalty };
 });

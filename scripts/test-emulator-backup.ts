@@ -5,6 +5,8 @@ import {
   snapshotName,
   selectSnapshotsToPrune,
   selectRestoreTarget,
+  isEmulatorReady,
+  canAttemptExport,
 } from './lib/emulatorBackup.mjs';
 
 let passed = 0;
@@ -43,6 +45,20 @@ ok(selectRestoreTarget([{ name: 'backup-3', valid: false }, { name: 'backup-2', 
 ok(selectRestoreTarget([]) === null, 'empty → null');
 ok(selectRestoreTarget([{ name: 'backup-1', valid: false }]) === null, 'all invalid → null');
 ok(selectRestoreTarget(undefined as never) === null, 'undefined → null');
+
+// ── isEmulatorReady ──────────────────────────────────────────────────────────
+ok(isEmulatorReady(null) === false, 'null hub → not ready');
+ok(isEmulatorReady(undefined as never) === false, 'undefined hub → not ready');
+ok(isEmulatorReady({}) === false, 'empty hub map → not ready');
+ok(isEmulatorReady({ firestore: {} }) === false, 'firestore only → not ready (functions still loading)');
+ok(isEmulatorReady({ functions: {} }) === false, 'functions only → not ready');
+ok(isEmulatorReady({ firestore: {}, functions: {}, auth: {} }) === true, 'firestore + functions present → ready');
+
+// ── canAttemptExport ─────────────────────────────────────────────────────────
+ok(canAttemptExport({ ready: false, lastTs: null, nowTs: 1000, intervalMs: 500 }) === false, 'not ready → no export even when due');
+ok(canAttemptExport({ ready: true, lastTs: null, nowTs: 1000, intervalMs: 500 }) === true, 'ready + never snapshotted → export');
+ok(canAttemptExport({ ready: true, lastTs: 1000, nowTs: 1400, intervalMs: 500 }) === false, 'ready but within interval → no export');
+ok(canAttemptExport({ ready: true, lastTs: 1000, nowTs: 1500, intervalMs: 500 }) === true, 'ready + interval elapsed → export');
 
 console.log(failed === 0
   ? `\n✅ ALL EMULATOR-BACKUP TESTS PASSED (${passed})`

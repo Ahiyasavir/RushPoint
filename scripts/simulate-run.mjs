@@ -23,6 +23,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
+import { auditRun } from './lib/run-audit.mjs';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
 const TEAMS = Math.max(2, Number((process.argv.find((a) => a.startsWith('--teams=')) ?? '').split('=')[1] || 12));
@@ -208,39 +209,9 @@ async function main() {
   console.log(`avg turns/team: ${avgTurns}`);
 
   // ── Consistency audit ────────────────────────────────────────────────────────
-  // Score conservation per team.
+  // Shared oracle (scripts/lib/run-audit.mjs) — the same checks the browser sim runs.
   const states = await pMap(teams, (p) => p.call('getMyTeamState', { code: accessCode }));
-  const broken = states.filter((st) => {
-    const tasks = (st?.team?.stages ?? []).flatMap((s) => s.tasks ?? []);
-    return tasks.reduce((a, t) => a + (t.earnedScore ?? 0), 0) !== st?.team?.score;
-  });
-  audit('score conservation holds for every team', broken.length === 0,
-    broken.map((st) => st?.team?.displayName).join(',') || `${TEAMS} teams checked`);
-
-  const teamIds = states.map((s) => s?.team?.id);
-
-  const oracle = (label, rankings) => {
-    const ids = (rankings ?? []).map((r) => r.teamId);
-    audit(`${label}: one entry per team`, ids.length === TEAMS && new Set(ids).size === TEAMS && teamIds.every((id) => ids.includes(id)), `${ids.length} entries`);
-    audit(`${label}: contiguous ranks from 1`, (rankings ?? []).every((r, i) => r.rank === i + 1));
-    audit(`${label}: finite scores`, (rankings ?? []).every((r) => Number.isFinite(r.score)));
-    audit(`${label}: non-increasing scores`, (rankings ?? []).every((r, i) => i === 0 || rankings[i - 1].score >= r.score));
-  };
-
-  const live = await creator.call('refreshLeaderboard', { gameId, runId, publish: false });
-  oracle('live board', live?.rankings);
-  const fin = await creator.call('finalizeRun', { gameId, runId });
-  oracle('final board', fin?.rankings);
-  audit('live/final ordering parity (no drift)',
-    JSON.stringify((live?.rankings ?? []).map((r) => r.teamId)) === JSON.stringify((fin?.rankings ?? []).map((r) => r.teamId)));
-
-  // Station slots: every assignment was released → all counters back to 0.
-  const runDoc = await creator.getDocAt(`users/${ownerUid}/games/${gameId}/runs/${runId}`);
-  const counts = runDoc.data?.taskCounts ?? {};
-  const leaked = Object.entries(counts).filter(([, v]) => v !== 0);
-  audit('no leaked station slots (all taskCounts back to 0)', leaked.length === 0, JSON.stringify(counts));
-  const negative = Object.entries(counts).filter(([, v]) => v < 0);
-  audit('no negative station counters', negative.length === 0, JSON.stringify(negative));
+  await auditRun({ creator, ownerUid, gameId, runId, states, audit });
 
   // ── Latency table ────────────────────────────────────────────────────────────
   const rows = [...latencySamples.entries()]

@@ -1,28 +1,32 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
-import type { Run, HotZone, RunFeedback, RunFeedbackSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
+import type { Run, HotZone, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
+import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, type ChatMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
-  getRunAnalytics, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
+  getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
   sendTeamChatMessage,
   type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult, type SurveyResultRow,
 } from '../services/calls';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { toast } from '../components/toast';
+import { playAlert, unlockAudio } from '../lib/sound';
 import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
 import HeatmapMap from '../components/HeatmapMap';
+import LocationStep from '../components/LocationStep';
+import { isValidCoord } from '@rushpoint/shared';
 
 // Where the participant app lives (for the shareable join link/QR).
 const PLAY_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
 export default function RunConsolePage() {
@@ -44,6 +48,12 @@ export default function RunConsolePage() {
   }, [gameId, runId, ownerUid]);
 
   // Live unacknowledged SOS / alerts (owner reads its own run's alerts).
+  // Safety path: when a NEW alert arrives the organizer gets an audible cue + a
+  // document.title flash so a raised SOS never sits silent on a busy console.
+  // Ref-baseline the seen ids (null until the first snapshot) so a fresh mount
+  // doesn't replay existing alerts. Mirrors the StaffConsole cue.
+  const seenAlertIds = useRef<Set<string> | null>(null);
+  const baseTitle = useRef<string>(document.title);
   useEffect(() => {
     if (!gameId || !runId) return;
     const ref = query(
@@ -56,9 +66,28 @@ export default function RunConsolePage() {
         return { id: d.id, teamId: a.teamId ?? '', type: a.type ?? 'sos', message: a.message ?? '', lat: a.lat ?? null, lng: a.lng ?? null, createdAt: a.createdAt ?? '' };
       });
       rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const ids = new Set(rows.map((r) => r.id));
+      if (seenAlertIds.current === null) {
+        seenAlertIds.current = ids; // baseline: don't cue on first paint
+      } else if (rows.some((r) => !seenAlertIds.current!.has(r.id))) {
+        playAlert();
+      }
+      seenAlertIds.current = ids;
       setAlerts(rows);
     }, () => undefined);
   }, [gameId, runId, ownerUid]);
+
+  // Flash the browser-tab title while any alert is unacknowledged so the
+  // organizer notices even on another tab; restore it when all are cleared.
+  useEffect(() => {
+    if (alerts.length === 0) { document.title = baseTitle.current; return; }
+    const id = setInterval(() => {
+      document.title = document.title === baseTitle.current
+        ? t.runConsole.newAlertTitleFlash({ n: alerts.length })
+        : baseTitle.current;
+    }, 1000);
+    return () => { clearInterval(id); document.title = baseTitle.current; };
+  }, [alerts.length, t]);
 
   const loadTeams = useCallback(async () => {
     if (!gameId || !runId) return;
@@ -72,24 +101,47 @@ export default function RunConsolePage() {
     return () => clearInterval(id);
   }, [loadTeams]);
 
+  // Keep the leaderboard snapshot fresh mid-run so the teams table + live
+  // standings panel (both read the snapshot, the SAME source the TV/public board
+  // uses) don't look "stuck" between manual refreshes. Skips a finished run and a
+  // frozen board (the freeze feature must win — refreshLeaderboard recomputes even
+  // when frozen, so we simply don't call it while frozen). No busy flag: this must
+  // not disable the action buttons every interval.
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    if (run?.status === 'finished' || run?.leaderboard?.frozen) return;
+    const id = setInterval(() => {
+      refreshLeaderboard({ ownerUid, gameId, runId }).catch(() => undefined);
+    }, 15000);
+    return () => clearInterval(id);
+  }, [gameId, runId, ownerUid, run?.status, run?.leaderboard?.frozen]);
+
   const ctx = { ownerUid, gameId: gameId!, runId: runId! };
 
   async function startAll() {
+    // Unlock audio on this user gesture so the SOS cue can play later (autoplay).
+    unlockAudio();
     setBusy(true);
-    try { await startTeams({ gameId: gameId!, runId: runId! }); await loadTeams(); }
+    try { await startTeams({ gameId: gameId!, runId: runId! }); await loadTeams(); toast.success(t.runConsole.startedAllTeams); }
+    catch { await dialog.alert(t.runConsole.startFailed); }
     finally { setBusy(false); }
   }
   async function finalize() {
-    if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle))) return;
+    if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle, true))) return;
     setBusy(true);
-    try { await finalizeRun({ gameId: gameId!, runId: runId! }); }
+    try { await finalizeRun({ gameId: gameId!, runId: runId! }); toast.success(t.runConsole.finalizedRun); }
+    catch { await dialog.alert(t.runConsole.finalizeFailed); }
     finally { setBusy(false); }
   }
   async function invite() {
+    // A click gesture — also unlock audio for the SOS cue.
+    unlockAudio();
     const name = await dialog.prompt(t.runConsole.staffNamePrompt);
     if (!name) return;
-    const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
-    setStaffPin(pin);
+    try {
+      const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
+      setStaffPin(pin);
+    } catch { await dialog.alert(t.runConsole.staffInviteFailed); }
   }
   async function refreshStandings(publish?: boolean) {
     setBusy(true);
@@ -99,10 +151,25 @@ export default function RunConsolePage() {
   async function ack(alertId: string) {
     try { await acknowledgeAlert({ ...ctx, alertId }); } catch { /* listener will reflect state */ }
   }
+  // Sharing a board/TV link implies the audience should see standings — publish
+  // on share so the projection screen never sits on "not yet available".
+  async function ensureBoardPublished() {
+    if (run?.leaderboard?.published) return;
+    try { await refreshLeaderboard({ ...ctx, publish: true }); } catch { /* board stays hidden; toggle still works */ }
+  }
 
   if (!run) return <Spinner label={t.runConsole.loadingRun} />;
 
   const finished = run.status === 'finished';
+
+  // Single source of truth for the number we show organizers: the ranked score
+  // from the (auto-refreshed) leaderboard snapshot — the SAME value the live
+  // standings panel, the TV screen, and the public board render. The teams
+  // table joins each row to its ranking entry by teamId so it can never show a
+  // different number than the panel right below it.
+  const rankedScoreById = new Map<string, number>(
+    (run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]),
+  );
 
   return (
     <div className="space-y-5">
@@ -111,7 +178,11 @@ export default function RunConsolePage() {
         <div>
           <h1 className="text-2xl font-bold">{t.runConsole.liveRun}</h1>
           <div className="flex items-center gap-2 mt-1">
-            <Badge color={finished ? 'zinc' : 'green'}>{run.status}</Badge>
+            <Badge color={finished ? 'zinc' : 'green'}>
+              {run.status === 'draft' ? t.runConsole.statusDraft
+                : run.status === 'finished' ? t.runConsole.statusFinished
+                : t.runConsole.statusLive}
+            </Badge>
             {run.billingType && (
               <Badge color={run.billingType === 'test' ? 'gold' : run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
                 {run.billingType === 'test' ? t.runConsole.testRun
@@ -126,7 +197,7 @@ export default function RunConsolePage() {
           </div>
         </div>
         <div className="flex flex-col items-stretch gap-2">
-          <JoinShare accessCode={run.accessCode} />
+          <JoinShare accessCode={run.accessCode} onShareBoard={ensureBoardPublished} />
           <StationQrPrint gameId={gameId!} />
         </div>
       </div>
@@ -138,7 +209,7 @@ export default function RunConsolePage() {
           <div className="space-y-2">
             {alerts.map((a) => (
               <div key={a.id} className="flex items-center gap-3 text-sm">
-                <span className="uppercase text-neon-red font-medium">{a.type}</span>
+                <span className="uppercase text-neon-red font-medium">{t.runConsole.alertType(a.type)}</span>
                 <span className="text-zinc-500 text-xs">{t.runConsole.team({ id: a.teamId.slice(0, 8) })}</span>
                 {a.message && <span className="text-zinc-300 flex-1 truncate">{a.message}</span>}
                 {a.lat != null && a.lng != null && (
@@ -158,18 +229,14 @@ export default function RunConsolePage() {
         <Button variant="ghost" onClick={invite}>{t.runConsole.inviteStaffPin}</Button>
         <Button variant="danger" disabled={busy || finished} onClick={finalize}>{t.runConsole.finalizeRun}</Button>
       </div>
-      {staffPin && (
-        <Card className="p-3 text-sm">
-          {t.runConsole.staffPinLabel} <span className="font-mono text-neon-green text-lg tracking-widest">{staffPin}</span>
-          <span className="text-zinc-500"> {t.runConsole.staffPinShareNote}</span>
-        </Card>
-      )}
+      {staffPin && <StaffInviteCard ctx={ctx} pin={staffPin} />}
 
       {/* Live-ops + post-run organizer tools (deferred-UI wiring) */}
       <div className="grid md:grid-cols-2 gap-5">
         {!finished && <HotZonePanel ctx={ctx} hotZone={run.hotZone ?? null} />}
-        <PostRunLinks accessCode={run.accessCode} finished={finished} />
+        <PostRunLinks accessCode={run.accessCode} finished={finished} onShareBoard={ensureBoardPublished} />
       </div>
+      {finished && <RunSummaryPanel accessCode={run.accessCode} />}
       {finished && <AnalyticsPanel accessCode={run.accessCode} />}
       {finished && <HeatmapPanel accessCode={run.accessCode} />}
       {finished && <FeedbackPanel gameId={gameId} runId={runId} />}
@@ -189,13 +256,28 @@ export default function RunConsolePage() {
                     <div className="flex-1">
                       <div className="text-sm text-zinc-200">{team.displayName}</div>
                       <div className="text-[11px] text-zinc-500">
-                        {team.finished ? 'finished' : team.launched ? `stage ${(team.activeStageOrder ?? 0) + 1}` : 'waiting'}
+                        {team.finished
+                          ? t.runConsole.teamStatusFinished
+                          : !team.launched
+                            ? t.runConsole.teamStatusWaiting
+                            : team.activeStageOrder != null
+                              ? t.runConsole.teamStageLabel({ n: team.activeStageOrder + 1 })
+                              : t.runConsole.teamStatusBetween}
                         {' · '}{t.runConsole.stageDone({ n: team.completedStages })}
                       </div>
                     </div>
-                    <div className="text-neon-green font-mono font-semibold">{team.score}</div>
+                    {/* Ranked score from the leaderboard snapshot — identical to
+                        the live-standings panel + TV. Falls back to the raw earned
+                        tally only until the first snapshot exists for this run. */}
+                    <div className="text-neon-green font-mono font-semibold">
+                      {rankedScoreById.get(team.id) ?? team.score}
+                    </div>
                     <button className="text-[11px] text-zinc-400 hover:text-zinc-200"
-                      onClick={async () => { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }}>
+                      onClick={async () => {
+                        if (!(await dialog.confirm(t.runConsole.skipConfirm, undefined, true))) return;
+                        try { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }
+                        catch { await dialog.alert(t.runConsole.skipFailed); }
+                      }}>
                       {t.runConsole.skip}
                     </button>
                     <button className="text-[11px] text-zinc-400 hover:text-neon-red"
@@ -243,11 +325,12 @@ export default function RunConsolePage() {
                   disabled={busy}
                   onClick={() => refreshStandings(!run.leaderboard!.published)}
                 >
-                  {run.leaderboard.published ? 'Visible to teams ✓' : 'Hidden from teams'}
+                  {run.leaderboard.published ? t.runConsole.standingsVisibleToTeams : t.runConsole.standingsHiddenFromTeams}
                 </button>
               </div>
+              {/* Show ALL teams — at 20 teams a slice(0,12) hid ranks 13-20 mid-run. */}
               <div className="space-y-1">
-                {run.leaderboard.rankings.slice(0, 12).map((r) => (
+                {run.leaderboard.rankings.map((r) => (
                   <div key={r.teamId} className="flex items-center gap-3 text-sm">
                     <span className="w-6 text-zinc-500">{r.rank}</span>
                     <span className="flex-1 text-zinc-200">{r.teamName}</span>
@@ -289,7 +372,7 @@ export default function RunConsolePage() {
 
 // Access code + shareable join link + QR — participants scan to land in the app
 // with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
-function JoinShare({ accessCode }: { accessCode: string }) {
+function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBoard?: () => Promise<void> }) {
   const t = useT();
   const link = `${PLAY_URL}/?code=${accessCode}`;
   const boardLink = `${PLAY_URL}/?board=${accessCode}`;
@@ -299,7 +382,10 @@ function JoinShare({ accessCode }: { accessCode: string }) {
     QRCode.toDataURL(link, { margin: 1, width: 200 }).then(setQr).catch(() => setQr(''));
   }, [link]);
   async function copy(url: string, which: string) {
+    // Copy synchronously with the click (clipboard needs the user gesture),
+    // THEN publish the board for audience-facing links.
     try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { /* no clipboard */ }
+    if (which !== 'join') await onShareBoard?.();
   }
   return (
     <Card className="px-5 py-4 text-center">
@@ -308,16 +394,57 @@ function JoinShare({ accessCode }: { accessCode: string }) {
       {qr && <img src={qr} alt={t.runConsole.joinQrCode} className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
       <div className="mt-2 flex flex-col gap-1">
         <button className="text-xs text-neon-green hover:underline" onClick={() => copy(link, 'join')}>
-          {copied === 'join' ? 'Link copied ✓' : 'Copy join link'}
+          {copied === 'join' ? t.runConsole.linkCopied : t.runConsole.copyJoinLink}
         </button>
         <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(boardLink, 'board')}>
-          {copied === 'board' ? 'Link copied ✓' : '🏆 Copy public leaderboard link'}
+          {copied === 'board' ? t.runConsole.linkCopied : t.runConsole.copyBoardLink}
         </button>
         {/* Ceremony mode (ceremony-mode): the same board link with &ceremony plays
             the awards finale (slideshow → podium reveal → standings). */}
         <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(`${boardLink}&ceremony`, 'ceremony')}>
           {copied === 'ceremony' ? t.runConsole.linkCopied : t.runConsole.ceremonyLinkLabel}
         </button>
+      </div>
+      {/* Temporary per-run phone ceiling (run-device-cap). Reads the SAME shared
+          constant the server enforces, so the number is always correct; hides
+          itself automatically once the cap is raised to Infinity (removed). */}
+      {isRunDeviceCapActive() && (
+        <p dir="auto" className="mt-3 pt-3 border-t border-zinc-800 text-[11px] leading-relaxed text-amber-300/80 flex items-start gap-1.5">
+          <span aria-hidden="true">⚠️</span>
+          <span>{t.runConsole.deviceCapNote({ max: MAX_RUN_DEVICES })}</span>
+        </p>
+      )}
+    </Card>
+  );
+}
+
+// Staff onboarding card — instead of hand-typing three Firebase IDs + the PIN,
+// the organizer shares a link/QR that lands staff in the play app's staff sign-in
+// with owner/game/run pre-filled (StaffSignIn reads ?owner/?game/?run). The PIN is
+// deliberately NOT in the link (it's a secret + play-web doesn't read it from the
+// URL) — staff read it off this card and type it once.
+function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string; runId: string }; pin: string }) {
+  const t = useT();
+  const link = `${PLAY_URL}/?staff&owner=${ctx.ownerUid}&game=${ctx.gameId}&run=${ctx.runId}`;
+  const [qr, setQr] = useState('');
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    QRCode.toDataURL(link, { margin: 1, width: 160 }).then(setQr).catch(() => setQr(''));
+  }, [link]);
+  async function copy() {
+    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
+  }
+  return (
+    <Card className="p-4 text-sm flex flex-wrap items-center gap-4">
+      {qr && <img src={qr} alt={t.runConsole.staffLinkQrAlt} className="rounded-lg bg-white p-1.5 w-28 h-28 shrink-0" />}
+      <div className="flex-1 min-w-[12rem] space-y-1.5">
+        <div>
+          {t.runConsole.staffPinLabel} <span className="font-mono text-neon-green text-lg tracking-widest">{pin}</span>
+        </div>
+        <button className="text-xs text-neon-green hover:underline" onClick={copy}>
+          {copied ? t.runConsole.linkCopied : t.runConsole.staffLinkCopy}
+        </button>
+        <div className="text-zinc-500 text-xs leading-relaxed">{t.runConsole.staffLinkNote}</div>
       </div>
     </Card>
   );
@@ -412,13 +539,14 @@ function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; ru
     try {
       await pushAnnouncement({ ...ctx, message: msg, ...(teamTarget ? { teamId: teamTarget } : {}) });
       setMsg('');
+      toast.success(t.runConsole.announcementSent);
     }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyMsg(false); }
   }
   async function sendFlash() {
     setBusyFlash(true);
-    try { await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: 600 }); setFlash(''); }
+    try { await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: 600 }); setFlash(''); toast.success(t.runConsole.flashSent); }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyFlash(false); }
   }
@@ -460,8 +588,8 @@ function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; ru
 // ── Hot Zone activate panel (hot-zone-bonus) ──────────────────────────────────
 function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: string; runId: string }; hotZone: HotZone | null }) {
   const t = useT();
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
+  const [lat, setLat] = useState(0);
+  const [lng, setLng] = useState(0);
   const [radius, setRadius] = useState(200);
   const [mult, setMult] = useState(2);
   const [minutes, setMinutes] = useState(10);
@@ -469,19 +597,12 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
 
   const active = !!hotZone && hotZoneMultiplier(hotZone, hotZone.center, Date.now()) > 1;
 
-  function useMyLocation() {
-    navigator.geolocation?.getCurrentPosition(
-      (p) => { setLat(p.coords.latitude.toFixed(5)); setLng(p.coords.longitude.toFixed(5)); },
-      () => dialog.alert(t.runConsole.hotZoneNeedsCenter),
-    );
-  }
-
   async function activate() {
-    const la = parseFloat(lat), ln = parseFloat(lng);
-    if (!Number.isFinite(la) || !Number.isFinite(ln)) { void dialog.alert(t.runConsole.hotZoneNeedsCenter); return; }
+    // A hot zone is inherently geographic — require a real point (0,0 = unset).
+    if (!isValidCoord(lat, lng) || (lat === 0 && lng === 0)) { void dialog.alert(t.runConsole.hotZoneNeedsCenter); return; }
     setBusy(true);
     try {
-      await activateHotZone({ gameId: ctx.gameId, runId: ctx.runId, center: { lat: la, lng: ln }, radiusMeters: radius, multiplier: mult, durationMinutes: minutes });
+      await activateHotZone({ gameId: ctx.gameId, runId: ctx.runId, center: { lat, lng }, radiusMeters: radius, multiplier: mult, durationMinutes: minutes });
     } finally { setBusy(false); }
   }
   async function deactivate() {
@@ -492,6 +613,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
   return (
     <Card className="p-4 space-y-3">
       <div className="text-sm font-semibold">{t.runConsole.hotZoneTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed">{t.runConsole.hotZoneHelp}</p>
       {active && hotZone ? (
         <div className="space-y-2 text-sm">
           <div className="text-neon-green font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
@@ -501,11 +623,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
       ) : (
         <div className="space-y-2">
           <Label>{t.runConsole.hotZoneCenter}</Label>
-          <div className="flex gap-2">
-            <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder="31.79" inputMode="decimal" />
-            <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder="35.16" inputMode="decimal" />
-            <Button variant="ghost" type="button" onClick={useMyLocation}>{t.runConsole.hotZoneUseLocation}</Button>
-          </div>
+          <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" />
           <div className="grid grid-cols-3 gap-2">
             <div><Label>{t.runConsole.hotZoneRadius}</Label><Input type="number" value={radius} onChange={(e) => setRadius(Math.max(1, Number(e.target.value)))} /></div>
             <div><Label>{t.runConsole.hotZoneMultiplier}</Label><Input type="number" value={mult} min={2} max={5} onChange={(e) => setMult(Math.min(5, Math.max(2, Number(e.target.value))))} /></div>
@@ -519,7 +637,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
 }
 
 // ── Post-run shareable links (tv-leaderboard / run-recap) ─────────────────────
-function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: boolean }) {
+function PostRunLinks({ accessCode, finished, onShareBoard }: { accessCode: string; finished: boolean; onShareBoard?: () => Promise<void> }) {
   const t = useT();
   const [copied, setCopied] = useState('');
   const tvUrl = `${PLAY_URL}/?${TV_ROUTE_PARAM}=${accessCode}`;
@@ -527,13 +645,14 @@ function PostRunLinks({ accessCode, finished }: { accessCode: string; finished: 
 
   async function copy(url: string, which: string) {
     try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { window.open(url, '_blank'); }
+    if (which === 'tv') await onShareBoard?.();
   }
 
   return (
     <Card className="p-4 space-y-3">
       <div className="text-sm font-semibold">{t.runConsole.postRunTitle}</div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => window.open(tvUrl, '_blank')}>{t.runConsole.tvScreen}</Button>
+        <Button variant="ghost" onClick={async () => { window.open(tvUrl, '_blank'); await onShareBoard?.(); }}>{t.runConsole.tvScreen}</Button>
         <Button variant="ghost" onClick={() => copy(tvUrl, 'tv')}>{copied === 'tv' ? t.runConsole.linkCopied : '🔗'}</Button>
         {finished && (
           <>
@@ -584,7 +703,8 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
 
   return (
     <Card className="p-4 mt-4">
-      <div className="text-sm font-medium mb-3">🎒 {rc.trackablesTitle}</div>
+      <div className="text-sm font-medium mb-1">🎒 {rc.trackablesTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.trackablesHelp}</p>
       <div className="flex gap-2 mb-3">
         <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={rc.trackablesPlaceholder} dir="auto" className="flex-1" />
         <Button variant="ghost" disabled={busy || !name.trim()} onClick={create}>{rc.trackablesAdd}</Button>
@@ -608,14 +728,15 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
 }
 
 // Territory zones console (change: territory-capture): author capturable zones and
-// see which team currently holds each. Center is entered as lat/lng (or 0,0 for a
-// locationless zone). Capturing is validated server-side against the player's GPS.
+// see which team currently holds each. Center is picked on the map; leaving it
+// unset (0,0) makes a locationless zone. Capturing is validated server-side
+// against the player's GPS.
 function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: string; runId: string }) {
   const rc = useT().runConsole;
   const [zones, setZones] = useState<CaptureZone[]>([]);
   const [title, setTitle] = useState('');
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
+  const [lat, setLat] = useState(0);
+  const [lng, setLng] = useState(0);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
 
@@ -628,26 +749,28 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
   }, [ownerUid, gameId, runId, tick]);
 
   async function create() {
-    const la = parseFloat(lat), ln = parseFloat(lng);
-    if (!title.trim() || !Number.isFinite(la) || !Number.isFinite(ln)) return;
+    // No map pick (0,0) is allowed on purpose — it authors a locationless zone.
+    if (!title.trim() || !isValidCoord(lat, lng)) return;
     setBusy(true);
-    try { await createZone({ gameId, runId, title: title.trim(), lat: la, lng: ln }); setTitle(''); setLat(''); setLng(''); setTick((x) => x + 1); }
+    try { await createZone({ gameId, runId, title: title.trim(), lat, lng }); setTitle(''); setLat(0); setLng(0); setTick((x) => x + 1); }
     finally { setBusy(false); }
   }
   async function remove(zoneId: string) {
-    if (!(await dialog.confirm(rc.zonesDeleteConfirm))) return;
+    if (!(await dialog.confirm(rc.zonesDeleteConfirm, undefined, true))) return;
     await deleteZone({ gameId, runId, zoneId }).catch(() => undefined);
     setTick((x) => x + 1);
   }
 
   return (
     <Card className="p-4 mt-4">
-      <div className="text-sm font-medium mb-3">🚩 {rc.zonesTitle}</div>
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className="text-sm font-medium mb-1">🚩 {rc.zonesTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.zonesHelp}</p>
+      <div className="flex flex-wrap gap-2 mb-2">
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={rc.zonesTitlePlaceholder} dir="auto" className="flex-1 min-w-[8rem]" />
-        <Input value={lat} onChange={(e) => setLat(e.target.value)} placeholder={rc.zonesLat} className="w-24" />
-        <Input value={lng} onChange={(e) => setLng(e.target.value)} placeholder={rc.zonesLng} className="w-24" />
         <Button variant="ghost" disabled={busy || !title.trim()} onClick={create}>{rc.zonesAdd}</Button>
+      </div>
+      <div className="mb-3">
+        <LocationStep coordinates={{ lat, lng }} onChange={(la, ln) => { setLat(la); setLng(ln); }} mapClassName="h-52" />
       </div>
       {zones.length === 0 ? (
         <div className="text-sm text-zinc-500">{rc.zonesEmpty}</div>
@@ -687,7 +810,7 @@ function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: st
   if (items.length === 0) return null;
 
   async function hide(itemId: string) {
-    if (!(await dialog.confirm(rc.feedHideConfirm))) return;
+    if (!(await dialog.confirm(rc.feedHideConfirm, undefined, true))) return;
     await hideFeedItem({ ownerUid, gameId, runId, itemId }).catch(() => undefined);
   }
 
@@ -742,6 +865,16 @@ function ChatConsole({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; 
       setThreads(rows);
     }, () => undefined);
   }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  // Keep the currently-open thread marked read as its message count grows — an HQ
+  // reply (or a message that arrives while HQ is watching) must not re-badge the
+  // very thread being read. Without this, sending a reply flags it "unread".
+  useEffect(() => {
+    if (!openTeam) return;
+    const th = threads.find((x) => x.teamId === openTeam);
+    if (!th) return;
+    setSeen((s) => (s[openTeam] === th.messages.length ? s : { ...s, [openTeam]: th.messages.length }));
+  }, [openTeam, threads]);
 
   if (threads.length === 0) return null;
 
@@ -832,10 +965,16 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
   const t = useT();
   const [data, setData] = useState<RunHeatmapResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // Surface a failed load instead of a silent blank (change: fix-post-run-analytics-visibility).
+  // Kept opt-in (the GPS track can be heavy) — no auto-load.
+  const [err, setErr] = useState('');
 
   async function load() {
     setBusy(true);
-    try { setData(await getRunHeatmap({ code: accessCode })); } finally { setBusy(false); }
+    setErr('');
+    try { setData(await getRunHeatmap({ code: accessCode })); }
+    catch { setErr(t.runConsole.analyticsError); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -844,6 +983,7 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
         <div className="text-sm font-semibold">{t.runConsole.heatmapTitle}</div>
         {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.heatmapLoad}</Button>}
       </div>
+      {err && !data && <div className="text-sm text-danger">{err}</div>}
       {data && (
         data.pointCount === 0
           ? <div className="text-sm text-zinc-500">{t.runConsole.heatmapEmpty}</div>
@@ -858,15 +998,115 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
   );
 }
 
+// ─── Post-run summary panel (run-summary-report) ──────────────────────────────
+// Auto-loads once the run is finished: a one-glance organizer report folding
+// standings + completion + feedback digest, plus a note that the same summary is
+// emailed to the organizer. Mirrors AnalyticsPanel's load pattern.
+function RunSummaryPanel({ accessCode }: { accessCode: string }) {
+  const t = useT();
+  const [data, setData] = useState<RunSummary | null>(null);
+  const [err, setErr] = useState('');
+  // Localized issue labels (same mapping as FeedbackPanel) so a Hebrew UI never
+  // shows the raw English issue enum.
+  const issueLabel: Record<string, string> = {
+    gps: t.runConsole.feedbackIssueGps, photo: t.runConsole.feedbackIssuePhoto,
+    station_code: t.runConsole.feedbackIssueStationCode, task_unclear: t.runConsole.feedbackIssueTaskUnclear,
+    slow: t.runConsole.feedbackIssueSlow, other: t.runConsole.feedbackIssueOther,
+  };
+
+  useEffect(() => {
+    let alive = true;
+    getRunSummary({ code: accessCode })
+      .then((d) => { if (alive) setData(d); })
+      .catch(() => { if (alive) setErr(t.runConsole.analyticsError); });
+    return () => { alive = false; };
+  }, [accessCode, t]);
+
+  return (
+    <Card className="p-4 space-y-3">
+      <div className="text-sm font-semibold">{t.runConsole.summaryTitle}</div>
+      {err && !data && <div className="text-sm text-danger">{err}</div>}
+      {!data && !err && <div className="text-sm text-zinc-500">{t.runConsole.summaryNoData}</div>}
+      {data && (
+        <div className="space-y-3">
+          {/* Standings */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryStandings}</div>
+            {data.standings.length === 0 ? (
+              <div className="text-sm text-zinc-500">{t.runConsole.summaryNoData}</div>
+            ) : (
+              <ol className="space-y-0.5">
+                {data.standings.slice(0, 5).map((s) => (
+                  <li key={s.teamId} className="flex items-center justify-between text-sm">
+                    <span>{s.rank}. {s.teamName}</span>
+                    <span className="font-mono text-zinc-400">{s.score}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+          {/* Completion headline */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryCompletion}</div>
+            <div className="text-sm text-zinc-400">
+              {t.runConsole.summaryTeams({ n: data.completion.teamCount })}
+              {' · '}
+              {t.runConsole.summaryCompletionRate({ pct: Math.round(data.completion.overallCompletionRate * 100) })}
+              {' · '}
+              {t.runConsole.summaryPhotos({ n: data.completion.photoCount })}
+            </div>
+          </div>
+          {/* Feedback digest */}
+          <div>
+            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryFeedback}</div>
+            <div className="text-sm text-zinc-400 space-y-1">
+              <div>
+                {t.runConsole.feedbackResponseRate({ n: data.feedback.responseCount, total: data.feedback.participantCount })}
+                {' · '}
+                {t.runConsole.feedbackRecommend({ pct: Math.round(data.feedback.recommendScore * 100) })}
+              </div>
+              {data.feedback.topIssues.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {data.feedback.topIssues.map((it) => (
+                    <Badge key={it.issue}>{issueLabel[it.issue] ?? it.issue} · {it.count}</Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="text-xs text-zinc-500">{t.runConsole.summaryEmailNote}</div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+
 function AnalyticsPanel({ accessCode }: { accessCode: string }) {
   const t = useT();
+  const b = t.builder;
+  // Localized task-type labels — never show raw English enum values in a Hebrew UI.
+  const TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+  };
   const [data, setData] = useState<RunAnalyticsResult | null>(null);
   const [busy, setBusy] = useState(false);
+  // Post-run visibility (change: fix-post-run-analytics-visibility): surface load
+  // failures instead of leaving a silently-blank card, and auto-load on mount so
+  // the creator sees the numbers without hunting for a button.
+  const [err, setErr] = useState('');
 
-  async function load() {
+  const load = useCallback(async () => {
     setBusy(true);
-    try { setData(await getRunAnalytics({ code: accessCode })); } finally { setBusy(false); }
-  }
+    setErr('');
+    try { setData(await getRunAnalytics({ code: accessCode })); }
+    catch { setErr(t.runConsole.analyticsError); }
+    finally { setBusy(false); }
+  }, [accessCode, t]);
+
+  useEffect(() => { void load(); }, [load]);
 
   // Export the loaded per-task analytics as a CSV file (pure client-side; no
   // callable). One row per task, header row included; downloaded via a blob URL.
@@ -907,6 +1147,7 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
           {!data && <Button variant="ghost" disabled={busy} onClick={load}>{t.runConsole.analyticsLoad}</Button>}
         </div>
       </div>
+      {err && !data && <div className="text-sm text-danger">{err}</div>}
       {data && (
         data.tasks.length === 0 ? (
           <div className="text-sm text-zinc-500">{t.runConsole.analyticsEmpty}</div>
@@ -928,7 +1169,7 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
                 <tbody>
                   {data.tasks.map((task) => (
                     <tr key={task.taskId} className="border-t border-[--rp-border]">
-                      <td className="py-1.5">{TYPE_EMOJI[task.type] ?? '•'} {task.type}</td>
+                      <td className="py-1.5">{TYPE_EMOJI[task.type] ?? '•'} {TYPE_LABEL[task.type] ?? task.type}</td>
                       <td className="py-1.5">{task.completions}/{task.attempts}</td>
                       <td className="py-1.5">{Math.round(task.completionRate * 100)}%</td>
                       <td className="py-1.5 font-mono">{fmtMs(task.medianMs)}</td>
@@ -957,13 +1198,18 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
   const t = useT();
   const [data, setData] = useState<{ summary: RunFeedbackSummary; responses: RunFeedback[] } | null>(null);
   const [open, setOpen] = useState<RunFeedback | null>(null);
+  // Surface a failed load instead of a silent blank (change: fix-post-run-analytics-visibility).
+  const [err, setErr] = useState('');
 
   useEffect(() => {
     if (!gameId || !runId) return;
     let alive = true;
-    getRunFeedbackSummary({ gameId, runId }).then((d) => { if (alive) setData(d); }).catch(() => undefined);
+    setErr('');
+    getRunFeedbackSummary({ gameId, runId })
+      .then((d) => { if (alive) setData(d); })
+      .catch(() => { if (alive) setErr(t.runConsole.analyticsError); });
     return () => { alive = false; };
-  }, [gameId, runId]);
+  }, [gameId, runId, t]);
 
   const dimLabel: Record<FeedbackRatingKey, string> = {
     overall: t.runConsole.feedbackDimOverall, content: t.runConsole.feedbackDimContent,
@@ -987,6 +1233,7 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
         {s && <div className="text-xs text-zinc-500">{t.runConsole.feedbackResponseRate({ n: s.responseCount, total: s.participantCount })}</div>}
       </div>
 
+      {err && !s && <div className="text-sm text-danger">{err}</div>}
       {!s ? null : s.responseCount === 0 ? (
         <div className="text-sm text-zinc-500">{t.runConsole.feedbackEmpty}</div>
       ) : (
@@ -1014,9 +1261,9 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
               <Distribution
                 title={t.runConsole.feedbackDifficulty}
                 bars={[
-                  [t.runConsole.feedbackDiffEasy, s.ratings.difficulty.distribution[0]],
-                  [t.runConsole.feedbackDiffRight, s.ratings.difficulty.distribution[1]],
-                  [t.runConsole.feedbackDiffHard, s.ratings.difficulty.distribution[2]],
+                  [t.runConsole.feedbackDiffEasy, s.ratings.difficulty.distribution[0] ?? 0],
+                  [t.runConsole.feedbackDiffRight, s.ratings.difficulty.distribution[1] ?? 0],
+                  [t.runConsole.feedbackDiffHard, s.ratings.difficulty.distribution[2] ?? 0],
                 ]}
               />
             )}
@@ -1024,9 +1271,9 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
               <Distribution
                 title={t.runConsole.feedbackSmoothness}
                 bars={[
-                  [t.runConsole.feedbackSmoothGood, s.ratings.smoothness.distribution[2]],
-                  [t.runConsole.feedbackSmoothSome, s.ratings.smoothness.distribution[1]],
-                  [t.runConsole.feedbackSmoothBad, s.ratings.smoothness.distribution[0]],
+                  [t.runConsole.feedbackSmoothGood, s.ratings.smoothness.distribution[2] ?? 0],
+                  [t.runConsole.feedbackSmoothSome, s.ratings.smoothness.distribution[1] ?? 0],
+                  [t.runConsole.feedbackSmoothBad, s.ratings.smoothness.distribution[0] ?? 0],
                 ]}
               />
             )}
@@ -1105,12 +1352,14 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
 }
 
 function Distribution({ title, bars }: { title: string; bars: [string, number][] }) {
-  const max = Math.max(1, ...bars.map(([, n]) => n));
+  const max = Math.max(1, ...bars.map(([, n]) => (Number.isFinite(n) ? n : 0)));
   return (
     <div className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
       <div className="text-[11px] text-zinc-500 mb-2">{title}</div>
       <div className="space-y-1.5">
-        {bars.map(([label, n]) => (
+        {bars.map(([label, rawN]) => {
+          const n = Number.isFinite(rawN) ? rawN : 0;
+          return (
           <div key={label} className="flex items-center gap-2 text-xs">
             <span className="w-24 shrink-0 text-zinc-400 truncate">{label}</span>
             <div className="flex-1 h-2 rounded-full bg-black/20 overflow-hidden">
@@ -1118,7 +1367,8 @@ function Distribution({ title, bars }: { title: string; bars: [string, number][]
             </div>
             <span className="w-5 text-end text-zinc-400">{n}</span>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

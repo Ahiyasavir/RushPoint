@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -55,6 +55,10 @@ export interface PublicLeaderboard {
   // Ceremony mode (change: ceremony-mode): server-selected top-liked feed photos,
   // published-gated; [] for unpublished/legacy/pruned runs.
   ceremonyFeed: CeremonyFeedItem[];
+  // The `time_only` preset's `score` is a meaningless placeholder (e.g. 500/0) —
+  // teams are ranked by time, not points. Public/TV leaderboard surfaces should
+  // hide the score column and show elapsed time instead when this is `time_only`.
+  scoringPreset: ScoringPreset;
 }
 export const getPublicLeaderboard = callable<{ code: string }, PublicLeaderboard>('getPublicLeaderboard');
 
@@ -113,7 +117,7 @@ export interface StageNarrative {
 export interface MyTeamState {
   team: RunTeam;
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
-  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean };
+  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
   activeStageTasks: SafeTask[];
   // Narrative chapters: intro/outro beats for stages the team has reached (active or
   // completed). The play UI shows an intro when a chapter opens, an outro when it ends.
@@ -169,10 +173,12 @@ export const submitStationPhoto = callable<
   { submitted: boolean; autoApproved: boolean }
 >('submitStationPhoto');
 
+// Not idempotent — creates a fresh auto-id alert doc each call, so a retry after
+// a timeout would post a DUPLICATE SOS. Opt out of the client retry wrapper.
 export const triggerSOS = callable<
   Ctx & { lat?: number; lng?: number; message?: string },
   { alertId: string }
->('triggerSOS');
+>('triggerSOS', { retry: false });
 
 export const updateLocation = callable<Ctx & { lat: number; lng: number }, { ok: boolean }>('updateLocation');
 

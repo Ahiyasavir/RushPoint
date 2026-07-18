@@ -4,6 +4,7 @@ import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@
 import { db } from '../services/firebase';
 import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
+import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -21,12 +22,15 @@ interface FlashDoc { id: string; title: string; titleHe?: string; description?: 
 // Non-blocking live-ops banners + a collapsible leaderboard peek. Rendered above
 // the map/task card so it never covers the active mission UI.
 export default function LiveOps({
-  ctx, leaderboard, myTeamId, lang = 'en',
+  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false,
 }: {
   ctx: Ctx;
   leaderboard: RunLeaderboard | null;
   myTeamId: string;
   lang?: 'en' | 'he';
+  // time_only runs never award points, so the peek must show each team's time,
+  // not a column of zeros (mirrors the finish/TV/public boards).
+  timeOnly?: boolean;
 }) {
   const [announcements, setAnnouncements] = useState<AnnouncementDoc[]>([]);
   const [flashes, setFlashes] = useState<FlashDoc[]>([]);
@@ -79,19 +83,19 @@ export default function LiveOps({
   // Haptic buzz when a NEW score notice arrives — success for a gain, warn for a
   // penalty. The backlog present on first mount is seeded silently (no buzz), so
   // late joiners aren't spammed; only genuinely-new notices vibrate, once each.
+  // Announcements load ASYNC (Firestore snapshot), so a "first effect run" latch
+  // would trip on the still-empty list and then buzz the whole backlog once it
+  // arrives. Gate on the notice's own createdAt vs. our mount time instead: any
+  // notice authored before we mounted is pre-existing and seeded silently.
   const seenScore = useRef<Set<string>>(new Set());
-  const scoreMounted = useRef(false);
+  const mountedAt = useRef(Date.now());
   useEffect(() => {
-    const scores = liveAnnouncements.filter((a) => a.kind === 'score');
-    if (!scoreMounted.current) {
-      scores.forEach((a) => seenScore.current.add(a.id));
-      scoreMounted.current = true;
-      return;
-    }
-    for (const a of scores) {
+    for (const a of liveAnnouncements) {
+      if (a.kind !== 'score') continue;
       if (seenScore.current.has(a.id)) continue;
       seenScore.current.add(a.id);
-      haptic((a.delta ?? 0) >= 0 ? 'success' : 'warn');
+      const createdMs = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      if (createdMs > mountedAt.current) haptic((a.delta ?? 0) >= 0 ? 'success' : 'warn');
     }
   }, [liveAnnouncements]);
 
@@ -145,7 +149,7 @@ export default function LiveOps({
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-sm font-semibold text-purple-200">
                   {lang === 'he' && f.titleHe ? f.titleHe : f.title}
-                  {f.bonusPoints ? <span className="ml-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
+                  {f.bonusPoints ? <span className="ms-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
                 </div>
                 {(f.description || f.descriptionHe) && (
                   <p dir="auto" className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
@@ -157,15 +161,15 @@ export default function LiveOps({
         );
       })}
 
-      {hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} />}
+      {hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
     </div>
   );
 }
 
 function LeaderboardPeek({
-  leaderboard, myTeamId, lang,
+  leaderboard, myTeamId, lang, timeOnly,
 }: {
-  leaderboard: RunLeaderboard; myTeamId: string; lang: 'en' | 'he';
+  leaderboard: RunLeaderboard; myTeamId: string; lang: 'en' | 'he'; timeOnly: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const top = leaderboard.rankings.slice(0, 5);
@@ -177,9 +181,9 @@ function LeaderboardPeek({
         className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
         onClick={() => setOpen((o) => !o)}
       >
-        <span>🏆 {lang === 'he' ? 'טבלת מובילים' : 'Leaderboard'}
-          {leaderboard.frozen && <span className="ml-2 text-xs text-zinc-500">{lang === 'he' ? '(קפואה)' : '(frozen)'}</span>}
-          {mine && <span className="ml-2 text-accent font-mono">#{mine.rank}</span>}
+        <span>🏆 {translations[lang].liveOps.leaderboardHeading}
+          {leaderboard.frozen && <span className="ms-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
+          {mine && <span className="ms-2 text-accent font-mono">#{mine.rank}</span>}
         </span>
         <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
       </button>
@@ -191,7 +195,9 @@ function LeaderboardPeek({
               className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-accent font-semibold' : 'text-zinc-400'}`}
             >
               <span dir="auto" className="truncate min-w-0"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
-              <span className="font-mono shrink-0">{r.score}</span>
+              <span className="font-mono shrink-0">
+                {timeOnly ? (() => { const s = boardTimeSeconds(r); return s != null ? formatDuration(s) : '—'; })() : r.score}
+              </span>
             </div>
           ))}
         </div>

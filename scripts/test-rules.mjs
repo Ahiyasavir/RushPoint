@@ -76,6 +76,12 @@ async function main() {
       { teamId: TEAM, deviceUids: [TEAM, DEVICE], messages: [], updatedAt: '2020-01-01T00:00:00Z' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/chat/${TEAM2}`),
       { teamId: TEAM2, deviceUids: [TEAM2], messages: [], updatedAt: '2020-01-01T00:00:00Z' });
+    // Live-ops content (fix-i18n-leaks-and-feed-authz): feed carries participant
+    // PII (photoUrl + teamName); reads are run-scoped, not any-authed.
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/feedItems/f1`),
+      { active: true, photoUrl: 'https://example/p.jpg', teamName: 'Lions', taskTitle: 'Mural' });
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/announcements/an1`), { title: 'Go' });
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/flashMissions/fm1`), { title: 'Flash' });
     await setDoc(doc(db, `wallets/${OWNER}`), { eventCredits: 5 });
     await setDoc(doc(db, `publicGames/${GAME}`), { title: 'Public' });
     await setDoc(doc(db, `accessCodes/ABC123`), { ownerUid: OWNER, gameId: GAME, runId: RUN });
@@ -143,6 +149,21 @@ async function main() {
   await check('client CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(team, chatPath), { messages: [] })));
   await check('owner CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(owner, chatPath), { messages: [] })));
   await check('staff CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(staff, chatPath), { messages: [] })));
+
+  console.log('\n── Live-ops feed & broadcasts: run-scoped reads only (feed carries participant PII) ──');
+  const feedDoc = `${runPath}/feedItems/f1`;
+  await check('run participant CAN read the feed', assertSucceeds(getDoc(doc(team, feedDoc))));
+  await check('run participant CAN list the feed collection', assertSucceeds(getDocs(collection(team, `${runPath}/feedItems`))));
+  await check('run owner CAN read the feed', assertSucceeds(getDoc(doc(owner, feedDoc))));
+  await check('scoped staff CAN read the feed', assertSucceeds(getDoc(doc(staff, feedDoc))));
+  await check('a stranger (not a participant) CANNOT read the feed', assertFails(getDoc(doc(other, feedDoc))));
+  await check('a stranger CANNOT list the feed collection', assertFails(getDocs(collection(other, `${runPath}/feedItems`))));
+  await check('staff for a DIFFERENT run CANNOT read the feed', assertFails(getDoc(doc(wrongStaff, feedDoc))));
+  await check('an anonymous user CANNOT read the feed', assertFails(getDoc(doc(anon, feedDoc))));
+  // Announcements + flash missions share the same run-scoped read surface.
+  await check('run participant CAN read announcements', assertSucceeds(getDoc(doc(team, `${runPath}/announcements/an1`))));
+  await check('a stranger CANNOT read announcements', assertFails(getDoc(doc(other, `${runPath}/announcements/an1`))));
+  await check('a stranger CANNOT read flash missions', assertFails(getDoc(doc(other, `${runPath}/flashMissions/fm1`))));
 
   console.log('\n── Public/join reads behave as designed ──');
   await check('anyone (even anon) CAN read publicGames', assertSucceeds(getDoc(doc(anon, `publicGames/${GAME}`))));

@@ -197,7 +197,10 @@ export function skipAward(
     case 'time_only':
       return 0;
     case 'fixed_points_speed':
-      return task.pointValue;
+      // Guard a missing/non-finite pointValue (legacy/hand-written task), matching
+      // taskScoreFixed — otherwise a skipped task could award NaN and poison the
+      // whole leaderboard's comparisons (nightly hardening).
+      return Number.isFinite(task.pointValue) ? task.pointValue : 0;
     case 'smart_weighted':
       // On-target sigmoid score (x=1)
       return taskScoreSmart(task.difficulty, task.estimatedMinutes, task.estimatedMinutes);

@@ -21,35 +21,36 @@ export default function TaskCanvas({ tasks, activeTaskId, onSelect }: {
     overscan: 6,
   });
 
-  // Small stages: a roomy 2-column grid (skips the windowing machinery entirely).
-  // The centre pane is wide, so cards get generous size + spacing.
-  if (tasks.length <= 24) {
-    return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 content-start">
-        {tasks.map((t) => (
-          <TaskCard key={t.id} task={t} active={t.id === activeTaskId} onClick={() => onSelect(t.id)} />
-        ))}
-      </div>
-    );
-  }
-
+  // The canvas fills its parent's height and is the ONLY scroll container in the
+  // Builder centre column (the parent no longer scrolls — no nested double
+  // scrollbar). Small stages (≤24 tasks): a roomy 2-column grid, no windowing.
+  // Large stages: the same scroll box, windowed via react-virtual.
+  const small = tasks.length <= 24;
   return (
-    <div ref={parentRef} className="overflow-y-auto max-h-[62vh] -mx-1 px-1">
-      <div style={{ height: rv.getTotalSize(), position: 'relative', width: '100%' }}>
-        {rv.getVirtualItems().map((vi) => {
-          const t = tasks[vi.index];
-          return (
-            <div
-              key={t.id}
-              ref={rv.measureElement}
-              data-index={vi.index}
-              style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)`, paddingBottom: 8 }}
-            >
-              <TaskCard task={t} active={t.id === activeTaskId} onClick={() => onSelect(t.id)} />
-            </div>
-          );
-        })}
-      </div>
+    <div ref={parentRef} className="h-full overflow-y-auto -mx-1 px-1">
+      {small ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 content-start">
+          {tasks.map((t) => (
+            <TaskCard key={t.id} task={t} active={t.id === activeTaskId} onClick={() => onSelect(t.id)} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ height: rv.getTotalSize(), position: 'relative', width: '100%' }}>
+          {rv.getVirtualItems().map((vi) => {
+            const t = tasks[vi.index];
+            return (
+              <div
+                key={t.id}
+                ref={rv.measureElement}
+                data-index={vi.index}
+                style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)`, paddingBottom: 8 }}
+              >
+                <TaskCard task={t} active={t.id === activeTaskId} onClick={() => onSelect(t.id)} />
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

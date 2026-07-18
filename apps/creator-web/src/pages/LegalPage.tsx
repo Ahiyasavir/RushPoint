@@ -886,7 +886,7 @@ function renderMarkdown(text: string) {
       return (
         <div
           key={i}
-          className="border-l-4 border-rp-fire bg-rp-fire/10 px-4 py-2 my-3 rounded-r-lg text-sm text-[--ink-1] font-medium"
+          className="border-s-4 border-rp-fire bg-rp-fire/10 px-4 py-2 my-3 rounded-e-lg text-sm text-[--ink-1] font-medium"
           dangerouslySetInnerHTML={{ __html: content }}
         />
       );

@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
-import { saveSession, type Session } from '../store';
+import { saveSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
+import { unlockAudio } from '../lib/sound';
+
+// Firebase callable codes that mean "transient / connectivity", not a bad code —
+// surfaced to the player as a single "check your connection" message.
+const CONNECTION_CODES = new Set(['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated']);
 
 export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
   const { t, toggleLang, lang, colorblind, setColorblind } = useT();
@@ -25,6 +30,15 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const codeRef = useRef<HTMLInputElement>(null);
   const memberRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [justAdded, setJustAdded] = useState<number | null>(null);
+  // Sound/haptic feedback preference (change: audio-haptic-feedback). Persisted in
+  // the store; `feedback()` reads it live, so this state only drives the toggle UI.
+  const [sound, setSound] = useState<boolean>(() => loadSound());
+  function toggleSound() {
+    const next = !sound;
+    setSound(next);
+    saveSound(next);
+    if (next) unlockAudio(); // turning it on is a gesture — unlock so cues are audible
+  }
 
   useEffect(() => {
     if (linkCode.length >= 4) void lookup();
@@ -44,14 +58,28 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     setMembers([...members, '']);
   }
 
+  // Map a callable failure to a localized, participant-safe message. Full-run
+  // (resource-exhausted) and network blips (unavailable/internal/…) get friendly
+  // copy instead of host-facing billing jargon or raw Firebase codes; a genuinely
+  // unexpected error still falls back to the provided message.
+  function joinError(e: unknown, fallback: string): string {
+    const code = (e && typeof e === 'object' && 'code' in e
+      ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
+    if (code === 'resource-exhausted') return t.join.gameFull;
+    if (CONNECTION_CODES.has(code)) return t.join.connectionError;
+    if (code === 'not-found' || code === 'invalid-argument') return t.join.invalidCode;
+    return e instanceof Error ? e.message.replace('Firebase: ', '') : fallback;
+  }
+
   async function lookup() {
+    unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
     setErr(''); setBusy(true);
     try {
       const i = await getJoinInfo({ code: code.trim().toUpperCase() });
       if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.invalidCode);
+      setErr(joinError(e, t.join.invalidCode));
     } finally { setBusy(false); }
   }
 
@@ -68,6 +96,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     // `members`, so values['name'] was always empty.)
     const memberNames = members.map((m) => m.trim()).filter(Boolean);
     const errors = validateRequiredFields(allFields.filter((f) => f.id !== 'name'), values);
+    // Team mode: each team must pick its own name (no defaulting to the first member).
+    if (info.mode === 'team' && !(values.teamName ?? '').trim()) { errors.add('teamName'); }
     if (memberNames.length === 0) { setBusy(false); return; } // guarded by the disabled Join button
     if (errors.size > 0) { setFieldErrors(errors); setBusy(false); return; }
     setFieldErrors(new Set());
@@ -83,7 +113,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       saveSession(session);
       onJoined(session);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.join.joinFailed);
+      setErr(joinError(e, t.join.joinFailed));
     } finally { setBusy(false); }
   }
 
@@ -145,6 +175,18 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           {/* Language + accessibility toggles */}
           <div className="absolute top-4 end-4 flex items-center gap-2">
             <button
+              onClick={toggleSound}
+              role="switch"
+              aria-checked={sound}
+              aria-label={sound ? t.common.soundOn : t.common.soundOff}
+              title={sound ? t.common.soundOn : t.common.soundOff}
+              className={`text-xs font-semibold border rounded-full w-7 h-7 flex items-center justify-center transition-colors ${
+                sound ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {sound ? '🔊' : '🔇'}
+            </button>
+            <button
               onClick={() => setColorblind(!colorblind)}
               role="switch"
               aria-checked={colorblind}
@@ -158,10 +200,10 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
             </button>
             <button
               onClick={toggleLang}
-              aria-label={lang === 'he' ? 'Switch to English' : 'עבור לעברית'}
+              aria-label={t.join.langToggleAria}
               className="text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
             >
-              {lang === 'he' ? 'English' : 'עברית'}
+              {lang === 'he' ? 'English' : 'עברית'} {/* i18n-ignore — language switcher shows the target language in its own script */}
             </button>
           </div>
         </div>
@@ -322,6 +364,25 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           <FieldInput key={f.id} field={f} value={values[f.id] ?? ''} onChange={(v) => setValues({ ...values, [f.id]: v })} hasError={fieldErrors.has(f.id)} />
         ))}
 
+        {/* Team mode: each team picks its own name instead of defaulting to the
+            first member's name. Skipped if the creator already added a custom
+            teamName registration field (rendered above via teamFields). */}
+        {!isSolo && !teamFields.some((f) => f.id === 'teamName') && (
+          <Card className="p-5">
+            <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
+              <span>🏷️</span>
+              {t.join.teamName}
+            </div>
+            <Input
+              value={values.teamName ?? ''}
+              dir="auto"
+              placeholder={t.join.teamNamePlaceholder}
+              className={fieldErrors.has('teamName') ? 'border-rp-alert' : ''}
+              onChange={(e) => setValues({ ...values, teamName: e.target.value })}
+            />
+          </Card>
+        )}
+
         <Card className="p-5">
           <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
             <span>{isSolo ? '👤' : '👥'}</span>
@@ -329,7 +390,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           </div>
           {isSolo ? (
             // Solo: exactly one name input. No member list, no add-member.
-            <Input value={members[0] ?? ''} placeholder={t.join.yourName}
+            <Input value={members[0] ?? ''} placeholder={t.join.yourName} data-testid="join-name"
               onChange={(e) => setMembers([e.target.value])} />
           ) : (
             <>
@@ -340,7 +401,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
                     value={m} placeholder={t.join.memberPlaceholder(i + 1)}
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
-                    <button aria-label={lang === 'he' ? `הסר ${m}` : `Remove ${m}`} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                    <button aria-label={t.join.removeMember(m)} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
                   )}
                 </div>
               ))}
@@ -360,8 +421,9 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
 
       <Button
-        disabled={busy || !members.some((m) => m.trim())}
+        disabled={busy || !members.some((m) => m.trim()) || (!isSolo && !(values.teamName ?? '').trim())}
         onClick={submit}
+        data-testid="join-submit"
         className="mt-5 !py-4 !text-lg !rounded-2xl"
       >
         {busy ? t.join.joining : t.join.joinCta}

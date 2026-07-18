@@ -53,7 +53,10 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
   }
   function answerRating(key: string, value: number) {
     setRatings((r) => ({ ...r, [key]: value }));
-    // brief beat so the tap animation reads before the next question slides in
+    // brief beat so the tap animation reads before the next question slides in.
+    // Clear any pending advance first so a rapid double-tap can't schedule two
+    // advances (which would skip a question / over-advance past one).
+    window.clearTimeout(advanceTimer.current);
     advanceTimer.current = window.setTimeout(advance, 220);
   }
   function toggleIssue(issue: FeedbackIssue) {

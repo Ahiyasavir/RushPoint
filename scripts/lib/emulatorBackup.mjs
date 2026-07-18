@@ -9,6 +9,28 @@ export function isSnapshotDue(lastTs, nowTs, intervalMs) {
 }
 
 /**
+ * Whether the emulator suite is fully booted, given the parsed emulator Hub
+ * `/emulators` response (or null on a failed probe). Ready iff BOTH the
+ * `firestore` and `functions` emulators are present — functions load last, so
+ * their presence means boot is effectively complete and an export is safe.
+ * Never run an export against a not-ready emulator: it wedges Firestore and
+ * cascade-kills the playtest stack.
+ */
+export function isEmulatorReady(hubJson) {
+  if (!hubJson || typeof hubJson !== 'object') return false;
+  return Boolean(hubJson.firestore) && Boolean(hubJson.functions);
+}
+
+/**
+ * The single gate the backup loop consults before spawning an export: only when
+ * the emulator is ready AND a snapshot is due. `ready` comes from
+ * `isEmulatorReady`; the due check reuses `isSnapshotDue`. Pure — no I/O.
+ */
+export function canAttemptExport({ ready, lastTs, nowTs, intervalMs }) {
+  return ready === true && isSnapshotDue(lastTs, nowTs, intervalMs);
+}
+
+/**
  * Deterministic, lexicographically-sortable snapshot folder name for a timestamp
  * (ms). ISO-8601 in UTC with `:`/`.` swapped for `-` so the string sorts in
  * chronological order.

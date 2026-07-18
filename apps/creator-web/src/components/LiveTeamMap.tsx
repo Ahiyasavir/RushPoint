@@ -15,6 +15,14 @@ const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 // A few distinct hues so adjacent teams are visually separable.
 const COLORS = ['#22c55e', '#3b82f6', '#f97316', '#a855f7', '#ec4899', '#eab308', '#14b8a6', '#ef4444'];
 
+// Stable color per team: derived from the teamId (not the snapshot array index),
+// so a team keeps the same hue even as other teams join and reorder the docs.
+function colorForTeam(teamId: string): string {
+  let h = 0;
+  for (let i = 0; i < teamId.length; i++) h = (h * 31 + teamId.charCodeAt(i)) | 0;
+  return COLORS[Math.abs(h) % COLORS.length];
+}
+
 interface TeamLoc {
   teamId: string;
   lat: number;
@@ -33,7 +41,11 @@ export default function LiveTeamMap({
   const rc = useT().runConsole;
   const ref = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const markers = useRef<maplibregl.Marker[]>([]);
+  // One persistent marker per team, keyed by teamId — updated in place on each
+  // GPS ping instead of a full teardown, so the map doesn't flicker/close popups.
+  const markersById = useRef<Map<string, maplibregl.Marker>>(new Map());
+  // The set of teamIds we last framed to — reframe only when the set changes.
+  const framedKey = useRef<string>('');
   const [mode, setMode] = useState<MapMode>('topo');
   const [locs, setLocs] = useState<TeamLoc[]>([]);
 
@@ -75,29 +87,48 @@ export default function LiveTeamMap({
     map.current?.setStyle(resolveMapStyle(KEY, mode) as maplibregl.StyleSpecification | string);
   }, [mode]);
 
-  // Recreate markers whenever the reported locations change, and frame them.
+  // Update marker positions in place on every GPS ping; create/remove markers
+  // only for teams that join/leave. This avoids the full teardown that made the
+  // map flicker and slammed popups shut with 20 teams pinging constantly.
   useEffect(() => {
     if (!map.current) return;
-    markers.current.forEach((m) => m.remove());
-    markers.current = locs.map((l, i) => {
-      const color = COLORS[i % COLORS.length];
-      const el = document.createElement('div');
-      el.style.cssText =
-        `width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
-        `background:${color};border:2px solid #fff;cursor:pointer;box-shadow:0 0 0 2px ${color}55;`;
-      el.title = nameOf(l.teamId);
-      return new maplibregl.Marker({ element: el })
-        .setLngLat([l.lng, l.lat])
-        .setPopup(
-          new maplibregl.Popup({ offset: 16, closeButton: false }).setHTML(
-            `<div style="font-weight:600">${escapeHtml(nameOf(l.teamId))}</div>`,
-          ),
-        )
-        .addTo(map.current!);
-    });
+    const present = new Set(locs.map((l) => l.teamId));
 
-    // Frame all reported teams.
-    if (locs.length > 0) {
+    // Drop markers for teams no longer reporting.
+    for (const [teamId, marker] of markersById.current) {
+      if (!present.has(teamId)) { marker.remove(); markersById.current.delete(teamId); }
+    }
+
+    // Move existing markers; create new ones for first-seen teams.
+    for (const l of locs) {
+      const existing = markersById.current.get(l.teamId);
+      if (existing) {
+        existing.setLngLat([l.lng, l.lat]);
+      } else {
+        const color = colorForTeam(l.teamId);
+        const el = document.createElement('div');
+        el.style.cssText =
+          `width:18px;height:18px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);` +
+          `background:${color};border:2px solid #fff;cursor:pointer;box-shadow:0 0 0 2px ${color}55;`;
+        el.title = nameOf(l.teamId);
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([l.lng, l.lat])
+          .setPopup(
+            new maplibregl.Popup({ offset: 16, closeButton: false }).setHTML(
+              `<div style="font-weight:600">${escapeHtml(nameOf(l.teamId))}</div>`,
+            ),
+          )
+          .addTo(map.current!);
+        markersById.current.set(l.teamId, marker);
+      }
+    }
+
+    // Frame only when the SET of reporting teams changes (first load or a team
+    // joins/leaves) — never on a mere position update, so the map stays put and
+    // open popups survive while teams move.
+    const key = [...present].sort().join(',');
+    if (key !== framedKey.current && locs.length > 0) {
+      framedKey.current = key;
       const pts = locs.map((l) => [l.lng, l.lat] as [number, number]);
       if (pts.length === 1) {
         map.current.easeTo({ center: pts[0], zoom: 13 });

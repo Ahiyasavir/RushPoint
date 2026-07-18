@@ -191,11 +191,24 @@ export function optionalCoordinatePair(
 // submitStationPhoto must only accept photos hosted in our own Firebase Storage
 // bucket — never an arbitrary external URL a malicious client could inject. Pure
 // (no admin imports) so it stays importable by both the server and the unit lane.
-export const FIREBASE_STORAGE_ORIGIN =
-  'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/';
+// Our project's Storage bucket is addressable under BOTH the legacy `appspot.com`
+// name and Firebase's newer `firebasestorage.app` default — the client SDK builds
+// download URLs with whichever VITE_FIREBASE_STORAGE_BUCKET is set (currently
+// firebasestorage.app), so the server guard must accept both or every real upload
+// is rejected. Still restricted to our project on the Firebase download host.
+const FIREBASE_STORAGE_HTTPS_PREFIX = 'https://firebasestorage.googleapis.com/v0/b/';
+export const FIREBASE_STORAGE_BUCKETS = [
+  'rushpoint-pwa-7daaa.firebasestorage.app',
+  'rushpoint-pwa-7daaa.appspot.com',
+];
+export const FIREBASE_STORAGE_ORIGINS = FIREBASE_STORAGE_BUCKETS.map(
+  (b) => `${FIREBASE_STORAGE_HTTPS_PREFIX}${b}/`,
+);
+// Back-compat single-origin constant (legacy appspot form).
+export const FIREBASE_STORAGE_ORIGIN = `${FIREBASE_STORAGE_HTTPS_PREFIX}rushpoint-pwa-7daaa.appspot.com/`;
 
 export function isFirebaseStorageUrl(url: unknown): boolean {
-  return typeof url === 'string' && url.startsWith(FIREBASE_STORAGE_ORIGIN);
+  return typeof url === 'string' && FIREBASE_STORAGE_ORIGINS.some((o) => (url as string).startsWith(o));
 }
 
 // ─── Task media: YouTube parsing + upload-URL validation (change: task-media-attachments) ─
@@ -307,7 +320,7 @@ export function requireStorageUrl(url: unknown, runId: string, uid: string): str
   if (s.length > MAX_URL_LEN) fail('photoUrl', `maxLength:${MAX_URL_LEN}`, MESSAGES.maxLen('photoUrl', MAX_URL_LEN));
 
   let objectPath: string | null = null;
-  if (s.startsWith(FIREBASE_STORAGE_ORIGIN)) {
+  if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
     const m = s.match(/\/o\/([^?]+)/);
     if (m) { try { objectPath = decodeURIComponent(m[1]); } catch { objectPath = null; } }
   } else if (s.startsWith('gs://')) {
@@ -319,8 +332,8 @@ export function requireStorageUrl(url: unknown, runId: string, uid: string): str
   const expected = `runs/${runId}/teams/${uid}/`;
   if (!objectPath || !objectPath.startsWith(expected)) {
     fail('photoUrl', 'storagePath', [
-      'Photo must be uploaded to your own team folder.',
-      'יש להעלות את התמונה לתיקיית הקבוצה שלכם.',
+      'That photo could not be saved. Please retake the photo.',
+      'לא הצלחנו לשמור את התמונה. צלמו שוב.',
     ]);
   }
   return s;

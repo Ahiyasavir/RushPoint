@@ -1,21 +1,32 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game } from '@rushpoint/shared';
-import { PAYMENTS_ENABLED } from '@rushpoint/shared';
+import { PAYMENTS_ENABLED, resolvePlayOrigin, validateUnlockGraph } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
+import { isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 
 // Module-level cache so navigating back to dashboard is instant (no spinner).
-let _gamesCache: { data: Game[]; ts: number } | null = null;
+// Scoped to the owner uid: sign-out doesn't reload the page, so without the uid
+// guard this cache would survive an account switch on the same device and leak
+// the previous user's game list to the next login for up to the TTL.
+let _gamesCache: { uid: string; data: Game[]; ts: number } | null = null;
 const CACHE_TTL = 45_000;
 
+function readGamesCache(uid: string | undefined): Game[] | null {
+  if (!uid || !_gamesCache || _gamesCache.uid !== uid) return null;
+  if (Date.now() - _gamesCache.ts >= CACHE_TTL) return null;
+  return _gamesCache.data;
+}
+
 const PLAY_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5181`
+  ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
 function getAccentBar(g: Game): string {
@@ -33,29 +44,47 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const t = useT();
   const d = t.dashboard;
+  const b = t.builder;
+  // Localized task-type chip labels (never show raw English enum values in a
+  // Hebrew UI). Mirrors the Builder's TaskCard type labels.
+  const TASK_TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+  };
 
-  const [games, setGames] = useState<Game[] | null>(() => {
-    if (_gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return _gamesCache.data;
-    return null;
-  });
+  const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [sharing, setSharing] = useState<Game | null>(null);
 
   async function load(invalidate = false) {
-    if (!invalidate && _gamesCache && Date.now() - _gamesCache.ts < CACHE_TTL) return;
+    if (!invalidate && readGamesCache(user?.uid)) return;
     try {
       const { games } = await listGames();
-      _gamesCache = { data: games, ts: Date.now() };
+      if (user?.uid) _gamesCache = { uid: user.uid, data: games, ts: Date.now() };
       setGames(games);
     } catch (e) {
       // Escape the spinner on a first-load failure, but never blank an already-
       // loaded dashboard if a post-mutation refresh fails.
       setGames((prev) => prev ?? []);
-      await dialog.alert(e instanceof Error ? e.message : 'Failed to load games');
+      // Never leak a raw Firebase error CODE ("not-found", "unavailable", …) into
+      // the UI — a load failure is always technical, not user-actionable. Show the
+      // friendly localized message and keep the real error in the console.
+      console.error('[dashboard] listGames failed:', e);
+      await dialog.alert(d.loadGamesFailed);
     }
   }
   useEffect(() => { void load(); }, []);
+
+  // Lock background scroll while the (portalled) template picker is open, so the
+  // page behind can't scroll under the full-screen overlay.
+  useEffect(() => {
+    if (!picking) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [picking]);
 
   async function newGame(tpl: GameTemplate) {
     setBusy(true); setPicking(false);
@@ -64,18 +93,37 @@ export default function DashboardPage() {
       const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
       const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
       await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
+      // Invalidate the games cache — otherwise returning to the dashboard within
+      // the TTL serves a stale list that's missing this just-created game.
+      _gamesCache = null;
       nav(`/build/${gameId}`);
     } finally { setBusy(false); }
   }
 
   async function launch(g: Game, opts?: { testDrive?: boolean }) {
     if (g.stages.length === 0) { await dialog.alert(d.emptyBody); return; }
+    // Don't launch an unplayable game: a quiz/numeric/station/sequence task missing
+    // its answer key can never be completed (updateGame doesn't reject these).
+    const badTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
+    if (badTask) { await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return; }
+    // Block a located task left at (0,0): a radius/exact task with no real pin would
+    // route teams to the null island (Gulf of Guinea) and can never be completed.
+    const noPinTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskLocationValid(tk));
+    if (noPinTask) { await dialog.alert(b.taskNeedsLocation(noPinTask.title || b.untitledTask)); return; }
+    // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
+    // actually complete (the Builder only shows a soft warning; the Dashboard has
+    // no stage view at all, so this is the only place it's caught from here).
+    const brokenStage = g.stages.find((s) => {
+      const r = validateUnlockGraph(s);
+      return r.warnings.length > 0 || r.errors.length > 0;
+    });
+    if (brokenStage) { await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return; }
     setBusy(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Launch failed';
+      const msg = e instanceof Error ? e.message : d.launchFailed;
       // Out of free runs + credits → route the creator to buy more. In free
       // mode launches never fail for billing, so just surface other errors.
       if (PAYMENTS_ENABLED && /credit|pro/i.test(msg)) {
@@ -87,7 +135,7 @@ export default function DashboardPage() {
   }
 
   async function remove(g: Game) {
-    if (!(await dialog.confirm(d.deleteConfirm(g.title), d.deleteBtn))) return;
+    if (!(await dialog.confirm(d.deleteConfirm(g.title), d.deleteBtn, true))) return;
     await deleteGame({ gameId: g.id });
     void load(true);
   }
@@ -100,7 +148,7 @@ export default function DashboardPage() {
   if (!games) return <DashboardSkeleton />;
 
   const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
-  const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'יוצר';
+  const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? d.creatorFallback;
 
   return (
     <div className="animate-fade-up">
@@ -184,19 +232,19 @@ export default function DashboardPage() {
                     <div className="flex items-start justify-between gap-3">
                       <h3 className="font-brand font-bold text-[--ink-1] text-base leading-snug flex-1">{g.title}</h3>
                       <Badge color={g.visibility === 'public' ? 'cyan' : 'zinc'}>
-                        {g.visibility === 'public' ? 'ציבורי' : 'פרטי'}
+                        {g.visibility === 'public' ? d.visPublic : d.visPrivate}
                       </Badge>
                     </div>
 
                     <p className="text-xs text-[--ink-3] line-clamp-2 leading-relaxed min-h-[2.5rem]">
-                      {g.description || 'אין תיאור עדיין.'}
+                      {g.description || d.noDescription}
                     </p>
 
                     {allTaskTypes.length > 0 && (
                       <div className="flex gap-1.5 flex-wrap">
                         {allTaskTypes.map(type => (
                           <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[10px] font-medium">
-                            {TASK_TYPE_EMOJI[type] ?? '●'} {type.replace('_', ' ')}
+                            {TASK_TYPE_EMOJI[type] ?? '●'} {TASK_TYPE_LABEL[type] ?? type}
                           </span>
                         ))}
                       </div>
@@ -321,35 +369,42 @@ export default function DashboardPage() {
       )}
 
       {/* ── Template picker modal ─────────────────────────────────────────── */}
-      {picking && (
+      {picking && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setPicking(false)}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-lg shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
+            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6">
-              <div className="flex items-start justify-between mb-6">
-                <div>
-                  <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
-                  <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
-                </div>
-                <button onClick={() => setPicking(false)}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+            {/* Header — fixed; never scrolls away. */}
+            <div className="flex items-start justify-between gap-4 p-5 pb-4 shrink-0 border-b border-[--rp-border]">
+              <div>
+                <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
+                <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
               </div>
-              <div className="grid sm:grid-cols-2 gap-3">
+              <button onClick={() => setPicking(false)}
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
+            </div>
+            {/* Body — bounded to the modal; the compact cards fit without scrolling
+                on a normal screen, and only this region (never the page) scrolls on
+                a very short viewport. */}
+            <div className="overflow-y-auto p-5 pt-4">
+              <div className="grid sm:grid-cols-2 gap-2.5">
                 {TEMPLATES.map((tpl) => (
                   <button key={tpl.key} disabled={busy} onClick={() => newGame(tpl)}
-                    className="text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-4 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
-                    <div className="text-2xl mb-2.5">{tpl.emoji}</div>
-                    <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{tpl.label}</div>
-                    <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{tpl.description}</div>
+                    className="flex items-start gap-3 text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
+                    <div className="text-2xl leading-none shrink-0 mt-0.5">{tpl.emoji}</div>
+                    <div className="min-w-0">
+                      <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{tpl.label}</div>
+                      <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{tpl.description}</div>
+                    </div>
                   </button>
                 ))}
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {sharing && (

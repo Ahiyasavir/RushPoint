@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { isFatalSyncError } from '../lib/syncError';
 import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
@@ -22,6 +23,8 @@ const ChatPanel = lazy(() => import('../components/ChatPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 import { shareStoryCard } from '../lib/storyCard';
+import { formatDuration } from '../lib/boardTime';
+import { feedback, isRankUp } from '../lib/sound';
 
 // Creator app — viral CTA baked into every shared progress card.
 const CREATOR_URL = import.meta.env.DEV
@@ -32,13 +35,30 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const { t, lang } = useT();
   const [state, setState] = useState<MyTeamState | null>(null);
   const [err, setErr] = useState('');
+  // Offline continuity (change: fix-play-offline-continuity): a transient poll
+  // failure keeps the last state on screen and flips `reconnecting` (a subtle,
+  // non-blocking pill) instead of blanking to the error screen. `hasState` lets the
+  // error handler know we already have something worth keeping without adding
+  // `state` to refresh()'s deps (which would tear down the poll effect each poll).
+  const [reconnecting, setReconnecting] = useState(false);
+  const hasState = useRef(false);
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
   const [sharing, setSharing] = useState(false);
+  // Territory zones (change: fix-territory-map-visibility): fetched once here so the
+  // SAME list feeds both the NavMap circles and the ZonesPanel list, and both
+  // refresh together after a capture.
+  const [zones, setZones] = useState<CaptureZone[]>([]);
   // Power-ups (change: power-ups): a transient award toast fired when the team's
   // powerUps.log grows across polls (ref-compared), for both award types.
   const [powerUpToast, setPowerUpToast] = useState<'double_points' | 'bonus_points' | null>(null);
   const powerUpLogLen = useRef<number | null>(null);
+  // Audio/haptic cue baselines (change: audio-haptic-feedback) — ref-compared
+  // across polls, like the power-up toast. null/undefined = not yet observed, so a
+  // mid-run reload records the baseline instead of replaying past events.
+  const taskDoneCount = useRef<number | null>(null);
+  const stageDoneCount = useRef<number | null>(null);
+  const lastRank = useRef<number | undefined>(undefined);
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
@@ -51,11 +71,26 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const refresh = useCallback(async () => {
     try {
       const s = await getMyTeamState({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId });
-      setState(s); setErr('');
+      setState(s); hasState.current = true; setErr(''); setReconnecting(false);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : t.play.syncFailed);
+      const code = (e as { code?: string })?.code;
+      // A transient blip while we already have state → keep the game on screen and
+      // show "reconnecting"; only a fatal error (or a failed first load) replaces it.
+      if (hasState.current && !isFatalSyncError(code)) {
+        setReconnecting(true);
+      } else {
+        setErr(e instanceof Error ? e.message : t.play.syncFailed);
+      }
     }
   }, [session, t]);
+
+  const reloadZones = useCallback(async () => {
+    try {
+      const r = await getRunZones({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId });
+      setZones(r.zones);
+    } catch { /* zones are best-effort; keep the last list */ }
+  }, [session]);
+  useEffect(() => { void reloadZones(); }, [reloadZones]);
 
   useEffect(() => {
     let alive = true;
@@ -89,6 +124,28 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     };
   }, [refresh, session]);
 
+  // Offline continuity: resume the instant the browser reports it's back online
+  // (don't wait up to 12s for the fallback poll), and show "reconnecting" the
+  // moment it goes offline.
+  useEffect(() => {
+    const onOnline = () => { void refresh(); };
+    const onOffline = () => { if (hasState.current) setReconnecting(true); };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [refresh]);
+
+  // While reconnecting, retry on a short interval so recovery doesn't wait for the
+  // slow fallback poll. Stops as soon as a refresh succeeds (clears reconnecting).
+  useEffect(() => {
+    if (!reconnecting) return;
+    const id = window.setInterval(() => { void refresh(); }, 3_000);
+    return () => window.clearInterval(id);
+  }, [reconnecting, refresh]);
+
   // Track the participant's live position for the navigation map, and report it
   // to the host's live team map (throttled to once per ~20s, only while active).
   useEffect(() => {
@@ -121,15 +178,52 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     if (powerUpLogLen.current === null) { powerUpLogLen.current = log.length; return; }
     if (log.length > powerUpLogLen.current) {
       const latest = log[log.length - 1];
-      if (latest?.type) {
-        setPowerUpToast(latest.type);
-        powerUpLogLen.current = log.length;
-        const id = window.setTimeout(() => setPowerUpToast(null), 4000);
-        return () => window.clearTimeout(id);
-      }
+      if (latest?.type) setPowerUpToast(latest.type);
     }
     powerUpLogLen.current = log.length;
   }, [state?.team.powerUps?.log]);
+
+  // Auto-hide the toast ~4s after it appears. Keyed on the toast value itself, NOT
+  // on the team state — the detection effect above re-runs on every poll/snapshot
+  // (powerUps.log is a fresh array reference each fetch), so scheduling the timeout
+  // there let a refresh arriving inside the 4s window run that effect's cleanup and
+  // clear the pending timer, leaving the toast stuck on screen forever.
+  useEffect(() => {
+    if (!powerUpToast) return;
+    const id = window.setTimeout(() => setPowerUpToast(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [powerUpToast]);
+
+  // Task-complete cue: fire when the total count of completed tasks grows across
+  // polls. Counting the server-confirmed 'completed' status (not the callable
+  // return) covers every task type from one place AND correctly stays silent for a
+  // photo/audio submission that is still pending staff review (not yet completed).
+  useEffect(() => {
+    const done = state?.team.stages.reduce(
+      (n, s) => n + s.tasks.filter((tk) => tk.status === 'completed').length, 0) ?? 0;
+    if (taskDoneCount.current === null) { taskDoneCount.current = done; return; }
+    if (done > taskDoneCount.current) feedback('task');
+    taskDoneCount.current = done;
+  }, [state?.team.stages]);
+
+  // Stage-complete cue: fire when the count of completed stages grows across polls.
+  // First observation only records the baseline (a reload mid-run doesn't replay).
+  useEffect(() => {
+    const done = state?.team.stages.filter((s) => s.status === 'completed').length ?? 0;
+    if (stageDoneCount.current === null) { stageDoneCount.current = done; return; }
+    if (done > stageDoneCount.current) feedback('stage');
+    stageDoneCount.current = done;
+  }, [state?.team.stages]);
+
+  // Rank-up cue: fire only when our leaderboard rank strictly improves. Rank is
+  // present only once the board carries our team; undefined ranks never cue.
+  useEffect(() => {
+    const board = state?.run.leaderboard;
+    const teamId = state?.team.id;
+    const rank = board?.rankings.find((r) => r.teamId === teamId)?.rank;
+    if (isRankUp(lastRank.current, rank)) feedback('rankUp');
+    lastRank.current = rank;
+  }, [state?.run.leaderboard, state?.team.id]);
 
   async function leave() {
     if (await dialog.confirm(t.play.leaveConfirm)) { clearSession(); onLeave(); }
@@ -151,6 +245,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     });
     try {
       await triggerSOS({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, ...(coords ?? {}) });
+      feedback('alert');
       await dialog.alert(t.play.sosSent);
     } catch {
       await dialog.alert(t.play.sosFailed);
@@ -182,7 +277,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         teamName: team.displayName,
         score: team.score,
         rank,
-        stagesDone: `${done}/${game.stageCount}`,
+        stagesDone: `${done}/${team.stages.length}`,
         ctaUrl: CREATOR_URL,
         headline,
         scoreLabel: t.play.pointsSoFar,
@@ -235,12 +330,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   if (!team.launched) {
     return (
       <Screen>
-        <Header game={game} score={team.score} accent={accent} onLeave={leave} />
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
+        <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
+        <Header game={game} score={team.score} accent={accent} onLeave={leave}
+          timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">⏳</div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
           <p className="text-zinc-500">{t.play.waitingStart}</p>
+          <HowToPlayCard instructions={game.instructions} lang={lang} />
         </div>
         {hasTeammateDevices && myUid && (
           <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
@@ -254,11 +352,17 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   // Streak/momentum: consecutive completions across the run, in play order. A
   // skip or a long idle gap resets it (computeStreak). Chip hidden below 2.
+  // computeStreak counts the TRAILING run and detects idle gaps via lastAt, so it
+  // must be fed in completion-TIME order — the stage→task-index order these records
+  // sit in can diverge from it (non-linear routing, or a partial-completion stage
+  // whose non-chosen tasks auto-skip at the end), which would reset or inflate the
+  // streak on the wrong element. Sort by completedAt first.
   const { streak, milestone } = computeStreak(
     team.stages
       .flatMap((s) => s.tasks)
       .filter((rec) => rec.status === 'completed' || rec.status === 'skipped')
-      .map((rec) => ({ status: rec.status, completedAt: rec.completedAt })),
+      .map((rec) => ({ status: rec.status, completedAt: rec.completedAt }))
+      .sort((a, b) => (a.completedAt ? Date.parse(a.completedAt) : 0) - (b.completedAt ? Date.parse(b.completedAt) : 0)),
     { now: new Date().toISOString() },
   );
 
@@ -283,15 +387,18 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   return (
     <Screen>
+      <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
-      <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed} />
+      <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
+        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+      <HowToPlayButton instructions={game.instructions} lang={lang} />
       {session.isTestDrive && (
         <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-rp-amber flex items-center gap-2">
           🧪 {t.play.testRunBanner}
         </div>
       )}
-      <div className="mt-4 mb-2"><Progress done={completedStages} total={game.stageCount} /></div>
+      <div className="mt-4 mb-2"><Progress done={completedStages} total={team.stages.length} /></div>
       <InRunAlerts hotZone={state.run.hotZone} outOfBounds={team.outOfBounds} />
       {streak >= 2 && (
         <div
@@ -306,34 +413,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {sharing ? t.play.creating : t.play.shareProgress}
       </button>
 
-      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} />
-
-      {state.game.photoFeedEnabled !== false && myUid && (
-        <FeedSection ctx={session} myUid={myUid} />
-      )}
-
-      <ChatSection ctx={session} teamId={team.id} />
-
-      <TrackablesPanel ctx={session} myTeamId={team.id} isController={isController} />
-
-      <ZonesPanel ctx={session} myTeamId={team.id} isController={isController} me={me} />
-
-      {hasTeammateDevices && myUid && (
-        <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
-      )}
-      {!isController && (
-        <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
-          👀 {t.devices.viewingBanner({ name: controllerName })}
-        </div>
-      )}
-
-      {activeStage && (
+      {/* PRIMARY: the map + current task sit at the TOP, prominent
+          (change: fix-play-screen-hierarchy) — the family playtest buried the task
+          under status panels and the screen scrolled to find it. */}
+      {(activeStage || zones.length > 0) && (
         <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <NavMap targets={targets} me={me} accent={accent} className="h-52 mb-4" />
+          <NavMap targets={targets} me={me} hotZone={state.run.hotZone} zones={zones} myTeamId={team.id} accent={accent} className="h-52 mb-4" />
         </Suspense>
       )}
 
-      <div className="flex-1">
+      <div className="mb-4">
         {activeStage ? (
           <>
             <TaskRunner session={session} state={state} stage={activeStage} onChanged={refresh} readOnly={!isController} />
@@ -346,6 +435,27 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         )}
       </div>
 
+      {/* SECONDARY: standings, feed, chat, trackables, territory, devices — the
+          lower-priority status content lives below the task and scrolls within its
+          own bounded region so it never pushes the task off-screen. */}
+      <div className="mt-1 max-h-[60vh] overflow-y-auto -mx-1 px-1">
+        {!isController && (
+          <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
+            👀 {t.devices.viewingBanner({ name: controllerName })}
+          </div>
+        )}
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
+        {state.game.photoFeedEnabled !== false && myUid && (
+          <FeedSection ctx={session} myUid={myUid} />
+        )}
+        <ChatSection ctx={session} teamId={team.id} />
+        <TrackablesPanel ctx={session} myTeamId={team.id} isController={isController} />
+        <ZonesPanel zones={zones} myTeamId={team.id} isController={isController} me={me} ctx={session} onCaptured={reloadZones} />
+        {hasTeammateDevices && myUid && (
+          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
+        )}
+      </div>
+
       <Button variant="danger" className="mt-4" onClick={sos}>SOS</Button>
     </Screen>
   );
@@ -354,6 +464,22 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 // Scheduled-release (change: scheduled-release): the team finished a chapter but
 // the next one is a TIMED DROP. Show a live countdown; when it hits zero, poll so
 // the server unlocks the stage and play resumes.
+
+// Offline continuity (change: fix-play-offline-continuity): a small non-blocking
+// pill shown while a poll is failing but we still have state — the game stays on
+// screen and this reassures the player it's syncing (never a full-screen takeover).
+function ReconnectingPill({ show, text }: { show: boolean; text: string }) {
+  if (!show) return null;
+  return (
+    <div className="fixed top-8 inset-x-0 z-40 flex justify-center pointer-events-none" role="status" aria-live="polite">
+      <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow">
+        <span className="w-3 h-3 rounded-full border-2 border-zinc-400/40 border-t-zinc-100 animate-spin" />
+        {text}
+      </div>
+    </div>
+  );
+}
+
 // Narrative chapters (change: narrative-chapters): a full-card story beat shown when a
 // chapter opens (intro) or closes (outro). Outro of the most-recently-completed stage
 // takes priority so it appears before the next chapter's intro. Dismissal is local
@@ -400,6 +526,62 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
   );
 }
 
+// Game intro primer (change: game-intro-instructions): the game-level "How to play"
+// content. The waiting-screen card (below) and the in-run button/modal both reuse
+// the narrative StoryInterstitial visual language so players see one consistent
+// "read this" surface. Renders nothing when the game has no primer.
+
+// Waiting/pre-start card: a joined player reading the lobby learns the mechanics
+// before the run goes live. Static (not an overlay) — it lives inline on the page.
+function HowToPlayCard({ instructions, lang }: { instructions?: GameInstructions | null; lang: 'he' | 'en' }) {
+  const { t } = useT();
+  if (!gameInstructionsHasContent(instructions ?? undefined)) return null;
+  const ins = instructions!;
+  const body = localizedInstructionsBody(ins, lang);
+  return (
+    <div className="w-full max-w-md mt-4 rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden text-start">
+      {ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-40 object-cover" />}
+      <div className="p-4 space-y-2">
+        <h3 className="text-base font-bold text-zinc-100" dir="auto">{ins.title ?? t.play.howToPlayTitle}</h3>
+        {body && <p className="text-sm text-zinc-300 whitespace-pre-line" dir="auto">{body}</p>}
+      </div>
+    </div>
+  );
+}
+
+// In-run button + modal: a confused player can re-read the primer mid-game. The
+// modal reuses the StoryInterstitial overlay layout (image header + title +
+// pre-line body + close). Available for the whole run.
+function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructions | null; lang: 'he' | 'en' }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  if (!gameInstructionsHasContent(instructions ?? undefined)) return null;
+  const ins = instructions!;
+  const body = localizedInstructionsBody(ins, lang);
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="self-start mt-2 inline-flex items-center gap-1 rounded-full bg-app-card border border-glass-border px-3 py-1 text-xs font-semibold text-zinc-300 hover:text-zinc-100"
+      >
+        📖 {t.play.howToPlay}
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
+          <div className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
+            {ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-48 object-cover" />}
+            <div className="p-5 space-y-3">
+              <h2 className="text-lg font-bold text-zinc-100" dir="auto">{ins.title ?? t.play.howToPlayTitle}</h2>
+              {body && <p className="text-sm text-zinc-300 whitespace-pre-line" dir="auto">{body}</p>}
+              <Button onClick={() => setOpen(false)} className="w-full">{t.play.howToPlayClose}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Live photo feed (change: live-photo-feed): a collapsible section over the lazy
 // FeedPanel. The panel (and its listener) only mounts on first open, so a team
 // that never opens the feed pays zero bundle + zero snapshot cost.
@@ -442,6 +624,16 @@ function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
       setCount(n);
     }, () => setCount(0));
   }, [ctx.ownerUid, ctx.gameId, ctx.runId, teamId]);
+
+  // While the panel is open, arriving messages are being read — keep `seen` in
+  // step with the live count so they don't resurface as an "unread" dot the
+  // moment the panel is collapsed again.
+  useEffect(() => {
+    if (open && count > seen) {
+      saveChatSeen(ctx.runId, teamId, count);
+      setSeen(count);
+    }
+  }, [open, count, seen, ctx.runId, teamId]);
 
   const unread = count > seen;
 
@@ -543,25 +735,16 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
 
 // Territory capture (change: territory-capture): the run's zones with their current
 // owner; a controller standing inside a zone can capture (or flip) it for bonus points.
-function ZonesPanel({ ctx, myTeamId, isController, me }: { ctx: Session; myTeamId: string; isController: boolean; me: { lat: number; lng: number } | null }) {
+function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zones: CaptureZone[]; ctx: Session; myTeamId: string; isController: boolean; me: { lat: number; lng: number } | null; onCaptured: () => void }) {
   const { t } = useT();
-  const [zones, setZones] = useState<CaptureZone[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const r = await getRunZones({ ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId });
-      setZones(r.zones);
-    } catch { setZones([]); }
-  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
-  useEffect(() => { void load(); }, [load]);
 
   async function capture(z: CaptureZone) {
     if (!me) return;
     setBusy(z.id);
     try {
       await captureZone({ ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId, zoneId: z.id, lat: me.lat, lng: me.lng });
-      await load();
+      onCaptured(); // refresh both the map circles and this list
     } catch { /* out of range / already yours — list reloads */ } finally { setBusy(null); }
   }
 
@@ -660,8 +843,12 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
   );
 }
 
-function Header({ game, score, accent, onLeave, powerUpArmed }: {
+function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
+  // time_only runs are ranked purely by time and never award points, so the
+  // in-run "score" is a permanent 0 that misreads as a total — show a live
+  // elapsed clock instead (mirrors the finish/TV/public boards).
+  timeOnly?: boolean; startedAt?: string;
 }) {
   const { t } = useT();
   return (
@@ -671,7 +858,9 @@ function Header({ game, score, accent, onLeave, powerUpArmed }: {
           {game.branding?.name ?? game.title}
         </div>
         <div className="text-xs text-zinc-500 flex items-center gap-2">
-          <span>{t.play.score}: <span className="text-accent font-mono">{score}</span></span>
+          {timeOnly
+            ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
+            : <span>{t.play.score}: <span className="text-accent font-mono">{score}</span></span>}
           {powerUpArmed && (
             <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-accent">
               {t.play.powerUpArmedChip}
@@ -682,6 +871,19 @@ function Header({ game, score, accent, onLeave, powerUpArmed }: {
       <button onClick={onLeave} className="text-xs text-zinc-500">{t.play.leave}</button>
     </div>
   );
+}
+
+// A live m:ss elapsed clock for time_only runs, ticking on its own so only this
+// node re-renders each second (not the whole header/screen). Before the race is
+// stamped (startedAt absent) it reads 0:00.
+function ElapsedClock({ startedAt }: { startedAt?: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  const sec = startedAt ? Math.max(0, (now - new Date(startedAt).getTime()) / 1000) : 0;
+  return <span className="text-accent font-mono">{formatDuration(sec)}</span>;
 }
 
 // Power-ups (change: power-ups): a transient award toast at the top of the screen.

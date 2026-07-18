@@ -30,6 +30,9 @@ import {
   validateAvailabilityWindow,
   validateOrderItems,
   validateSurveyChoices,
+  sumEstimatedMinutes,
+  taskCompletabilityError,
+  cleanGameInstructions,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
@@ -43,12 +46,7 @@ function gamePath(uid: string, gameId: string) {
   return `users/${uid}/games/${gameId}`;
 }
 
-function requireAuth(context: functions.https.CallableContext): string {
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  }
-  return context.auth.uid;
-}
+import { requireAuth } from '../auth';
 
 // Enforce the task-media trust boundary on every write: run each task's `media`
 // through normalizeTaskMedia so a client can never persist an off-origin image/video
@@ -115,6 +113,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
+    instructions,
   } = data as UpdateGamePayload;
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
@@ -162,6 +161,14 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
           const choiceError = validateSurveyChoices(task.surveyChoices);
           if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
         }
+        // Unwinnable-task guard: mirrors the creator-web Wizard's client-side
+        // isTaskInteractionValid, but enforced server-side so a direct callable
+        // invocation (bypassing the Wizard) can't persist a quiz with no answer,
+        // numeric with no numericAnswer, smart_station with no secretCode, or
+        // sequence with no steps — every participant attempt at such a task
+        // would otherwise fail forever.
+        const completabilityError = taskCompletabilityError(task);
+        if (completabilityError) problems.push(completabilityError);
       }
     }
     if (problems.length > 0) {
@@ -183,6 +190,13 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
   if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
+  // Game intro primer (change: game-intro-instructions): clean-or-clear, mirroring
+  // integrationWebhookUrl. A defined primer with content is stored cleaned (https
+  // image guard lives in cleanGameInstructions); defined + empty ⇒ delete the field.
+  if (instructions !== undefined) {
+    const cleaned = cleanGameInstructions(instructions);
+    updates.instructions = cleaned ?? (admin.firestore.FieldValue.delete() as unknown as undefined);
+  }
   // Chat integration (change: chat-integrations): validate the owner-supplied
   // webhook URL against the SSRF allow-list. An empty string clears it; a non-empty
   // off-allowlist URL is rejected loud (never silently persisted).
@@ -200,6 +214,37 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   }
 
   await ref.update(updates);
+
+  // Consistency (consistency sweep C2): if the game is PUBLISHED, keep its
+  // gallery summary in sync with this edit so the public card can't drift from
+  // the live Dashboard. Best-effort PARTIAL update — never touches playCount (a
+  // live counter maintained by launchRun) or the publicTasks copyCount, and
+  // skips the auth lookup (ownerDisplayName doesn't change on a content edit).
+  const existing = snap.data() as Game;
+  if (existing.visibility === 'public') {
+    const merged = { ...existing, ...updates } as Game;
+    const allTasks = merged.stages.flatMap((s) => s.tasks);
+    db.doc(`publicGames/${gameId}`).update({
+      title: merged.title,
+      description: merged.description,
+      mode: merged.mode,
+      scoringPreset: merged.scoringPreset,
+      tags: merged.tags,
+      coverImage: merged.coverImage,
+      approxLocation: merged.approxLocation,
+      stageCount: merged.stages.length,
+      taskCount: allTasks.length,
+      estimatedTotalMinutes: sumEstimatedMinutes(allTasks),
+      allowInstantPlay: merged.allowInstantPlay ?? false,
+      // Game intro primer (change: game-intro-instructions): keep the public teaser
+      // in sync — write the cleaned primer or delete it so it can't drift from the
+      // live game. (merged.instructions is the delete sentinel when this edit cleared it.)
+      instructions: merged.instructions ?? admin.firestore.FieldValue.delete(),
+      requirement: describeGameRequirements(merged),
+      updatedAt: updates.updatedAt,
+    }).catch((e) => logBestEffort('publicGames.resync', { gameId }, e));
+  }
+
   return { ok: true };
 });
 
@@ -317,7 +362,7 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   if (visibility === 'public') {
     // Compute summary stats
     const allTasks = game.stages.flatMap((s) => s.tasks);
-    const estimatedTotalMinutes = allTasks.reduce((s, t) => s + t.estimatedMinutes, 0);
+    const estimatedTotalMinutes = sumEstimatedMinutes(allTasks);
 
     // Get creator display name
     const creatorSnap = await admin.auth().getUser(uid).catch((e) => { logBestEffort('auth.getUser', { uid }, e); return null; });

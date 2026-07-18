@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { Button } from './ui';
 import { useT } from './LanguageContext';
@@ -42,7 +43,7 @@ export function ShareSheet({
     try { await onPublish(); } finally { setPublishing(false); }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-app-card border border-glass-border rounded-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
@@ -73,7 +74,8 @@ export function ShareSheet({
 
         <Button className="mt-4 w-full" onClick={nativeShare}>{b.shareBtn}</Button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

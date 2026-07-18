@@ -61,7 +61,7 @@ Copy each `.env.example` to `.env` (all are gitignored) and fill in real values.
 |---|---|
 | `apps/creator-web/.env` | `VITE_FIREBASE_*` from your Web app config + **required** `VITE_MAPTILER_KEY` (see below) |
 | `apps/play-web/.env` | same `VITE_FIREBASE_*` values (+ optional `VITE_MAPTILER_KEY`) |
-| `functions/.env` | `APP_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (Stripe in §4) |
+| `functions/.env` | `APP_URL`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` (Stripe in §4); optional `RESEND_API_KEY` for run-summary email (§7b) |
 
 - `VITE_*` values are **public** (baked into the web bundle) — that's fine, they're not secrets.
 - `functions/.env` holds **server secrets**; it is gitignored and only deployed to your functions.
@@ -144,6 +144,24 @@ Most of the app needs no admin. Two things use elevated access:
 - **Audit-log reading** (`listAuditLogs`) requires an admin custom claim. To mint the first admin,
   set `RUSHPOINT_ADMIN_BOOTSTRAP=<your-email-or-uid>` in `functions/.env`, deploy, call the admin
   bootstrap once, then remove it.
+
+---
+
+## 7b. Run summary email (optional)
+
+Every finalized run composes an organizer summary (final standings + completion stats + player
+feedback digest). It is always shown in the creator Run Console. To also **email** it after each run,
+add a mail provider key to `functions/.env`:
+
+```
+RESEND_API_KEY=re_xxx                            # from resend.com (free tier) — enables delivery
+RUN_SUMMARY_EMAIL_TO=you@example.com             # optional — override recipient (else the owner's account email)
+RUN_SUMMARY_EMAIL_FROM=onboarding@resend.dev      # optional — sender (default is Resend's sandbox address)
+RUN_SUMMARY_EMAIL_ENABLED=false                   # optional — set to hard-disable (default ON)
+```
+
+Then **deploy the backend again** (§5) so the function picks it up. With no `RESEND_API_KEY`, sending
+is a safe no-op (a log breadcrumb only) — nothing is sent and no network call is made.
 
 ---
 

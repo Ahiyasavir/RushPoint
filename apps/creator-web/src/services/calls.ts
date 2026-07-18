@@ -15,6 +15,7 @@ import type {
   ReplayEvent,
   ScorePoint,
   RunRecap,
+  RunSummary,
   RunFeedback,
   RunFeedbackSummary,
   LiveRunSummary,
@@ -54,6 +55,9 @@ export const getRunHeatmap   = callable<{ code: string }, RunHeatmapResult>('get
 export type { RunHeatmapResult } from '@rushpoint/shared';
 export const getRunReplay    = callable<{ code: string }, RunReplayResult>('getRunReplay');
 export const getRunRecap     = callable<{ code: string }, RunRecapResult>('getRunRecap');
+// Post-run organizer summary (change: run-summary-report) — standings + completion
+// + feedback digest folded into one; also emailed to the organizer on finalize.
+export const getRunSummary   = callable<{ code: string }, RunSummary>('getRunSummary');
 export const getRunFeedbackSummary = callable<
   { gameId: string; runId: string },
   { summary: RunFeedbackSummary; responses: RunFeedback[] }
@@ -93,6 +97,8 @@ export interface RunTeamRow {
   memberCount: number;
   status: string;
   score: number;
+  /** Hints + staff adjustments; subtracted from score at ranking time. */
+  bonusPenalty: number;
   completedStages: number;
   activeStageOrder: number | null;
   finished: boolean;

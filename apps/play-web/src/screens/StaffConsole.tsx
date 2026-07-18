@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
 // Live photo feed moderation (live-photo-feed): lazy, loads on first open.
@@ -20,6 +20,7 @@ import {
 } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
+import { feedback } from '../lib/sound';
 
 // ── A flattened pending photo submission row (one per team×task) ──
 interface PendingSubmission {
@@ -85,7 +86,15 @@ function StaffSignIn({
       saveStaffSession(session);
       onSignedIn(session);
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.staff.signInFailed);
+      // Localize the server's English rejections by code instead of leaking them.
+      const code = (e && typeof e === 'object' && 'code' in e
+        ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
+      setErr(
+        code === 'not-found' ? t.staff.signInInvalidPin
+        : code === 'resource-exhausted' ? t.staff.signInLocked
+        : code === 'invalid-argument' ? t.staff.signInBadDetails
+        : t.staff.signInFailed,
+      );
     } finally { setBusy(false); }
   }
 
@@ -166,6 +175,10 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   }, [ownerUid, gameId, runId]);
 
   // Live unacknowledged SOS / alerts.
+  // audio-haptic-feedback: play the urgent cue when a NEW alert arrives so staff
+  // are notified without watching the screen. Ref-baseline the seen ids (null on
+  // first snapshot) so a fresh mount / re-attach doesn't replay existing alerts.
+  const seenAlertIds = useRef<Set<string> | null>(null);
   useEffect(() => {
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`),
@@ -185,6 +198,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         };
       });
       rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const ids = new Set(rows.map((r) => r.id));
+      if (seenAlertIds.current === null) {
+        seenAlertIds.current = ids; // baseline: don't cue on first paint
+      } else {
+        const isNew = rows.some((r) => !seenAlertIds.current!.has(r.id));
+        seenAlertIds.current = ids;
+        if (isNew) feedback('alert');
+      }
       setAlerts(rows);
     }, (e) => setReadErr(e.message));
   }, [ownerUid, gameId, runId]);
@@ -386,6 +407,18 @@ function StaffChatSection({
       setThreads(rows);
     }, () => setThreads([]));
   }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  // While a thread is expanded, new arrivals (incl. this staffer's own replies)
+  // are being read — keep its seen-count in step with the live message count so it
+  // doesn't resurface as "unread" the moment it's collapsed (mirrors the
+  // participant ChatSection). Without this, sending a reply re-flags the open thread.
+  useEffect(() => {
+    if (!openTeam) return;
+    const th = threads.find((x) => x.teamId === openTeam);
+    if (th && th.messages.length > (seen[openTeam] ?? 0)) {
+      setSeen((s) => ({ ...s, [openTeam]: th.messages.length }));
+    }
+  }, [openTeam, threads, seen]);
 
   const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
 

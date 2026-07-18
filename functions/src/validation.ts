@@ -7,7 +7,7 @@
 // Any non-validation throw is re-raised unchanged.
 
 import * as functions from 'firebase-functions';
-import { ValidationError } from '@rushpoint/shared';
+import { ValidationError, StoredDocError } from '@rushpoint/shared';
 
 export function validate<T>(build: () => T): T {
   try {
@@ -15,6 +15,24 @@ export function validate<T>(build: () => T): T {
   } catch (e) {
     if (e instanceof ValidationError) {
       throw new functions.https.HttpsError('invalid-argument', e.message, e.toResult());
+    }
+    throw e;
+  }
+}
+
+// Read-boundary counterpart of `validate()`: run a stored-doc parse and, on a
+// StoredDocError (a malformed document read back from Firestore — missing/wrong-
+// typed required field), rethrow it as an `internal` HttpsError so the corrupt
+// doc fails loud instead of feeding a mis-typed object into scoring/routing/
+// payment math. Unlike a bad payload (the caller's fault ⇒ `invalid-argument`),
+// a corrupt stored doc is a server-side data problem ⇒ `internal`. Any other
+// throw is re-raised unchanged.
+export function parseStored<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (e) {
+    if (e instanceof StoredDocError) {
+      throw new functions.https.HttpsError('internal', e.message);
     }
     throw e;
   }
