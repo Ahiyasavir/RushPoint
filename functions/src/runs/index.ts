@@ -643,19 +643,30 @@ export async function completeTaskForTeam(
   const hotZone = runData?.hotZone;
   const launchedAt = runData?.launchedAt;
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  // WO Fix 1: fold the station-slot release INTO this transaction so completion and
+  // release commit atomically. Read the run doc inside the txn (all reads precede
+  // all writes) and decrement run.taskCounts for the completed slot + any
+  // assigned-but-auto-skipped slots — no separate post-commit releaseTask that
+  // could be dropped (leaving a leaked slot) if the process dies between commit and
+  // release.
+  const runRef = db.doc(runPath(ownerUid, gameId, runId));
 
   // Station-occupancy slots held by tasks that get auto-skipped when a partial
   // stage completes early. assignTask incremented taskCounts for an ASSIGNED
-  // task; the skip below must release it or the slot leaks. Released AFTER the
-  // transaction (releaseTask opens its own txn — can't nest). Reset per attempt
-  // so a transaction retry never double-releases.
+  // task; the skip below must release it or the slot leaks. WO Fix 1: released
+  // INSIDE this transaction (atomic with the completion). Reset per attempt so a
+  // transaction retry never double-decrements.
   let skippedHeldTaskIds: string[] = [];
 
   const result = await db.runTransaction<{ completed: boolean; heldSlot: boolean }>(async (tx) => {
     skippedHeldTaskIds = [];
+    // All reads up front (teamRef + runRef) before any write, per the Firestore
+    // transaction rule (WO Fix 1).
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) return { completed: false, heldSlot: false };
     const team = teamSnap.data() as RunTeam;
+    const runSnapTx = await tx.get(runRef);
+    const counts = (runSnapTx.data() as { taskCounts?: Record<string, number> } | undefined)?.taskCounts ?? {};
 
     // WO Fix 2: stage 0 is 'active' at join (buildInitialStages) while the team is
     // still launched:false, so a team could grade stage-1 tasks BEFORE the host
@@ -859,17 +870,34 @@ export async function completeTaskForTeam(
       activeTaskId: null,
       updatedAt: now,
     });
+
+    // WO Fix 1: release the station slots ATOMICALLY in the same commit. Decrement
+    // the completed task's slot (only when THIS team held it) plus every
+    // assigned-but-auto-skipped leftover, each guarded by the same >0 check
+    // releaseTask uses so a stale/zero counter never goes negative. `counts` is the
+    // value read at the top of this txn; Firestore serializes conflicting writes so
+    // the increment is applied against the committed value.
+    if (heldSlot && (counts[taskId] ?? 0) > 0) {
+      tx.update(runRef, { [`taskCounts.${taskId}`]: admin.firestore.FieldValue.increment(-1) });
+    }
+    for (const id of skippedHeldTaskIds) {
+      if ((counts[id] ?? 0) > 0) {
+        tx.update(runRef, { [`taskCounts.${id}`]: admin.firestore.FieldValue.increment(-1) });
+      }
+    }
     return { completed: true, heldSlot };
   });
 
-  // Release station slots held by assigned-but-auto-skipped tasks (guarded:
-  // releaseTask no-ops when the counter is already 0, so it's safe on retry).
-  for (const id of skippedHeldTaskIds) {
-    await releaseTask(id, ownerUid, gameId, runId);
-  }
-  // Keep the live leaderboard snapshot fresh (throttled; best-effort).
+  // Keep the live leaderboard snapshot fresh (throttled; best-effort). WO Fix 2:
+  // fire-and-forget — the ~throttled recompute must NOT block the player's
+  // completion response (it dominated completeTask p95). maybeRefreshLeaderboard
+  // re-reads + re-throttles + is last-write-wins idempotent, so dropping the await
+  // is safe; the next scoring event and every organizer refresh recompute it, and
+  // finalizeRun reconciles definitively. Caveat: post-response background work on
+  // Cloud Functions can be terminated before it runs — acceptable here (best-effort).
   if (result.completed) {
-    await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId);
+    void maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId)
+      .catch((e) => functions.logger.warn('leaderboard refresh (best-effort) failed', { runId, error: (e as Error).message }));
   }
   return result;
 }
@@ -1047,7 +1075,11 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
       const aDone = a.finishedAt ? (a.durationSeconds ?? Infinity) : Infinity;
       const bDone = b.finishedAt ? (b.durationSeconds ?? Infinity) : Infinity;
       if (aDone !== bDone) return aDone - bDone;
-      return b.completedStages - a.completedStages;
+      // WO Fix 3: terminal teamId tie-break so tied teams don't churn between
+      // refreshes (the team list is read via an unordered Firestore query). Mirrors
+      // the non-time branch's stable fallback below.
+      if (b.completedStages !== a.completedStages) return b.completedStages - a.completedStages;
+      return a.teamId.localeCompare(b.teamId);
     }
     if (b.score !== a.score) return b.score - a.score;
     // Deterministic tie-break (equal score is common mid-run, e.g. two teams at 0
@@ -2597,16 +2629,15 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     }
   }
 
-  const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
   // A duplicate/idempotent completion must NOT release or re-assign: a concurrent
   // real completion already did, and doubling the assignment leaks a station slot.
   // Idempotent replay (WO-3): a duplicate completion of an already-graded task is
   // a no-op for score/slots — surface `already:true` so clients/sims/support can
   // tell a replay from a first completion (score is already conserved either way).
   if (!completed) return { ok: true, already: true, nextTaskId: null };
-  // Release only the slot THIS team actually reserved (fix: station-cap-bypass) —
-  // a permissive completion of a task the team never checked out holds no slot.
-  if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  // WO Fix 1: the station slot the team held is released atomically inside
+  // completeTaskForTeam's transaction — no post-commit releaseTask here.
 
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
@@ -2812,9 +2843,9 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     // Task expiry still applies (a closed task takes no more responses).
     await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
     const now = new Date().toISOString();
-    const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
+    const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
     if (!completed) return { correct: true, nextTaskId: null };
-    if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+    // WO Fix 1: slot release is atomic inside completeTaskForTeam.
     const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
     const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
     return { correct: true, nextTaskId: next.taskId ?? null };
@@ -2869,9 +2900,9 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   }
 
   const now = new Date().toISOString();
-  const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
   if (!completed) return { correct: true, nextTaskId: null };
-  if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  // WO Fix 1: slot release is atomic inside completeTaskForTeam.
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
   return { correct: true, nextTaskId: next.taskId ?? null };
@@ -2923,9 +2954,9 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   await teamRef.update({ [`taskStepProgress.${taskId}`]: newDone, updatedAt: now });
 
   if (taskComplete) {
-    const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
     if (completed) {
-      if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+      // WO Fix 1: slot release is atomic inside completeTaskForTeam.
       const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
       await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
     }

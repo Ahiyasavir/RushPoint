@@ -118,12 +118,15 @@ function buildStages() {
     {
       id: 'sim-stage-2', order: 1, title: 'Answers',
       tasks: [
+        // WO Fix 4: locationless tasks are uncapped in routing, so these deliberately
+        // OMIT maxConcurrentTeams — they exercise the unset-cap default and must still
+        // hand every team the task (no phantom 'stationsFull').
         { id: 'sim-quiz', title: 'Quiz', type: 'quiz', locationless: true, triggerMode: 'locationless',
           coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: 60,
-          maxConcurrentTeams: TEAMS + 1, choices: ['Jerusalem', 'Haifa', 'Eilat'], answers: ['Jerusalem'] },
+          choices: ['Jerusalem', 'Haifa', 'Eilat'], answers: ['Jerusalem'] },
         { id: 'sim-num', title: 'Numeric', type: 'numeric', locationless: true, triggerMode: 'locationless',
           coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: 60,
-          maxConcurrentTeams: TEAMS + 1, numericAnswer: 7, numericTolerance: 0 },
+          numericAnswer: 7, numericTolerance: 0 },
       ],
     },
     {

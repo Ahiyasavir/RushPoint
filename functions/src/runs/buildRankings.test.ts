@@ -62,3 +62,32 @@ describe('buildRankings — no non-finite duration (playtest regression)', () =>
     expect(board).toHaveLength(2);
   });
 });
+
+// WO Fix 3: the time_only sort branch had no terminal teamId tie-break, so two
+// teams that tie on both duration and completedStages kept their (unordered
+// Firestore) input order — the live/public board could churn between refreshes.
+// Add a deterministic teamId fallback to the time_only branch.
+describe('buildRankings — time_only deterministic tie-break', () => {
+  test('unfinished tied teams sort by teamId regardless of input order', () => {
+    const a = joinedNotStarted('a');
+    const b = joinedNotStarted('b');
+    expect(buildRankings(game('time_only'), [b, a], now).map((r) => r.teamId)).toEqual(['a', 'b']);
+    expect(buildRankings(game('time_only'), [a, b], now).map((r) => r.teamId)).toEqual(['a', 'b']);
+  });
+
+  test('two consecutive builds are order-stable', () => {
+    const a = joinedNotStarted('a');
+    const b = joinedNotStarted('b');
+    const first = buildRankings(game('time_only'), [a, b], now).map((r) => r.teamId);
+    const second = buildRankings(game('time_only'), [b, a], now).map((r) => r.teamId);
+    expect(first).toEqual(second);
+  });
+
+  test('finished teams tied on duration and completedStages break by teamId', () => {
+    // Two finished teams with equal durationSeconds and equal completedStages.
+    const a = startedFinished('a');
+    const b = startedFinished('b');
+    expect(buildRankings(game('time_only'), [b, a], now).map((r) => r.teamId)).toEqual(['a', 'b']);
+    expect(buildRankings(game('time_only'), [a, b], now).map((r) => r.teamId)).toEqual(['a', 'b']);
+  });
+});

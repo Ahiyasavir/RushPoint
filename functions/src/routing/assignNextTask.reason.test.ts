@@ -43,4 +43,11 @@ describe('classifyNoAssignment', () => {
     ];
     expect(classifyNoAssignment(tasks, [], { a: 1 }, undefined, NOW)).toBe('stationsFull');
   });
+
+  // WO Fix 4: locationless tasks are uncapped in routing, so an over-"cap" count on
+  // a locationless task must never be reported as stationsFull.
+  it("does not report stationsFull for an over-'cap' locationless task", () => {
+    const tasks = [task({ id: 'q', locationless: true })];
+    expect(classifyNoAssignment(tasks, [], { q: 5 }, undefined, NOW)).toBe('none');
+  });
 });

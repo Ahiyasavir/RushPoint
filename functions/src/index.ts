@@ -16,7 +16,6 @@ function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
 import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask } from './runs/index';
-import { releaseTask } from './routing/assignNextTask';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
@@ -841,9 +840,9 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // the next team gets {taskId:null} forever. Guarded on `completed` (idempotent
   // replay must not over-release) and `heldSlot` (never drain a slot this team
   // never reserved). `verifyStationCode` carries no lat/lng → route locationless.
-  const { completed, heldSlot } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+  const { completed } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
   if (!completed) return { verified: true, already: true, nextTaskId: null };
-  if (heldSlot) await releaseTask(taskId, ownerUid, gameId, runId);
+  // WO Fix 1: the held station slot is released atomically inside completeTaskForTeam.
   const next = await assignNextInActiveStage(ownerUid, gameId, runId, resolvedTeamId, { lat: 0, lng: 0 }, now);
   return { verified: true, nextTaskId: next.taskId ?? null };
 });
@@ -955,19 +954,13 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // autoApprove: the submission is logged but does not block progression.
   let alreadyCompleted = false;
   if (autoApprove) {
-    const { completed, heldSlot } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    const { completed } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
     // Idempotent replay (WO-3): a duplicate autoApprove submission is a no-op —
     // `completed` is false. Surface `already:true` so a replay is observable.
     alreadyCompleted = !completed;
-    // Release the completed task's own station slot (completeTaskForTeam only
-    // releases auto-skipped siblings — every caller releases its own task, like
-    // completeTask/submitTaskAnswer). Guarded on `completed` so an idempotent
-    // duplicate submission doesn't over-release, and on `heldSlot` so a
-    // permissive completion of a task this team never reserved can't drain another
-    // team's slot (fix: station-cap-bypass). Without the release a capped photo
-    // station leaks a slot on every completion (caught by the run-audit "no
-    // leaked station slots" oracle).
-    if (completed && heldSlot) await releaseTask(taskId, ownerUid, gameId, runId);
+    // WO Fix 1: the completed task's own station slot is now released ATOMICALLY
+    // inside completeTaskForTeam's transaction (along with any auto-skipped
+    // siblings), so no post-commit releaseTask is needed here.
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
     // audio-tasks non-goal: audio submissions never enter the photo feed.
@@ -1030,11 +1023,9 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
 
   // Approved photo = task complete → score it + advance the team.
   if (approved) {
-    const { completed, heldSlot } = await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
-    // Release the completed task's own station slot (see submitStationPhoto note):
-    // a staff-approved photo must free its capped slot too, or it leaks. Gated on
-    // heldSlot so it can't drain a slot this team never reserved (station-cap-bypass).
-    if (completed && heldSlot) await releaseTask(taskId, ownerUid, gameId, runId);
+    const { completed } = await completeTaskForTeam(ownerUid, gameId, runId, teamId, taskId, now);
+    // WO Fix 1: the completed task's station slot is released atomically inside
+    // completeTaskForTeam's transaction.
 
     // Live photo feed (live-photo-feed): broadcast the approved photo. This path
     // adds a game-doc read (staff review, not a hot path) for the task title +

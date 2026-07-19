@@ -33,6 +33,10 @@ const runPath = (ownerUid: string, gameId: string, runId: string) =>
 // ─── Priority sub-formulas ────────────────────────────────────────────────────
 
 function loadFactor(task: Task, taskCounts: Record<string, number>): number {
+  // WO Fix 4: a locationless task has no physical station to fill — it's always at
+  // full availability. Use a constant here (NOT cap=Infinity, which makes
+  // (Infinity-current)/Infinity → NaN and poisons priorityScore).
+  if (task.locationless) return 1;
   const cap = task.maxConcurrentTeams ?? 3;
   const current = taskCounts[task.id] ?? 0;
   return cap > 0 ? Math.max(0, (cap - current) / cap) : 0;
@@ -171,8 +175,8 @@ export async function buildRecommendations(
     if (isExpired(t, launchedAt, nowMs)) return false;
     // Unlockable tasks (change: unlockable-tasks): unmet prerequisites hide it.
     if (!isUnlocked(t, completedTaskIds)) return false;
-    const current = taskCounts[t.id] ?? 0;
-    if (current >= (t.maxConcurrentTeams ?? 3)) return false;
+    // WO Fix 4: locationless tasks are uncapped — skip the cap exclusion.
+    if (!t.locationless && (taskCounts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3)) return false;
     return true;
   });
 
@@ -264,6 +268,8 @@ export function classifyNoAssignment(
   for (const t of pool) {
     if (!isReleased(t, launchedAt, nowMs) || !isUnlocked(t, completedTaskIds)) { anyLocked = true; continue; }
     if (isExpired(t, launchedAt, nowMs)) { anyExpired = true; continue; }
+    // WO Fix 4: locationless tasks are uncapped — never mis-report them stationsFull.
+    if (t.locationless) continue;
     const current = taskCounts[t.id] ?? 0;
     if (current >= (t.maxConcurrentTeams ?? 3)) { anyCapBlocked = true; }
   }
@@ -308,8 +314,8 @@ export async function assignTask(
       if (isExpired(t, launchedAt, nowMs)) return false;
       // Unlockable tasks (change: unlockable-tasks): locked tasks can't be assigned.
       if (!isUnlocked(t, completedTaskIds)) return false;
-      const current = taskCounts[t.id] ?? 0;
-      if (current >= (t.maxConcurrentTeams ?? 3)) return false;
+      // WO Fix 4: locationless tasks are uncapped — skip the cap exclusion.
+      if (!t.locationless && (taskCounts[t.id] ?? 0) >= (t.maxConcurrentTeams ?? 3)) return false;
       return true;
     });
 

@@ -90,6 +90,17 @@ describe('priorityScore — hot-zone routing bias', () => {
     expect(withZone).toBeCloseTo(noZone, 6);
   });
 
+  // WO Fix 4: locationless tasks have no physical station, so occupancy must never
+  // reduce their load factor (and the score must stay finite — the Infinity-cap
+  // trap yields NaN, which poisons the sort).
+  test('priorityScore — locationless is uncapped & finite', () => {
+    const locationlessTask = { id: 'L', type: 'self_report', locationless: true, difficulty: 5 } as Task;
+    const hi = priorityScore(locationlessTask, { lat: 0, lng: 0 }, 0, { L: 100 }, false);
+    const lo = priorityScore(locationlessTask, { lat: 0, lng: 0 }, 0, {}, false);
+    expect(hi).toBe(lo); // load must not degrade with occupancy
+    expect(Number.isFinite(hi)).toBe(true); // guards the NaN trap
+  });
+
   test('the bias is a nudge, not an override — a loaded in-zone task can lose to an empty near out-of-zone task', () => {
     // The team sits ~1.1km N of the zone centre. The in-zone task is near its cap
     // (2/3 full) AND ~1.1km away; the out-of-zone task is empty and right at the

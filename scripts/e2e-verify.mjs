@@ -661,9 +661,18 @@ async function main() {
   // The first scoring completion must refresh run.leaderboard server-side — at
   // this point NO refreshLeaderboard call has ever been made for this run, so a
   // stale/missing snapshot here means the auto-refresh didn't fire.
+  // WO Fix 2: completeTaskForTeam now fires the refresh WITHOUT awaiting it (so the
+  // player's completion isn't blocked by the recompute), so the snapshot can land a
+  // moment after the completion call returns. Poll briefly instead of reading once
+  // — this documents the new best-effort timing contract and keeps 8a from flaking.
   const runDocPath = `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}`;
-  const lbAuto = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
-  const lbAutoEntry = lbAuto?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  let lbAuto, lbAutoEntry;
+  for (let i = 0; i < 20; i++) {
+    lbAuto = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+    lbAutoEntry = lbAuto?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+    if ((lbAutoEntry?.score ?? 0) > 0) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
   check('leaderboard auto-refreshes after a task completion (no manual refresh)',
     (lbAutoEntry?.score ?? 0) > 0, JSON.stringify(lbAuto ?? null));
   check('auto-refreshed leaderboard stays unpublished',
@@ -1069,6 +1078,52 @@ async function main() {
   check('team finished after the single required task', s2?.team?.status === 'finished', s2?.team?.status);
 
   }); // scenario: partial-completion
+
+  await scenario('locationless task is uncapped (>3 teams, unset cap)', async () => {
+
+  // ── WO Fix 4. A locationless task has no physical station, so it must be
+  // uncapped in routing: MORE teams than the default cap (3), and NO explicit
+  // maxConcurrentTeams, must all be handed the task — none may get stationsFull.
+  const { gameId: gLC } = await creator.call('createGame', { title: 'Uncapped Locationless', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gLC,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'st-lc', order: 0, title: 'Anywhere', isFinal: true,
+      // Deliberately NO maxConcurrentTeams → default cap 3; locationless must bypass it.
+      tasks: [
+        { id: 'lc-a', title: 'Do it anywhere', type: 'self_report', locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 60 },
+      ],
+    }],
+  });
+  const { runId: rLC, accessCode: cLC } = await creator.call('launchRun', { gameId: gLC });
+
+  const N = 4; // > default cap of 3
+  const lcPlayers = [];
+  for (let i = 0; i < N; i++) {
+    const p = makeParty(`lc-player${i}`);
+    await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: cLC, displayName: `LC${i}` });
+    lcPlayers.push(p);
+  }
+  await creator.call('startTeams', { gameId: gLC, runId: rLC });
+
+  let allAssigned = true;
+  let anyStationsFull = false;
+  for (const p of lcPlayers) {
+    const st = await p.call('getMyTeamState', { code: cLC });
+    const assigned = st?.team?.stages?.[0]?.tasks?.find((t) => t.taskId === 'lc-a' && t.status === 'assigned');
+    if (!assigned) {
+      allAssigned = false;
+      // Ask explicitly and inspect the reason so a cap-block is visible.
+      const next = await p.call('requestNextTask', { code: cLC, lat: 0, lng: 0 });
+      if (next?.reason === 'stationsFull') anyStationsFull = true;
+    }
+  }
+  check(`all ${N} teams (> cap 3) are handed the locationless task`, allAssigned);
+  check('no team is mis-reported stationsFull for the uncapped locationless task', anyStationsFull === false);
+
+  }); // scenario: locationless uncapped
 
   await scenario('paid hints (reveal once, charge once)', async () => {
 
