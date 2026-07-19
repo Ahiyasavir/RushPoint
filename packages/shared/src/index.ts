@@ -30,6 +30,7 @@ export * from './runSummary';
 export * from './reactions';
 export * from './schedule';
 export * from './gating';
+export * from './env';
 export * from './webhookPayload';
 export * from './narrative';
 export * from './gameInstructions';

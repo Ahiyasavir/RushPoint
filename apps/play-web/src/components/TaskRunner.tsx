@@ -62,7 +62,13 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   const [hint, setHint] = useState<string | null>(null);
   const [routingError, setRoutingError] = useState(false);
   const [routingAttempt, setRoutingAttempt] = useState(0);
+  // Transient "every station is full" state — distinct from routingError so the
+  // team sees a friendly waiting card + auto-retry instead of a dead-end.
+  const [stationBusy, setStationBusy] = useState(false);
   const [helpSent, setHelpSent] = useState(false);
+  // Single in-flight guard: a slow requestNextTask must not be re-fired on every
+  // poll/re-render while the team is unassigned (thundering herd).
+  const routingInFlight = useRef(false);
 
   // The task currently assigned to this team within the active stage.
   const assignedRec = stage.tasks.find((t) => t.status === 'assigned');
@@ -86,13 +92,31 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // the team-doc snapshot brings the result here.
   useEffect(() => {
     if (readOnly) return;
-    if (!assignedRec && unassigned.length > 0) {
-      setRoutingError(false);
-      withLocation(
-        (lat, lng) => requestNextTask({ ...ctx, lat, lng }).then(onChanged).catch(() => setRoutingError(true)),
-        () => setRoutingError(true),
-      );
-    }
+    if (assignedRec || unassigned.length === 0) return;
+    if (routingInFlight.current) return; // don't stampede a slow request
+    routingInFlight.current = true;
+    setRoutingError(false);
+    withLocation(
+      (lat, lng) => requestNextTask({ ...ctx, lat, lng })
+        .then((res) => {
+          if (res.reason === 'stationsFull') {
+            // Transient: every eligible station is at capacity. Show the waiting
+            // card and auto-retry with backoff rather than dead-ending on an error
+            // that retry could never clear.
+            setStationBusy(true);
+            window.setTimeout(() => {
+              routingInFlight.current = false;
+              setRoutingAttempt((n) => n + 1);
+            }, 5000 + Math.random() * 3000);
+            return;
+          }
+          setStationBusy(false);
+          routingInFlight.current = false;
+          onChanged();
+        })
+        .catch(() => { routingInFlight.current = false; setRoutingError(true); }),
+      () => { routingInFlight.current = false; setRoutingError(true); },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignedRec, unassigned.length, routingAttempt, readOnly]);
 
@@ -148,6 +172,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   }
 
   if (!task) {
+    // Station-full waiting state (WO-1): a transient, auto-retrying card — never
+    // the terminal routingError. Shown only while we're not already erroring out.
+    if (stationBusy && !routingError) {
+      return (
+        <Card className="p-6 text-center space-y-2">
+          <div className="text-3xl">⏳</div>
+          <p className="text-sm font-semibold text-zinc-200">{t.task.stationBusyTitle}</p>
+          <p className="text-xs text-zinc-500">{t.task.stationBusyBody}</p>
+        </Card>
+      );
+    }
     if (routingError) {
       return (
         <Card className="p-6 text-center space-y-3">

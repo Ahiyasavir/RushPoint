@@ -786,6 +786,15 @@ async function main() {
   check('photo stage stays active until reviewed', state?.team?.stages?.[1]?.status === 'active',
     state?.team?.stages?.[1]?.status);
 
+  // WO-4: listRunTeams surfaces the pending-review count so a non-console consumer
+  // can see a team is blocked on a staff photo review (not silently stalled).
+  {
+    const rowPending = (await creator.call('listRunTeams', { gameId, runId }))
+      ?.teams?.find((t) => t.id === playerCred.user.uid);
+    check('listRunTeams exposes pendingReviews >= 1 while a photo awaits review',
+      (rowPending?.pendingReviews ?? 0) >= 1, JSON.stringify(rowPending));
+  }
+
   // audio-tasks: while stage-2 is active, the sanitized audio task must expose
   // smart.captureKind so the client renders the recorder instead of the picker.
   const audioTaskSan = (state?.activeStageTasks ?? []).find((t) => t.id === AUDIO_TASK_ID);
@@ -839,6 +848,14 @@ async function main() {
     teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID, approved: true,
   });
   check('reviewStationSubmission approves', review?.ok === true && review?.approved === true);
+
+  // WO-4: once the review is resolved, the pending count returns to 0.
+  {
+    const rowResolved = (await creator.call('listRunTeams', { gameId, runId }))
+      ?.teams?.find((t) => t.id === playerCred.user.uid);
+    check('listRunTeams pendingReviews returns to 0 after the review is approved',
+      (rowResolved?.pendingReviews ?? -1) === 0, JSON.stringify(rowResolved));
+  }
 
   state = await player.call('getMyTeamState', { code: accessCode });
   check('review marks the submission approved (nested update)',
@@ -3731,6 +3748,10 @@ async function main() {
     const cRetry = await retrier.call('completeTask', { taskId: first.taskId, ownerUid: OWNER, gameId: rg, runId: rr, code: rc, lat: 31.78, lng: 35.21 });
     check('retry completeTask: duplicate call is a no-op (no nextTaskId)',
       cRetry?.nextTaskId == null, JSON.stringify({ cDone, cRetry }));
+    // WO-3: the no-op replay is now OBSERVABLE — a duplicate returns already:true
+    // while the first completion does not, so clients/sims can tell them apart.
+    check('retry completeTask: duplicate is flagged already:true (first was not)',
+      cRetry?.already === true && cDone?.already !== true, JSON.stringify({ cDone, cRetry }));
 
     runDoc = await creator.getDocAt(`users/${OWNER}/games/${rg}/runs/${rr}`);
     counts = runDoc.data?.taskCounts ?? {};

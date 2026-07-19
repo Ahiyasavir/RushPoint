@@ -26,7 +26,7 @@ import {
   uploadBytesResumable,
   getDownloadURL,
 } from 'firebase/storage';
-import { resolveEmulatorHost } from '@rushpoint/shared';
+import { resolveEmulatorHost, isEmulatorBuild } from '@rushpoint/shared';
 import { buildEmulatorGoogleClaims } from './authClaims';
 
 // Emulator-safe defaults: the Firebase SDK only needs non-empty apiKey/appId
@@ -53,7 +53,7 @@ const originHost = typeof window !== 'undefined' ? window.location.hostname : ''
 // Wire the emulator in `vite dev` (DEV) AND in the production `--mode playtest`
 // build the always-on tunnel host serves — otherwise the minified bundle hits real
 // Firebase and creator sign-in / all callables fail over the tunnel.
-const emulatorBuild = import.meta.env.DEV || import.meta.env.MODE === 'playtest';
+const emulatorBuild = isEmulatorBuild(import.meta.env);
 const tunnelMode =
   emulatorBuild && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
 

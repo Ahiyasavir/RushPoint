@@ -100,6 +100,8 @@ export interface RunTeamRow {
   /** Hints + staff adjustments; subtracted from score at ranking time. */
   bonusPenalty: number;
   completedStages: number;
+  /** Pending photo/audio station submissions awaiting staff review (WO-4). */
+  pendingReviews: number;
   activeStageOrder: number | null;
   finished: boolean;
   launched: boolean;

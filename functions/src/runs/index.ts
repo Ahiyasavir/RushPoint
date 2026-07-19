@@ -93,6 +93,7 @@ import {
 import { requireString, MAX_ID_LEN } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
+import type { NoAssignmentReason } from '../routing/assignNextTask';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
@@ -1991,8 +1992,15 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
 
   const snap = await db.collection(teamsCol(uid, gameId, runId)).get();
   const teams = snap.docs.map((d) => {
-    const t = d.data() as RunTeam;
+    const t = d.data() as RunTeam & {
+      taskSubmissions?: Record<string, { status?: string }>;
+    };
     const activeStageOrder = t.stages.find((s) => s.status === 'active')?.order ?? null;
+    // Pending photo/audio station reviews awaiting staff action (WO-4): without
+    // this signal a non-console consumer is blind to why a team has stalled.
+    const pendingReviews = Object.values(t.taskSubmissions ?? {}).filter(
+      (s) => s?.status === 'pending',
+    ).length;
     return {
       id: t.id,
       displayName: t.displayName,
@@ -2004,6 +2012,7 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       // time); exposed so the console can show the effective score.
       bonusPenalty: t.bonusPenalty ?? 0,
       completedStages: t.stages.filter((s) => s.status === 'completed').length,
+      pendingReviews,
       activeStageOrder,
       finished: t.status === 'finished',
       launched: t.launched,
@@ -2355,7 +2364,7 @@ async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
   now: string,
-): Promise<{ taskId?: string }> {
+): Promise<{ taskId?: string; reason?: NoAssignmentReason }> {
   const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   if (!gameSnap.exists) return {};
   const game = gameSnap.data() as Game;
@@ -2474,7 +2483,9 @@ async function assignNextInActiveStage(
       return { taskId: claim.taskId };
     }
   }
-  return { taskId: result.taskId };
+  // Thread the "why nothing" reason (stationsFull / allLocked / none) so the
+  // participant UI can wait-and-retry on a full station instead of dead-ending.
+  return { taskId: result.taskId, reason: result.reason };
 }
 
 // ─── completeTask (participant self-report / field) ───────────────────────────
@@ -2557,7 +2568,10 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
   // A duplicate/idempotent completion must NOT release or re-assign: a concurrent
   // real completion already did, and doubling the assignment leaks a station slot.
-  if (!completed) return { ok: true, nextTaskId: null };
+  // Idempotent replay (WO-3): a duplicate completion of an already-graded task is
+  // a no-op for score/slots — surface `already:true` so clients/sims/support can
+  // tell a replay from a first completion (score is already conserved either way).
+  if (!completed) return { ok: true, already: true, nextTaskId: null };
   // Release only the slot THIS team actually reserved (fix: station-cap-bypass) —
   // a permissive completion of a task the team never checked out holds no slot.
   if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
@@ -2565,7 +2579,7 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
 
-  return { ok: true, nextTaskId: next.taskId ?? null };
+  return { ok: true, nextTaskId: next.taskId ?? null, nextReason: next.reason ?? null };
 });
 
 // ─── requestNextTask (assign a task in the active stage) ──────────────────────
@@ -2585,7 +2599,7 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
   const now = new Date().toISOString();
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
-  return { taskId: next.taskId ?? null };
+  return { taskId: next.taskId ?? null, reason: next.reason ?? null };
 });
 
 // ─── requestTaskHint (reveal a paid hint, charge once) ────────────────────────

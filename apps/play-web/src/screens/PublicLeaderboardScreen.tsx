@@ -26,7 +26,13 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   const load = useCallback(async () => {
     setRefreshing(true);
     try { setData(await getPublicLeaderboard({ code })); setErr(''); setNowTick(Date.now()); }
-    catch (e) { setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.board.couldNotLoad); setData(null); }
+    catch (e) {
+      // Never render a raw Firebase error code (e.g. auth/admin-restricted-operation)
+      // to players (WO-5) — show one friendly localized line, log the code for us.
+      console.warn('public leaderboard load failed:', e instanceof Error ? e.message : e);
+      setErr(t.board.couldNotLoad);
+      setData(null);
+    }
     finally { setRefreshing(false); }
   }, [code, t]);
 

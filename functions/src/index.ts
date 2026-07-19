@@ -901,8 +901,12 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   );
 
   // autoApprove: the submission is logged but does not block progression.
+  let alreadyCompleted = false;
   if (autoApprove) {
     const { completed, heldSlot } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+    // Idempotent replay (WO-3): a duplicate autoApprove submission is a no-op —
+    // `completed` is false. Surface `already:true` so a replay is observable.
+    alreadyCompleted = !completed;
     // Release the completed task's own station slot (completeTaskForTeam only
     // releases auto-skipped siblings — every caller releases its own task, like
     // completeTask/submitTaskAnswer). Guarded on `completed` so an idempotent
@@ -926,7 +930,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     }
   }
 
-  return { submitted: true, autoApproved: autoApprove };
+  return { submitted: true, autoApproved: autoApprove, ...(alreadyCompleted ? { already: true } : {}) };
 });
 
 

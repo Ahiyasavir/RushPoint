@@ -21,7 +21,7 @@ import {
   uploadBytes,
   getDownloadURL,
 } from 'firebase/storage';
-import { resolveEmulatorHost, normalizeContentType } from '@rushpoint/shared';
+import { resolveEmulatorHost, normalizeContentType, isEmulatorBuild } from '@rushpoint/shared';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -46,7 +46,7 @@ const originHost = typeof window !== 'undefined' ? window.location.hostname : ''
 // minified bundle drops all emulator wiring and hits real Firebase — where
 // anonymous auth is disabled (auth/admin-restricted-operation) — so no real phone
 // can join. MODE is 'playtest' for that build (see playtest:build).
-const emulatorBuild = import.meta.env.DEV || import.meta.env.MODE === 'playtest';
+const emulatorBuild = isEmulatorBuild(import.meta.env);
 const tunnelMode =
   emulatorBuild && !!originHost && originHost !== 'localhost' && originHost !== '127.0.0.1';
 

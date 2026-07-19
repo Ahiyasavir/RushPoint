@@ -3,7 +3,7 @@
 // (runs/{runId}/teams/{uid}/…) — not another team, not an arbitrary/foreign URL,
 // not a javascript: payload, not an oversized string. No emulator.
 //   npx tsx scripts/test-storage-url.ts
-import { requireStorageUrl, ValidationError, FIREBASE_STORAGE_ORIGIN } from '../packages/shared/src/validation';
+import { requireStorageUrl, isFirebaseStorageUrl, ValidationError, FIREBASE_STORAGE_ORIGIN } from '../packages/shared/src/validation';
 
 // The live client bucket is the firebasestorage.app form — the guard must accept it.
 const FBAPP_ORIGIN = 'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.firebasestorage.app/';
@@ -32,6 +32,20 @@ check('rejects another run\'s path', rejected(() => requireStorageUrl(`${FIREBAS
 check('rejects a foreign origin', rejected(() => requireStorageUrl('https://evil.com/runs/run123/teams/uidABC/x.jpg', RUN, UID)));
 check('rejects an oversized string', rejected(() => requireStorageUrl('https://x/' + 'a'.repeat(5000), RUN, UID)));
 check('rejects a non-string', rejected(() => requireStorageUrl(undefined as unknown as string, RUN, UID)));
+
+// ── isFirebaseStorageUrl regression lock (browser-02 P0 #2) ───────────────────
+// The bucket-origin gate must accept a client-SDK-shaped download URL on BOTH of
+// our project's bucket names and reject any external host. The night-sim report
+// flagged that no test used a client-shaped URL, so a bucket rename could silently
+// reject every real upload again.
+{
+  const appShaped = `${FBAPP_ORIGIN}o/runs%2Fr1%2Fteams%2Ft1%2Fp.jpg?alt=media&token=abc-123`;
+  const appspotShaped = `${FIREBASE_STORAGE_ORIGIN}o/runs%2Fr1%2Fteams%2Ft1%2Fp.jpg?alt=media&token=def-456`;
+  check('isFirebaseStorageUrl accepts a client-shaped firebasestorage.app URL', isFirebaseStorageUrl(appShaped));
+  check('isFirebaseStorageUrl accepts a client-shaped appspot.com URL', isFirebaseStorageUrl(appspotShaped));
+  check('isFirebaseStorageUrl rejects an external host', !isFirebaseStorageUrl('https://evil.example.com/p.jpg'));
+  check('isFirebaseStorageUrl rejects a non-string', !isFirebaseStorageUrl(undefined));
+}
 
 console.log(`\n${failures === 0 ? 'ALL STORAGE-URL TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -30,6 +30,27 @@ export interface UnlockGraphTask extends UnlockGate {
   id: string;
 }
 
+/**
+ * Builder-time starvation warning (WO-6 / sim-01 defect #2). In a partial stage
+ * (`requiredTaskCount` set below the task count) routing gives locationless tasks
+ * a transit cost of 0, so they are picked first over any located station — a
+ * physical stop can end up NEVER visited by any team. This pure predicate flags
+ * that risky mix so the Builder can warn the creator; it does NOT change routing.
+ * True only when the stage is partial AND mixes at least one locationless task
+ * with at least one located (pinned) task.
+ */
+export function partialStageStarvationWarning(stage: {
+  requiredTaskCount?: number;
+  tasks: { locationless?: boolean }[];
+}): boolean {
+  const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+  const req = stage.requiredTaskCount;
+  if (typeof req !== 'number' || req >= tasks.length) return false;
+  const locationless = tasks.filter((t) => t?.locationless === true).length;
+  const located = tasks.length - locationless;
+  return locationless > 0 && located > 0;
+}
+
 export interface UnlockGraphReport {
   /** Save-blocking problems: self-reference, unknown/cross-stage id, cycle. */
   errors: string[];

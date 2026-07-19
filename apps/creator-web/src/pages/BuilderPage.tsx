@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -735,6 +735,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 completion count exceeds the tasks that can actually complete. */}
             {validateUnlockGraph(activeStage).warnings.length > 0 && (
               <p className="text-xs text-amber-400">⚠ {b.unlockRequiredCountWarn}</p>
+            )}
+
+            {/* Partial-stage starvation (WO-6): a partial stage that mixes
+                locationless + located tasks routes locationless first, so a
+                physical station may never be visited. Non-blocking warning. */}
+            {partialStageStarvationWarning(activeStage) && (
+              <p className="text-xs text-amber-400">⚠ {b.partialStarvationWarn}</p>
             )}
 
             {/* Scheduled release — a timed drop of this stage (change: scheduled-release) */}

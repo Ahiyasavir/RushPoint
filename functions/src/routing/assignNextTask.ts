@@ -222,6 +222,44 @@ async function withLockRetry<T>(op: () => Promise<T>, attempts = 8): Promise<T> 
   throw lastErr;
 }
 
+// ─── "Why nothing was assigned" classification ───────────────────────────────
+// When assignTask finds no eligible candidate, the caller needs to know WHY so
+// the participant UI can distinguish a transient "station is full — wait and
+// retry" from a terminal dead-end. Pure (no I/O) so it's unit-tested without the
+// emulator. Mirrors the candidate filter in assignTask exactly.
+//   'stationsFull' — an otherwise-eligible task exists but every one is at its
+//                    maxConcurrentTeams cap (transient: a slot will free up).
+//   'allLocked'    — the only remaining tasks are release-scheduled / unlock-gated.
+//   'expired'      — the only remaining tasks have closed (task-expiry).
+//   'none'         — no unassigned task exists at all in this pool.
+export type NoAssignmentReason = 'stationsFull' | 'allLocked' | 'expired' | 'none';
+
+export function classifyNoAssignment(
+  tasks: Task[],
+  completedTaskIds: string[],
+  taskCounts: Record<string, number>,
+  launchedAt: string | undefined,
+  nowMs: number,
+): NoAssignmentReason {
+  const pool = tasks.filter(
+    (t) => !completedTaskIds.includes(t.id) && t.status !== 'paused' && t.status !== 'closed',
+  );
+  if (pool.length === 0) return 'none';
+  let anyCapBlocked = false;
+  let anyLocked = false;
+  let anyExpired = false;
+  for (const t of pool) {
+    if (!isReleased(t, launchedAt, nowMs) || !isUnlocked(t, completedTaskIds)) { anyLocked = true; continue; }
+    if (isExpired(t, launchedAt, nowMs)) { anyExpired = true; continue; }
+    const current = taskCounts[t.id] ?? 0;
+    if (current >= (t.maxConcurrentTeams ?? 3)) { anyCapBlocked = true; }
+  }
+  if (anyCapBlocked) return 'stationsFull';
+  if (anyLocked) return 'allLocked';
+  if (anyExpired) return 'expired';
+  return 'none';
+}
+
 // ─── Task assignment (atomically increments run.taskCounts[taskId]) ───────────
 
 export async function assignTask(
@@ -233,7 +271,7 @@ export async function assignTask(
   gameId: string,
   runId: string,
   skillAware = true,
-): Promise<{ taskId?: string; taskIndex?: number }> {
+): Promise<{ taskId?: string; taskIndex?: number; reason?: NoAssignmentReason }> {
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
 
   // Read the live counts, pick a task, and claim its slot in ONE transaction so
@@ -262,7 +300,10 @@ export async function assignTask(
       return true;
     });
 
-    if (candidates.length === 0) return {};
+    if (candidates.length === 0) {
+      const reason = classifyNoAssignment(tasks, completedTaskIds, taskCounts, launchedAt, nowMs);
+      return { reason: reason === 'expired' ? 'none' : reason };
+    }
 
     const chosen = candidates.sort(
       (a, b) =>

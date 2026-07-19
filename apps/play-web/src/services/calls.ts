@@ -137,12 +137,20 @@ export const getMyTeamState = callable<
 
 type Ctx = { ownerUid: string; gameId: string; runId: string };
 
+// `reason` explains why routing handed back no task: 'stationsFull' (transient —
+// every eligible station is at cap; wait and retry), 'allLocked' (only gated
+// tasks remain), or 'none'. `already` marks an idempotent replay (WO-3).
+export type NoAssignmentReason = 'stationsFull' | 'allLocked' | 'none';
+
 export const completeTask = callable<
   Ctx & { taskId: string; lat?: number; lng?: number },
-  { ok: boolean; nextTaskId: string | null }
+  { ok: boolean; nextTaskId: string | null; already?: boolean; nextReason?: NoAssignmentReason | null }
 >('completeTask');
 
-export const requestNextTask = callable<Ctx & { lat?: number; lng?: number }, { taskId: string | null }>('requestNextTask');
+export const requestNextTask = callable<
+  Ctx & { lat?: number; lng?: number },
+  { taskId: string | null; reason?: NoAssignmentReason | null }
+>('requestNextTask');
 
 export const requestTaskHint = callable<
   Ctx & { taskId: string },
