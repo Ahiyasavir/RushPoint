@@ -1059,10 +1059,12 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
 
   // Apply Z-Score for non-time presets (only meaningful once teams have finished)
   if (game.scoringPreset !== 'time_only' && scored.length >= 2) {
-    const finishedDurations = scored.filter((t) => t.finishedAt).map((t) => t.durationMin);
+    const finishedDurations = scored
+      .filter((t) => t.finishedAt && Number.isFinite(t.durationMin))
+      .map((t) => t.durationMin);
     if (finishedDurations.length >= 2) {
       for (const t of scored) {
-        if (t.finishedAt) {
+        if (t.finishedAt && Number.isFinite(t.durationMin)) {
           t.score = applyZScoreBonus(t.score, t.durationMin, finishedDurations);
         }
       }

@@ -63,6 +63,42 @@ describe('buildRankings — no non-finite duration (playtest regression)', () =>
   });
 });
 
+// A team that FINISHED but has no `startedAt` (finishedAt set, startedAt undefined)
+// passes parseRunTeam quarantine (it requires neither field) and reaches buildRankings
+// with durationMin = Infinity/60 = Infinity. It also passes the `t.finishedAt`-only
+// Z-cohort filter, so mu/sigma go non-finite and EVERY finisher's score becomes NaN.
+// The cohort must exclude non-finite durations so scores stay finite and the sort stays
+// deterministic (NaN comparators are non-deterministic).
+const finishedNoStart = (id: string): RunTeam => ({
+  id, displayName: id, status: 'finished',
+  startedAt: undefined,
+  finishedAt: new Date(1_700_000_001_800_000).toISOString(),
+  score: 0, bonusPenalty: 0,
+  stages: [{ stageId: 's0', status: 'completed', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: 50 }] }],
+} as unknown as RunTeam);
+
+describe('buildRankings — Z-cohort excludes non-finite durations', () => {
+  test('every entry score stays finite when a finished team has no startedAt', () => {
+    const board = buildRankings(
+      game('smart_weighted'),
+      [startedFinished('a'), startedFinished('b'), finishedNoStart('c')],
+      now,
+    );
+    expect(board).toHaveLength(3);
+    for (const entry of board) {
+      expect(Number.isFinite(entry.score)).toBe(true);
+    }
+  });
+
+  test('board JSON-encodes and the sort is order-stable across reversed input', () => {
+    const teams = [startedFinished('a'), startedFinished('b'), finishedNoStart('c')];
+    const first = buildRankings(game('smart_weighted'), teams, now);
+    const second = buildRankings(game('smart_weighted'), [...teams].reverse(), now);
+    expect(() => JSON.stringify(first)).not.toThrow();
+    expect(first.map((r) => r.teamId)).toEqual(second.map((r) => r.teamId));
+  });
+});
+
 // WO Fix 3: the time_only sort branch had no terminal teamId tie-break, so two
 // teams that tie on both duration and completedStages kept their (unordered
 // Firestore) input order — the live/public board could churn between refreshes.

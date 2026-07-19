@@ -160,7 +160,7 @@ export function applyZScoreBonus(
   const mu = allDurationMinutes.reduce((a, b) => a + b, 0) / allDurationMinutes.length;
   const variance = allDurationMinutes.reduce((s, d) => s + (d - mu) ** 2, 0) / allDurationMinutes.length;
   const sigma = Math.sqrt(variance);
-  if (sigma === 0) return rawScore;
+  if (!Number.isFinite(sigma) || sigma === 0) return rawScore;
   const z = (teamDurationMinutes - mu) / sigma;
   return Math.max(0, rawScore + Math.round(-z * 200));
 }
