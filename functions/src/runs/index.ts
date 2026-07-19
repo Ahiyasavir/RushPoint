@@ -94,6 +94,7 @@ import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/share
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
 import type { NoAssignmentReason } from '../routing/assignNextTask';
+import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
@@ -1316,11 +1317,16 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     // overwrite the published final standings after finalize. An organizer can
     // still explicitly un-freeze via refreshLeaderboard if they intend to.
     leaderboard: { rankings, frozen: true, published: true, updatedAt: now },
-    // Clear station reservations: the run is over, so any slot still held by a team
-    // that was mid-task at finalize (e.g. stuck on a quiz) must not linger. Harmless
-    // post-finalize (no more assignments) and keeps taskCounts honest — nightly
-    // hardening, needed once single-task stages also reserve slots (see R2 fix).
-    taskCounts: {},
+    // Reconcile station reservations from the live team docs (Fix 1 backstop):
+    // recompute taskCounts as the ground truth of who ACTUALLY still holds a slot
+    // (a non-empty activeTaskId) rather than blindly zeroing. A fully-finished run
+    // reconciles to {} (all teams released), but a team stuck mid-task at finalize
+    // keeps its real reservation instead of the doc lying with {}. Crucially, a
+    // LEAKED +1 (a counter above its true holder count, e.g. from a crash between
+    // reserve and release) is self-healed here to the reconciled value — one
+    // idempotent write, off the hot path. Harmless post-finalize (no more
+    // assignments), and keeps archived taskCounts honest for audits.
+    taskCounts: reconcileTaskCounts(teams),
     updatedAt: now,
   });
 
