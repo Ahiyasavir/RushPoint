@@ -8,9 +8,6 @@ import { Button, Card, Screen } from '../components/ui';
 import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
-import { shareStoryCard } from '../lib/storyCard';
-import { sharePhoto } from '../lib/sharePhoto';
-import { sharePodium } from '../lib/podiumCard';
 import { fireConfetti } from '../lib/confetti';
 
 const CREATOR_URL = import.meta.env.DEV
@@ -86,6 +83,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
     if (podium.length === 0) return;
     setBusy(true);
     try {
+      const { sharePodium } = await import('../lib/podiumCard');
       await sharePodium(podium, {
         gameName: game.branding?.name ?? game.title,
         ctaUrl: CREATOR_URL,
@@ -102,6 +100,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
     setBusy(true);
     try {
       const playBase = window.location.origin;
+      const { sharePhoto } = await import('../lib/sharePhoto');
       await sharePhoto(firstPhotoUrl, {
         playBaseUrl: playBase,
         gameId: (game as { id?: string }).id ?? null,
@@ -127,6 +126,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         timePart,
         url: CREATOR_URL.replace(/^https?:\/\//, ''),
       });
+      const { shareStoryCard } = await import('../lib/storyCard');
       const result = await shareStoryCard({
         gameName: name,
         teamName: team.displayName,

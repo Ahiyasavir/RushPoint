@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore, initializeFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, connectFirestoreEmulator } from 'firebase/firestore';
 import {
   getAuth,
   connectAuthEmulator,
@@ -60,15 +60,25 @@ const tunnelMode =
 // Firestore over a tunnel needs ssl + no port at creation time (settings can't be
 // changed after first use), so build it with host/ssl here; local dev uses the
 // default instance + connectFirestoreEmulator below.
-export const db = tunnelMode
-  ? (() => {
-      try {
-        return initializeFirestore(app, { host: originHost, ssl: true, experimentalAutoDetectLongPolling: true });
-      } catch {
-        return getFirestore(app);
-      }
-    })()
-  : getFirestore(app);
+// Offline-first cache: RunConsole run/team/leaderboard reads survive a network
+// blip during a live event, and an offline reload rehydrates from IndexedDB
+// instead of the browser error page. In tunnel mode Firestore also needs
+// host/ssl at creation (routes via the proxy). Cached on globalThis so a Vite
+// HMR re-execution reuses the instance instead of re-calling initializeFirestore.
+const dbHolder = globalThis as unknown as { __rpCreatorDb?: ReturnType<typeof getFirestore> };
+function initDb() {
+  if (dbHolder.__rpCreatorDb) return dbHolder.__rpCreatorDb;
+  try {
+    dbHolder.__rpCreatorDb = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      ...(tunnelMode ? { host: originHost, ssl: true, experimentalAutoDetectLongPolling: true } : {}),
+    });
+  } catch {
+    dbHolder.__rpCreatorDb = getFirestore(app);
+  }
+  return dbHolder.__rpCreatorDb;
+}
+export const db = initDb();
 export const auth      = getAuth(app);
 export const functions = getFunctions(app);
 export const storage   = getStorage(app);

@@ -127,7 +127,13 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (raw.includes('Location required to check in here')) return t.task.locationRequired;
     if (raw.includes('keep following the clue')) return t.task.notHereYet;
     if (raw.includes('This task is not available yet')) return t.task.notAvailableYet;
-    return raw || fallback;
+    if (raw.includes('No hint available')) return t.task.noHint;
+    if (raw.includes('already finished')) return t.task.raceFinished;
+    if (raw.includes('No active stage')) return t.task.noActiveStageSubmit;
+    if (raw.includes('not found')) return t.task.stateGone;
+    // Default: NEVER leak an un-whitelisted English server message into a
+    // Hebrew-default participant app — fall back to the localized copy.
+    return fallback;
   }
 
   // M4: don't fire a submit while offline — the callable would fail with a raw

@@ -22,7 +22,6 @@ const FeedPanel = lazy(() => import('../components/FeedPanel'));
 const ChatPanel = lazy(() => import('../components/ChatPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
-import { shareStoryCard } from '../lib/storyCard';
 import { formatDuration } from '../lib/boardTime';
 import { feedback, isRankUp } from '../lib/sound';
 
@@ -79,7 +78,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       if (hasState.current && !isFatalSyncError(code)) {
         setReconnecting(true);
       } else {
-        setErr(e instanceof Error ? e.message : t.play.syncFailed);
+        // Never surface a raw English server message (e.g. "Team not found" /
+        // "Run not found") to a Hebrew-default participant. A not-found code means
+        // the run was deleted or the team pruned → say the game ended/was removed;
+        // everything else falls back to the generic localized sync message.
+        setErr(code === 'not-found' ? t.play.gameGone : t.play.syncFailed);
       }
     }
   }, [session, t]);
@@ -272,6 +275,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         score: team.score,
         url: CREATOR_URL.replace(/^https?:\/\//, ''),
       });
+      const { shareStoryCard } = await import('../lib/storyCard');
       await shareStoryCard({
         gameName: name,
         teamName: team.displayName,

@@ -3,12 +3,6 @@ import { ensureAuth } from './services/firebase';
 import { loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
 import PlayScreen from './screens/PlayScreen';
-import StaffConsole from './screens/StaffConsole';
-import GamePromoScreen from './screens/GamePromoScreen';
-import PublicLeaderboardScreen from './screens/PublicLeaderboardScreen';
-import ChallengeTeaser from './screens/ChallengeTeaser';
-import TvLeaderboard from './screens/TvLeaderboard';
-import RunRecap from './screens/RunRecap';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 import { parseChallengeParam, TV_ROUTE_PARAM, RECAP_ROUTE_PARAM } from '@rushpoint/shared';
@@ -17,6 +11,12 @@ import { unlockAudio } from './lib/sound';
 // Ceremony mode (change: ceremony-mode): lazy so the slideshow/confetti code
 // stays out of the main bundle (same pattern as the MapLibre chunk).
 const CeremonyScreen = lazy(() => import('./screens/CeremonyScreen'));
+const StaffConsole = lazy(() => import('./screens/StaffConsole'));
+const GamePromoScreen = lazy(() => import('./screens/GamePromoScreen'));
+const PublicLeaderboardScreen = lazy(() => import('./screens/PublicLeaderboardScreen'));
+const ChallengeTeaser = lazy(() => import('./screens/ChallengeTeaser'));
+const TvLeaderboard = lazy(() => import('./screens/TvLeaderboard'));
+const RunRecap = lazy(() => import('./screens/RunRecap'));
 
 export default function App() {
   return (
@@ -59,6 +59,12 @@ function AppInner() {
   );
 
   const { dir, lang } = useT();
+
+  const routeFallback = (
+    <div className="min-h-screen flex items-center justify-center bg-app-bg">
+      <div className="w-8 h-8 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
+    </div>
+  );
 
   useEffect(() => {
     // Always leave the loading state, even if anonymous auth fails on a network
@@ -106,7 +112,9 @@ function AppInner() {
     return (
       <>
         <ConnectionBanner />
-        <StaffConsole onExit={() => setStaffMode(false)} />
+        <Suspense fallback={routeFallback}>
+          <StaffConsole onExit={() => setStaffMode(false)} />
+        </Suspense>
         <DialogHost />
       </>
     );
@@ -115,7 +123,9 @@ function AppInner() {
   if (tvCode) {
     return (
       <>
-        <TvLeaderboard code={tvCode} />
+        <Suspense fallback={routeFallback}>
+          <TvLeaderboard code={tvCode} />
+        </Suspense>
         <DialogHost />
       </>
     );
@@ -125,7 +135,9 @@ function AppInner() {
     return (
       <>
         <ConnectionBanner />
-        <RunRecap code={recapCode} onJoin={() => setRecapCode(null)} />
+        <Suspense fallback={routeFallback}>
+          <RunRecap code={recapCode} onJoin={() => setRecapCode(null)} />
+        </Suspense>
         <DialogHost />
       </>
     );
@@ -135,7 +147,9 @@ function AppInner() {
     return (
       <>
         <ConnectionBanner />
-        <ChallengeTeaser gameId={challenge.gameId} taskId={challenge.taskId} onJoin={() => setChallenge(null)} />
+        <Suspense fallback={routeFallback}>
+          <ChallengeTeaser gameId={challenge.gameId} taskId={challenge.taskId} onJoin={() => setChallenge(null)} />
+        </Suspense>
         <DialogHost />
       </>
     );
@@ -154,7 +168,9 @@ function AppInner() {
             <CeremonyScreen code={boardCode} />
           </Suspense>
         ) : (
-          <PublicLeaderboardScreen code={boardCode} onJoin={() => setBoardCode(null)} />
+          <Suspense fallback={routeFallback}>
+            <PublicLeaderboardScreen code={boardCode} onJoin={() => setBoardCode(null)} />
+          </Suspense>
         )}
         <DialogHost />
       </>
@@ -165,8 +181,10 @@ function AppInner() {
     return (
       <>
         <ConnectionBanner />
-        <GamePromoScreen gameId={promoGameId} onPlay={() => setPromoGameId(null)}
-          onInstantPlay={(s) => { setSession(s); setPromoGameId(null); }} />
+        <Suspense fallback={routeFallback}>
+          <GamePromoScreen gameId={promoGameId} onPlay={() => setPromoGameId(null)}
+            onInstantPlay={(s) => { setSession(s); setPromoGameId(null); }} />
+        </Suspense>
         <DialogHost />
       </>
     );

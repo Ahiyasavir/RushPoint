@@ -160,6 +160,12 @@ html.dark .rp-blob-3 { background: radial-gradient(circle, rgba(6,182,212,0.11) 
 
 /* Pause for users who prefer reduced motion, and skip on mobile to save GPU */
 @media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .rp-blob { animation: none !important; }
 }
 @media (max-width: 640px) {
