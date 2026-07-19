@@ -7,7 +7,7 @@ export function Button({
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger'; loading?: boolean }) {
   const map: Record<string, string> = {
     primary: `
-      bg-gradient-to-r from-rp-fire to-rp-amber
+      bg-gradient-to-r from-[#C2410C] to-[#B45309]
       text-white font-bold tracking-wide
       shadow-[0_4px_16px_rgba(255,87,34,0.40),0_1px_4px_rgba(255,87,34,0.25)]
       hover:shadow-[0_6px_24px_rgba(255,87,34,0.55),0_2px_8px_rgba(255,87,34,0.30)]
