@@ -3617,6 +3617,66 @@ async function main() {
       (counts[active] ?? 0) === 1, `active=${active} counts=${JSON.stringify(counts)}`);
   });
 
+  // ═══ Cross-team completion cannot steal a held station slot ══════════════════
+  // A hand-crafted completeTask on a capped station the caller never checked out
+  // must NOT decrement run.taskCounts for the slot the HOLDER reserved (that would
+  // silently defeat the station cap). Two cap-1 stations, requiredTaskCount 1.
+  await scenario('cross-team completion cannot steal a held station slot', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: bg } = await creator.call('createGame', { title: 'Cap Bypass', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: bg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'cap0', order: 0, title: 'Two capped stations', isFinal: true, requiredTaskCount: 1, tasks: [
+          { id: 'st-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+          { id: 'st-b', title: 'Station B', type: 'field', coordinates: { lat: 31.79, lng: 35.22 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+        ] },
+      ],
+    });
+    const { runId: br, accessCode: bc } = await creator.call('launchRun', { gameId: bg });
+
+    const teamA = makeParty('capHolderA');
+    await signInAnonymously(teamA.auth);
+    await teamA.call('joinRun', { code: bc, displayName: 'Holder A' });
+    const teamB = makeParty('capThiefB');
+    await signInAnonymously(teamB.auth);
+    await teamB.call('joinRun', { code: bc, displayName: 'Thief B' });
+    await creator.call('startTeams', { gameId: bg, runId: br });
+
+    const CA = { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21 };
+    const CB = { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21 };
+
+    // A takes st-a (nearest, cap 1); B is pushed to st-b (st-a is full).
+    const aAsg = await teamA.call('requestNextTask', CA);
+    const bAsg = await teamB.call('requestNextTask', CB);
+    check('cap: A holds st-a', aAsg?.taskId === 'st-a', JSON.stringify(aAsg));
+    check('cap: B pushed to st-b (st-a full)', bAsg?.taskId === 'st-b', JSON.stringify(bAsg));
+
+    const runPath = `users/${OWNER}/games/${bg}/runs/${br}`;
+    let counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
+    check('cap: both slots reserved before the attack', (counts['st-a'] ?? 0) === 1 && (counts['st-b'] ?? 0) === 1, JSON.stringify(counts));
+
+    // ATTACK: B hand-crafts a completeTask on st-a, which it never checked out.
+    await teamB.call('completeTask', { ...CB, taskId: 'st-a' });
+
+    counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
+    check("cap: attacker cannot drain the holder's slot (taskCounts st-a still 1)",
+      (counts['st-a'] ?? 0) === 1, JSON.stringify(counts));
+
+    const aState = await teamA.call('getMyTeamState', { code: bc });
+    check('cap: holder A still holds st-a', aState?.team?.activeTaskId === 'st-a', JSON.stringify(aState?.team?.activeTaskId));
+
+    // Invariant: a third team must NOT be assignable into the still-held st-a.
+    const teamC = makeParty('capThirdC');
+    await signInAnonymously(teamC.auth);
+    await teamC.call('joinRun', { code: bc, displayName: 'Third C' });
+    await creator.call('startTeams', { gameId: bg, runId: br });
+    const cAsg = await teamC.call('requestNextTask', { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21 });
+    check('cap: third team is not assigned the still-held st-a', cAsg?.taskId !== 'st-a', JSON.stringify(cAsg));
+  });
+
   // ═══ Lost-response retry leaks no station slot (bug-hunt-2026-07-10) ═════════
   // The play-web callable wrapper now retries a callable up to 3× on a transient/
   // timeout code (the client can't tell "the server never got it" from "the

@@ -616,12 +616,16 @@ export async function completeTaskForTeam(
   // survey-tasks: optional per-completion extras stamped onto the team's task
   // record INSIDE the existing transaction (no new transaction, no new reads).
   extras?: { surveyResponse?: string },
-): Promise<boolean> {
-  // Returns TRUE only when this call actually transitioned the task to completed.
-  // A duplicate/idempotent no-op (already completed, team/task missing) returns
-  // FALSE so callers can skip the follow-on releaseTask + next-task assignment —
-  // otherwise two concurrent duplicate completions each assign the next task and
-  // leak a station-occupancy slot (adversarial-smoke "leaked station slots").
+): Promise<{ completed: boolean; heldSlot: boolean }> {
+  // Returns { completed, heldSlot }. `completed` is TRUE only when this call
+  // actually transitioned the task to completed; a duplicate/idempotent no-op
+  // (already completed, team/task missing) returns completed:false so callers skip
+  // the follow-on releaseTask + next-task assignment — otherwise two concurrent
+  // duplicate completions each assign the next task and leak a station-occupancy
+  // slot (adversarial-smoke "leaked station slots"). `heldSlot` is TRUE only when
+  // THIS team actually reserved this task (activeTaskId/'assigned') so callers
+  // release the station slot ONLY for a slot the team held — a permissive/cross-
+  // team completion must not decrement another team's reservation (station-cap-bypass).
   const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   const game = gameSnap.data() as Game;
   // Hot Zone (if any) is read-only here — used to multiply the earned score for
@@ -639,10 +643,10 @@ export async function completeTaskForTeam(
   // so a transaction retry never double-releases.
   let skippedHeldTaskIds: string[] = [];
 
-  const didComplete = await db.runTransaction<boolean>(async (tx) => {
+  const result = await db.runTransaction<{ completed: boolean; heldSlot: boolean }>(async (tx) => {
     skippedHeldTaskIds = [];
     const teamSnap = await tx.get(teamRef);
-    if (!teamSnap.exists) return false;
+    if (!teamSnap.exists) return { completed: false, heldSlot: false };
     const team = teamSnap.data() as RunTeam;
 
     const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
@@ -653,10 +657,19 @@ export async function completeTaskForTeam(
       const ti = stages[si].tasks.findIndex((t) => t.taskId === taskId);
       if (ti >= 0) { stageIdx = si; taskIdx = ti; break; }
     }
-    if (stageIdx < 0) return false;
+    if (stageIdx < 0) return { completed: false, heldSlot: false };
 
     const taskRec = stages[stageIdx].tasks[taskIdx];
-    if (taskRec.status === 'completed') return false; // idempotent
+    if (taskRec.status === 'completed') return { completed: false, heldSlot: false }; // idempotent
+
+    // Station-cap integrity (fix: station-cap-bypass): did THIS team actually hold a
+    // reservation for this task? run.taskCounts is incremented ONLY by assignTask for
+    // a task it assigns (→ record 'assigned' + activeTaskId). A completion of a task
+    // the team never reserved (a hand-crafted completeTask on a slot ANOTHER team
+    // holds) must not let the caller releaseTask — that decrement would drain the
+    // other team's reservation and silently defeat the station cap. Mirrors the
+    // checkOutTask in-flight test.
+    const heldSlot = team.activeTaskId === taskId || taskRec.status === 'assigned';
 
     // Stage-lock enforcement: a completion may only land in the team's ACTIVE
     // stage. A task in a locked (future / scheduled-gated) or already-completed
@@ -826,7 +839,7 @@ export async function completeTaskForTeam(
       activeTaskId: null,
       updatedAt: now,
     });
-    return true;
+    return { completed: true, heldSlot };
   });
 
   // Release station slots held by assigned-but-auto-skipped tasks (guarded:
@@ -835,10 +848,10 @@ export async function completeTaskForTeam(
     await releaseTask(id, ownerUid, gameId, runId);
   }
   // Keep the live leaderboard snapshot fresh (throttled; best-effort).
-  if (didComplete) {
+  if (result.completed) {
     await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId);
   }
-  return didComplete;
+  return result;
 }
 
 // Read-modify-write a player's cross-run profile (change: player-profile-badges).
@@ -2541,11 +2554,13 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     }
   }
 
-  const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
   // A duplicate/idempotent completion must NOT release or re-assign: a concurrent
   // real completion already did, and doubling the assignment leaks a station slot.
   if (!completed) return { ok: true, nextTaskId: null };
-  await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  // Release only the slot THIS team actually reserved (fix: station-cap-bypass) —
+  // a permissive completion of a task the team never checked out holds no slot.
+  if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
 
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
@@ -2712,9 +2727,9 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     // Task expiry still applies (a closed task takes no more responses).
     await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
     const now = new Date().toISOString();
-    const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
+    const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
     if (!completed) return { correct: true, nextTaskId: null };
-    await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+    if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
     const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
     const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
     return { correct: true, nextTaskId: next.taskId ?? null };
@@ -2769,9 +2784,9 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   }
 
   const now = new Date().toISOString();
-  const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
   if (!completed) return { correct: true, nextTaskId: null };
-  await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+  if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
   const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
   return { correct: true, nextTaskId: next.taskId ?? null };
@@ -2818,9 +2833,9 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   await teamRef.update({ [`taskStepProgress.${taskId}`]: newDone, updatedAt: now });
 
   if (taskComplete) {
-    const completed = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    const { completed, heldSlot } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
     if (completed) {
-      await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
+      if (heldSlot) await releaseTask(taskId, ctx.ownerUid, ctx.gameId, ctx.runId);
       const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
       await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
     }
