@@ -2360,7 +2360,7 @@ export async function advanceTeamStateOnPoll(args: {
   }
 }
 
-async function assignNextInActiveStage(
+export async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
   now: string,
@@ -2499,6 +2499,9 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+  // WO-5: reject a bad coordinate up front — BEFORE completeTaskForTeam — so the
+  // player never sees a 500 AFTER a successful check-in.
+  assertCoordIfPresent(lat, lng);
 
   const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   const now = new Date().toISOString();
@@ -2591,6 +2594,7 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
     lat?: number; lng?: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
+  assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
   if (team.outOfBounds === true) {
@@ -2671,6 +2675,39 @@ function findGameTask(game: Game, taskId: string): Task | undefined {
   return undefined;
 }
 
+// WO-5: reject a PRESENT-but-invalid client coordinate up front, with a clean
+// `invalid-argument` — never let out-of-range/NaN/string lat/lng reach
+// haversineKm (which throws LocationError → opaque INTERNAL). "Absent" (both
+// null/undefined) falls through to the existing (0,0) no-location path. Mirrors
+// updateLocation's isValidCoord guard. Placed before any completion/side-effect
+// so completeTask can't 500 AFTER the task is already marked complete.
+function assertCoordIfPresent(lat: unknown, lng: unknown): void {
+  const present = lat != null || lng != null;
+  if (present && !isValidCoord(lat as number, lng as number)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid coordinates');
+  }
+}
+
+// WO-2: the caller-team's status for the stage that CONTAINS taskId (or
+// undefined if the task isn't in the team's stages). Lets the answer callables
+// close the locked/future-stage oracle BEFORE computing correctness, so a wrong
+// vs a correct probe on a locked stage are byte-identical. Message string must
+// match completeTaskForTeam's in-transaction gate exactly.
+function teamStageStatusForTask(team: RunTeam, taskId: string): string | undefined {
+  for (const s of team.stages) {
+    if (s.tasks.some((t) => t.taskId === taskId)) return s.status;
+  }
+  return undefined;
+}
+
+const STAGE_NOT_ACTIVE_MSG = 'This stage is not active yet — finish your current stage first';
+
+export function assertStageActiveForTask(team: RunTeam, taskId: string): void {
+  if (teamStageStatusForTask(team, taskId) !== 'active') {
+    throw new functions.https.HttpsError('failed-precondition', STAGE_NOT_ACTIVE_MSG);
+  }
+}
+
 // Task expiry guard shared by the answer callables (change: task-expiry). Reads
 // the run doc for `launchedAt` only when the task actually carries an expiry —
 // zero extra reads on the common (no-expiry) path.
@@ -2702,7 +2739,8 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   if (answer == null && orderedAnswer === undefined) {
     throw new functions.https.HttpsError('invalid-argument', 'taskId and answer required');
   }
-  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
+  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -2711,6 +2749,10 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   if (task.type !== 'quiz' && task.type !== 'numeric' && task.type !== 'survey') {
     throw new functions.https.HttpsError('failed-precondition', 'Task does not take an answer');
   }
+  // WO-2: close the locked/future-stage answer oracle BEFORE any correctness
+  // computation (and before the attempt-limit read, so a probe consumes no slot).
+  // A wrong and a correct answer on a locked stage now throw the identical error.
+  assertStageActiveForTask(team, taskId);
 
   // Optional presence gate (change: quiz-location-verification): when the creator
   // opted this task into requirePresence AND it has real coordinates, the submitted
@@ -2819,6 +2861,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   if (!taskId || typeof stepIndex !== 'number') {
     throw new functions.https.HttpsError('invalid-argument', 'taskId and stepIndex required');
   }
+  assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
@@ -2827,6 +2870,10 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   if (!task || task.type !== 'sequence' || !task.steps?.length) {
     throw new functions.https.HttpsError('failed-precondition', 'Not a sequence task');
   }
+  // WO-2: close the locked/future-stage oracle — a step submission on a locked
+  // stage throws the identical error regardless of step-answer correctness,
+  // before any step-progress read/write.
+  assertStageActiveForTask(team, taskId);
   // Task expiry (change: task-expiry): a closed task takes no more steps.
   await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
 
@@ -2866,6 +2913,7 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
     lat: number; lng: number;
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
+  assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   // Read-only: any attached device may ask for recommendations.
   const { ctx, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
 

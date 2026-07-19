@@ -3829,6 +3829,243 @@ async function main() {
       (entry?.score ?? 0) === 0, JSON.stringify(entry));
   });
 
+  // ═══ WO-1: verifyStationCode releases its held station slot ══════════════════
+  // A correct code completes the task — but the fire-and-forget completion never
+  // released the reserved slot, so a capped smart_station leaked a slot on every
+  // check-in (the next team got {taskId:null} forever). It must now release the
+  // slot AND return nextTaskId for parity with completeTask/submitStationPhoto.
+  await scenario('verifyStationCode releases its station slot (WO-1)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: vg } = await creator.call('createGame', { title: 'Station Release', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: vg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'vs-0', order: 0, title: 'Cap-1 station', tasks: [
+          { id: 'vs-code', title: 'Secret station', type: 'smart_station', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 1,
+            smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'OPEN' } },
+        ] },
+        { id: 'vs-1', order: 1, title: 'Finish', isFinal: true, tasks: [
+          { id: 'vs-fin', title: 'Wrap up', type: 'self_report', triggerMode: 'locationless', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+      ],
+    });
+    const { runId: vr, accessCode: vc } = await creator.call('launchRun', { gameId: vg });
+    const runPath = `users/${OWNER}/games/${vg}/runs/${vr}`;
+
+    const teamA = makeParty('vsTeamA');
+    await signInAnonymously(teamA.auth);
+    await teamA.call('joinRun', { code: vc, displayName: 'Alpha' });
+    await creator.call('startTeams', { gameId: vg, runId: vr });
+
+    // Reserve the cap-1 station slot.
+    await teamA.call('requestNextTask', { ownerUid: OWNER, gameId: vg, runId: vr, code: vc, lat: 31.78, lng: 35.21 });
+    let counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
+    check('WO-1: slot reserved before completion (taskCounts vs-code == 1)',
+      (counts['vs-code'] ?? 0) === 1, JSON.stringify(counts));
+
+    // Correct code completes → releases the slot AND advances to the next stage.
+    const vres = await teamA.call('verifyStationCode', { ownerUid: OWNER, gameId: vg, runId: vr, taskId: 'vs-code', code: 'open' });
+    check('WO-1: verifyStationCode verified true', vres?.verified === true, JSON.stringify(vres));
+    check('WO-1: response carries nextTaskId (parity with completeTask)',
+      vres?.nextTaskId === 'vs-fin', JSON.stringify(vres));
+
+    counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
+    check('WO-1: station slot released after completion (taskCounts vs-code == 0)',
+      (counts['vs-code'] ?? 0) === 0, JSON.stringify(counts));
+
+    // Team B can now take the same station (the slot is free again).
+    const teamB = makeParty('vsTeamB');
+    await signInAnonymously(teamB.auth);
+    await teamB.call('joinRun', { code: vc, displayName: 'Bravo' });
+    await creator.call('startTeams', { gameId: vg, runId: vr });
+    const bAsg = await teamB.call('requestNextTask', { ownerUid: OWNER, gameId: vg, runId: vr, code: vc, lat: 31.78, lng: 35.21 });
+    check('WO-1: team B gets the freed station (non-null taskId)',
+      bAsg?.taskId === 'vs-code', JSON.stringify(bAsg));
+  });
+
+  // ═══ WO-2: locked/future-stage answer oracle is closed ══════════════════════
+  // Every answer callable computed correctness BEFORE the stage-active gate (which
+  // lived inside completeTaskForTeam), so a locked-stage task returned a clean
+  // correct/wrong oracle (wrong→{correct:false}, correct→a different error). A
+  // wrong and a correct probe on a locked stage must now be BYTE-IDENTICAL.
+  await scenario('locked-stage answer oracle is closed (WO-2)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const grab = async (p) => {
+      try { return { ok: true, r: await p }; }
+      catch (e) { return { ok: false, code: e.code, message: e.message }; }
+    };
+    const { gameId: og } = await creator.call('createGame', { title: 'Answer Oracle', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: og, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'or-0', order: 0, title: 'Warmup', tasks: [
+          { id: 'or-warm', title: 'Warm', type: 'self_report', triggerMode: 'locationless', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+        { id: 'or-1', order: 1, title: 'Locked stage', isFinal: true, requiredTaskCount: 1, tasks: [
+          { id: 'or-quiz', title: 'Locked quiz', type: 'quiz', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 9,
+            answers: ['42'] },
+          { id: 'or-num', title: 'Locked numeric', type: 'numeric', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 9,
+            numericAnswer: 7, numericTolerance: 0 },
+          { id: 'or-code', title: 'Locked station', type: 'smart_station', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 9,
+            smart: { enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: 'OPEN' } },
+          { id: 'or-seq', title: 'Locked sequence', type: 'sequence', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 9,
+            steps: [{ id: 's1', prompt: 'Step 1', answer: 'step1' }, { id: 's2', prompt: 'Step 2', answer: 'step2' }] },
+        ] },
+      ],
+    });
+    const { runId: orr, accessCode: oc } = await creator.call('launchRun', { gameId: og });
+    const p = makeParty('oraclePlayer');
+    await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: oc, displayName: 'Prober' });
+    await creator.call('startTeams', { gameId: og, runId: orr });
+    const CS = { ownerUid: OWNER, gameId: og, runId: orr, code: oc };
+
+    // submitTaskAnswer: wrong vs correct on the locked quiz are indistinguishable.
+    const wrongQuiz = await grab(p.call('submitTaskAnswer', { ...CS, taskId: 'or-quiz', answer: 'nope' }));
+    const rightQuiz = await grab(p.call('submitTaskAnswer', { ...CS, taskId: 'or-quiz', answer: '42' }));
+    check('WO-2: locked-stage wrong quiz throws failed-precondition (not {correct:false})',
+      wrongQuiz.ok === false && wrongQuiz.code === 'functions/failed-precondition', JSON.stringify(wrongQuiz));
+    check('WO-2: locked-stage correct quiz throws the SAME error as wrong (no oracle)',
+      rightQuiz.ok === false && rightQuiz.code === wrongQuiz.code && rightQuiz.message === wrongQuiz.message,
+      JSON.stringify({ wrongQuiz, rightQuiz }));
+
+    // verifyStationCode: wrong vs correct code on the locked station are identical.
+    const wrongCode = await grab(p.call('verifyStationCode', { ownerUid: OWNER, gameId: og, runId: orr, taskId: 'or-code', code: 'nope' }));
+    const rightCode = await grab(p.call('verifyStationCode', { ownerUid: OWNER, gameId: og, runId: orr, taskId: 'or-code', code: 'open' }));
+    check('WO-2: locked-stage wrong station code throws failed-precondition',
+      wrongCode.ok === false && wrongCode.code === 'functions/failed-precondition', JSON.stringify(wrongCode));
+    check('WO-2: locked-stage correct code throws the SAME generic error (not "Incorrect code")',
+      rightCode.ok === false && rightCode.message === wrongCode.message && !/incorrect code/i.test(rightCode.message ?? ''),
+      JSON.stringify({ wrongCode, rightCode }));
+
+    // submitSequenceStep: wrong vs correct step on the locked sequence are identical.
+    const wrongStep = await grab(p.call('submitSequenceStep', { ...CS, taskId: 'or-seq', stepIndex: 0, answer: 'nope' }));
+    const rightStep = await grab(p.call('submitSequenceStep', { ...CS, taskId: 'or-seq', stepIndex: 0, answer: 'step1' }));
+    check('WO-2: locked-stage sequence step throws the SAME error regardless of correctness',
+      wrongStep.ok === false && rightStep.ok === false &&
+      wrongStep.code === 'functions/failed-precondition' &&
+      wrongStep.code === rightStep.code && wrongStep.message === rightStep.message,
+      JSON.stringify({ wrongStep, rightStep }));
+
+    // Positive control: once stage 1 is active, grading works normally again.
+    await p.call('completeTask', { ...CS, taskId: 'or-warm' }); // completes stage 0 → stage 1 active
+    const wrongNow = await grab(p.call('submitTaskAnswer', { ...CS, taskId: 'or-quiz', answer: 'nope' }));
+    const rightNow = await grab(p.call('submitTaskAnswer', { ...CS, taskId: 'or-quiz', answer: '42' }));
+    check('WO-2 positive control: active-stage wrong quiz returns {correct:false}',
+      wrongNow.ok === true && wrongNow.r?.correct === false, JSON.stringify(wrongNow));
+    check('WO-2 positive control: active-stage correct quiz completes',
+      rightNow.ok === true && rightNow.r?.correct === true, JSON.stringify(rightNow));
+  });
+
+  // ═══ WO-4: run-wide staff lockout never blocks a correct PIN ═════════════════
+  // The run-wide lockout throw fired BEFORE the PIN lookup, so any griefer could
+  // spend 20 wrong guesses from fresh anonymous uids and lock every legit staffer
+  // out of a live run. A correct, unused PIN must win even under run-wide lockout;
+  // only wrong guesses stay gated.
+  await scenario('run-wide staff lockout never blocks a correct PIN (WO-4)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gg } = await creator.call('createGame', { title: 'Lockout DoS', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'lk-0', order: 0, isFinal: true, title: 'Only stage', tasks: [
+        { id: 'lk-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: lr } = await creator.call('launchRun', { gameId: gg });
+    const { pin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: gg, runId: lr, name: 'Legit Marshal', permissions: ['review_photos'],
+    });
+
+    // Drive the RUN-WIDE counter to lockout: STAFF_RUN_LOCKOUT_LIMIT (20) wrong
+    // guesses, each from a FRESH anonymous identity (per-uid counter never trips).
+    for (let i = 0; i < 20; i++) {
+      const griefer = makeParty(`grief${i}`);
+      await signInAnonymously(griefer.auth);
+      try { await griefer.call('staffSignIn', { ownerUid: OWNER, gameId: gg, runId: lr, pin: '000000' }); }
+      catch { /* expected not-found / resource-exhausted */ }
+    }
+
+    // A WRONG PIN during the run-wide lockout window is still rejected.
+    const wrongDuring = makeParty('wrongDuring');
+    await signInAnonymously(wrongDuring.auth);
+    let wrongRejected = false;
+    try { await wrongDuring.call('staffSignIn', { ownerUid: OWNER, gameId: gg, runId: lr, pin: '111111' }); }
+    catch { wrongRejected = true; }
+    check('WO-4: a WRONG PIN during run-wide lockout is still rejected', wrongRejected);
+
+    // A legit staffer with the CORRECT PIN succeeds despite the run-wide lockout.
+    const legit = makeParty('legitStaff');
+    await signInAnonymously(legit.auth);
+    const tok = await legit.call('staffSignIn', { ownerUid: OWNER, gameId: gg, runId: lr, pin });
+    check('WO-4: correct PIN succeeds under run-wide lockout (mints a token)',
+      !!tok?.customToken, JSON.stringify({ hasToken: !!tok?.customToken }));
+  });
+
+  // ═══ WO-5: bad-coordinate inputs return clean errors, not 500 ════════════════
+  // Client {lat,lng} flowed into haversineKm; only null/undefined defaulted to
+  // (0,0). Out-of-range/NaN/string coords reached haversineKm → LocationError →
+  // opaque INTERNAL (a 500). On completeTask the 500 fired AFTER the task was
+  // already marked complete. Each callable must now throw a clean invalid-argument
+  // up front, and completeTask must not complete the task on a rejected call.
+  await scenario('bad-coordinate inputs return clean errors, not 500 (WO-5)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: bg } = await creator.call('createGame', { title: 'Bad Coords', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: bg, scoringPreset: 'smart_weighted',
+      stages: [{ id: 'bc-0', order: 0, isFinal: true, title: 'Mixed tasks', requiredTaskCount: 1, tasks: [
+        { id: 'bc-field', title: 'Check in', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        { id: 'bc-quiz', title: 'Quiz', type: 'quiz', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 9,
+          answers: ['x'] },
+        { id: 'bc-seq', title: 'Sequence', type: 'sequence', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 9,
+          steps: [{ id: 's1', prompt: 'Step 1', answer: 'a' }] },
+      ] }],
+    });
+    const { runId: brr, accessCode: bcc } = await creator.call('launchRun', { gameId: bg });
+    const p = makeParty('badCoordPlayer');
+    await signInAnonymously(p.auth);
+    await p.call('joinRun', { code: bcc, displayName: 'Coords' });
+    await creator.call('startTeams', { gameId: bg, runId: brr });
+    const CS = { ownerUid: OWNER, gameId: bg, runId: brr, code: bcc };
+    const BAD = { lat: 999, lng: 181 };
+
+    await expectError('WO-5: requestNextTask rejects out-of-range coords (invalid-argument)',
+      p.call('requestNextTask', { ...CS, ...BAD }), { codeIn: ['functions/invalid-argument'] });
+    await expectError('WO-5: getRecommendedTasks rejects out-of-range coords (invalid-argument)',
+      p.call('getRecommendedTasks', { ...CS, ...BAD }), { codeIn: ['functions/invalid-argument'] });
+    await expectError('WO-5: submitTaskAnswer rejects out-of-range coords (invalid-argument)',
+      p.call('submitTaskAnswer', { ...CS, taskId: 'bc-quiz', answer: 'x', ...BAD }), { codeIn: ['functions/invalid-argument'] });
+    await expectError('WO-5: submitSequenceStep rejects out-of-range coords (invalid-argument)',
+      p.call('submitSequenceStep', { ...CS, taskId: 'bc-seq', stepIndex: 0, answer: 'a', ...BAD }), { codeIn: ['functions/invalid-argument'] });
+    // Non-numeric (string) coords are rejected the same way, not coerced/500'd.
+    await expectError('WO-5: string coords are rejected (invalid-argument, not internal)',
+      p.call('requestNextTask', { ...CS, lat: 'abc', lng: 'def' }), { codeIn: ['functions/invalid-argument'] });
+
+    // completeTask: the guard must fire BEFORE completeTaskForTeam so the player
+    // never sees an error AFTER a successful check-in.
+    await expectError('WO-5: completeTask rejects out-of-range coords (invalid-argument, not internal)',
+      p.call('completeTask', { ...CS, taskId: 'bc-field', ...BAD }), { codeIn: ['functions/invalid-argument'] });
+    const st = await p.call('getMyTeamState', { code: bcc });
+    const fieldRec = (st?.team?.stages ?? []).flatMap((s) => s.tasks).find((t) => t.taskId === 'bc-field');
+    check('WO-5: bc-field is NOT completed after the rejected bad-coord completeTask',
+      fieldRec?.status !== 'completed', JSON.stringify(fieldRec));
+
+    // Positive control: absent lat/lng still routes via the (0,0) no-location path.
+    const okReq = await p.call('requestNextTask', { ...CS });
+    check('WO-5 positive control: absent lat/lng still routes (no throw)',
+      okReq !== undefined && okReq !== null, JSON.stringify(okReq));
+  });
+
   // ═══ checkOutTask holds its own slot (fix-checkouttask-slot-theft) ══════════
   // checkOutTask may only release a slot the caller's team actually holds. A
   // replayed call (team no longer holds it) or a cross-team call (never held it)

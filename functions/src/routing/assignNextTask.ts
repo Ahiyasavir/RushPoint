@@ -41,7 +41,15 @@ function loadFactor(task: Task, taskCounts: Record<string, number>): number {
 function transitMinutes(teamLocation: GeoPoint, task: Task): number {
   // A locationless (general) task can be done from wherever the team is.
   if (task.locationless) return 0;
+  // Hidden-location task (WO-3): its priority must NOT encode distance, or the
+  // secret spot is triangulable by polling recommendations from many points.
+  // Treat it like a coords-unavailable task — a constant transit, no gradient.
+  if (task.hideLocation) return 5;
   if (!task.coordinates || !isValidCoord(task.coordinates.lat, task.coordinates.lng)) return 5;
+  // Bad client `teamLocation` (WO-5 layer 1): out-of-range / NaN coords would make
+  // haversineKm throw LocationError and escape as an opaque INTERNAL. Fall back to
+  // the coords-unavailable constant so the internal routing path never 500s.
+  if (!isValidCoord(teamLocation.lat, teamLocation.lng)) return 5;
   return haversineKm(teamLocation, task.coordinates) * 12; // 5 km/h walking
 }
 
@@ -173,7 +181,12 @@ export async function buildRecommendations(
       task,
       priority: priorityScore(task, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs),
       distanceKm:
-        !task.locationless && task.coordinates && isValidCoord(task.coordinates.lat, task.coordinates.lng)
+        // WO-3: a hidden-location task reports distance 0 so getRecommendedTasks
+        // never leaks how close the secret spot is. WO-5: a bad `teamLocation`
+        // (out-of-range/NaN) resolves to 0 instead of throwing in haversineKm.
+        !task.hideLocation && !task.locationless && task.coordinates &&
+        isValidCoord(task.coordinates.lat, task.coordinates.lng) &&
+        isValidCoord(teamLocation.lat, teamLocation.lng)
           ? haversineKm(teamLocation, task.coordinates)
           : 0,
     }))

@@ -15,7 +15,7 @@ import { validate } from './validation';
 function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask } from './runs/index';
 import { releaseTask } from './routing/assignNextTask';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 
@@ -211,16 +211,20 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   const prevRunCount = r.count ?? 0;
   const lastRunFailedAt = r.lastFailedAtMs ?? 0;
 
+  // Per-caller lockout stays a pre-check: a single caller hammering with wrong
+  // PINs is hard-stopped early (row 40). This is NOT the run-wide DoS vector —
+  // it can't be weaponized by identity-cycling (a fresh uid has count 0).
   if (shouldLockout(prevCount) && isWithinCooldown(lastFailedAt, nowMs)) {
     throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts. Try again later.');
-  }
-  if (shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS)) {
-    throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts for this run. Try again later.');
   }
   // Cooldown expired → forgive prior failures.
   const baseCount = shouldLockout(prevCount) && !isWithinCooldown(lastFailedAt, nowMs) ? 0 : prevCount;
   const baseRunCount = shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && !isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS) ? 0 : prevRunCount;
 
+  // WO-4: look up the PIN BEFORE consulting the RUN-WIDE lockout. A correct,
+  // unused PIN is not a brute-force attempt — it must win even while an attacker
+  // has driven the run-wide counter to lockout with fresh anonymous identities.
+  // Otherwise any griefer can lock every legit staffer out of a live run.
   const inviteSnap = await db
     .collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/staffInvites`)
     .where('pin', '==', pin)
@@ -229,6 +233,11 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
     .get();
 
   if (inviteSnap.empty) {
+    // Wrong/used PIN: NOW apply the run-wide brute-force wall (a correct PIN never
+    // reaches here). Throw without incrementing, mirroring the per-caller pre-check.
+    if (shouldLockout(prevRunCount, STAFF_RUN_LOCKOUT_LIMIT) && isWithinCooldown(lastRunFailedAt, nowMs, STAFF_RUN_COOLDOWN_MS)) {
+      throw new functions.https.HttpsError('resource-exhausted', 'Too many failed attempts for this run. Try again later.');
+    }
     await Promise.all([
       attemptsRef.set({ count: baseCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true }),
       runAttemptsRef.set({ count: baseRunCount + 1, lastFailedAtMs: nowMs, updatedAt: new Date().toISOString() }, { merge: true }),
@@ -750,7 +759,7 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
   // Shared team devices: resolve the team this uid is ATTACHED to (founding
   // device or an attached phone) and require the controller role to mutate.
-  const { teamId: resolvedTeamId } = await resolveCallerTeam(
+  const { teamId: resolvedTeamId, team } = await resolveCallerTeam(
     uid, { ownerUid, gameId, runId }, { requireController: true },
   );
   // IDOR guard (auth-anticheat row 38): a participant may only verify for their
@@ -758,6 +767,10 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   if (teamId && teamId !== resolvedTeamId) {
     throw new functions.https.HttpsError('permission-denied', 'Cannot act on another team');
   }
+  // WO-2: close the locked/future-stage oracle BEFORE the code comparison — a
+  // wrong code and a correct code on a locked stage now throw the identical
+  // "stage not active" error instead of 'Incorrect code' vs a stage error.
+  assertStageActiveForTask(team, taskId);
 
   const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -808,10 +821,17 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
     { merge: true },
   );
 
-  // Correct code = task complete → score it + advance the team.
-  await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
-
-  return { verified: true };
+  // Correct code = task complete → score it, RELEASE the held station slot, and
+  // advance the team (WO-1). Mirrors submitStationPhoto/completeTask: without the
+  // releaseTask a capped smart_station leaks a slot on every verified check-in, so
+  // the next team gets {taskId:null} forever. Guarded on `completed` (idempotent
+  // replay must not over-release) and `heldSlot` (never drain a slot this team
+  // never reserved). `verifyStationCode` carries no lat/lng → route locationless.
+  const { completed, heldSlot } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+  if (!completed) return { verified: true, already: true, nextTaskId: null };
+  if (heldSlot) await releaseTask(taskId, ownerUid, gameId, runId);
+  const next = await assignNextInActiveStage(ownerUid, gameId, runId, resolvedTeamId, { lat: 0, lng: 0 }, now);
+  return { verified: true, nextTaskId: next.taskId ?? null };
 });
 
 
