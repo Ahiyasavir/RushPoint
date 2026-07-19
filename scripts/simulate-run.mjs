@@ -45,6 +45,14 @@ function recordLatency(fn, ms) {
 // counted + reported: a NOISY retry tally is itself a finding, a hidden one isn't).
 let transientRetries = 0;
 
+// WO Item 1/3: structural INTERNAL oracle. A player callable that aborts under the
+// single-run-doc lock (Firestore "10 ABORTED: lock timeout") used to surface to the
+// player as an opaque `functions/internal`. The harness's own retry could absorb it
+// at 8/12 teams (exit 0, bug hidden) and only crash the whole sim at 16. Record EVERY
+// internal rejection so it's a hard violation regardless of team count — the RED
+// signal for the withLockRetry wraps on completeTaskForTeam + the claim txn.
+const internalErrors = [];
+
 function makeParty(name) {
   const app = initializeApp({ apiKey: 'emulator-key', projectId: PROJECT, appId: `sim-${name}` }, name);
   const auth = getAuth(app);
@@ -62,6 +70,7 @@ function makeParty(name) {
           try {
             return (await httpsCallable(functions, fn)(data)).data;
           } catch (e) {
+            if (e.code === 'functions/internal') internalErrors.push(fn);
             if (e.code !== 'functions/internal' || attempt >= 2) throw e;
             transientRetries++;
             await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
@@ -230,6 +239,14 @@ async function main() {
 
   console.log(`\ntransient INTERNAL retries absorbed: ${transientRetries}`);
   audit('transient-error rate is sane (< 1 retry per team)', transientRetries < TEAMS, String(transientRetries));
+  // WO Item 1/3: ANY player-facing INTERNAL is a hard violation (un-retried ABORTED
+  // from the run-doc lock). Post-fix (withLockRetry on completeTaskForTeam + claim)
+  // this stays empty even at --teams=16.
+  audit(
+    'no player callable surfaced INTERNAL under load',
+    internalErrors.length === 0,
+    internalErrors.length ? `${internalErrors.length}× [${[...new Set(internalErrors)].join(', ')}]` : '',
+  );
   console.log(`total wall time: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(violations === 0 ? '\n✅ LOAD SIM CONSISTENT' : `\n❌ ${violations} CONSISTENCY VIOLATION(S)`);
   process.exit(violations === 0 ? 0 : 1);

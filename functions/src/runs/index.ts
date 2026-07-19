@@ -92,7 +92,7 @@ import {
 } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
-import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
+import { assignTask, releaseTask, computeSkillRatio, buildRecommendations, withLockRetry } from '../routing/assignNextTask';
 import type { NoAssignmentReason } from '../routing/assignNextTask';
 import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
@@ -658,7 +658,15 @@ export async function completeTaskForTeam(
   // transaction retry never double-decrements.
   let skippedHeldTaskIds: string[] = [];
 
-  const result = await db.runTransaction<{ completed: boolean; heldSlot: boolean }>(async (tx) => {
+  // WO Item 1: wrap the scoring transaction in withLockRetry. Every completion
+  // locks the ONE run doc; a burst of ≥16 synchronized teams queues on that lock
+  // and Firestore aborts with "10 ABORTED: lock timeout", which surfaced to the
+  // player as an opaque INTERNAL (reproduced by simulate-run.mjs --teams=16). The
+  // jittered backoff absorbs the burst instead of failing the completion. The
+  // `skippedHeldTaskIds = []` reset is the first statement inside the txn body, so
+  // per-attempt state is correct across retries.
+  const result = await withLockRetry(() =>
+    db.runTransaction<{ completed: boolean; heldSlot: boolean }>(async (tx) => {
     skippedHeldTaskIds = [];
     // All reads up front (teamRef + runRef) before any write, per the Firestore
     // transaction rule (WO Fix 1).
@@ -886,7 +894,7 @@ export async function completeTaskForTeam(
       }
     }
     return { completed: true, heldSlot };
-  });
+  }));
 
   // Keep the live leaderboard snapshot fresh (throttled; best-effort). WO Fix 2:
   // fire-and-forget — the ~throttled recompute must NOT block the player's
@@ -2523,22 +2531,36 @@ export async function assignNextInActiveStage(
     // team on it (a permanent station-capacity leak). Re-read the team inside a
     // transaction: if another task already went in-flight for this stage we LOST the
     // race, so release our reserved slot instead of clobbering the winner.
-    const claim = await db.runTransaction(async (tx) => {
-      const cur = await tx.get(teamRef);
-      if (!cur.exists) return { taskId: undefined as string | undefined, mine: false };
-      const curTeam = cur.data() as RunTeam;
-      const curStage = curTeam.stages[activeStageIdx];
-      if (!curStage) return { taskId: undefined, mine: false };
-      const existing = curStage.tasks.find((t) => t.status === 'assigned');
-      if (existing) return { taskId: existing.taskId, mine: false };
-      const localIdx = curStage.tasks.findIndex((t) => t.taskId === result.taskId);
-      if (localIdx < 0) return { taskId: undefined, mine: false };
-      const stages = curTeam.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
-      stages[activeStageIdx].tasks[localIdx].status = 'assigned';
-      stages[activeStageIdx].tasks[localIdx].startedAt = now;
-      tx.update(teamRef, { stages, activeTaskId: result.taskId, updatedAt: now });
-      return { taskId: result.taskId, mine: true };
-    });
+    // WO Item 3: retry the claim under contention and release on ANY failure. The
+    // claim transaction locks the run doc indirectly (via the follow-on releaseTask)
+    // and can itself abort under a burst; an un-retried abort threw out of here as
+    // INTERNAL, leaving assignTask's reservation (run.taskCounts[result.taskId]++)
+    // orphaned forever — a permanent station-slot leak that dead-ends later teams at
+    // 'stationsFull'. withLockRetry absorbs the abort; the try/catch guarantees the
+    // reservation is reversed whether we lose the race OR the write fails outright.
+    let claim: { taskId: string | undefined; mine: boolean };
+    try {
+      claim = await withLockRetry(() => db.runTransaction<{ taskId: string | undefined; mine: boolean }>(async (tx) => {
+        const cur = await tx.get(teamRef);
+        if (!cur.exists) return { taskId: undefined as string | undefined, mine: false };
+        const curTeam = cur.data() as RunTeam;
+        const curStage = curTeam.stages[activeStageIdx];
+        if (!curStage) return { taskId: undefined, mine: false };
+        const existing = curStage.tasks.find((t) => t.status === 'assigned');
+        if (existing) return { taskId: existing.taskId, mine: false };
+        const localIdx = curStage.tasks.findIndex((t) => t.taskId === result.taskId);
+        if (localIdx < 0) return { taskId: undefined, mine: false };
+        const stages = curTeam.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+        stages[activeStageIdx].tasks[localIdx].status = 'assigned';
+        stages[activeStageIdx].tasks[localIdx].startedAt = now;
+        tx.update(teamRef, { stages, activeTaskId: result.taskId, updatedAt: now });
+        return { taskId: result.taskId, mine: true };
+      }));
+    } catch (e) {
+      // Reverse assignTask's increment so a failed claim never orphans the slot.
+      await releaseTask(result.taskId, ownerUid, gameId, runId);
+      throw e;
+    }
     if (!claim.mine) {
       // Lost the race (or team/stage vanished): reverse assignTask's reservation so
       // the slot doesn't leak, and hand back whatever is actually in flight.

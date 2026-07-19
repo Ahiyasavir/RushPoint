@@ -219,7 +219,7 @@ export async function buildRecommendations(
 // opaque INTERNAL (caught by scripts/simulate-run.mjs under 12 concurrent
 // teams). The lock frees in milliseconds; a short jittered backoff + retry
 // absorbs the burst instead of failing the player's completion.
-async function withLockRetry<T>(op: () => Promise<T>, attempts = 8): Promise<T> {
+export async function withLockRetry<T>(op: () => Promise<T>, attempts = 8): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
