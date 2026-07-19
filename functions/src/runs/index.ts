@@ -90,7 +90,7 @@ import {
   taskScoreSmart,
   COMPLETION_BONUS,
 } from '@rushpoint/shared';
-import { requireString, MAX_ID_LEN } from '@rushpoint/shared';
+import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations } from '../routing/assignNextTask';
 import type { NoAssignmentReason } from '../routing/assignNextTask';
@@ -326,9 +326,9 @@ export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) =
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   await enforceRateLimit(context.auth.uid, 'getJoinInfo');
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
   if (c.status === 'revoked') throw new functions.https.HttpsError('permission-denied', 'Code revoked');
@@ -370,7 +370,7 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     memberNames?: string[];
   };
 
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
   if (!displayName?.trim()) throw new functions.https.HttpsError('invalid-argument', 'displayName required');
 
   // Anti-griefing / DoS: bound the untrusted join payload. displayName + each
@@ -397,7 +397,6 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     throw new functions.https.HttpsError('invalid-argument', 'registrationData must be an object');
   }
 
-  const normalizedCode = code.trim().toUpperCase();
   const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const codeData = codeSnap.data() as AccessCode;
@@ -633,6 +632,13 @@ export async function completeTaskForTeam(
   // completions inside the zone+window (hot-zone-bonus). Server-decided.
   const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
   const runData = runSnap.data() as Run | undefined;
+  // WO Fix 3: a finished run's final board is published — a straggler completion
+  // must not score, or it would (together with an un-frozen board) silently rewrite
+  // the published FINAL standings. Reject at every grading path (this is the single
+  // choke point). finalizeRun also freezes the board (belt-and-suspenders).
+  if (runData?.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
   const hotZone = runData?.hotZone;
   const launchedAt = runData?.launchedAt;
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
@@ -649,6 +655,18 @@ export async function completeTaskForTeam(
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) return { completed: false, heldSlot: false };
     const team = teamSnap.data() as RunTeam;
+
+    // WO Fix 2: stage 0 is 'active' at join (buildInitialStages) while the team is
+    // still launched:false, so a team could grade stage-1 tasks BEFORE the host
+    // presses start. Gate every grading path on launched here (the single choke
+    // point) — startTeams sets launched:true before assigning, so real completions
+    // are unaffected, and self-guided runs seed launched:true.
+    if (team.launched !== true) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        "The host hasn't started the game yet",
+      );
+    }
 
     const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
 
@@ -1293,7 +1311,11 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   await runRef.update({
     status: 'finished',
     finishedAt: now,
-    leaderboard: { rankings, frozen: false, published: true, updatedAt: now },
+    // WO Fix 3: freeze the FINAL board so the throttled auto-snapshot
+    // (maybeRefreshLeaderboardSnapshot bails on frozen) can never recompute and
+    // overwrite the published final standings after finalize. An organizer can
+    // still explicitly un-freeze via refreshLeaderboard if they intend to.
+    leaderboard: { rankings, frozen: true, published: true, updatedAt: now },
     // Clear station reservations: the run is over, so any slot still held by a team
     // that was mid-task at finalize (e.g. stuck on a quiz) must not linger. Harmless
     // post-finalize (no more assignments) and keeps taskCounts honest — nightly
@@ -1388,7 +1410,7 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     const responses = feedbackSnap.docs.map((d) => d.data() as RunFeedback);
     const summary = buildRunSummaryResult(
       game,
-      { ...run, status: 'finished', finishedAt: now, leaderboard: { rankings, frozen: false, published: true, updatedAt: now } },
+      { ...run, status: 'finished', finishedAt: now, leaderboard: { rankings, frozen: true, published: true, updatedAt: now } },
       teams,
       responses,
     );
@@ -1466,9 +1488,9 @@ export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (da
 export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
 
@@ -1528,9 +1550,9 @@ export const getRunRecap = loggedCallable('getRunRecap', async (data, context) =
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
 
@@ -1568,9 +1590,9 @@ export const getRunReplay = loggedCallable('getRunReplay', async (data, context)
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
   if (uid !== c.ownerUid) {
@@ -1601,9 +1623,9 @@ export const getRunAnalytics = loggedCallable('getRunAnalytics', async (data, co
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
   if (uid !== c.ownerUid) {
@@ -1671,9 +1693,9 @@ export const getRunSummary = loggedCallable('getRunSummary', async (data, contex
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   const uid = context.auth.uid;
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
   if (uid !== c.ownerUid) {
@@ -1704,9 +1726,9 @@ export const getRunHeatmap = loggedCallable('getRunHeatmap', async (data, contex
   const uid = context.auth.uid;
   await enforceRateLimit(uid, 'getRunHeatmap');
   const { code } = data as { code: string };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const c = codeSnap.data() as AccessCode;
   if (uid !== c.ownerUid) {
@@ -2041,7 +2063,8 @@ async function resolveTeamContext(teamId: string, ctx: {
     return { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId };
   }
   if (ctx.code) {
-    const codeSnap = await db.doc(`accessCodes/${ctx.code.trim().toUpperCase()}`).get();
+    const normalizedCode = validate(() => normalizeAccessCode(ctx.code));
+    const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
     if (codeSnap.exists) {
       const c = codeSnap.data() as AccessCode;
       return { ownerUid: c.ownerUid, gameId: c.gameId, runId: c.runId };
@@ -2091,11 +2114,11 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
   const { code, teamCode, memberName } = data as {
     code: string; teamCode: string; memberName?: string;
   };
-  if (!code?.trim()) throw new functions.https.HttpsError('invalid-argument', 'code required');
+  const normalizedCode = validate(() => normalizeAccessCode(code));
   if (!teamCode?.trim()) throw new functions.https.HttpsError('invalid-argument', 'teamCode required');
   if (memberName != null) validate(() => requireString(memberName, 'memberName', MAX_ID_LEN));
 
-  const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+  const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
   if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
   const codeData = codeSnap.data() as AccessCode;
   if (codeData.status === 'revoked') {
@@ -3243,7 +3266,8 @@ export const getRunFeedbackSummary = loggedCallable('getRunFeedbackSummary', asy
   // own ownerUid is the authority for the gate.
   let resolved: { ownerUid: string; gameId: string; runId: string };
   if (code?.trim()) {
-    const codeSnap = await db.doc(`accessCodes/${code.trim().toUpperCase()}`).get();
+    const normalizedCode = validate(() => normalizeAccessCode(code));
+    const codeSnap = await db.doc(`accessCodes/${normalizedCode}`).get();
     if (!codeSnap.exists) throw new functions.https.HttpsError('not-found', 'Invalid access code');
     const c = codeSnap.data() as AccessCode;
     resolved = { ownerUid: c.ownerUid, gameId: c.gameId, runId: c.runId };

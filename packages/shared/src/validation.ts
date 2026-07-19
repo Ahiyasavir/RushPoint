@@ -120,6 +120,35 @@ export function requireString(value: unknown, field: string, max: number = MAX_I
   return trimmed;
 }
 
+// ─── Access code normalization (Wave 1, Fix 1) ───────────────────────────────
+// Join/board/recap/device codes come straight from client payloads and are
+// interpolated into a Firestore doc path (accessCodes/{CODE}). A non-string code
+// makes `.trim()` a TypeError; a code containing `/` builds an odd-segment path
+// that db.doc() rejects — both re-thrown as opaque INTERNAL/500. Normalize (and
+// reject) BEFORE any doc path is built so every bad code is a typed, bilingual
+// invalid-argument. Codes are alphanumeric only (server-generated codes always are).
+export const ACCESS_CODE_RE = /^[A-Za-z0-9]+$/;
+
+const ACCESS_CODE_MESSAGES = {
+  invalid: (): [string, string] => [
+    'code must be letters and digits only',
+    'הקוד חייב להכיל אותיות וספרות בלבד',
+  ],
+} as const;
+
+/** Validate + canonicalize a client-supplied access code. Rejects non-strings,
+ *  empty/whitespace-only, over-length, and any non-alphanumeric char (incl. `/`,
+ *  spaces, non-ASCII). Returns the trimmed, upper-cased code. */
+export function normalizeAccessCode(code: unknown): string {
+  if (code === undefined || code === null) fail('code', 'required', MESSAGES.required('code'));
+  if (typeof code !== 'string') fail('code', 'type:string', MESSAGES.string('code'));
+  const t = (code as string).trim();
+  if (!t) fail('code', 'nonEmpty', MESSAGES.empty('code'));
+  if (t.length > MAX_CODE_LEN) fail('code', `maxLength:${MAX_CODE_LEN}`, MESSAGES.maxLen('code', MAX_CODE_LEN));
+  if (!ACCESS_CODE_RE.test(t)) fail('code', 'alphanumeric', ACCESS_CODE_MESSAGES.invalid());
+  return t.toUpperCase();
+}
+
 /** Optional string of bounded length. Absent/empty → undefined. */
 export function optionalString(
   value: unknown,

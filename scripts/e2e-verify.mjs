@@ -4674,6 +4674,159 @@ async function main() {
     check('pruneExpiredRunDataNow runs the retention sweep', sweep?.ok === true, JSON.stringify(sweep));
   });
 
+  // ═══ Wave 1 Fix 1: access-code normalization (no opaque 500s) ════════════════
+  // A non-string code makes .trim() a TypeError; a code with `/` builds an odd-
+  // segment path db.doc() rejects — both were re-thrown as INTERNAL. They must now
+  // be a clean invalid-argument BEFORE any accessCodes/ doc path is built.
+  await scenario('access code type/slash guard (invalid-argument, not 500) (Fix 1)', async () => {
+    await expectError('getJoinInfo with a numeric code rejects invalid-argument',
+      player.call('getJoinInfo', { code: 42 }), { codeIn: ['invalid-argument'] });
+    await expectError('getJoinInfo with a slash code rejects invalid-argument',
+      player.call('getJoinInfo', { code: 'A/B' }), { codeIn: ['invalid-argument'] });
+    await expectError('getJoinInfo with an object code rejects invalid-argument',
+      player.call('getJoinInfo', { code: {} }), { codeIn: ['invalid-argument'] });
+  });
+
+  // ═══ Wave 1 Fix 2: pre-start grading is rejected until the host starts ═══════
+  // Stage 0 is 'active' at join while the team is launched:false. Grading any task
+  // before startTeams must be rejected (failed-precondition); after start it works.
+  await scenario('pre-start grading is rejected until host starts (Fix 2)', async () => {
+    const { gameId: gp } = await creator.call('createGame', { title: 'Pre-Start Guard', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gp, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'ps-0', order: 0, isFinal: true, title: 'Only stage', tasks: [
+        { id: 'ps-t', title: 'Anywhere', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: rp, accessCode: cp } = await creator.call('launchRun', { gameId: gp });
+    const pre = makeParty('preStartPlayer');
+    await signInAnonymously(pre.auth);
+    await pre.call('joinRun', { code: cp, displayName: 'Eager Beaver' });
+
+    // No startTeams yet → grading is rejected.
+    await expectError('completeTask before startTeams is rejected',
+      pre.call('completeTask', { taskId: 'ps-t', code: cp, lat: 0, lng: 0 }),
+      { codeIn: ['failed-precondition'] });
+    let preState = await pre.call('getMyTeamState', { code: cp });
+    check('team is not launched before startTeams', preState?.team?.launched !== true, String(preState?.team?.launched));
+
+    // After startTeams the same completion works.
+    await creator.call('startTeams', { gameId: gp, runId: rp });
+    await pre.call('completeTask', { taskId: 'ps-t', code: cp, lat: 0, lng: 0 });
+    preState = await pre.call('getMyTeamState', { code: cp });
+    const psTask = (preState?.team?.stages?.[0]?.tasks ?? []).find((t) => t.taskId === 'ps-t');
+    check('grading after startTeams works', psTask?.status === 'completed', psTask?.status);
+    check('startedAt is set only after start', !!preState?.team?.startedAt, preState?.team?.startedAt);
+  });
+
+  // ═══ Wave 1 Fix 3: post-finalize grading rejected + final board frozen ═══════
+  await scenario('post-finalize grading is rejected and final board is frozen (Fix 3)', async () => {
+    const { gameId: gf } = await creator.call('createGame', { title: 'Finalize Freeze', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gf, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'ff-0', order: 0, isFinal: true, title: 'Two tasks', requiredTaskCount: 1, tasks: [
+        { id: 'ff-a', title: 'Do A', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        { id: 'ff-b', title: 'Do B', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: rf, accessCode: cf } = await creator.call('launchRun', { gameId: gf });
+    const fp = makeParty('finalizePlayer');
+    await signInAnonymously(fp.auth);
+    await fp.call('joinRun', { code: cf, displayName: 'Straggler' });
+    await creator.call('startTeams', { gameId: gf, runId: rf });
+
+    const fin = await creator.call('finalizeRun', { gameId: gf, runId: rf });
+    const publishedRankings = JSON.stringify(fin?.rankings ?? []);
+    check('finalizeRun returns rankings', Array.isArray(fin?.rankings) && fin.rankings.length === 1);
+
+    // A straggler completion on a not-yet-completed task must be rejected.
+    await expectError('completion after finalize is rejected',
+      fp.call('completeTask', { taskId: 'ff-a', code: cf, lat: 0, lng: 0 }),
+      { codeIn: ['failed-precondition'] });
+
+    // The auto-snapshot must not overwrite the published final board: it is frozen.
+    const board = await creator.call('getPublicLeaderboard', { code: cf }).catch(() => null);
+    const reFin = await creator.call('finalizeRun', { gameId: gf, runId: rf }).catch((e) => e);
+    check('published final board rankings are unchanged',
+      JSON.stringify(reFin?.rankings ?? []) === publishedRankings, 'rankings drifted after re-finalize');
+    check('final board is published to participants', Array.isArray(board?.rankings) || board === null);
+  });
+
+  // ═══ Wave 1 Fix 4: submitStationPhoto write-ordering ═════════════════════════
+  await scenario('station photo write-ordering (no moderation bypass / feed flood) (Fix 4)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gs } = await creator.call('createGame', { title: 'Photo Ordering', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gs, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'so-0', order: 0, isFinal: true, title: 'Auto photo', tasks: [
+        { id: 'so-t', title: 'Snap it', type: 'photo', coordinates: { lat: 31.78, lng: 35.21 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'photo_verification', autoApprove: true } },
+      ] }],
+    });
+    const { runId: rs, accessCode: cs } = await creator.call('launchRun', { gameId: gs });
+    const sp = makeParty('stationPhotoPlayer');
+    const spCred = await signInAnonymously(sp.auth);
+    await sp.call('joinRun', { code: cs, displayName: 'Shutterbug' });
+    await creator.call('startTeams', { gameId: gs, runId: rs });
+
+    const ownPhoto = (n) => `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.firebasestorage.app/o/runs%2F${rs}%2Fteams%2F${spCred.user.uid}%2Fphoto-${n}.jpg?alt=media`;
+
+    // Submit the same autoApprove task 3× — only the first completes; the rest are no-ops.
+    const first = await sp.call('submitStationPhoto', { ownerUid: OWNER, gameId: gs, runId: rs, taskId: 'so-t', photoUrl: ownPhoto(1) });
+    check('first autoApprove submission is not a replay', first?.already !== true, JSON.stringify(first));
+    const dup2 = await sp.call('submitStationPhoto', { ownerUid: OWNER, gameId: gs, runId: rs, taskId: 'so-t', photoUrl: ownPhoto(2) });
+    const dup3 = await sp.call('submitStationPhoto', { ownerUid: OWNER, gameId: gs, runId: rs, taskId: 'so-t', photoUrl: ownPhoto(3) });
+    check('duplicate autoApprove submissions are idempotent no-ops',
+      dup2?.already === true && dup3?.already === true, JSON.stringify({ dup2, dup3 }));
+
+    // The stored submission stays approved with the ORIGINAL url (no approved→pending flip).
+    const st = await creator.call('listRunTeams', { gameId: gs, runId: rs });
+    const teamRow = (st?.teams ?? []).find((t) => t.teamId === spCred.user.uid) ?? st?.teams?.[0];
+    const sub = teamRow?.taskSubmissions?.['so-t'];
+    check('re-submit after approval keeps status approved + original url',
+      sub?.status === 'approved' && sub?.photoUrl === ownPhoto(1),
+      JSON.stringify(sub));
+  });
+
+  // ═══ Wave 1 Fix 5: staffSignIn single-use PIN under concurrency ══════════════
+  await scenario('staffSignIn PIN is single-use under concurrency (Fix 5)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gc } = await creator.call('createGame', { title: 'PIN Race', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gc, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'pc-0', order: 0, isFinal: true, title: 'Only stage', tasks: [
+        { id: 'pc-t', title: 'T', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: rc } = await creator.call('launchRun', { gameId: gc });
+    const { pin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: gc, runId: rc, name: 'Solo Marshal', permissions: ['review_photos'],
+    });
+
+    // Fire N concurrent staffSignIn calls from distinct identities with the same PIN.
+    const N = 10;
+    const parties = [];
+    for (let i = 0; i < N; i++) {
+      const pty = makeParty(`pinRacer${i}`);
+      await signInAnonymously(pty.auth);
+      parties.push(pty);
+    }
+    const results = await Promise.allSettled(
+      parties.map((pty) => pty.call('staffSignIn', { ownerUid: OWNER, gameId: gc, runId: rc, pin })),
+    );
+    const successes = results.filter((r) => r.status === 'fulfilled' && r.value?.customToken);
+    check('exactly one staffSignIn succeeds under concurrency', successes.length === 1,
+      `successes=${successes.length}/${N}`);
+    check('the rest are rejected (single-use enforced)',
+      results.filter((r) => r.status === 'rejected').length === N - 1,
+      `rejected=${results.filter((r) => r.status === 'rejected').length}`);
+  });
+
   // ═══ Callable coverage guard ════════════════════════════════════════════════
   // Introspect the callables the emulator actually serves (from the built lib)
   // and require every one to have been INVOKED by the suite above (positively or

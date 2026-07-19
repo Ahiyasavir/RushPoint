@@ -247,13 +247,27 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
 
   const invite = inviteSnap.docs[0].data() as { id: string; name: string; permissions: string[] };
 
-  // Success → reset the failure counter for this caller.
-  await attemptsRef.set({ count: 0, lastFailedAtMs: 0, updatedAt: new Date().toISOString() }, { merge: true });
-  await inviteSnap.docs[0].ref.update({
-    used: true,
-    usedBy: uid,
-    usedAt: new Date().toISOString(),
+  // Single-use consume MUST be atomic: the where('used','==',false) query above is
+  // NON-transactional, so N concurrent callers with the same PIN all read used==false
+  // and — without this — each mints a valid token. Re-read the specific invite ref
+  // inside a transaction and let exactly one caller flip used:true; the losers see
+  // used==true and get the same not-found the query-miss path returns.
+  const inviteRef = inviteSnap.docs[0].ref;
+  await db.runTransaction(async (tx) => {
+    const fresh = await tx.get(inviteRef);
+    const d = fresh.data() as { used?: boolean } | undefined;
+    if (!fresh.exists || d?.used === true) {
+      throw new functions.https.HttpsError('not-found', 'Invalid or already-used PIN');
+    }
+    tx.update(inviteRef, {
+      used: true,
+      usedBy: uid,
+      usedAt: new Date().toISOString(),
+    });
   });
+
+  // Success (transaction winner only) → reset this caller's failure counter.
+  await attemptsRef.set({ count: 0, lastFailedAtMs: 0, updatedAt: new Date().toISOString() }, { merge: true });
 
   let customToken: string;
   try {
@@ -902,6 +916,24 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     }
   });
 
+  // WO Fix 4: gate the taskSubmissions write BEFORE it happens. The record was
+  // previously written unconditionally, ahead of any completion/idempotency/stage
+  // check — which (a) stored an orphan `approved` record for a locked/future stage,
+  // and (b) let a re-submit flip an already-approved submission back to `pending`
+  // (moderation bypass). Guard on the freshly-resolved team state:
+  //  1. stage must be active for this task (rejects locked/future/completed stages);
+  //  2. if the task is already completed, or its submission is already approved,
+  //     return an idempotent no-op WITHOUT writing.
+  assertStageActiveForTask(team, taskId);
+  const priorSubmission = (team as { taskSubmissions?: Record<string, { status?: string }> })
+    .taskSubmissions?.[taskId];
+  const taskAlreadyCompleted = team.stages.some((s) =>
+    s.tasks.some((t) => t.taskId === taskId && t.status === 'completed'),
+  );
+  if (taskAlreadyCompleted || priorSubmission?.status === 'approved') {
+    return { submitted: true, autoApproved: autoApprove, already: true };
+  }
+
   const now = new Date().toISOString();
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
   await teamRef.set(
@@ -939,7 +971,9 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
     // audio-tasks non-goal: audio submissions never enter the photo feed.
-    if (feedEnabled && kind !== 'audio') {
+    // WO Fix 4: gated on `completed` (like the sibling releaseTask) so a duplicate
+    // autoApprove submission — which returns completed:false — cannot flood the feed.
+    if (completed && feedEnabled && kind !== 'audio') {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
@@ -1024,7 +1058,9 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         const submission = teamData?.taskSubmissions?.[taskId];
         const submittedPhotoUrl = submission?.photoUrl;
         // audio-tasks non-goal: audio submissions never enter the photo feed.
-        if (submittedPhotoUrl && submission?.mediaKind !== 'audio') {
+        // WO Fix 4: gated on `completed` — a re-approval of an already-completed
+        // task returns completed:false and must not re-emit a feed item.
+        if (completed && submittedPhotoUrl && submission?.mediaKind !== 'audio') {
           await writeFeedItem(ownerUid, gameId, runId, {
             taskId,
             taskTitle,
