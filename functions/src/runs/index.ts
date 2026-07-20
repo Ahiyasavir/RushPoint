@@ -1056,7 +1056,12 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
       rank: 0,
       teamId: team.id,
       teamName: team.displayName,
-      score: rawScore,
+      // Final backstop: sink any residual non-finite score to 0 at emit. This both
+      // guarantees the leaderboard is JSON-encodable (getMyTeamState/refreshLeaderboard
+      // must not crash) and makes the `b.score - a.score` comparator below a total
+      // order (a NaN score otherwise scrambles TimSort → live/final ordering drift,
+      // since teams are read from an unordered Firestore query).
+      score: Number.isFinite(rawScore) ? rawScore : 0,
       completedStages: team.stages.filter((s) => s.status === 'completed').length,
       finishedAt: team.finishedAt,
       durationSeconds: durFinite,

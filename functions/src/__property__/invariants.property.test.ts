@@ -292,6 +292,78 @@ describe('buildRankings — leaderboard invariants (all presets)', () => {
   });
 });
 
+describe('buildRankings — NaN-poison resistance', () => {
+  const now = new Date(1_700_000_100_000).toISOString();
+
+  // A team whose ONE task record carries a non-finite earnedScore (legacy/hand-
+  // written data, or a scoring bug upstream). parseRunTeam validates the top-level
+  // `score` but never the nested earnedScore, so this class reaches buildRankings.
+  function poisonedTeam(id: string): RunTeam {
+    const start = new Date(1_700_000_000_000).toISOString();
+    return {
+      id, displayName: id, status: 'finished',
+      startedAt: start, finishedAt: new Date(1_700_000_050_000).toISOString(),
+      score: 0, bonusPenalty: 0,
+      stages: [{
+        stageId: 's0', status: 'completed',
+        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: NaN }],
+      }],
+    } as unknown as RunTeam;
+  }
+
+  // A clean, finished team (finite earnedScore).
+  function cleanTeam(id: string, earned: number): RunTeam {
+    const start = new Date(1_700_000_000_000).toISOString();
+    return {
+      id, displayName: id, status: 'finished',
+      startedAt: start, finishedAt: new Date(1_700_000_040_000).toISOString(),
+      score: 0, bonusPenalty: 0,
+      stages: [{
+        stageId: 's0', status: 'completed',
+        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: earned }],
+      }],
+    } as unknown as RunTeam;
+  }
+
+  // A game whose single task omits BOTH expectedDurationMinutes and estimatedMinutes,
+  // exercising the expectedTotal reduce in scoreFixedPointsSpeed.
+  function gameNoDurations(preset: Game['scoringPreset']): Game {
+    return {
+      id: 'g', title: 'G', mode: 'individual', scoringPreset: preset,
+      stages: [{
+        id: 's0', order: 0, title: 'S0',
+        tasks: [{ id: 's0t0', title: 'T', type: 'field', coordinates: { lat: 0, lng: 0 },
+          difficulty: 3, pointValue: 50, maxConcurrentTeams: 3 }],
+      }],
+    } as unknown as Game;
+  }
+
+  test('a poisoned earnedScore never yields a non-finite leaderboard score (all point presets)', () => {
+    for (const preset of ['smart_weighted', 'fixed_points_speed'] as const) {
+      const teams = [poisonedTeam('poison'), cleanTeam('clean-a', 40), cleanTeam('clean-b', 70)];
+      const board = buildRankings(gameFor(preset), teams, now);
+      expect(board.every((r) => Number.isFinite(r.score))).toBe(true);
+      expect(board.map((r) => r.rank)).toEqual([1, 2, 3]);
+      expect(new Set(board.map((r) => r.teamId)).size).toBe(3);
+    }
+  });
+
+  test('a task missing both durations still yields a finite fixed_points_speed score', () => {
+    const board = buildRankings(gameNoDurations('fixed_points_speed'), [cleanTeam('t0', 50)], now);
+    expect(board).toHaveLength(1);
+    expect(Number.isFinite(board[0].score)).toBe(true);
+  });
+
+  test('live/final parity under poison: ranking is independent of (unordered) input order', () => {
+    for (const preset of ['smart_weighted', 'fixed_points_speed'] as const) {
+      const teams = [poisonedTeam('poison'), cleanTeam('a', 40), cleanTeam('b', 70), cleanTeam('c', 55)];
+      const forward = buildRankings(gameFor(preset), teams, now);
+      const reversed = buildRankings(gameFor(preset), teams.slice().reverse(), now);
+      expect(forward).toEqual(reversed);
+    }
+  });
+});
+
 describe('haversineKm — metric invariants', () => {
   test('non-negative, symmetric, and zero for identical points', () => {
     const rng = makeRng(14);

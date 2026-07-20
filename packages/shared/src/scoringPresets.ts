@@ -53,7 +53,11 @@ export function scoreFixedPointsSpeed(
   for (const stageRec of stages) {
     for (const taskRec of stageRec.tasks) {
       if (taskRec.status === 'completed' || taskRec.status === 'skipped') {
-        taskPoints += taskRec.earnedScore ?? 0;
+        // NaN ?? 0 === NaN, so a single poisoned per-task record would NaN the
+        // whole team total (parseRunTeam validates top-level score, not nested
+        // earnedScore). Guard for finiteness, not just null-ish.
+        const e = taskRec.earnedScore;
+        taskPoints += Number.isFinite(e) ? (e as number) : 0;
       }
     }
   }
@@ -62,7 +66,12 @@ export function scoreFixedPointsSpeed(
 
   // Build expected total from the game template's expectedDurationMinutes
   const expectedTotal = game.stages.reduce((sum, stage) =>
-    sum + stage.tasks.reduce((s, t) => s + (t.expectedDurationMinutes ?? t.estimatedMinutes), 0), 0);
+    sum + stage.tasks.reduce((s, t) => {
+      // A task missing BOTH durations yields undefined → NaN → speedBonus returns
+      // NaN (delta <= 0 is false for NaN). Mirror the sumEstimatedMinutes guard.
+      const m = t.expectedDurationMinutes ?? t.estimatedMinutes;
+      return s + (Number.isFinite(m) && m > 0 ? m : 0);
+    }, 0), 0);
   const actualTotal = (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
 
   return taskPoints + speedBonus(expectedTotal, actualTotal);
@@ -104,7 +113,10 @@ export function scoreSmartWeighted(stages: RunStageRecord[]): number {
   for (const stageRec of stages) {
     for (const taskRec of stageRec.tasks) {
       if (taskRec.status === 'completed' || taskRec.status === 'skipped') {
-        total += taskRec.earnedScore ?? 0;
+        // Guard non-finite per-task earnedScore (NaN ?? 0 === NaN) — one poisoned
+        // record must not NaN the whole team total.
+        const e = taskRec.earnedScore;
+        total += Number.isFinite(e) ? (e as number) : 0;
       }
     }
   }
