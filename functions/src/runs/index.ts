@@ -699,7 +699,17 @@ export async function completeTaskForTeam(
     if (stageIdx < 0) return { completed: false, heldSlot: false };
 
     const taskRec = stages[stageIdx].tasks[taskIdx];
-    if (taskRec.status === 'completed') return { completed: false, heldSlot: false }; // idempotent
+    // WO Fix 2: idempotent / already-advanced short-circuit. A partial-stage
+    // auto-skip (applyStageCompletion) can flip a sibling team's still-held task to
+    // 'skipped' AND flip the stage off 'active'. A team then completing its now-
+    // 'skipped' task must be a graceful no-op — NOT fall through to the stage-active
+    // throw below (which would surface failed-precondition and crash the play loop).
+    // Any non-actionable status (currently 'completed' | 'skipped', and any future
+    // terminal like 'expired') folds to the no-op; only 'unassigned'/'assigned' grade.
+    // Kept BEFORE the stage-active throw so a terminal record never reaches it.
+    if (taskRec.status !== 'unassigned' && taskRec.status !== 'assigned') {
+      return { completed: false, heldSlot: false };
+    }
 
     // Station-cap integrity (fix: station-cap-bypass): did THIS team actually hold a
     // reservation for this task? run.taskCounts is incremented ONLY by assignTask for
@@ -896,17 +906,17 @@ export async function completeTaskForTeam(
     return { completed: true, heldSlot };
   }));
 
-  // Keep the live leaderboard snapshot fresh (throttled; best-effort). WO Fix 2:
-  // fire-and-forget — the ~throttled recompute must NOT block the player's
-  // completion response (it dominated completeTask p95). maybeRefreshLeaderboard
-  // re-reads + re-throttles + is last-write-wins idempotent, so dropping the await
-  // is safe; the next scoring event and every organizer refresh recompute it, and
-  // finalizeRun reconciles definitively. Caveat: post-response background work on
-  // Cloud Functions can be terminated before it runs — acceptable here (best-effort).
-  if (result.completed) {
-    void maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId)
-      .catch((e) => functions.logger.warn('leaderboard refresh (best-effort) failed', { runId, error: (e as Error).message }));
-  }
+  // WO Fix 4 (scale/perf): the live-leaderboard recompute is DELIBERATELY not run
+  // from the completion hot path anymore. Even fire-and-forget it paid a runRef.get()
+  // + an O(teams) collection scan + a SECOND transaction on the already-contended run
+  // doc per scoring event — amplifying run-doc lock depth under load (it dominated
+  // completeTask p95 at --teams=16). The board is now recomputed lazily at READ time:
+  // the organizer-facing refreshLeaderboard / console poll and getPublicLeaderboard
+  // both recompute on demand via the shared buildRankings (<100ms), skipStage's
+  // force:true call keeps the low-frequency organizer path warm, and finalizeRun
+  // reconciles definitively. The e2e scenario
+  //   'completeTask does not write the run-doc leaderboard during active play; organizer read recomputes it'
+  // and the existing live/final parity oracle guard this move.
   return result;
 }
 

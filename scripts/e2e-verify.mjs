@@ -3514,6 +3514,57 @@ async function main() {
       JSON.stringify({ live: (live?.rankings ?? []).map((r) => r.teamName), final: (finL?.rankings ?? []).map((r) => r.teamName) }));
   });
 
+  // ═══ Hot-path leaderboard moved to read-time (WO Fix 4) ═════════════════════
+  // completeTask must NOT recompute/write run.leaderboard during active play (it
+  // dominated completeTask p95 under load). The board is recomputed lazily when an
+  // organizer/viewer reads it (refreshLeaderboard / getPublicLeaderboard). Assert
+  // the observable contract: a completion leaves run.leaderboard.updatedAt UNCHANGED,
+  // and an organizer refresh then recomputes it (advancing updatedAt + reflecting the
+  // new score). The live/final parity oracle above is the companion guard that this
+  // move didn't break standings.
+  await scenario('completeTask does not write the run-doc leaderboard during active play; organizer read recomputes it', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: hg } = await creator.call('createGame', { title: 'Hot-Path Board', mode: 'individual' });
+    const mkTask = (id, pts) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: pts, maxConcurrentTeams: 9,
+    });
+    await creator.call('updateGame', {
+      gameId: hg, scoringPreset: 'smart_weighted',
+      stages: [
+        { id: 'hp-1', order: 0, title: 'One', tasks: [mkTask('hp-t1', 30)] },
+        { id: 'hp-2', order: 1, title: 'Two', isFinal: true, tasks: [mkTask('hp-t2', 60)] },
+      ],
+    });
+    const { runId: hr, accessCode: hc } = await creator.call('launchRun', { gameId: hg });
+    const teamA = makeParty('hpA');
+    await signInAnonymously(teamA.auth);
+    await teamA.call('joinRun', { code: hc, displayName: 'A' });
+    const teamB = makeParty('hpB');
+    await signInAnonymously(teamB.auth);
+    await teamB.call('joinRun', { code: hc, displayName: 'B' });
+    await creator.call('startTeams', { gameId: hg, runId: hr });
+
+    const runPath = `users/${OWNER}/games/${hg}/runs/${hr}`;
+    const before = (await creator.getDocAt(runPath)).data?.leaderboard?.updatedAt ?? null;
+
+    // A scoring completion during active play.
+    await teamA.call('completeTask', { taskId: 'hp-t1', code: hc });
+
+    const afterCompletion = (await creator.getDocAt(runPath)).data?.leaderboard?.updatedAt ?? null;
+    check('WO4: completeTask leaves run.leaderboard.updatedAt unchanged (no hot-path write)',
+      afterCompletion === before, `before=${before} after=${afterCompletion}`);
+
+    // An organizer read recomputes on demand.
+    const refreshed = await creator.call('refreshLeaderboard', { gameId: hg, runId: hr, publish: false });
+    const aEntry = (refreshed?.rankings ?? []).find((r) => r.teamName === 'A');
+    check('WO4: organizer refresh recomputes and reflects A\'s new score',
+      (aEntry?.score ?? 0) > 0, JSON.stringify(refreshed?.rankings));
+    const afterRefresh = (await creator.getDocAt(runPath)).data?.leaderboard?.updatedAt ?? null;
+    check('WO4: the organizer refresh advanced run.leaderboard.updatedAt',
+      afterRefresh !== null && afterRefresh !== before, `before=${before} afterRefresh=${afterRefresh}`);
+  });
+
   // ═══ Non-finite leaderboard guard (family-playtest regression) ══════════════
   // A team that JOINED but was never STARTED has no startedAt → durationSeconds
   // returns Infinity, which used to poison run.leaderboard and crash
@@ -3639,6 +3690,78 @@ async function main() {
     check('double-submit: task scored exactly once (team.score == its earnedScore)',
       dstate?.team?.score === drec?.earnedScore && (drec?.earnedScore ?? 0) > 0,
       `score=${dstate?.team?.score} earned=${drec?.earnedScore}`);
+  });
+
+  // ═══ Partial-stage auto-skip of a sibling-held task is a no-op (WO Fix 2) ═════
+  // A partial stage (requiredTaskCount:1) completing auto-skips leftover tasks — a
+  // leftover a SIBLING team still holds gets flipped to 'skipped' AND its stage off
+  // 'active'. That sibling then completing its now-'skipped' task must be a graceful
+  // no-op ({ ok:true, already:true }), NOT a thrown failed-precondition that crashes
+  // the play loop (the --teams=16 Run A crash). The idempotency guard must fold any
+  // non-actionable status (completed|skipped) BEFORE the stage-active throw.
+  await scenario('partial-stage auto-skip of a task a sibling still holds is a no-op, not failed-precondition', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: pg } = await creator.call('createGame', { title: 'Partial Auto-Skip', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: pg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'ps-warm', order: 0, title: 'Warmup', tasks: [
+          { id: 'ps-w', title: 'Warm', type: 'self_report', triggerMode: 'locationless', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        ] },
+        { id: 'ps-race', order: 1, title: 'Two cap-1 stations, pick one', isFinal: true, requiredTaskCount: 1, tasks: [
+          { id: 'ps-a', title: 'Station A', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+          { id: 'ps-b', title: 'Station B', type: 'field', coordinates: { lat: 31.78, lng: 35.21 },
+            difficulty: 2, estimatedMinutes: 5, pointValue: 50, maxConcurrentTeams: 1 },
+        ] },
+      ],
+    });
+    const { runId: pr, accessCode: pc } = await creator.call('launchRun', { gameId: pg });
+    const racers = [];
+    for (let i = 0; i < 3; i++) {
+      const p = makeParty(`psRacer${i}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: pc, displayName: `PS Racer ${i}` });
+      racers.push(p);
+    }
+    await creator.call('startTeams', { gameId: pg, runId: pr });
+    // Complete the warmup so routing advances everyone into the cap-1 stage.
+    await Promise.all(racers.map((p) => p.call('completeTask', { taskId: 'ps-w', code: pc })));
+
+    // Identify the two holders (2 of 3; the third dead-ends stationsFull).
+    const states = await Promise.all(racers.map(async (p, i) => ({
+      p, i, state: await p.call('getMyTeamState', { code: pc }),
+    })));
+    const holders = states
+      .map((s) => ({ p: s.p, held: s.state?.team?.activeTaskId }))
+      .filter((s) => !!s.held);
+    check('WO2: exactly 2 of 3 racers hold a cap-1 station', holders.length === 2,
+      JSON.stringify(states.map((s) => s.state?.team?.activeTaskId)));
+    const [H1, H2] = holders;
+
+    // H1 completes → its requiredTaskCount:1 stage flips 'completed', auto-skipping
+    // H2's still-held leftover task and releasing its slot.
+    await H1.p.call('completeTask', { taskId: H1.held, code: pc });
+
+    // Now the crash driver: H2 completes its (now 'skipped') task. Must be a no-op.
+    let threw = null;
+    let res = null;
+    try {
+      res = await H2.p.call('completeTask', { taskId: H2.held, code: pc });
+    } catch (e) {
+      threw = e;
+    }
+    check('WO2: completing a sibling-auto-skipped task does not throw',
+      threw === null, threw ? String(threw?.message ?? threw) : 'no throw');
+    check('WO2: it returns a graceful idempotent no-op (ok && already)',
+      res?.ok === true && res?.already === true, JSON.stringify(res));
+
+    // Invariant tail: every station counter ≤ cap and the finished run drains to 0.
+    const runDoc = await creator.getDocAt(`users/${OWNER}/games/${pg}/runs/${pr}`);
+    const counts = runDoc.data?.taskCounts ?? {};
+    check('WO2: no station counter exceeds its cap (≤ 1)',
+      (counts['ps-a'] ?? 0) <= 1 && (counts['ps-b'] ?? 0) <= 1, JSON.stringify(counts));
   });
 
   // ═══ Same-team assignment race (fix-station-slot-same-team-race) ═════════════

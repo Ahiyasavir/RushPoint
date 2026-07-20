@@ -228,7 +228,14 @@ export async function withLockRetry<T>(op: () => Promise<T>, attempts = 8): Prom
     } catch (e) {
       const code = (e as { code?: number | string }).code;
       const msg = String((e as Error).message ?? '');
-      const contended = code === 10 || /ABORTED|lock timeout|too much contention/i.test(msg);
+      // Contention surfaces as code-10 ABORTED (lock timeout) AND as the transient
+      // gRPC codes 4 (DEADLINE_EXCEEDED), 13 (INTERNAL), 14 (UNAVAILABLE) under deep
+      // run-doc lock queues — all the same "retry in ms" class. The message arm
+      // catches SDK errors that carry no numeric `.code`. Kept narrow: NOT_FOUND (5)
+      // and other terminal errors still rethrow raw (see the identity guard test).
+      const contended =
+        code === 10 || code === 4 || code === 13 || code === 14 ||
+        /ABORTED|lock timeout|too much contention|deadline|unavailable|internal/i.test(msg);
       if (!contended) throw e;
       lastErr = e;
       // Jittered backoff with a wider ceiling: at ~20+ synchronized teams the
