@@ -1042,7 +1042,18 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
         rawScore = 0;
         break;
       case 'fixed_points_speed':
-        rawScore = scoreFixedPointsSpeed(team.stages, team.startedAt, team.finishedAt ?? now, game);
+        // Gate the speed bonus on REAL completion. Passing `team.finishedAt ?? now`
+        // scored an unfinished (started, no finishedAt) team as if it had finished at
+        // `now`, so its speed bonus decayed as wall-clock advanced — a phantom score
+        // that shrank between refreshes and broke live/final parity. Only a genuinely
+        // finished team feeds a finishedAt into the bonus math; otherwise
+        // scoreFixedPointsSpeed short-circuits to taskPoints (time-invariant).
+        rawScore = scoreFixedPointsSpeed(
+          team.stages,
+          team.startedAt,
+          team.status === 'finished' ? team.finishedAt : undefined,
+          game,
+        );
         break;
       case 'smart_weighted':
         rawScore = scoreSmartWeighted(team.stages);

@@ -99,6 +99,50 @@ describe('buildRankings — Z-cohort excludes non-finite durations', () => {
   });
 });
 
+// CHANGE B (fixed-points-speed-bonus-gate): the fixed_points_speed arm of
+// buildRankings passed `team.finishedAt ?? now`, so a team that STARTED but never
+// FINISHED was scored as if it finished at `now` — its speed bonus decayed as
+// wall-clock advanced, making live/final standings drift (phantom score decay).
+// The bonus must be gated on real completion: an unfinished team's score is a pure
+// function of stored state (taskPoints only), invariant across `now`.
+const startedNotFinished = (id: string, earned: number): RunTeam => ({
+  id, displayName: id, status: 'active',
+  startedAt: new Date(1_700_000_000_000).toISOString(),
+  finishedAt: undefined,
+  score: 0, bonusPenalty: 0,
+  stages: [{ stageId: 's0', status: 'active', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: earned }] }],
+} as unknown as RunTeam);
+
+describe('buildRankings — fixed_points_speed bonus gated on completion', () => {
+  const now1 = new Date(1_700_000_000_600_000).toISOString(); // +10 min from start
+  const now2 = new Date(1_700_000_002_400_000).toISOString(); // +40 min from start
+
+  test('an unfinished (started, no finishedAt) team gets NO speed bonus — score is time-invariant across two now values', () => {
+    const teamAt1 = buildRankings(game('fixed_points_speed'), [startedNotFinished('a', 100)], now1);
+    const teamAt2 = buildRankings(game('fixed_points_speed'), [startedNotFinished('a', 100)], now2);
+    // taskPoints only (stage not completed → no completion bonus, no penalty).
+    expect(teamAt1[0].score).toBe(100);
+    // Identical regardless of how much wall-clock elapsed → no speed-bonus decay.
+    expect(teamAt2[0].score).toBe(teamAt1[0].score);
+  });
+
+  test('a finished team still earns its speed bonus', () => {
+    // game() task has expectedDurationMinutes 5. A team that finishes the whole run
+    // in 1 min (well under the 5-min expected total) earns a speed bonus.
+    const fast: RunTeam = {
+      id: 'f', displayName: 'f', status: 'finished',
+      startedAt: new Date(1_700_000_000_000).toISOString(),
+      finishedAt: new Date(1_700_000_060_000).toISOString(), // +1 min from start
+      score: 0, bonusPenalty: 0,
+      stages: [{ stageId: 's0', status: 'completed', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: 50 }] }],
+    } as unknown as RunTeam;
+    const board = buildRankings(game('fixed_points_speed'), [fast], now1);
+    // 50 taskPoints + 500 completion bonus + a positive speed bonus (finished under
+    // expected). The exact bonus is (5-1)*10 = 40. Assert the bonus is present.
+    expect(board[0].score).toBe(50 + 500 + 40);
+  });
+});
+
 // WO Fix 3: the time_only sort branch had no terminal teamId tie-break, so two
 // teams that tie on both duration and completedStages kept their (unordered
 // Firestore) input order — the live/public board could churn between refreshes.
