@@ -1149,7 +1149,10 @@ export async function maybeRefreshLeaderboardSnapshot(
     const game = gameSnap.data() as Game;
 
     const teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
-    const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+    // Quarantine any single poisoned/legacy team doc instead of counting it raw
+    // — finalizeRun (:1348) and refreshLeaderboard (:1504) both do this, so the
+    // live auto-refresh must too or live vs final standings diverge on a bad row.
+    const teams = parseTeamsQuarantining(teamsSnap.docs);
 
     const now = new Date().toISOString();
     const rankings = buildRankings(game, teams, now);

@@ -10,6 +10,7 @@
 //   Ω            = skill-difficulty match
 
 import { FieldValue } from 'firebase-admin/firestore';
+import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import {
   haversineKm, isValidCoord, isReleased, isExpired, isUnlocked,
@@ -236,7 +237,17 @@ export async function withLockRetry<T>(op: () => Promise<T>, attempts = 8): Prom
       await new Promise((r) => setTimeout(r, 75 * (i + 1) + Math.random() * 300));
     }
   }
-  throw lastErr;
+  // Retry budget exhausted while the run-doc lock stayed contended. Surface a
+  // RETRIABLE HttpsError (wire code `functions/unavailable`) instead of letting
+  // the raw code-10 ABORTED escape as an opaque INTERNAL — the latter reads to
+  // players as a hard crash and trips scripts/simulate-run.mjs' crash-violation
+  // detector, whereas `unavailable` is what the e2e call() retry treats as
+  // transient. Keep `lastErr` as the cause for server logs.
+  throw new functions.https.HttpsError(
+    'unavailable',
+    'The game is busy right now — please retry',
+    { retriable: true, cause: String((lastErr as Error)?.message ?? lastErr) },
+  );
 }
 
 // ─── "Why nothing was assigned" classification ───────────────────────────────
