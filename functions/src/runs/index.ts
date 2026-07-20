@@ -1066,7 +1066,15 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     // so an absent field here would otherwise yield NaN in run.leaderboard.
     rawScore = applyPenalties(rawScore, team.bonusPenalty ?? 0);
 
-    const durSec = durationSeconds(team.startedAt, team.finishedAt ?? now);
+    // Gate the emitted duration on REAL completion, exactly as the fixed_points_speed
+    // score above does. Passing `team.finishedAt ?? now` made an unfinished (started,
+    // no finishedAt) team's durationSeconds/totalMinutes track wall-clock `now`, so
+    // they drifted every recompute — breaking live/final parity AND finalize
+    // idempotency (a re-finalize rewrote the frozen final board's durations against a
+    // later `now`). Only a genuinely finished team feeds a finishedAt into the
+    // duration; otherwise durationSeconds() returns Infinity → the field is omitted
+    // below, keeping an unfinished team's entry a pure function of stored state.
+    const durSec = durationSeconds(team.startedAt, team.status === 'finished' ? team.finishedAt : undefined);
     // A joined-but-not-started team has no startedAt → durationSeconds returns
     // Infinity. Never let a non-finite duration reach the (serialized) leaderboard
     // — it would crash getMyTeamState/refreshLeaderboard at JSON-encode. Both sort
@@ -2815,8 +2823,20 @@ function teamStageStatusForTask(team: RunTeam, taskId: string): string | undefin
 
 const STAGE_NOT_ACTIVE_MSG = 'This stage is not active yet — finish your current stage first';
 
+// WO-2 oracle guard: reject a submission whose stage the team has NOT YET reached
+// (a locked / future / scheduled-gated stage) — that is the only oracle a probe
+// could exploit (a wrong vs a correct answer on a locked stage now throw the
+// identical error). A stage the team is ON ('active') OR has already CLEARED
+// ('completed') is NOT a future-stage oracle: submitting there is legitimate —
+// e.g. an auto-skipped sibling in a requiredTaskCount partial stage, or an
+// idempotent duplicate on a stage that just completed. Those fall through to
+// completeTaskForTeam, whose own idempotency guard folds a terminal task record to
+// a graceful no-op. Gating strictly on 'active' (the pre-fix behavior) instead
+// rejected those legitimate completed-stage submissions with a spurious
+// failed-precondition, aborting the play loop.
 export function assertStageActiveForTask(team: RunTeam, taskId: string): void {
-  if (teamStageStatusForTask(team, taskId) !== 'active') {
+  const status = teamStageStatusForTask(team, taskId);
+  if (status !== 'active' && status !== 'completed') {
     throw new functions.https.HttpsError('failed-precondition', STAGE_NOT_ACTIVE_MSG);
   }
 }

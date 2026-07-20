@@ -657,26 +657,23 @@ async function main() {
   check('code task scored > 0', (state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore ?? 0) > 0,
     String(state?.team?.stages?.[0]?.tasks?.[0]?.earnedScore));
 
-  // ── 8a. Leaderboard auto-refresh (change: live-leaderboard-auto-refresh) ────
-  // The first scoring completion must refresh run.leaderboard server-side — at
-  // this point NO refreshLeaderboard call has ever been made for this run, so a
-  // stale/missing snapshot here means the auto-refresh didn't fire.
-  // WO Fix 2: completeTaskForTeam now fires the refresh WITHOUT awaiting it (so the
-  // player's completion isn't blocked by the recompute), so the snapshot can land a
-  // moment after the completion call returns. Poll briefly instead of reading once
-  // — this documents the new best-effort timing contract and keeps 8a from flaking.
+  // ── 8a. Completion hot path does NOT write run.leaderboard (scale WO Fix 4) ──
+  // The completion hot path (completeTaskForTeam) deliberately no longer recomputes
+  // run.leaderboard: even fire-and-forget it paid a run-doc get + an O(teams) scan +
+  // a 2nd txn on the already-contended run doc per scoring event (it dominated
+  // completeTask p95 at --teams=16). The board is now recomputed LAZILY at read time
+  // — refreshLeaderboard / the organizer console poll / getPublicLeaderboard — and
+  // finalizeRun reconciles definitively. So right after this first scoring completion
+  // (verifyStationCode), with NO refresh yet made, the run doc must carry no
+  // auto-written standings for the team. The dedicated scenario
+  // 'completeTask does not write the run-doc leaderboard during active play; organizer
+  // read recomputes it' asserts the full before/after contract; here we just confirm
+  // the hot path stayed silent (the organizer-refresh recompute is exercised in 8b).
   const runDocPath = `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}`;
-  let lbAuto, lbAutoEntry;
-  for (let i = 0; i < 20; i++) {
-    lbAuto = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
-    lbAutoEntry = lbAuto?.rankings?.find((r) => r.teamId === playerCred.user.uid);
-    if ((lbAutoEntry?.score ?? 0) > 0) break;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  check('leaderboard auto-refreshes after a task completion (no manual refresh)',
-    (lbAutoEntry?.score ?? 0) > 0, JSON.stringify(lbAuto ?? null));
-  check('auto-refreshed leaderboard stays unpublished',
-    (lbAuto?.published ?? false) === false, String(lbAuto?.published));
+  const lbAuto = (await adminSdk.firestore().doc(runDocPath).get()).data()?.leaderboard;
+  const lbAutoEntry = lbAuto?.rankings?.find((r) => r.teamId === playerCred.user.uid);
+  check('completion hot path does NOT auto-write run.leaderboard (recompute is lazy at read)',
+    (lbAutoEntry?.score ?? 0) === 0, JSON.stringify(lbAuto ?? null));
 
   // ── 8b. Live leaderboard mid-run (refreshLeaderboard) ───────────────────────
   const lbCtx = { ownerUid: creatorCred.user.uid, gameId, runId };
@@ -3740,19 +3737,33 @@ async function main() {
       JSON.stringify(states.map((s) => s.state?.team?.activeTaskId)));
     const [H1, H2] = holders;
 
-    // H1 completes → its requiredTaskCount:1 stage flips 'completed', auto-skipping
-    // H2's still-held leftover task and releasing its slot.
-    await H1.p.call('completeTask', { taskId: H1.held, code: pc });
+    // H1 completes its own held station → its requiredTaskCount:1 (isFinal) stage
+    // flips 'completed', auto-skipping H1's OTHER same-stage task and releasing its
+    // slot. ps-a/ps-b are LOCATED `field` stations (real coords, radius trigger), so —
+    // like a real client at the station — the check-in must carry GPS or the server's
+    // anti-spoof gate rejects it with "Location required to check in here". Both
+    // stations sit at 31.78/35.21. (Auto-skip is per-team: H1 finishing does NOT skip
+    // H2's separately-held station, so H2 below completes its own task for real.)
+    await H1.p.call('completeTask', { taskId: H1.held, code: pc, lat: 31.78, lng: 35.21 });
 
-    // Now the crash driver: H2 completes its (now 'skipped') task. Must be a no-op.
+    // H2 completes its OWN still-held station — a genuine first completion, which
+    // likewise flips H2's partial stage 'completed' and auto-skips H2's leftover.
+    const h2First = await H2.p.call('completeTask', { taskId: H2.held, code: pc, lat: 31.78, lng: 35.21 });
+    check('WO2: H2 completes its own held station without a failed-precondition crash',
+      h2First?.ok === true, JSON.stringify(h2First));
+
+    // The crash driver: a DUPLICATE completion of H2's now-terminal ('completed')
+    // task, in a stage that has flipped off 'active'. The WO Fix 2 idempotency guard
+    // must fold this to a graceful no-op — NOT the stage-active failed-precondition
+    // throw that crashed the play loop (the --teams=16 Run A crash).
     let threw = null;
     let res = null;
     try {
-      res = await H2.p.call('completeTask', { taskId: H2.held, code: pc });
+      res = await H2.p.call('completeTask', { taskId: H2.held, code: pc, lat: 31.78, lng: 35.21 });
     } catch (e) {
       threw = e;
     }
-    check('WO2: completing a sibling-auto-skipped task does not throw',
+    check('WO2: a duplicate completion of a now-terminal task does not throw',
       threw === null, threw ? String(threw?.message ?? threw) : 'no throw');
     check('WO2: it returns a graceful idempotent no-op (ok && already)',
       res?.ok === true && res?.already === true, JSON.stringify(res));
@@ -3843,25 +3854,37 @@ async function main() {
     const CA = { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21 };
     const CB = { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21 };
 
-    // A takes st-a (nearest, cap 1); B is pushed to st-b (st-a is full).
+    // startTeams already auto-assigned each team its first task (from a fixed seed
+    // location, in unordered team-query order); requestNextTask just returns that
+    // in-flight task. Both cap-1 stations are >2.5 km from the seed, so their transit
+    // norms tie and the sequential assignment loop hands st-a to whichever team it
+    // processes FIRST — a Firestore doc-order coin-flip. So don't assume which named
+    // team holds which station; identify the two holders. The invariant under test is
+    // "a completion by a team that does NOT hold st-a cannot drain st-a's reserved
+    // slot", which is independent of that ordering.
     const aAsg = await teamA.call('requestNextTask', CA);
     const bAsg = await teamB.call('requestNextTask', CB);
-    check('cap: A holds st-a', aAsg?.taskId === 'st-a', JSON.stringify(aAsg));
-    check('cap: B pushed to st-b (st-a full)', bAsg?.taskId === 'st-b', JSON.stringify(bAsg));
+    check('cap: the two teams hold the two distinct cap-1 stations',
+      new Set([aAsg?.taskId, bAsg?.taskId]).size === 2 &&
+        [aAsg?.taskId, bAsg?.taskId].every((t) => t === 'st-a' || t === 'st-b'),
+      JSON.stringify({ aAsg, bAsg }));
+    // The attacker holds st-b; its target is st-a (reserved by the OTHER team).
+    const attacker = aAsg?.taskId === 'st-a' ? teamB : teamA;
+    const holderOfStA = aAsg?.taskId === 'st-a' ? teamA : teamB;
 
     const runPath = `users/${OWNER}/games/${bg}/runs/${br}`;
     let counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
     check('cap: both slots reserved before the attack', (counts['st-a'] ?? 0) === 1 && (counts['st-b'] ?? 0) === 1, JSON.stringify(counts));
 
-    // ATTACK: B hand-crafts a completeTask on st-a, which it never checked out.
-    await teamB.call('completeTask', { ...CB, taskId: 'st-a' });
+    // ATTACK: the st-b holder hand-crafts a completeTask on st-a, which it never checked out.
+    await attacker.call('completeTask', { ownerUid: OWNER, gameId: bg, runId: br, code: bc, lat: 31.78, lng: 35.21, taskId: 'st-a' });
 
     counts = (await creator.getDocAt(runPath)).data?.taskCounts ?? {};
     check("cap: attacker cannot drain the holder's slot (taskCounts st-a still 1)",
       (counts['st-a'] ?? 0) === 1, JSON.stringify(counts));
 
-    const aState = await teamA.call('getMyTeamState', { code: bc });
-    check('cap: holder A still holds st-a', aState?.team?.activeTaskId === 'st-a', JSON.stringify(aState?.team?.activeTaskId));
+    const holderState = await holderOfStA.call('getMyTeamState', { code: bc });
+    check('cap: the st-a holder still holds st-a', holderState?.team?.activeTaskId === 'st-a', JSON.stringify(holderState?.team?.activeTaskId));
 
     // Invariant: a third team must NOT be assignable into the still-held st-a.
     const teamC = makeParty('capThirdC');
@@ -4858,11 +4881,11 @@ async function main() {
   // be a clean invalid-argument BEFORE any accessCodes/ doc path is built.
   await scenario('access code type/slash guard (invalid-argument, not 500) (Fix 1)', async () => {
     await expectError('getJoinInfo with a numeric code rejects invalid-argument',
-      player.call('getJoinInfo', { code: 42 }), { codeIn: ['invalid-argument'] });
+      player.call('getJoinInfo', { code: 42 }), { codeIn: ['functions/invalid-argument'] });
     await expectError('getJoinInfo with a slash code rejects invalid-argument',
-      player.call('getJoinInfo', { code: 'A/B' }), { codeIn: ['invalid-argument'] });
+      player.call('getJoinInfo', { code: 'A/B' }), { codeIn: ['functions/invalid-argument'] });
     await expectError('getJoinInfo with an object code rejects invalid-argument',
-      player.call('getJoinInfo', { code: {} }), { codeIn: ['invalid-argument'] });
+      player.call('getJoinInfo', { code: {} }), { codeIn: ['functions/invalid-argument'] });
   });
 
   // ═══ Wave 1 Fix 2: pre-start grading is rejected until the host starts ═══════
@@ -4885,7 +4908,7 @@ async function main() {
     // No startTeams yet → grading is rejected.
     await expectError('completeTask before startTeams is rejected',
       pre.call('completeTask', { taskId: 'ps-t', code: cp, lat: 0, lng: 0 }),
-      { codeIn: ['failed-precondition'] });
+      { codeIn: ['functions/failed-precondition'] });
     let preState = await pre.call('getMyTeamState', { code: cp });
     check('team is not launched before startTeams', preState?.team?.launched !== true, String(preState?.team?.launched));
 
@@ -4923,7 +4946,7 @@ async function main() {
     // A straggler completion on a not-yet-completed task must be rejected.
     await expectError('completion after finalize is rejected',
       fp.call('completeTask', { taskId: 'ff-a', code: cf, lat: 0, lng: 0 }),
-      { codeIn: ['failed-precondition'] });
+      { codeIn: ['functions/failed-precondition'] });
 
     // The auto-snapshot must not overwrite the published final board: it is frozen.
     const board = await creator.call('getPublicLeaderboard', { code: cf }).catch(() => null);
@@ -4961,10 +4984,12 @@ async function main() {
     check('duplicate autoApprove submissions are idempotent no-ops',
       dup2?.already === true && dup3?.already === true, JSON.stringify({ dup2, dup3 }));
 
-    // The stored submission stays approved with the ORIGINAL url (no approved→pending flip).
-    const st = await creator.call('listRunTeams', { gameId: gs, runId: rs });
-    const teamRow = (st?.teams ?? []).find((t) => t.teamId === spCred.user.uid) ?? st?.teams?.[0];
-    const sub = teamRow?.taskSubmissions?.['so-t'];
+    // The stored submission stays approved with the ORIGINAL url (no approved→pending
+    // flip). taskSubmissions live on the team doc — read via the player's own
+    // getMyTeamState (listRunTeams intentionally exposes only pendingReviews, not the
+    // full submission records).
+    const spState = await sp.call('getMyTeamState', { code: cs });
+    const sub = spState?.team?.taskSubmissions?.['so-t'];
     check('re-submit after approval keeps status approved + original url',
       sub?.status === 'approved' && sub?.photoUrl === ownPhoto(1),
       JSON.stringify(sub));
