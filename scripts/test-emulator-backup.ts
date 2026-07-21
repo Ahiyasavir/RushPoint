@@ -9,6 +9,7 @@ import {
   canAttemptExport,
   snapshotTimeMs,
   selectFreshestImport,
+  didExportSucceed,
 } from './lib/emulatorBackup.mjs';
 
 let passed = 0;
@@ -77,6 +78,14 @@ ok(selectFreshestImport({ primaryMs: null, backupMs: 2000 }) === 'backup', 'no p
 ok(selectFreshestImport({ primaryMs: 2000, backupMs: null }) === 'primary', 'no backup → primary');
 ok(selectFreshestImport({ primaryMs: NaN, backupMs: NaN }) === null, 'neither present → null (start fresh)');
 ok(selectFreshestImport({ primaryMs: null, backupMs: null }) === null, 'both null → null');
+
+// ── didExportSucceed (mtime-based, ignores the flaky Windows exit code) ──────
+ok(didExportSucceed({ beforeMtimeMs: null, afterExists: true, afterMtimeMs: 1000 }) === true, 'no prior metadata, now exists → success (first export ever)');
+ok(didExportSucceed({ beforeMtimeMs: null, afterExists: false, afterMtimeMs: undefined }) === false, 'no prior metadata, still absent → failure');
+ok(didExportSucceed({ beforeMtimeMs: 1000, afterExists: true, afterMtimeMs: 2000 }) === true, 'mtime advanced → success (this is the exit-code-134 case)');
+ok(didExportSucceed({ beforeMtimeMs: 1000, afterExists: true, afterMtimeMs: 1000 }) === false, 'mtime unchanged → failure (stale leftover, no real write)');
+ok(didExportSucceed({ beforeMtimeMs: 2000, afterExists: true, afterMtimeMs: 1000 }) === false, 'mtime went backwards (clock skew) → treated as failure, not success');
+ok(didExportSucceed({ beforeMtimeMs: 1000, afterExists: false, afterMtimeMs: undefined }) === false, 'metadata vanished after attempt → failure');
 
 console.log(failed === 0
   ? `\n✅ ALL EMULATOR-BACKUP TESTS PASSED (${passed})`

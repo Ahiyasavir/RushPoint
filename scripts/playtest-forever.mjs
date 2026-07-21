@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canFastForwardApply } from './lib/gitUpdateGuard.mjs';
+import { didExportSucceed } from './lib/emulatorBackup.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = path.join(ROOT, '.firebase');
@@ -192,18 +193,29 @@ function freePorts() {
 // the TRUE latest state; dev-emulator.mjs then imports this primary dir on relaunch
 // (it's preferred over any backup). Best-effort: on failure the periodic backup loop
 // still covers us, so we log and proceed with the teardown rather than block it.
+//
+// Success is judged by the metadata file's mtime, NOT spawnSync's exit status — on
+// Windows `firebase emulators:export` hits a libuv assertion during its own shutdown
+// (`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`, src/win/async.c) and
+// returns a garbage non-zero status EVEN WHEN THE EXPORT GENUINELY SUCCEEDED. Trusting
+// r.status made this log "failed" on every single call. See didExportSucceed's doc
+// comment (scripts/lib/emulatorBackup.mjs) for the full mechanism.
 function exportPrimaryNow() {
   const dest = path.join(STATE_DIR, 'emulator-data');
   // Only meaningful while the suite is up (the source of the live data). If the stack
   // is already gone, the Hub is down and export would just fail — skip quietly.
   if (!child) { log('export skipped: stack not running (nothing live to snapshot).'); return false; }
   log('exporting live emulator → primary data dir before teardown…');
+  const metaPath = path.join(dest, 'firebase-export-metadata.json');
+  const beforeMtimeMs = fs.existsSync(metaPath) ? fs.statSync(metaPath).mtimeMs : null;
   const r = spawnSync('npx', ['firebase', 'emulators:export', dest, '--force', '--project', 'rushpoint-pwa-7daaa'], {
     cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32', timeout: 90_000,
   });
-  const ok = r.status === 0;
+  const afterExists = fs.existsSync(metaPath);
+  const afterMtimeMs = afterExists ? fs.statSync(metaPath).mtimeMs : undefined;
+  const ok = didExportSucceed({ beforeMtimeMs, afterExists, afterMtimeMs });
   log(ok
-    ? 'primary export ok — next boot imports the latest state (0 data loss).'
+    ? `primary export ok (child exit status=${r.status ?? '?'}, ignored — see comment above) — next boot imports the latest state (0 data loss).`
     : `primary export failed (status=${r.status ?? '?'}${r.error ? `, ${r.error.message}` : ''}) — periodic backup (≤${Math.round((Number(process.env.EMU_BACKUP_INTERVAL_MS || 120000)) / 1000)}s old) still covers us.`);
   return ok;
 }

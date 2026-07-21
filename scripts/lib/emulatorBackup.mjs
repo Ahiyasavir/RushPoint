@@ -99,3 +99,22 @@ export function selectFreshestImport({ primaryMs, backupMs }) {
   if (b == null) return 'primary';
   return p >= b ? 'primary' : 'backup';
 }
+
+/**
+ * Whether an `emulators:export` attempt actually wrote a fresh snapshot — decided by
+ * the metadata file's mtime, NOT the child process's exit code. On Windows,
+ * `firebase emulators:export` hits a libuv assertion during shutdown
+ * (`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`, src/win/async.c) and
+ * exits with a garbage non-zero status EVEN WHEN THE EXPORT GENUINELY SUCCEEDED (the
+ * file is written and valid before the crash-on-exit happens). Trusting the exit
+ * code makes every export look like a failure. The metadata file's mtime is ground
+ * truth: if it didn't exist before and exists now, or its mtime moved forward, the
+ * export wrote real data — the exit code is irrelevant noise.
+ *   beforeMtimeMs: mtime of the metadata file before the attempt, or null if absent.
+ *   afterExists / afterMtimeMs: metadata file state read AFTER the attempt.
+ */
+export function didExportSucceed({ beforeMtimeMs, afterExists, afterMtimeMs }) {
+  if (!afterExists) return false;
+  if (beforeMtimeMs == null) return true;               // didn't exist before, does now
+  return typeof afterMtimeMs === 'number' && afterMtimeMs > beforeMtimeMs;
+}

@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   isSnapshotDue, snapshotName, selectSnapshotsToPrune, selectRestoreTarget,
-  isEmulatorReady, canAttemptExport,
+  isEmulatorReady, canAttemptExport, didExportSucceed,
 } from './lib/emulatorBackup.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,14 +50,27 @@ function printLatest() {
   }
 }
 
+// Success is judged by the metadata file's mtime, NOT the child's exit code — on
+// Windows `firebase emulators:export` hits a libuv assertion during its OWN shutdown
+// (unrelated to whether the export itself worked) and returns a garbage non-zero
+// status even after genuinely writing a valid snapshot. Trusting the exit code made
+// every single periodic backup log as "failed" while silently still writing good
+// data — see didExportSucceed's doc comment for the full mechanism.
 function exportSnapshot(name) {
   return new Promise((resolve) => {
     const dest = path.join(BACKUP_DIR, name);
+    const metaPath = path.join(dest, 'firebase-export-metadata.json');
+    const beforeMtimeMs = fs.existsSync(metaPath) ? fs.statSync(metaPath).mtimeMs : null;
     const proc = spawn('npx', ['firebase', 'emulators:export', dest, '--force', '--project', PROJECT], {
       cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32',
     });
-    proc.on('exit', (code) => resolve(code === 0));
-    proc.on('error', () => resolve(false));
+    const finish = () => {
+      const afterExists = fs.existsSync(metaPath);
+      const afterMtimeMs = afterExists ? fs.statSync(metaPath).mtimeMs : undefined;
+      resolve(didExportSucceed({ beforeMtimeMs, afterExists, afterMtimeMs }));
+    };
+    proc.on('exit', finish);
+    proc.on('error', finish);
   });
 }
 
