@@ -808,10 +808,29 @@ async function main() {
   }
   check('submitStationPhoto rejects an external (non-Storage) photo URL', externalPhotoRejected);
 
+  // [wave-c] The REAL client never produces a production download URL locally: against
+  // the Storage emulator (and behind the playtest tunnel proxy) getDownloadURL() returns
+  // an emulator-hosted /v0/b/<bucket>/o/<encoded> URL. That shape used to be rejected, so
+  // no photo upload had ever succeeded in any local/playtest run. Round-trip the real
+  // shape here so a regression fails the suite. The run/team prefix stays enforced.
+  const EMULATOR_PHOTO_URL = (path) =>
+    `http://127.0.0.1:9199/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token`;
+  let emuOtherTeamRejected = false;
+  try {
+    await player.call('submitStationPhoto', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
+      photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/SOMEONE_ELSE/selfie.jpg`),
+    });
+  } catch (e) {
+    emuOtherTeamRejected = e.code === 'functions/invalid-argument';
+  }
+  check('submitStationPhoto still rejects ANOTHER team folder on an emulator URL', emuOtherTeamRejected);
+
   const photoSubmit = await player.call('submitStationPhoto', {
     ownerUid: creatorCred.user.uid, gameId, runId,
     teamId: playerCred.user.uid, taskId: PHOTO_TASK_ID,
-    photoUrl: STORAGE_PHOTO_URL,
+    photoUrl: EMULATOR_PHOTO_URL(`runs/${runId}/teams/${playerCred.user.uid}/selfie.jpg`),
   });
   check('submitStationPhoto accepts a photo (pending, not auto-approved)',
     photoSubmit?.submitted === true && photoSubmit?.autoApproved === false, JSON.stringify(photoSubmit));

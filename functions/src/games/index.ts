@@ -58,7 +58,13 @@ function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined 
     ...stage,
     tasks: (stage.tasks ?? []).map((task) => {
       if (task.media === undefined) return task;
-      const media = normalizeTaskMedia(task.media) as TaskMedia[];
+      // wave-c: same emulator-origin defect as submitStationPhoto — locally a
+      // creator-uploaded image/video gets an emulator-hosted download URL, which the
+      // production-origin gate silently DROPPED on every save. FUNCTIONS_EMULATOR is
+      // absent in deployed functions, so production behaviour is unchanged.
+      const media = normalizeTaskMedia(task.media, {
+        allowLocalEmulator: process.env.FUNCTIONS_EMULATOR === 'true',
+      }) as TaskMedia[];
       // Drop the field entirely when it normalizes to empty (avoid persisting []).
       if (media.length === 0) {
         const { media: _omit, ...rest } = task;

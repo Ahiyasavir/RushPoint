@@ -148,6 +148,8 @@ const UPLOAD_ATTEMPTS = 3;
 const UPLOAD_STALL_MS = 45_000;
 /** Absolute cap for a single attempt, however slowly it is progressing. */
 const UPLOAD_MAX_MS = 180_000;
+/** Cap on the post-upload getDownloadURL metadata fetch (the old un-timed leg). */
+const DOWNLOAD_URL_MS = 30_000;
 
 async function uploadResilient(
   path: string,
@@ -193,7 +195,12 @@ async function uploadResilient(
         });
         await withTimeout(done, UPLOAD_MAX_MS, 'storage/deadline-exceeded', cancel);
         setUploadProgress(100);
-        return getDownloadURL(r);
+        // The bytes are up; the metadata GET that mints the download URL was the ONE
+        // unbounded leg of the pipeline — over the emulator, and especially through the
+        // playtest tunnel, that request can stall and leave the player on the "working"
+        // spinner forever with no outcome. Bound it with the retryable synthetic code so
+        // runWithRetry re-issues the (idempotent, same-path) upload instead of hanging.
+        return await withTimeout(getDownloadURL(r), DOWNLOAD_URL_MS, 'storage/deadline-exceeded');
       },
       {
         attempts: UPLOAD_ATTEMPTS,

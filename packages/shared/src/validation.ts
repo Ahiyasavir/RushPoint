@@ -236,8 +236,52 @@ export const FIREBASE_STORAGE_ORIGINS = FIREBASE_STORAGE_BUCKETS.map(
 // Back-compat single-origin constant (legacy appspot form).
 export const FIREBASE_STORAGE_ORIGIN = `${FIREBASE_STORAGE_HTTPS_PREFIX}rushpoint-pwa-7daaa.appspot.com/`;
 
-export function isFirebaseStorageUrl(url: unknown): boolean {
-  return typeof url === 'string' && FIREBASE_STORAGE_ORIGINS.some((o) => (url as string).startsWith(o));
+/**
+ * Opt-in relaxation for local/playtest environments. See `extractStorageObjectPath`.
+ * ALWAYS decided by the CALLER (this module is pure — it never reads process.env),
+ * defaults to `false`, so every existing call site keeps production behaviour.
+ */
+export interface StorageOriginOptions {
+  /** Also accept an emulator-hosted / tunnel-proxied Storage URL. */
+  allowLocalEmulator?: boolean;
+}
+
+// The Firebase Storage download REST shape, host-agnostic: <origin>/v0/b/<bucket>/o/<encodedPath>.
+// Used ONLY when the caller opted into `allowLocalEmulator` — the Storage emulator serves
+// http://127.0.0.1:9199/v0/b/…, and behind the playtest tunnel (scripts/proxy.mjs) the same
+// path arrives on the single https tunnel origin. Both are rejected in production mode.
+const EMULATOR_STORAGE_URL_RE = /^https?:\/\/[^/?#]+\/v0\/b\/[^/?#]+\/o\/([^?#]+)/;
+
+/**
+ * The Storage object path a URL points at, or null if the URL is not one we trust.
+ * Production accept-set: our project's Firebase download origins, or `gs://`.
+ * With `allowLocalEmulator`, additionally any origin serving the `/v0/b/<bucket>/o/<path>`
+ * download shape (emulator or tunnel proxy). Never accepts an arbitrary URL in any mode.
+ */
+function extractStorageObjectPath(s: string, opts?: StorageOriginOptions): string | null {
+  const decode = (raw: string): string | null => {
+    try { return decodeURIComponent(raw); } catch { return null; }
+  };
+  if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
+    const m = s.match(/\/o\/([^?]+)/);
+    return m ? decode(m[1]) : null;
+  }
+  if (s.startsWith('gs://')) {
+    const rest = s.slice('gs://'.length);
+    const slash = rest.indexOf('/');
+    return slash >= 0 ? rest.slice(slash + 1) : null;
+  }
+  if (opts?.allowLocalEmulator) {
+    const m = s.match(EMULATOR_STORAGE_URL_RE);
+    return m ? decode(m[1]) : null;
+  }
+  return null;
+}
+
+export function isFirebaseStorageUrl(url: unknown, opts?: StorageOriginOptions): boolean {
+  if (typeof url !== 'string') return false;
+  if (FIREBASE_STORAGE_ORIGINS.some((o) => url.startsWith(o))) return true;
+  return opts?.allowLocalEmulator === true && EMULATOR_STORAGE_URL_RE.test(url);
 }
 
 // ─── Task media: YouTube parsing + upload-URL validation (change: task-media-attachments) ─
@@ -287,11 +331,11 @@ export function youTubeEmbedUrl(id: string): string {
 
 /** True if a single media entry is well-formed and its URL passes its kind's origin
  *  rule (image/video → Firebase Storage URL; youtube → parseable to a valid id). */
-export function isTaskMediaValid(m: unknown): boolean {
+export function isTaskMediaValid(m: unknown, opts?: StorageOriginOptions): boolean {
   if (!m || typeof m !== 'object') return false;
   const { kind, url } = m as { kind?: unknown; url?: unknown };
   if (typeof url !== 'string') return false;
-  if (kind === 'image' || kind === 'video') return isFirebaseStorageUrl(url);
+  if (kind === 'image' || kind === 'video') return isFirebaseStorageUrl(url, opts);
   if (kind === 'youtube') return parseYouTubeId(url) !== null;
   return false;
 }
@@ -303,7 +347,7 @@ export function isTaskMediaValid(m: unknown): boolean {
  * entry given a stable non-empty id (preserved if present, else derived from index).
  * This is the server-side enforcement boundary in createGame/updateGame.
  */
-export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
+export function normalizeTaskMedia(input: unknown, opts?: StorageOriginOptions): TaskMediaLike[] {
   if (!Array.isArray(input)) return [];
   const out: TaskMediaLike[] = [];
   input.forEach((raw, i) => {
@@ -318,7 +362,7 @@ export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
       if (!ytId) return;
       finalUrl = youTubeEmbedUrl(ytId);
     } else if (kind === 'image' || kind === 'video') {
-      if (!isFirebaseStorageUrl(url)) return;
+      if (!isFirebaseStorageUrl(url, opts)) return;
     } else {
       return; // unknown kind
     }
@@ -342,21 +386,22 @@ export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
 // invalid-argument).
 const MAX_URL_LEN = 2048;
 
-export function requireStorageUrl(url: unknown, runId: string, uid: string): string {
+export function requireStorageUrl(
+  url: unknown,
+  runId: string,
+  uid: string,
+  // wave-c: the CALLER decides whether emulator/tunnel-proxied Storage origins are
+  // acceptable (submitStationPhoto passes process.env.FUNCTIONS_EMULATOR === 'true').
+  // Default false ⇒ production accept-set unchanged. The run/team prefix check below
+  // — the actual IDOR guard — applies in EVERY mode.
+  opts?: StorageOriginOptions,
+): string {
   if (typeof url !== 'string') fail('photoUrl', 'type:string', MESSAGES.string('photoUrl'));
   const s = url as string;
   if (s.length === 0) fail('photoUrl', 'nonEmpty', MESSAGES.empty('photoUrl'));
   if (s.length > MAX_URL_LEN) fail('photoUrl', `maxLength:${MAX_URL_LEN}`, MESSAGES.maxLen('photoUrl', MAX_URL_LEN));
 
-  let objectPath: string | null = null;
-  if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
-    const m = s.match(/\/o\/([^?]+)/);
-    if (m) { try { objectPath = decodeURIComponent(m[1]); } catch { objectPath = null; } }
-  } else if (s.startsWith('gs://')) {
-    const rest = s.slice('gs://'.length);
-    const slash = rest.indexOf('/');
-    if (slash >= 0) objectPath = rest.slice(slash + 1);
-  }
+  const objectPath = extractStorageObjectPath(s, opts);
 
   const expected = `runs/${runId}/teams/${uid}/`;
   if (!objectPath || !objectPath.startsWith(expected)) {

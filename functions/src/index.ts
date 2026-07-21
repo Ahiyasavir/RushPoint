@@ -880,7 +880,16 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   }
   // row 41: the photo must live under the caller's OWN run/team Storage folder
   // (not just any bucket URL) — scoped to runId + uid. Throws invalid-argument.
-  validate(() => requireStorageUrl(photoUrl, runId, uid));
+  // wave-c: against the Storage EMULATOR (dev + playtest tunnel) getDownloadURL()
+  // returns an emulator-hosted /v0/b/<bucket>/o/<path> URL, not a production
+  // firebasestorage.googleapis.com one — so this guard rejected EVERY real upload
+  // locally ("the photo upload has never worked"). FUNCTIONS_EMULATOR is set only by
+  // the Functions emulator and is absent in deployed functions, so production keeps
+  // the exact old accept-set. The runs/{runId}/teams/{uid}/ prefix (the IDOR guard)
+  // is enforced in both modes. See docs/wave-c/photo-upload-fix.md.
+  validate(() => requireStorageUrl(photoUrl, runId, uid, {
+    allowLocalEmulator: process.env.FUNCTIONS_EMULATOR === 'true',
+  }));
 
   // Check the task's smart config for autoApprove (staffless events). The same
   // snapshot also yields the task title + the photoFeedEnabled gate for the
