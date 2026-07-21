@@ -425,6 +425,20 @@ export interface Stage {
   // multi-day / timed-drop games. Absent = unlocks as soon as the prior stage ends.
   releaseAt?: string;
   releaseAfterMinutes?: number;
+  // Mutually exclusive task groups (change: mutually-exclusive-tasks). Each entry
+  // names a set of task ids WITHIN this stage of which a team may complete at most
+  // ONE — completing any member locks the rest for that team (they are skipped, not
+  // failed). Lets a creator offer "pick one of these three" alternatives without a
+  // team farming every variant. Scoped to the stage: ids not present in
+  // `tasks` are ignored. A task may appear in at most one group.
+  exclusiveGroups?: ExclusiveTaskGroup[];
+}
+
+// One "choose at most one of these" set inside a Stage (change: mutually-exclusive-tasks).
+export interface ExclusiveTaskGroup {
+  id: string;
+  // Task ids belonging to this stage. A group of fewer than 2 ids is inert.
+  taskIds: string[];
 }
 
 
@@ -493,6 +507,14 @@ export interface Game {
   // Optional: absent games render no primer. Not secret — echoed to participants
   // and, when public, denormalized into publicGames. Cosmetic; never gates play.
   instructions?: GameInstructions;
+  // Staged leaderboard reveal (change: manual-leaderboard-reveal): when true,
+  // finalizeRun leaves the final board UNPUBLISHED so players cannot see who won
+  // the moment the run ends — the creator reveals it explicitly via
+  // refreshLeaderboard({ publish: true }). Default false (undefined ⇒ auto-publish),
+  // so every existing game keeps today's behaviour. Organizers always see the
+  // standings regardless (they read the run doc directly); this flag gates only
+  // the PARTICIPANT-visible board. Never denormalized into publicGames.
+  manualLeaderboardReveal?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -1132,6 +1154,9 @@ export interface UpdateGamePayload {
   photoFeedEnabled?: boolean;
   // Power-ups toggle (change: power-ups). Default false when absent.
   powerUpsEnabled?: boolean;
+  // Staged leaderboard reveal (change: manual-leaderboard-reveal). Default false
+  // when absent ⇒ finalizeRun auto-publishes the final board, today's behaviour.
+  manualLeaderboardReveal?: boolean;
   // Game intro primer (change: game-intro-instructions). Empty/whitespace-only ⇒
   // the field is cleared server-side; a non-https image is dropped on clean.
   instructions?: GameInstructions | null;
