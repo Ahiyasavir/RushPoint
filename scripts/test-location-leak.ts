@@ -23,5 +23,24 @@ check('neutral ⇒ []', eq(w({ hideLocation: true, title: 'Find the secret spot'
 check('clue exempt', eq(w({ hideLocation: true, title: 'Find it', locationClue: 'at the fountain' }), []));
 check('word-boundary: apartment ≠ art', eq(w({ hideLocation: true, title: 'Enter the apartment' }), []));
 
+// --- language symmetry: each language must be detected in EITHER field ---
+check('HE token in title', eq(w({ hideLocation: true, title: 'המשימה בכיכר ציון' }), ['title']));
+check('EN token in description only', eq(w({ hideLocation: true, title: 'משימה', description: 'Wait by the fountain' }), ['description']));
+check('HE token in both fields', eq(w({ hideLocation: true, title: 'רחוב יפו', description: 'ליד המזרקה' }), ['title', 'description']));
+check('mixed languages, one field each', eq(w({ hideLocation: true, title: 'The old market', description: 'מול השער' }), ['title', 'description']));
+
+// --- falsy short-circuit is total: no language, no field, ever warns when visible ---
+check('not hidden + HE place ⇒ []', eq(w({ title: 'כיכר ציון', description: 'ליד המזרקה' }), []));
+check('hideLocation undefined explicitly ⇒ []', eq(w({ hideLocation: undefined, title: 'at the gate', description: 'ברחוב' }), []));
+
+// --- shape / low-false-positive guards ---
+check('missing fields ⇒ []', eq(w({ hideLocation: true }), []));
+check('blank + whitespace fields ⇒ []', eq(w({ hideLocation: true, title: '   ', description: '' }), []));
+check('EN match is case insensitive', eq(w({ hideLocation: true, title: 'MEET AT THE FOUNTAIN' }), ['title']));
+check('multi-word EN token (in front of)', eq(w({ hideLocation: true, title: 'Stand in front of it' }), ['title']));
+check('HE clue fields exempt too', eq(w({ hideLocation: true, title: 'מצאו את המקום', locationClue: 'ליד המזרקה', locationClueHe: 'בכיכר' }), []));
+check('order is always title then description', eq(w({ hideLocation: true, description: 'near the gate', title: 'the tower' }), ['title', 'description']));
+check('neutral HE instruction ⇒ []', eq(w({ hideLocation: true, title: 'פענחו את החידה', description: 'צלמו את מה שמצאתם' }), []));
+
 console.log(`\n${failures === 0 ? 'ALL LOCATION-LEAK TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

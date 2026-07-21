@@ -190,6 +190,32 @@ function printSummary() {
   }
 }
 
+// finalizeRun's heavy consolidation (player-profile folds, benchmark aggregate,
+// summary email — perf: run-perf-scale Task 9) is now handled by the
+// `onRunFinalized` Firestore trigger, which fires ASYNCHRONOUSLY off the run
+// doc's status:'finished' write — finalizeRun itself no longer touches any of
+// it. This is a REAL execution guarantee (the platform awaits + retries the
+// trigger), not a dangling promise, but it is still inherently asynchronous
+// from the caller's point of view: the client that called finalizeRun has no
+// signal for "the trigger has now run," so a check that depends on the
+// trigger's side effect legitimately polls briefly rather than asserting
+// immediately. This is different from — and does not launder — the earlier,
+// rejected fire-and-forget-in-the-callable approach: there, polling only
+// worked because the emulator's process doesn't freeze mid-promise, which is
+// NOT true in production. Here, polling reflects a genuine two-hop async
+// architecture (write → trigger → side effect) that behaves identically in
+// the emulator and in production. Returns the last value seen (which may
+// still be falsy/absent if it never converges within timeoutMs).
+async function waitFor(fn, { timeoutMs = 4000, intervalMs = 100 } = {}) {
+  const start = Date.now();
+  for (;;) {
+    const val = await fn();
+    if (val) return val;
+    if (Date.now() - start >= timeoutMs) return val;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
 // ── Seeded RNG (reproducible fuzz) ────────────────────────────────────────────
 let _seed = 20260703;
 const rand = () => { _seed = (_seed * 1103515245 + 12345) & 0x7fffffff; return _seed / 0x7fffffff; };
@@ -683,7 +709,12 @@ async function main() {
   check('refreshLeaderboard stays unpublished by default', lbHidden?.published === false);
   let midState = await player.call('getMyTeamState', { code: accessCode });
   check('run is still live after refresh (not finished)', midState?.run?.status !== 'finished', midState?.run?.status);
-  check('unpublished standings are hidden from participant', midState?.run?.leaderboard?.published === false);
+  // Stronger than the original assertion (which allowed shipping the board with
+  // published:false): since change manual-leaderboard-reveal, getMyTeamState omits
+  // an unpublished board ENTIRELY, so it is not merely unrendered but absent from
+  // the wire — an unpublished board in the payload is readable in devtools.
+  check('unpublished standings are hidden from participant',
+    (midState?.run?.leaderboard ?? null) === null, JSON.stringify(midState?.run?.leaderboard ?? null));
 
   // Public, shareable leaderboard is gated on publish: hidden before, shown after.
   const boardBefore = await player.call('getPublicLeaderboard', { code: accessCode });
@@ -955,14 +986,30 @@ async function main() {
   check('final score is positive', (fin?.rankings?.[0]?.score ?? 0) > 0, String(fin?.rankings?.[0]?.score));
 
   // ── 10a. Platform benchmark contribution (platform-benchmark) ───────────────
-  // Finalizing the main run folds anonymized per-task-type aggregates into
-  // benchmarks/{taskType}. The main game has a 'smart_station' task type.
-  const benchStation = await creator.getDocAt('benchmarks/smart_station');
+  // Finalizing the main run marks the run doc's status:'finished', which fires
+  // the `onRunFinalized` Firestore TRIGGER (perf: run-perf-scale, Task 9) —
+  // asynchronous from finalizeRun's own response, so poll briefly rather than
+  // asserting immediately (a real two-hop async architecture, not a dangling
+  // promise — see the `waitFor` doc comment above). The main game has a
+  // 'smart_station' task type.
+  const benchStation = await waitFor(async () => {
+    const d = await creator.getDocAt('benchmarks/smart_station');
+    return d.exists ? d : null;
+  }) ?? { exists: false, data: undefined };
   check('benchmark: finalize contributed a station aggregate', benchStation.exists && (benchStation.data?.count ?? 0) >= 1, JSON.stringify(benchStation.data));
   check('benchmark: aggregate is anonymized (no run/team ids)',
     benchStation.exists && typeof benchStation.data?.medianMsRolling === 'number'
       && !('runId' in benchStation.data) && !('teamId' in benchStation.data) && !('ownerUid' in benchStation.data),
     JSON.stringify(benchStation.data));
+  // Direct evidence the TRIGGER actually ran (not just that finalizeRun
+  // returned fast): its own idempotency claim flags on the run doc.
+  const runAfterTrigger = await waitFor(async () => {
+    const d = await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}`);
+    return d.data?.benchmarkContributed && d.data?.summaryEmailSent ? d : null;
+  });
+  check('onRunFinalized trigger ran: benchmarkContributed + summaryEmailSent claimed',
+    runAfterTrigger?.data?.benchmarkContributed === true && runAfterTrigger?.data?.summaryEmailSent === true,
+    JSON.stringify({ benchmarkContributed: runAfterTrigger?.data?.benchmarkContributed, summaryEmailSent: runAfterTrigger?.data?.summaryEmailSent }));
 
   // Double-finalize guard (state-machine): re-finalizing an already-finished
   // run must not double-contribute to the platform-wide benchmark aggregate
@@ -2286,6 +2333,109 @@ async function main() {
       { match: /itself|unknown/i });
   }); // scenario: unlockable tasks
 
+  await scenario('mutually exclusive tasks (pick one, sibling auto-skipped)', async () => {
+    // A stage offering "either A or B, plus C". Completing A must RETIRE B by
+    // marking it `skipped` in the same transaction — not merely refuse it later.
+    // requiredTaskCount=2 is exactly the attainable ceiling (1 per group + 1
+    // ungrouped); if the loser were left pending, completedCount could never
+    // reach 2 and `allTerminal` would stay false, stranding the team forever.
+    const { gameId: gX } = await creator.call('createGame', { title: 'Either Or', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gX,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'xs0', order: 0, title: 'Pick one', isFinal: true, requiredTaskCount: 2,
+          exclusiveGroups: [{ id: 'xg1', taskIds: ['x-a', 'x-b'] }],
+          tasks: [
+            { id: 'x-a', title: 'Climb the tower', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+            { id: 'x-b', title: 'Swim the moat', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+            { id: 'x-c', title: 'Ring the bell', type: 'field', triggerMode: 'instant',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+          ] },
+      ],
+    });
+    const { runId: rX, accessCode: cX } = await creator.call('launchRun', { gameId: gX });
+    const pX = makeParty('playerExclusive');
+    await signInAnonymously(pX.auth);
+    await pX.call('joinRun', { code: cX, displayName: 'Chooser' });
+    await creator.call('startTeams', { gameId: gX, runId: rX });
+    const CX = { ownerUid: creatorCred.user.uid, gameId: gX, runId: rX };
+
+    // Exclusive-group membership is stage structure, not an answer key — it must
+    // survive the participant sanitizer without leaking anything secret.
+    const xs0 = await pX.call('getMyTeamState', { code: cX });
+    for (const t of xs0?.activeStageTasks ?? []) assertTaskPayloadAllowlisted('exclusive: task payload', t);
+
+    await pX.call('completeTask', { ...CX, taskId: 'x-a' });
+
+    // The losing sibling is SKIPPED (never failed), so it counts as terminal.
+    const xs1 = await pX.call('getMyTeamState', { code: cX });
+    const recs = (xs1?.team?.stages ?? []).flatMap((s) => s.tasks ?? []);
+    const bRec = recs.find((t) => t.taskId === 'x-b');
+    check('exclusive: completing A marks sibling B skipped', bRec?.status === 'skipped', bRec?.status);
+    check('exclusive: the ungrouped task C is untouched',
+      recs.find((t) => t.taskId === 'x-c')?.status !== 'skipped',
+      recs.find((t) => t.taskId === 'x-c')?.status);
+
+    // A late submission of the retired sibling is a graceful no-op (terminal-status
+    // short-circuit), NOT an error — a second device mid-flight must not see a crash.
+    let lateThrew = null;
+    try { await pX.call('completeTask', { ...CX, taskId: 'x-b' }); } catch (e) { lateThrew = e; }
+    check('exclusive: late completion of the skipped sibling is a silent no-op',
+      lateThrew === null, lateThrew ? `${lateThrew.code}: ${lateThrew.message}` : 'no-op');
+
+    // The team can still finish: 1 completed + 1 skipped + C reaches the ceiling.
+    await pX.call('completeTask', { ...CX, taskId: 'x-c' });
+    const xs2 = await pX.call('getMyTeamState', { code: cX });
+    check('exclusive: team finishes despite the retired sibling (not stranded)',
+      xs2?.team?.status === 'finished', xs2?.team?.status);
+  }); // scenario: mutually exclusive tasks
+
+  await scenario('manual leaderboard reveal (withheld on finalize, published on demand)', async () => {
+    // With manualLeaderboardReveal on, finalizeRun computes and freezes the board
+    // but must NOT publish it — players cannot learn who won until the creator
+    // reveals. Crucially the board must be absent from the WIRE, not just unrendered.
+    const { gameId: gL } = await creator.call('createGame', { title: 'Silent Podium', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gL,
+      scoringPreset: 'fixed_points_speed',
+      manualLeaderboardReveal: true,
+      stages: [
+        { id: 'ls0', order: 0, title: 'Only', isFinal: true, tasks: [
+          { id: 'l-a', title: 'Touch the gate', type: 'field', triggerMode: 'instant',
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 9 },
+        ] },
+      ],
+    });
+    const { runId: rL, accessCode: cL } = await creator.call('launchRun', { gameId: gL });
+    const pL = makeParty('playerReveal');
+    await signInAnonymously(pL.auth);
+    await pL.call('joinRun', { code: cL, displayName: 'Hopeful' });
+    await creator.call('startTeams', { gameId: gL, runId: rL });
+    const CL = { ownerUid: creatorCred.user.uid, gameId: gL, runId: rL };
+    await pL.call('completeTask', { ...CL, taskId: 'l-a' });
+
+    const fin = await creator.call('finalizeRun', { gameId: gL, runId: rL });
+    check('reveal: finalize still returns rankings to the organizer',
+      Array.isArray(fin?.rankings) && fin.rankings.length > 0, JSON.stringify(fin?.rankings?.length));
+
+    // The participant payload must carry NO board at all — an unpublished board on
+    // the wire is readable in devtools and would defeat the staged reveal.
+    const ls1 = await pL.call('getMyTeamState', { code: cL });
+    check('reveal: board is withheld from the participant payload before reveal',
+      (ls1?.run?.leaderboard ?? null) === null, JSON.stringify(ls1?.run?.leaderboard));
+
+    // Creator reveals; the same participant call now carries the standings.
+    const pub = await creator.call('refreshLeaderboard', { gameId: gL, runId: rL, publish: true });
+    check('reveal: refreshLeaderboard publishes the frozen final board', pub?.published === true, JSON.stringify(pub?.published));
+    const ls2 = await pL.call('getMyTeamState', { code: cL });
+    check('reveal: board reaches the participant after the reveal',
+      Array.isArray(ls2?.run?.leaderboard?.rankings) && ls2.run.leaderboard.rankings.length > 0,
+      JSON.stringify(ls2?.run?.leaderboard?.rankings?.length));
+  }); // scenario: manual leaderboard reveal
+
   await scenario('task expiry (timed close + in-flight auto-skip)', async () => {
     // A 2-task stage where E expires 12s after launch (fractional minutes are
     // honored exactly so tests don't wait whole minutes; the window still leaves
@@ -2556,9 +2706,15 @@ async function main() {
     const st = await pPr.call('getMyTeamState', { code: cPr });
     check('profile: team finished after the only task', st?.team?.status === 'finished', st?.team?.status);
 
-    // Profiles are recorded at finalize (off the hot completeTask path).
+    // Profiles are recorded by the `onRunFinalized` Firestore trigger (perf:
+    // run-perf-scale, Task 9), asynchronously off finalizeRun's own response —
+    // poll briefly instead of asserting immediately (real trigger execution,
+    // not a dangling promise — see the `waitFor` doc comment above).
     await creator.call('finalizeRun', { gameId: gPr, runId: rPr });
-    const prof = await pPr.call('getMyProfile', {});
+    const prof = await waitFor(async () => {
+      const p = await pPr.call('getMyProfile', {});
+      return (p?.profile?.gamesPlayed ?? 0) >= 1 ? p : null;
+    }) ?? await pPr.call('getMyProfile', {});
     check('profile: gamesPlayed recorded on finish', (prof?.profile?.gamesPlayed ?? 0) >= 1, JSON.stringify(prof?.profile));
     check('profile: tasksCompleted recorded', (prof?.profile?.tasksCompleted ?? 0) >= 1, prof?.profile?.tasksCompleted);
     check('profile: first_finish badge earned', (prof?.profile?.badges ?? []).includes('first_finish'), JSON.stringify(prof?.profile?.badges));
@@ -5028,6 +5184,61 @@ async function main() {
     check('the rest are rejected (single-use enforced)',
       results.filter((r) => r.status === 'rejected').length === N - 1,
       `rejected=${results.filter((r) => r.status === 'rejected').length}`);
+  });
+
+  // ═══ startTeams scales with team count (perf: run-perf-scale, Task 10) ═══════
+  // Root cause: startTeams used to await assignNextInActiveStage STRICTLY
+  // serially, one team at a time, re-reading the SAME game doc every iteration —
+  // 20+ teams could push the v1 default 60s callable timeout. This scenario
+  // joins a large cohort and asserts (a) startTeams still launches + routes
+  // every one of them correctly and (b) the single startTeams call comes back
+  // fast — a regression back to the serial loop would blow well past this
+  // budget locally, long before it ever got near a real 60s ceiling.
+  await scenario('startTeams scales with team count', async () => {
+    // Capped at 12, NOT ~24: MAX_RUN_DEVICES is a hard global ceiling of 16
+    // phones per run regardless of billing tier (see the dedicated "global
+    // per-run device cap (16 phones max)" scenario) — this scenario found that
+    // the hard way (a real bug in the TEST, not the fix: 24 joins tripped
+    // "This run is full (16 devices max)" before startTeams was even called).
+    // 12 teams still exercises 2 full chunks of the bounded-concurrency fan-out
+    // (chunk size 8) without touching either cap.
+    const N = 12;
+    const { gameId: gSc } = await creator.call('createGame', { title: 'Scale Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gSc, scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 'sc-s', order: 0, title: 'Anywhere', isFinal: true,
+        // Locationless + uncapped so every one of the N teams can be routed to
+        // the same task without a station-cap fight muddying the timing signal
+        // (station contention has its own dedicated scenario above).
+        tasks: [{ id: 'sc-t', title: 'Do it anywhere', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 999 }],
+      }],
+    });
+    const { runId: rSc, accessCode: cSc } = await creator.call('launchRun', { gameId: gSc });
+    const scPlayers = [];
+    for (let i = 0; i < N; i++) {
+      const p = makeParty(`scale${i}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: cSc, displayName: `Scale ${i}` });
+      scPlayers.push(p);
+    }
+
+    const t0 = Date.now();
+    const startRes = await creator.call('startTeams', { gameId: gSc, runId: rSc });
+    const ms = Date.now() - t0;
+    check(`startTeams launched all ${N} teams`, startRes?.launched === N, JSON.stringify(startRes));
+    console.log(`      startTeams(${N} teams) took ${ms}ms`);
+    // Generous ceiling for a local emulator — the point is architecture (bounded
+    // fan-out + one game read), not a tight production SLO. The old serial
+    // per-team loop scaled linearly with N and re-read the game doc every time;
+    // this should stay flat-ish as N grows.
+    check(`startTeams(${N} teams) completes well within budget`, ms < 20000, `${ms}ms`);
+
+    const states = await Promise.all(scPlayers.map((p) => p.call('getMyTeamState', { code: cSc })));
+    const allAssigned = states.every((s) => s?.team?.stages?.[0]?.tasks?.[0]?.status === 'assigned');
+    check('every team was routed to the locationless task', allAssigned,
+      JSON.stringify(states.map((s) => s?.team?.stages?.[0]?.tasks?.[0]?.status)));
   });
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════
