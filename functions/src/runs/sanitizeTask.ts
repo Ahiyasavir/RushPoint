@@ -21,8 +21,40 @@ export function sanitizeTaskForParticipant(
   // quiz-ordering: the caller (getMyTeamState) passes a per-team, per-task seed
   // (`${teamId}:${taskId}`) so ordering items reach the client deterministically
   // SHUFFLED — never in the authored (answer-key) order. No seed ⇒ fail closed.
-  opts?: { shuffleSeed?: string },
+  opts?: {
+    shuffleSeed?: string;
+    // change: play-task-gating (wave D). Hidden-location ("treasure hunt") tasks
+    // are SEALED until the server has confirmed the team physically arrived
+    // (reportArrival latches RunTaskRecord.arrivedAt). `revealed` is that
+    // server-side verdict; it defaults to FALSE so a caller that forgets to pass
+    // it fails CLOSED. It has no effect on a non-hidden task.
+    revealed?: boolean;
+  },
 ) {
+  // ── Sealed stub (hidden-location, not yet arrived) ──────────────────────────
+  // Built by CONSTRUCTION, never by deleting from `...rest`: a field added to
+  // `Task` tomorrow must default to WITHHELD, exactly like an answer key. The
+  // player gets the clue and nothing else — not the title, not the type, not the
+  // inputs. `type` is withheld rather than faked; the client keys off
+  // `arrivalPending` and renders a sealed card.
+  if (task.hideLocation && !opts?.revealed) {
+    return {
+      id: task.id,
+      locationHidden: true as const,
+      arrivalPending: true as const,
+      ...(task.locationClue != null ? { locationClue: task.locationClue } : {}),
+      ...(task.locationClueHe != null ? { locationClueHe: task.locationClueHe } : {}),
+      // The paid-hint affordance survives pre-arrival on purpose: a hint that
+      // helps you FIND the spot is exactly what a treasure-hunt hint is for.
+      hasHint: !!task.hint && task.hint.trim().length > 0,
+      hintPenalty: task.hintPenalty ?? 25,
+      // Non-revealing card chrome (how much it's worth / how hard / how long).
+      ...(task.pointValue != null ? { pointValue: task.pointValue } : {}),
+      ...(task.difficulty != null ? { difficulty: task.difficulty } : {}),
+      ...(task.estimatedMinutes != null ? { estimatedMinutes: task.estimatedMinutes } : {}),
+    } as Record<string, unknown>;
+  }
+
   // Strip every server-secret answer key: the hint text (paid reveal only),
   // quiz answers, the numeric target, and each sequence step's answer. The UI
   // still gets choices / tolerance / radius / step prompts so it can render.
@@ -49,17 +81,18 @@ export function sanitizeTaskForParticipant(
       ? seededShuffle(orderItems, opts.shuffleSeed)
       : undefined;
 
-  // Hidden-location (treasure-hunt) tasks keep their coordinates + radius SERVER-
-  // SIDE only — the participant is guided by `locationClue` and discovers the spot
-  // by arriving (server-validated GPS in completeTask). So when `hideLocation`,
-  // remove the top-level coordinates + exact radius and flag `locationHidden` so
-  // the client suppresses the map pin and renders the clue UI. The visible-task
-  // path is unchanged.
+  // Hidden-location (treasure-hunt) tasks: reaching this point means the task is
+  // either not hidden at all, or hidden AND the server has confirmed arrival
+  // (`opts.revealed`). Everything BEFORE arrival is handled by the sealed-stub
+  // early return at the top of this function — coordinates never leave the server
+  // while the spot is still secret.
+  //
+  // Product decision (wave D, user): AFTER arrival the coordinates ARE released,
+  // so the map can pin the spot and a player who wanders off can navigate back.
+  // The `locationHidden` flag is kept so the client still tells the treasure-hunt
+  // story (clue box, "you found it" chrome) rather than silently turning into an
+  // ordinary pin.
   const hidden = !!rest.hideLocation;
-  if (hidden) {
-    delete (rest as { coordinates?: unknown }).coordinates;
-    delete (rest as { geofenceRadiusMeters?: unknown }).geofenceRadiusMeters;
-  }
 
   return {
     ...rest,
@@ -79,10 +112,11 @@ export function sanitizeTaskForParticipant(
           imageUrl: smart.imageUrl,
           codeInputLabel: smart.codeInputLabel,
           hasCode: smart.hasCode,
-          // For a hidden task, the station's injected coordinates + exact radius
-          // are also withheld so the spot can't be triangulated.
-          geofenceRadiusMeters: hidden ? undefined : smart.geofenceRadiusMeters,
-          stationCoords: hidden ? undefined : smart.stationCoords,
+          // A hidden station's injected coordinates + radius ride along with the
+          // top-level ones: withheld entirely while sealed (the early return
+          // emits no `smart` at all), released once the team has arrived.
+          geofenceRadiusMeters: smart.geofenceRadiusMeters,
+          stationCoords: smart.stationCoords,
           timeLimitSeconds: smart.timeLimitSeconds,
           autoApprove: smart.autoApprove,
           // audio-tasks: which capture widget the client must render (photo vs

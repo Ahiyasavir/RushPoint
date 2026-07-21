@@ -33,7 +33,7 @@ export {
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
-  listRunTeams, completeTask, requestNextTask, requestTaskHint,
+  listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
   checkOutTask, getMyTeamState, listLiveRuns, getMyProfile,
   createTrackable, getRunTrackables, pickUpTrackable, dropTrackable,
@@ -188,11 +188,15 @@ export const inviteStaff = loggedCallable('inviteStaff', async (data, context) =
 
 export const staffSignIn = loggedCallable('staffSignIn', async (data, context) => {
   const uid = requireAuth(context);
-  const { ownerUid, gameId, runId, pin } = data as {
+  const { ownerUid, gameId, runId, pin, name } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     pin: string;
+    // Optional self-declared display name (change: staff-onboarding-simplification).
+    // The staffer types who they are at sign-in; see the staffName claim below for
+    // why this is attribution, not authorization.
+    name?: string;
   };
 
   if (!pin) throw new functions.https.HttpsError('invalid-argument', 'PIN required');
@@ -278,7 +282,14 @@ export const staffSignIn = loggedCallable('staffSignIn', async (data, context) =
   try {
     customToken = await admin.auth().createCustomToken(context.auth!.uid, {
       staff: true,
-      staffName: invite.name,
+      // Attribution, NOT authorization: the audit trail should name the human who
+      // actually signed in, not whatever placeholder the creator typed when
+      // generating the invite ("Staff 1"). Self-declared and therefore untrusted —
+      // it never grants anything. Every real permission comes from `permissions`,
+      // `ownerUid/gameId/runId` and the single-use PIN, all invite-derived above.
+      // Falls back to the invite name when the staffer types nothing. Trimmed and
+      // length-capped so a hostile value can't bloat the token or the audit rows.
+      staffName: (typeof name === 'string' && name.trim() ? name.trim() : invite.name).slice(0, 60),
       permissions: invite.permissions,
       ownerUid,
       gameId,

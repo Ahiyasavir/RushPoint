@@ -2975,6 +2975,92 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
   return { hint: hintText, penalty: result.charged, alreadyUsed: result.alreadyUsed, free: result.free };
 });
 
+// ─── reportArrival (unseal a hidden-location task once the team is there) ─────
+// change: play-task-gating (wave D).
+//
+// A hidden-location ("treasure hunt") task ships to the participant as a sealed
+// stub — clue only, no title/type/inputs — until the SERVER agrees the team has
+// physically arrived. This is that moment. It deliberately reuses the exact
+// predicate `completeTask` uses for a check-in (haversine against the
+// server-held coordinates → `evaluateTrigger(mode, dist, radius, {hidden:true})`),
+// so there is ONE arrival rule in the codebase, not two, and a spoofer gains
+// nothing here they could not already get from completeTask.
+//
+// It is deliberately WEAKER than completeTask: it awards no points, starts no
+// timer, holds no station slot. It only unseals text.
+//
+// No distance, no "getting warmer", no metres are ever returned — a numeric
+// response would let a player triangulate the secret spot by polling.
+//
+// The verdict is LATCHED (`RunTaskRecord.arrivedAt`) rather than re-evaluated per
+// read: arrival must survive a reload, a GPS dropout, and an offline spell. A
+// per-read evaluation would re-seal the task in the player's hands mid-play.
+export const reportArrival = loggedCallable('reportArrival', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'reportArrival');
+  const { taskId, lat, lng, ownerUid, gameId, runId, code } = data as {
+    taskId?: string; lat?: number; lng?: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+  assertCoordIfPresent(lat, lng);
+  const { ctx, teamId, team, teamRef } = await resolveCallerTeam(
+    uid, { ownerUid, gameId, runId, code }, { requireController: true },
+  );
+
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const task = findGameTask(gameSnap.data() as Game, taskId);
+  if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
+  // Same stage-scope guard as every answer callable: you can't probe a stage you
+  // have not reached (that would be a location oracle on a future chapter).
+  assertStageActiveForTask(team, taskId);
+
+  // Nothing to unseal on a visible task — a no-op success keeps the client simple.
+  if (!task.hideLocation) return { arrived: true };
+
+  const c = task.coordinates;
+  const hasRealCoords = !!c && isValidCoord(c.lat, c.lng) && (c.lat !== 0 || c.lng !== 0);
+  const mode = normalizeTriggerMode(task);
+  if ((mode === 'radius' || mode === 'exact') && hasRealCoords) {
+    // Arrival is NEVER self-declared: no coordinates ⇒ no reveal. Same wording
+    // family as the check-in path.
+    if (lat == null || lng == null || !isValidCoord(lat, lng)) {
+      throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
+    }
+    const distM = haversineKm({ lat, lng }, c!) * 1000;
+    const verdict = evaluateTrigger(mode, distM, task.geofenceRadiusMeters, { hidden: true });
+    if (!verdict.ok) {
+      // Reason strings for hidden tasks are digit-free by contract; never fall
+      // back to a message that carries the distance.
+      return { arrived: false, reason: verdict.reason ?? 'Not here yet — keep following the clue' };
+    }
+  }
+
+  // Latch. Read-modify-write of the WHOLE stages array — never a dotted-path
+  // update into an array (that coerces the array to a map; see CLAUDE.md).
+  const arrivedAt = new Date().toISOString();
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const fresh = snap.data() as RunTeam;
+    let changed = false;
+    const stages = fresh.stages.map((s) => ({
+      ...s,
+      tasks: s.tasks.map((r) => {
+        if (r.taskId !== taskId || r.arrivedAt != null) return r; // idempotent
+        changed = true;
+        return { ...r, arrivedAt };
+      }),
+    }));
+    if (!changed) return;
+    tx.update(teamRef, { stages, updatedAt: arrivedAt });
+  });
+
+  functions.logger.info('reportArrival.unsealed', { runId: ctx.runId, teamId, taskId });
+  return { arrived: true };
+});
+
 
 // ─── Answer-checking helpers (quiz / numeric / sequence) ──────────────────────
 
@@ -3309,10 +3395,35 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   const assignedActiveRec =
     activeStageIdx >= 0 ? team.stages[activeStageIdx].tasks.find((r) => r.status === 'assigned') : undefined;
+  // ── Visibility gating (change: play-task-gating, wave D) ────────────────────
+  // A participant may only ACT on the task routing assigned them, so they only
+  // RECEIVE that one — plus the ones they already finished (history/progress must
+  // still render). Every other task of the active stage is OMITTED ENTIRELY from
+  // the payload: no title, no stub, no lock reason.
+  //
+  // Why this is a security fix and not just polish: a multi-task stage used to
+  // ship EVERY task's quiz choices / sequence prompts / station instructions at
+  // once, so a player could pre-read the whole stage in devtools before routing
+  // ever handed a task out. "Withheld" now means absent from the wire.
+  //
+  // NOTE: this is a PAYLOAD concern only. completeTask / submitTaskAnswer /
+  // verifyStationCode keep their own authorization + locked/unreleased/expired
+  // gates unchanged — omission is never the security control.
+  const recByTaskId = new Map(
+    (activeStageIdx >= 0 ? team.stages[activeStageIdx].tasks : []).map((r) => [r.taskId, r]),
+  );
   const activeStageTasks =
     activeStageIdx >= 0 && orderedStages[activeStageIdx]
-      ? orderedStages[activeStageIdx].tasks.map((t) => {
-          const safe = sanitizeTaskForParticipant(t, { shuffleSeed: `${team.id}:${t.id}` }) as Record<string, unknown>;
+      ? orderedStages[activeStageIdx].tasks.filter((t) => {
+          const st = recByTaskId.get(t.id)?.status;
+          return st === 'assigned' || st === 'completed';
+        }).map((t) => {
+          // Hidden-location tasks stay SEALED until reportArrival has latched
+          // `arrivedAt` (or the team already completed them — you can't un-find a
+          // spot you've been to).
+          const rec = recByTaskId.get(t.id);
+          const revealed = rec?.arrivedAt != null || rec?.status === 'completed';
+          const safe = sanitizeTaskForParticipant(t, { shuffleSeed: `${team.id}:${t.id}`, revealed }) as Record<string, unknown>;
           // Hint auto escalation (change: hint-auto-escalation): decorate the
           // team's ACTIVE task with a display-only `hintFreeNow` flag. The charge
           // decision is re-made inside requestTaskHint's transaction, so a stale

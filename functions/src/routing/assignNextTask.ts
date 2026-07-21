@@ -200,7 +200,13 @@ export async function buildRecommendations(
     .map(({ task, priority, distanceKm }, idx) => ({
       taskId: task.id,
       taskIndex: tasks.indexOf(task),
-      title: task.title,
+      // play-task-gating (wave D): a hidden-location task's TITLE is part of what
+      // the sealed stub withholds until the team has physically arrived
+      // (sanitizeTaskForParticipant). getRecommendedTasks is participant-callable,
+      // so echoing the title here would hand back exactly what getMyTeamState
+      // just refused to send. Withhold it and flag the task instead — the same
+      // reasoning as the WO-3 `distanceKm: 0` rule two lines up.
+      ...(task.hideLocation ? { locationHidden: true } : { title: task.title }),
       priority: Math.round(priority * 1000) / 1000,
       estimatedMinutes: task.estimatedMinutes,
       difficulty: task.difficulty ?? 5,

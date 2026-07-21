@@ -227,3 +227,108 @@ describe('sanitizeTaskForParticipant — hidden location', () => {
     expect(smart?.geofenceRadiusMeters).toBeUndefined();
   });
 });
+
+// change: play-task-gating (wave D). Product decision: a hidden-location task
+// reveals NOTHING but its clue until the server has confirmed the team actually
+// ARRIVED (reportArrival → RunTaskRecord.arrivedAt). Before that the sanitizer
+// emits a "sealed stub" built by CONSTRUCTION (allowlist), so a future Task field
+// defaults to withheld — same fail-closed policy as the answer keys.
+// After arrival the task sanitizes like any other task, coordinates INCLUDED
+// (user decision: a player who wanders off must be able to navigate back).
+describe('sanitizeTaskForParticipant — hidden location: sealed until arrival', () => {
+  const SEALED_KEYS = [
+    'arrivalPending', 'difficulty', 'estimatedMinutes', 'hasHint', 'hintPenalty',
+    'id', 'locationClue', 'locationClueHe', 'locationHidden', 'pointValue',
+  ];
+  const treasure = (extra: Partial<Task> = {}) =>
+    baseTask({
+      hideLocation: true,
+      title: 'The secret spot',
+      description: 'Behind the blue door',
+      type: 'quiz',
+      locationClue: 'Where water never stops',
+      locationClueHe: 'במקום שבו המים לא נחים',
+      choices: ['a', 'b'],
+      answers: ['a'],
+      hint: 'paid secret',
+      media: [{ id: 'm1', kind: 'image', url: 'https://firebasestorage.googleapis.com/x.jpg' }],
+      smart: { enabled: true, verificationType: 'code_verification', longInstructions: 'go inside' },
+      steps: [{ id: 's1', prompt: 'do it', answer: 'X' }],
+      numericTolerance: 3,
+      tags: ['secret'],
+      ...extra,
+    } as Partial<Task>);
+
+  test('sealed: the title is ABSENT from the payload', () => {
+    const out = sanitizeTaskForParticipant(treasure()) as Record<string, unknown>;
+    expect('title' in out).toBe(false);
+  });
+
+  test('sealed: no description / type / media / smart / choices / steps / tolerance / tags', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { shuffleSeed: 't:1' }) as Record<string, unknown>;
+    for (const k of ['description', 'type', 'media', 'smart', 'choices', 'steps',
+      'numericTolerance', 'tags', 'coordinates', 'geofenceRadiusMeters', 'triggerMode',
+      'surveyChoices', 'orderItems', 'unlockAfterTaskIds', 'hideLocation']) {
+      expect([k, k in out]).toEqual([k, false]);
+    }
+  });
+
+  test('sealed: emits arrivalPending + locationHidden + the clue (EN + HE) + hint affordance', () => {
+    const out = sanitizeTaskForParticipant(treasure()) as Record<string, unknown>;
+    expect(out.arrivalPending).toBe(true);
+    expect(out.locationHidden).toBe(true);
+    expect(out.locationClue).toBe('Where water never stops');
+    expect(out.locationClueHe).toBe('במקום שבו המים לא נחים');
+    expect(out.hasHint).toBe(true);
+    expect(out.hintPenalty).toBe(25);
+    expect(out.id).toBe('t1');
+  });
+
+  test('sealed: key set is EXACTLY the allowlist (a new Task field defaults to withheld)', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { shuffleSeed: 't:1' }) as Record<string, unknown>;
+    expect(Object.keys(out).sort()).toEqual([...SEALED_KEYS].sort());
+  });
+
+  test('sealed beats the ordering shuffle: orderItems never ship pre-arrival', () => {
+    const out = sanitizeTaskForParticipant(
+      treasure({ orderItems: ['one', 'two', 'three'] } as Partial<Task>),
+      { shuffleSeed: 'team-1:t1' },
+    ) as Record<string, unknown>;
+    expect('orderItems' in out).toBe(false);
+  });
+
+  test('arrived: title/description/type return and coordinates are RESTORED', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { revealed: true, shuffleSeed: 't:1' }) as Record<string, unknown>;
+    expect(out.title).toBe('The secret spot');
+    expect(out.description).toBe('Behind the blue door');
+    expect(out.type).toBe('quiz');
+    expect(out.coordinates).toEqual({ lat: 31.78, lng: 35.21 });
+    expect(out.geofenceRadiusMeters).toBe(40);
+    expect(out.locationHidden).toBe(true);
+    expect('arrivalPending' in out).toBe(false);
+  });
+
+  test('arrived: the answer keys are STILL stripped (reveal is not a bypass)', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { revealed: true }) as Record<string, unknown>;
+    expect(out.answers).toBeUndefined();
+    expect(out.hint).toBeUndefined();
+    const steps = out.steps as Array<Record<string, unknown>> | undefined;
+    expect(steps?.[0]).not.toHaveProperty('answer');
+    const smart = out.smart as Record<string, unknown> | undefined;
+    expect(smart?.secretCode).toBeUndefined();
+  });
+
+  test('a NOT-hidden task is unaffected by revealed (byte-identical either way)', () => {
+    const a = sanitizeTaskForParticipant(baseTask({ type: 'quiz', choices: ['x'] } as Partial<Task>));
+    const b = sanitizeTaskForParticipant(baseTask({ type: 'quiz', choices: ['x'] } as Partial<Task>), { revealed: true });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    expect((a as Record<string, unknown>).arrivalPending).toBeUndefined();
+  });
+
+  test('sealed: the whole serialized payload contains neither the title nor the description', () => {
+    const json = JSON.stringify(sanitizeTaskForParticipant(treasure()));
+    expect(json.includes('The secret spot')).toBe(false);
+    expect(json.includes('Behind the blue door')).toBe(false);
+    expect(json.includes('go inside')).toBe(false);
+  });
+});
