@@ -115,6 +115,12 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
     instructions,
   } = data as UpdateGamePayload;
+  // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
+  // raw payload with a narrow cast rather than the UpdateGamePayload destructure
+  // — the shared payload type does not carry the field yet (see
+  // docs/wave-b/leaderboard-reveal.md); adding it there is a pure type widening
+  // and this stays correct either way.
+  const { manualLeaderboardReveal } = data as { manualLeaderboardReveal?: boolean };
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
@@ -190,6 +196,10 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
   if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
+  // Organizer-only control: gates whether finalizeRun publishes the final board to
+  // participants. Deliberately NOT mirrored into publicGames (below) — it is a run
+  // control, not gallery data.
+  if (manualLeaderboardReveal !== undefined) updates.manualLeaderboardReveal = manualLeaderboardReveal;
   // Game intro primer (change: game-intro-instructions): clean-or-clear, mirroring
   // integrationWebhookUrl. A defined primer with content is stored cleaned (https
   // image guard lives in cleanGameInstructions); defined + empty ⇒ delete the field.

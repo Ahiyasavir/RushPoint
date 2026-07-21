@@ -103,9 +103,19 @@ function idsFromPayload(data: unknown): Pick<CallMeta, 'runId' | 'gameId'> {
  * line per invocation via logCall. The callable body is unchanged. The log record
  * carries `runId`/`gameId` from the payload when present so a reported issue can
  * be correlated to its run (ids only — never answer keys / PII).
+ *
+ * `runtimeOpts` is optional and additive: every existing call site keeps the v1
+ * default (60s / 256MB). Pass e.g. `{ timeoutSeconds: 180, memory: '512MB' }` for
+ * a callable whose work legitimately needs more time/headroom than the default
+ * (bulk per-team fan-out) — see startTeams/finalizeRun (perf: run-perf-scale).
  */
-export function loggedCallable(name: string, handler: CallableHandler) {
-  return functions.https.onCall(async (data, context) =>
+export function loggedCallable(
+  name: string,
+  handler: CallableHandler,
+  runtimeOpts?: functions.RuntimeOptions,
+) {
+  const target = runtimeOpts ? functions.runWith(runtimeOpts) : functions;
+  return target.https.onCall(async (data, context) =>
     logCall(
       { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
       // Backstop: a callable must never return a non-finite number — one Infinity

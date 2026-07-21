@@ -46,6 +46,12 @@ export {
   activateHotZone, deactivateHotZone,
   getRunDiscoveryPois, claimDiscoveryPoi,
 } from './runs/index';
+// onRunFinalized is a Firestore TRIGGER (not a callable) — fires the run's
+// post-finalize consolidation (player-profile folds, benchmark aggregate,
+// summary email) with the platform's own execution/retry guarantee, off
+// finalizeRun's critical path (perf: run-perf-scale, Task 9). Re-exported
+// explicitly, alongside the callables above, so Firebase discovers it.
+export { onRunFinalized } from './runs/index';
 
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────

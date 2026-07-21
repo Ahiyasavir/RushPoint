@@ -64,6 +64,7 @@ import {
   releaseInstantMs,
   isExpired,
   isUnlocked,
+  resolveExclusions,
   isHintFree,
   isOrderingTask,
   matchesOrderedAnswer,
@@ -334,10 +335,15 @@ export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) =
   const c = codeSnap.data() as AccessCode;
   if (c.status === 'revoked') throw new functions.https.HttpsError('permission-denied', 'Code revoked');
 
-  const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
+  // Perf (run-perf-scale, Task 2): the game and run reads are independent once
+  // the access code has resolved ownerUid/gameId/runId — parallelize them
+  // instead of two sequential round trips.
+  const [gameSnap, runSnap] = await Promise.all([
+    db.doc(gamePath(c.ownerUid, c.gameId)).get(),
+    db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get(),
+  ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
-  const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
   const run = runSnap.exists ? (runSnap.data() as Run) : null;
 
   return {
@@ -407,27 +413,34 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
 
   const { ownerUid, gameId, runId } = codeData;
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
-  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+
+  // Perf (run-perf-scale, Task 2): these four reads are all independent given
+  // only the access code's ownerUid/gameId/runId + this caller's teamId — none
+  // depends on another's result — so read them concurrently instead of four
+  // sequential round trips. The existence/priority checks below run in the
+  // SAME order as before so error precedence is unchanged.
+  const [gameSnap, existingTeam, attachedQ, runSnap] = await Promise.all([
+    db.doc(gamePath(ownerUid, gameId)).get(),
+    // Idempotent: team already registered in this run (own-team fast path).
+    db.doc(teamPath(ownerUid, gameId, runId, teamId)).get(),
+    // Split-brain guard: this uid may already be an ATTACHED DEVICE of another
+    // team in this run (joined via joinTeamAsDevice). Minting a second standalone
+    // team here makes the uid a member of two teams and double-counts
+    // participant/device totals. Mirror joinTeamAsDevice's array-contains guard.
+    db.collection(teamsCol(ownerUid, gameId, runId)).where('deviceUids', 'array-contains', teamId).limit(1).get(),
+    runRef.get(),
+  ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
 
-  // Idempotent: team already registered in this run (own-team fast path).
-  const existingTeam = await db.doc(teamPath(ownerUid, gameId, runId, teamId)).get();
   if (existingTeam.exists) {
     return { teamId, runId, gameId, ownerUid, alreadyJoined: true };
   }
-  // Split-brain guard: this uid may already be an ATTACHED DEVICE of another
-  // team in this run (joined via joinTeamAsDevice). Minting a second standalone
-  // team here makes the uid a member of two teams and double-counts
-  // participant/device totals. Mirror joinTeamAsDevice's array-contains guard.
-  const attachedQ = await db.collection(teamsCol(ownerUid, gameId, runId))
-    .where('deviceUids', 'array-contains', teamId).limit(1).get();
   if (!attachedQ.empty) {
     const t = attachedQ.docs[0].data() as RunTeam;
     return { teamId: t.id, runId, gameId, ownerUid, alreadyJoined: true };
   }
 
-  const runSnap = await runRef.get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   const run = runSnap.data() as Run;
 
@@ -502,6 +515,28 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
 // ─── startTeams ───────────────────────────────────────────────────────────────
 // Owner launches all (or specific) registered teams.
 
+// Perf (run-perf-scale, Task 10): startTeams used to await assignNextInActiveStage
+// STRICTLY serially, one team at a time — each iteration re-read the same game
+// doc and cost 3-4+ round trips, so 20+ teams could exceed the v1 default 60s
+// timeout. The game doc is now read ONCE and threaded through every call, and
+// assignment is fanned out in bounded-concurrency chunks (not one giant
+// Promise.all, to avoid hammering Firestore / the station-cap contention path
+// with the whole cohort at once). Station-capacity safety is untouched: the
+// actual cap enforcement + atomic claim lives inside assignTask/the claim
+// transaction in assignNextInActiveStage, which is unchanged and still race-safe
+// under concurrent callers (see the station-contention e2e scenario). The
+// callable is also given extra headroom (timeoutSeconds/memory) above the v1
+// default, since a large cohort's fan-out is legitimately heavier than most
+// callables even after this fix.
+const START_TEAMS_ASSIGN_CONCURRENCY = 8;
+
+/** Split `items` into fixed-size chunks (last chunk may be shorter). */
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 export const startTeams = loggedCallable('startTeams', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId, runId, teamIds } = data as { gameId: string; runId: string; teamIds?: string[] };
@@ -542,14 +577,18 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
   // Assign the first task of the active stage for each launched team. Delegated
   // to assignNextInActiveStage so single- vs multi-task routing — and the
   // full-array write that avoids array→map corruption — lives in one place.
+  // The already-loaded `game` is passed through (no per-team re-read) and the
+  // cohort is fanned out in bounded chunks rather than one team at a time.
   if (game.stages.length > 0) {
-    for (const doc of targets) {
-      await assignNextInActiveStage(uid, gameId, runId, doc.id, { lat: 31.7905, lng: 35.164 }, now);
+    for (const group of chunk(targets, START_TEAMS_ASSIGN_CONCURRENCY)) {
+      await Promise.all(group.map((doc) =>
+        assignNextInActiveStage(uid, gameId, runId, doc.id, { lat: 31.7905, lng: 35.164 }, now, game),
+      ));
     }
   }
 
   return { launched: targets.length };
-});
+}, { timeoutSeconds: 180, memory: '512MB' });
 
 
 // ─── Guardian consent (change: guardian-consent-qr) ────────────────────────────
@@ -763,6 +802,27 @@ export async function completeTaskForTeam(
       }
     }
 
+    // Mutually exclusive task groups (change: mutually-exclusive-tasks): within a
+    // stage, a team may complete at most ONE task per group. Placed here
+    // deliberately — AFTER the already-terminal no-op above (so a duplicate
+    // submission of THIS task stays a silent no-op rather than erroring the play
+    // loop) and inside the same lock-retry transaction as every other guard, so two
+    // devices racing two members of one group serialize on the team doc: the loser
+    // retries, re-reads its own record as `skipped`, and short-circuits harmlessly.
+    const gameStage = game.stages.find((s) => s.id === stages[stageIdx].stageId);
+    const exclusiveSiblingIds = gameStage ? resolveExclusions(gameStage, taskId) : [];
+    if (exclusiveSiblingIds.length) {
+      const blockedByCompleted = stages[stageIdx].tasks.some(
+        (t) => t.status === 'completed' && exclusiveSiblingIds.includes(t.taskId),
+      );
+      if (blockedByCompleted) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          'You already completed an alternative for this challenge',
+        );
+      }
+    }
+
     let earnedScore = 0;
     if (gameTask) {
       switch (game.scoringPreset) {
@@ -855,6 +915,24 @@ export async function completeTaskForTeam(
         }
         powerUps.log.push(entry);
       }
+    }
+
+    // Mutually exclusive groups (change: mutually-exclusive-tasks): now that THIS
+    // task is graded, retire its losing siblings. They are marked `skipped`, never
+    // `failed` — and this MUST happen, not merely be rejected on a later attempt:
+    // applyStageCompletion ends a stage on `completedCount >= required ||
+    // allTerminal`, so a sibling left `pending` forever keeps completedCount below
+    // an unreachable requiredTaskCount AND allTerminal false, stranding the team in
+    // the stage permanently. Any sibling still ASSIGNED holds a station slot, so it
+    // joins skippedHeldTaskIds and is decremented by the existing in-transaction
+    // release loop below — releasing it post-commit instead would double-decrement
+    // (the station-slot leak class we have shipped before). Ordered BEFORE
+    // applyStageCompletion so the freshly skipped siblings count toward allTerminal.
+    for (const t of stages[stageIdx].tasks) {
+      if (!exclusiveSiblingIds.includes(t.taskId)) continue;
+      if (t.status === 'completed' || t.status === 'skipped') continue;
+      if (t.status === 'assigned') skippedHeldTaskIds.push(t.taskId);
+      t.status = 'skipped';
     }
 
     // Stage completion via the shared single-source helper (applyStageCompletion):
@@ -1368,15 +1446,6 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   if (run.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
-  // Double-finalize guard (state-machine): the leaderboard recompute below is
-  // deterministic from current team state, so re-running it is harmless — but
-  // the platform benchmark contribution further down is a ROLLING aggregate
-  // merge and is NOT idempotent. Without this flag, a double-click / retried
-  // finalizeRun call would fold the same run's stats into benchmarks/{taskType}
-  // twice, corrupting the cross-tenant median/completion-rate for every
-  // creator sharing that task type (player-profile writes are separately
-  // guarded by `profileRecorded` on each team, so they stay safe either way).
-  const alreadyFinalized = run.status === 'finished';
 
   const gameSnap = await db.doc(gamePath(uid, gameId)).get();
   const game = parseStored(() => parseGame(gameSnap.data()));
@@ -1387,7 +1456,19 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   const now = new Date().toISOString();
   const rankings = buildRankings(game, teams, now);
 
-  // Finalizing always publishes the final standings to participants.
+  // Finalizing publishes the final standings to participants UNLESS the creator
+  // opted into a staged reveal (change: manual-leaderboard-reveal) — then the
+  // board is computed and frozen but withheld until the creator explicitly calls
+  // refreshLeaderboard({ publish: true }) from the run console. Organizers always
+  // see the standings regardless (they read the run doc directly). This
+  // authoritative write is the ENTIRE job of finalizeRun (perf: run-perf-scale
+  // Task 9) — it's what the client is actually waiting on to move past "Ending
+  // run…", so it's the only thing awaited before returning. Heavier
+  // consolidation (per-team player-profile folds, the cross-tenant benchmark
+  // aggregate, the summary email) is handled by the `onRunFinalized` Firestore
+  // trigger below, which fires off THIS write's status:'finished' transition —
+  // see that trigger for why a background trigger (not a fire-and-forget
+  // promise here) is the correct mechanism.
   await runRef.update({
     status: 'finished',
     finishedAt: now,
@@ -1395,7 +1476,7 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     // (maybeRefreshLeaderboardSnapshot bails on frozen) can never recompute and
     // overwrite the published final standings after finalize. An organizer can
     // still explicitly un-freeze via refreshLeaderboard if they intend to.
-    leaderboard: { rankings, frozen: true, published: true, updatedAt: now },
+    leaderboard: { rankings, frozen: true, published: !game.manualLeaderboardReveal, updatedAt: now },
     // Reconcile station reservations from the live team docs (Fix 1 backstop):
     // recompute taskCounts as the ground truth of who ACTUALLY still holds a slot
     // (a non-empty activeTaskId) rather than blindly zeroing. A fully-finished run
@@ -1409,107 +1490,204 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     updatedAt: now,
   });
 
-  // Player profiles (change: player-profile-badges): fold each finished team's result
-  // into the player's cross-run profile. Done here as a batch — OFF the hot completeTask
-  // path — and made idempotent by `profileRecorded` on the team so a re-finalize never
-  // double-counts. Best-effort: a profile write must never fail finalize.
-  // A test-drive run is a rehearsal — excluded from cross-run player profiles
-  // (change: test-drive-mode).
-  if (!run.isTestDrive) try {
-    const scoreByTeam = new Map(rankings.map((r) => [r.teamId, r.score]));
-    for (const d of teamsSnap.docs) {
-      const team = d.data() as RunTeam & { profileRecorded?: boolean };
-      if (team.status !== 'finished' || team.profileRecorded) continue;
-      const tasksCompleted = (team.stages ?? []).reduce(
-        (n, s) => n + (s.tasks ?? []).filter((t) => t.status === 'completed').length, 0);
-      // The `profileRecorded` guard is checked + set atomically inside recordPlayerResult
-      // (same transaction as the profile write) so a concurrent finalize can't double-count.
-      await recordPlayerResult({
-        uid: d.id,
-        displayName: team.displayName,
-        tasksCompleted,
-        points: scoreByTeam.get(d.id) ?? team.score ?? 0,
-      }, d.ref);
-    }
-  } catch (e) {
-    logBestEffort('finalize.playerProfiles', { runId }, e);
-  }
+  return { rankings };
+}, { timeoutSeconds: 180, memory: '512MB' });
 
-  // Platform benchmark contribution (platform-benchmark): fold anonymized,
-  // per-task-type aggregates (median completion time + completion rate) into
-  // benchmarks/{taskType}. No per-run identifiers are written. Opt-outable via
-  // game.benchmarkOptOut. Best-effort — never blocks finalize. A test-drive run
-  // is excluded so a rehearsal never pollutes platform benchmarks
-  // (change: test-drive-mode).
-  if (!game.benchmarkOptOut && !run.isTestDrive && !alreadyFinalized) {
+
+// ─── onRunFinalized (Firestore trigger — perf: run-perf-scale, Task 9) ────────
+//
+// Why a trigger and not a fire-and-forget promise in finalizeRun: once a v1
+// `onCall` sends its response, Cloud Functions may throttle the container's
+// CPU toward zero and can freeze/reclaim the instance — an unawaited promise
+// left running after the response is NOT guaranteed to finish. That would
+// trade a visible latency bug for silent, non-deterministic data loss (a
+// player's badge/profile or a benchmark contribution just... doesn't happen,
+// with nothing but a log line nobody reads). A Firestore trigger is a
+// first-class unit of work the platform itself awaits and RETRIES on failure
+// (at-least-once delivery) — a real execution guarantee, not a hope.
+//
+// Mechanism: onUpdate on the run doc, guarded to fire exactly once per
+// `status` transition into 'finished' (never on an unrelated run-doc write —
+// e.g. a live team's taskCounts bump, requestNextTask, refreshLeaderboard —
+// and never again on a re-finalize of an already-finished run, since `before`
+// is then ALREADY 'finished'). This subsumes the old `alreadyFinalized` flag
+// entirely: the transition guard IS the double-finalize guard now.
+//
+// Idempotency under retry (Firestore delivers onUpdate at-least-once, so this
+// function itself can run more than once for the SAME transition):
+//   - player-profile folds: unchanged — `profileRecorded` is checked + set
+//     INSIDE recordPlayerResult's own transaction, per team, so a duplicate
+//     trigger fire just no-ops on every already-recorded team.
+//   - benchmark aggregate: NOT naturally idempotent (mergeBenchmark is a
+//     rolling merge) — see foldPlatformBenchmark's own `benchmarkContributed`
+//     transactional claim below.
+//   - summary email: would otherwise double-send on a duplicate fire — see
+//     sendRunSummaryEmailOnce's `summaryEmailSent` transactional claim below.
+// Each of the three concerns is independently try/caught so one failing
+// (e.g. a poisoned team doc, a down email provider) can never block the
+// others — but all three are properly AWAITED here, which is the whole point.
+export const onRunFinalized = functions.firestore
+  .document('users/{ownerUid}/games/{gameId}/runs/{runId}')
+  .onUpdate(async (change, context) => {
+    const beforeStatus = (change.before.data() as { status?: string } | undefined)?.status;
+    if (beforeStatus === 'finished') return null; // already handled on a prior transition
+
+    let run: Run;
     try {
-      const typeOf = new Map<string, string>();
-      for (const s of game.stages) for (const t of s.tasks) typeOf.set(t.id, t.type);
-      const durationsByType = new Map<string, number[]>();
-      const totalsByType = new Map<string, { done: number; total: number }>();
-      for (const team of teams) {
-        for (const stage of team.stages ?? []) {
-          for (const rec of stage.tasks ?? []) {
-            const type = typeOf.get(rec.taskId);
-            if (!type) continue;
-            const totals = totalsByType.get(type) ?? { done: 0, total: 0 };
-            totals.total += 1;
-            if (rec.status === 'completed') {
-              totals.done += 1;
-              if (rec.actualMinutes != null) {
-                const arr = durationsByType.get(type) ?? [];
-                arr.push(rec.actualMinutes * 60_000);
-                durationsByType.set(type, arr);
-              }
-            }
-            totalsByType.set(type, totals);
+      run = parseStored(() => parseRun(change.after.data()));
+    } catch (e) {
+      logBestEffort('onRunFinalized.parse', { path: change.after.ref.path }, e);
+      return null;
+    }
+    if (run.status !== 'finished') return null; // not the transition we care about
+
+    const { ownerUid, gameId, runId } = context.params as { ownerUid: string; gameId: string; runId: string };
+    const runRef = change.after.ref;
+
+    let game: Game;
+    let teams: RunTeam[];
+    let teamsSnap: FirebaseFirestore.QuerySnapshot;
+    try {
+      const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+      if (!gameSnap.exists) return null; // game deleted between finalize and trigger — nothing to fold
+      game = parseStored(() => parseGame(gameSnap.data()));
+      teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
+      teams = parseTeamsQuarantining(teamsSnap.docs);
+    } catch (e) {
+      logBestEffort('onRunFinalized.read', { runId }, e);
+      return null;
+    }
+
+    // Player profiles (change: player-profile-badges): fold each finished
+    // team's result into the player's cross-run profile. A test-drive run is a
+    // rehearsal — excluded (change: test-drive-mode).
+    if (!run.isTestDrive) {
+      try {
+        const scoreByTeam = new Map((run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]));
+        await Promise.all(teamsSnap.docs.map(async (d) => {
+          const team = d.data() as RunTeam & { profileRecorded?: boolean };
+          if (team.status !== 'finished' || team.profileRecorded) return;
+          const tasksCompleted = (team.stages ?? []).reduce(
+            (n, s) => n + (s.tasks ?? []).filter((t) => t.status === 'completed').length, 0);
+          await recordPlayerResult({
+            uid: d.id,
+            displayName: team.displayName,
+            tasksCompleted,
+            points: scoreByTeam.get(d.id) ?? team.score ?? 0,
+          }, d.ref);
+        }));
+      } catch (e) {
+        logBestEffort('onRunFinalized.playerProfiles', { runId }, e);
+      }
+    }
+
+    // Platform benchmark contribution (platform-benchmark): opt-outable via
+    // game.benchmarkOptOut; test-drive runs are excluded (change: test-drive-mode).
+    if (!game.benchmarkOptOut && !run.isTestDrive) {
+      try {
+        await foldPlatformBenchmark(runRef, game, teams);
+      } catch (e) {
+        logBestEffort('onRunFinalized.benchmark', { runId }, e);
+      }
+    }
+
+    // Run summary email seam (change: run-summary-report).
+    try {
+      await sendRunSummaryEmailOnce(runRef, ownerUid, gameId, runId, game, run, teams);
+    } catch (e) {
+      logBestEffort('onRunFinalized.runSummaryEmail', { runId }, e);
+    }
+
+    return null;
+  });
+
+// Fold anonymized per-task-type aggregates (median completion time +
+// completion rate) into benchmarks/{taskType}. No per-run identifiers are
+// written. Guarded by a transactional claim on the run doc so a duplicate
+// trigger delivery for the SAME finalize transition can never merge the same
+// run's stats into the rolling aggregate twice (mergeBenchmark is not
+// naturally idempotent — unlike profileRecorded, there's no cheap
+// per-sample dedupe). Tradeoff: if the fold crashes AFTER the claim, it will
+// not be retried on a later redelivery — accepted for this best-effort,
+// anonymized, cross-tenant aggregate (never blocks scoring/leaderboard
+// correctness), since the alternative (claim-after-write) risks a genuine
+// double-count under concurrent redelivery, which is the worse failure mode.
+async function foldPlatformBenchmark(
+  runRef: FirebaseFirestore.DocumentReference,
+  game: Game,
+  teams: RunTeam[],
+): Promise<void> {
+  const claimed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    if ((snap.data() as { benchmarkContributed?: boolean } | undefined)?.benchmarkContributed) return false;
+    tx.update(runRef, { benchmarkContributed: true });
+    return true;
+  });
+  if (!claimed) return;
+
+  const typeOf = new Map<string, string>();
+  for (const s of game.stages) for (const t of s.tasks) typeOf.set(t.id, t.type);
+  const durationsByType = new Map<string, number[]>();
+  const totalsByType = new Map<string, { done: number; total: number }>();
+  for (const team of teams) {
+    for (const stage of team.stages ?? []) {
+      for (const rec of stage.tasks ?? []) {
+        const type = typeOf.get(rec.taskId);
+        if (!type) continue;
+        const totals = totalsByType.get(type) ?? { done: 0, total: 0 };
+        totals.total += 1;
+        if (rec.status === 'completed') {
+          totals.done += 1;
+          if (rec.actualMinutes != null) {
+            const arr = durationsByType.get(type) ?? [];
+            arr.push(rec.actualMinutes * 60_000);
+            durationsByType.set(type, arr);
           }
         }
+        totalsByType.set(type, totals);
       }
-      for (const [type, totals] of totalsByType) {
-        const sample = {
-          medianMs: median(durationsByType.get(type) ?? []),
-          completionRate: totals.total > 0 ? totals.done / totals.total : 0,
-        };
-        const benchRef = db.doc(`benchmarks/${type}`);
-        await db.runTransaction(async (tx) => {
-          const snap = await tx.get(benchRef);
-          const prev = snap.exists ? (snap.data() as BenchmarkAggregate) : null;
-          tx.set(benchRef, mergeBenchmark(prev, sample));
-        });
-      }
-    } catch (e) {
-      // Benchmark contribution is best-effort; never fail finalize over it — but
-      // log so a silent merge/transaction bug here is visible, not invisible.
-      logBestEffort('finalize.benchmark', { runId }, e);
     }
   }
+  // One transaction per task type — independent keys, safe to run concurrently.
+  await Promise.all([...totalsByType.entries()].map(async ([type, totals]) => {
+    const sample = {
+      medianMs: median(durationsByType.get(type) ?? []),
+      completionRate: totals.total > 0 ? totals.done / totals.total : 0,
+    };
+    const benchRef = db.doc(`benchmarks/${type}`);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(benchRef);
+      const prev = snap.exists ? (snap.data() as BenchmarkAggregate) : null;
+      tx.set(benchRef, mergeBenchmark(prev, sample));
+    });
+  }));
+}
 
-  // Run summary email seam (change: run-summary-report). Strictly last, post-commit,
-  // OUTSIDE any transaction: compose the organizer summary from the just-written
-  // standings + feedback and hand it to the single email seam. Recipient is an env
-  // override or the owner's stored email. Best-effort — never allowed to affect
-  // finalize's return. Disabled/no-provider ⇒ a logged no-op (no socket opened).
-  try {
-    const feedbackSnap = await db.collection(feedbackCol(uid, gameId, runId)).get();
-    const responses = feedbackSnap.docs.map((d) => d.data() as RunFeedback);
-    const summary = buildRunSummaryResult(
-      game,
-      { ...run, status: 'finished', finishedAt: now, leaderboard: { rankings, frozen: true, published: true, updatedAt: now } },
-      teams,
-      responses,
-    );
-    const ownerSnap = await db.doc(`users/${uid}`).get();
-    const recipient = process.env.RUN_SUMMARY_EMAIL_TO
-      ?? (ownerSnap.data() as { email?: string } | undefined)?.email
-      ?? null;
-    await sendRunSummaryEmail(summary, recipient);
-  } catch (e) {
-    logBestEffort('finalize.runSummaryEmail', { runId }, e);
-  }
+// Compose + send the organizer's run summary email, guarded by the same
+// claim-transaction pattern as the benchmark fold so a duplicate trigger
+// delivery can never double-send the same run's summary.
+async function sendRunSummaryEmailOnce(
+  runRef: FirebaseFirestore.DocumentReference,
+  ownerUid: string, gameId: string, runId: string,
+  game: Game, run: Run, teams: RunTeam[],
+): Promise<void> {
+  const claimed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    if ((snap.data() as { summaryEmailSent?: boolean } | undefined)?.summaryEmailSent) return false;
+    tx.update(runRef, { summaryEmailSent: true });
+    return true;
+  });
+  if (!claimed) return;
 
-  return { rankings };
-});
+  const feedbackSnap = await db.collection(feedbackCol(ownerUid, gameId, runId)).get();
+  const responses = feedbackSnap.docs.map((d) => d.data() as RunFeedback);
+  const summary = buildRunSummaryResult(game, run, teams, responses);
+  const ownerSnap = await db.doc(`users/${ownerUid}`).get();
+  const recipient = process.env.RUN_SUMMARY_EMAIL_TO
+    ?? (ownerSnap.data() as { email?: string } | undefined)?.email
+    ?? null;
+  await sendRunSummaryEmail(summary, recipient);
+}
 
 
 // ─── refreshLeaderboard ─────────────────────────────────────────────────────────
@@ -2472,10 +2650,22 @@ export async function assignNextInActiveStage(
   ownerUid: string, gameId: string, runId: string, teamId: string,
   teamLocation: { lat: number; lng: number },
   now: string,
+  // Perf (run-perf-scale, Task 10): the caller MAY already hold the game doc
+  // (e.g. startTeams fans this out across every launched team). Accepting it
+  // here avoids re-reading the SAME game doc once per team — the dominant cost
+  // of the old serial startTeams loop. Falls back to a fresh read so every
+  // other caller (requestNextTask, completeTask's reassign, the poll sweep…)
+  // is unaffected.
+  preloadedGame?: Game,
 ): Promise<{ taskId?: string; reason?: NoAssignmentReason }> {
-  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
-  if (!gameSnap.exists) return {};
-  const game = gameSnap.data() as Game;
+  let game: Game;
+  if (preloadedGame) {
+    game = preloadedGame;
+  } else {
+    const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+    if (!gameSnap.exists) return {};
+    game = gameSnap.data() as Game;
+  }
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
   const teamSnap = await teamRef.get();
   if (!teamSnap.exists) return {};
@@ -3192,7 +3382,12 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       // Run start, so the client can compute per-task `releaseAfterMinutes`
       // countdowns for scheduled-release tasks in the active stage.
       launchedAt: run.launchedAt ?? null,
-      leaderboard: run.leaderboard ?? null,
+      // Only ever ship a PUBLISHED board to a participant (change:
+      // manual-leaderboard-reveal). Every participant consumer already requires
+      // `published` before rendering, but an unpublished board on the wire is
+      // still readable in devtools — which would defeat a staged reveal. Gate it
+      // at the source so "hidden from players" means hidden, not just unrendered.
+      leaderboard: run.leaderboard?.published ? run.leaderboard : null,
       // Active hot zone (hot-zone-bonus) so the participant app can show the
       // live "🔥 Hot Zone" banner + countdown. Coordinates are the zone centre
       // (already public to anyone in the run); answer keys are unaffected.
