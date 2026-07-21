@@ -3,16 +3,28 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
+import {
+  DndContext, DragOverlay, KeyboardSensor, PointerSensor, MeasuringStrategy,
+  closestCenter, useSensor, useSensors,
+} from '@dnd-kit/core';
+import type {
+  Announcements, DragEndEvent, DragStartEvent, KeyboardCoordinateGetter, ScreenReaderInstructions,
+} from '@dnd-kit/core';
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 import TaskLibrary from '../components/TaskLibrary';
-import StageRail from '../components/StageRail';
+import StageRail, { STAGE_DROP_PREFIX } from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
+import TaskCard, { GROUP_STYLES, type TaskGroupBadge } from '../components/TaskCard';
+import ExclusiveGroupsModal from '../components/ExclusiveGroupsModal';
 import TaskWizard from '../components/TaskWizard';
-import { moveItem, moveTaskBetweenStages, clampRequiredTaskCount } from '../lib/reorder';
+import {
+  moveItem, moveTaskBetweenStages, clampRequiredTaskCount,
+  normalizeGroups, setTaskGroup, removeTaskFromGroups, groupIndexOfTask,
+} from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
@@ -34,6 +46,51 @@ function MapSkeleton({ className = 'h-44' }: { className?: string }) {
 }
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+
+/**
+ * Keyboard arrow navigation for the Builder's drags (change: builder-dnd-groups).
+ *
+ * dnd-kit ships `sortableKeyboardCoordinates`, which navigates GEOMETRICALLY. That
+ * breaks down on the task canvas, which is a 2-column grid rendered right-to-left:
+ * "down" from the first card lands between rows and reads as a dead key, and after
+ * one horizontal step the walk gets stuck. Since what the creator is editing is an
+ * ORDERED LIST, this getter walks the sortable order instead: Down/Up are always
+ * next/previous, and Left/Right follow the document's writing direction. Predictable
+ * in either language, in either branch of the canvas, and unaffected by the column
+ * count. Cross-STAGE moves stay on the card's ⋯ menu, which is a real listbox.
+ */
+const arrowKeyCoordinates: KeyboardCoordinateGetter = (event, { context, currentCoordinates }) => {
+  const rtl = typeof document !== 'undefined' && document.dir === 'rtl';
+  const forward = event.code === 'ArrowDown' || event.code === (rtl ? 'ArrowLeft' : 'ArrowRight');
+  const back = event.code === 'ArrowUp' || event.code === (rtl ? 'ArrowRight' : 'ArrowLeft');
+  if (!forward && !back) return undefined;
+  event.preventDefault();
+
+  const activeId = context.active?.id;
+  if (activeId == null) return undefined;
+  const self = context.droppableContainers.get(activeId);
+  const containerId = self?.data.current?.sortable?.containerId;
+  if (containerId == null) return undefined;
+
+  // Siblings of the SAME sortable context, in their current sort order.
+  const siblings = Array.from(context.droppableContainers.values())
+    .filter((c) => c.data.current?.sortable?.containerId === containerId)
+    .sort((a, b) => (a.data.current?.sortable?.index ?? 0) - (b.data.current?.sortable?.index ?? 0));
+  const at = siblings.findIndex((c) => c.id === activeId);
+  const target = siblings[at + (forward ? 1 : -1)];
+  // Fall back to the containers' own rects: immediately after the lift the
+  // measuring pass may not have produced a collisionRect / droppableRects yet, and
+  // returning undefined there would silently SWALLOW the creator's first arrow key.
+  const targetRect = target && (context.droppableRects.get(target.id) ?? target.rect.current);
+  const from = context.collisionRect
+    ?? context.active?.rect.current.translated
+    ?? context.active?.rect.current.initial;
+  if (!targetRect || !from) return undefined;
+
+  // Translate the pointer by the gap between the dragged rect and the target rect;
+  // dnd-kit derives the collision rect from that delta.
+  return { x: currentCoordinates.x + (targetRect.left - from.left), y: currentCoordinates.y + (targetRect.top - from.top) };
+};
 
 function blankStage(order: number, title: string): Stage {
   return { id: uuid(), order, title, tasks: [blankTask()] };
@@ -650,6 +707,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 }) {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
+  const [groupsOpen, setGroupsOpen] = useState(false);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
   // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
   // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
@@ -680,21 +738,21 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   // rest lock (skip) once one is done. All the semantics (inert groups, first group
   // wins a contested id, the completion ceiling vs requiredTaskCount) live in the
   // pure @rushpoint/shared `mutualExclusion` module — the UI only edits the array.
-  function setExclusiveGroups(stage: Stage, groups: { id: string; taskIds: string[] }[]) {
-    updateStage(stage.id, { exclusiveGroups: groups.length > 0 ? groups : undefined });
-  }
-  function addExclusiveGroup(stage: Stage) {
-    setExclusiveGroups(stage, [...(stage.exclusiveGroups ?? []), { id: uuid(), taskIds: [] }]);
+  // Every write funnels through `normalizeGroups`, so the array that reaches the
+  // server already obeys the rules `effectiveExclusiveGroups` reads it by (ids of
+  // this stage only, deduped, first group wins a contested id, no empty groups).
+  function setExclusiveGroups(stage: Stage, groups: { id: string; taskIds: string[] }[] | undefined) {
+    updateStage(stage.id, { exclusiveGroups: normalizeGroups(groups, stage.tasks.map((t) => t.id)) });
   }
   function removeExclusiveGroup(stage: Stage, groupId: string) {
     setExclusiveGroups(stage, (stage.exclusiveGroups ?? []).filter((g) => g.id !== groupId));
   }
-  function toggleExclusiveMember(stage: Stage, groupId: string, taskId: string) {
-    setExclusiveGroups(stage, (stage.exclusiveGroups ?? []).map((g) => {
-      if (g.id !== groupId) return g;
-      const has = g.taskIds.includes(taskId);
-      return { ...g, taskIds: has ? g.taskIds.filter((id) => id !== taskId) : [...g.taskIds, taskId] };
-    }));
+  /** Put one task in exactly one group (or none). `create` makes the group in the
+   *  same update, so "new group + first member" is a single undo step. */
+  function assignTaskGroup(stage: Stage, taskId: string, groupId: string | null, create = false) {
+    const next = setTaskGroup(stage.exclusiveGroups, taskId, groupId, create);
+    if (next === stage.exclusiveGroups) return;
+    setExclusiveGroups(stage, next);
   }
   function removeStage(id: string) {
     const remaining = game.stages.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }));
@@ -724,14 +782,96 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   // `moveTaskBetweenStages` re-clamps BOTH stages' requiredTaskCount — skipping
   // either side leaves an unwinnable stage (required > tasks). It also refuses to
   // empty the source stage and returns the same array reference on a no-op.
-  function moveTaskToStage(fromStageId: string, taskId: string, toStageId: string) {
-    const next = moveTaskBetweenStages(game.stages, fromStageId, taskId, toStageId);
+  // `moveTaskBetweenStages` also strips the task from the SOURCE stage's exclusive
+  // groups — they are stage scoped, so a left-behind id is inert and would
+  // silently shrink a real group to one member with no trace in the UI.
+  function moveTaskToStage(fromStageId: string, taskId: string, toStageId: string, toIndex?: number) {
+    const next = moveTaskBetweenStages(game.stages, fromStageId, taskId, toStageId, toIndex);
     if (next === game.stages) return;
     setStages(next);
     // The moved task lives in a different stage now; the open panel would point
     // at a stale (stageId, taskId) pair, so close it.
     if (editing?.taskId === taskId) setEditing(null);
   }
+
+  // ── One DndContext for the whole Builder body (change: builder-dnd-groups) ──
+  // A cross-container drag (canvas card → stage rail) needs the rail and the
+  // canvas inside the SAME context, so the context lives here and both children
+  // only declare items. State is committed ONLY in onDragEnd, never in onDragOver,
+  // so one drag is exactly one `useHistory` undo step.
+  const [activeDrag, setActiveDrag] = useState<{ type: 'task' | 'stage'; id: string } | null>(null);
+  const sensors = useSensors(
+    // A short press + movement tolerance: without it a tap on a card (which opens
+    // the panel) and a scroll swipe on a tablet both register as drags.
+    useSensor(PointerSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: arrowKeyCoordinates }),
+  );
+  const dragName = (id: string): string => {
+    for (const s of game.stages) {
+      if (s.id === id) return s.title || b.untitledStage;
+      const t = s.tasks.find((x) => x.id === id);
+      if (t) return t.title || b.untitledTask;
+    }
+    return id;
+  };
+  // dnd-kit's default announcements are English-only strings baked into the
+  // library, so they are replaced wholesale — this is the whole justification for
+  // the drag being a first-class (rather than the only) way to move a task.
+  const screenReaderInstructions: ScreenReaderInstructions = { draggable: b.dndInstructions };
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => b.dndPickedUp(dragName(String(active.id))),
+    onDragOver: ({ active, over }) => {
+      if (!over) return undefined;
+      const overId = String(over.id);
+      const name = dragName(String(active.id));
+      return overId.startsWith(STAGE_DROP_PREFIX)
+        ? b.dndOverStage(name, dragName(overId.slice(STAGE_DROP_PREFIX.length)))
+        : b.dndOverTask(name, dragName(overId));
+    },
+    onDragEnd: ({ active }) => b.dndDropped(dragName(String(active.id))),
+    onDragCancel: ({ active }) => b.dndCancelled(dragName(String(active.id))),
+  };
+  function onDragStart(e: DragStartEvent) {
+    const type = e.active.data.current?.type;
+    setActiveDrag(type === 'stage' || type === 'task' ? { type, id: String(e.active.id) } : null);
+  }
+  function onDragEnd(e: DragEndEvent) {
+    setActiveDrag(null);
+    const { active, over } = e;
+    if (!over) return;
+    const aData = active.data.current as { type?: string; stageId?: string } | undefined;
+    const overId = String(over.id);
+
+    // ── A stage was dragged onto another stage: reorder the rail. ──
+    if (aData?.type === 'stage') {
+      const from = game.stages.findIndex((s) => s.id === active.id);
+      const to = game.stages.findIndex((s) => s.id === overId);
+      if (from >= 0 && to >= 0 && from !== to) moveStage(from, to);
+      return;
+    }
+    if (aData?.type !== 'task' || !aData.stageId) return;
+    const taskId = String(active.id);
+
+    // ── A task was dropped on a stage rail entry: append it to that stage. ──
+    if (overId.startsWith(STAGE_DROP_PREFIX)) {
+      const toStageId = overId.slice(STAGE_DROP_PREFIX.length);
+      if (toStageId !== aData.stageId) moveTaskToStage(aData.stageId, taskId, toStageId);
+      return;
+    }
+    // ── A task was dropped on another task. ──
+    const overStage = game.stages.find((s) => s.tasks.some((t) => t.id === overId));
+    if (!overStage) return;
+    const toIndex = overStage.tasks.findIndex((t) => t.id === overId);
+    if (overStage.id === aData.stageId) {
+      const from = overStage.tasks.findIndex((t) => t.id === taskId);
+      if (from >= 0 && from !== toIndex) reorderTasks(overStage.id, from, toIndex);
+    } else {
+      moveTaskToStage(aData.stageId, taskId, overStage.id, toIndex);
+    }
+  }
+  const draggedTask = activeDrag?.type === 'task'
+    ? game.stages.flatMap((s) => s.tasks).find((t) => t.id === activeDrag.id)
+    : undefined;
 
   function addTask(stageId: string) {
     const stage = game.stages.find((s) => s.id === stageId);
@@ -751,18 +891,38 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   // applies to later stages (a timed "drop" of a chapter mid-game / on day N).
   const isFirstStage = !!activeStage && game.stages[0]?.id === activeStage.id;
 
+  // Group membership for the badges, derived from the SHARED `effectiveExclusiveGroups`
+  // so a badge can never claim something the server would not enforce (a 1-member
+  // group is inert there and therefore badge-less here).
+  const activeEffectiveGroups = activeStage ? effectiveExclusiveGroups(activeStage) : [];
+  const groupOf = (taskId: string): TaskGroupBadge | undefined => {
+    const i = groupIndexOfTask(activeEffectiveGroups, taskId);
+    if (i < 0) return undefined;
+    return { index: i, letter: b.exclusiveGroupLetter(i), size: activeEffectiveGroups[i].length };
+  };
+
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      accessibility={{ announcements, screenReaderInstructions }}
+      // Always-remeasure is what lets a droppable that MOUNTS mid-drag (a row the
+      // virtualizer reveals while auto-scrolling) still be a valid target.
+      measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragCancel={() => setActiveDrag(null)}
+    >
     <div className="flex gap-3 h-full min-h-0">
-      {/* ── Left rail: stage navigator ── */}
+      {/* ── Left rail: stage navigator (also the cross-stage drop target) ── */}
       <StageRail
         stages={game.stages}
         activeStageId={activeStage?.id ?? null}
         onSelect={setActiveStageId}
-        onMove={moveStage}
         onAdd={addStage}
-        onTaskDrop={(p, toStageId) => moveTaskToStage(p.fromStageId, p.taskId, toStageId)}
+        taskDragging={activeDrag?.type === 'task'}
       />
 
       {/* ── Centre canvas: the active stage. No wrapping Card — the shell already
@@ -842,56 +1002,38 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               </div>
             )}
 
-            {/* Mutually exclusive task groups (wave-b task 5). Same compact strip
-                idiom as the stage rules row above: one bordered surface row,
-                text-xs, logical spacing only so RTL stays correct. Each group is a
-                line of toggle chips (a task already claimed by another group is
-                disabled); ✕ deletes the group. Only meaningful with a task pool. */}
+            {/* Mutually exclusive task groups — SUMMARY strip (change:
+                builder-dnd-groups). One line whose height is constant in the
+                number of TASKS (it only wraps with the number of groups, which is
+                realistically 2 or 3), replacing the old chip table that drew one
+                chip per task per group. Editing happens in the modal; the badges
+                on the task cards are where the membership is actually read. */}
             {m > 1 && (
-              <div className="rounded-lg border border-[--rp-border] bg-[--surface-2]/40 px-3 py-2 text-xs text-zinc-400 space-y-1.5">
-                <div className="flex items-center flex-wrap gap-2 text-start">
-                  <span title={b.exclusiveHint}>{b.exclusiveLead}</span>
-                  <button
-                    type="button"
-                    className="rounded-full border border-[--rp-border] px-2 py-0.5 hover:text-zinc-200"
-                    onClick={() => addExclusiveGroup(activeStage)}
-                  >+ {b.exclusiveAddGroup}</button>
-                </div>
-                {(activeStage.exclusiveGroups ?? []).map((g, gi) => (
-                  <div key={g.id} className="flex items-center flex-wrap gap-1.5 text-start">
-                    <span className="shrink-0">{b.exclusiveGroupLabel(gi + 1)}</span>
-                    {activeStage.tasks.map((t, ti) => {
-                      const inThis = g.taskIds.includes(t.id);
-                      const inOther = !inThis && (activeStage.exclusiveGroups ?? [])
-                        .some((o) => o.id !== g.id && o.taskIds.includes(t.id));
-                      return (
-                        <button
-                          key={t.id}
-                          type="button"
-                          disabled={inOther}
-                          title={inOther ? b.exclusiveTaskTaken : undefined}
-                          aria-pressed={inThis}
-                          dir="auto"
-                          className={`rounded-full border px-2 py-0.5 max-w-[10rem] truncate ${
-                            inThis
-                              ? 'border-neon-cyan text-neon-cyan'
-                              : inOther
-                                ? 'border-[--rp-border] opacity-40'
-                                : 'border-[--rp-border] hover:text-zinc-200'
-                          }`}
-                          onClick={() => toggleExclusiveMember(activeStage, g.id, t.id)}
-                        >{t.title || `${b.untitledTask} ${ti + 1}`}</button>
-                      );
-                    })}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-[--rp-border] bg-[--surface-2]/40 px-3 py-2 text-xs text-zinc-400 text-start">
+                <span title={b.exclusiveHint}>{b.exclusiveLead}</span>
+                {activeEffectiveGroups.map((members, gi) => {
+                  const letter = b.exclusiveGroupLetter(gi);
+                  const st = GROUP_STYLES[gi % GROUP_STYLES.length];
+                  return (
                     <button
+                      key={letter}
                       type="button"
-                      className="text-neon-red shrink-0"
-                      title={b.exclusiveRemoveGroup}
-                      aria-label={b.exclusiveRemoveGroup}
-                      onClick={() => removeExclusiveGroup(activeStage, g.id)}
-                    >✕</button>
-                  </div>
-                ))}
+                      aria-label={b.exclusiveChipAria(letter, members.length)}
+                      title={b.exclusiveChipAria(letter, members.length)}
+                      onClick={() => setGroupsOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5 hover:text-zinc-200"
+                    >
+                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
+                      <span className="tabular-nums">{b.taskCount(members.length)}</span>
+                    </button>
+                  );
+                })}
+                {activeEffectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
+                <button
+                  type="button"
+                  className="ms-auto rounded-full border border-[--rp-border] px-2 py-0.5 hover:text-zinc-200"
+                  onClick={() => setGroupsOpen(true)}
+                >{b.exclusiveOpenEditor}</button>
               </div>
             )}
 
@@ -925,7 +1067,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
                 onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
                 stageId={activeStage.id}
-                onReorder={(from, to) => reorderTasks(activeStage.id, from, to)}
+                groupOf={groupOf}
                 moveTargets={game.stages
                   .map((s, i) => ({ id: s.id, label: s.title || b.stageLabel(i + 1) }))
                   .filter((s) => s.id !== activeStage.id)}
@@ -972,14 +1114,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 // Drop the removed id from any exclusive group too (wave-b task 5).
                 // A dangling id is inert by contract, but leaving it would silently
                 // shrink a group to one member (= no exclusivity) with no UI trace.
-                const nextGroups = (editingStage.exclusiveGroups ?? [])
-                  .map((g) => ({ ...g, taskIds: g.taskIds.filter((id) => id !== editingTask.id) }))
-                  .filter((g) => g.taskIds.length > 0);
                 const patch: Partial<Stage> = {
                   tasks: nextTasks,
                   requiredTaskCount: clampRequiredTaskCount(editingStage.requiredTaskCount, nextTasks.length),
                   ...(editingStage.exclusiveGroups
-                    ? { exclusiveGroups: nextGroups.length > 0 ? nextGroups : undefined }
+                    ? { exclusiveGroups: removeTaskFromGroups(editingStage.exclusiveGroups, editingTask.id) }
                     : {}),
                 };
                 updateStage(editingStage.id, patch);
@@ -989,7 +1128,28 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
           onClose={() => setEditing(null)}
         />
       )}
+
+      {/* Grouping editor. One radio group per task ⇒ a task can be in at most one
+          group by construction, and the whole editor is keyboard native with no
+          drag involved (deliberate: grouping must never depend on a gesture). */}
+      {groupsOpen && activeStage && (
+        <ExclusiveGroupsModal
+          stage={activeStage}
+          onAssign={(taskId, groupId, create) => assignTaskGroup(activeStage, taskId, groupId, create)}
+          onRemoveGroup={(groupId) => removeExclusiveGroup(activeStage, groupId)}
+          onClose={() => setGroupsOpen(false)}
+        />
+      )}
+
+      {/* The dragged card is rendered OUTSIDE the scroll container, so a windowed
+          row that unmounts as the canvas auto-scrolls cannot kill the drag. */}
+      <DragOverlay dropAnimation={null}>
+        {draggedTask
+          ? <div className="w-72 opacity-90 pointer-events-none"><TaskCard task={draggedTask} onClick={() => {}} group={groupOf(draggedTask.id)} /></div>
+          : null}
+      </DragOverlay>
     </div>
+    </DndContext>
   );
 }
 

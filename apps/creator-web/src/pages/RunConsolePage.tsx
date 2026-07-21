@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import QRCode from 'qrcode';
@@ -11,9 +11,16 @@ import {
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
-  sendTeamChatMessage,
+  sendTeamChatMessage, reviewStationSubmission,
   type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult, type SurveyResultRow,
 } from '../services/calls';
+// Photo approval queue (wave-e task 13) — pure queue logic shared with the
+// play-web StaffConsole so the two review surfaces can never disagree.
+import {
+  buildSubmissionQueues, submissionKey, canReject, isRenderableMedia,
+  type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
+} from '@rushpoint/shared';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
@@ -319,6 +326,11 @@ export default function RunConsolePage() {
           {/* Territory zones — author capturable zones + see who holds them. */}
           {!finished && <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />}
 
+          {/* Photo approval queue — submissions waiting for a human, streamed live
+              from the run's team docs. Sits ABOVE the feed: pending work outranks
+              the gallery of already-approved photos (wave-e task 13). */}
+          <PhotoReviewConsole ctx={ctx} />
+
           {/* Live photo feed — approved photos broadcast to participants, with
               a hide button per card for moderation (live-photo-feed). */}
           <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />
@@ -452,12 +464,18 @@ function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBo
 
 // Staff onboarding card — instead of hand-typing three Firebase IDs + the PIN,
 // the organizer shares a link/QR that lands staff in the play app's staff sign-in
-// with owner/game/run pre-filled (StaffSignIn reads ?owner/?game/?run). The PIN is
+// with the run context pre-filled (StaffSignIn reads it from the single ?staff param). The PIN is
 // deliberately NOT in the link (it's a secret + play-web doesn't read it from the
 // URL) — staff read it off this card and type it once.
 function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string; runId: string }; pin: string }) {
   const t = useT();
-  const link = `${PLAY_URL}/?staff&owner=${ctx.ownerUid}&game=${ctx.gameId}&run=${ctx.runId}`;
+  // ONE param, and deliberately no `game=` key: the public promo route reads `game`
+  // too, so the old multi-param shape re-resolved to GamePromoScreen (which offers
+  // instant play) and turned staff into participants. A valueless `?staff` key was
+  // also droppable by QR scanners / link previewers, which misrouted the FIRST scan.
+  // Shape must stay in sync with parseStaffParam() in apps/play-web/src/lib/playRoute.ts;
+  // that parser still accepts the legacy shape, so links already in the wild keep working.
+  const link = `${PLAY_URL}/?staff=${encodeURIComponent(`${ctx.ownerUid}.${ctx.gameId}.${ctx.runId}`)}`;
   const [qr, setQr] = useState('');
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -815,6 +833,167 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
               <button className="text-neon-red text-xs" onClick={() => remove(z.id)}>✕</button>
             </div>
           ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// Photo approval queue (wave-e task 13): the manager's live review panel.
+//
+// Why a `teams` collection listener and not a query: `submitStationPhoto` stores a
+// submission as a MAP FIELD on the team doc (`taskSubmissions[taskId]`), so there
+// is nothing to index or filter on — a queue must read the team docs and flatten
+// them. One listener covers the whole run; team docs already change constantly, so
+// this is cheaper than the 5s listRunTeams poll this page already runs, and it is
+// bounded by the per-run device cap. The flattening/ordering/status rules live in
+// @rushpoint/shared (photoQueue) so this panel and the play-web StaffConsole can
+// never disagree about what is pending or which actions are legal.
+//
+// The owner already has rules-level read on every team doc of its own run
+// (firestore.rules, match /teams/{teamId}), so no rules or index change is needed.
+function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+  const rc = useT().runConsole;
+  const [teamDocs, setTeamDocs] = useState<SubmissionTeamDoc[]>([]);
+  const { ownerUid, gameId, runId } = ctx;
+
+  useEffect(() => {
+    const ref = collection(db, FIRESTORE_PATHS.teamsCol(ownerUid, gameId, runId));
+    return onSnapshot(ref, (snap) => {
+      setTeamDocs(snap.docs.map((d) => {
+        const data = d.data() as { displayName?: string; taskSubmissions?: Record<string, RawSubmission> };
+        return { id: d.id, displayName: data.displayName, taskSubmissions: data.taskSubmissions };
+      }));
+    }, () => undefined);
+  }, [ownerUid, gameId, runId]);
+
+  const { pending, reviewed, pendingCount } = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
+
+  async function review(row: SubmissionRow, approved: boolean) {
+    let note = '';
+    if (!approved) {
+      const answer = await dialog.prompt(rc.photoReviewRejectPrompt);
+      if (answer === null) return; // cancelled
+      note = answer;
+    }
+    try {
+      await reviewStationSubmission({
+        ...ctx, teamId: row.teamId, taskId: row.taskId, approved, ...(note ? { note } : {}),
+      });
+      toast.success(approved ? rc.photoReviewApproved : rc.photoReviewRejected);
+    } catch {
+      toast.error(rc.photoReviewFailed);
+    }
+    // No optimistic removal: the row disappears because the snapshot says the
+    // status left 'pending'. Optimism here would hide a failed review.
+  }
+
+  // Per-row in-flight guard — a double-tapped Approve must fire ONE callable.
+  // Keyed exactly like the StaffConsole so another row can still act meanwhile.
+  const reviewAction = useAsyncAction<[SubmissionRow, boolean], void>(review, (row) => submissionKey(row));
+
+  function clock(iso: string): string {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString();
+  }
+
+  function Media({ row }: { row: SubmissionRow }) {
+    if (!isRenderableMedia(row.photoUrl)) {
+      return <div className="text-[11px] text-zinc-500">{rc.photoReviewNoPhoto}</div>;
+    }
+    if (row.mediaKind === 'audio') {
+      return <audio controls preload="none" src={row.photoUrl} className="w-full" aria-label={rc.photoReviewAudio} />;
+    }
+    return (
+      <a href={row.photoUrl} target="_blank" rel="noreferrer">
+        <img src={row.photoUrl} alt={rc.photoReviewAlt} loading="lazy" className="w-full h-32 object-cover rounded-md" />
+      </a>
+    );
+  }
+
+  if (pendingCount === 0 && reviewed.length === 0) return null;
+
+  return (
+    <Card className="p-4 mt-4">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-sm font-medium">📷 {rc.photoReview}</div>
+        {pendingCount > 0 && (
+          <Badge color="gold">{rc.photoReviewCount({ n: pendingCount })}</Badge>
+        )}
+      </div>
+      <p className="text-[11px] text-zinc-500 mb-3">{rc.photoReviewHelp}</p>
+
+      {pending.length === 0
+        ? <p className="text-zinc-500 text-sm">{rc.photoReviewNone}</p>
+        : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {pending.map((row) => {
+              const key = submissionKey(row);
+              return (
+                <div key={key} className="rounded-lg bg-app-bg p-2">
+                  <Media row={row} />
+                  <div dir="auto" className="text-xs text-zinc-200 truncate mt-2">{row.displayName}</div>
+                  <div dir="auto" className="text-[11px] text-zinc-500 truncate">
+                    {rc.photoReviewTaskLabel} {row.taskId}
+                  </div>
+                  {row.submittedAt && (
+                    <div className="text-[11px] text-zinc-600">
+                      {rc.photoReviewSubmittedAt({ time: clock(row.submittedAt) })}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 mt-2">
+                    <Button
+                      className="flex-1"
+                      disabled={reviewAction.isBusy(key)}
+                      onClick={() => { void reviewAction.run(row, true).catch(() => undefined); }}
+                    >
+                      {rc.photoReviewApprove}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="flex-1"
+                      disabled={reviewAction.isBusy(key)}
+                      onClick={() => { void reviewAction.run(row, false).catch(() => undefined); }}
+                    >
+                      {rc.photoReviewReject}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+      {reviewed.length > 0 && (
+        <div className="mt-4">
+          <div className="text-[11px] text-zinc-500 mb-2">{rc.photoReviewRecent}</div>
+          <div className="space-y-1">
+            {reviewed.map((row) => {
+              const key = submissionKey(row);
+              return (
+                <div key={key} className="flex items-center gap-2 text-[11px]">
+                  <span className={row.status === 'approved' ? 'text-neon-green' : 'text-neon-red'}>
+                    {row.status === 'approved' ? rc.photoReviewTagApproved : rc.photoReviewTagRejected}
+                  </span>
+                  <span dir="auto" className="text-zinc-300 truncate flex-1">{row.displayName}</span>
+                  <span dir="auto" className="text-zinc-600 truncate">{row.taskId}</span>
+                  {/* An approved row can never be "rejected" back: the server has no
+                      score clawback, so the button is DISABLED and says why rather
+                      than flipping a status string while the points quietly stay.
+                      A rejected row can still be approved (it was never scored). */}
+                  <button
+                    className="text-zinc-500 disabled:text-zinc-700 disabled:cursor-not-allowed"
+                    disabled={!canReject(row.status) || reviewAction.isBusy(key)}
+                    title={canReject(row.status) ? undefined : rc.photoReviewRejectDisabled}
+                    onClick={() => { void reviewAction.run(row, false).catch(() => undefined); }}
+                  >
+                    {canReject(row.status) ? rc.photoReviewReject : rc.photoReviewRejectDisabled}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </Card>
