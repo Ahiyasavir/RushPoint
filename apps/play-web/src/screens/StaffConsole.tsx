@@ -21,6 +21,7 @@ import {
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { feedback } from '../lib/sound';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // ── A flattened pending photo submission row (one per team×task) ──
 interface PendingSubmission {
@@ -72,10 +73,9 @@ function StaffSignIn({
   const [runId, setRunId] = useState(params.get('run') ?? '');
   const [pin, setPin] = useState('');
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
 
   async function submit() {
-    setErr(''); setBusy(true);
+    setErr('');
     try {
       const res = await staffSignIn({ ownerUid: ownerUid.trim(), gameId: gameId.trim(), runId: runId.trim(), pin: pin.trim() });
       await signInStaff(res.customToken);
@@ -95,8 +95,12 @@ function StaffSignIn({
         : code === 'invalid-argument' ? t.staff.signInBadDetails
         : t.staff.signInFailed,
       );
-    } finally { setBusy(false); }
+    }
   }
+  // In-flight guard (change: wave-b/async-action-guard) — a double-tapped sign-in
+  // burned two PIN attempts against the server's lockout counter.
+  const submitAction = useAsyncAction(submit);
+  const busy = submitAction.busy;
 
   return (
     <Screen>
@@ -112,11 +116,11 @@ function StaffSignIn({
             onChange={(e) => setPin(e.target.value)}
             placeholder={t.staff.pin}
             className="text-center text-xl font-mono tracking-[0.3em]"
-            onKeyDown={(e) => e.key === 'Enter' && submit()}
+            onKeyDown={(e) => { if (e.key === 'Enter') void submitAction.run(); }}
           />
         </div>
         {err && <p className="text-danger text-sm text-center mt-3">{err}</p>}
-        <Button disabled={busy || !ownerUid || !gameId || !runId || !pin} onClick={submit} className="mt-5">
+        <Button disabled={busy || !ownerUid || !gameId || !runId || !pin} loading={busy} onClick={() => void submitAction.run()} className="mt-5">
           {t.staff.signIn}
         </Button>
         <button className="text-zinc-500 text-sm mt-4 mx-auto" onClick={onExit}>{t.staff.backToJoin}</button>
@@ -135,7 +139,6 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [readErr, setReadErr] = useState('');
-  const [busyKey, setBusyKey] = useState<string | null>(null);
 
   // Live pending photo submissions + team scores across all teams in the run.
   // One snapshot feeds both the photo-review queue and the manual bonus panel.
@@ -211,34 +214,39 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   }, [ownerUid, gameId, runId]);
 
   async function review(s: PendingSubmission, approved: boolean) {
-    const key = `${s.teamId}:${s.taskId}`;
-    setBusyKey(key);
     try {
       await reviewStationSubmission({ ...ctx, teamId: s.teamId, taskId: s.taskId, approved });
     } catch (e) {
       setReadErr(e instanceof Error ? e.message : t.staff.reviewFailed);
-    } finally { setBusyKey(null); }
+    }
   }
 
   async function ack(a: Alert) {
-    setBusyKey(a.id);
     try {
       await acknowledgeAlert({ ...ctx, alertId: a.id });
     } catch (e) {
       setReadErr(e instanceof Error ? e.message : t.staff.ackFailed);
-    } finally { setBusyKey(null); }
+    }
   }
 
   // Manual bonus / deduction. Positive delta = bonus, negative = fine. The team
   // score updates live via the open snapshot; no manual refresh needed.
   async function adjust(team: TeamRow, delta: number) {
-    setBusyKey(team.id);
     try {
       await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'staff' });
     } catch (e) {
       setReadErr(e instanceof Error ? e.message : t.staff.adjustFailed);
-    } finally { setBusyKey(null); }
+    }
   }
+
+  // In-flight guards (change: wave-b/async-action-guard). These replace the single
+  // `busyKey` useState — which could not stop a second tap in the same React batch,
+  // so a double-tapped +10 really did award 20, and a double-tapped approve fired
+  // reviewStationSubmission twice. Keyed exactly like busyKey was, so a different
+  // row can still act while this one is in flight.
+  const reviewAction = useAsyncAction<[PendingSubmission, boolean], void>(review, (s) => `${s.teamId}:${s.taskId}`);
+  const ackAction = useAsyncAction<[Alert], void>(ack, (a) => a.id);
+  const adjustAction = useAsyncAction<[TeamRow, number], void>(adjust, (team) => team.id);
 
 
   return (
@@ -279,8 +287,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                 </div>
                 <button
                   className="shrink-0 px-3 py-1.5 rounded-lg bg-app-raised text-zinc-100 text-sm border border-glass-border disabled:opacity-40"
-                  disabled={busyKey === a.id}
-                  onClick={() => ack(a)}
+                  disabled={ackAction.isBusy(a.id)}
+                  onClick={() => void ackAction.run(a)}
                 >
                   {t.staff.ack}
                 </button>
@@ -314,15 +322,15 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                 <div className="flex gap-2">
                   <button
                     className="flex-1 py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
-                    disabled={busyKey === key}
-                    onClick={() => review(s, true)}
+                    disabled={reviewAction.isBusy(key)}
+                    onClick={() => void reviewAction.run(s, true)}
                   >
                     {t.staff.approve}
                   </button>
                   <button
                     className="flex-1 py-2 rounded-lg bg-danger text-white font-semibold text-sm disabled:opacity-40"
-                    disabled={busyKey === key}
-                    onClick={() => review(s, false)}
+                    disabled={reviewAction.isBusy(key)}
+                    onClick={() => void reviewAction.run(s, false)}
                   >
                     {t.staff.reject}
                   </button>
@@ -353,9 +361,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                       className={`w-9 h-9 rounded-lg text-sm font-bold border disabled:opacity-40 ${
                         d > 0 ? 'bg-accent/15 text-accent border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
                       }`}
-                      disabled={busyKey === tm.id}
+                      disabled={adjustAction.isBusy(tm.id)}
                       aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
-                      onClick={() => adjust(tm, d)}
+                      onClick={() => void adjustAction.run(tm, d)}
                     >{d > 0 ? `+${d}` : d}</button>
                   ))}
                 </div>
@@ -394,7 +402,6 @@ function StaffChatSection({
   const [openTeam, setOpenTeam] = useState<string | null>(null);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState('');
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const ref = collection(db, FIRESTORE_PATHS.runChatCol(ctx.ownerUid, ctx.gameId, ctx.runId));
@@ -433,14 +440,16 @@ function StaffChatSection({
 
   async function reply(teamId: string) {
     const clean = draft.trim();
-    if (!clean || busy) return;
-    setBusy(true);
+    if (!clean) return;
     try {
       await sendTeamChatMessage({ ...ctx, teamId, text: clean, senderName });
       setDraft('');
     } catch { /* the listener reconciles; keep the draft for a retry */ }
-    finally { setBusy(false); }
   }
+  // Guarded so a double-tapped send (or Enter held down) can't post the same reply
+  // twice (change: wave-b/async-action-guard).
+  const replyAction = useAsyncAction(reply);
+  const busy = replyAction.busy;
 
   const totalUnread = threads.reduce((n, th) => n + (th.messages.length > (seen[th.teamId] ?? 0) ? 1 : 0), 0);
 
@@ -488,7 +497,7 @@ function StaffChatSection({
                       <input
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void reply(th.teamId); } }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void replyAction.run(th.teamId); } }}
                         maxLength={CHAT_TEXT_MAX_LEN}
                         dir="auto"
                         disabled={busy}
@@ -496,7 +505,7 @@ function StaffChatSection({
                         className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
                       />
                       <button
-                        onClick={() => void reply(th.teamId)}
+                        onClick={() => void replyAction.run(th.teamId)}
                         disabled={busy || !draft.trim()}
                         className="shrink-0 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
                       >
@@ -541,18 +550,19 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
   const { t } = useT();
   const [msg, setMsg] = useState('');
   const [msgHe, setMsgHe] = useState('');
-  const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
 
   async function send() {
     if (!msg.trim()) return;
-    setBusy(true); setSent(false);
-    try {
-      await pushAnnouncement({ ...ctx, message: msg.trim(), messageHe: msgHe.trim() || undefined });
-      setMsg(''); setMsgHe(''); setSent(true);
-      setTimeout(() => setSent(false), 2500);
-    } finally { setBusy(false); }
+    setSent(false);
+    await pushAnnouncement({ ...ctx, message: msg.trim(), messageHe: msgHe.trim() || undefined });
+    setMsg(''); setMsgHe(''); setSent(true);
+    setTimeout(() => setSent(false), 2500);
   }
+  // Guarded: a double-tapped broadcast pushed the same announcement to every team
+  // twice (change: wave-b/async-action-guard).
+  const sendAction = useAsyncAction(send);
+  const busy = sendAction.busy;
 
   return (
     <section className="pt-2 border-t border-glass-border">
@@ -561,7 +571,7 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
         <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.staff.msgEn} />
         <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder={t.staff.msgHe} dir="rtl" />
       </div>
-      <Button disabled={busy || !msg.trim()} onClick={send} className="mt-3">
+      <Button disabled={busy || !msg.trim()} loading={busy} onClick={() => void sendAction.run()} className="mt-3">
         {sent ? t.staff.sent : t.staff.broadcast}
       </Button>
     </section>

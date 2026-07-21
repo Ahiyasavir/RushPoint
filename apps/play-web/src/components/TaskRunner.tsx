@@ -7,7 +7,11 @@ import {
   type MyTeamState, type SafeTask,
 } from '../services/calls';
 import { uploadTaskPhoto, uploadTaskAudio } from '../services/firebase';
-import { compressImageFile } from '../lib/imageResize';
+import { compressImageWithReport } from '../lib/imageResize';
+import {
+  getUploadProgress, subscribeUploadProgress,
+  getUploadRetrying, subscribeUploadRetrying,
+} from '../lib/uploadResiliency';
 import { withLocation } from '../utils/withLocation';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
@@ -821,6 +825,19 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [fileErr, setFileErr] = useState('');
+  // A full-size fallback (compression failed) is the difference between a 400 KB
+  // and a 5 MB upload — tell the player instead of letting it look like a freeze.
+  const [warn, setWarn] = useState('');
+  // Live upload progress, published by uploadResilient() in services/firebase.ts.
+  // A store rather than a prop because the upload is kicked off by TaskRunner's
+  // photo() several components away. See docs/wave-a/upload-resiliency.md.
+  const [pct, setPct] = useState<number | null>(getUploadProgress());
+  const [retrying, setRetrying] = useState(getUploadRetrying());
+  useEffect(() => {
+    const un1 = subscribeUploadProgress(setPct);
+    const un2 = subscribeUploadRetrying(setRetrying);
+    return () => { un1(); un2(); };
+  }, []);
   // Track the live object URL so we can revoke the previous one (and clean up on
   // unmount) — otherwise each re-pick leaks a blob URL.
   const prevPreviewRef = useRef<string | null>(null);
@@ -837,14 +854,17 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
   // no paste-a-URL field. The captured image is downscaled + JPEG-compressed in the
   // browser BEFORE upload so it doesn't burn mobile data.
   async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setFileErr('');
+    setFileErr(''); setWarn('');
     const f = e.target.files?.[0] ?? null;
     e.target.value = ''; // allow re-selecting the same capture
     if (!f) { setFile(null); setPreviewUrl(null); return; }
     if (!f.type.startsWith('image/')) { setFileErr(t.task.chooseImage); setFile(null); setPreviewUrl(null); return; }
     if (f.size > MAX_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
-    const blob = await compressImageFile(f);
-    const compressed = new File([blob], `photo-${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+    // compressImageWithReport reports WHY it fell back instead of silently
+    // handing back the full-size capture (Task 11).
+    const report = await compressImageWithReport(f);
+    if (!report.compressed) setWarn(t.task.photoNotCompressed);
+    const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
     setFile(compressed);
     setPreviewUrl(URL.createObjectURL(compressed));
   }
@@ -858,7 +878,19 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
         {file ? t.task.retakePhoto : t.task.takePhoto}
       </Button>
       {fileErr && <p className="text-rp-alert text-sm">{fileErr}</p>}
+      {!fileErr && warn && <p className="text-sm text-zinc-400" data-testid="photo-warn">{warn}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
+      {/* Determinate progress: a slow upload must never look like a frozen app. */}
+      {busy && pct !== null && (
+        <div className="space-y-1" data-testid="photo-progress">
+          <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+            <div className="h-full bg-rp-fire transition-all duration-200" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="text-xs text-zinc-400">
+            {retrying ? t.task.uploadRetrying : t.task.uploadingPercent({ pct })}
+          </p>
+        </div>
+      )}
       <Button disabled={!canSubmit} onClick={() => file && onSubmit(file)} data-testid="photo-submit">
         {busy ? t.task.working : t.task.submitPhoto}
       </Button>

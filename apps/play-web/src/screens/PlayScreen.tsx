@@ -5,6 +5,7 @@ import { getMyTeamState, triggerSOS, updateLocation, getRunTrackables, pickUpTra
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import { isFatalSyncError } from '../lib/syncError';
 import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
@@ -43,7 +44,6 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const hasState = useRef(false);
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
-  const [sharing, setSharing] = useState(false);
   // Territory zones (change: fix-territory-map-visibility): fetched once here so the
   // SAME list feeds both the NavMap circles and the ZonesPanel list, and both
   // refresh together after a capture.
@@ -259,9 +259,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // a "we're racing / we're #N" headline. Every share carries the build-your-own
   // CTA, so an in-progress flex doubles as marketing for the creator app.
   async function shareProgress() {
-    if (!state || sharing) return;
-    setSharing(true);
-    try {
+    if (!state) return;
+    {
       const { team, game } = state;
       const name = game.branding?.name ?? game.title;
       const done = team.stages.filter((s) => s.status === 'completed').length;
@@ -286,8 +285,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         headline,
         scoreLabel: t.play.pointsSoFar,
       }, text);
-    } finally { setSharing(false); }
+    }
   }
+
+  // In-flight guards (change: wave-b/async-action-guard). SOS was completely
+  // unguarded — a panicked double tap fired triggerSOS twice and stacked two
+  // confirm dialogs on a SAFETY feature. shareProgress re-entrancy would kick off
+  // two canvas renders + two native share sheets.
+  const sosAction = useAsyncAction(sos);
+  const shareAction = useAsyncAction(shareProgress);
+  const sharing = shareAction.busy;
 
   if (!state) {
     return (
@@ -347,7 +354,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         {hasTeammateDevices && myUid && (
           <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
         )}
-        <Button variant="danger" onClick={sos}>SOS</Button>
+        <Button variant="danger" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
       </Screen>
     );
   }
@@ -412,7 +419,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           {t.play.streak({ n: streak })}
         </div>
       )}
-      <button onClick={shareProgress} disabled={sharing}
+      <button onClick={() => void shareAction.run()} disabled={sharing}
         className="self-end text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
         {sharing ? t.play.creating : t.play.shareProgress}
       </button>
@@ -460,7 +467,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         )}
       </div>
 
-      <Button variant="danger" className="mt-4" onClick={sos}>SOS</Button>
+      <Button variant="danger" className="mt-4" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
     </Screen>
   );
 }
@@ -685,7 +692,6 @@ function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
 function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeamId: string; isController: boolean }) {
   const { t } = useT();
   const [items, setItems] = useState<Trackable[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -696,13 +702,15 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
   useEffect(() => { void load(); }, [load]);
 
   async function act(tr: Trackable, action: 'pickup' | 'drop') {
-    setBusy(tr.id);
     try {
       const args = { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId, trackableId: tr.id };
       if (action === 'pickup') await pickUpTrackable(args); else await dropTrackable(args);
       await load();
-    } catch { /* surfaced by a no-op; the list reloads */ } finally { setBusy(null); }
+    } catch { /* surfaced by a no-op; the list reloads */ }
   }
+  // Keyed in-flight guard (change: wave-b/async-action-guard): a double-tapped
+  // "pick up" fired pickUpTrackable twice; different trackables stay independent.
+  const actAction = useAsyncAction<[Trackable, 'pickup' | 'drop'], void>(act, (tr) => tr.id);
 
   if (!items || items.length === 0) return null;
   return (
@@ -719,12 +727,12 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
                 {mine ? ` · ${t.trackables.carrying}` : held ? ` · ${t.trackables.held}` : ''}
               </span>
               {isController && (mine ? (
-                <button disabled={busy === tr.id} onClick={() => act(tr, 'drop')}
+                <button disabled={actAction.isBusy(tr.id)} onClick={() => void actAction.run(tr, 'drop')}
                   className="text-xs font-bold px-3 py-1 rounded-full border border-glass-border text-zinc-200 disabled:opacity-40">
                   {t.trackables.drop}
                 </button>
               ) : !held && (
-                <button disabled={busy === tr.id} onClick={() => act(tr, 'pickup')}
+                <button disabled={actAction.isBusy(tr.id)} onClick={() => void actAction.run(tr, 'pickup')}
                   className="text-xs font-bold px-3 py-1 rounded-full bg-accent/15 text-accent border border-accent/30 disabled:opacity-40">
                   {t.trackables.pickUp}
                 </button>
@@ -741,16 +749,16 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
 // owner; a controller standing inside a zone can capture (or flip) it for bonus points.
 function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zones: CaptureZone[]; ctx: Session; myTeamId: string; isController: boolean; me: { lat: number; lng: number } | null; onCaptured: () => void }) {
   const { t } = useT();
-  const [busy, setBusy] = useState<string | null>(null);
-
   async function capture(z: CaptureZone) {
     if (!me) return;
-    setBusy(z.id);
     try {
       await captureZone({ ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId, zoneId: z.id, lat: me.lat, lng: me.lng });
       onCaptured(); // refresh both the map circles and this list
-    } catch { /* out of range / already yours — list reloads */ } finally { setBusy(null); }
+    } catch { /* out of range / already yours — list reloads */ }
   }
+  // Keyed in-flight guard (change: wave-b/async-action-guard): captureZone awards
+  // points, so a double-tapped capture was a real double-award window.
+  const captureAction = useAsyncAction(capture, (z: CaptureZone) => z.id);
 
   if (!zones || zones.length === 0) return null;
   return (
@@ -766,7 +774,7 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
                 <span className="text-zinc-500"> · {z.ownerTeamId ? (mine ? t.zones.yours : t.zones.heldBy({ name: z.ownerTeamName ?? '' })) : t.zones.open}</span>
               </span>
               {isController && !mine && (
-                <button disabled={busy === z.id || !me} onClick={() => capture(z)}
+                <button disabled={captureAction.isBusy(z.id) || !me} onClick={() => void captureAction.run(z)}
                   className="text-xs font-bold px-3 py-1 rounded-full bg-rp-fire/15 text-rp-fire border border-rp-fire/30 disabled:opacity-40">
                   {t.zones.capture}
                 </button>

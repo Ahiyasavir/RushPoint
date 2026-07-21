@@ -4,6 +4,7 @@ import { submitRunFeedback } from '../services/calls';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button } from './ui';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Post-game feedback (change: post-game-feedback): a playful, tap-only survey on
 // the finish screen. One question per screen, auto-advancing, every step
@@ -34,6 +35,12 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
   const advanceTimer = useRef<number>();
 
   useEffect(() => () => window.clearTimeout(advanceTimer.current), []);
+
+  // In-flight guard (change: wave-b/async-action-guard). Declared before the
+  // `hidden` early return so the hook order is stable. The server rejects a
+  // duplicate response anyway, but a double-tapped send used to fire two
+  // submitRunFeedback calls and race the `phase` transition.
+  const sendAction = useAsyncAction(send);
 
   // The step list is dynamic: the "what went wrong" step only appears when the
   // player reports the game did not run perfectly smoothly (smoothness < 3).
@@ -196,7 +203,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
           <button onClick={advance} className="text-sm text-zinc-500 hover:text-zinc-400">{t.survey.skip}</button>
         ) : <span />}
         {isLast && (
-          <Button disabled={phase === 'sending'} onClick={send}>
+          <Button disabled={phase === 'sending'} loading={sendAction.busy} onClick={() => void sendAction.run()}>
             {phase === 'sending' ? t.survey.sending : t.survey.send}
           </Button>
         )}

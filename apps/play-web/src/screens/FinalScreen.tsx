@@ -32,7 +32,15 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   const { t, lang } = useT();
   const { team, run, game } = state;
   const accent = game.branding?.primaryColor ?? '#FF5722';
-  const myEntry = run.leaderboard?.rankings.find((r) => r.teamId === team.id);
+  // Staged reveal (change: manual-leaderboard-reveal): a game may ask for the
+  // final standings to stay hidden from players until the creator reveals them.
+  // EVERY ranking-derived surface here (rank badge, podium, board, share text)
+  // reads this gated `board`, never run.leaderboard directly — before this gate
+  // an unpublished board rendered in full. `run.leaderboard` still means "the run
+  // was finalized" and keeps driving the badges + waiting state.
+  const board = run.leaderboard?.published ? run.leaderboard : null;
+  const boardWithheld = !!run.leaderboard && !run.leaderboard.published;
+  const myEntry = board?.rankings.find((r) => r.teamId === team.id);
   const myRank = myEntry?.rank;
   const finalScore = myEntry?.score ?? team.score;
   const isTimeOnly = game.scoringPreset === 'time_only';
@@ -77,7 +85,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   })();
 
   // Top-3 podium for the reveal + the branded podium share (podium-share-moment).
-  const { podium } = selectPodium(run.leaderboard?.rankings ?? [], team.id);
+  const { podium } = selectPodium(board?.rankings ?? [], team.id);
 
   async function sharePodiumFn() {
     if (podium.length === 0) return;
@@ -219,7 +227,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-accent' : 'text-zinc-200'}`}>{e.teamName}</div>
                     <div className="text-[11px] text-zinc-400 mb-1">
                       {isTimeOnly
-                        ? (() => { const d = run.leaderboard?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
+                        ? (() => { const d = board?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
                         : e.score}
                     </div>
                     <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-accent' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
@@ -232,11 +240,11 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         )}
 
         {/* Leaderboard */}
-        {run.leaderboard && run.leaderboard.rankings.length > 0 && (
+        {board && board.rankings.length > 0 && (
           <Card className="p-4 w-full">
             <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🏅 {t.final.leaderboardTitle}</div>
             <div className="space-y-1.5">
-              {run.leaderboard.rankings.slice(0, 10).map((r, i) => {
+              {board.rankings.slice(0, 10).map((r, i) => {
                 const isMe = r.teamId === team.id;
                 const medalBg = i < 3 ? MEDAL_BG[i] : '';
                 return (
@@ -262,6 +270,16 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                 );
               })}
             </div>
+          </Card>
+        )}
+
+        {/* Finalized, but the host is staging the reveal — say so plainly instead
+            of showing a blank space where the board would be. */}
+        {boardWithheld && (
+          <Card className="p-6 w-full text-center">
+            <div className="text-4xl mb-2">🤫</div>
+            <div className="text-sm font-semibold text-zinc-300">{t.final.notRevealedTitle}</div>
+            <p className="text-zinc-500 text-sm mt-1">{t.final.notRevealedBody}</p>
           </Card>
         )}
 

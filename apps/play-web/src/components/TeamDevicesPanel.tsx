@@ -3,6 +3,7 @@ import type { RunTeam } from '@rushpoint/shared';
 import { transferController, claimController } from '../services/calls';
 import { useT } from '../i18nContext';
 import { dialog } from './dialog';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Shared team devices (change: shared-team-devices): every attached phone sees
 // the team's device join code (to invite the rest of the team), who is attached,
@@ -18,7 +19,6 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const controllerUid = team.controllerUid ?? team.id;
@@ -36,19 +36,24 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
 
   async function transfer(toUid: string, toName: string) {
     if (!(await dialog.confirm(t.devices.transferTo({ name: toName }), { confirmLabel: t.devices.transferBtn }))) return;
-    setBusy(true); setErr('');
+    setErr('');
     try { await transferController({ ...ctx, toUid }); onChanged(); }
     catch { setErr(t.devices.actionFailed); }
-    finally { setBusy(false); }
   }
 
   async function takeControl() {
     if (!(await dialog.confirm(t.devices.takeControlConfirm, { confirmLabel: t.devices.takeControl }))) return;
-    setBusy(true); setErr('');
+    setErr('');
     try { await claimController(ctx); onChanged(); }
     catch { setErr(t.devices.actionFailed); }
-    finally { setBusy(false); }
   }
+
+  // In-flight guards (change: wave-b/async-action-guard). These also cover the
+  // confirm dialog, so a double tap can no longer stack two confirms — and
+  // handing control twice can't race the team into the wrong controller.
+  const transferAction = useAsyncAction<[string, string], void>(transfer, (toUid) => toUid);
+  const takeControlAction = useAsyncAction(takeControl);
+  const busy = transferAction.busy || takeControlAction.busy;
 
   return (
     <div className="rounded-xl bg-app-card border border-glass-border mb-3">
@@ -88,7 +93,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                 ) : isController ? (
                   <button
                     disabled={busy}
-                    onClick={() => transfer(d.uid, d.name || t.devices.deviceFallbackName)}
+                    onClick={() => void transferAction.run(d.uid, d.name || t.devices.deviceFallbackName)}
                     className="shrink-0 text-xs text-accent hover:underline disabled:opacity-40"
                   >
                     {t.devices.transferBtn}
@@ -101,7 +106,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
           {!isController && (
             <button
               disabled={busy}
-              onClick={takeControl}
+              onClick={() => void takeControlAction.run()}
               className="w-full text-sm font-semibold text-accent border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
             >
               ✏️ {t.devices.takeControl}

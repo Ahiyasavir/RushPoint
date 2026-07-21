@@ -5,6 +5,7 @@ import { saveSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { unlockAudio } from '../lib/sound';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Firebase callable codes that mean "transient / connectivity", not a bad code —
 // surfaced to the player as a single "check your connection" message.
@@ -19,7 +20,6 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
   const [values, setValues] = useState<Record<string, string>>({});
   const [members, setMembers] = useState<string[]>(['']);
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
   // Shared team devices: team-mode games offer "my team is already in" — this
   // phone attaches to an existing team via its device join code.
@@ -73,19 +73,19 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
   async function lookup() {
     unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
-    setErr(''); setBusy(true);
+    setErr('');
     try {
       const i = await getJoinInfo({ code: code.trim().toUpperCase() });
       if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
     } catch (e) {
       setErr(joinError(e, t.join.invalidCode));
-    } finally { setBusy(false); }
+    }
   }
 
   async function submit() {
     if (!info) return;
-    setErr(''); setBusy(true);
+    setErr('');
     // Validate required registration fields client-side so participants see
     // exactly which fields to fill instead of waiting for a cold server error.
     const allFields = resolveRegistrationFields(info.mode, info.registrationFields);
@@ -98,8 +98,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
     const errors = validateRequiredFields(allFields.filter((f) => f.id !== 'name'), values);
     // Team mode: each team must pick its own name (no defaulting to the first member).
     if (info.mode === 'team' && !(values.teamName ?? '').trim()) { errors.add('teamName'); }
-    if (memberNames.length === 0) { setBusy(false); return; } // guarded by the disabled Join button
-    if (errors.size > 0) { setFieldErrors(errors); setBusy(false); return; }
+    if (memberNames.length === 0) return; // guarded by the disabled Join button
+    if (errors.size > 0) { setFieldErrors(errors); return; }
     setFieldErrors(new Set());
     try {
       const displayName = resolveDisplayName(info.mode, values, memberNames);
@@ -114,13 +114,13 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       onJoined(session);
     } catch (e) {
       setErr(joinError(e, t.join.joinFailed));
-    } finally { setBusy(false); }
+    }
   }
 
   // Attach this phone to a team that already joined (shared-team-devices).
   async function attach() {
     if (!info) return;
-    setErr(''); setBusy(true);
+    setErr('');
     try {
       const res = await joinTeamAsDevice({
         code: code.trim().toUpperCase(),
@@ -137,8 +137,17 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
       onJoined(session);
     } catch {
       setErr(t.devices.attachFailed);
-    } finally { setBusy(false); }
+    }
   }
+
+  // In-flight guards (change: wave-b/async-action-guard). The old shared `busy`
+  // useState could not stop a second tap landing in the same React batch — a real
+  // risk here, since a double-tapped Join would fire joinRun twice and could
+  // register the same phone as two teams.
+  const lookupAction = useAsyncAction(lookup);
+  const submitAction = useAsyncAction(submit);
+  const attachAction = useAsyncAction(attach);
+  const busy = lookupAction.busy || submitAction.busy || attachAction.busy;
 
   // ── Step 1: enter access code ──────────────────────────────────────────────
   if (!info) {
@@ -226,7 +235,7 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
                 transition-all duration-200
               "
               maxLength={8}
-              onKeyDown={(e) => e.key === 'Enter' && lookup()}
+              onKeyDown={(e) => { if (e.key === 'Enter') void lookupAction.run(); }}
             />
           </div>
 
@@ -236,7 +245,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
           <Button
             disabled={busy || code.length < 4}
-            onClick={lookup}
+            loading={lookupAction.busy}
+            onClick={() => void lookupAction.run()}
             className="!py-4 !text-lg !rounded-2xl"
           >
             {busy ? t.join.lookingUp : t.join.continue}
@@ -351,7 +361,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
           {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
           <Button
             disabled={busy || teamCode.trim().length < 6}
-            onClick={attach}
+            loading={attachAction.busy}
+            onClick={() => void attachAction.run()}
             className="mt-5 !py-4 !text-lg !rounded-2xl"
           >
             {busy ? t.devices.attaching : t.devices.attachCta}
@@ -422,7 +433,8 @@ export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Sessio
 
       <Button
         disabled={busy || !members.some((m) => m.trim()) || (!isSolo && !(values.teamName ?? '').trim())}
-        onClick={submit}
+        loading={submitAction.busy}
+        onClick={() => void submitAction.run()}
         data-testid="join-submit"
         className="mt-5 !py-4 !text-lg !rounded-2xl"
       >

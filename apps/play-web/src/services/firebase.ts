@@ -18,10 +18,19 @@ import {
   getStorage,
   connectStorageEmulator,
   ref as storageRef,
-  uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
 } from 'firebase/storage';
 import { resolveEmulatorHost, normalizeContentType, isEmulatorBuild } from '@rushpoint/shared';
+import {
+  runWithRetry,
+  withTimeout,
+  isRetryableStorageError,
+  errorCode,
+  uploadPercent,
+  setUploadProgress,
+  setUploadRetrying,
+} from '../lib/uploadResiliency';
 
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY             ?? 'emulator-key',
@@ -126,6 +135,78 @@ export async function signInStaff(customToken: string) {
   await signInWithCustomToken(auth, customToken);
 }
 
+// ── Resilient Storage upload ────────────────────────────────────────────────
+// The upload used to be a bare, non-resumable `uploadBytes`: no timeout, no
+// retry, no progress — while the callable right below it already retried 3× with
+// a timeout. So `submitStationPhoto` survived a flaky moment on mobile data but
+// the upload before it did not, and the player just got "couldn't save the photo,
+// take it again". Now: uploadBytesResumable + progress + stall/absolute timeouts
+// + the SAME bounded jittered-backoff retry policy (shared implementation in
+// lib/uploadResiliency.ts). See docs/wave-a/upload-resiliency.md.
+const UPLOAD_ATTEMPTS = 3;
+/** No progress byte for this long ⇒ the attempt is dead; cancel and retry. */
+const UPLOAD_STALL_MS = 45_000;
+/** Absolute cap for a single attempt, however slowly it is progressing. */
+const UPLOAD_MAX_MS = 180_000;
+
+async function uploadResilient(
+  path: string,
+  data: Blob | File,
+  contentType: string,
+): Promise<string> {
+  await ensureAuth();
+  // The path is computed ONCE by the caller, so a retry overwrites the same
+  // object instead of leaving an orphan — and the server-validated shape
+  // (runs/{runId}/teams/{teamId}/{taskId}-{ts}.ext, requireStorageUrl) is stable.
+  const r = storageRef(storage, path);
+  try {
+    return await runWithRetry(
+      async () => {
+        setUploadRetrying(false);
+        setUploadProgress(0);
+        const task = uploadBytesResumable(r, data, { contentType });
+        let stallTimer: ReturnType<typeof setTimeout> | undefined;
+        let stalled = false;
+        const cancel = () => { try { task.cancel(); } catch { /* already settled */ } };
+        const armStall = () => {
+          if (stallTimer) clearTimeout(stallTimer);
+          stallTimer = setTimeout(() => { stalled = true; cancel(); }, UPLOAD_STALL_MS);
+        };
+        const done = new Promise<void>((resolve, reject) => {
+          armStall();
+          task.on(
+            'state_changed',
+            (snap) => {
+              armStall();
+              setUploadProgress(uploadPercent(snap.bytesTransferred, snap.totalBytes));
+            },
+            (err) => {
+              if (stallTimer) clearTimeout(stallTimer);
+              // A cancel WE caused is a stall, not a user abort — surface it with
+              // the retryable synthetic code so the loop tries again.
+              reject(stalled
+                ? Object.assign(new Error('upload stalled'), { code: 'storage/deadline-exceeded' })
+                : err);
+            },
+            () => { if (stallTimer) clearTimeout(stallTimer); resolve(); },
+          );
+        });
+        await withTimeout(done, UPLOAD_MAX_MS, 'storage/deadline-exceeded', cancel);
+        setUploadProgress(100);
+        return getDownloadURL(r);
+      },
+      {
+        attempts: UPLOAD_ATTEMPTS,
+        isRetryable: isRetryableStorageError,
+        onRetry: () => setUploadRetrying(true),
+      },
+    );
+  } finally {
+    setUploadRetrying(false);
+    setUploadProgress(null);
+  }
+}
+
 // Upload a photo-mission image to Storage and return its download URL. Path is
 // scoped to the team's own folder (runs/{runId}/teams/{teamId}/…) so storage
 // rules can confine writes to the authenticated participant.
@@ -135,12 +216,9 @@ export async function uploadTaskPhoto(
   file: File | Blob,
   p: { runId: string; teamId: string; taskId: string },
 ): Promise<string> {
-  await ensureAuth();
   const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.jpg`;
-  const r = storageRef(storage, path);
-  await uploadBytes(r, file, { contentType: 'image/jpeg' });
-  return getDownloadURL(r);
+  return uploadResilient(path, file, 'image/jpeg');
 }
 
 // Upload an audio-mission clip (audio-tasks). Shares the SAME path scheme as
@@ -152,7 +230,6 @@ export async function uploadTaskAudio(
   blob: Blob,
   p: { runId: string; teamId: string; taskId: string; contentType: string },
 ): Promise<{ url: string; contentType: string }> {
-  await ensureAuth();
   const contentType = normalizeContentType(p.contentType || blob.type || 'audio/webm');
   const ext = contentType === 'audio/mp4' ? 'm4a'
     : contentType === 'audio/mpeg' ? 'mp3'
@@ -160,9 +237,7 @@ export async function uploadTaskAudio(
     : 'webm';
   const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
-  const r = storageRef(storage, path);
-  await uploadBytes(r, blob, { contentType });
-  return { url: await getDownloadURL(r), contentType };
+  return { url: await uploadResilient(path, blob, contentType), contentType };
 }
 
 // Under a ~20-player run over an ngrok tunnel, a momentary backend contention or
@@ -191,32 +266,23 @@ export function callable<Req = void, Res = unknown>(
   const maxAttempts = opts.retry === false ? 1 : CALLABLE_ATTEMPTS;
   return async (data?: Req) => {
     await ensureAuth();
-    let lastErr: unknown;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(Object.assign(new Error(`callable ${name} timed out`), { code: 'functions/deadline-exceeded' })),
-            CALLABLE_TIMEOUT_MS,
-          );
-        });
-        try {
-          const res = await Promise.race([fn(data as Req), timeout]);
-          return (res as { data: Res }).data;
-        } finally {
-          if (timer) clearTimeout(timer);
-        }
-      } catch (e) {
-        lastErr = e;
-        const code = String((e as { code?: string }).code ?? '');
-        const isLast = attempt === maxAttempts - 1;
-        if (isLast || !RETRYABLE_CALLABLE_CODES.has(code)) throw e;
-        // Jittered backoff before the next attempt.
-        await new Promise((r) => setTimeout(r, 150 * (attempt + 1) + Math.random() * 250));
-      }
-    }
-    throw lastErr;
+    // Same timeout + jittered-backoff policy as before, now via the shared
+    // implementation the Storage uploads use (lib/uploadResiliency.ts) so there
+    // is exactly one retry loop in the app.
+    return runWithRetry(
+      async () => {
+        const res = await withTimeout(
+          fn(data as Req),
+          CALLABLE_TIMEOUT_MS,
+          'functions/deadline-exceeded',
+        );
+        return (res as { data: Res }).data;
+      },
+      {
+        attempts: maxAttempts,
+        isRetryable: (e) => RETRYABLE_CALLABLE_CODES.has(errorCode(e)),
+      },
+    );
   };
 }
 
