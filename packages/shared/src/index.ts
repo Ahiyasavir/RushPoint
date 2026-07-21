@@ -48,6 +48,7 @@ export * from './powerUps';
 export * from './qrPayload';
 export * from './chat';
 export * from './mediaKinds';
+export * from './photoQueue';
 export * from './storedDocs';
 export * from './gameStats';
 export * from './sanitizeFinite';

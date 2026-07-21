@@ -67,6 +67,10 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   submitStationPhoto: { max: 20, windowMs: MIN },
   completeTask: { max: 60, windowMs: MIN },
   requestTaskHint: { max: 20, windowMs: MIN },
+  // Hidden-location arrival probe (change: play-task-gating). Strictly TIGHTER
+  // than completeTask — it evaluates the same proximity predicate, so it must
+  // never become a cheaper grid-search oracle than the check-in it mirrors.
+  reportArrival: { max: 30, windowMs: MIN },
   claimDiscoveryPoi: { max: 30, windowMs: MIN },
   checkOutTask: { max: 60, windowMs: MIN },
   joinRun: { max: 10, windowMs: MIN },

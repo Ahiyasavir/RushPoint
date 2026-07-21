@@ -704,6 +704,12 @@ export interface RunTaskRecord {
   // response is final (the already-completed guard never overwrites it). Not
   // secret to its own team, so it flows through getMyTeamState unchanged.
   surveyResponse?: string;
+  // Hidden-location arrival latch (change: play-task-gating). Server-written by
+  // `reportArrival` once the team's GPS passed the SAME haversine/evaluateTrigger
+  // check that gates a check-in. Once set it is never cleared — arrival is sticky,
+  // so a reload / GPS loss / offline spell can never re-seal a task the player has
+  // already reached. Until it is set, the sanitizer ships only the sealed stub.
+  arrivedAt?: string;
 }
 
 export interface RunStageRecord {
@@ -1190,7 +1196,11 @@ export interface RequestNextTaskResult {
 export interface TaskRecommendation {
   taskId: string;
   taskIndex: number;
-  title: string;
+  // play-task-gating: OPTIONAL because a hidden-location task withholds its title
+  // until the team has arrived (the same secret the participant sanitizer seals).
+  // When it is absent, `locationHidden` is set instead.
+  title?: string;
+  locationHidden?: boolean;
   priority: number;
   estimatedMinutes: number;
   difficulty: number;
