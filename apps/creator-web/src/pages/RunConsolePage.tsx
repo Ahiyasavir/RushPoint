@@ -153,9 +153,21 @@ export default function RunConsolePage() {
   }
   // Sharing a board/TV link implies the audience should see standings — publish
   // on share so the projection screen never sits on "not yet available".
+  // EXCEPTION (change: manual-leaderboard-reveal): once the run is finished the
+  // published flag IS the staged-reveal decision finalizeRun made from the game
+  // setting. Auto publishing here would silently reveal the winner the moment the
+  // host copies the TV/ceremony link — which is exactly the link they are meant to
+  // open BEFORE revealing. After finish, reveal is only ever the explicit button.
   async function ensureBoardPublished() {
     if (run?.leaderboard?.published) return;
+    if (run?.status === 'finished') return;
     try { await refreshLeaderboard({ ...ctx, publish: true }); } catch { /* board stays hidden; toggle still works */ }
+  }
+  async function revealStandings() {
+    setBusy(true);
+    try { await refreshLeaderboard({ ...ctx, publish: true }); toast.success(t.runConsole.standingsRevealed); }
+    catch { await dialog.alert(t.runConsole.revealFailed); }
+    finally { setBusy(false); }
   }
 
   if (!run) return <Spinner label={t.runConsole.loadingRun} />;
@@ -345,9 +357,29 @@ export default function RunConsolePage() {
             </Card>
           )}
 
+          {/* Final standings. The organizer ALWAYS sees them (this reads the run
+              doc directly); `published` only controls the participant surfaces —
+              with manual reveal on, finalizeRun leaves the board unpublished and
+              this button is how the host reveals it. */}
           {finished && run.leaderboard && (
             <Card className="p-4 mt-4">
-              <div className="text-sm font-medium mb-3">{t.runConsole.finalLeaderboard}</div>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="text-sm font-medium">{t.runConsole.finalLeaderboard}</div>
+                {run.leaderboard.published ? (
+                  <span className="text-[11px] px-2 py-1 rounded-md bg-neon-green/15 text-neon-green">
+                    {t.runConsole.standingsVisibleToTeams}
+                  </span>
+                ) : (
+                  <Button className="px-3 py-1.5 text-xs" disabled={busy} onClick={() => void revealStandings()}>
+                    {t.runConsole.revealStandings}
+                  </Button>
+                )}
+              </div>
+              {!run.leaderboard.published && (
+                <div className="text-[11px] text-amber-400/90 mb-3">
+                  {t.runConsole.standingsHiddenUntilReveal}
+                </div>
+              )}
               <div className="space-y-1">
                 {run.leaderboard.rankings.map((r) => (
                   <div key={r.teamId} className="flex items-center gap-3 text-sm">

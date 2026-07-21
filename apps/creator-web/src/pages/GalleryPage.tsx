@@ -6,6 +6,7 @@ import { Badge, Button, Card, EmptyState, Input, Skeleton } from '../components/
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import GalleryMap from '../components/GalleryMap';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useT } from '../components/LanguageContext';
 
 export default function GalleryPage() {
@@ -26,8 +27,6 @@ export default function GalleryPage() {
   const [q, setQ] = useState('');
   const [games, setGames] = useState<PublicGame[] | null>(null);
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [copyingId, setCopyingId] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
 
   function focusGame(id: string) {
@@ -51,6 +50,13 @@ export default function GalleryPage() {
       if (tab === 'games') setGames([]); else setTasks([]);
     } finally { setSearching(false); }
   }
+  // Re-entrancy guard (change: wave-b/async-action-guard) for the explicit search
+  // button / Enter key, so hammering them can't stack overlapping searchGallery
+  // calls whose results then land out of order.
+  // The debounce effect below deliberately keeps calling the RAW `run`: a guard
+  // there would silently drop the newest query whenever a slow search was still in
+  // flight, leaving the results stale behind what the user typed.
+  const searchAction = useAsyncAction(run);
   const runRef = useRef(run);
   runRef.current = run;
 
@@ -63,14 +69,13 @@ export default function GalleryPage() {
   }, [q, tab]);
 
   async function copy(g: PublicGame) {
-    setBusy(true);
-    setCopyingId(g.id);
     try {
       const { gameId } = await duplicateGame({ gameId: g.id, sourceOwnerUid: g.ownerUid });
       nav(`/build/${gameId}`);
     } catch (e) { toast.error(e instanceof Error ? e.message : gl.copyFailed); }
-    finally { setBusy(false); setCopyingId(null); }
   }
+  // Keyed by game id: copying one gallery card must not block a different card.
+  const copyAction = useAsyncAction(copy, (g: PublicGame) => g.id);
 
   return (
     <div>
@@ -98,8 +103,8 @@ export default function GalleryPage() {
 
       <div className="flex gap-2 mb-5">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={gl.searchPlaceholder}
-          onKeyDown={(e) => e.key === 'Enter' && run()} />
-        <Button onClick={run}>{gl.searchBtn}</Button>
+          onKeyDown={(e) => { if (e.key === 'Enter') void searchAction.run(); }} />
+        <Button loading={searchAction.busy} onClick={() => void searchAction.run()}>{gl.searchBtn}</Button>
       </div>
 
       {tab === 'games' && view === 'map' && games && games.length > 0 && (
@@ -122,7 +127,7 @@ export default function GalleryPage() {
                 <span>{gl.stages(pg.stageCount)}</span>·<span>{gl.tasks(pg.taskCount)}</span>·<span>~{pg.estimatedTotalMinutes}m</span>·<span>{gl.plays(pg.playCount)}</span>
               </div>
               {pg.approxLocation?.label && <span className="text-[11px] text-zinc-600">📍 {pg.approxLocation.label}</span>}
-              <Button disabled={busy} loading={copyingId === pg.id} className="mt-1" onClick={() => copy(pg)}>{gl.copyBtn}</Button>
+              <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-1" onClick={() => void copyAction.run(pg)}>{gl.copyBtn}</Button>
             </Card>
           ))}
         </div>

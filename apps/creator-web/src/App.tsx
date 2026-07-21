@@ -6,6 +6,7 @@ import { useT } from './components/LanguageContext';
 import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
 import { ToastHost } from './components/toast';
+import ActiveRunBar from './components/ActiveRunBar';
 
 const DashboardPage  = lazy(() => import('./pages/DashboardPage'));
 const BuilderPage    = lazy(() => import('./pages/BuilderPage'));
@@ -116,6 +117,8 @@ export default function App() {
           </Routes>
         </Suspense>
       </main>
+      {/* Sibling of the hosts (outside <main>) so it survives every route change. */}
+      <ActiveRunBar />
       <DialogHost />
       <ToastHost />
     </div>

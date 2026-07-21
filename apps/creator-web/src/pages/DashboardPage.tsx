@@ -9,6 +9,7 @@ import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
 import { isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 
@@ -54,9 +55,20 @@ export default function DashboardPage() {
   };
 
   const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
-  const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [sharing, setSharing] = useState<Game | null>(null);
+
+  // Double-click / re-entrancy guards (change: wave-b/async-action-guard). A
+  // `useState` busy flag can't stop a second click in the SAME React batch —
+  // setState is async, so both clicks read busy === false and both fire the
+  // callable. These hold for the whole duration of the promise instead.
+  // launch/publish/delete are keyed by game id so acting on one card never
+  // blocks another.
+  const newGameAction = useAsyncAction(newGame);
+  const launchAction = useAsyncAction<[Game, { testDrive?: boolean }?], void>(launch, (g) => g.id);
+  const publishAction = useAsyncAction(togglePublish, (g: Game) => g.id);
+  const removeAction = useAsyncAction(remove, (g: Game) => g.id);
+  const busy = newGameAction.busy || launchAction.busy;
 
   async function load(invalidate = false) {
     if (!invalidate && readGamesCache(user?.uid)) return;
@@ -87,17 +99,15 @@ export default function DashboardPage() {
   }, [picking]);
 
   async function newGame(tpl: GameTemplate) {
-    setBusy(true); setPicking(false);
-    try {
-      const title = tpl.key === 'blank' ? d.untitledGame : tpl.label;
-      const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
-      const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
-      await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
-      // Invalidate the games cache — otherwise returning to the dashboard within
-      // the TTL serves a stale list that's missing this just-created game.
-      _gamesCache = null;
-      nav(`/build/${gameId}`);
-    } finally { setBusy(false); }
+    setPicking(false);
+    const title = tpl.key === 'blank' ? d.untitledGame : tpl.label;
+    const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
+    const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
+    await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
+    // Invalidate the games cache — otherwise returning to the dashboard within
+    // the TTL serves a stale list that's missing this just-created game.
+    _gamesCache = null;
+    nav(`/build/${gameId}`);
   }
 
   async function launch(g: Game, opts?: { testDrive?: boolean }) {
@@ -118,7 +128,6 @@ export default function DashboardPage() {
       return r.warnings.length > 0 || r.errors.length > 0;
     });
     if (brokenStage) { await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return; }
-    setBusy(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
@@ -131,7 +140,7 @@ export default function DashboardPage() {
       } else {
         await dialog.alert(msg);
       }
-    } finally { setBusy(false); }
+    }
   }
 
   async function remove(g: Game) {
@@ -265,7 +274,12 @@ export default function DashboardPage() {
                       >
                         {d.cardEdit}
                       </button>
-                      <Button className="flex-1 !py-2 !text-xs !font-semibold" disabled={busy} onClick={() => launch(g)}>
+                      <Button
+                        className="flex-1 !py-2 !text-xs !font-semibold"
+                        disabled={busy}
+                        loading={launchAction.isBusy(g.id)}
+                        onClick={() => void launchAction.run(g)}
+                      >
                         {d.cardLaunch}
                       </Button>
                     </div>
@@ -275,13 +289,14 @@ export default function DashboardPage() {
                         className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
                         disabled={busy}
                         title={d.cardTestRunHint}
-                        onClick={() => launch(g, { testDrive: true })}
+                        onClick={() => void launchAction.run(g, { testDrive: true })}
                       >
                         {d.cardTestRun}
                       </button>
                       <button
-                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
-                        onClick={() => togglePublish(g)}
+                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled={publishAction.isBusy(g.id)}
+                        onClick={() => void publishAction.run(g)}
                       >
                         {g.visibility === 'public' ? d.cardUnpublish : d.cardPublish}
                       </button>
@@ -292,8 +307,9 @@ export default function DashboardPage() {
                         {d.cardShare}
                       </button>
                       <button
-                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
-                        onClick={() => remove(g)}
+                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40 disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled={removeAction.isBusy(g.id)}
+                        onClick={() => void removeAction.run(g)}
                       >
                         {d.cardDelete}
                       </button>
@@ -391,7 +407,7 @@ export default function DashboardPage() {
             <div className="overflow-y-auto p-5 pt-4">
               <div className="grid sm:grid-cols-2 gap-2.5">
                 {TEMPLATES.map((tpl) => (
-                  <button key={tpl.key} disabled={busy} onClick={() => newGame(tpl)}
+                  <button key={tpl.key} disabled={busy} onClick={() => void newGameAction.run(tpl)}
                     className="flex items-start gap-3 text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
                     <div className="text-2xl leading-none shrink-0 mt-0.5">{tpl.emoji}</div>
                     <div className="min-w-0">

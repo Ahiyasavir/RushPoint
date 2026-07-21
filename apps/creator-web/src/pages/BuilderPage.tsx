@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning } from '@rushpoint/shared';
+import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions } from '@rushpoint/shared';
 import { getGame, updateGame, launchRun } from '../services/calls';
 import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -12,7 +12,7 @@ import TaskLibrary from '../components/TaskLibrary';
 import StageRail from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
 import TaskWizard from '../components/TaskWizard';
-import { moveItem } from '../lib/reorder';
+import { moveItem, moveTaskBetweenStages, clampRequiredTaskCount } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
@@ -59,6 +59,9 @@ function buildSavePayload(g: Game) {
     photoFeedEnabled: g.photoFeedEnabled,
     // Power-ups (change: power-ups). Undefined means off (default).
     powerUpsEnabled: g.powerUpsEnabled,
+    // Staged leaderboard reveal (change: manual-leaderboard-reveal). Undefined
+    // means off (default) = finalizeRun auto publishes, the prior behaviour.
+    manualLeaderboardReveal: g.manualLeaderboardReveal,
     // Game intro primer (change: game-intro-instructions). Undefined when unset
     // (skipped server-side); an empty/whitespace-only primer clears it on save.
     instructions: g.instructions,
@@ -422,6 +425,17 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
       </label>
       <p className="text-xs text-zinc-500 -mt-2">{b.powerUpsHint}</p>
 
+      {/* Staged leaderboard reveal (change: manual-leaderboard-reveal): default OFF
+          (absent = auto publish on finalize, the pre-existing behaviour). When ON,
+          finalizeRun leaves the board unpublished and the creator reveals it from
+          the run console. */}
+      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <input type="checkbox" checked={!!game.manualLeaderboardReveal}
+          onChange={(e) => patch({ manualLeaderboardReveal: e.target.checked })} />
+        {b.manualRevealLabel}
+      </label>
+      <p className="text-xs text-zinc-500 -mt-2">{b.manualRevealHint}</p>
+
       <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
         <Label>{b.scoringPreset}</Label>
         <div className="space-y-2">
@@ -645,6 +659,27 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   function updateStage(id: string, p: Partial<Stage>) {
     setStages(game.stages.map((s) => (s.id === id ? { ...s, ...p } : s)));
   }
+  // ── Mutually exclusive task groups (wave-b task 5) ──
+  // A group = task ids of this stage of which a team may complete at most ONE; the
+  // rest lock (skip) once one is done. All the semantics (inert groups, first group
+  // wins a contested id, the completion ceiling vs requiredTaskCount) live in the
+  // pure @rushpoint/shared `mutualExclusion` module — the UI only edits the array.
+  function setExclusiveGroups(stage: Stage, groups: { id: string; taskIds: string[] }[]) {
+    updateStage(stage.id, { exclusiveGroups: groups.length > 0 ? groups : undefined });
+  }
+  function addExclusiveGroup(stage: Stage) {
+    setExclusiveGroups(stage, [...(stage.exclusiveGroups ?? []), { id: uuid(), taskIds: [] }]);
+  }
+  function removeExclusiveGroup(stage: Stage, groupId: string) {
+    setExclusiveGroups(stage, (stage.exclusiveGroups ?? []).filter((g) => g.id !== groupId));
+  }
+  function toggleExclusiveMember(stage: Stage, groupId: string, taskId: string) {
+    setExclusiveGroups(stage, (stage.exclusiveGroups ?? []).map((g) => {
+      if (g.id !== groupId) return g;
+      const has = g.taskIds.includes(taskId);
+      return { ...g, taskIds: has ? g.taskIds.filter((id) => id !== taskId) : [...g.taskIds, taskId] };
+    }));
+  }
   function removeStage(id: string) {
     const remaining = game.stages.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i }));
     setStages(remaining);
@@ -659,6 +694,29 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
     const blankOnly = stage.tasks.length === 1 && !stage.tasks[0].title && stage.tasks[0].coordinates.lat === 0;
     updateStage(stageId, { tasks: blankOnly ? [task] : [...stage.tasks, task] });
   }
+  // ── Task drag & drop (wave-a task 7) ──
+  // Reorder inside one stage: pure `moveItem`, task count unchanged so
+  // requiredTaskCount stays valid by construction.
+  function reorderTasks(stageId: string, from: number, to: number) {
+    const stage = game.stages.find((s) => s.id === stageId);
+    if (!stage) return;
+    const tasks = moveItem(stage.tasks, from, to);
+    if (tasks === stage.tasks) return;
+    updateStage(stageId, { tasks });
+  }
+  // Move a task to another stage (rail drop, or the card's non-drag fallback).
+  // `moveTaskBetweenStages` re-clamps BOTH stages' requiredTaskCount — skipping
+  // either side leaves an unwinnable stage (required > tasks). It also refuses to
+  // empty the source stage and returns the same array reference on a no-op.
+  function moveTaskToStage(fromStageId: string, taskId: string, toStageId: string) {
+    const next = moveTaskBetweenStages(game.stages, fromStageId, taskId, toStageId);
+    if (next === game.stages) return;
+    setStages(next);
+    // The moved task lives in a different stage now; the open panel would point
+    // at a stale (stageId, taskId) pair, so close it.
+    if (editing?.taskId === taskId) setEditing(null);
+  }
+
   function addTask(stageId: string) {
     const stage = game.stages.find((s) => s.id === stageId);
     if (!stage) return;
@@ -688,6 +746,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
         onSelect={setActiveStageId}
         onMove={moveStage}
         onAdd={addStage}
+        onTaskDrop={(p, toStageId) => moveTaskToStage(p.fromStageId, p.taskId, toStageId)}
       />
 
       {/* ── Centre canvas: the active stage. No wrapping Card — the shell already
@@ -711,24 +770,121 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               )}
             </div>
 
-            {/* Completion rule — only meaningful with a pool of tasks */}
-            {m > 1 && (
-              <div className="flex items-center flex-wrap gap-2 text-xs text-zinc-400">
-                <span>{b.completionLead}</span>
-                <Select
-                  className="w-auto py-1"
-                  value={String(req)}
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value);
-                    updateStage(activeStage.id, { requiredTaskCount: n >= m ? undefined : n });
-                  }}
-                >
-                  {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </Select>
-                <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
+            {/* Stage rules strip — the completion rule and the scheduled release
+                folded into ONE compact, wrap-friendly row so the header stops
+                eating three full-width lines of the shell (wave-a task 6).
+                Logical spacing only (gap-x/gap-y/px/py) so it stays RTL-correct. */}
+            {(m > 1 || !isFirstStage) && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-[--rp-border] bg-[--surface-2]/40 px-3 py-2 text-xs text-zinc-400">
+                {/* Completion rule — only meaningful with a pool of tasks */}
+                {m > 1 && (
+                  <div className="flex items-center flex-wrap gap-1.5 min-w-0 text-start">
+                    <span>{b.completionLead}</span>
+                    <Select
+                      className="w-auto py-1"
+                      value={String(req)}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value);
+                        updateStage(activeStage.id, { requiredTaskCount: n >= m ? undefined : n });
+                      }}
+                    >
+                      {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                    </Select>
+                    <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
+                  </div>
+                )}
+
+                {m > 1 && !isFirstStage && (
+                  <span aria-hidden className="h-4 w-px bg-[--rp-border]" />
+                )}
+
+                {/* Scheduled release — a timed drop of this stage (change:
+                    scheduled-release). The long unit sentence is kept as the
+                    tooltip; the row shows only the short unit. */}
+                {!isFirstStage && (
+                  <div className="flex items-center flex-wrap gap-1.5 min-w-0 text-start" title={b.releaseAfterUnit}>
+                    <span>{b.releaseLead}</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="w-16 py-1"
+                      value={activeStage.releaseAfterMinutes ?? ''}
+                      placeholder="0"
+                      aria-label={b.releaseAfterUnit}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        updateStage(activeStage.id, {
+                          releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined,
+                        });
+                      }}
+                    />
+                    <span>{b.releaseUnitShort}</span>
+                  </div>
+                )}
               </div>
+            )}
+
+            {/* Mutually exclusive task groups (wave-b task 5). Same compact strip
+                idiom as the stage rules row above: one bordered surface row,
+                text-xs, logical spacing only so RTL stays correct. Each group is a
+                line of toggle chips (a task already claimed by another group is
+                disabled); ✕ deletes the group. Only meaningful with a task pool. */}
+            {m > 1 && (
+              <div className="rounded-lg border border-[--rp-border] bg-[--surface-2]/40 px-3 py-2 text-xs text-zinc-400 space-y-1.5">
+                <div className="flex items-center flex-wrap gap-2 text-start">
+                  <span title={b.exclusiveHint}>{b.exclusiveLead}</span>
+                  <button
+                    type="button"
+                    className="rounded-full border border-[--rp-border] px-2 py-0.5 hover:text-zinc-200"
+                    onClick={() => addExclusiveGroup(activeStage)}
+                  >+ {b.exclusiveAddGroup}</button>
+                </div>
+                {(activeStage.exclusiveGroups ?? []).map((g, gi) => (
+                  <div key={g.id} className="flex items-center flex-wrap gap-1.5 text-start">
+                    <span className="shrink-0">{b.exclusiveGroupLabel(gi + 1)}</span>
+                    {activeStage.tasks.map((t, ti) => {
+                      const inThis = g.taskIds.includes(t.id);
+                      const inOther = !inThis && (activeStage.exclusiveGroups ?? [])
+                        .some((o) => o.id !== g.id && o.taskIds.includes(t.id));
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          disabled={inOther}
+                          title={inOther ? b.exclusiveTaskTaken : undefined}
+                          aria-pressed={inThis}
+                          dir="auto"
+                          className={`rounded-full border px-2 py-0.5 max-w-[10rem] truncate ${
+                            inThis
+                              ? 'border-neon-cyan text-neon-cyan'
+                              : inOther
+                                ? 'border-[--rp-border] opacity-40'
+                                : 'border-[--rp-border] hover:text-zinc-200'
+                          }`}
+                          onClick={() => toggleExclusiveMember(activeStage, g.id, t.id)}
+                        >{t.title || `${b.untitledTask} ${ti + 1}`}</button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      className="text-neon-red shrink-0"
+                      title={b.exclusiveRemoveGroup}
+                      aria-label={b.exclusiveRemoveGroup}
+                      onClick={() => removeExclusiveGroup(activeStage, g.id)}
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Exclusion ceiling vs requiredTaskCount: an explicit count above what
+                the groups leave attainable ends the stage early (see
+                docs/wave-b/mutually-exclusive-tasks.md §2.2). Non-blocking. */}
+            {typeof activeStage.requiredTaskCount === 'number'
+              && activeStage.requiredTaskCount > maxAttainableCompletions(activeStage) && (
+              <p className="text-xs text-amber-400">⚠ {b.exclusiveUnwinnableWarn}</p>
             )}
 
             {/* Unlockable tasks (change: unlockable-tasks): warn when the required
@@ -744,27 +900,6 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               <p className="text-xs text-amber-400">⚠ {b.partialStarvationWarn}</p>
             )}
 
-            {/* Scheduled release — a timed drop of this stage (change: scheduled-release) */}
-            {!isFirstStage && (
-              <div className="flex items-center flex-wrap gap-2 text-xs text-zinc-400">
-                <span>{b.releaseLead}</span>
-                <Input
-                  type="number"
-                  min={0}
-                  className="w-20 py-1"
-                  value={activeStage.releaseAfterMinutes ?? ''}
-                  placeholder="0"
-                  onChange={(e) => {
-                    const n = parseInt(e.target.value, 10);
-                    updateStage(activeStage.id, {
-                      releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined,
-                    });
-                  }}
-                />
-                <span>{b.releaseAfterUnit}</span>
-              </div>
-            )}
-
             <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
             </div>
 
@@ -773,6 +908,12 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 tasks={activeStage.tasks}
                 activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
                 onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
+                stageId={activeStage.id}
+                onReorder={(from, to) => reorderTasks(activeStage.id, from, to)}
+                moveTargets={game.stages
+                  .map((s, i) => ({ id: s.id, label: s.title || b.stageLabel(i + 1) }))
+                  .filter((s) => s.id !== activeStage.id)}
+                onMoveToStage={(taskId, toStageId) => moveTaskToStage(activeStage.id, taskId, toStageId)}
               />
             </div>
             <div className="flex gap-2 shrink-0">
@@ -812,9 +953,19 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 // Clamp a now-oversized requiredTaskCount: dropping a task below the
                 // required count would leave the stage unwinnable (and the count
                 // select would show a value not in its options). `undefined` = all.
-                const req = editingStage.requiredTaskCount;
-                const patch: Partial<Stage> = { tasks: nextTasks };
-                if (typeof req === 'number' && req >= nextTasks.length) patch.requiredTaskCount = undefined;
+                // Drop the removed id from any exclusive group too (wave-b task 5).
+                // A dangling id is inert by contract, but leaving it would silently
+                // shrink a group to one member (= no exclusivity) with no UI trace.
+                const nextGroups = (editingStage.exclusiveGroups ?? [])
+                  .map((g) => ({ ...g, taskIds: g.taskIds.filter((id) => id !== editingTask.id) }))
+                  .filter((g) => g.taskIds.length > 0);
+                const patch: Partial<Stage> = {
+                  tasks: nextTasks,
+                  requiredTaskCount: clampRequiredTaskCount(editingStage.requiredTaskCount, nextTasks.length),
+                  ...(editingStage.exclusiveGroups
+                    ? { exclusiveGroups: nextGroups.length > 0 ? nextGroups : undefined }
+                    : {}),
+                };
                 updateStage(editingStage.id, patch);
                 setEditing(null);
               }

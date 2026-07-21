@@ -1,49 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { LiveRunSummary } from '@rushpoint/shared';
-import { listLiveRuns } from '../services/calls';
 import { Button, Card, Skeleton } from '../components/ui';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
+import { useLiveRuns } from '../hooks/useLiveRuns';
 
 // Multi-run GM overview (change: multi-run-gm-panel): every LIVE run across all of
 // the owner's games in one place, with a participant count + unacknowledged-alert
 // badge. Each card deep-links into the existing per-run console — no duplicated
-// controls. Polls every 10s so a fresh SOS surfaces without a manual refresh.
+// controls. Data comes from the app-wide shared 10s poll (hooks/useLiveRuns) that
+// also backs the floating ActiveRunBar — one timer, one callable per tick, even
+// though both are mounted here — so a fresh SOS surfaces without a manual refresh.
 export default function RunsOverviewPage() {
   const nav = useNavigate();
   const t = useT();
   const r = t.liveRuns;
-  const [runs, setRuns] = useState<LiveRunSummary[] | null>(null);
-  const [errored, setErrored] = useState(false);
-
-  // Extracted so the Retry button can re-invoke it directly. Not tied to `alive`
-  // (that guard only matters for the polling loop), so it's safe to call on demand.
-  const load = useCallback(async () => {
-    try {
-      const res = await listLiveRuns({});
-      setRuns(res.runs); setErrored(false);
-    } catch {
-      setErrored(true);
-    }
-  }, []);
-
-  // A single poll loop that survives language switches without churning the
-  // interval. The error LABEL is read at render time so it's always in-language.
-  useEffect(() => {
-    let alive = true;
-    async function poll() {
-      try {
-        const res = await listLiveRuns({});
-        if (alive) { setRuns(res.runs); setErrored(false); }
-      } catch {
-        if (alive) setErrored(true);
-      }
-    }
-    void poll();
-    const id = setInterval(() => void poll(), 10_000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
+  const { runs, errored, refresh: load } = useLiveRuns();
 
   async function copyCode(code: string) {
     try { await navigator.clipboard.writeText(code); toast.success(r.copied); }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { Button } from './ui';
 import { useT } from './LanguageContext';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Reusable share modal: QR + copyable link + native share sheet. Used to recruit
 // players to a game's public promo page before an event, and reusable anywhere a
@@ -20,7 +21,6 @@ export function ShareSheet({
   const b = useT().builder;
   const [qr, setQr] = useState('');
   const [copied, setCopied] = useState(false);
-  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
     QRCode.toDataURL(url, { margin: 1, width: 220 }).then(setQr).catch(() => setQr(''));
@@ -39,9 +39,13 @@ export function ShareSheet({
 
   async function publish() {
     if (!onPublish) return;
-    setPublishing(true);
-    try { await onPublish(); } finally { setPublishing(false); }
+    await onPublish();
   }
+  // In-flight guard (change: wave-b/async-action-guard): `onPublish` fires the
+  // publishGame callable, and the old `publishing` useState flag couldn't stop a
+  // second click landing in the same React batch.
+  const publishAction = useAsyncAction(publish);
+  const publishing = publishAction.busy;
 
   return createPortal(
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
@@ -55,7 +59,7 @@ export function ShareSheet({
           <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
             {b.shareNotInGallery}
             {onPublish && (
-              <button onClick={publish} disabled={publishing}
+              <button onClick={() => void publishAction.run()} disabled={publishing}
                 className="ms-1 underline hover:text-amber-200 disabled:opacity-50">
                 {publishing ? b.sharePublishing : b.sharePublishNow}
               </button>
