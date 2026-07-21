@@ -11,10 +11,19 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 // surfaced to the player as a single "check your connection" message.
 const CONNECTION_CODES = new Set(['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated']);
 
-export default function JoinScreen({ onJoined, onStaff }: { onJoined: (s: Session) => void; onStaff?: () => void }) {
+export default function JoinScreen({ initialCode, onJoined, onStaff }: {
+  /**
+   * The access code carried by the link, already resolved by lib/playRoute.ts.
+   * The URL is parsed in exactly ONE place now: a screen re-reading
+   * `window.location` is how a stale session ended up beating the link code.
+   */
+  initialCode?: string | null;
+  onJoined: (s: Session) => void;
+  onStaff?: () => void;
+}) {
   const { t, toggleLang, lang, colorblind, setColorblind } = useT();
-  // Evaluate the ?code= link param at mount time, not at module-parse time (P9).
-  const [linkCode] = useState<string>(() => (new URLSearchParams(window.location.search).get('code') ?? '').toUpperCase().trim());
+  // Snapshot at mount, not at module-parse time (P9).
+  const [linkCode] = useState<string>(() => (initialCode ?? '').toUpperCase().trim());
   const [code, setCode] = useState(linkCode);
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});

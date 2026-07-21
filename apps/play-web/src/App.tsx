@@ -1,22 +1,51 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from 'react';
 import { ensureAuth } from './services/firebase';
-import { loadSession, loadStaffSession, type Session } from './store';
+import { clearSession, loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
 import PlayScreen from './screens/PlayScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
-import { parseChallengeParam, TV_ROUTE_PARAM, RECAP_ROUTE_PARAM } from '@rushpoint/shared';
 import { I18nProvider, useT } from './i18nContext';
 import { unlockAudio } from './lib/sound';
+import { resolvePlayRoute, stripStaffParams } from './lib/playRoute';
 // Ceremony mode (change: ceremony-mode): lazy so the slideshow/confetti code
 // stays out of the main bundle (same pattern as the MapLibre chunk).
 const CeremonyScreen = lazy(() => import('./screens/CeremonyScreen'));
-const StaffConsole = lazy(() => import('./screens/StaffConsole'));
 const GamePromoScreen = lazy(() => import('./screens/GamePromoScreen'));
 const PublicLeaderboardScreen = lazy(() => import('./screens/PublicLeaderboardScreen'));
 const ChallengeTeaser = lazy(() => import('./screens/ChallengeTeaser'));
 const TvLeaderboard = lazy(() => import('./screens/TvLeaderboard'));
 const RunRecap = lazy(() => import('./screens/RunRecap'));
+
+/**
+ * `React.lazy` + a stale service-worker shell is a trap: the cached index.html can
+ * reference a hashed chunk that no longer exists, the dynamic import rejects, and
+ * Suspense hangs on the spinner forever — which looks exactly like the staff
+ * deep-link bug this change fixes. Reload ONCE (guarded per tab) to pick up a
+ * fresh shell; if it fails again, rethrow so the ErrorBoundary shows something real.
+ */
+function lazyWithRetry<P extends object>(
+  key: string,
+  factory: () => Promise<{ default: ComponentType<P> }>,
+) {
+  return lazy<ComponentType<P>>(() =>
+    factory().catch((err) => {
+      const flag = `rushpoint.chunkReload.${key}`;
+      let already = true;
+      try {
+        already = sessionStorage.getItem(flag) === '1';
+        if (!already) sessionStorage.setItem(flag, '1');
+      } catch { /* private mode — fall through and rethrow */ }
+      if (!already) {
+        window.location.reload();
+        return new Promise<{ default: ComponentType<P> }>(() => { /* never resolves; the reload takes over */ });
+      }
+      throw err;
+    }),
+  );
+}
+
+const StaffConsole = lazyWithRetry('staff', () => import('./screens/StaffConsole'));
 
 export default function App() {
   return (
@@ -29,34 +58,15 @@ export default function App() {
 function AppInner() {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  // Staff mode is entered via ?staff in the URL or a restored staff session.
-  const [staffMode, setStaffMode] = useState(
-    () => new URLSearchParams(window.location.search).has('staff') || !!loadStaffSession(),
-  );
-  // A shared promo link (`?game=<id>`) shows the public teaser for a game until
-  // the visitor chooses to enter a code (or already has a live session).
-  const [promoGameId, setPromoGameId] = useState<string | null>(
-    () => new URLSearchParams(window.location.search).get('game'),
-  );
-  // A shared standings link (`?board=<code>`) shows the public leaderboard.
-  const [boardCode, setBoardCode] = useState<string | null>(
-    () => new URLSearchParams(window.location.search).get('board'),
-  );
-  // `?board=<code>&ceremony` plays the awards finale instead (ceremony-mode).
-  const [ceremony] = useState(
-    () => new URLSearchParams(window.location.search).has('ceremony'),
-  );
-  // A "challenge a friend" deep link (`?challenge=<gameId>:<taskId>`) opens the
-  // standalone single-task teaser for brand-new (signed-out) visitors.
-  const [challenge, setChallenge] = useState(
-    () => parseChallengeParam(new URLSearchParams(window.location.search).get('challenge')),
-  );
-  // A `?tv=<accessCode>` link opens the full-screen projection leaderboard.
-  const tvCode = new URLSearchParams(window.location.search).get(TV_ROUTE_PARAM);
-  // A `?recap=<accessCode>` link opens the public post-run recap (published only).
-  const [recapCode, setRecapCode] = useState<string | null>(
-    () => new URLSearchParams(window.location.search).get(RECAP_ROUTE_PARAM),
-  );
+  // The URL is the authority for routing (see lib/playRoute.ts). Held in state so
+  // a history.replaceState (staff exit) re-resolves the route immediately.
+  const [search, setSearch] = useState(() => window.location.search);
+  // Staff mode: a stored staff session, or the "I'm staff" button on the join
+  // screen. A staff *link* is detected from the URL by the resolver itself.
+  const [staffMode, setStaffMode] = useState(() => !!loadStaffSession());
+  // A route the visitor dismissed in-app ("I have a code" on the promo/board)
+  // without changing the URL. Only ever downgrades to the plain join screen.
+  const [dismissed, setDismissed] = useState(false);
 
   const { dir, lang } = useT();
 
@@ -71,9 +81,22 @@ function AppInner() {
     // blip — otherwise the whole app hangs on the spinner forever. On failure we
     // still render (JoinScreen); the join flow re-attempts auth when it runs.
     ensureAuth()
-      .then(() => setSession(loadSession()))
       .catch(() => { /* render anyway; do not trap the user on a spinner */ })
-      .finally(() => setReady(true));
+      .finally(() => {
+        const stored = loadSession();
+        // Stale-session guard (issue 3): a join code in the URL that points at a
+        // run this device is NOT in drops the persisted session, so the player
+        // lands in the NEW game instead of silently reopening the old one. A link
+        // for the SAME run is a no-op resume and keeps every bit of progress.
+        const { clearSession: stale } = resolvePlayRoute({
+          search: window.location.search,
+          session: stored,
+          hasStaffSession: !!loadStaffSession(),
+        });
+        if (stale) clearSession();
+        setSession(stale ? null : stored);
+        setReady(true);
+      });
   }, []);
 
   // Reflect the active language on the document root for RTL/LTR.
@@ -100,6 +123,19 @@ function AppInner() {
     };
   }, []);
 
+  // Leaving staff mode MUST rewrite the URL. Otherwise the same address
+  // re-resolves — and a legacy staff link carries `game=<gameId>`, which the
+  // promo route would happily render, instant-play button and all, quietly
+  // turning a marshal into a participant.
+  const exitStaff = useCallback(() => {
+    const next = stripStaffParams(window.location.search);
+    if (next !== window.location.search) {
+      window.history.replaceState(null, '', `${window.location.pathname}${next}${window.location.hash}`);
+    }
+    setSearch(next);
+    setStaffMode(false);
+  }, []);
+
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-app-bg">
@@ -108,82 +144,90 @@ function AppInner() {
     );
   }
 
-  if (staffMode) {
+  const { route } = resolvePlayRoute({ search, session, hasStaffSession: staffMode });
+
+  if (route.kind === 'staff') {
     return (
       <>
         <ConnectionBanner />
         <Suspense fallback={routeFallback}>
-          <StaffConsole onExit={() => setStaffMode(false)} />
+          <StaffConsole ctx={route.ctx} onExit={exitStaff} />
         </Suspense>
         <DialogHost />
       </>
     );
   }
 
-  if (tvCode) {
+  if (route.kind === 'tv') {
     return (
       <>
         <Suspense fallback={routeFallback}>
-          <TvLeaderboard code={tvCode} />
+          <TvLeaderboard code={route.code} />
         </Suspense>
         <DialogHost />
       </>
     );
   }
 
-  if (recapCode) {
+  if (route.kind === 'recap' && !dismissed) {
     return (
       <>
         <ConnectionBanner />
         <Suspense fallback={routeFallback}>
-          <RunRecap code={recapCode} onJoin={() => setRecapCode(null)} />
+          <RunRecap code={route.code} onJoin={() => setDismissed(true)} />
         </Suspense>
         <DialogHost />
       </>
     );
   }
 
-  if (challenge && !session) {
+  if (route.kind === 'ceremony') {
     return (
       <>
         <ConnectionBanner />
-        <Suspense fallback={routeFallback}>
-          <ChallengeTeaser gameId={challenge.gameId} taskId={challenge.taskId} onJoin={() => setChallenge(null)} />
+        <Suspense fallback={
+          <div className="min-h-screen flex items-center justify-center bg-app-bg">
+            <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          </div>
+        }>
+          <CeremonyScreen code={route.code} />
         </Suspense>
         <DialogHost />
       </>
     );
   }
 
-  if (boardCode) {
+  if (route.kind === 'board' && !dismissed) {
     return (
       <>
         <ConnectionBanner />
-        {ceremony ? (
-          <Suspense fallback={
-            <div className="min-h-screen flex items-center justify-center bg-app-bg">
-              <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
-            </div>
-          }>
-            <CeremonyScreen code={boardCode} />
-          </Suspense>
-        ) : (
-          <Suspense fallback={routeFallback}>
-            <PublicLeaderboardScreen code={boardCode} onJoin={() => setBoardCode(null)} />
-          </Suspense>
-        )}
+        <Suspense fallback={routeFallback}>
+          <PublicLeaderboardScreen code={route.code} onJoin={() => setDismissed(true)} />
+        </Suspense>
         <DialogHost />
       </>
     );
   }
 
-  if (promoGameId && !session) {
+  if (route.kind === 'challenge' && !dismissed) {
     return (
       <>
         <ConnectionBanner />
         <Suspense fallback={routeFallback}>
-          <GamePromoScreen gameId={promoGameId} onPlay={() => setPromoGameId(null)}
-            onInstantPlay={(s) => { setSession(s); setPromoGameId(null); }} />
+          <ChallengeTeaser gameId={route.gameId} taskId={route.taskId} onJoin={() => setDismissed(true)} />
+        </Suspense>
+        <DialogHost />
+      </>
+    );
+  }
+
+  if (route.kind === 'promo' && !dismissed) {
+    return (
+      <>
+        <ConnectionBanner />
+        <Suspense fallback={routeFallback}>
+          <GamePromoScreen gameId={route.gameId} onPlay={() => setDismissed(true)}
+            onInstantPlay={(s) => { setSession(s); setDismissed(true); }} />
         </Suspense>
         <DialogHost />
       </>
@@ -193,9 +237,13 @@ function AppInner() {
   return (
     <>
       <ConnectionBanner />
-      {!session
-        ? <JoinScreen onJoined={setSession} onStaff={() => setStaffMode(true)} />
-        : <PlayScreen session={session} onLeave={() => setSession(null)} />}
+      {route.kind === 'play' && session
+        ? <PlayScreen session={session} onLeave={() => setSession(null)} />
+        : <JoinScreen
+            initialCode={route.kind === 'join' ? route.code : null}
+            onJoined={setSession}
+            onStaff={() => setStaffMode(true)}
+          />}
       <DialogHost />
     </>
   );

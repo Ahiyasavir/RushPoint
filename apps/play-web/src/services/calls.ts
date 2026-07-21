@@ -80,7 +80,17 @@ export const joinRun = callable<
 
 // Sanitized task shape returned to participants — every answer key is stripped
 // server-side (secretCode, hint text, quiz answers, numeric target, step answers).
-export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps' | 'coordinates'> & {
+export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps' | 'coordinates' | 'title' | 'type'> & {
+  // play-task-gating: a SEALED hidden-location task (see `arrivalPending`) ships
+  // as a stub with NO title and NO type — the client must render the clue card
+  // and must never assume these exist. They return the moment the server
+  // confirms arrival.
+  title?: string;
+  type?: Task['type'];
+  // play-task-gating: true while a hidden-location task has not yet been
+  // unsealed by `reportArrival`. Everything but the clue is absent from the
+  // payload — this is not a UI-level hide.
+  arrivalPending?: boolean;
   hasHint?: boolean;
   hintPenalty?: number;
   // Hint auto escalation: server-computed display flag — the paid hint is FREE
@@ -156,6 +166,15 @@ export const requestTaskHint = callable<
   Ctx & { taskId: string },
   { hint: string; penalty: number; alreadyUsed: boolean; free?: boolean }
 >('requestTaskHint');
+
+// play-task-gating: ask the server whether we have ARRIVED at a hidden-location
+// task. The server re-checks GPS against the secret coordinates with the same
+// rule as a check-in and latches the verdict, so a reload / GPS dropout can
+// never re-seal a spot the team already found. Never returns a distance.
+export const reportArrival = callable<
+  Ctx & { taskId: string; lat?: number; lng?: number },
+  { arrived: boolean; reason?: string }
+>('reportArrival');
 
 export const submitTaskAnswer = callable<
   // quiz/numeric take `answer`; an ordering quiz takes `orderedAnswer` (the
@@ -241,7 +260,9 @@ export const hideFeedItem = callable<
 >('hideFeedItem');
 
 export const staffSignIn = callable<
-  { ownerUid: string; gameId: string; runId: string; pin: string },
+  // `name` is the staffer's self-declared display name (attribution only — the
+  // server treats it as untrusted and it grants nothing). Omitted ⇒ the invite's name.
+  { ownerUid: string; gameId: string; runId: string; pin: string; name?: string },
   { customToken: string; name: string; permissions: string[] }
 >('staffSignIn');
 

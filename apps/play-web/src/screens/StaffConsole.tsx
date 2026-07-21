@@ -12,6 +12,7 @@ import {
   sendTeamChatMessage,
 } from '../services/calls';
 import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
+import type { StaffCtx } from '../lib/playRoute';
 import {
   loadStaffSession,
   saveStaffSession,
@@ -51,37 +52,63 @@ interface TeamRow {
   score: number;
 }
 
-export default function StaffConsole({ onExit }: { onExit: () => void }) {
+export default function StaffConsole({ ctx, onExit }: { ctx: StaffCtx | null; onExit: () => void }) {
   const [staff, setStaff] = useState<StaffSession | null>(() => loadStaffSession());
 
-  if (!staff) return <StaffSignIn onSignedIn={setStaff} onExit={onExit} />;
+  if (!staff) return <StaffSignIn ctx={ctx} onSignedIn={setStaff} onExit={onExit} />;
   return <StaffDashboard staff={staff} onSignOut={() => { clearStaffSession(); onExit(); }} />;
 }
 
 // ─── Sign-in ────────────────────────────────────────────────────────────────
+// Onboarding used to demand FOUR fields: ownerUid, gameId, runId and the PIN.
+// The first three are addressing, not secrets — they are already in the invite
+// link, so typing them is pure friction. When the link carries them (any staff
+// link shape, see lib/playRoute.ts) the marshal now types their own name and the
+// PIN, nothing else. The three ids stay editable ONLY as the fallback for someone
+// who opened /?staff with no context.
+//
+// The PIN is deliberately still typed and is NOT in the link: the QR is printed,
+// photographed and forwarded, and it must grant nothing on its own. Server-side
+// auth is untouched — staffSignIn still verifies the PIN against this run's
+// staffInvites and mints the ownerUid/gameId/runId-scoped custom token.
 function StaffSignIn({
+  ctx,
   onSignedIn,
   onExit,
 }: {
+  ctx: StaffCtx | null;
   onSignedIn: (s: StaffSession) => void;
   onExit: () => void;
 }) {
   const { t } = useT();
-  const params = new URLSearchParams(window.location.search);
-  const [ownerUid, setOwnerUid] = useState(params.get('owner') ?? '');
-  const [gameId, setGameId] = useState(params.get('game') ?? '');
-  const [runId, setRunId] = useState(params.get('run') ?? '');
+  const [ownerUid, setOwnerUid] = useState(ctx?.ownerUid ?? '');
+  const [gameId, setGameId] = useState(ctx?.gameId ?? '');
+  const [runId, setRunId] = useState(ctx?.runId ?? '');
+  const [name, setName] = useState('');
   const [pin, setPin] = useState('');
   const [err, setErr] = useState('');
+  // Full context from the link ⇒ the short form (name + PIN).
+  const fromLink = !!ctx;
 
   async function submit() {
     setErr('');
     try {
-      const res = await staffSignIn({ ownerUid: ownerUid.trim(), gameId: gameId.trim(), runId: runId.trim(), pin: pin.trim() });
+      // Send the typed name so it reaches the `staffName` token claim: audit rows
+      // (approvals, score adjustments) are written server-side from the claim, so a
+      // client-only name would leave the trail saying "Staff 1" instead of who acted.
+      const res = await staffSignIn({
+        ownerUid: ownerUid.trim(), gameId: gameId.trim(), runId: runId.trim(),
+        pin: pin.trim(), name: name.trim() || undefined,
+      });
       await signInStaff(res.customToken);
       const session: StaffSession = {
         ownerUid: ownerUid.trim(), gameId: gameId.trim(), runId: runId.trim(),
-        name: res.name, permissions: res.permissions,
+        // The marshal's own name wins over the placeholder the organizer typed
+        // when minting the PIN. NOTE: attribution in the audit trail still comes
+        // from the `staffName` token claim — carrying this to the server needs a
+        // staffSignIn payload field (see docs/wave-e/staff-qr-onboarding-plan.md).
+        name: name.trim() || res.name,
+        permissions: res.permissions,
       };
       saveStaffSession(session);
       onSignedIn(session);
@@ -108,19 +135,33 @@ function StaffSignIn({
         <h1 className="font-brand text-2xl font-extrabold text-accent text-center mb-1">{t.staff.consoleTitle}</h1>
         <p className="text-zinc-500 text-center mb-8 text-sm">{t.staff.signInSub}</p>
         <div className="space-y-3">
-          <Input value={ownerUid} onChange={(e) => setOwnerUid(e.target.value)} placeholder={t.staff.ownerUid} />
-          <Input value={gameId} onChange={(e) => setGameId(e.target.value)} placeholder={t.staff.gameId} />
-          <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder={t.staff.runId} />
+          {/* Only shown when the link did NOT carry the run address. */}
+          {!fromLink && (
+            <>
+              <Input value={ownerUid} onChange={(e) => setOwnerUid(e.target.value)} placeholder={t.staff.ownerUid} />
+              <Input value={gameId} onChange={(e) => setGameId(e.target.value)} placeholder={t.staff.gameId} />
+              <Input value={runId} onChange={(e) => setRunId(e.target.value)} placeholder={t.staff.runId} />
+            </>
+          )}
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t.join.yourName}
+            autoFocus={fromLink}
+            dir="auto"
+            onKeyDown={(e) => { if (e.key === 'Enter') void submitAction.run(); }}
+          />
           <Input
             value={pin}
             onChange={(e) => setPin(e.target.value)}
             placeholder={t.staff.pin}
+            inputMode="numeric"
             className="text-center text-xl font-mono tracking-[0.3em]"
             onKeyDown={(e) => { if (e.key === 'Enter') void submitAction.run(); }}
           />
         </div>
         {err && <p className="text-danger text-sm text-center mt-3">{err}</p>}
-        <Button disabled={busy || !ownerUid || !gameId || !runId || !pin} loading={busy} onClick={() => void submitAction.run()} className="mt-5">
+        <Button disabled={busy || !ownerUid || !gameId || !runId || !name.trim() || !pin} loading={busy} onClick={() => void submitAction.run()} className="mt-5">
           {t.staff.signIn}
         </Button>
         <button className="text-zinc-500 text-sm mt-4 mx-auto" onClick={onExit}>{t.staff.backToJoin}</button>

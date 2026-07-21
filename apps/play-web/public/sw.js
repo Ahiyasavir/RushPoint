@@ -5,7 +5,11 @@
  * caches Firebase traffic (Firestore/Auth/Functions/Storage are cross-origin and
  * handled by the SDK's own offline cache); only same-origin GETs are touched.
  */
-const CACHE = 'rushpoint-play-v2';
+// Bump on every shell-affecting release: `activate` deletes every other cache, so
+// a bump is what actually pushes a fix (e.g. the wave-e deep-link routing fix) out
+// to devices that already installed the app. A stale shell can also reference a
+// hashed chunk that no longer exists — see lazyWithRetry() in src/App.tsx.
+const CACHE = 'rushpoint-play-v3';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png'];
 
 self.addEventListener('install', (event) => {

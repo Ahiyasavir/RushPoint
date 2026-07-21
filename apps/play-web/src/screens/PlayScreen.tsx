@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
-import { getMyTeamState, triggerSOS, updateLocation, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
+import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
@@ -66,6 +66,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const controllerRef = useRef(true);
   // Last time we pinged updateLocation, for ~20s client-side throttling.
   const lastPing = useRef(0);
+  // play-task-gating: the id of the team's assigned hidden-location task that is
+  // still SEALED (awaiting a server-confirmed arrival), or null. Read by the
+  // geolocation watcher (which mounts once) so it can probe reportArrival on the
+  // same tick it already has a fix — no extra GPS work, no hot-path server write
+  // for teams with nothing sealed.
+  const pendingArrivalRef = useRef<string | null>(null);
+  const lastArrivalProbe = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -164,12 +171,25 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng })
             .catch(() => undefined);
         }
+        // play-task-gating: while the assigned task is a still-sealed hidden
+        // location, ask the server (throttled, controller-only) whether we have
+        // arrived. The server latches the verdict, so a single success is
+        // permanent — we stop probing as soon as the refreshed state clears
+        // `arrivalPending`. A failure is silent: the manual button is the
+        // fallback and the next tick retries anyway.
+        const sealedId = pendingArrivalRef.current;
+        if (activeRef.current && controllerRef.current && sealedId && now - lastArrivalProbe.current >= 15_000) {
+          lastArrivalProbe.current = now;
+          reportArrival({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, taskId: sealedId, lat, lng })
+            .then((r) => { if (r.arrived) { pendingArrivalRef.current = null; void refresh(); } })
+            .catch(() => undefined);
+        }
       },
       () => undefined,
       { enableHighAccuracy: true, maximumAge: 10_000 },
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, [session]);
+  }, [session, refresh]);
 
   // Keep the screen awake while actively racing (map open, navigating).
   useWakeLock(!!state && state.team.launched && state.team.status !== 'finished');
@@ -328,6 +348,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const myUid = uid();
   const isController = (team.controllerUid ?? team.id) === myUid;
   controllerRef.current = isController;
+  // play-task-gating: which assigned task (if any) is a hidden location the
+  // server has not unsealed yet. `arrivalPending` is server-set, so this can
+  // never disagree with what the payload actually contains.
+  pendingArrivalRef.current =
+    state.activeStageTasks.find((c) => c.arrivalPending)?.id ?? null;
   const controllerName = team.devices?.find((d) => d.uid === (team.controllerUid ?? team.id))?.name
     ?? t.devices.deviceFallbackName;
   const hasTeammateDevices = (team.deviceUids?.length ?? 1) > 1 || game.mode === 'team';
@@ -385,7 +410,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         .map((rec) => {
           const content = state.activeStageTasks.find((c) => c.id === rec.taskId);
           if (content?.locationless) return null; // general task — not on the map
-          if (content?.locationHidden) return null; // hidden spot — found by clue, no pin
+          // play-task-gating: a hidden spot has no pin only while it is still
+          // SEALED. Once the server confirms arrival it releases the coordinates,
+          // so a player who wanders off can navigate back to it.
+          if (content?.arrivalPending) return null;
           const coords = content?.smart?.stationCoords ?? content?.coordinates;
           return coords && (coords.lat !== 0 || coords.lng !== 0)
             ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Task', active: rec.status === 'assigned' }
@@ -792,6 +820,13 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
 // THEN the vault opens"). Locked-ness is computed with the SAME shared
 // isUnlocked used by the server routing + completion guard — display only, the
 // server independently refuses locked completions.
+//
+// play-task-gating (wave D): this list is now normally EMPTY by design. The
+// product decision is that a player only receives the task routing assigned them
+// (plus the ones they finished), so an unassigned/locked task is absent from the
+// payload entirely and there is nothing to look up. The component is kept — it
+// renders null harmlessly and stays correct for any legacy/completed content —
+// but do not "fix" it by re-shipping locked tasks to the client.
 function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTeamState }) {
   const { t } = useT();
   const completedIds = state.team.stages

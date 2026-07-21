@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { haversineKm, expiryInstantMs, isUnlocked, defaultRadiusFor } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
-  completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint,
+  completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, triggerSOS,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
@@ -85,9 +85,13 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     .flatMap((s) => s.tasks)
     .filter((rec) => rec.status === 'completed')
     .map((rec) => rec.taskId);
+  // play-task-gating: an unassigned task is no longer shipped to the client at
+  // all, so `c` is normally undefined here. A task we cannot even see is one we
+  // certainly cannot act on, so treat "no content" as locked — otherwise the
+  // "everything left is locked" explanation would silently stop appearing.
   const allRemainingLocked = unassigned.length > 0 && unassigned.every((rec) => {
     const c = state.activeStageTasks.find((x) => x.id === rec.taskId);
-    return !!c && !isUnlocked(c, completedTaskIds);
+    return !c || !isUnlocked(c, completedTaskIds);
   });
 
   // If multi-task stage and nothing assigned yet, request a routing decision once.
@@ -167,9 +171,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // M4: don't fire a submit while offline — the callable would fail with a raw
   // network error on tap. Short-circuit with a localized nudge instead (the
   // ConnectionBanner already shows the offline state). Returns true when blocked.
-  function blockedOffline(): boolean {
+  function blockedOffline(offlineMsg: string = t.task.offlineSubmit): boolean {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setMsg(t.task.offlineSubmit);
+      setMsg(offlineMsg);
       return true;
     }
     return false;
@@ -247,6 +251,27 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       async (lat, lng) => {
         try { await completeTask({ ...ctx, taskId: task!.id, lat, lng }); onChanged(); }
         catch (e) { setMsg(submitError(e, t.task.failed)); }
+        finally { setBusy(false); }
+      },
+      () => { setMsg(t.task.gpsWarning); setBusy(false); },
+    );
+  }
+
+  // play-task-gating: manual "we got here" for a SEALED hidden-location task.
+  // The background watcher already probes on every GPS tick; this covers a player
+  // whose last fix is stale. It awards nothing — it only asks the server to
+  // re-check proximity and unseal the task. `arrived:false` is a normal answer,
+  // not an error, and never carries a distance.
+  async function checkArrival() {
+    if (blockedOffline(t.task.arrivalNeedsOnline)) return;
+    setBusy(true); setMsg('');
+    withLocation(
+      async (lat, lng) => {
+        try {
+          const res = await reportArrival({ ...ctx, taskId: task!.id, lat, lng });
+          if (res.arrived) { setMsg(t.task.arrivalUnlocked); onChanged(); }
+          else setMsg(t.task.notThereYet);
+        } catch (e) { setMsg(submitError(e, t.task.notThereYet)); }
         finally { setBusy(false); }
       },
       () => { setMsg(t.task.gpsWarning); setBusy(false); },
@@ -405,6 +430,48 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   const headerLabel = stage.tasks.length > 1
     ? (requiredHere < stage.tasks.length ? t.task.stopOf({ done: completedHere + 1, total: requiredHere }) : t.task.routedTask)
     : t.task.yourTask;
+
+  // play-task-gating: SEALED hidden-location task. The server has not confirmed
+  // arrival, so the payload literally contains no title, no type and no inputs —
+  // there is nothing to render but the clue. This is not a UI-level hide; there
+  // is nothing in devtools either.
+  if (task.arrivalPending) {
+    return (
+      <Card className="p-5" data-testid="task-card" data-task-sealed="true" data-task-id={task.id}>
+        <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
+        <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
+        <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-warm mb-1">
+            {t.task.hiddenBadge}
+          </div>
+          {(task.locationClueHe || task.locationClue) && (
+            <p dir="auto" className="text-sm text-zinc-200" data-testid="sealed-clue">
+              {task.locationClueHe || task.locationClue}
+            </p>
+          )}
+          <p className="text-[11px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
+        </div>
+
+        <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
+          <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
+            {t.task.checkArrival}
+          </Button>
+        </div>
+
+        {task.hasHint && !hint && (
+          <div className="mt-3">
+            <button onClick={revealHint} disabled={frozen}
+              aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+              className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+              💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+            </button>
+          </div>
+        )}
+        {hint && <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>}
+        {msg && <p className="mt-3 text-sm text-zinc-300">{msg}</p>}
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-5" data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
