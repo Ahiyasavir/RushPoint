@@ -26,6 +26,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canFastForwardApply } from './lib/gitUpdateGuard.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = path.join(ROOT, '.firebase');
@@ -87,39 +88,89 @@ function git(args) {
 }
 function headSha() { return git(['rev-parse', 'HEAD']).out; }
 
-// Fetch origin and, if the tracked upstream is ahead, fast-forward pull.
-// Returns true if the working tree HEAD actually moved (→ stack should restart).
-// Conservative on purpose: --ff-only never rewrites history or discards local work;
-// if a local edit blocks the fast-forward we log it and keep serving the current build.
-function updateFromGit() {
-  const before = headSha();
+// Rate-limiter for the "can't fast-forward" log: because the poll runs every few
+// minutes, a persistently-blocked update would otherwise log every cycle. We only
+// re-log when the (reason, upstreamSha) pair changes.
+let lastBlockedKey = null;
+function logBlockedOnce(reason, upstreamSha, human) {
+  const key = `${reason}@${upstreamSha}`;
+  if (key === lastBlockedKey) return;
+  lastBlockedKey = key;
+  log(human);
+}
+
+// Fetch origin and assess whether the tracked upstream can be FAST-FORWARDED cleanly
+// onto the working tree — the branch is strictly behind (not diverged) AND no file the
+// incoming commits change is locally modified. This is consulted BEFORE any stack
+// teardown so we never collapse for an update that would then fail to pull. Returns
+// { assessed, ok, reason, behind, upstreamRef, upstreamSha }. `assessed` is false when
+// we couldn't even evaluate (offline / no upstream) — treat as "do nothing".
+function assessUpdate() {
   const f = git(['fetch', '--quiet', 'origin']);
-  if (f.code !== 0) { log(`git fetch failed (offline?): ${f.err || f.out}`); return false; }
+  if (f.code !== 0) { log(`git fetch failed (offline?): ${f.err || f.out}`); return { assessed: false }; }
 
   const upstream = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
-  if (upstream.code !== 0) { log('no upstream tracking branch configured — skipping auto-update.'); return false; }
+  if (upstream.code !== 0) { log('no upstream tracking branch configured — skipping auto-update.'); return { assessed: false }; }
+  const upstreamRef = upstream.out;
+  const upstreamSha = git(['rev-parse', upstreamRef]).out;
 
-  const counts = git(['rev-list', '--left-right', '--count', `HEAD...${upstream.out}`]);
-  const behind = Number.parseInt((counts.out.split(/\s+/)[1] || '0'), 10);
-  if (!behind) return false;
+  const counts = git(['rev-list', '--left-right', '--count', `HEAD...${upstreamRef}`]);
+  const [aheadStr, behindStr] = counts.out.split(/\s+/);
+  const ahead = Number.parseInt(aheadStr || '0', 10);
+  const behind = Number.parseInt(behindStr || '0', 10);
 
-  log(`update available: ${behind} new commit(s) on ${upstream.out} — pulling…`);
+  // Files the incoming commits change, vs. locally-modified TRACKED files. `status
+  // --porcelain` XY codes: skip untracked ('??') — they can't block a fast-forward.
+  const changedUpstreamFiles = behind > 0
+    ? git(['diff', '--name-only', `HEAD..${upstreamRef}`]).out.split(/\r?\n/).filter(Boolean)
+    : [];
+  const dirtyFiles = git(['status', '--porcelain'])
+    .out.split(/\r?\n/)
+    .filter((l) => l && !l.startsWith('??'))
+    .map((l) => l.slice(3).trim())
+    .filter(Boolean);
+
+  const { ok, reason } = canFastForwardApply({ ahead, behind, changedUpstreamFiles, dirtyFiles });
+  return { assessed: true, ok, reason, behind, ahead, upstreamRef, upstreamSha };
+}
+
+// Perform the pull ONLY when a fast-forward is safe. Returns true if HEAD actually
+// moved (→ stack should rebuild). A blocked update logs once (rate-limited) and keeps
+// serving the current build rather than failing a pull every relaunch.
+function updateFromGit() {
+  const before = headSha();
+  const a = assessUpdate();
+  if (!a.assessed) return false;
+  if (!a.ok) {
+    if (a.reason !== 'up-to-date') {
+      logBlockedOnce(a.reason, a.upstreamSha,
+        a.reason === 'diverged'
+          ? `update on ${a.upstreamRef} can't fast-forward: local branch has diverged (${a.ahead} commit(s) ahead). Serving current build.`
+          : `update on ${a.upstreamRef} can't fast-forward: local changes to ${a.reason.slice('dirty-conflict:'.length)} would be overwritten. Commit/stash to apply. Serving current build.`);
+    }
+    return false;
+  }
+
+  log(`update available: ${a.behind} new commit(s) on ${a.upstreamRef} — pulling…`);
   const pull = git(['pull', '--ff-only']);
   if (pull.code !== 0) {
-    log(`git pull --ff-only failed (local changes block a fast-forward?): ${pull.err || pull.out}`);
-    log('keep this runner tree clean (commit/stash local edits) so pushes apply. Serving current build.');
+    // Guard said it was safe but the pull still failed — surface it and keep serving.
+    log(`git pull --ff-only failed unexpectedly: ${pull.err || pull.out}. Serving current build.`);
     return false;
   }
   const after = headSha();
   if (after === before) return false;
 
   log(`updated ${before.slice(0, 8)} → ${after.slice(0, 8)}.`);
-  // Reinstall deps only if the lockfile/manifests changed in the pulled range.
+  lastBlockedKey = null; // moved forward — clear any prior blocked state
+  // Reinstall deps only if the lockfile/manifests changed in the pulled range. Use
+  // `npm ci` (installs from the lockfile, never rewrites it) so a dependency update
+  // can't leave package-lock.json dirty and block the NEXT fast-forward.
   const changed = git(['diff', '--name-only', `${before}`, `${after}`]).out;
   if (/(^|\n)(package(-lock)?\.json|.*\/package\.json)(\n|$)/.test(changed)) {
-    log('dependency manifests changed — running npm install…');
-    const ni = spawnSync('npm', ['install'], { cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32' });
-    log(ni.status === 0 ? 'npm install ok.' : `npm install exited ${ni.status}.`);
+    log('dependency manifests changed — running npm ci…');
+    const ni = spawnSync('npm', ['ci'], { cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32' });
+    log(ni.status === 0 ? 'npm ci ok.' : `npm ci exited ${ni.status} — serving current build.`);
   }
   return true;
 }
@@ -201,25 +252,28 @@ async function stop() {
 process.on('SIGINT', stop);
 process.on('SIGTERM', stop);
 
-// Background poll: while the stack is up, watch origin. When a push lands, kill the
-// running stack — the loop below then pulls the new code and relaunches. Guarded so
-// only one check runs at a time and none runs mid-teardown.
+// Background poll: while the stack is up, watch origin. When a push lands that can
+// actually FAST-FORWARD, kill the running stack — the loop below then pulls and
+// relaunches. Critically, we assess ff-safety BEFORE killing: a dirty tree or a
+// diverged branch means the pull would fail, so we keep serving instead of collapsing
+// the stack every few minutes (the old thrash-restart loop). Guarded so only one
+// check runs at a time and none runs mid-teardown; blocked updates log once.
 let gitTimer = null;
 let checking = false;
 gitTimer = setInterval(() => {
   if (stopping || checking || !child) return;
   checking = true;
   try {
-    const f = git(['fetch', '--quiet', 'origin']);
-    if (f.code === 0) {
-      const up = git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}']);
-      if (up.code === 0) {
-        const behind = Number.parseInt((git(['rev-list', '--count', `HEAD..${up.out}`]).out || '0'), 10);
-        if (behind > 0) {
-          log(`poll: ${behind} new commit(s) upstream — restarting stack to apply.`);
-          try { child.kill(); } catch { /* the exit handler resolves runOnce */ }
-        }
-      }
+    const a = assessUpdate();
+    if (!a.assessed) return;
+    if (a.ok) {
+      log(`poll: ${a.behind} new commit(s) upstream (fast-forward safe) — restarting stack to apply.`);
+      try { child.kill(); } catch { /* the exit handler resolves runOnce */ }
+    } else if (a.reason !== 'up-to-date') {
+      logBlockedOnce(a.reason, a.upstreamSha,
+        a.reason === 'diverged'
+          ? `poll: ${a.behind} new commit(s) upstream but local branch diverged (${a.ahead} ahead) — keeping stack up.`
+          : `poll: ${a.behind} new commit(s) upstream but local changes to ${a.reason.slice('dirty-conflict:'.length)} block a fast-forward — keeping stack up. Commit/stash to apply.`);
     }
   } finally { checking = false; }
 }, GIT_POLL_MS);
