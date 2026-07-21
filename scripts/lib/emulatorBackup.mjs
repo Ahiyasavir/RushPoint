@@ -67,3 +67,35 @@ export function selectRestoreTarget(entries) {
   const sorted = sortedAsc(valid.map((e) => e.name));
   return sorted[sorted.length - 1];                 // newest valid
 }
+
+/**
+ * Inverse of `snapshotName`: parse a `backup-<iso-with-dashes>` folder name back to
+ * epoch-ms, or NaN if it doesn't match. The date keeps its own dashes, so we only
+ * un-swap the time separators after the `T` (HH-MM-SS-mmm → HH:MM:SS.mmm).
+ */
+export function snapshotTimeMs(name) {
+  const m = /^backup-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/.exec(name || '');
+  if (!m) return NaN;
+  const [, date, hh, mm, ss, ms] = m;
+  return Date.parse(`${date}T${hh}:${mm}:${ss}.${ms}Z`);
+}
+
+/**
+ * Choose the FRESHEST import source between the primary export dir and the newest
+ * valid periodic backup — the fix for the "planned export shadows a newer crash
+ * backup" hazard. On a clean/planned teardown the primary dir is written last and
+ * wins; after a crash (no planned export) the newest periodic backup can be newer
+ * and must win instead. Inputs are already-resolved timestamps (ms) so this stays
+ * pure/testable; either may be null/NaN when that source is absent.
+ *   returns 'primary' | 'backup' | null
+ * Ties (equal ms) prefer 'primary' (the just-written clean export). When only one
+ * source is present, that one wins; when neither is, null (start fresh).
+ */
+export function selectFreshestImport({ primaryMs, backupMs }) {
+  const p = Number.isFinite(primaryMs) ? primaryMs : null;
+  const b = Number.isFinite(backupMs) ? backupMs : null;
+  if (p == null && b == null) return null;
+  if (p == null) return 'backup';
+  if (b == null) return 'primary';
+  return p >= b ? 'primary' : 'backup';
+}

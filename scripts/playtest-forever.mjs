@@ -183,6 +183,31 @@ function freePorts() {
   });
 }
 
+// Force a LIVE export of the running emulator into the PRIMARY data dir before any
+// planned teardown. Critical on Windows: child.kill() hard-terminates the emulator
+// (TerminateProcess), so the emulator's own --export-on-exit NEVER fires on a
+// programmatic stop — without this, every restart falls back to the periodic backup,
+// which can be up to one interval (~2 min) stale. `emulators:export` talks to the
+// Emulator Hub of the still-running suite (no kill, no signal needed), so it captures
+// the TRUE latest state; dev-emulator.mjs then imports this primary dir on relaunch
+// (it's preferred over any backup). Best-effort: on failure the periodic backup loop
+// still covers us, so we log and proceed with the teardown rather than block it.
+function exportPrimaryNow() {
+  const dest = path.join(STATE_DIR, 'emulator-data');
+  // Only meaningful while the suite is up (the source of the live data). If the stack
+  // is already gone, the Hub is down and export would just fail — skip quietly.
+  if (!child) { log('export skipped: stack not running (nothing live to snapshot).'); return false; }
+  log('exporting live emulator → primary data dir before teardown…');
+  const r = spawnSync('npx', ['firebase', 'emulators:export', dest, '--force', '--project', 'rushpoint-pwa-7daaa'], {
+    cwd: ROOT, stdio: 'ignore', shell: process.platform === 'win32', timeout: 90_000,
+  });
+  const ok = r.status === 0;
+  log(ok
+    ? 'primary export ok — next boot imports the latest state (0 data loss).'
+    : `primary export failed (status=${r.status ?? '?'}${r.error ? `, ${r.error.message}` : ''}) — periodic backup (≤${Math.round((Number(process.env.EMU_BACKUP_INTERVAL_MS || 120000)) / 1000)}s old) still covers us.`);
+  return ok;
+}
+
 // True once both apps have a production build on disk that `vite preview` can serve.
 function distReady() {
   return fs.existsSync(path.join(ROOT, 'apps', 'creator-web', 'dist', 'index.html'))
@@ -240,6 +265,8 @@ async function stop() {
   stopping = true;
   log('stopping supervisor…');
   if (gitTimer) clearInterval(gitTimer);
+  if (stopWatch) clearInterval(stopWatch);
+  exportPrimaryNow();   // capture latest live state before we hard-kill the emulator
   if (child) { try { child.kill(); } catch { /* ignore */ } }
   if (buildChild) { try { buildChild.kill(); } catch { /* ignore */ } }
   await freePorts();
@@ -268,6 +295,7 @@ gitTimer = setInterval(() => {
     if (!a.assessed) return;
     if (a.ok) {
       log(`poll: ${a.behind} new commit(s) upstream (fast-forward safe) — restarting stack to apply.`);
+      exportPrimaryNow();   // snapshot latest live state so the relaunch imports it (not a stale backup)
       try { child.kill(); } catch { /* the exit handler resolves runOnce */ }
     } else if (a.reason !== 'up-to-date') {
       logBlockedOnce(a.reason, a.upstreamSha,
@@ -277,6 +305,20 @@ gitTimer = setInterval(() => {
     }
   } finally { checking = false; }
 }, GIT_POLL_MS);
+
+// Prompt stop-file watcher: `npm run playtest:stop` writes STOPF. Without this the
+// running supervisor only notices STOPF *between* restart cycles (i.e. after the
+// stack independently dies), so a user wanting to stop had no clean lever and would
+// reach for a force-kill — the very thing that skips the emulator export and risks
+// data loss. Polling STOPF every few seconds gives `playtest:stop` a prompt, CLEAN
+// teardown (export → kill), so force-killing is never necessary. (Signals can't do
+// this on Windows: process.kill to a detached pid terminates it without running its
+// handlers, so a stop-file is the only cross-platform graceful trigger.)
+let stopWatch = null;
+stopWatch = setInterval(() => {
+  if (stopping) return;
+  if (fs.existsSync(STOPF)) { stop(); }
+}, 3_000);
 
 // Supervisor loop: pull latest, (re)build for prod when the code changed, run the
 // stack, and whenever it dies, clean ports, re-pull (in case the poll above

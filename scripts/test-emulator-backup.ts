@@ -7,6 +7,8 @@ import {
   selectRestoreTarget,
   isEmulatorReady,
   canAttemptExport,
+  snapshotTimeMs,
+  selectFreshestImport,
 } from './lib/emulatorBackup.mjs';
 
 let passed = 0;
@@ -59,6 +61,22 @@ ok(canAttemptExport({ ready: false, lastTs: null, nowTs: 1000, intervalMs: 500 }
 ok(canAttemptExport({ ready: true, lastTs: null, nowTs: 1000, intervalMs: 500 }) === true, 'ready + never snapshotted → export');
 ok(canAttemptExport({ ready: true, lastTs: 1000, nowTs: 1400, intervalMs: 500 }) === false, 'ready but within interval → no export');
 ok(canAttemptExport({ ready: true, lastTs: 1000, nowTs: 1500, intervalMs: 500 }) === true, 'ready + interval elapsed → export');
+
+// ── snapshotTimeMs (inverse of snapshotName) ─────────────────────────────────
+ok(snapshotTimeMs('backup-2026-06-28T12-34-56-789Z') === Date.UTC(2026, 5, 28, 12, 34, 56, 789), 'parses a snapshot name back to ms');
+ok(snapshotTimeMs(snapshotName(t1)) === t1, 'round-trips snapshotName → snapshotTimeMs');
+ok(Number.isNaN(snapshotTimeMs('not-a-backup')), 'garbage name → NaN');
+ok(Number.isNaN(snapshotTimeMs('')), 'empty → NaN');
+ok(Number.isNaN(snapshotTimeMs(undefined as never)), 'undefined → NaN');
+
+// ── selectFreshestImport (primary export vs newest crash backup) ─────────────
+ok(selectFreshestImport({ primaryMs: 2000, backupMs: 1000 }) === 'primary', 'primary newer → primary (clean/planned teardown)');
+ok(selectFreshestImport({ primaryMs: 1000, backupMs: 2000 }) === 'backup', 'backup newer → backup (crash after last planned export)');
+ok(selectFreshestImport({ primaryMs: 1500, backupMs: 1500 }) === 'primary', 'tie → primary (prefer the clean export)');
+ok(selectFreshestImport({ primaryMs: null, backupMs: 2000 }) === 'backup', 'no primary → backup');
+ok(selectFreshestImport({ primaryMs: 2000, backupMs: null }) === 'primary', 'no backup → primary');
+ok(selectFreshestImport({ primaryMs: NaN, backupMs: NaN }) === null, 'neither present → null (start fresh)');
+ok(selectFreshestImport({ primaryMs: null, backupMs: null }) === null, 'both null → null');
 
 console.log(failed === 0
   ? `\n✅ ALL EMULATOR-BACKUP TESTS PASSED (${passed})`
