@@ -250,6 +250,10 @@ const ALLOWED_TASK_KEYS = new Set([
   'requirePresence',
   // added by the sanitizer itself:
   'hasHint', 'locationHidden', 'hintFreeNow',
+  // play-task-gating: set on a hidden-location task the server has NOT yet
+  // unsealed. It is a boolean state flag, not content — the sealed payload it
+  // accompanies carries no title/type/inputs at all.
+  'arrivalPending',
 ]);
 const ALLOWED_SMART_KEYS = new Set([
   'enabled', 'verificationType', 'longInstructions', 'longInstructionsHe',
@@ -444,6 +448,13 @@ async function main() {
           id: AUDIO_TASK_ID,
           title: 'Record your team chant',
           type: 'photo',
+          // play-task-gating: only the ASSIGNED task reaches the participant, so
+          // this task has to be the one routing picks in this 2-task stage for the
+          // captureKind sanitizer assertion to have anything to read. Locationless
+          // ⇒ transit 0 ⇒ deterministically the higher-priority candidate. The
+          // photo pipeline it exercises (submitStationPhoto → review) is unchanged.
+          locationless: true,
+          triggerMode: 'locationless',
           coordinates: { lat: 31.796, lng: 35.166 },
           difficulty: 2,
           estimatedMinutes: 4,
@@ -842,6 +853,16 @@ async function main() {
   check('photo stage stays active until reviewed', state?.team?.stages?.[1]?.status === 'active',
     state?.team?.stages?.[1]?.status);
 
+  // audio-tasks: the sanitized audio task must expose smart.captureKind so the
+  // client renders the recorder instead of the photo picker.
+  // play-task-gating (wave D): only the ASSIGNED task is shipped, and the audio
+  // task is the one routing assigns in this stage (it is locationless), so this
+  // reads the task the team actually holds. Its located sibling (the photo task,
+  // submitted directly below) is correctly absent from the payload.
+  const audioTaskSan = (state?.activeStageTasks ?? []).find((t) => t.id === AUDIO_TASK_ID);
+  check('sanitized audio task exposes smart.captureKind === "audio"',
+    audioTaskSan?.smart?.captureKind === 'audio', JSON.stringify(audioTaskSan?.smart ?? {}));
+
   // WO-4: listRunTeams surfaces the pending-review count so a non-console consumer
   // can see a team is blocked on a staff photo review (not silently stalled).
   {
@@ -850,12 +871,6 @@ async function main() {
     check('listRunTeams exposes pendingReviews >= 1 while a photo awaits review',
       (rowPending?.pendingReviews ?? 0) >= 1, JSON.stringify(rowPending));
   }
-
-  // audio-tasks: while stage-2 is active, the sanitized audio task must expose
-  // smart.captureKind so the client renders the recorder instead of the picker.
-  const audioTaskSan = (state?.activeStageTasks ?? []).find((t) => t.id === AUDIO_TASK_ID);
-  check('sanitized audio task exposes smart.captureKind === "audio"',
-    audioTaskSan?.smart?.captureKind === 'audio', JSON.stringify(audioTaskSan?.smart ?? {}));
 
   // Staff joins via PIN and approves the photo
   const { pin } = await creator.call('inviteStaff', {
@@ -1891,7 +1906,26 @@ async function main() {
       JSON.stringify(item1));
 
     // 2) Staff-review approve path → a second item (game-doc read on the staff path).
+    const fTeamPath = `users/${OWNER}/games/${fg}/runs/${fr}/teams/${fUid}`;
+    const fRunPath = `users/${OWNER}/games/${fg}/runs/${fr}`;
     await fp.call('submitStationPhoto', { ...FCTX, teamId: fUid, taskId: 'fp-rev', photoUrl: feedPhotoUrl('b.jpg') });
+
+    // 2a) REVIEW QUEUE SOURCE (wave-e task 13): a photo awaiting review lands as
+    //     `taskSubmissions[taskId]` on the TEAM doc with status 'pending' — that map
+    //     is the ONLY source a live approval queue can read (there is no submissions
+    //     collection), and the owner reads it directly via firestore.rules. If this
+    //     goes empty or non-'pending', every review console silently shows nothing —
+    //     exactly the failure mode of the "photos never reach the console" report,
+    //     whose root cause was the requireStorageUrl rejection (docs/wave-c).
+    const pendingTeam = await creator.getDocAt(fTeamPath);
+    const pendingSub = pendingTeam.data?.taskSubmissions?.['fp-rev'];
+    check('queue: a submitted photo is visible to the owner as taskSubmissions[taskId].status pending',
+      pendingSub?.status === 'pending' && pendingSub?.photoUrl === feedPhotoUrl('b.jpg'),
+      JSON.stringify(pendingSub));
+    check('queue: the pending submission carries a submittedAt (the queue sorts FIFO on it)',
+      typeof pendingSub?.submittedAt === 'string' && pendingSub.submittedAt.length > 0,
+      JSON.stringify(pendingSub?.submittedAt));
+
     const rev = await creator.call('reviewStationSubmission', { ...FCTX, teamId: fUid, taskId: 'fp-rev', approved: true });
     check('feed: staff review approves', rev?.approved === true);
     const afterReview = await fp.getColAt(feedCol);
@@ -1900,6 +1934,44 @@ async function main() {
     check('feed: reviewed item carries the submitted photo + title',
       item2?.photoUrl === feedPhotoUrl('b.jpg') && item2?.taskTitle === 'Team at the gate' && item2?.active === true,
       JSON.stringify(item2));
+
+    // 2b) The approved row leaves the queue and the approval SCORED the task.
+    const approvedTeam = await creator.getDocAt(fTeamPath);
+    check('queue: an approved submission flips to status approved (it leaves the pending queue)',
+      approvedTeam.data?.taskSubmissions?.['fp-rev']?.status === 'approved',
+      JSON.stringify(approvedTeam.data?.taskSubmissions?.['fp-rev']));
+    check('queue: approval records reviewedAt + reviewedBy (the recently-reviewed strip reads them)',
+      typeof approvedTeam.data?.taskSubmissions?.['fp-rev']?.reviewedAt === 'string'
+        && approvedTeam.data?.taskSubmissions?.['fp-rev']?.reviewedBy === OWNER,
+      JSON.stringify(approvedTeam.data?.taskSubmissions?.['fp-rev']));
+    const scoreAfterApprove = approvedTeam.data?.score ?? 0;
+    check('queue: approval awarded points', scoreAfterApprove > 0, String(scoreAfterApprove));
+
+    // 2c) STATION SLOT RELEASED on approval. completeTaskForTeam releases the held
+    //     slot inside its own transaction; a leak here would mean a capped photo
+    //     station stops handing itself out after the first approval of the run.
+    const afterApproveCounts = (await creator.getDocAt(fRunPath)).data?.taskCounts ?? {};
+    check('queue: approving a photo releases its station slot (taskCounts back to 0)',
+      (afterApproveCounts['fp-rev'] ?? 0) === 0, JSON.stringify(afterApproveCounts));
+    check('queue: the approved task is no longer the team\'s activeTaskId',
+      approvedTeam.data?.activeTaskId !== 'fp-rev', String(approvedTeam.data?.activeTaskId));
+
+    // 2d) DOUBLE APPROVAL IS IDEMPOTENT — a double-clicked Approve (or two
+    //     reviewers) must not score twice, must not re-broadcast, and must not
+    //     re-release a slot it no longer holds. completeTaskForTeam returns
+    //     completed:false on replay and every side effect is gated on it.
+    const rev2 = await creator.call('reviewStationSubmission', { ...FCTX, teamId: fUid, taskId: 'fp-rev', approved: true });
+    check('queue: a second approval of the same submission still resolves ok', rev2?.ok === true, JSON.stringify(rev2));
+    const twiceTeam = await creator.getDocAt(fTeamPath);
+    check('queue: double approval does NOT score twice',
+      (twiceTeam.data?.score ?? 0) === scoreAfterApprove,
+      `${twiceTeam.data?.score} vs ${scoreAfterApprove}`);
+    const feedAfterDouble = await fp.getColAt(feedCol);
+    check('queue: double approval does NOT broadcast a duplicate feed item',
+      feedAfterDouble.length === 2, String(feedAfterDouble.length));
+    const doubleCounts = (await creator.getDocAt(fRunPath)).data?.taskCounts ?? {};
+    check('queue: double approval never drives a station counter negative',
+      Object.values(doubleCounts).every((n) => (n ?? 0) >= 0), JSON.stringify(doubleCounts));
 
     // 3) Reaction semantics: dedup (same emoji is a no-op) + switch (count moves).
     const r1 = await fp.call('reactToFeedItem', { ...FCTX, itemId: item1.id, emoji: '👍' });
@@ -1990,6 +2062,98 @@ async function main() {
     check('feed off: photo still auto-approves (completion unaffected)', offSubmit?.autoApproved === true);
     const offItems = await offP.getColAt(`users/${OWNER}/games/${offGame}/runs/${offRun}/feedItems`);
     check('feed off: NO feed item is written when the game disables the feed', offItems.length === 0, String(offItems.length));
+
+    // 6b) APPROVAL QUEUE: the reject path + two reviewers acting at once
+    //     (wave-e task 13). Runs on its OWN game/run so it cannot perturb the feed
+    //     counts, reaction totals or ceremony assertions above.
+    const { gameId: rqGame } = await creator.call('createGame', { title: 'Review Queue Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: rqGame, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'rq-s1', order: 0, title: 'Reviewed shots', tasks: [
+          photoTask('rq-rej', 'Reject me', 1),
+          photoTask('rq-dual', 'Two reviewers', 2),
+        ] },
+        { id: 'rq-s2', order: 1, title: 'End', isFinal: true, tasks: [photoTask('rq-end', 'Last shot', 3)] },
+      ],
+    });
+    const { runId: rqRun, accessCode: rqCode } = await creator.call('launchRun', { gameId: rqGame });
+    const rqP = makeParty('reviewQueuePlayer');
+    const rqCred = await signInAnonymously(rqP.auth);
+    const rqUid = rqCred.user.uid;
+    await rqP.call('joinRun', { code: rqCode, displayName: 'Queue Foxes' });
+    await creator.call('startTeams', { gameId: rqGame, runId: rqRun });
+    const RQCTX = { ownerUid: OWNER, gameId: rqGame, runId: rqRun };
+    const rqTeamPath = `users/${OWNER}/games/${rqGame}/runs/${rqRun}/teams/${rqUid}`;
+    const rqRunPath = `users/${OWNER}/games/${rqGame}/runs/${rqRun}`;
+    const rqFeedCol = `users/${OWNER}/games/${rqGame}/runs/${rqRun}/feedItems`;
+    const rqUrl = (name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rqRun}/teams/${rqUid}/${name}`)}?alt=media`;
+
+    // REJECT PATH: no score, no feed item, and the team may RESUBMIT (the
+    // moderation guard only blocks an already-approved/completed task, so a
+    // rejection must leave the task retryable — otherwise one bad photo would
+    // permanently dead-end the team).
+    await rqP.call('submitStationPhoto', { ...RQCTX, teamId: rqUid, taskId: 'rq-rej', photoUrl: rqUrl('r1.jpg') });
+    const scoreBeforeReject = (await creator.getDocAt(rqTeamPath)).data?.score ?? 0;
+    const rejected = await creator.call('reviewStationSubmission', {
+      ...RQCTX, teamId: rqUid, taskId: 'rq-rej', approved: false, note: 'Too dark, try again',
+    });
+    check('queue reject: the callable reports approved:false', rejected?.approved === false, JSON.stringify(rejected));
+    const rejTeam = await creator.getDocAt(rqTeamPath);
+    const rejSub = rejTeam.data?.taskSubmissions?.['rq-rej'];
+    check('queue reject: status flips to rejected and keeps the review note',
+      rejSub?.status === 'rejected' && rejSub?.reviewNote === 'Too dark, try again', JSON.stringify(rejSub));
+    check('queue reject: rejection awards NO points',
+      (rejTeam.data?.score ?? 0) === scoreBeforeReject, `${rejTeam.data?.score} vs ${scoreBeforeReject}`);
+    const rejFeed = await rqP.getColAt(rqFeedCol);
+    check('queue reject: rejection broadcasts NO feed item', rejFeed.length === 0, String(rejFeed.length));
+    await rqP.call('submitStationPhoto', { ...RQCTX, teamId: rqUid, taskId: 'rq-rej', photoUrl: rqUrl('r2.jpg') });
+    const resub = (await creator.getDocAt(rqTeamPath)).data?.taskSubmissions?.['rq-rej'];
+    check('queue reject: a rejected task stays re-submittable (status returns to pending)',
+      resub?.status === 'pending' && resub?.photoUrl === rqUrl('r2.jpg'), JSON.stringify(resub));
+
+    // CONCURRENT REVIEWERS: the owner and run-scoped staff hit Approve on the SAME
+    // submission at the same moment. Exactly one completion may take effect.
+    const { pin: rqPin } = await creator.call('inviteStaff', {
+      ...RQCTX, name: 'Queue Marshal', permissions: ['review_photos'],
+    });
+    const rqStaff = makeParty('reviewQueueStaff');
+    await signInAnonymously(rqStaff.auth);
+    const rqTok = await rqStaff.call('staffSignIn', { ownerUid: OWNER, gameId: rqGame, runId: rqRun, pin: rqPin });
+    await signInWithCustomToken(rqStaff.auth, rqTok.customToken);
+
+    await rqP.call('submitStationPhoto', { ...RQCTX, teamId: rqUid, taskId: 'rq-dual', photoUrl: rqUrl('d.jpg') });
+    const scoreBeforeDual = (await creator.getDocAt(rqTeamPath)).data?.score ?? 0;
+    const dual = await Promise.allSettled([
+      creator.call('reviewStationSubmission', { ...RQCTX, teamId: rqUid, taskId: 'rq-dual', approved: true }),
+      rqStaff.call('reviewStationSubmission', { ...RQCTX, teamId: rqUid, taskId: 'rq-dual', approved: true }),
+    ]);
+    check('queue race: at least one concurrent approval succeeds',
+      dual.some((r) => r.status === 'fulfilled' && r.value?.ok === true),
+      JSON.stringify(dual.map((r) => (r.status === 'fulfilled' ? 'ok' : String(r.reason?.code ?? r.reason)))));
+    const dualTeam = await creator.getDocAt(rqTeamPath);
+    check('queue race: the submission ends approved', dualTeam.data?.taskSubmissions?.['rq-dual']?.status === 'approved',
+      JSON.stringify(dualTeam.data?.taskSubmissions?.['rq-dual']));
+    const scoreAfterDual = dualTeam.data?.score ?? 0;
+    check('queue race: two simultaneous approvals score the task exactly once',
+      scoreAfterDual > scoreBeforeDual, `${scoreBeforeDual} → ${scoreAfterDual}`);
+    const dualFeed = await rqP.getColAt(rqFeedCol);
+    check('queue race: two simultaneous approvals broadcast exactly ONE feed item',
+      dualFeed.filter((d) => d.taskId === 'rq-dual').length === 1,
+      JSON.stringify(dualFeed.map((d) => d.taskId)));
+    const dualCounts = (await creator.getDocAt(rqRunPath)).data?.taskCounts ?? {};
+    check('queue race: the contested station slot is released exactly once (counter 0, never negative)',
+      (dualCounts['rq-dual'] ?? 0) === 0 && Object.values(dualCounts).every((n) => (n ?? 0) >= 0),
+      JSON.stringify(dualCounts));
+    // A third, serial approval on top of the race must still change nothing.
+    await creator.call('reviewStationSubmission', { ...RQCTX, teamId: rqUid, taskId: 'rq-dual', approved: true });
+    const settled = await creator.getDocAt(rqTeamPath);
+    check('queue race: a further approval after the race is still a no-op on the score',
+      (settled.data?.score ?? 0) === scoreAfterDual, `${settled.data?.score} vs ${scoreAfterDual}`);
+    const replayFeed = await rqP.getColAt(rqFeedCol);
+    check('queue race: a further approval after the race broadcasts nothing new',
+      replayFeed.length === dualFeed.length, `${replayFeed.length} vs ${dualFeed.length}`);
 
     // 7) Retention: feed items (photo URLs + team names) die with the run's PII.
     const prunedFeed = await platformAdmin.call('pruneRunNow', { ...FCTX });
@@ -2168,7 +2332,12 @@ async function main() {
             coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
             releaseAt: future },
           { id: 'open-1', title: 'Go now', type: 'field', triggerMode: 'instant',
-            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9 },
+            coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+            // play-task-gating: only an ASSIGNED task is shipped to the client, so
+            // the `releaseAt` sanitizer-passthrough assertion has to ride on the
+            // task the team actually holds. A PAST releaseAt is released, hence
+            // assignable, and still exercises the passthrough.
+            releaseAt: past },
         ] },
         { id: 'ts1', order: 1, title: 'The Drop', isFinal: true, releaseAfterMinutes: 120, tasks: [
           { id: 'drop-1', title: 'Timed drop', type: 'field', triggerMode: 'instant',
@@ -2184,9 +2353,15 @@ async function main() {
     const CS = { ownerUid: creatorCred.user.uid, gameId: gS, runId: rS };
 
     // Sanitizer exposes the release fields (allowlisted) so the client can render a countdown.
+    await pS.call('requestNextTask', { ...CS, lat: 0, lng: 0, stageId: 'ts0' }).catch(() => undefined);
     const s0 = await pS.call('getMyTeamState', { code: cS });
-    const lockedTask = s0?.activeStageTasks?.find((t) => t.id === 'locked-1');
-    check('scheduled: releaseAt survives sanitizer', lockedTask?.releaseAt === future, lockedTask?.releaseAt);
+    const openTaskS = s0?.activeStageTasks?.find((t) => t.id === 'open-1');
+    check('scheduled: releaseAt survives sanitizer', openTaskS?.releaseAt === past, openTaskS?.releaseAt);
+    // play-task-gating: the still-GATED task is not merely un-completable, it is
+    // absent from the wire (a player cannot choose it, so they never receive it).
+    check('scheduled: the not-yet-released task is absent from the payload',
+      s0?.activeStageTasks?.find((t) => t.id === 'locked-1') === undefined,
+      JSON.stringify((s0?.activeStageTasks ?? []).map((t) => t.id)));
 
     // completeTask on the not-yet-released task is refused.
     let blocked = false;
@@ -2251,8 +2426,13 @@ async function main() {
     await signInAnonymously(viewerP.auth);
     await viewerP.call('joinTeamAsDevice', { code: cP, teamCode: pcode, memberName: 'Viewer' });
     const vState = await viewerP.call('getMyTeamState', { code: cP });
+    // play-task-gating: `p-b` is still UNASSIGNED, so it is (correctly) absent
+    // from activeStageTasks. The unlock is observed where it actually lives — the
+    // returned team's stage record — which is also what the play UI drives
+    // routing off. The persistence assertions below are unchanged.
     check('scheduled: viewer poll response reflects the unlock',
-      vState?.activeStageTasks?.some((t) => t.id === 'p-b') === true, JSON.stringify(vState?.activeStageTasks?.map((t) => t.id)));
+      vState?.team?.stages?.find((s) => s.stageId === 'ps1')?.status === 'active',
+      JSON.stringify(vState?.team?.stages?.map((s) => [s.stageId, s.status])));
     const afterViewer = (await adminSdk.firestore().doc(teamDocPathP).get()).data();
     check('scheduled: a viewer poll does NOT persist the unlock (controller-only writes)',
       afterViewer?.stages?.find((s) => s.stageId === 'ps1')?.status === 'locked',
@@ -2260,7 +2440,8 @@ async function main() {
 
     const sp = await pP.call('getMyTeamState', { code: cP });
     check('scheduled: past-release stage unlocks (active task present)',
-      sp?.activeStageTasks?.some((t) => t.id === 'p-b') === true, JSON.stringify(sp?.activeStageTasks?.map((t) => t.id)));
+      sp?.team?.stages?.find((s) => s.stageId === 'ps1')?.status === 'active',
+      JSON.stringify(sp?.team?.stages?.map((s) => [s.stageId, s.status])));
     const afterController = (await adminSdk.firestore().doc(teamDocPathP).get()).data();
     check('scheduled: the controller poll DOES persist the unlock',
       afterController?.stages?.find((s) => s.stageId === 'ps1')?.status === 'active',
@@ -2295,14 +2476,22 @@ async function main() {
     await creator.call('startTeams', { gameId: gU, runId: rU });
     const CU = { ownerUid: creatorCred.user.uid, gameId: gU, runId: rU };
 
-    // Sanitizer passthrough: the locked task still names its prerequisites, and
-    // the payload stays allowlisted (unlockAfterTaskIds is a known-safe key).
+    // PRODUCT DECISION CHANGED (play-task-gating, wave D). This scenario used to
+    // assert the opposite: that a LOCKED task still shipped to the participant
+    // with its `unlockAfterTaskIds` intact, so the play UI could render the chain
+    // ("solve the cipher, THEN the vault opens"). The user's ruling is that a
+    // player never chooses where to go — routing does — so they receive only the
+    // task they were routed to. Showing a locked task therefore buys nothing and
+    // costs a pre-read of its content. The assertion is INVERTED on purpose, not
+    // deleted: the locked task must now be ABSENT from the wire entirely.
     const s0 = await pU.call('getMyTeamState', { code: cU });
     const lockedB = s0?.activeStageTasks?.find((t) => t.id === 'u-b');
-    check('unlock: unlockAfterTaskIds survives the sanitizer',
-      JSON.stringify(lockedB?.unlockAfterTaskIds) === JSON.stringify(['u-a']),
-      JSON.stringify(lockedB?.unlockAfterTaskIds));
-    assertTaskPayloadAllowlisted('unlock: locked task', lockedB);
+    check('unlock: the LOCKED task is absent from the participant payload',
+      lockedB === undefined,
+      JSON.stringify((s0?.activeStageTasks ?? []).map((t) => t.id)));
+    check('unlock: the locked task title appears nowhere on the wire',
+      !JSON.stringify(s0).includes('Open the vault'), 'locked task content leaked');
+    for (const t of s0?.activeStageTasks ?? []) assertTaskPayloadAllowlisted('unlock: shipped task', t);
 
     // Anti-cheat: a hand-crafted completion of the locked task is refused.
     await expectError('unlock: direct completeTask on a locked task is refused',
@@ -2492,8 +2681,14 @@ async function main() {
 
     // Sanitizer passthrough: expiresAfterMinutes reaches the client (countdown UI).
     const s0 = await pX.call('getMyTeamState', { code: cX });
-    const fTask = s0?.activeStageTasks?.find((t) => t.id === 'x-f');
-    check('expiry: expiresAfterMinutes survives the sanitizer', fTask?.expiresAfterMinutes === 120, fTask?.expiresAfterMinutes);
+    // play-task-gating: only the ASSIGNED task ships, so the countdown-passthrough
+    // assertion reads x-e (the assigned flash task) instead of the unassigned x-f.
+    // Same contract: expiresAfterMinutes reaches the client for the countdown UI.
+    const fTask = s0?.activeStageTasks?.find((t) => t.id === 'x-e');
+    check('expiry: expiresAfterMinutes survives the sanitizer', fTask?.expiresAfterMinutes === 0.2, fTask?.expiresAfterMinutes);
+    check('expiry: the unassigned sibling task is absent from the payload',
+      s0?.activeStageTasks?.find((t) => t.id === 'x-f') === undefined,
+      JSON.stringify((s0?.activeStageTasks ?? []).map((t) => t.id)));
     assertTaskPayloadAllowlisted('expiry: generous-expiry task', fTask);
 
     // Let the flash window close (server clock decides, not the client). Wait
@@ -2884,16 +3079,65 @@ async function main() {
   await creator.call('startTeams', { gameId: gHL, runId: rHL });
   const CHL = { ownerUid: creatorCred.user.uid, gameId: gHL, runId: rHL };
 
-  const sHL = await playerHL.call('getMyTeamState', { code: cHL });
+  // Routing assigns hl-1 (or hl-2) — force hl-1 to be the assigned one so the
+  // sealed-payload assertions below are about the task the team actually holds.
+  // (play-task-gating: only the ASSIGNED task is shipped at all.)
+  let sHL = await playerHL.call('getMyTeamState', { code: cHL });
+  let assignedHL = sHL?.team?.stages?.[0]?.tasks?.find((r) => r.status === 'assigned')?.taskId;
+  if (assignedHL === 'hl-2') {
+    await playerHL.call('completeTask', { ...CHL, taskId: 'hl-2', lat: 31.781, lng: 35.211 });
+    sHL = await playerHL.call('getMyTeamState', { code: cHL });
+    assignedHL = sHL?.team?.stages?.[0]?.tasks?.find((r) => r.status === 'assigned')?.taskId;
+  }
+  check('hidden task: the hidden task is the assigned one', assignedHL === 'hl-1', String(assignedHL));
+
   const hiddenTask = sHL?.activeStageTasks?.find((t) => t.id === 'hl-1');
-  const visibleTask = sHL?.activeStageTasks?.find((t) => t.id === 'hl-2');
+
+  // ── SEALED (pre-arrival): assert ON THE WIRE, not in the UI ────────────────
+  // play-task-gating (wave D): a hidden-location task reveals NOTHING but its
+  // clue until the server has confirmed arrival. "Withheld" means the key is
+  // absent from the payload — a devtools reader must find nothing.
+  check('hidden task: arrivalPending true before arrival', hiddenTask?.arrivalPending === true, String(hiddenTask?.arrivalPending));
+  check('hidden task: TITLE absent before arrival', hiddenTask?.title === undefined, String(hiddenTask?.title));
+  check('hidden task: TYPE absent before arrival', hiddenTask?.type === undefined, String(hiddenTask?.type));
+  check('hidden task: description/smart/steps absent before arrival',
+    hiddenTask?.description === undefined && hiddenTask?.smart === undefined && hiddenTask?.steps === undefined,
+    JSON.stringify({ d: hiddenTask?.description, s: hiddenTask?.smart, st: hiddenTask?.steps }));
   check('hidden task: coordinates stripped from payload', hiddenTask?.coordinates === undefined, JSON.stringify(hiddenTask?.coordinates));
   check('hidden task: locationHidden flag set', hiddenTask?.locationHidden === true, String(hiddenTask?.locationHidden));
   check('hidden task: exact radius withheld', hiddenTask?.geofenceRadiusMeters === undefined, String(hiddenTask?.geofenceRadiusMeters));
   check('hidden task: clue exposed (EN + HE)',
     hiddenTask?.locationClue === 'Where water never stops' && hiddenTask?.locationClueHe === 'במקום שבו המים לא נחים',
     JSON.stringify({ en: hiddenTask?.locationClue, he: hiddenTask?.locationClueHe }));
-  check('visible sibling task: coordinates still present', visibleTask?.coordinates?.lat === 31.781 && visibleTask?.locationHidden === undefined, JSON.stringify(visibleTask?.coordinates));
+  // Whole-payload sweep: catches a leak of the authored title through ANY other
+  // field (recommendations, narratives, team records…), not just the task object.
+  check('hidden task: the authored title appears NOWHERE in the whole response',
+    !JSON.stringify(sHL).includes('The secret spot'), 'title leaked into getMyTeamState');
+  assertTaskPayloadAllowlisted('sanitizer(hidden, sealed)', hiddenTask);
+
+  // Second channel, same secret: getRecommendedTasks is participant-callable and
+  // used to echo every candidate task's TITLE — which would hand back exactly what
+  // the sealed stub just withheld. It must withhold it too.
+  const recHL = await playerHL.call('getRecommendedTasks', { ...CHL, lat: 31.9, lng: 35.3 });
+  check('hidden task: getRecommendedTasks withholds the hidden title',
+    !JSON.stringify(recHL ?? {}).includes('The secret spot'),
+    JSON.stringify(recHL?.recommendations ?? []));
+
+  // ── reportArrival: the arrival authority ───────────────────────────────────
+  // Far away → not arrived, no distance digits, and the task STAYS sealed.
+  const farArrival = await playerHL.call('reportArrival', { ...CHL, taskId: 'hl-1', lat: 32.5, lng: 35.9 });
+  check('reportArrival: far away does not arrive', farArrival?.arrived === false, JSON.stringify(farArrival));
+  check('reportArrival: far-away reason leaks NO distance digits',
+    !/\d/.test(farArrival?.reason ?? '') && !/m away/i.test(farArrival?.reason ?? ''), farArrival?.reason);
+  const sHLstill = await playerHL.call('getMyTeamState', { code: cHL });
+  check('reportArrival: task still sealed after a far-away probe',
+    sHLstill?.activeStageTasks?.find((t) => t.id === 'hl-1')?.title === undefined,
+    'title revealed by a far-away probe');
+
+  // No coordinates at all → refused. Arrival is never self-declared.
+  await expectError('reportArrival: refused with no coordinates',
+    playerHL.call('reportArrival', { ...CHL, taskId: 'hl-1' }),
+    { match: /location required/i });
 
   // Out-of-range check-in on the hidden task: rejected with NO distance leaked.
   let hiddenFarMsg = '';
@@ -2902,14 +3146,150 @@ async function main() {
   check('hidden task: out-of-range check-in rejected', hiddenFarMsg.length > 0, hiddenFarMsg);
   check('hidden task: rejection leaks NO distance digits', hiddenFarMsg.length > 0 && !/\d/.test(hiddenFarMsg) && !/m away/i.test(hiddenFarMsg), hiddenFarMsg);
 
+  // In range → arrived. The latch is idempotent.
+  const nearArrival = await playerHL.call('reportArrival', { ...CHL, taskId: 'hl-1', lat: 31.78, lng: 35.21 });
+  check('reportArrival: in range arrives', nearArrival?.arrived === true, JSON.stringify(nearArrival));
+  const teamDocHL = await adminSdk.firestore()
+    .doc(`users/${creatorCred.user.uid}/games/${gHL}/runs/${rHL}/teams/${sHL.team.id}`).get();
+  const arrivedAt1 = teamDocHL.data()?.stages?.[0]?.tasks?.find((r) => r.taskId === 'hl-1')?.arrivedAt;
+  check('reportArrival: arrivedAt latched on the team record', typeof arrivedAt1 === 'string', String(arrivedAt1));
+  await playerHL.call('reportArrival', { ...CHL, taskId: 'hl-1', lat: 31.78, lng: 35.21 });
+  const teamDocHL2 = await adminSdk.firestore()
+    .doc(`users/${creatorCred.user.uid}/games/${gHL}/runs/${rHL}/teams/${sHL.team.id}`).get();
+  check('reportArrival: repeat call is idempotent (arrivedAt unchanged)',
+    teamDocHL2.data()?.stages?.[0]?.tasks?.find((r) => r.taskId === 'hl-1')?.arrivedAt === arrivedAt1,
+    'arrivedAt was rewritten');
+
+  // ── REVEALED (post-arrival) ───────────────────────────────────────────────
+  // Product decision (wave D, user): after arrival the coordinates ARE released
+  // so a player who wanders off can navigate back to the spot.
+  const sHLopen = await playerHL.call('getMyTeamState', { code: cHL });
+  const openTask = sHLopen?.activeStageTasks?.find((t) => t.id === 'hl-1');
+  check('hidden task: title revealed after arrival', openTask?.title === 'The secret spot', String(openTask?.title));
+  check('hidden task: type revealed after arrival', openTask?.type === 'field', String(openTask?.type));
+  check('hidden task: coordinates released after arrival', openTask?.coordinates?.lat === 31.78, JSON.stringify(openTask?.coordinates));
+  check('hidden task: arrivalPending cleared after arrival', openTask?.arrivalPending === undefined, String(openTask?.arrivalPending));
+  check('hidden task: still flagged locationHidden (clue chrome kept)', openTask?.locationHidden === true, String(openTask?.locationHidden));
+  assertTaskPayloadAllowlisted('sanitizer(hidden, revealed)', openTask);
+
   // Arrival within radius completes (server-validated GPS), assigns the next task.
   const hiddenNear = await playerHL.call('completeTask', { ...CHL, taskId: 'hl-1', lat: 31.78, lng: 35.21 });
   check('hidden task: arrival within radius completes', hiddenNear?.ok === true, JSON.stringify(hiddenNear));
 
-  // Hidden task payload must ALSO stay allowlisted (locationHidden path).
-  assertTaskPayloadAllowlisted('sanitizer(hidden)', hiddenTask);
-
   }); // scenario: hidden-location
+
+  await scenario('hidden-location: arrival is per-team + authz-scoped', async () => {
+    // play-task-gating: `arrivedAt` is latched on the TEAM record, so one team
+    // arriving must never unseal the task for anyone else, and a stranger must
+    // not be able to probe the spot at all.
+    const { gameId: gA } = await creator.call('createGame', { title: 'Two Seekers', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gA,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 's-arr', order: 0, title: 'Seek', isFinal: true,
+        tasks: [{
+          id: 'arr-1', title: 'The buried chest', type: 'field', triggerMode: 'radius',
+          hideLocation: true, coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40,
+          locationClue: 'Under the old stone', difficulty: 2, estimatedMinutes: 3,
+          pointValue: 60, maxConcurrentTeams: 9,
+        }],
+      }],
+    });
+    const { runId: rA, accessCode: cA } = await creator.call('launchRun', { gameId: gA });
+    const pA = makeParty('arrivalA'); await signInAnonymously(pA.auth);
+    const pB = makeParty('arrivalB'); await signInAnonymously(pB.auth);
+    await pA.call('joinRun', { code: cA, displayName: 'Seeker A' });
+    await pB.call('joinRun', { code: cA, displayName: 'Seeker B' });
+    await creator.call('startTeams', { gameId: gA, runId: rA });
+    const CA = { ownerUid: creatorCred.user.uid, gameId: gA, runId: rA };
+
+    const arrA = await pA.call('reportArrival', { ...CA, taskId: 'arr-1', lat: 31.78, lng: 35.21 });
+    check('arrival: team A arrives', arrA?.arrived === true, JSON.stringify(arrA));
+
+    const stA = await pA.call('getMyTeamState', { code: cA });
+    const stB = await pB.call('getMyTeamState', { code: cA });
+    check('arrival: team A sees the revealed title',
+      stA?.activeStageTasks?.find((t) => t.id === 'arr-1')?.title === 'The buried chest',
+      String(stA?.activeStageTasks?.find((t) => t.id === 'arr-1')?.title));
+    check('arrival: team B is STILL sealed (arrivedAt is per-team)',
+      stB?.activeStageTasks?.find((t) => t.id === 'arr-1')?.title === undefined &&
+        stB?.activeStageTasks?.find((t) => t.id === 'arr-1')?.arrivalPending === true,
+      JSON.stringify(stB?.activeStageTasks?.find((t) => t.id === 'arr-1')));
+    check('arrival: team B response contains the title NOWHERE',
+      !JSON.stringify(stB).includes('The buried chest'), 'title leaked to a team that never arrived');
+
+    // A stranger with no team in this run cannot probe the secret spot.
+    const stranger = makeParty('arrivalStranger'); await signInAnonymously(stranger.auth);
+    await expectError('arrival: a stranger cannot call reportArrival',
+      stranger.call('reportArrival', { ...CA, taskId: 'arr-1', lat: 31.78, lng: 35.21 }),
+      { match: /not|permission|found/i });
+  }); // scenario: hidden-location arrival authz
+
+  await scenario('task visibility gating (non-assigned tasks are absent from the wire)', async () => {
+    // play-task-gating (wave D), the second security win of this change: a
+    // multi-task stage used to ship EVERY task's quiz choices at once, so a
+    // player could pre-read the whole stage in devtools before routing handed it
+    // out. Routing decides where a player goes, so a player receives only the
+    // task they were routed to (plus the ones they already finished).
+    const { gameId: gV } = await creator.call('createGame', { title: 'Pre-read Leak', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gV,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 's-vis', order: 0, title: 'Three quizzes', isFinal: true,
+        tasks: [
+          { id: 'v-1', title: 'Quiz one', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+            choices: ['alpha', 'beta'], answers: ['alpha'], difficulty: 1, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 9 },
+          { id: 'v-2', title: 'Quiz two', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+            choices: ['gamma', 'delta'], answers: ['gamma'], difficulty: 1, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 9 },
+          { id: 'v-3', title: 'Quiz three', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+            choices: ['epsilon', 'zeta'], answers: ['epsilon'], difficulty: 1, estimatedMinutes: 1, pointValue: 40, maxConcurrentTeams: 9 },
+        ],
+      }],
+    });
+    const { runId: rV, accessCode: cV } = await creator.call('launchRun', { gameId: gV });
+    const pV = makeParty('visGate'); await signInAnonymously(pV.auth);
+    await pV.call('joinRun', { code: cV, displayName: 'Peeker' });
+    await creator.call('startTeams', { gameId: gV, runId: rV });
+    const CV = { ownerUid: creatorCred.user.uid, gameId: gV, runId: rV };
+
+    const sV = await pV.call('getMyTeamState', { code: cV });
+    const assignedV = sV?.team?.stages?.[0]?.tasks?.find((r) => r.status === 'assigned')?.taskId;
+    check('visibility: exactly ONE task ships while one is assigned',
+      (sV?.activeStageTasks ?? []).length === 1 && sV.activeStageTasks[0].id === assignedV,
+      JSON.stringify((sV?.activeStageTasks ?? []).map((t) => t.id)));
+    const others = ['v-1', 'v-2', 'v-3'].filter((id) => id !== assignedV);
+    check('visibility: the other tasks are ABSENT from activeStageTasks',
+      others.every((id) => !(sV?.activeStageTasks ?? []).some((t) => t.id === id)),
+      JSON.stringify((sV?.activeStageTasks ?? []).map((t) => t.id)));
+    // The pre-read leak itself: no unrouted quiz's CHOICES may appear anywhere.
+    const wireV = JSON.stringify(sV);
+    const otherChoices = { 'v-1': 'alpha', 'v-2': 'gamma', 'v-3': 'epsilon' };
+    check('visibility: an unrouted quiz’s choices appear nowhere in the response',
+      others.every((id) => !wireV.includes(otherChoices[id])),
+      'a non-assigned quiz’s choices are readable on the wire');
+    check('visibility: an unrouted task’s TITLE appears nowhere either',
+      others.every((id) => !wireV.includes(`Quiz ${{ 'v-1': 'one', 'v-2': 'two', 'v-3': 'three' }[id]}`)),
+      'a non-assigned task title is readable on the wire');
+
+    // Hiding is a PAYLOAD concern only: the server still authorizes normally, so
+    // a hand-crafted answer to a non-assigned task is graded on its merits, not
+    // silently accepted because "the client couldn't have known".
+    const victim = others[0];
+    const wrong = await pV.call('submitTaskAnswer', { ...CV, taskId: victim, answer: 'not-the-answer' });
+    check('visibility: server still grades a hand-crafted non-assigned answer (no omission-as-authz)',
+      wrong?.correct === false, JSON.stringify(wrong));
+
+    // History still renders: after completing the assigned task it stays in the
+    // payload (the player has seen it) — progress/recap must not go blank.
+    await pV.call('submitTaskAnswer', { ...CV, taskId: assignedV, answer: { 'v-1': 'alpha', 'v-2': 'gamma', 'v-3': 'epsilon' }[assignedV] });
+    const sV2 = await pV.call('getMyTeamState', { code: cV });
+    check('visibility: a COMPLETED task stays visible (history renders)',
+      (sV2?.activeStageTasks ?? []).some((t) => t.id === assignedV),
+      JSON.stringify((sV2?.activeStageTasks ?? []).map((t) => t.id)));
+    for (const t of sV2?.activeStageTasks ?? []) assertTaskPayloadAllowlisted(`visibility(${t.id})`, t);
+  }); // scenario: task visibility gating
 
   await scenario('task media (upload URL + YouTube round-trip, external URL dropped)', async () => {
 
@@ -4796,6 +5176,9 @@ async function main() {
       ['stranger', str, 'transferController', { ownerUid: OWNER, gameId: ag, runId: ar, toUid: plUid }],
       ['stranger', str, 'captureZone', { ownerUid: OWNER, gameId: ag, runId: ar, zoneId: 'fake', lat: 31.78, lng: 35.21 }],
       ['stranger', str, 'pickUpTrackable', { ownerUid: OWNER, gameId: ag, runId: ar, trackableId: 'fake' }],
+      // play-task-gating: reportArrival unseals hidden-location content, so a
+      // non-participant must not be able to probe a run's secret spots at all.
+      ['stranger', str, 'reportArrival', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', lat: 31.78, lng: 35.21 }],
       // Territory/trackable authoring is owner-only — a participant can't create them:
       ['participant', pl, 'createZone', { gameId: ag, runId: ar, title: 'pwn', lat: 31.78, lng: 35.21 }],
       ['participant', pl, 'deleteZone', { gameId: ag, runId: ar, zoneId: 'fake' }],
