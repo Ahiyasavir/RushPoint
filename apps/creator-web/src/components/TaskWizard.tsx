@@ -12,7 +12,7 @@ import {
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
   locationLeakWarnings,
 } from '@rushpoint/shared';
-import { Button, Input, Label, Textarea } from './ui';
+import { Advanced, Button, Input, Label, Textarea } from './ui';
 import { dialog } from './dialog';
 import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
@@ -23,6 +23,9 @@ import { BuilderIcon, TRIGGER_ICON_NAME, TYPE_ICON_NAME } from './builderIcons';
 import {
   type WizardStep, TYPE_PICKER_ORDER, canGoNext, canGoBack, isTaskLocationValid, isTaskInteractionValid,
 } from '../lib/wizardLogic';
+import {
+  type SectionKey, defaultOpenSections, sectionApplies, sectionSummary,
+} from '../lib/wizardSections';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -48,6 +51,12 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
   const t = useT();
   const b = t.builder;
   const [step, setStep] = useState<WizardStep>(1);
+  // Which optional sections are expanded. Held here (not per step body) so the
+  // disclosure state survives hopping between steps 2 and 3. A section starts
+  // open only when the task already carries content for it — see wizardSections.
+  const [open, setOpen] = useState<Record<SectionKey, boolean>>(() => defaultOpenSections(task));
+  const toggle = (k: SectionKey) => setOpen((o) => ({ ...o, [k]: !o[k] }));
+  const sections = { open, toggle };
 
   const set = (p: Partial<Task>) => onChange({ ...task, ...p });
   const setSmart = (p: Record<string, unknown>) =>
@@ -92,8 +101,8 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
           grow to fill; steps 2 & 3 scroll only inside themselves if ever needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
         {step === 1 && <LocationStepBody task={task} mode={mode} located={located} setMode={setMode} set={set} b={b} />}
-        {step === 2 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} siblings={siblings} /></div>}
-        {step === 3 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} b={b} /></div>}
+        {step === 2 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} siblings={siblings} sections={sections} /></div>}
+        {step === 3 && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} b={b} sections={sections} /></div>}
       </div>
 
       {/* Footer */}
@@ -118,6 +127,31 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
 }
 
 type B = ReturnType<typeof useT>['builder'];
+
+// Disclosure state shared by steps 2 and 3.
+type Sections = { open: Record<SectionKey, boolean>; toggle: (k: SectionKey) => void };
+
+// One collapsible optional block of the task editor. Nothing is ever removed by
+// folding: the header carries a count badge whenever the section holds authored
+// content, and `defaultOpenSections` pre-expands exactly those.
+function Section({ k, title, task, sections, b, children }: {
+  k: SectionKey; title: string; task: Task; sections: Sections; b: B; children: ReactNode;
+}) {
+  const n = sectionSummary(k, task);
+  return (
+    <Advanced
+      dense
+      title={title}
+      open={sections.open[k]}
+      onToggle={() => sections.toggle(k)}
+      meta={n > 0
+        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(n)}</span>
+        : undefined}
+    >
+      {children}
+    </Advanced>
+  );
+}
 
 // ── Step 1: Location ──
 function LocationStepBody({ task, mode, located, setMode, set, b }: {
@@ -271,12 +305,12 @@ function OrderingItemsEditor({ task, set, b }: { task: Task; set: (p: Partial<Ta
 
   return (
     <div className="space-y-1.5">
-      <Label>{b.orderingItemsLead}</Label>
+      <Label dense>{b.orderingItemsLead}</Label>
       <div className="space-y-1">
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-1.5">
             <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
-            <Input value={row.text} dir="auto" className="flex-1 min-w-0"
+            <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
               onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
             <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${b.mediaMoveUp} ${i + 1}`}
               className="text-[--ink-3] hover:text-[--ink-1] disabled:opacity-30 shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-[--surface-2] text-xs">↑</button>
@@ -342,12 +376,12 @@ function SurveyChoicesSection({ task, set, b }: { task: Task; set: (p: Partial<T
       </div>
       {choices && (
         <div className="space-y-1.5">
-          <Label>{b.surveyChoicesLead}</Label>
+          <Label dense>{b.surveyChoicesLead}</Label>
           <div className="space-y-1">
             {rows.map((row, i) => (
               <div key={row.id} className="flex items-center gap-1.5">
                 <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
-                <Input value={row.text} dir="auto" className="flex-1 min-w-0"
+                <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
                   placeholder={b.surveyChoicePlaceholder(i + 1)}
                   onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
                 <button onClick={() => apply(rows.filter((r) => r.id !== row.id))} disabled={rows.length <= SURVEY_CHOICES_MIN}
@@ -369,34 +403,34 @@ function SurveyChoicesSection({ task, set, b }: { task: Task; set: (p: Partial<T
 }
 
 // ── Step 2: Details ──
-function DetailsStepBody({ task, set, b, gameId, siblings }: {
-  task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string; siblings?: Task[];
+function DetailsStepBody({ task, set, b, gameId, siblings, sections }: {
+  task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string; siblings?: Task[]; sections: Sections;
 }) {
   const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
-  // Optional hint collapses behind a toggle so the common (no-hint) form is short
-  // enough to never scroll, even on small laptops.
-  const [showHint, setShowHint] = useState(!!task.hint);
+  const siblingCount = siblings?.length ?? 1;
   return (
     <>
       <div>
-        <Label>{b.titleField}</Label>
-        <Input value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder={b.titlePlaceholder} dir="auto" autoFocus />
+        <Label dense>{b.titleField}</Label>
+        <Input dense value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder={b.titlePlaceholder} dir="auto" autoFocus />
       </div>
       <div>
-        <Label>{b.descriptionField}</Label>
-        <Textarea value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
+        <Label dense>{b.descriptionField}</Label>
+        <Textarea dense value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
       </div>
-      <div>
-        <div className="flex items-center gap-1.5 mb-1">
+      {/* Difficulty on ONE line: the label sits beside its chips instead of above
+          them, the same compact strip idiom the stage settings row uses. */}
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 shrink-0">
           <InlineLabel>{b.difficulty}</InlineLabel>
           <RichTooltip concept="difficulty" />
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex gap-1.5 flex-1 min-w-0">
           {DIFF_BANDS.map((d) => {
             const active = d.test(task.difficulty);
             return (
               <button key={d.key} onClick={() => set({ difficulty: d.value })}
-                className={`flex-1 rounded-lg border py-1.5 text-sm transition-colors ${
+                className={`flex-1 min-w-0 rounded-lg border py-1 text-[13px] transition-colors ${
                   active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
                 {DIFF_LABEL[d.key]}
               </button>
@@ -405,41 +439,39 @@ function DetailsStepBody({ task, set, b, gameId, siblings }: {
         </div>
       </div>
 
-      {showHint ? (
-        <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5">
-              <InlineLabel>{b.hintField}</InlineLabel>
-              <RichTooltip concept="hint" />
-            </div>
-            <button className="text-[11px] text-[--ink-3] hover:text-neon-red"
-              onClick={() => {
-                setShowHint(false);
-                set({ hint: undefined, hintPenalty: undefined, hintAutoRevealMinutes: undefined, hintAutoRevealAttempts: undefined });
-              }}>
-              {b.removeHint}
-            </button>
-          </div>
-          <Textarea value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
-          <div className="flex items-center gap-2">
-            <InlineLabel>{b.hintCost}</InlineLabel>
-            <Input type="number" min={0} className="w-24" value={task.hintPenalty ?? 25}
-              onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
-          </div>
-          {/* Hint auto escalation (change: hint-auto-escalation): optional free
-              thresholds — the hint stops costing points once the team has held
-              the task N minutes OR burned N wrong attempts. 0/empty = off. */}
-          <p className="text-[11px] text-[--ink-3] leading-snug">{b.hintEscalationLead}</p>
-          <div className="flex items-center gap-2">
-            <Input type="number" min={0} step="0.5" className="w-20" value={task.hintAutoRevealMinutes ?? ''}
+      <Section k="hint" title={b.hintField} task={task} sections={sections} b={b}>
+        <div className="flex items-center justify-between gap-2">
+          <RichTooltip concept="hint" />
+          <button className="text-[11px] text-[--ink-3] hover:text-neon-red"
+            onClick={() => set({
+              hint: undefined, hintPenalty: undefined, hintAutoRevealMinutes: undefined, hintAutoRevealAttempts: undefined,
+            })}>
+            {b.removeHint}
+          </button>
+        </div>
+        <Textarea dense value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
+        <div className="flex items-center gap-2">
+          <InlineLabel>{b.hintCost}</InlineLabel>
+          <Input dense type="number" min={0} className="w-20" value={task.hintPenalty ?? 25}
+            onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
+        </div>
+        {/* Hint auto escalation (change: hint-auto-escalation): optional free
+            thresholds — the hint stops costing points once the team has held
+            the task N minutes OR burned N wrong attempts. 0/empty = off. The
+            long explanation is demoted to a tooltip on the row. */}
+        <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5" title={b.hintEscalationLead}>
+          <div className="flex items-center gap-1.5">
+            <Input dense type="number" min={0} step="0.5" className="w-16" value={task.hintAutoRevealMinutes ?? ''}
+              aria-label={b.hintFreeAfterMinutes}
               onChange={(e) => {
                 const v = parseFloat(e.target.value);
                 set({ hintAutoRevealMinutes: Number.isFinite(v) && v > 0 ? v : undefined });
               }} />
             <InlineLabel>{b.hintFreeAfterMinutes}</InlineLabel>
           </div>
-          <div className="flex items-center gap-2">
-            <Input type="number" min={0} className="w-20" value={task.hintAutoRevealAttempts ?? ''}
+          <div className="flex items-center gap-1.5">
+            <Input dense type="number" min={0} className="w-16" value={task.hintAutoRevealAttempts ?? ''}
+              aria-label={b.hintFreeAfterAttempts}
               onChange={(e) => {
                 const v = parseInt(e.target.value);
                 set({ hintAutoRevealAttempts: Number.isInteger(v) && v > 0 ? v : undefined });
@@ -447,16 +479,17 @@ function DetailsStepBody({ task, set, b, gameId, siblings }: {
             <InlineLabel>{b.hintFreeAfterAttempts}</InlineLabel>
           </div>
         </div>
-      ) : (
-        <button onClick={() => setShowHint(true)}
-          className="self-start text-xs text-rp-fire hover:underline">
-          + {b.addHint}
-        </button>
+      </Section>
+
+      {sectionApplies('unlock', task, siblingCount) && (
+        <Section k="unlock" title={b.unlockAfterLead} task={task} sections={sections} b={b}>
+          <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
+        </Section>
       )}
 
-      <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
-
-      <MediaSection task={task} set={set} b={b} gameId={gameId} />
+      <Section k="media" title={b.mediaField} task={task} sections={sections} b={b}>
+        <MediaSection task={task} set={set} b={b} gameId={gameId} />
+      </Section>
     </>
   );
 }
@@ -472,7 +505,6 @@ function UnlockSection({ task, siblings, set, b }: {
   task: Task; siblings: Task[]; set: (p: Partial<Task>) => void; b: B;
 }) {
   const selected = task.unlockAfterTaskIds ?? [];
-  const [show, setShow] = useState(selected.length > 0);
   const others = siblings.filter((s) => s.id !== task.id);
 
   // Would checking `id` make the stage graph invalid (i.e. create a cycle)?
@@ -488,22 +520,8 @@ function UnlockSection({ task, siblings, set, b }: {
     set({ unlockAfterTaskIds: next.length > 0 ? next : undefined });
   };
 
-  if (!show) {
-    return (
-      <button onClick={() => setShow(true)} className="self-start text-xs text-rp-fire hover:underline">
-        + {b.unlockAfterLead}
-      </button>
-    );
-  }
   return (
-    <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
-      <div className="flex items-center justify-between">
-        <InlineLabel>🔒 {b.unlockAfterLead}</InlineLabel>
-        <button aria-label={b.closePanel} className="text-[11px] text-[--ink-3] hover:text-neon-red"
-          onClick={() => { setShow(false); set({ unlockAfterTaskIds: undefined }); }}>
-          ✕
-        </button>
-      </div>
+    <div className="space-y-1.5">
       <p className="text-[11px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
       {others.length === 0 ? (
         <p className="text-[11px] text-[--ink-3]">{b.unlockAfterNone}</p>
@@ -580,11 +598,7 @@ function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<T
     commit(media.map((m, idx) => (idx === i ? { ...m, caption: caption || undefined } : m)));
 
   return (
-    <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
-      <div className="flex items-center gap-1.5">
-        <InlineLabel>{b.mediaField}</InlineLabel>
-      </div>
-
+    <div className="space-y-2">
       {media.length > 0 && (
         <ul className="space-y-2">
           {media.map((m, i) => (
@@ -600,8 +614,8 @@ function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<T
                 <div className="text-[11px] text-[--ink-3] truncate">
                   {m.kind === 'youtube' ? b.mediaKindYouTube : m.kind === 'video' ? b.mediaKindVideo : b.mediaKindImage}
                 </div>
-                <Input value={m.caption ?? ''} onChange={(e) => setCaption(i, e.target.value)}
-                  placeholder={b.mediaCaptionPlaceholder} dir="auto" className="text-sm" />
+                <Input dense value={m.caption ?? ''} onChange={(e) => setCaption(i, e.target.value)}
+                  placeholder={b.mediaCaptionPlaceholder} dir="auto" />
               </div>
               <div className="flex flex-col gap-1 shrink-0">
                 <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={b.mediaMoveUp}
@@ -629,8 +643,8 @@ function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<T
       {/* YouTube link */}
       <div className="space-y-1">
         <div className="flex items-center gap-2">
-          <Input value={ytUrl} onChange={(e) => { setYtUrl(e.target.value); setYtError(false); }}
-            placeholder={b.mediaYouTubePlaceholder} dir="ltr" className="text-sm flex-1" />
+          <Input dense value={ytUrl} onChange={(e) => { setYtUrl(e.target.value); setYtError(false); }}
+            placeholder={b.mediaYouTubePlaceholder} dir="ltr" className="flex-1 min-w-0" />
           <Button variant="ghost" onClick={addYouTube} disabled={!ytUrl.trim()}>{b.mediaAddYouTube}</Button>
         </div>
         {ytError && <span className="text-[11px] text-neon-red">{b.mediaYouTubeError}</span>}
@@ -774,9 +788,11 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
 };
 
 // ── Step 3: Interaction ──
-function InteractionStepBody({ task, set, setSmart, b }: {
-  task: Task; set: (p: Partial<Task>) => void; setSmart: (p: Record<string, unknown>) => void; b: B;
+function InteractionStepBody({ task, set, setSmart, b, sections }: {
+  task: Task; set: (p: Partial<Task>) => void; setSmart: (p: Record<string, unknown>) => void; b: B; sections: Sections;
 }) {
+  const located = (() => { const m = normalizeTriggerMode(task); return m === 'radius' || m === 'exact'; })();
+  const isAnswerTask = task.type === 'quiz' || task.type === 'numeric' || task.type === 'survey';
   const TYPE_META: Record<TaskType, { label: string; desc: string }> = {
     smart_station: { label: b.typeStation, desc: b.typeStationDesc },
     photo: { label: b.typePhoto, desc: b.typePhotoDesc },
@@ -791,7 +807,7 @@ function InteractionStepBody({ task, set, setSmart, b }: {
   return (
     <>
       <div>
-        <Label>{b.howComplete}</Label>
+        <Label dense>{b.howComplete}</Label>
         {/* Compact type picker: original icon + label grid, with a one-line
             description for the active type below — keeps the step short. */}
         <div className="grid grid-cols-3 gap-1.5">
@@ -824,8 +840,8 @@ function InteractionStepBody({ task, set, setSmart, b }: {
       <div className="space-y-2">
         {task.type === 'smart_station' && (
           <div>
-            <Label>{b.secretCode}</Label>
-            <Input value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
+            <Label dense>{b.secretCode}</Label>
+            <Input dense value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
               onChange={(e) => setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true })} />
           </div>
         )}
@@ -834,7 +850,7 @@ function InteractionStepBody({ task, set, setSmart, b }: {
             {/* audio-tasks: capture a photo (default) or an audio clip. Writes to
                 task.smart.captureKind (never top-level). */}
             <div>
-              <Label>{b.captureKindLabel}</Label>
+              <Label dense>{b.captureKindLabel}</Label>
               <div className="flex gap-2">
                 {(['photo', 'audio'] as const).map((k) => {
                   const active = (task.smart?.captureKind ?? 'photo') === k;
@@ -862,13 +878,13 @@ function InteractionStepBody({ task, set, setSmart, b }: {
         {task.type === 'numeric' && (
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label>{b.correctNumber}</Label>
-              <Input type="number" value={task.numericAnswer ?? ''}
+              <Label dense>{b.correctNumber}</Label>
+              <Input dense type="number" value={task.numericAnswer ?? ''}
                 onChange={(e) => set({ numericAnswer: e.target.value === '' ? undefined : parseFloat(e.target.value) })} />
             </div>
             <div>
-              <Label>{b.tolerance}</Label>
-              <Input type="number" min={0} value={task.numericTolerance ?? 0}
+              <Label dense>{b.tolerance}</Label>
+              <Input dense type="number" min={0} value={task.numericTolerance ?? 0}
                 onChange={(e) => set({ numericTolerance: Math.max(0, parseFloat(e.target.value) || 0) })} />
             </div>
           </div>
@@ -877,8 +893,8 @@ function InteractionStepBody({ task, set, setSmart, b }: {
         {task.type === 'survey' && <SurveyChoicesSection task={task} set={set} b={b} />}
         {(task.type === 'smart_station' || task.type === 'photo') && (
           <div>
-            <Label>{b.extendedInstructions}</Label>
-            <Textarea value={task.smart?.longInstructions ?? ''} rows={2} placeholder={b.extendedPlaceholder} dir="auto"
+            <Label dense>{b.extendedInstructions}</Label>
+            <Textarea dense value={task.smart?.longInstructions ?? ''} rows={2} placeholder={b.extendedPlaceholder} dir="auto"
               onChange={(e) => setSmart({ longInstructions: e.target.value })} />
           </div>
         )}
@@ -887,111 +903,106 @@ function InteractionStepBody({ task, set, setSmart, b }: {
         )}
       </div>
 
-      {/* Presence gate (change: quiz-location-verification): opt-in for ANSWER
-          tasks — a quiz/numeric/survey answer can only be submitted from within a
-          lenient radius of the task coordinates (default OFF). */}
-      {(task.type === 'quiz' || task.type === 'numeric' || task.type === 'survey') && (
-        <div className="rounded-lg border border-[--rp-border] bg-[--surface-2] px-3 py-2">
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input type="checkbox" className="mt-0.5" checked={!!task.requirePresence}
-              onChange={(e) => set({ requirePresence: e.target.checked || undefined })} />
-            <span>
-              <span className="text-sm font-medium text-[--ink-1]">{b.requirePresence}</span>
-              <span className="block text-[11px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
-            </span>
-          </label>
-        </div>
-      )}
-
-      {/* Hidden-location (treasure hunt): only for located tasks (radius/exact).
-          Hides the map pin from participants — they reach the spot from the clue. */}
-      {(() => {
-        const m = normalizeTriggerMode(task);
-        if (m !== 'radius' && m !== 'exact') return null;
-        return (
-          <div className="rounded-lg border border-[--rp-border] bg-[--surface-2] px-3 py-2">
+      {/* Player rules — the two opt-in restrictions, folded into ONE collapsed
+          section instead of two always-open boxes. Nothing is removed: the
+          presence gate (change: quiz-location-verification, answer tasks only)
+          and the hidden-location clue (located tasks only) each still render
+          exactly where they applied, and the section auto expands whenever
+          either is already on. */}
+      {sectionApplies('rules', task, 1) && (
+        <Section k="rules" title={b.sectionRules} task={task} sections={sections} b={b}>
+          {isAnswerTask && (
             <label className="flex items-start gap-2 cursor-pointer">
-              <input type="checkbox" className="mt-0.5" checked={!!task.hideLocation}
-                onChange={(e) => set(e.target.checked
-                  ? { hideLocation: true }
-                  : { hideLocation: undefined, locationClue: undefined, locationClueHe: undefined })} />
+              <input type="checkbox" className="mt-0.5" checked={!!task.requirePresence}
+                onChange={(e) => set({ requirePresence: e.target.checked || undefined })} />
               <span>
-                <span className="text-sm font-medium text-[--ink-1]">{b.hideLocation}</span>
-                <span className="block text-[11px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
+                <span className="text-[13px] font-medium text-[--ink-1]">{b.requirePresence}</span>
+                <span className="block text-[11px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
               </span>
             </label>
-            {task.hideLocation && (
-              <div className="mt-2">
-                <Label>{b.locationClueField}</Label>
-                <Textarea value={task.locationClue ?? ''} onChange={(e) => set({ locationClue: e.target.value })}
-                  placeholder={b.locationCluePlaceholder} rows={2} dir="auto" />
-                {!isTaskLocationValid(task) ? (
-                  // A hidden task is still a located task — Step 1's place-a-pin gate
-                  // (isTaskLocationValid) is what guarantees real coordinates exist.
-                  <p className="text-[11px] text-rp-fire mt-1">{b.hideLocationNeedsCoords}</p>
-                ) : !task.locationClue?.trim() && (
-                  <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
-                )}
-                {/* Leak guard (change: hidden-location-leak-guard): title/description
-                    still ship to players, so warn if they name the place. Advisory only. */}
-                {(() => {
-                  const leaks = locationLeakWarnings(task);
-                  if (leaks.length === 0) return null;
-                  return (
-                    <p className="text-[11px] text-rp-fire mt-1">
-                      {leaks.length === 2 ? b.hideLocationLeakBoth
-                        : leaks[0] === 'title' ? b.hideLocationLeakTitle
-                        : b.hideLocationLeakDesc}
-                    </p>
-                  );
-                })()}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+          )}
+          {located && (
+            <div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={!!task.hideLocation}
+                  onChange={(e) => set(e.target.checked
+                    ? { hideLocation: true }
+                    : { hideLocation: undefined, locationClue: undefined, locationClueHe: undefined })} />
+                <span>
+                  <span className="text-[13px] font-medium text-[--ink-1]">{b.hideLocation}</span>
+                  <span className="block text-[11px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
+                </span>
+              </label>
+              {task.hideLocation && (
+                <div className="mt-1.5">
+                  <Label dense>{b.locationClueField}</Label>
+                  <Textarea dense value={task.locationClue ?? ''} onChange={(e) => set({ locationClue: e.target.value })}
+                    placeholder={b.locationCluePlaceholder} rows={2} dir="auto" />
+                  {!isTaskLocationValid(task) ? (
+                    // A hidden task is still a located task — Step 1's place-a-pin gate
+                    // (isTaskLocationValid) is what guarantees real coordinates exist.
+                    <p className="text-[11px] text-rp-fire mt-1">{b.hideLocationNeedsCoords}</p>
+                  ) : !task.locationClue?.trim() && (
+                    <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
+                  )}
+                  {/* Leak guard (change: hidden-location-leak-guard): title/description
+                      still ship to players, so warn if they name the place. Advisory only. */}
+                  {(() => {
+                    const leaks = locationLeakWarnings(task);
+                    if (leaks.length === 0) return null;
+                    return (
+                      <p className="text-[11px] text-rp-fire mt-1">
+                        {leaks.length === 2 ? b.hideLocationLeakBoth
+                          : leaks[0] === 'title' ? b.hideLocationLeakTitle
+                          : b.hideLocationLeakDesc}
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
+        </Section>
+      )}
 
-      <details className="rounded-lg border border-[--rp-border] px-3 py-2">
-        <summary className="text-xs font-medium text-[--ink-2] cursor-pointer select-none">{b.advanced}</summary>
-        <div className="grid grid-cols-3 gap-2 mt-2">
+      <Section k="advanced" title={b.advanced} task={task} sections={sections} b={b}>
+        <div className="grid grid-cols-3 gap-2">
           <div>
-            <Label>{b.points}</Label>
-            <Input type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
+            <Label dense>{b.points}</Label>
+            <Input dense type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
           </div>
           <div>
-            <Label>{b.estMin}</Label>
-            <Input type="number" value={task.estimatedMinutes} onChange={(e) => set({ estimatedMinutes: parseInt(e.target.value) || 1 })} />
+            <Label dense>{b.estMin}</Label>
+            <Input dense type="number" value={task.estimatedMinutes} onChange={(e) => set({ estimatedMinutes: parseInt(e.target.value) || 1 })} />
           </div>
           <div>
-            <div className="flex items-center gap-1 mb-1">
+            <div className="flex items-center gap-1 mb-0.5">
               <InlineLabel>{b.maxTeams}</InlineLabel>
               <RichTooltip concept="concurrent" />
             </div>
-            <Input type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
+            <Input dense type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
           </div>
-          {(() => {
-            const m = normalizeTriggerMode(task);
-            if (m !== 'radius' && m !== 'exact') return null;
-            return (
-              <div>
-                <div className="flex items-center gap-1 mb-1">
-                  <InlineLabel>{b.triggerRadius}</InlineLabel>
-                  <RichTooltip concept="geofence" />
-                </div>
-                <Input type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(m)}
-                  onChange={(e) => set({ geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(m)) })} />
+          {located && (
+            <div>
+              <div className="flex items-center gap-1 mb-0.5">
+                <InlineLabel>{b.triggerRadius}</InlineLabel>
+                <RichTooltip concept="geofence" />
               </div>
-            );
-          })()}
+              <Input dense type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(normalizeTriggerMode(task))}
+                onChange={(e) => set({
+                  geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(normalizeTriggerMode(task))),
+                })} />
+            </div>
+          )}
         </div>
         {/* Task expiry (change: task-expiry): the task closes N minutes after the
             run starts — dropped from routing, refused on completion, auto-skipped
             when in flight. Empty/0 = never expires. */}
-        <div className="mt-2">
+        <div>
           <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
             <InlineLabel>⏳ {b.expiryLead}</InlineLabel>
-            <Input type="number" min={0} className="w-24 py-1" value={task.expiresAfterMinutes ?? ''}
-              placeholder="0"
+            <Input dense type="number" min={0} className="w-20" value={task.expiresAfterMinutes ?? ''}
+              placeholder="0" aria-label={b.expiryLead}
               onChange={(e) => {
                 const n = parseFloat(e.target.value);
                 set({ expiresAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined });
@@ -1004,7 +1015,7 @@ function InteractionStepBody({ task, set, setSmart, b }: {
             <p className="text-[11px] text-[--ink-3] mt-1">⚠ {b.expiryReleaseAtWarn}</p>
           ) : null}
         </div>
-      </details>
+      </Section>
     </>
   );
 }
@@ -1013,13 +1024,13 @@ function StepsEditor({ steps, onChange, b }: { steps: TaskStep[]; onChange: (s: 
   const update = (i: number, p: Partial<TaskStep>) => onChange(steps.map((s, j) => (j === i ? { ...s, ...p } : s)));
   return (
     <div className="space-y-2">
-      <Label>{b.orderedSteps}</Label>
+      <Label dense>{b.orderedSteps}</Label>
       {steps.map((s, i) => (
         <div key={s.id} className="flex gap-2 items-start">
           <span className="text-xs text-[--ink-3] mt-2.5 w-3">{i + 1}</span>
           <div className="flex-1 space-y-1">
-            <Input value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder={b.stepPrompt} dir="auto" />
-            <Input value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder={b.stepAnswer} dir="auto" />
+            <Input dense value={s.prompt} onChange={(e) => update(i, { prompt: e.target.value })} placeholder={b.stepPrompt} dir="auto" />
+            <Input dense value={s.answer ?? ''} onChange={(e) => update(i, { answer: e.target.value })} placeholder={b.stepAnswer} dir="auto" />
           </div>
           <button className="text-neon-red text-sm mt-2.5" aria-label={`${b.deleteTask} ${i + 1}`} onClick={() => onChange(steps.filter((_, j) => j !== i))}>✕</button>
         </div>

@@ -16,6 +16,7 @@ import { moveItem, moveTaskBetweenStages, clampRequiredTaskCount } from '../lib/
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
+import { storyFieldCount } from '../lib/wizardSections';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -548,30 +549,45 @@ function StageStory({ stage, onChange }: { stage: Stage; onChange: (n: Stage['na
   function setOutro(p: Partial<NonNullable<Stage['narrative']>['outro']>) {
     onChange({ ...n, outro: { ...n.outro, ...p } });
   }
+  // Compact inline editor (change: task-builder-ui). The five story fields used
+  // to be a full-width stack of roomy textareas that swallowed the whole stage
+  // column when opened; they now live in a dense two-column grid (one column on
+  // narrow screens) with the long explanation demoted to the header tooltip, so
+  // the task canvas keeps its room. Every field is still here.
+  const filledCount = storyFieldCount(stage.narrative);
   return (
-    <Advanced title={b.storyTitle} open={open} onToggle={() => setOpen(!open)}>
-      <div className="space-y-3">
-        <p className="text-xs text-zinc-500">{b.storyHint}</p>
+    <Advanced
+      dense
+      title={b.storyTitle}
+      open={open}
+      onToggle={() => setOpen(!open)}
+      meta={filledCount > 0
+        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(filledCount)}</span>
+        : undefined}
+    >
+      <div className="space-y-2" title={b.storyHint}>
         <div>
-          <Label>{b.storyIntroTitle}</Label>
-          <Input value={n.intro?.title ?? ''} onChange={(e) => setIntro({ title: e.target.value })}
+          <Label dense>{b.storyIntroTitle}</Label>
+          <Input dense value={n.intro?.title ?? ''} onChange={(e) => setIntro({ title: e.target.value })}
             placeholder={b.storyIntroTitlePlaceholder} dir="auto" />
         </div>
-        <div>
-          <Label>{b.storyIntroBodyEn}</Label>
-          <Textarea rows={2} value={n.intro?.body ?? ''} onChange={(e) => setIntro({ body: e.target.value })} dir="auto" />
-        </div>
-        <div>
-          <Label>{b.storyIntroBodyHe}</Label>
-          <Textarea rows={2} value={n.intro?.bodyHe ?? ''} onChange={(e) => setIntro({ bodyHe: e.target.value })} dir="auto" />
-        </div>
-        <div>
-          <Label>{b.storyOutroBodyEn}</Label>
-          <Textarea rows={2} value={n.outro?.body ?? ''} onChange={(e) => setOutro({ body: e.target.value })} dir="auto" />
-        </div>
-        <div>
-          <Label>{b.storyOutroBodyHe}</Label>
-          <Textarea rows={2} value={n.outro?.bodyHe ?? ''} onChange={(e) => setOutro({ bodyHe: e.target.value })} dir="auto" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div>
+            <Label dense>{b.storyIntroBodyEn}</Label>
+            <Textarea dense rows={2} value={n.intro?.body ?? ''} onChange={(e) => setIntro({ body: e.target.value })} dir="auto" />
+          </div>
+          <div>
+            <Label dense>{b.storyIntroBodyHe}</Label>
+            <Textarea dense rows={2} value={n.intro?.bodyHe ?? ''} onChange={(e) => setIntro({ bodyHe: e.target.value })} dir="auto" />
+          </div>
+          <div>
+            <Label dense>{b.storyOutroBodyEn}</Label>
+            <Textarea dense rows={2} value={n.outro?.body ?? ''} onChange={(e) => setOutro({ body: e.target.value })} dir="auto" />
+          </div>
+          <div>
+            <Label dense>{b.storyOutroBodyHe}</Label>
+            <Textarea dense rows={2} value={n.outro?.bodyHe ?? ''} onChange={(e) => setOutro({ bodyHe: e.target.value })} dir="auto" />
+          </div>
         </div>
       </div>
     </Advanced>
@@ -1030,8 +1046,15 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings }: {
   // min-w-0) naturally yields the space, matching the redesign mockup.
   return (
     <aside
-      className="shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out"
-      style={{ width: shown ? 500 : 0 }}
+      // From lg up this is the inline third pane the redesign describes. Below lg
+      // the three panes no longer fit side by side, so the editor becomes a
+      // full-height sheet pinned to the inline end instead — a hard 500px pane
+      // used to be pushed off the edge of a phone screen entirely, taking the
+      // whole task editor with it (change: task-builder-ui). The `!` width wins
+      // over the inline style, which only drives the lg open/close animation.
+      className="shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out
+        max-lg:fixed max-lg:inset-y-0 max-lg:end-0 max-lg:z-40 max-lg:!w-[min(100vw,32rem)] max-lg:p-2 max-lg:shadow-soft"
+      style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
     >
       {/* Full-height panel: it matches the fixed-height workspace row, so the
           wizard's footer + all content stay visible (never clipped). It is wide
@@ -1039,8 +1062,8 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings }: {
       {/* No separate title bar — the close control lives in the wizard's tab row,
           reclaiming ~45px of chrome for the actual content. */}
       <div
-        style={{ willChange: 'transform' }}
-        className={`w-[500px] h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden
+        style={{ willChange: 'transform', width: 'min(500px, calc(100vw - 1.5rem))' }}
+        className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden max-lg:!w-full
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <div className="flex-1 min-h-0 p-2.5">

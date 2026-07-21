@@ -70,11 +70,16 @@ export function Button({
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
-export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+// `dense` trades the roomy default padding for a compact control — used by the
+// Task Builder so a form of many small fields fits on screen without scrolling.
+// It is a prop (not a className override) because two conflicting Tailwind
+// padding utilities in one class list resolve by stylesheet order, not by which
+// one is written last.
+export function Input({ className = '', dense = false, ...rest }: InputHTMLAttributes<HTMLInputElement> & { dense?: boolean }) {
   return (
     <input
       className={`
-        w-full px-3.5 py-2.5 rounded-xl text-sm
+        w-full ${dense ? 'px-2.5 py-1.5 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
         bg-[--surface-0] dark:bg-[--surface-2]/60
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
@@ -88,11 +93,11 @@ export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInput
 }
 
 // ── Textarea ──────────────────────────────────────────────────────────────────
-export function Textarea({ className = '', ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ className = '', dense = false, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & { dense?: boolean }) {
   return (
     <textarea
       className={`
-        w-full px-3.5 py-2.5 rounded-xl text-sm resize-y
+        w-full resize-y ${dense ? 'px-2.5 py-1.5 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
         bg-[--surface-0] dark:bg-[--surface-2]/60
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
@@ -126,8 +131,11 @@ export function Select({ className = '', children, ...rest }: SelectHTMLAttribut
 }
 
 // ── Label ─────────────────────────────────────────────────────────────────────
-export function Label({ children }: { children: ReactNode }) {
-  return <label className="block text-xs font-semibold text-[--ink-3] uppercase tracking-wider mb-1.5">{children}</label>;
+export function Label({ children, dense = false }: { children: ReactNode; dense?: boolean }) {
+  return (
+    <label className={`block font-semibold text-[--ink-3] uppercase tracking-wider ${
+      dense ? 'text-[10px] mb-0.5' : 'text-xs mb-1.5'}`}>{children}</label>
+  );
 }
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
@@ -150,20 +158,32 @@ export function Badge({
 }
 
 // ── Advanced (collapsible) ────────────────────────────────────────────────────
-export function Advanced({ title, children, open, onToggle }: {
+// `dense` is the Task Builder variant: tighter chrome so a stack of collapsed
+// sections reads as a compact list rather than a wall of boxes. `meta` renders
+// beside the chevron — use it for an at-rest summary (a count badge), so folding
+// a section never hides the fact that it is configured.
+// The chevron rotates by 90deg on open and the trigger carries aria-expanded, so
+// screen readers and sighted users get the same state.
+export function Advanced({ title, children, open, onToggle, dense = false, meta }: {
   title: string; children: ReactNode; open: boolean; onToggle: () => void;
+  dense?: boolean; meta?: ReactNode;
 }) {
   return (
-    <div className="border border-[--rp-border] rounded-xl overflow-hidden">
+    <div className={`border border-[--rp-border] overflow-hidden ${dense ? 'rounded-lg' : 'rounded-xl'}`}>
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-semibold text-[--ink-3] uppercase tracking-wider hover:bg-[--surface-2] transition-colors"
+        aria-expanded={open}
+        className={`w-full flex items-center gap-2 font-semibold text-[--ink-3] uppercase tracking-wider hover:bg-[--surface-2] transition-colors text-start ${
+          dense ? 'px-2.5 py-1.5 text-[11px]' : 'px-3.5 py-2.5 text-xs'}`}
       >
-        <span>{title}</span>
-        <span className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
+        <span className="min-w-0 truncate">{title}</span>
+        {meta && <span className="shrink-0 normal-case tracking-normal font-medium text-[--ink-3]">{meta}</span>}
+        <span aria-hidden className={`ms-auto shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
       </button>
-      {open && <div className="p-3.5 border-t border-[--rp-border] space-y-3">{children}</div>}
+      {open && (
+        <div className={`border-t border-[--rp-border] ${dense ? 'p-2.5 space-y-2' : 'p-3.5 space-y-3'}`}>{children}</div>
+      )}
     </div>
   );
 }
