@@ -118,3 +118,26 @@ export function didExportSucceed({ beforeMtimeMs, afterExists, afterMtimeMs }) {
   if (beforeMtimeMs == null) return true;               // didn't exist before, does now
   return typeof afterMtimeMs === 'number' && afterMtimeMs > beforeMtimeMs;
 }
+
+/**
+ * What the supervisor loop should do after a prod build attempt, given whether the
+ * functions compile-gate passed, whether the app bundles built, and whether a serveable
+ * app dist already exists on disk. Pure decision — the loop maps the result to logging +
+ * control flow. Four outcomes:
+ *   'retry-functions' — functions did NOT compile. Launching would crash-loop
+ *       dev-emulator.mjs's process.exit(1) under `--kill-others-on-fail`, so NEVER launch:
+ *       skip this cycle, keep serving the previous good stack, back off, retry. This wins
+ *       even when a serveable app dist exists — a crash-looping stack serves nothing.
+ *   'launch-fresh'    — everything built cleanly; launch.
+ *   'launch-stale'    — functions compile but the app bundles failed AND a prior good dist
+ *       is on disk; serve THAT (availability first — a broken app push never blacks out the
+ *       site). The caller keeps needBuild armed to retry.
+ *   'retry-no-dist'   — functions compile but the apps failed and there's no dist at all
+ *       yet (fresh host); retry after a backoff rather than launch vite-preview on nothing.
+ */
+export function decidePostBuildAction({ functionsOk, appsBuilt, distReady }) {
+  if (!functionsOk) return 'retry-functions';   // guaranteed crash-loop → never launch
+  if (appsBuilt) return 'launch-fresh';         // clean build of everything
+  if (distReady) return 'launch-stale';         // apps failed but a prior good dist serves
+  return 'retry-no-dist';                        // fresh host, nothing serveable yet
+}

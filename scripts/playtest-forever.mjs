@@ -24,10 +24,12 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { canFastForwardApply } from './lib/gitUpdateGuard.mjs';
-import { didExportSucceed } from './lib/emulatorBackup.mjs';
+import { didExportSucceed, isEmulatorReady, decidePostBuildAction } from './lib/emulatorBackup.mjs';
+import { depsNeedInstall } from './lib/depsGuard.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_DIR = path.join(ROOT, '.firebase');
@@ -36,6 +38,11 @@ const PIDF = path.join(STATE_DIR, 'playtest-forever.pid');
 const STOPF = path.join(STATE_DIR, 'playtest-forever.stop');
 const RESTART_BACKOFF_MS = 4_000;
 const GIT_POLL_MS = 3 * 60_000;   // check origin for new commits every 3 minutes
+// Single-instance LOCK port. Bound on loopback for the supervisor's whole lifetime;
+// the OS lets exactly one process hold it and RELEASES it automatically when that
+// process dies (even a hard SIGKILL/poweroff) — so it's race-free where the pid file
+// is not. NOT one of the stack's real ports; picked high to avoid collisions.
+const LOCK_PORT = 47615;
 // The stack to serve. Default `playtest:prod` = pre-built + minified static apps
 // served via `vite preview` (dramatically faster over the tunnel than the dev
 // server). Override with PLAYTEST_TARGET=playtest:ngrok to fall back to dev mode.
@@ -58,21 +65,30 @@ if (process.argv.includes('--stop')) {
   process.exit(0);
 }
 
-// --- single-instance guard -------------------------------------------------
-// If a prior supervisor is still alive, don't start a second one. process.kill(pid, 0)
-// throws ESRCH when the pid is gone (the normal case after a hard poweroff/hibernate
-// kill), and succeeds when it's still running (resume-from-sleep kept it alive).
-function pidAlive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return false;
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
-}
-try {
-  const prev = Number.parseInt(fs.readFileSync(PIDF, 'utf8').trim(), 10);
-  if (pidAlive(prev)) {
-    log(`already running (pid ${prev}); this launch exits. (watchdog no-op)`);
-    process.exit(0);
+// --- single-instance guard (race-free, OS-enforced) ------------------------
+// Authoritative check: try to hold an exclusive loopback lock port. Only one process
+// can bind it, and the OS frees it the instant the holder dies — so this is immune to
+// the pid-file races that let TWO supervisors run at once (delete-then-relaunch, or
+// two watchdog fires seconds apart), which spawned two full stacks fighting over the
+// same ports → endless `--kill-others-on-fail` crash loop. A stale pid file or a hard
+// SIGKILL can't fool it: a dead holder's port is already released; a live holder's is
+// not. The pid file remains, but only for `--stop` targeting + human-readable logs.
+const lockServer = net.createServer();
+lockServer.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    log(`another supervisor already holds the single-instance lock (:${LOCK_PORT}); this launch exits. (watchdog no-op)`);
+  } else {
+    log(`single-instance lock error (${e.code || e.message}) — exiting to be safe rather than risk a duplicate.`);
   }
-} catch { /* no pid file yet — first run */ }
+  process.exit(0);
+});
+// Block startup until the lock is acquired (or we've exited above). listen() resolves
+// async, so gate the rest of boot on it. Keep the socket referenced so it holds the
+// lock for the whole process lifetime; stop() closes it.
+await new Promise((resolve) => {
+  lockServer.once('listening', resolve);
+  lockServer.listen(LOCK_PORT, '127.0.0.1');
+});
 
 if (fs.existsSync(STOPF)) fs.rmSync(STOPF, { force: true });
 fs.writeFileSync(PIDF, String(process.pid));
@@ -184,6 +200,26 @@ function freePorts() {
   });
 }
 
+// The fixed Emulator Hub port. The Hub answers with a JSON map of the running
+// emulators; `isEmulatorReady` (shared with the periodic backup loop) treats the suite
+// as export-safe only once BOTH firestore and functions appear (functions load last).
+const HUB_EMULATORS_URL = 'http://127.0.0.1:4400/emulators';
+
+// Async readiness probe of the Emulator Hub, used to gate the primary export. A short
+// AbortSignal.timeout keeps a hung/booting Hub from stalling teardown; ANY failure
+// (offline, mid-boot 404/connection-refused, timeout, non-JSON) → not ready → the
+// caller skips the export rather than risk clobbering the primary dir with a partial
+// snapshot. Pure I/O only; the readiness decision itself lives in isEmulatorReady.
+async function isPrimaryEmulatorReady() {
+  try {
+    const res = await fetch(HUB_EMULATORS_URL, { signal: AbortSignal.timeout(2_000) });
+    if (!res.ok) return false;
+    return isEmulatorReady(await res.json());
+  } catch {
+    return false;   // no Hub / mid-boot / timeout → treat as not ready (never export blind)
+  }
+}
+
 // Force a LIVE export of the running emulator into the PRIMARY data dir before any
 // planned teardown. Critical on Windows: child.kill() hard-terminates the emulator
 // (TerminateProcess), so the emulator's own --export-on-exit NEVER fires on a
@@ -200,11 +236,26 @@ function freePorts() {
 // returns a garbage non-zero status EVEN WHEN THE EXPORT GENUINELY SUCCEEDED. Trusting
 // r.status made this log "failed" on every single call. See didExportSucceed's doc
 // comment (scripts/lib/emulatorBackup.mjs) for the full mechanism.
-function exportPrimaryNow() {
+//
+// Readiness gate (see isPrimaryEmulatorReady below): we ONLY export when the suite is
+// fully booted. A `!child` check alone is not enough — the git poll (every 3 min) can
+// fire during a fresh 60-90s emulator boot, or a stop can land seconds after launch, so
+// `child` is set but Firestore/Functions aren't up yet. Exporting then writes a partial
+// or empty snapshot into the PRIMARY dir, which dev-emulator.mjs imports preferentially
+// on the next boot → it becomes the "freshest" state and REAL data is lost (and a mid-boot
+// export can wedge Firestore). This mirrors the periodic backup loop's Hub-readiness gate.
+async function exportPrimaryNow() {
   const dest = path.join(STATE_DIR, 'emulator-data');
   // Only meaningful while the suite is up (the source of the live data). If the stack
   // is already gone, the Hub is down and export would just fail — skip quietly.
   if (!child) { log('export skipped: stack not running (nothing live to snapshot).'); return false; }
+  // Skip when the emulator isn't fully booted — see the block comment above. The caller
+  // then relies on the last periodic backup (which uses the same readiness gate) rather
+  // than clobbering the primary dir with a partial snapshot.
+  if (!(await isPrimaryEmulatorReady())) {
+    log(`primary export skipped: emulator not ready (mid-boot or stopping) — periodic backup (≤${Math.round((Number(process.env.EMU_BACKUP_INTERVAL_MS || 120000)) / 1000)}s old) still covers us.`);
+    return false;
+  }
   log('exporting live emulator → primary data dir before teardown…');
   const metaPath = path.join(dest, 'firebase-export-metadata.json');
   const beforeMtimeMs = fs.existsSync(metaPath) ? fs.statSync(metaPath).mtimeMs : null;
@@ -230,9 +281,58 @@ function distReady() {
 // after each git update. Resolves TRUE only on a clean build — the caller keeps
 // needBuild armed on failure so it retries next loop instead of crash-looping on a
 // missing/stale dist (a fresh host has no dist until the first build succeeds).
-function buildProd() {
+// Install deps if the lockfile is newer than npm's own install-state snapshot
+// (node_modules/.package-lock.json), REGARDLESS of how the lockfile got here. The
+// git-update path (updateFromGit, above) only runs `npm ci` when the supervisor
+// itself performed the pull; a manual `git pull`/rebase/stash-restore in the same
+// working tree (e.g. resolving a divergence or a dirty-file block by hand) changes
+// the lockfile too but skips that check entirely — the next build then runs against
+// a stale node_modules and fails on any genuinely new dependency. This runs
+// unconditionally before every build attempt; the mtime comparison is two stat
+// calls, so it's a no-op cost when already in sync.
+function ensureDepsInstalled() {
   return new Promise((resolve) => {
-    log('building production bundles: npm run playtest:build…');
+    const lockPath = path.join(ROOT, 'package-lock.json');
+    const markerPath = path.join(ROOT, 'node_modules', '.package-lock.json');
+    const lockMtimeMs = fs.existsSync(lockPath) ? fs.statSync(lockPath).mtimeMs : NaN;
+    const markerMtimeMs = fs.existsSync(markerPath) ? fs.statSync(markerPath).mtimeMs : NaN;
+    if (!depsNeedInstall({ lockMtimeMs, markerMtimeMs })) { resolve(true); return; }
+    log('package-lock.json is newer than the installed node_modules snapshot — running npm ci before building…');
+    const ni = spawnSync('npm', ['ci'], { cwd: ROOT, stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')], shell: process.platform === 'win32' });
+    log(ni.status === 0 ? 'npm ci ok.' : `npm ci exited ${ni.status ?? '?'} — build will likely fail; will retry next cycle.`);
+    resolve(ni.status === 0);
+  });
+}
+
+// Build everything the prod stack needs, functions FIRST as a compile gate. Returns
+// { functionsOk, appsBuilt }:
+//   • functionsOk — the functions workspace tsc-compiled. This is the crash-loop guard:
+//     `playtest:build` only builds shared+creator+play, but `playtest:prod` boots the
+//     emulator via dev-emulator.mjs which itself runs `npm run build --workspace=functions`
+//     and does process.exit(1) on failure. Under `concurrently --kill-others-on-fail` that
+//     tears the WHOLE stack down → 4s backoff → forever. The git ff-guard only checks that
+//     a pull APPLIES cleanly, never that the pulled code COMPILES, so a non-compiling
+//     functions/ push would otherwise crash-loop the stack indefinitely. Building it here
+//     first lets the caller detect the break and keep serving the previous good build.
+//   • appsBuilt — creator-web + play-web bundles built (npm run playtest:build).
+// We only attempt the app bundles when functions compiles (no point building apps for a
+// stack we won't launch). ensureDepsInstalled runs first as before.
+function buildProd() {
+  return ensureDepsInstalled().then(() => new Promise((resolve) => {
+    log('compile-gating functions: npm run build --workspace=functions…');
+    const fnBuild = spawnSync('npm', ['run', 'build', '--workspace=functions'], {
+      cwd: ROOT,
+      stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')],
+      shell: process.platform === 'win32',
+    });
+    if (fnBuild.status !== 0) {
+      // Do NOT launch: dev-emulator.mjs would exit(1) on this same failure and crash-loop
+      // the stack. Signal functionsOk=false so the caller backs off and retries next cycle.
+      log(`functions build FAILED (status=${fnBuild.status ?? '?'}${fnBuild.error ? `, ${fnBuild.error.message}` : ''}) — not launching (would crash-loop dev-emulator's exit(1)); retrying next cycle.`);
+      resolve({ functionsOk: false, appsBuilt: false });
+      return;
+    }
+    log('functions compile ok — building app bundles: npm run playtest:build…');
     buildChild = spawn('npm', ['run', 'playtest:build'], {
       cwd: ROOT,
       stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')],
@@ -241,14 +341,14 @@ function buildProd() {
     buildChild.on('exit', (code) => {
       log(`playtest:build finished (code=${code}).`);
       buildChild = null;
-      resolve(code === 0);
+      resolve({ functionsOk: true, appsBuilt: code === 0 });
     });
     buildChild.on('error', (err) => {
       log(`playtest:build failed to spawn: ${err.message} — will retry.`);
       buildChild = null;
-      resolve(false);
+      resolve({ functionsOk: true, appsBuilt: false });
     });
-  });
+  }));
 }
 
 function runOnce() {
@@ -278,10 +378,14 @@ async function stop() {
   log('stopping supervisor…');
   if (gitTimer) clearInterval(gitTimer);
   if (stopWatch) clearInterval(stopWatch);
-  exportPrimaryNow();   // capture latest live state before we hard-kill the emulator
+  // AWAIT the export before the hard kill: exportPrimaryNow is async now (it probes the
+  // Hub for readiness first), and the snapshot must finish writing before child.kill()
+  // TerminateProcess's the emulator out from under it.
+  await exportPrimaryNow();   // capture latest live state before we hard-kill the emulator
   if (child) { try { child.kill(); } catch { /* ignore */ } }
   if (buildChild) { try { buildChild.kill(); } catch { /* ignore */ } }
   await freePorts();
+  try { lockServer.close(); } catch { /* ignore */ }   // release the single-instance lock port
   try { fs.rmSync(PIDF, { force: true }); } catch { /* ignore */ }
   try { fs.rmSync(STOPF, { force: true }); } catch { /* ignore */ }
   log('supervisor stopped.');
@@ -299,7 +403,7 @@ process.on('SIGTERM', stop);
 // check runs at a time and none runs mid-teardown; blocked updates log once.
 let gitTimer = null;
 let checking = false;
-gitTimer = setInterval(() => {
+gitTimer = setInterval(async () => {
   if (stopping || checking || !child) return;
   checking = true;
   try {
@@ -307,8 +411,11 @@ gitTimer = setInterval(() => {
     if (!a.assessed) return;
     if (a.ok) {
       log(`poll: ${a.behind} new commit(s) upstream (fast-forward safe) — restarting stack to apply.`);
-      exportPrimaryNow();   // snapshot latest live state so the relaunch imports it (not a stale backup)
-      try { child.kill(); } catch { /* the exit handler resolves runOnce */ }
+      // AWAIT the export before killing — exportPrimaryNow is async (readiness-gated) and
+      // its snapshot must land before child.kill() terminates the emulator. Re-check
+      // `child` after the await: a concurrent stop()/exit could have cleared it meanwhile.
+      await exportPrimaryNow();   // snapshot latest live state so the relaunch imports it (not a stale backup)
+      if (child) { try { child.kill(); } catch { /* the exit handler resolves runOnce */ } }
     } else if (a.reason !== 'up-to-date') {
       logBlockedOnce(a.reason, a.upstreamSha,
         a.reason === 'diverged'
@@ -339,22 +446,39 @@ stopWatch = setInterval(() => {
 let needBuild = NEEDS_BUILD;          // build once before the first prod launch
 while (!stopping) {
   if (fs.existsSync(STOPF)) { await stop(); break; }
+  // Free ports BEFORE updateFromGit(). updateFromGit() can run `npm ci`, which on Windows
+  // deletes/recreates node_modules — if orphaned vite/esbuild processes from the previous
+  // stack still hold handles under node_modules, that npm ci hits EPERM/EBUSY and leaves a
+  // half-deleted node_modules that bricks every later build. freePorts() kills those orphans
+  // first so the tree is quiescent before any dependency reinstall touches it. (The other
+  // npm ci path, ensureDepsInstalled → buildProd, already runs after this freePorts.)
+  await freePorts();                  // start each attempt from clean ports (kills orphan Java + vite/esbuild)
   if (updateFromGit()) needBuild = NEEDS_BUILD;   // new code pulled → rebuild (prod only)
-  await freePorts();                  // start each attempt from clean ports (kills orphan Java)
-  // Build before serving prod. On a build failure: if a previous good dist exists,
-  // serve THAT (availability first — a broken push never blacks out the site) but
-  // keep needBuild armed to retry on the next restart/update; if there's no dist at
-  // all yet (fresh host), retry the build after a backoff instead of crash-looping
-  // vite-preview on a missing dist.
+  // Build before serving prod. Decision by decidePostBuildAction (pure, unit-tested):
+  //   • retry-functions — functions didn't compile; launching would crash-loop
+  //     dev-emulator's exit(1). Skip the launch, keep serving the previous good stack,
+  //     back off, retry next cycle. NEVER launch on this — availability of the OLD build
+  //     beats a guaranteed crash-loop of the new one.
+  //   • retry-no-dist   — build failed AND no prior dist (fresh host); retry after backoff
+  //     rather than crash-looping vite-preview on a missing dist.
+  //   • launch-stale    — app build failed but a previous good dist exists; serve THAT
+  //     (availability first — a broken app push never blacks out the site), needBuild armed.
+  //   • launch-fresh    — clean build of everything.
   if (needBuild) {
-    const built = await buildProd();
-    needBuild = !built;
-    if (!distReady()) {
+    const { functionsOk, appsBuilt } = await buildProd();
+    needBuild = !(functionsOk && appsBuilt);      // keep armed until BOTH are clean
+    const action = decidePostBuildAction({ functionsOk, appsBuilt, distReady: distReady() });
+    if (action === 'retry-functions') {
+      log('functions failed to compile — skipping stack launch this cycle (would crash-loop); retrying after backoff.');
+      await new Promise((r) => setTimeout(r, RESTART_BACKOFF_MS));
+      continue;
+    }
+    if (action === 'retry-no-dist') {
       log('no serveable build yet (build failed, no dist) — retrying build after backoff.');
       await new Promise((r) => setTimeout(r, RESTART_BACKOFF_MS));
       continue;
     }
-    if (!built) log('build failed — serving the previous good build; will retry on next restart/update.');
+    if (action === 'launch-stale') log('app build failed — serving the previous good build; will retry on next restart/update.');
   }
   await runOnce();                    // blocks until the stack exits
   if (fs.existsSync(STOPF) || stopping) { await stop(); break; }

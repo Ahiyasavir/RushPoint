@@ -33,6 +33,26 @@ const server = http.createServer((req, res) => {
 });
 
 const PORT = 3000;
+
+// Listen-socket resilience: on a playtest restart :3000 may still be held for a
+// moment by a previous proxy the OS hasn't reaped yet. Without this handler the
+// EADDRINUSE throws unhandled → the process crashes → `concurrently
+// --kill-others-on-fail` tears down the whole stack into a 4s crash-loop.
+// Instead we retry .listen() a few times on a short backoff; only a persistent
+// bind failure (or a non-EADDRINUSE fatal) is surfaced loudly.
+let listenAttempts = 0;
+const MAX_LISTEN_ATTEMPTS = 5;
+const LISTEN_RETRY_MS = 1000;
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE' && listenAttempts < MAX_LISTEN_ATTEMPTS) {
+    listenAttempts += 1;
+    console.error(`[Proxy] :${PORT} busy (a prior proxy not yet reaped) — retry ${listenAttempts}/${MAX_LISTEN_ATTEMPTS} in ${LISTEN_RETRY_MS}ms…`);
+    setTimeout(() => server.listen(PORT), LISTEN_RETRY_MS);
+    return;
+  }
+  console.error(`[Proxy] fatal listen error: ${err.code || ''} ${err.message}`);
+});
+
 server.listen(PORT, () => {
   console.log('\n================================================');
   console.log(` RushPoint playtest proxy  →  http://localhost:${PORT}`);

@@ -10,6 +10,7 @@ import {
   snapshotTimeMs,
   selectFreshestImport,
   didExportSucceed,
+  decidePostBuildAction,
 } from './lib/emulatorBackup.mjs';
 
 let passed = 0;
@@ -86,6 +87,14 @@ ok(didExportSucceed({ beforeMtimeMs: 1000, afterExists: true, afterMtimeMs: 2000
 ok(didExportSucceed({ beforeMtimeMs: 1000, afterExists: true, afterMtimeMs: 1000 }) === false, 'mtime unchanged → failure (stale leftover, no real write)');
 ok(didExportSucceed({ beforeMtimeMs: 2000, afterExists: true, afterMtimeMs: 1000 }) === false, 'mtime went backwards (clock skew) → treated as failure, not success');
 ok(didExportSucceed({ beforeMtimeMs: 1000, afterExists: false, afterMtimeMs: undefined }) === false, 'metadata vanished after attempt → failure');
+
+// ── decidePostBuildAction (functions compile-gate vs app dist availability) ──
+ok(decidePostBuildAction({ functionsOk: true, appsBuilt: true, distReady: true }) === 'launch-fresh', 'all built → launch-fresh');
+ok(decidePostBuildAction({ functionsOk: true, appsBuilt: false, distReady: true }) === 'launch-stale', 'apps failed but prior dist → serve stale');
+ok(decidePostBuildAction({ functionsOk: true, appsBuilt: false, distReady: false }) === 'retry-no-dist', 'apps failed, no dist (fresh host) → retry');
+ok(decidePostBuildAction({ functionsOk: false, appsBuilt: false, distReady: false }) === 'retry-functions', 'functions broken, no dist → retry (never launch)');
+ok(decidePostBuildAction({ functionsOk: false, appsBuilt: false, distReady: true }) === 'retry-functions', 'functions broken even WITH a serveable dist → retry (crash-loop beats availability)');
+ok(decidePostBuildAction({ functionsOk: false, appsBuilt: true, distReady: true }) === 'retry-functions', 'functions broken outranks a clean app build → retry');
 
 console.log(failed === 0
   ? `\n✅ ALL EMULATOR-BACKUP TESTS PASSED (${passed})`
