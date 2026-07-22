@@ -83,9 +83,19 @@ async function main() {
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/announcements/an1`), { title: 'Go' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/flashMissions/fm1`), { title: 'Flash' });
     await setDoc(doc(db, `wallets/${OWNER}`), { eventCredits: 5 });
-    await setDoc(doc(db, `publicGames/${GAME}`), { title: 'Public' });
+    await setDoc(doc(db, `publicGames/${GAME}`), { title: 'Public', likeCount: 3, popularity: 1.5 });
+    await setDoc(doc(db, `publicTasks/${GAME}_t1`), { title: 'Public task', copyCount: 2, likeCount: 1, popularity: 0.9 });
+    // gallery-popularity-ranking: a like record. Clients may neither read nor
+    // write it — like state reaches the UI through the gallery callables only.
+    await setDoc(doc(db, `publicLikes/game_${GAME}_${OWNER}`),
+      { kind: 'game', itemId: GAME, uid: OWNER, createdAt: '2026-01-01T00:00:00.000Z' });
     await setDoc(doc(db, `accessCodes/ABC123`), { ownerUid: OWNER, gameId: GAME, runId: RUN });
     await setDoc(doc(db, `auditLogs/log1`), { action: 'x' });
+    // recoverable-game-deletion: a game already in the trash. The tombstone is
+    // written ONLY by the deleteGame/restoreGame callables (Admin SDK), so a
+    // client must be able neither to forge one nor to clear one.
+    await setDoc(doc(db, `users/${OWNER}/games/TRASHED-GAME`),
+      { title: 'Trashed', deletedAt: '2026-07-01T00:00:00.000Z', deletedBy: OWNER });
   });
 
   const owner = testEnv.authenticatedContext(OWNER).firestore();
@@ -109,6 +119,37 @@ async function main() {
   await check('client CANNOT write an alert', assertFails(setDoc(doc(team, `${runPath}/alerts/x`), { type: 'sos' })));
   await check('client CANNOT write publicGames (gallery is CF-only)', assertFails(setDoc(doc(owner, `publicGames/${GAME}`), { title: 'x' })));
   await check('client CANNOT write auditLogs', assertFails(setDoc(doc(owner, `auditLogs/x`), { action: 'x' })));
+  // [gallery-popularity-ranking] Popularity is the ORDERING field of the public
+  // gallery. If a client could write it (or the like counter it is derived from)
+  // anyone could pin their own game to the top of the library forever.
+  await check('client CANNOT write publicGames.popularity (ranking is CF-only)',
+    assertFails(setDoc(doc(owner, `publicGames/${GAME}`), { popularity: 999 })));
+  await check('client CANNOT write publicGames.likeCount',
+    assertFails(setDoc(doc(owner, `publicGames/${GAME}`), { likeCount: 999 })));
+  await check('client CANNOT write publicTasks.popularity',
+    assertFails(setDoc(doc(owner, `publicTasks/${GAME}_t1`), { popularity: 999 })));
+  await check('client CANNOT write publicTasks.likeCount',
+    assertFails(setDoc(doc(other, `publicTasks/${GAME}_t1`), { likeCount: 999 })));
+  // The like RECORD is what enforces one-like-per-user. A client that could write
+  // it could forge likes; one that could read it could enumerate the like graph.
+  await check('client CANNOT write a publicLikes record',
+    assertFails(setDoc(doc(owner, `publicLikes/game_${GAME}_${OWNER}`), { kind: 'game', itemId: GAME, uid: OWNER })));
+  await check('client CANNOT forge a like as another user',
+    assertFails(setDoc(doc(other, `publicLikes/game_${GAME}_${OWNER}`), { kind: 'game', itemId: GAME, uid: OWNER })));
+  await check('client CANNOT read its OWN publicLikes record',
+    assertFails(getDoc(doc(owner, `publicLikes/game_${GAME}_${OWNER}`))));
+  // [recoverable-game-deletion] Deletion state is server-only. A forged tombstone
+  // would hide a game with no audit record; a cleared one would undelete past the
+  // grace period or un-queue a pending purge. Ordinary game writes still work.
+  await check('owner CANNOT forge a deletedAt tombstone on their own game',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`),
+      { title: 'G', deletedAt: '2026-07-22T00:00:00.000Z' })));
+  await check('owner CANNOT clear a deletedAt tombstone (undelete by client write)',
+    assertFails(setDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed' })));
+  await check('owner CAN still write an ordinary (tombstone-free) game doc',
+    assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'G' })));
+  await check('client CANNOT enumerate the publicLikes collection',
+    assertFails(getDocs(collection(other, 'publicLikes'))));
   // [callable-rate-limiting #19] per-uid rate-limit counters are server-only.
   await check('client CANNOT read a rateLimits counter', assertFails(getDoc(doc(owner, `rateLimits/triggerSOS__${OWNER}`))));
   await check('client CANNOT write a rateLimits counter', assertFails(setDoc(doc(owner, `rateLimits/triggerSOS__${OWNER}`), { count: 0 })));
@@ -167,6 +208,7 @@ async function main() {
 
   console.log('\n── Public/join reads behave as designed ──');
   await check('anyone (even anon) CAN read publicGames', assertSucceeds(getDoc(doc(anon, `publicGames/${GAME}`))));
+  await check('anyone (even anon) CAN read publicTasks', assertSucceeds(getDoc(doc(anon, `publicTasks/${GAME}_t1`))));
   await check('authed user CAN read an access code to join', assertSucceeds(getDoc(doc(team, `accessCodes/ABC123`))));
   await check('anon CANNOT read an access code (auth required)', assertFails(getDoc(doc(anon, `accessCodes/ABC123`))));
   await check('owner CAN write own game template (builder responsiveness)', assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'edited' })));

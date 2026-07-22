@@ -9,6 +9,7 @@ import {
   TASK_TYPE_META,
   TYPE_PICKER_ORDER,
   WIZARD_STEPS,
+  WIZARD_STEP_ORDER,
   STEP_LABELS,
 } from '../apps/creator-web/src/lib/wizardLogic';
 import type { Task } from '@rushpoint/shared';
@@ -27,13 +28,13 @@ ok(fresh.title === '' && fresh.type === 'field', 'blankTask: empty title, field 
 ok(typeof fresh.id === 'string' && fresh.id.length > 0, 'blankTask gets an id');
 ok(blankTask('fixed').id === 'fixed', 'blankTask accepts an explicit id');
 
-// ── canGoNext ────────────────────────────────────────────────────────────────
-ok(canGoNext(1, fresh) === true, 'step 1 always passable (even with 0,0 coords)');
-ok(canGoNext(1, { ...fresh, coordinates: { lat: 31.7, lng: 35.1 } }) === true, 'step 1 passable with real coords too');
-ok(canGoNext(2, fresh) === false, 'step 2 blocked with a blank title');
-ok(canGoNext(2, { ...fresh, title: 'My task' }) === true, 'step 2 passable once titled');
-ok(canGoNext(2, { ...fresh, title: '   ' }) === false, 'step 2 blocked for whitespace-only title');
-ok(canGoNext(3, fresh) === false, 'step 3 is terminal');
+// ── canGoNext (keyed by step, change: builder-first-task-flow) ───────────────
+ok(canGoNext('details', fresh) === false, 'details blocked with a blank title');
+ok(canGoNext('details', { ...fresh, title: 'My task' }) === true, 'details passable once titled');
+ok(canGoNext('details', { ...fresh, title: '   ' }) === false, 'details blocked for whitespace-only title');
+ok(canGoNext('interaction', fresh) === true, 'interaction never gates forward');
+ok(canGoNext('placement', fresh) === true, 'placement never gates forward (even at 0,0)');
+ok(canGoNext('placement', { ...fresh, coordinates: { lat: 31.7, lng: 35.1 } }) === true, 'placement passable with real coords too');
 
 // ── canGoBack ────────────────────────────────────────────────────────────────
 ok(canGoBack(1) === false, 'cannot go back from step 1');
@@ -76,7 +77,8 @@ ok(TYPE_PICKER_ORDER.every((t) => t in TASK_TYPE_META), 'every picker-order type
 
 // ── steps / labels ───────────────────────────────────────────────────────────
 ok(WIZARD_STEPS.length === 3, 'three wizard steps');
-ok(WIZARD_STEPS.every((s) => STEP_LABELS[s]?.trim()), 'every step has a label');
+ok(WIZARD_STEP_ORDER.every((k) => STEP_LABELS[k]?.trim()), 'every step has a label');
+ok(WIZARD_STEP_ORDER[2] === 'placement', 'placement is the last step');
 
 console.log(failed === 0
   ? `\n✅ ALL WIZARD TESTS PASSED (${passed})`

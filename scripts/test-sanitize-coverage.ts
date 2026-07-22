@@ -30,7 +30,14 @@ function check(label: string, cond: boolean, detail = ''): void {
 const SECRET_NAME = /(answer|secret|solution|password|\bpin\b|adminnotes|privatekey)/i;
 // Fields whose NAME matches the pattern but which are deliberately participant-safe
 // (they hold UI labels / booleans, not the secret itself).
-const SAFE_DESPITE_NAME = new Set(['codeInputLabel', 'hasCode', 'numericTolerance']);
+// `wrongAnswerPenalty` (change: wrong-answer-cost) matches /answer/ but holds a
+// strictness LEVEL ('off'|'gentle'|'standard'|'strict'), never an answer key. It
+// must reach the participant: the whole deterrent depends on the player being told
+// what a wrong guess costs BEFORE they guess, so stripping it would break the
+// feature rather than protect anything.
+const SAFE_DESPITE_NAME = new Set([
+  'codeInputLabel', 'hasCode', 'numericTolerance', 'wrongAnswerPenalty',
+]);
 
 // Extract the field names declared inside `export interface <Name> { … }`.
 function interfaceFields(src: string, name: string): string[] {

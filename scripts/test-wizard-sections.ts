@@ -70,7 +70,7 @@ ok(sectionSummary('rules', { ...locatedField, hideLocation: true, requirePresenc
 
 // ── advanced ─────────────────────────────────────────────────────────────────
 ok(sectionApplies('advanced', fresh, 1) === true, 'advanced always applies');
-ok(defaultOpenSections({ ...fresh, expiresAfterMinutes: 30 }).advanced === false, 'advanced never auto expands');
+ok(defaultOpenSections({ ...fresh, expiresAfterMinutes: 30 }).advanced === true, 'advanced auto expands when a setting is configured');
 ok(sectionSummary('advanced', fresh) === 0, 'advanced carries no badge');
 
 // ── stage story (narrative) ──────────────────────────────────────────────────

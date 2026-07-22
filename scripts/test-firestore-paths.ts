@@ -33,6 +33,12 @@ const cases: Array<{ name: string; path: string; kind: 'doc' | 'col' }> = [
   { name: 'staffInvite',     path: FIRESTORE_PATHS.staffInvite(OWNER, GAME, RUN, 'inv1'),   kind: 'doc' },
   { name: 'publicGame',      path: FIRESTORE_PATHS.publicGame(GAME),                        kind: 'doc' },
   { name: 'publicTask',      path: FIRESTORE_PATHS.publicTask('task1'),                     kind: 'doc' },
+  // gallery-popularity-ranking: the like doc id is DERIVED from (kind, item, uid),
+  // which is what makes "one like per user per item" a property of the address
+  // rather than a check anyone could forget.
+  { name: 'publicLikeGame',  path: FIRESTORE_PATHS.publicLike('game', GAME, UID),           kind: 'doc' },
+  { name: 'publicLikeTask',  path: FIRESTORE_PATHS.publicLike('task', 'task1', UID),        kind: 'doc' },
+  { name: 'publicLikesCol',  path: FIRESTORE_PATHS.publicLikesCol(),                        kind: 'col' },
   { name: 'discoveryPoisCol',path: FIRESTORE_PATHS.discoveryPoisCol(OWNER, GAME),           kind: 'col' },
   { name: 'discoveryPoi',    path: FIRESTORE_PATHS.discoveryPoi(OWNER, GAME, 'poi1'),       kind: 'doc' },
   { name: 'wallet',          path: FIRESTORE_PATHS.wallet(UID),                             kind: 'doc' },
@@ -67,7 +73,21 @@ check('teamsCol is the parent collection of team',
 check('transaction is nested under its wallet',
   FIRESTORE_PATHS.transaction(UID, 'tx1').startsWith(FIRESTORE_PATHS.wallet(UID) + '/'));
 
+check('publicLike is a member of publicLikesCol',
+  FIRESTORE_PATHS.publicLike('game', GAME, UID)
+    .startsWith(FIRESTORE_PATHS.publicLikesCol() + '/'));
+
 // ── Distinct ids never collide in the same path ───────────────────────────────
+// The like id is the uniqueness constraint: same (kind,item,uid) ⇒ same address
+// (a repeat like is physically the same document), and any differing component
+// ⇒ a different address.
+check('the same user liking the same item twice resolves to ONE document',
+  FIRESTORE_PATHS.publicLike('game', GAME, UID) === FIRESTORE_PATHS.publicLike('game', GAME, UID));
+check('two users liking the same item are separate documents',
+  FIRESTORE_PATHS.publicLike('game', GAME, 'userA') !== FIRESTORE_PATHS.publicLike('game', GAME, 'userB'));
+check('a game like and a task like of the same id never collide',
+  FIRESTORE_PATHS.publicLike('game', 'x1', UID) !== FIRESTORE_PATHS.publicLike('task', 'x1', UID));
+
 check('two different teams yield different paths',
   FIRESTORE_PATHS.team(OWNER, GAME, RUN, 'a') !== FIRESTORE_PATHS.team(OWNER, GAME, RUN, 'b'));
 check('same id under different owners is isolated',

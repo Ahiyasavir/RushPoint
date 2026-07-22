@@ -23,6 +23,13 @@ import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/
 import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { getStorage, connectStorageEmulator, ref as storageRef, uploadBytes } from 'firebase/storage';
 import adminSdk from 'firebase-admin';
+// The gallery ranking oracle: the suite asserts the STORED popularity field equals
+// this pure function applied to the stored counters, so a bump that forgets to
+// recompute the score (a silently wrong ORDER, with no error anywhere) fails loud.
+// GAME_FILE_FORMAT/CURRENT_GAME_FILE_VERSION come along so the export/import
+// scenario asserts against the SAME envelope the server writes (a version bump
+// can never silently pass an outdated assertion).
+import { popularityScore, GAME_FILE_FORMAT, CURRENT_GAME_FILE_VERSION } from '@rushpoint/shared';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -248,8 +255,16 @@ const ALLOWED_TASK_KEYS = new Set([
   // quiz-location-verification: opt-in presence gate — NOT a secret; the client
   // needs it to know it must attach GPS to submitTaskAnswer.
   'requirePresence',
+  // wrong-answer-cost: the creator-authored strictness level for a wrong answer.
+  // It says what a wrong answer COSTS, never what the answer is, and the whole
+  // point of the change is that the participant is TOLD the rule before answering.
+  'wrongAnswerPenalty',
   // added by the sanitizer itself:
   'hasHint', 'locationHidden', 'hintFreeNow',
+  // wrong-answer-cost: server-computed display object (level, free attempts left,
+  // next point/second cost, cooldown expiry, charged so far). Derived from the
+  // level table + the team's OWN progress; carries no fragment of an answer key.
+  'answerCost',
   // play-task-gating: set on a hidden-location task the server has NOT yet
   // unsealed. It is a boolean state flag, not content — the sealed payload it
   // accompanies carries no title/type/inputs at all.
@@ -1243,6 +1258,229 @@ async function main() {
   check('bonusPenalty unchanged after re-request', afterAgain?.team?.bonusPenalty === 30, String(afterAgain?.team?.bonusPenalty));
 
   }); // scenario: paid hints
+
+  await scenario('wrong answers cost (escalate, cap, cooldown, replay, preset)', async () => {
+
+  // ── Wrong-answer cost (change: wrong-answer-cost) ───────────────────────────
+  // Before this change the `if (!correct)` branch charged NOTHING, so on a 4
+  // choice quiz brute-forcing every option was strictly optimal play. These
+  // assertions pin the whole model: free attempts, escalation, the cumulative
+  // cap, the retry cooldown, duplicate-submission idempotence, the preset gate,
+  // and the promise that a game authored BEFORE this change is untouched.
+  const ownerUid = creatorCred.user.uid;
+  const quizTask = (id, answer) => ({
+    id, title: `Riddle ${id}`, type: 'quiz', answers: [answer],
+    choices: [answer, 'wrong-a', 'wrong-b', 'wrong-c'],
+    coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 4, estimatedMinutes: 5,
+    pointValue: 100, maxConcurrentTeams: 5, triggerMode: 'instant',
+  });
+
+  // ── A. A normal `standard` run: free → charged → replay → cooldown ──────────
+  const { gameId: gWA } = await creator.call('createGame', { title: 'Wrong Answer Cost', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gWA,
+    scoringPreset: 'fixed_points_speed',
+    scoringOptions: { wrongAnswerPenalty: 'standard' },
+    stages: [{ id: 'st-wa', order: 0, title: 'Quiz', isFinal: true, tasks: [quizTask('wa-1', 'olive')] }],
+  });
+  const { runId: rWA, accessCode: cWA } = await creator.call('launchRun', { gameId: gWA });
+  const pWA = makeParty('wrongAnswerPlayer');
+  await signInAnonymously(pWA.auth);
+  await pWA.call('joinRun', { code: cWA, displayName: 'Guesser' });
+  await creator.call('startTeams', { gameId: gWA, runId: rWA });
+  const waCtx = { ownerUid, gameId: gWA, runId: rWA };
+
+  // The rule is announced BEFORE the first answer, and it leaks nothing.
+  const sWA0 = await pWA.call('getMyTeamState', { code: cWA });
+  const tWA0 = sWA0?.activeStageTasks?.find((t) => t.id === 'wa-1');
+  assertTaskPayloadAllowlisted('wrong-answer cost task', tWA0);
+  check('answerCost is announced before the first answer',
+    tWA0?.answerCost?.level === 'standard' && tWA0?.answerCost?.freeAttemptsLeft === 1,
+    JSON.stringify(tWA0?.answerCost));
+  check('answerCost leaks no answer key',
+    tWA0?.answers === undefined && tWA0?.numericAnswer === undefined,
+    JSON.stringify({ answers: tWA0?.answers }));
+
+  // 1st wrong answer: FREE (a typo is not a crime) and no lockout.
+  const w1 = await pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: 'wrong-a' });
+  check('1st wrong answer at standard is free', w1?.correct === false && (w1?.penalty ?? 0) === 0, JSON.stringify(w1));
+  check('1st wrong answer starts no cooldown', (w1?.cooldownUntil ?? 0) === 0, JSON.stringify(w1?.cooldownUntil));
+  const sWA1 = await pWA.call('getMyTeamState', { code: cWA });
+  check('1st wrong answer left bonusPenalty at 0', (sWA1?.team?.bonusPenalty ?? 0) === 0, String(sWA1?.team?.bonusPenalty));
+  check('1st wrong answer was recorded as an attempt', (sWA1?.team?.taskAttempts?.['wa-1'] ?? 0) === 1, JSON.stringify(sWA1?.team?.taskAttempts));
+
+  // 2nd wrong answer: charged 10 points + a 15 second lockout.
+  const w2 = await pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: 'wrong-b' });
+  check('2nd wrong answer charges 10 points', w2?.penalty === 10, JSON.stringify(w2));
+  check('2nd wrong answer starts a 15 second cooldown',
+    w2?.retryAfterSeconds > 0 && w2?.retryAfterSeconds <= 15, String(w2?.retryAfterSeconds));
+  const sWA2 = await pWA.call('getMyTeamState', { code: cWA });
+  check('the charge landed on bonusPenalty (never on buildRankings)',
+    (sWA2?.team?.bonusPenalty ?? 0) === 10, String(sWA2?.team?.bonusPenalty));
+
+  // Duplicate submission (network retry / double tap) must NOT double-charge.
+  const w2dup = await pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: 'wrong-b' });
+  check('a duplicate identical wrong answer is an idempotent replay',
+    w2dup?.correct === false && w2dup?.replay === true && (w2dup?.penalty ?? 0) === 0, JSON.stringify(w2dup));
+  const sWA3 = await pWA.call('getMyTeamState', { code: cWA });
+  check('the replay did not double-charge bonusPenalty', (sWA3?.team?.bonusPenalty ?? 0) === 10, String(sWA3?.team?.bonusPenalty));
+  check('the replay did not inflate the attempt count', (sWA3?.team?.taskAttempts?.['wa-1'] ?? 0) === 2, JSON.stringify(sWA3?.team?.taskAttempts));
+  // Case/whitespace variants of the same answer are the same attempt.
+  const w2case = await pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: '  WRONG-B ' });
+  check('a case/whitespace variant of the same wrong answer is still a replay', w2case?.replay === true, JSON.stringify(w2case));
+
+  // A DIFFERENT answer during the lockout is refused before it is graded — that
+  // ordering is the whole deterrent (grading first would let a team fire every
+  // option during the wait).
+  await expectError('a different wrong answer during the cooldown is refused',
+    pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: 'wrong-c' }),
+    { codeIn: ['functions/failed-precondition'] });
+  await expectError('even the CORRECT answer waits out the cooldown (no free grading oracle)',
+    pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: 'olive' }),
+    { codeIn: ['functions/failed-precondition'] });
+  const sWA4 = await pWA.call('getMyTeamState', { code: cWA });
+  check('a cooldown refusal consumes no attempt and charges nothing',
+    (sWA4?.team?.taskAttempts?.['wa-1'] ?? 0) === 2 && (sWA4?.team?.bonusPenalty ?? 0) === 10,
+    JSON.stringify({ a: sWA4?.team?.taskAttempts, bp: sWA4?.team?.bonusPenalty }));
+  check('the cooldown is surfaced to the participant so the UI can count it down',
+    (sWA4?.activeStageTasks?.find((t) => t.id === 'wa-1')?.answerCost?.cooldownUntil ?? 0) > Date.now(),
+    JSON.stringify(sWA4?.activeStageTasks?.find((t) => t.id === 'wa-1')?.answerCost));
+
+  // ── B. Escalation + the cap, in a TEST-DRIVE run (the cooldown is waived so a
+  //       rehearsal does not spend 90 s waiting — and that waiver is asserted). ─
+  const { gameId: gWB } = await creator.call('createGame', { title: 'Wrong Answer Cap', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gWB,
+    scoringPreset: 'fixed_points_speed',
+    scoringOptions: { wrongAnswerPenalty: 'standard' },
+    stages: [{ id: 'st-wb', order: 0, title: 'Quiz', isFinal: true, tasks: [quizTask('wb-1', 'olive')] }],
+  });
+  const { runId: rWB, accessCode: cWB } = await creator.call('launchRun', { gameId: gWB, testDrive: true });
+  const pWB = makeParty('wrongAnswerCapPlayer');
+  await signInAnonymously(pWB.auth);
+  await pWB.call('joinRun', { code: cWB, displayName: 'Brute' });
+  await creator.call('startTeams', { gameId: gWB, runId: rWB });
+  const wbCtx = { ownerUid, gameId: gWB, runId: rWB };
+
+  const charges = [];
+  for (const guess of ['g1', 'g2', 'g3', 'g4', 'g5', 'g6']) {
+    const r = await pWB.call('submitTaskAnswer', { ...wbCtx, taskId: 'wb-1', answer: guess });
+    charges.push(r?.penalty ?? 0);
+  }
+  check('a test-drive rehearsal is not blocked by the cooldown', charges.length === 6, JSON.stringify(charges));
+  check('escalation is 0, 10, 20, 30 then capped at 0',
+    JSON.stringify(charges) === JSON.stringify([0, 10, 20, 30, 0, 0]), JSON.stringify(charges));
+  const sWB = await pWB.call('getMyTeamState', { code: cWB });
+  check('one task can never take more than the 60 point cap off a team',
+    (sWB?.team?.bonusPenalty ?? 0) === 60, String(sWB?.team?.bonusPenalty));
+  check('the per-task ledger records the capped charge',
+    (sWB?.team?.answerPenalties?.['wb-1']?.charged ?? 0) === 60,
+    JSON.stringify(sWB?.team?.answerPenalties));
+
+  // A correct answer after all that still completes the task.
+  const wbCorrect = await pWB.call('submitTaskAnswer', { ...wbCtx, taskId: 'wb-1', answer: 'olive' });
+  check('the correct answer after six wrong ones still completes the task', wbCorrect?.correct === true, JSON.stringify(wbCorrect));
+
+  // The penalty must be visible identically on the live and the final board, and
+  // must not break the ranking oracle (it rides bonusPenalty, never buildRankings).
+  const wbTeamId = (await pWB.call('getMyTeamState', { code: cWB }))?.team?.id;
+  const wbLive = await creator.call('refreshLeaderboard', { gameId: gWB, runId: rWB, publish: false });
+  assertLeaderboardInvariants('wrong-answer cost live', wbLive?.rankings, [wbTeamId]);
+  const wbLiveScore = wbLive?.rankings?.[0]?.score;
+  const wbFinal = await creator.call('finalizeRun', { gameId: gWB, runId: rWB });
+  const wbFinalRankings = wbFinal?.rankings ?? wbFinal?.leaderboard?.rankings ?? [];
+  assertLeaderboardInvariants('wrong-answer cost final', wbFinalRankings, [wbTeamId]);
+  check('live and final scores agree with the wrong-answer charge applied',
+    wbLiveScore === wbFinalRankings[0]?.score, `live=${wbLiveScore} final=${wbFinalRankings[0]?.score}`);
+  check('the charge can never drive a score below the 0 floor',
+    wbFinalRankings[0]?.score >= 0, String(wbFinalRankings[0]?.score));
+
+  // ── C. time_only has no points, so the cost is time and only time ───────────
+  const { gameId: gWC } = await creator.call('createGame', { title: 'Wrong Answer Time Only', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gWC,
+    scoringPreset: 'time_only',
+    scoringOptions: { wrongAnswerPenalty: 'standard' },
+    stages: [{ id: 'st-wc', order: 0, title: 'Quiz', isFinal: true, tasks: [quizTask('wc-1', 'olive')] }],
+  });
+  const { runId: rWC, accessCode: cWC } = await creator.call('launchRun', { gameId: gWC, testDrive: true });
+  const pWC = makeParty('wrongAnswerTimePlayer');
+  await signInAnonymously(pWC.auth);
+  await pWC.call('joinRun', { code: cWC, displayName: 'Racer' });
+  await creator.call('startTeams', { gameId: gWC, runId: rWC });
+  const wcCtx = { ownerUid, gameId: gWC, runId: rWC };
+  await pWC.call('submitTaskAnswer', { ...wcCtx, taskId: 'wc-1', answer: 'g1' }); // free
+  const wc2 = await pWC.call('submitTaskAnswer', { ...wcCtx, taskId: 'wc-1', answer: 'g2' });
+  check('time_only charges NO points (points do not exist in that preset)', (wc2?.penalty ?? 0) === 0, JSON.stringify(wc2));
+  check('time_only still applies the cooldown, which costs real race time',
+    wc2?.retryAfterSeconds > 0, String(wc2?.retryAfterSeconds));
+  const sWC = await pWC.call('getMyTeamState', { code: cWC });
+  check('time_only leaves bonusPenalty untouched', (sWC?.team?.bonusPenalty ?? 0) === 0, String(sWC?.team?.bonusPenalty));
+
+  // ── D. Negative control: a game authored BEFORE this change is untouched ────
+  const { gameId: gWD } = await creator.call('createGame', { title: 'Legacy No Cost', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gWD,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{ id: 'st-wd', order: 0, title: 'Quiz', isFinal: true, tasks: [quizTask('wd-1', 'olive')] }],
+  });
+  const { runId: rWD, accessCode: cWD } = await creator.call('launchRun', { gameId: gWD });
+  const pWD = makeParty('legacyPlayer');
+  await signInAnonymously(pWD.auth);
+  await pWD.call('joinRun', { code: cWD, displayName: 'Legacy' });
+  await creator.call('startTeams', { gameId: gWD, runId: rWD });
+  const wdCtx = { ownerUid, gameId: gWD, runId: rWD };
+  const sWD0 = await pWD.call('getMyTeamState', { code: cWD });
+  check('a game with no wrongAnswerPenalty ships NO answerCost at all',
+    sWD0?.activeStageTasks?.find((t) => t.id === 'wd-1')?.answerCost === undefined,
+    JSON.stringify(sWD0?.activeStageTasks?.find((t) => t.id === 'wd-1')?.answerCost));
+  for (const guess of ['x1', 'x2', 'x3']) {
+    const r = await pWD.call('submitTaskAnswer', { ...wdCtx, taskId: 'wd-1', answer: guess });
+    check(`legacy game: wrong answer "${guess}" costs nothing and is never refused`,
+      r?.correct === false && r?.penalty === undefined, JSON.stringify(r));
+  }
+  const sWD = await pWD.call('getMyTeamState', { code: cWD });
+  check('legacy game: bonusPenalty untouched after three wrong answers',
+    (sWD?.team?.bonusPenalty ?? 0) === 0, String(sWD?.team?.bonusPenalty));
+
+  // ── E. Composition: the hard attempt limit still wins, and charges nothing ──
+  const { gameId: gWE } = await creator.call('createGame', { title: 'Wrong Answer + Limit', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gWE,
+    scoringPreset: 'fixed_points_speed',
+    scoringOptions: { wrongAnswerPenalty: 'standard' },
+    stages: [{
+      id: 'st-we', order: 0, title: 'Quiz', isFinal: true,
+      tasks: [{
+        ...quizTask('we-1', 'olive'),
+        smart: { enabled: true, verificationType: 'code_verification', attemptLimit: 2 },
+        hint: 'It grows on a tree.', hintPenalty: 25, hintAutoRevealAttempts: 2,
+      }],
+    }],
+  });
+  const { runId: rWE, accessCode: cWE } = await creator.call('launchRun', { gameId: gWE, testDrive: true });
+  const pWE = makeParty('wrongAnswerLimitPlayer');
+  await signInAnonymously(pWE.auth);
+  await pWE.call('joinRun', { code: cWE, displayName: 'Capped' });
+  await creator.call('startTeams', { gameId: gWE, runId: rWE });
+  const weCtx = { ownerUid, gameId: gWE, runId: rWE };
+  await pWE.call('submitTaskAnswer', { ...weCtx, taskId: 'we-1', answer: 'y1' }); // free
+  const we2 = await pWE.call('submitTaskAnswer', { ...weCtx, taskId: 'we-1', answer: 'y2' }); // charged 10
+  check('composition: the 2nd wrong answer is charged before the limit locks', we2?.penalty === 10, JSON.stringify(we2));
+  const bpBeforeLock = (await pWE.call('getMyTeamState', { code: cWE }))?.team?.bonusPenalty ?? 0;
+  await expectError('composition: attemptLimit still locks the task with resource-exhausted',
+    pWE.call('submitTaskAnswer', { ...weCtx, taskId: 'we-1', answer: 'y3' }),
+    { codeIn: ['functions/resource-exhausted'] });
+  const sWE = await pWE.call('getMyTeamState', { code: cWE });
+  check('composition: a locked task charges nothing further',
+    (sWE?.team?.bonusPenalty ?? 0) === bpBeforeLock, `${sWE?.team?.bonusPenalty} vs ${bpBeforeLock}`);
+  // hintAutoRevealAttempts reads the SAME taskAttempts counter, which the cost
+  // curve now maintains — so guessing gets expensive and then the hint goes free.
+  const weHint = await pWE.call('requestTaskHint', { ...weCtx, taskId: 'we-1' });
+  check('composition: the hint is FREE once the wrong-attempt threshold is met',
+    weHint?.free === true && weHint?.penalty === 0, JSON.stringify(weHint));
+
+  }); // scenario: wrong answers cost
 
   await scenario('game intro instructions (bilingual echo + non-https image strip + null when unset)', async () => {
 
@@ -5720,6 +5958,9 @@ async function main() {
       // Even the OWNER is not the platform admin:
       ['owner', creator, 'pruneRunNow', { ownerUid: OWNER, gameId: ag, runId: ar }],
       ['owner', creator, 'listAuditLogs', { limit: 5 }],
+      // public-task-coordinates-backfill: the sweep is platform-admin-only, same
+      // gate/trust level as pruneRunNow — an owner must not be able to trigger it.
+      ['owner', creator, 'backfillPublicTaskCoordinatesNow', {}],
       // Staff of a DIFFERENT run (same owner) must not reach this run:
       ['other-run staff', staffB, 'adjustTeamScore', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, delta: 500 }],
       ['other-run staff', staffB, 'reviewStationSubmission', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t', approved: true }],
@@ -5839,6 +6080,181 @@ async function main() {
       { match: /too far/i });
     const near = await fuzzer.call('completeTask', { ...F, taskId: 'bf-g', lat: GATE.lat + 55 * degPerMeterLat, lng: GATE.lng });
     check('fuzz: check-in ~55m inside a 60m radius is accepted', near?.ok === true, JSON.stringify(near));
+  });
+
+  // ═══ Recoverable game deletion (change: recoverable-game-deletion) ═══════════
+  //
+  // THE INCIDENT this scenario exists for: deleteGame used to end in
+  // db.recursiveDelete, so one click destroyed a game AND every run, team, feed
+  // item and location track beneath it — irreversibly, with no audit record — and
+  // it never cleaned up accessCodes, leaving a join code pointing at nothing.
+  //
+  // The whole contract is asserted here: hide but preserve, refuse while live,
+  // revoke then reinstate the code, restore whole, purge only after the grace
+  // period, and leave a durable trail.
+  await scenario('recoverable game deletion (soft delete · restore · purge · audit)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const adminDb = adminSdk.firestore();
+
+    const stagesFor = (prefix) => ([{
+      id: `${prefix}-s`, order: 0, title: 'S', isFinal: true, requiredTaskCount: 1,
+      tasks: [{
+        id: `${prefix}-a`, title: 'A', type: 'field',
+        coordinates: { lat: 31.7767, lng: 35.2345 },
+        difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3,
+      }],
+    }]);
+
+    // ── 1. A game with a FINISHED run: delete hides it but destroys nothing ────
+    const { gameId: trashGame } = await creator.call('createGame', { title: 'Trash Me', mode: 'individual' });
+    await creator.call('updateGame', { gameId: trashGame, scoringPreset: 'fixed_points_speed', stages: stagesFor('tr') });
+    const { runId: trashRun, accessCode: trashCode } = await creator.call('launchRun', { gameId: trashGame });
+    const trashP = makeParty('trashPlayer');
+    await signInAnonymously(trashP.auth);
+    await trashP.call('joinRun', { code: trashCode, displayName: 'Doomed' });
+    const trashTeamUid = trashP.auth.currentUser.uid;
+    await creator.call('startTeams', { gameId: trashGame, runId: trashRun });
+
+    // Deleting a game with a run IN PROGRESS is refused outright — participants
+    // are physically out there. The old code deleted it out from under them.
+    await expectError('deleteGame is refused while a run is in progress',
+      creator.call('deleteGame', { gameId: trashGame }),
+      { codeIn: ['functions/failed-precondition'], match: /run in progress/i });
+    const stillLive = await adminDb.doc(`users/${OWNER}/games/${trashGame}`).get();
+    check('a refused delete leaves NO tombstone', !stillLive.data()?.deletedAt, JSON.stringify(stillLive.data()?.deletedAt));
+
+    await creator.call('finalizeRun', { gameId: trashGame, runId: trashRun });
+    const del = await creator.call('deleteGame', { gameId: trashGame });
+    check('deleteGame succeeds once the run is finished', del?.ok === true, JSON.stringify(del));
+    check('deleteGame returns the tombstone + purge date', !!del?.deletedAt && !!del?.purgeDueAt, JSON.stringify(del));
+
+    // Hidden everywhere…
+    await expectError('a deleted game reads as not-found',
+      creator.call('getGame', { gameId: trashGame }), { codeIn: ['functions/not-found'] });
+    const afterList = await creator.call('listGames', {});
+    check('a deleted game is gone from listGames',
+      !(afterList?.games ?? []).some((g) => g.id === trashGame), String(afterList?.games?.length));
+    await expectError('a deleted game cannot be launched',
+      creator.call('launchRun', { gameId: trashGame }), { codeIn: ['functions/not-found'] });
+    await expectError('a deleted game cannot be duplicated',
+      creator.call('duplicateGame', { gameId: trashGame }), { codeIn: ['functions/not-found'] });
+    await expectError('a deleted game cannot be published',
+      creator.call('publishGame', { gameId: trashGame, visibility: 'public' }), { codeIn: ['functions/not-found'] });
+    await expectError('a deleted game cannot be edited',
+      creator.call('updateGame', { gameId: trashGame, title: 'zombie' }), { codeIn: ['functions/not-found'] });
+    await expectError('deleting an already-deleted game is not-found (the clock never restarts)',
+      creator.call('deleteGame', { gameId: trashGame }), { codeIn: ['functions/not-found'] });
+
+    // …but NOTHING beneath it was destroyed. This is the assertion the incident
+    // would have failed: the run and the team must still be on disk.
+    const runDoc = await adminDb.doc(`users/${OWNER}/games/${trashGame}/runs/${trashRun}`).get();
+    check('the run document SURVIVES a soft delete', runDoc.exists);
+    const teamDoc = await adminDb.doc(`users/${OWNER}/games/${trashGame}/runs/${trashRun}/teams/${trashTeamUid}`).get();
+    check('the team document SURVIVES a soft delete', teamDoc.exists);
+
+    // The join code is REVOKED, not dangling (the accessCodes/RQH3DG orphan bug).
+    const codeDoc = await adminDb.doc(`accessCodes/${trashCode}`).get();
+    check('the access code still exists (held for restore, not released)', codeDoc.exists);
+    check('the access code is revoked', codeDoc.data()?.status === 'revoked', String(codeDoc.data()?.status));
+    await expectError('a participant entering the code of a deleted game is refused cleanly',
+      trashP.call('getJoinInfo', { code: trashCode }), { codeIn: ['functions/permission-denied'] });
+
+    // ── 2. The trash view lists it with a purge date ──────────────────────────
+    const trash = await creator.call('listDeletedGames', {});
+    const row = (trash?.games ?? []).find((g) => g.id === trashGame);
+    check('listDeletedGames shows the deleted game', !!row, String(trash?.games?.length));
+    check('listDeletedGames reports when it will be purged', !!row?.purgeDueAt, String(row?.purgeDueAt));
+    check('listDeletedGames reports the retention window', trash?.retentionDays === 30, String(trash?.retentionDays));
+
+    // ── 3. Restore brings it back WHOLE ───────────────────────────────────────
+    const stranger = makeParty('restoreStranger');
+    await signInAnonymously(stranger.auth);
+    await expectError('a stranger cannot restore someone else’s game',
+      stranger.call('restoreGame', { gameId: trashGame }), { codeIn: ['functions/not-found', 'functions/permission-denied'] });
+
+    const res = await creator.call('restoreGame', { gameId: trashGame });
+    check('restoreGame succeeds', res?.ok === true, JSON.stringify(res));
+    const back = await creator.call('getGame', { gameId: trashGame });
+    check('the restored game is readable again', back?.game?.id === trashGame);
+    check('the restored game has no tombstone', !back?.game?.deletedAt, String(back?.game?.deletedAt));
+    const backList = await creator.call('listGames', {});
+    check('the restored game is back in listGames', (backList?.games ?? []).some((g) => g.id === trashGame));
+    const backRun = await creator.call('listRunTeams', { gameId: trashGame, runId: trashRun });
+    check('the restored game still has its run AND its team',
+      (backRun?.teams ?? []).some((t) => t.id === trashTeamUid), String(backRun?.teams?.length));
+    const codeBack = await adminDb.doc(`accessCodes/${trashCode}`).get();
+    check('the access code is un-revoked by the restore', codeBack.data()?.status !== 'revoked', String(codeBack.data()?.status));
+    const resAgain = await creator.call('restoreGame', { gameId: trashGame });
+    check('restoring an already-restored game is an idempotent no-op', resAgain?.ok === true, JSON.stringify(resAgain));
+
+    // ── 4. A PUBLIC game leaves the gallery and comes back private ────────────
+    const { gameId: pubGame } = await creator.call('createGame', { title: 'Gallery Trash', mode: 'individual' });
+    await creator.call('updateGame', { gameId: pubGame, scoringPreset: 'fixed_points_speed', stages: stagesFor('gt') });
+    await creator.call('publishGame', { gameId: pubGame, visibility: 'public' });
+    await creator.call('deleteGame', { gameId: pubGame });
+    const gal = await creator.call('searchGallery', { query: 'Gallery Trash' });
+    check('a deleted public game is gone from the gallery',
+      !(gal?.games ?? []).some((g) => g.id === pubGame), String(gal?.games?.length));
+    check('its publicGames index row is gone',
+      !(await adminDb.doc(`publicGames/${pubGame}`).get()).exists);
+    await creator.call('restoreGame', { gameId: pubGame });
+    const restoredPub = await creator.call('getGame', { gameId: pubGame });
+    check('a restored public game comes back PRIVATE (never silently re-listed)',
+      restoredPub?.game?.visibility === 'private', String(restoredPub?.game?.visibility));
+
+    // ── 5. Permanent destruction: explicit, and after the grace period ────────
+    await expectError('purgeGameNow refuses a game that is not in the trash',
+      creator.call('purgeGameNow', { gameId: pubGame }), { codeIn: ['functions/failed-precondition'] });
+
+    const { gameId: purgeGame } = await creator.call('createGame', { title: 'Purge Me', mode: 'individual' });
+    await creator.call('updateGame', { gameId: purgeGame, scoringPreset: 'fixed_points_speed', stages: stagesFor('pg') });
+    await creator.call('deleteGame', { gameId: purgeGame });
+
+    // The scheduled sweep must NOT touch a game inside its grace period…
+    const noSweep = await platformAdmin.call('purgeDeletedGamesNow', { graceDays: 30 });
+    check('the sweep purges nothing inside the grace period',
+      noSweep?.ok === true && !(noSweep?.purged ?? []).some((p) => p.gameId === purgeGame), JSON.stringify(noSweep));
+    check('the game is still recoverable inside the grace period',
+      (await adminDb.doc(`users/${OWNER}/games/${purgeGame}`).get()).exists);
+
+    // …and MUST destroy it once the window has elapsed (graceDays: 0 simulates it).
+    const swept = await platformAdmin.call('purgeDeletedGamesNow', { graceDays: 0 });
+    check('the sweep purges a game past its grace period',
+      (swept?.purged ?? []).some((p) => p.gameId === purgeGame), JSON.stringify(swept));
+    check('the purged game document is gone',
+      !(await adminDb.doc(`users/${OWNER}/games/${purgeGame}`).get()).exists);
+    await expectError('a purged game can no longer be restored',
+      creator.call('restoreGame', { gameId: purgeGame }), { codeIn: ['functions/not-found'] });
+
+    // Owner-triggered "delete permanently" destroys the tree AND the access code.
+    const { gameId: nukeGame } = await creator.call('createGame', { title: 'Nuke Me', mode: 'individual' });
+    await creator.call('updateGame', { gameId: nukeGame, scoringPreset: 'fixed_points_speed', stages: stagesFor('nk') });
+    const { runId: nukeRun, accessCode: nukeCode } = await creator.call('launchRun', { gameId: nukeGame });
+    await creator.call('finalizeRun', { gameId: nukeGame, runId: nukeRun });
+    await creator.call('deleteGame', { gameId: nukeGame });
+    const nuked = await creator.call('purgeGameNow', { gameId: nukeGame });
+    check('purgeGameNow succeeds on a trashed game', nuked?.ok === true, JSON.stringify(nuked));
+    check('purgeGameNow destroys the game document',
+      !(await adminDb.doc(`users/${OWNER}/games/${nukeGame}`).get()).exists);
+    check('purgeGameNow destroys the run subtree (no orphans)',
+      !(await adminDb.doc(`users/${OWNER}/games/${nukeGame}/runs/${nukeRun}`).get()).exists);
+    // THE ORPHAN BUG: the original deleteGame never cleaned accessCodes, so a code
+    // outlived its destroyed game and a participant hit a dangling reference.
+    check('purgeGameNow deletes the access code (no dangling join code)',
+      !(await adminDb.doc(`accessCodes/${nukeCode}`).get()).exists);
+
+    // ── 6. The audit trail answers "who deleted this, and when" ───────────────
+    const logs = await platformAdmin.call('listAuditLogs', { limit: 200 });
+    const entries = logs?.logs ?? [];
+    check('a soft delete is recorded in auditLogs',
+      entries.some((l) => l.actionType === 'game_deleted' && l.gameId === trashGame && l.operatorId === OWNER),
+      String(entries.length));
+    check('a restore is recorded in auditLogs',
+      entries.some((l) => l.actionType === 'game_restored' && l.gameId === trashGame));
+    check('a permanent destruction is recorded in auditLogs',
+      entries.some((l) => l.actionType === 'game_purged' && l.gameId === nukeGame));
+    check('the scheduled sweep is attributed to the system operator',
+      entries.some((l) => l.actionType === 'game_purged' && l.operatorId === 'system:purge-sweep'));
   });
 
   // ═══ Long-tail coverage: exercise the callables the lifecycle skips ══════════
@@ -6204,6 +6620,482 @@ async function main() {
     check('every team was routed to the locationless task', allAssigned,
       JSON.stringify(states.map((s) => s?.team?.stages?.[0]?.tasks?.[0]?.status)));
   });
+
+  // ═══ Gallery popularity + likes (change: gallery-popularity-ranking) ════════
+  // Covers the NEW callable `setPublicLike` (coverage guard) plus the ranking
+  // contract the gallery now depends on. The bug classes hunted here:
+  //   • a toggle that double-counts on retry / concurrent double-fire,
+  //   • a counter that can be driven negative,
+  //   • one user's like leaking into another user's "liked" state,
+  //   • the DENORMALIZATION going stale — a counter bumped without recomputing
+  //     the stored score, which produces a silently wrong ORDER (the nastiest
+  //     failure here, because nothing errors),
+  //   • re-publishing a game silently wiping its accumulated signals,
+  //   • the new gallery fields leaking into a run-time Task payload.
+  await scenario('gallery popularity + likes', async () => {
+    const OWNER = creatorCred.user.uid;
+    const stamp = Date.now();
+    const mkStages = (prefix) => ([{
+      id: `${prefix}-s`, order: 0, title: 'Only stage', isFinal: true,
+      tasks: [{ id: `${prefix}-t`, title: `${prefix} task`, type: 'self_report', locationless: true,
+        coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 }],
+    }]);
+
+    // Two published games. Titles are unique per run so the text-relevance
+    // assertions can't collide with seeded/demo gallery content.
+    const QUIET = `Zzquiet ${stamp}`;
+    const LOUD = `Zzloud ${stamp}`;
+    const { gameId: gQuiet } = await creator.call('createGame', { title: QUIET, mode: 'individual' });
+    await creator.call('updateGame', { gameId: gQuiet, scoringPreset: 'fixed_points_speed', stages: mkStages('pq') });
+    await creator.call('publishGame', { gameId: gQuiet, visibility: 'public' });
+    const { gameId: gLoud } = await creator.call('createGame', { title: LOUD, mode: 'individual' });
+    await creator.call('updateGame', { gameId: gLoud, scoringPreset: 'fixed_points_speed', stages: mkStages('pl') });
+    await creator.call('publishGame', { gameId: gLoud, visibility: 'public' });
+
+    // ── Auth + existence gates ────────────────────────────────────────────────
+    const anon = makeParty(`likeAnon${stamp}`); // deliberately NOT signed in
+    await expectError('setPublicLike rejects an unauthenticated caller',
+      anon.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: true }),
+      { codeIn: ['functions/unauthenticated'] });
+    await expectError('setPublicLike rejects an unpublished/unknown item',
+      creator.call('setPublicLike', { kind: 'game', itemId: `no-such-game-${stamp}`, liked: true }),
+      { codeIn: ['functions/not-found'] });
+
+    // ── Idempotence: like → like again → unlike → unlike again ────────────────
+    const l1 = await creator.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: true });
+    check('first like counts once', l1?.liked === true && l1?.likeCount === 1, JSON.stringify(l1));
+    const l2 = await creator.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: true });
+    check('repeating a like does NOT double-count', l2?.liked === true && l2?.likeCount === 1, JSON.stringify(l2));
+    const u1 = await creator.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: false });
+    check('unlike returns the count to zero', u1?.liked === false && u1?.likeCount === 0, JSON.stringify(u1));
+    const u2 = await creator.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: false });
+    check('repeating an unlike never goes negative', u2?.liked === false && u2?.likeCount === 0, JSON.stringify(u2));
+
+    // ── Concurrent double-fire from ONE identity settles at exactly one ───────
+    const burst = await Promise.allSettled(Array.from({ length: 5 }, () =>
+      creator.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: true })));
+    const burstOk = burst.filter((r) => r.status === 'fulfilled').length;
+    const afterBurst = await creator.getDocAt(`publicGames/${gLoud}`);
+    check('5 concurrent identical likes leave likeCount at exactly 1',
+      afterBurst.data?.likeCount === 1, `likeCount=${afterBurst.data?.likeCount} fulfilled=${burstOk}/5`);
+
+    // ── A second identity counts separately ──────────────────────────────────
+    const liker2 = makeParty(`liker2_${stamp}`);
+    await signInAnonymously(liker2.auth);
+    const l3 = await liker2.call('setPublicLike', { kind: 'game', itemId: gLoud, liked: true });
+    check('a second user adds a second like', l3?.likeCount === 2, JSON.stringify(l3));
+
+    // A like on a TASK is a different document even for the same id shape.
+    const loudTaskId = `${gLoud}_pl-t`;
+    const tl = await creator.call('setPublicLike', { kind: 'task', itemId: loudTaskId, liked: true });
+    check('a public task can be liked independently', tl?.liked === true && tl?.likeCount === 1, JSON.stringify(tl));
+
+    // ── Usage signals move the stored score ──────────────────────────────────
+    await creator.call('incrementTaskCopyCount', { publicTaskId: loudTaskId });
+    // launchRun must bump the PUBLIC game's play signal, not only the private doc.
+    const pubPlaysBefore = (await creator.getDocAt(`publicGames/${gLoud}`)).data?.playCount ?? 0;
+    await creator.call('launchRun', { gameId: gLoud });
+    let pubPlaysAfter = pubPlaysBefore;
+    for (let i = 0; i < 10 && pubPlaysAfter <= pubPlaysBefore; i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      pubPlaysAfter = (await creator.getDocAt(`publicGames/${gLoud}`)).data?.playCount ?? 0;
+    }
+    check('launchRun bumps the public game playCount',
+      pubPlaysAfter === pubPlaysBefore + 1, `${pubPlaysBefore} → ${pubPlaysAfter}`);
+
+    // ── Denormalization consistency oracle ───────────────────────────────────
+    // The stored ordering field MUST equal the pure function applied to the
+    // stored counters. A bump that forgets to recompute (or a lost update from a
+    // read-modify-write around FieldValue.increment) fails here and nowhere else.
+    for (const [label, path, useField] of [
+      ['public game', `publicGames/${gLoud}`, 'playCount'],
+      ['public task', `publicTasks/${loudTaskId}`, 'copyCount'],
+    ]) {
+      const d = (await creator.getDocAt(path)).data ?? {};
+      const expected = popularityScore({
+        uses: d[useField], likes: d.likeCount, createdAtMs: Date.parse(d.createdAt),
+      });
+      check(`${label}: stored popularity equals the pure function of its stored counters`,
+        typeof d.popularity === 'number' && Math.abs(d.popularity - expected) < 1e-9,
+        `stored=${d.popularity} expected=${expected} uses=${d[useField]} likes=${d.likeCount}`);
+    }
+
+    // ── Ordering actually changed ────────────────────────────────────────────
+    const gal = await creator.call('searchGallery', { query: '', limit: 50 });
+    check('searchGallery still returns a games array', Array.isArray(gal?.games));
+    const iLoud = (gal?.games ?? []).findIndex((g) => g.id === gLoud);
+    const iQuiet = (gal?.games ?? []).findIndex((g) => g.id === gQuiet);
+    check('the engaged game outranks the untouched one', iLoud >= 0 && iQuiet >= 0 && iLoud < iQuiet,
+      `loud@${iLoud} quiet@${iQuiet}`);
+    const scores = (gal?.games ?? []).map((g) => g.popularity ?? 0);
+    check('gallery results are in non-increasing popularity order',
+      scores.every((s, i) => i === 0 || scores[i - 1] >= s), JSON.stringify(scores.slice(0, 8)));
+
+    // Relevance beats popularity: searching the QUIET game's unique title must
+    // return it even though the LOUD game is far more popular.
+    const relevant = await creator.call('searchGallery', { query: QUIET, limit: 5 });
+    check('a search returns the title match first, not the popular one',
+      relevant?.games?.[0]?.id === gQuiet, JSON.stringify((relevant?.games ?? []).map((g) => g.id)));
+
+    // ── Own like state comes back with the results, per caller ───────────────
+    check('searchGallery reports the caller\'s own likes', Array.isArray(gal?.likedIds) && gal.likedIds.includes(gLoud),
+      JSON.stringify(gal?.likedIds));
+    const gal2 = await liker2.call('searchGallery', { query: '', limit: 50 });
+    check('the second liker also sees their own like', (gal2?.likedIds ?? []).includes(gLoud));
+    const bystander = makeParty(`bystander${stamp}`);
+    await signInAnonymously(bystander.auth);
+    const gal3 = await bystander.call('searchGallery', { query: '', limit: 50 });
+    const seen = (gal3?.games ?? []).find((g) => g.id === gLoud);
+    check('a bystander sees the count but is not marked as having liked',
+      seen?.likeCount === 2 && !(gal3?.likedIds ?? []).includes(gLoud),
+      `likeCount=${seen?.likeCount} likedIds=${JSON.stringify(gal3?.likedIds)}`);
+
+    const lib = await creator.call('searchTaskLibrary', { query: '', limit: 100 });
+    check('searchTaskLibrary returns likedIds too', Array.isArray(lib?.likedIds) && lib.likedIds.includes(loudTaskId),
+      JSON.stringify(lib?.likedIds));
+    const tScores = (lib?.tasks ?? []).map((t) => t.popularity ?? 0);
+    check('task library results are in non-increasing popularity order',
+      tScores.every((s, i) => i === 0 || tScores[i - 1] >= s), JSON.stringify(tScores.slice(0, 8)));
+
+    // ── Re-publishing must not wipe accumulated signals ──────────────────────
+    const beforeRepub = (await creator.getDocAt(`publicTasks/${loudTaskId}`)).data ?? {};
+    await creator.call('publishGame', { gameId: gLoud, visibility: 'public' });
+    const gAfter = (await creator.getDocAt(`publicGames/${gLoud}`)).data ?? {};
+    const tAfter = (await creator.getDocAt(`publicTasks/${loudTaskId}`)).data ?? {};
+    check('re-publishing preserves the game like count', gAfter.likeCount === 2, String(gAfter.likeCount));
+    check('re-publishing preserves the task copy count',
+      tAfter.copyCount === beforeRepub.copyCount, `${beforeRepub.copyCount} → ${tAfter.copyCount}`);
+    check('re-publishing preserves the task like count', tAfter.likeCount === 1, String(tAfter.likeCount));
+
+    // ── The gallery fields are NOT run-time Task fields ──────────────────────
+    // popularity/likeCount live on the publicTasks GALLERY document, never on a
+    // Task in a run — so the participant payload allowlist must not need them.
+    check('the participant task allowlist is untouched by this change',
+      !ALLOWED_TASK_KEYS.has('popularity') && !ALLOWED_TASK_KEYS.has('likeCount')
+      && !ALLOWED_SMART_KEYS.has('popularity') && !ALLOWED_SMART_KEYS.has('likeCount'));
+  });
+
+  // (change: task-library-map-view) Authored blind — no emulator was available in
+  // the change that added it. Executed green on 2026-07-23 (7 checks) together
+  // with the legacy-coordinate backfill sweep below.
+  await scenario('public task library publishes an AREA, and nothing for hidden tasks', async () => {
+    // THE EXPOSURE this scenario defends: publicTasks is `allow read: if true`,
+    // and publishGame used to copy the creator's EXACT `task.coordinates` into it
+    // — for every task, including hideLocation tasks, whose coordinates are
+    // server-secret everywhere else in the platform. Anyone could scout the
+    // answers to a hidden-location puzzle with an unauthenticated read.
+    const EXACT = { lat: 31.77661, lng: 35.23499 };
+    const { gameId: gLoc } = await creator.call('createGame', { title: 'Area Only Hunt', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: gLoc,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'al0', order: 0, title: 'Stage', isFinal: true,
+          tasks: [
+            { id: 'al-open', title: 'Open task', type: 'field', triggerMode: 'radius',
+              coordinates: { ...EXACT }, difficulty: 2, estimatedMinutes: 5,
+              pointValue: 50, maxConcurrentTeams: 9 },
+            { id: 'al-hidden', title: 'Hidden task', type: 'field', triggerMode: 'radius',
+              coordinates: { ...EXACT }, difficulty: 3, estimatedMinutes: 5,
+              pointValue: 60, maxConcurrentTeams: 9,
+              hideLocation: true, locationClue: 'Where the lions guard the gate' },
+          ] },
+      ],
+    });
+    await creator.call('publishGame', { gameId: gLoc, visibility: 'public' });
+
+    const openDoc = (await creator.getDocAt(`publicTasks/${gLoc}_al-open`)).data ?? {};
+    const hiddenDoc = (await creator.getDocAt(`publicTasks/${gLoc}_al-hidden`)).data ?? {};
+
+    check('an ordinary public task publishes no exact coordinates',
+      openDoc.coordinates === undefined, JSON.stringify(openDoc.coordinates));
+    check('an ordinary public task publishes a coarsened area, not the authored point',
+      !!openDoc.approxLocation
+      && openDoc.approxLocation.lat !== EXACT.lat
+      && openDoc.approxLocation.lng !== EXACT.lng,
+      JSON.stringify(openDoc.approxLocation));
+    check('the published area is within ~1km of the authored point',
+      !!openDoc.approxLocation
+      && Math.abs(openDoc.approxLocation.lat - EXACT.lat) <= 0.005 + 1e-9
+      && Math.abs(openDoc.approxLocation.lng - EXACT.lng) <= 0.005 + 1e-9,
+      JSON.stringify(openDoc.approxLocation));
+
+    // The headline assertion: a hideLocation task leaks NOTHING, not even fuzzed.
+    check('a hideLocation task publishes NO location at all',
+      hiddenDoc.coordinates === undefined && hiddenDoc.approxLocation === undefined,
+      JSON.stringify({ coordinates: hiddenDoc.coordinates, approxLocation: hiddenDoc.approxLocation }));
+    check('a hideLocation task is still listed in the library',
+      hiddenDoc.title === 'Hidden task', JSON.stringify(hiddenDoc.title));
+
+    // Re-publishing is deterministic — repeated observation must not narrow the
+    // area (this is why the coarsening is a grid snap and not random jitter).
+    await creator.call('publishGame', { gameId: gLoc, visibility: 'public' });
+    const openAgain = (await creator.getDocAt(`publicTasks/${gLoc}_al-open`)).data ?? {};
+    check('re-publishing writes the identical area (not averageable)',
+      openAgain.approxLocation?.lat === openDoc.approxLocation?.lat
+      && openAgain.approxLocation?.lng === openDoc.approxLocation?.lng,
+      `${JSON.stringify(openDoc.approxLocation)} → ${JSON.stringify(openAgain.approxLocation)}`);
+
+    // …and the callable never returns an exact point, for ANY task, including
+    // documents published before this contract existed.
+    const libSafe = await creator.call('searchTaskLibrary', { query: '', limit: 100 });
+    check('searchTaskLibrary never returns coordinates on any result',
+      (libSafe?.tasks ?? []).every((t) => t.coordinates === undefined),
+      JSON.stringify((libSafe?.tasks ?? []).filter((t) => t.coordinates !== undefined).map((t) => t.id)));
+  });
+
+  await scenario('publicTasks legacy-coordinate backfill (privacy sweep, admin-only)', async () => {
+    // THE EXPOSURE this scenario defends: before `task-library-map-view`,
+    // `publishGame` copied the creator's EXACT authored `task.coordinates` into
+    // the world-readable `publicTasks/{id}` document — hideLocation tasks
+    // included. That fix only covers documents written AFTER it shipped;
+    // anything published earlier still sits in Firestore with its exact point.
+    // `backfillPublicTaskCoordinatesNow` is the one-time sweep that closes the
+    // gap. There's no way to manufacture a real "pre-fix" publish anymore (the
+    // current code never writes `coordinates`), so this scenario simulates one
+    // directly with the Admin SDK — writing the exact legacy field onto a
+    // document the REAL `publishGame` just created — and proves the sweep's
+    // pure decision rule (`repairPublicTask`, from @rushpoint/shared) is what
+    // actually runs server-side.
+    const EXACT_OPEN = { lat: 31.81234, lng: 35.22456 };
+    const EXACT_HIDDEN = { lat: 31.83456, lng: 35.24567 };
+    const { gameId: bfGame } = await creator.call('createGame', { title: 'Backfill Sweep Hunt', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: bfGame,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'bf0', order: 0, title: 'Stage', isFinal: true,
+          tasks: [
+            { id: 'bf-open', title: 'Open task', type: 'field', triggerMode: 'radius',
+              coordinates: { ...EXACT_OPEN }, difficulty: 2, estimatedMinutes: 5,
+              pointValue: 50, maxConcurrentTeams: 9 },
+            { id: 'bf-hidden', title: 'Hidden task', type: 'field', triggerMode: 'radius',
+              coordinates: { ...EXACT_HIDDEN }, difficulty: 3, estimatedMinutes: 5,
+              pointValue: 60, maxConcurrentTeams: 9,
+              hideLocation: true, locationClue: 'Where the water meets the wall' },
+          ] },
+      ],
+    });
+    await creator.call('publishGame', { gameId: bfGame, visibility: 'public' });
+
+    const openId = `${bfGame}_bf-open`;
+    const hiddenId = `${bfGame}_bf-hidden`;
+
+    // Simulate the pre-fix write: inject the deprecated exact `coordinates` field
+    // straight onto the documents the real publishGame just produced correctly.
+    // Admin SDK bypasses firestore.rules — same tool `pruneRunNow`'s own e2e
+    // setup relies on for direct writes the client could never make.
+    const rawDb = adminSdk.firestore();
+    await rawDb.doc(`publicTasks/${openId}`).set({ coordinates: { ...EXACT_OPEN } }, { merge: true });
+    await rawDb.doc(`publicTasks/${hiddenId}`).set({ coordinates: { ...EXACT_HIDDEN } }, { merge: true });
+
+    const openBefore = (await creator.getDocAt(`publicTasks/${openId}`)).data;
+    const hiddenBefore = (await creator.getDocAt(`publicTasks/${hiddenId}`)).data;
+    check('setup: the simulated legacy doc carries the exact coordinate',
+      openBefore?.coordinates?.lat === EXACT_OPEN.lat, JSON.stringify(openBefore?.coordinates));
+    check('setup: the simulated legacy HIDDEN doc carries the exact coordinate too',
+      hiddenBefore?.coordinates?.lat === EXACT_HIDDEN.lat, JSON.stringify(hiddenBefore?.coordinates));
+
+    // ── dryRun writes nothing ────────────────────────────────────────────────
+    const dry = await platformAdmin.call('backfillPublicTaskCoordinatesNow', { dryRun: true });
+    check('dryRun reports work to do without doing it',
+      dry?.ok === true && dry?.repaired >= 2, JSON.stringify(dry));
+    const openAfterDry = (await creator.getDocAt(`publicTasks/${openId}`)).data;
+    check('dryRun: the legacy coordinates field is untouched',
+      openAfterDry?.coordinates?.lat === EXACT_OPEN.lat, JSON.stringify(openAfterDry?.coordinates));
+
+    // ── The real sweep ───────────────────────────────────────────────────────
+    const swept = await platformAdmin.call('backfillPublicTaskCoordinatesNow', {});
+    check('the sweep succeeds and reports at least our two seeded docs repaired',
+      swept?.ok === true && swept?.repaired >= 2, JSON.stringify(swept));
+    check('the sweep reports at least one doc cleared to NO location (the hidden task)',
+      swept?.cleared >= 1, JSON.stringify(swept));
+
+    const openAfter = (await creator.getDocAt(`publicTasks/${openId}`)).data;
+    const hiddenAfter = (await creator.getDocAt(`publicTasks/${hiddenId}`)).data;
+
+    // 1. The legacy exact `coordinates` field is gone on BOTH documents.
+    check('sweep: the ordinary task\'s legacy coordinates field is deleted',
+      openAfter?.coordinates === undefined, JSON.stringify(openAfter?.coordinates));
+    check('sweep: the hidden task\'s legacy coordinates field is deleted',
+      hiddenAfter?.coordinates === undefined, JSON.stringify(hiddenAfter?.coordinates));
+
+    // 2. The ordinary task ends up with a coarsened area, NOT the authored point.
+    check('sweep: the ordinary task gets an approxLocation',
+      !!openAfter?.approxLocation, JSON.stringify(openAfter?.approxLocation));
+    check('sweep: the published area is not the exact authored point',
+      !!openAfter?.approxLocation
+      && (openAfter.approxLocation.lat !== EXACT_OPEN.lat || openAfter.approxLocation.lng !== EXACT_OPEN.lng),
+      JSON.stringify(openAfter?.approxLocation));
+    check('sweep: the published area is within ~1km (0.01°) of the authored point',
+      !!openAfter?.approxLocation
+      && Math.abs(openAfter.approxLocation.lat - EXACT_OPEN.lat) <= 0.01 + 1e-9
+      && Math.abs(openAfter.approxLocation.lng - EXACT_OPEN.lng) <= 0.01 + 1e-9,
+      JSON.stringify(openAfter?.approxLocation));
+
+    // 3. THE HEADLINE ASSERTION — a hideLocation task ends up with NO location
+    //    at all, not even a coarsened one. This is the entire point of the change.
+    check('sweep: a hideLocation task ends up with NO approxLocation and NO coordinates',
+      hiddenAfter?.approxLocation === undefined && hiddenAfter?.coordinates === undefined,
+      JSON.stringify({ coordinates: hiddenAfter?.coordinates, approxLocation: hiddenAfter?.approxLocation }));
+    check('sweep: the hideLocation task is still listed (title survives)',
+      hiddenAfter?.title === 'Hidden task', JSON.stringify(hiddenAfter?.title));
+
+    // ── Idempotence: nothing left to repair on a second pass ────────────────
+    const swept2 = await platformAdmin.call('backfillPublicTaskCoordinatesNow', {});
+    check('the sweep is idempotent (repaired: 0 on a clean second pass)',
+      swept2?.ok === true && swept2?.repaired === 0, JSON.stringify(swept2));
+  });
+
+  await scenario('game file export/import (owner-only, round trip, launchable)', async () => {
+    // THE INCIDENT this scenario defends: a creator's real game was destroyed
+    // because it existed in exactly one place and the creator had no copy of
+    // their own. The contract is (a) the owner can always get a FILE, (b) that
+    // file restores a LAUNCHABLE game, and (c) nobody else can ever read it —
+    // because the file necessarily contains every answer key.
+    const { gameId: gF } = await creator.call('createGame', { title: 'Portable Hunt 🗺️', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: gF,
+      scoringPreset: 'smart_weighted',
+      tags: ['portability'],
+      stages: [
+        { id: 'pf0', order: 0, title: 'שלב ראשון', isFinal: false, requiredTaskCount: 1,
+          tasks: [
+            { id: 'pf-quiz', title: 'חידון 🎯', type: 'quiz', triggerMode: 'instant',
+              coordinates: { lat: 31.7767, lng: 35.2345 }, difficulty: 3, estimatedMinutes: 2,
+              pointValue: 40, maxConcurrentTeams: 9,
+              question: 'מה הצבע?', answers: ['כחול', 'blue'],
+              hint: 'זה צבע השמיים', hintPenalty: 5 },
+            { id: 'pf-num', title: 'Count the steps', type: 'numeric', triggerMode: 'instant',
+              coordinates: { lat: 31.7770, lng: 35.2350 }, difficulty: 2, estimatedMinutes: 2,
+              pointValue: 30, maxConcurrentTeams: 9,
+              question: 'How many?', numericAnswer: 42, numericTolerance: 1 },
+          ] },
+        { id: 'pf1', order: 1, title: 'Final stage', isFinal: true,
+          tasks: [
+            { id: 'pf-station', title: 'Secret station', type: 'smart_station', triggerMode: 'instant',
+              coordinates: { lat: 31.7780, lng: 35.2360 }, difficulty: 2, estimatedMinutes: 2,
+              pointValue: 50, maxConcurrentTeams: 9,
+              smart: { secretCode: 'OPEN-SESAME', autoApprove: true } },
+          ] },
+      ],
+    });
+
+    // ── (2) Owner export: the envelope, the SECRETS, and the exclusions ───────
+    const { file } = await creator.call('exportGameFile', { gameId: gF });
+    check('export: format envelope', file?.format === GAME_FILE_FORMAT, String(file?.format));
+    check('export: schema version is the current one',
+      file?.schemaVersion === CURRENT_GAME_FILE_VERSION, String(file?.schemaVersion));
+    const fTasks = (file?.game?.stages ?? []).flatMap((s) => s.tasks ?? []);
+    const fQuiz = fTasks.find((t) => t.id === 'pf-quiz');
+    const fNum = fTasks.find((t) => t.id === 'pf-num');
+    const fStation = fTasks.find((t) => t.id === 'pf-station');
+    // Secrets MUST be present: an export without the answer keys restores an
+    // unplayable game, which would defeat the whole point of the file.
+    check('export: quiz answer keys are present', Array.isArray(fQuiz?.answers) && fQuiz.answers.includes('כחול'),
+      JSON.stringify(fQuiz?.answers));
+    check('export: numericAnswer is present', fNum?.numericAnswer === 42, String(fNum?.numericAnswer));
+    check('export: paid hint text is present', fQuiz?.hint === 'זה צבע השמיים', String(fQuiz?.hint));
+    check('export: smart.secretCode is present', fStation?.smart?.secretCode === 'OPEN-SESAME',
+      String(fStation?.smart?.secretCode));
+    check('export: Hebrew + emoji survive the wire', file?.game?.title === 'Portable Hunt 🗺️'
+      && file?.game?.stages?.[0]?.title === 'שלב ראשון', String(file?.game?.title));
+    // Server-owned identity and run history are NOT template — carrying them
+    // would make a file an account-transfer / play-count-forgery primitive.
+    for (const k of ['id', 'ownerUid', 'visibility', 'playCount', 'createdAt', 'updatedAt', 'deletedAt']) {
+      check(`export: server-owned field '${k}' is absent`, !(k in (file?.game ?? {})));
+    }
+    check('export: smart.stationCoords (runtime injection) is absent',
+      !('stationCoords' in (fStation?.smart ?? {})));
+
+    // ── (3) SECURITY: a second authenticated creator is DENIED ────────────────
+    // The file carries every answer key, so this denial is the whole security
+    // requirement. It must hold for any signed-in identity that is not the owner.
+    const otherCreator = makeParty('creatorExportStranger');
+    await signInAnonymously(otherCreator.auth);
+    const denied = await expectError('export: a non-owner is denied',
+      otherCreator.call('exportGameFile', { gameId: gF }),
+      { codeIn: ['functions/permission-denied', 'functions/not-found'] });
+    check('export: the denial body leaks no game content',
+      !/OPEN-SESAME|כחול|Portable Hunt/.test(JSON.stringify(denied?.message ?? '') + JSON.stringify(denied?.details ?? '')));
+
+    // ── (4) A game that does not exist ────────────────────────────────────────
+    await expectError('export: nonexistent game is not-found',
+      creator.call('exportGameFile', { gameId: 'no-such-game-at-all' }),
+      { codeIn: ['functions/not-found'] });
+
+    // ── (5) Import ALWAYS creates a NEW game (an overwrite is data loss) ──────
+    const { gameId: gImp } = await creator.call('importGameFile', { file });
+    check('import: created a NEW game (never overwrites the source)', !!gImp && gImp !== gF, `${gF} → ${gImp}`);
+    const { game: imported } = await creator.call('getGame', { gameId: gImp });
+    check('import: same stage count', imported?.stages?.length === 2, String(imported?.stages?.length));
+    const iTasks = (imported?.stages ?? []).flatMap((s) => s.tasks ?? []);
+    check('import: same task count', iTasks.length === 3, String(iTasks.length));
+    check('import: answer keys survived intact',
+      iTasks.find((t) => t.id === 'pf-quiz')?.answers?.includes('כחול')
+      && iTasks.find((t) => t.id === 'pf-num')?.numericAnswer === 42
+      && iTasks.find((t) => t.id === 'pf-station')?.smart?.secretCode === 'OPEN-SESAME');
+    check('import: requiredTaskCount survived', imported?.stages?.[0]?.requiredTaskCount === 1,
+      String(imported?.stages?.[0]?.requiredTaskCount));
+    check('import: the new game is private', imported?.visibility === 'private', String(imported?.visibility));
+    check('import: playCount is reset to 0 (run history is not template)',
+      imported?.playCount === 0, String(imported?.playCount));
+    check('import: ownerUid is the CALLER', imported?.ownerUid === creatorCred.user.uid, String(imported?.ownerUid));
+
+    // ── (6) A restored game is LAUNCHABLE — the real recovery test ────────────
+    const launched = await creator.call('launchRun', { gameId: gImp });
+    check('import: the restored game launches', !!launched?.runId && !!launched?.accessCode,
+      JSON.stringify(launched ?? {}).slice(0, 80));
+
+    // ── (7) Round-trip parity end-to-end (not only in the pure lane) ──────────
+    const { file: file2 } = await creator.call('exportGameFile', { gameId: gImp });
+    const strip = (f) => JSON.stringify({ ...f, exportedAt: undefined });
+    check('import(export(g)) re-exports an identical document', strip(file) === strip(file2),
+      strip(file) === strip(file2) ? 'identical' : 'DIFFERS');
+
+    // ── (8) Malformed imports: refused, and NO half-game left behind ──────────
+    const countGames = async () => ((await creator.call('listGames', {}))?.games ?? []).length;
+    const beforeBad = await countGames();
+    await expectError('import: unknown format is refused',
+      creator.call('importGameFile', { file: { ...file, format: 'not.rushpoint' } }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('import: a NEWER schema version is refused loudly',
+      creator.call('importGameFile', { file: { ...file, schemaVersion: CURRENT_GAME_FILE_VERSION + 1 } }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('import: a cyclic unlock graph is refused',
+      creator.call('importGameFile', { file: { ...file, game: { ...file.game, stages: [
+        { id: 'cy0', order: 0, title: 'Cycle', isFinal: true, tasks: [
+          { id: 'c-a', title: 'A', type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, unlockAfterTaskIds: ['c-b'] },
+          { id: 'c-b', title: 'B', type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, unlockAfterTaskIds: ['c-a'] },
+        ] },
+      ] } } }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('import: a quiz task with no answer key is refused',
+      creator.call('importGameFile', { file: { ...file, game: { ...file.game, stages: [
+        { id: 'nq0', order: 0, title: 'No key', isFinal: true, tasks: [
+          { id: 'nq-a', title: 'Unanswerable', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, question: 'What?', answers: [] },
+        ] },
+      ] } } }),
+      { codeIn: ['functions/invalid-argument'] });
+    check('import: no half-game was written by any refusal', (await countGames()) === beforeBad,
+      `${beforeBad} → ${await countGames()}`);
+
+    // ── (9) A file naming a FOREIGN owner/id is not an account-transfer ───────
+    const { gameId: gForeign } = await creator.call('importGameFile', {
+      file: { ...file, game: { ...file.game, ownerUid: 'somebody-else', id: 'forged-id', playCount: 999,
+        visibility: 'public' } },
+    });
+    check('import: a forged id is ignored (fresh server id)', gForeign !== 'forged-id', gForeign);
+    const { game: forged } = await creator.call('getGame', { gameId: gForeign });
+    check('import: a forged ownerUid is ignored (caller owns it)',
+      forged?.ownerUid === creatorCred.user.uid, String(forged?.ownerUid));
+    check('import: a forged visibility/playCount is ignored',
+      forged?.visibility === 'private' && forged?.playCount === 0,
+      `${forged?.visibility} / ${forged?.playCount}`);
+  }); // scenario: game file export/import
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════
   // Introspect the callables the emulator actually serves (from the built lib)
