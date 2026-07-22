@@ -143,10 +143,19 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   const p = params(input.search);
   const session = input.session;
 
+  // An explicit `?code=` in the URL is a player-join intent, and the URL is
+  // authoritative here. It must beat a *stored* staff session: a tester (or a
+  // marshal) who signed into the staff console once keeps that session in
+  // localStorage until an explicit logout, and without this a later scan of any
+  // player/test QR was hijacked straight to the staff console — the code never
+  // reached JoinScreen. A `?staff=` PARAM (real staff intent in the link) still
+  // wins; only a mere stored session yields to the code.
+  const linkCode = normCode(p.get('code'));
+
   // 1. Staff — highest precedence, and it CONSUMES owner/game/run so no later
   //    branch can re-read `game` as a promo id. A staff link never touches the
   //    player session: a marshal borrowing a player's phone must not wipe it.
-  if (p.has(STAFF_ROUTE_PARAM) || input.hasStaffSession) {
+  if (p.has(STAFF_ROUTE_PARAM) || (input.hasStaffSession && !linkCode)) {
     const ctx =
       parseStaffParam(value(p, STAFF_ROUTE_PARAM)) ??
       (() => {
@@ -179,8 +188,8 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
     return { route: { kind: 'challenge', ...challenge }, clearSession: false };
   }
 
-  // 7. A join code in the URL is an explicit intent and BEATS a restored session.
-  const linkCode = normCode(p.get('code'));
+  // 7. A join code in the URL is an explicit intent and BEATS a restored session
+  //    (and, per the guard above, a stored staff session too).
   if (linkCode) {
     const sessionCode = normCode(session?.code);
     if (!session) return { route: { kind: 'join', code: linkCode }, clearSession: false };

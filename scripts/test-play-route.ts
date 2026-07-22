@@ -75,6 +75,40 @@ const sess = (code: string): SessionRef => ({ code });
   ok(r.route.kind === 'staff', 'a stored staff session boots into staff mode with no params');
   ok(r.route.kind === 'staff' && r.route.ctx === null, 'stored staff session carries no URL ctx');
 }
+// ── A stored staff session must NOT hijack an explicit ?code= player link ─────
+// The reported P0: a tester signs into the staff console once (staff session
+// persists in localStorage until an explicit logout), then scans ANY player/test
+// QR (`?code=`). The URL is authoritative — a player-join link must land on the
+// code-prefilled JoinScreen, NOT the staff console. Only a `?staff=` PARAM (a real
+// staff intent in the URL) may outrank the code; a mere stored session may not.
+{
+  const r = resolvePlayRoute({ search: '?code=NEW999', session: null, hasStaffSession: true });
+  ok(r.route.kind === 'join', 'an explicit ?code= link BEATS a stored staff session (URL is authoritative)');
+  ok(r.route.kind === 'join' && r.route.code === 'NEW999', 'and it carries the code so JoinScreen prefills it');
+}
+{
+  // Whitespace/case survives the staff-session override for prefill.
+  const r = resolvePlayRoute({ search: '?code=+play01+', session: null, hasStaffSession: true });
+  ok(r.route.kind === 'join' && r.route.code === 'PLAY01', 'code is normalised (trim+upper) even past a stored staff session');
+}
+{
+  // A stored staff session + a code + a leftover player session for a DIFFERENT run:
+  // still a player join carrying the code, and the stale player session is cleared.
+  const r = resolvePlayRoute({ search: '?code=NEW999', session: sess('OLD111'), hasStaffSession: true });
+  ok(r.route.kind === 'join' && r.route.code === 'NEW999', 'code link past a staff session + stale player session → join with code');
+  ok(r.clearSession === true, 'and the stale player session is still cleared');
+}
+{
+  // A real staff PARAM in the URL still outranks a code (unchanged) — staff intent
+  // lives in the link, not just in storage.
+  const r = resolvePlayRoute({ search: '?staff=o.g.r&code=C', session: null, hasStaffSession: true });
+  ok(r.route.kind === 'staff', 'a ?staff= PARAM still beats a code, even with a stored staff session');
+}
+{
+  // No code → a stored staff session still boots to staff (the non-join case is unchanged).
+  const r = resolvePlayRoute({ search: '?tv=T', session: null, hasStaffSession: true });
+  ok(r.route.kind === 'staff', 'without a code link, a stored staff session still outranks other params');
+}
 
 // ── stripStaffParams — the exit path that used to land on the promo ──────────
 {
