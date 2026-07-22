@@ -17,7 +17,7 @@ import {
 // Photo approval queue (wave-e task 13) — pure queue logic shared with the
 // play-web StaffConsole so the two review surfaces can never disagree.
 import {
-  buildSubmissionQueues, submissionKey, canReject, isRenderableMedia,
+  buildSubmissionQueues, submissionKey, isRenderableMedia,
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
@@ -855,16 +855,25 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
 function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
   const rc = useT().runConsole;
   const [teamDocs, setTeamDocs] = useState<SubmissionTeamDoc[]>([]);
+  // A read failure must NOT look like "no pending photos": at a live event a
+  // manager would silently miss submissions. Track it and show a distinct line
+  // (the listener auto-retries, so it clears itself on the next good snapshot).
+  const [loadError, setLoadError] = useState(false);
   const { ownerUid, gameId, runId } = ctx;
 
   useEffect(() => {
+    setLoadError(false);
     const ref = collection(db, FIRESTORE_PATHS.teamsCol(ownerUid, gameId, runId));
     return onSnapshot(ref, (snap) => {
+      setLoadError(false);
       setTeamDocs(snap.docs.map((d) => {
         const data = d.data() as { displayName?: string; taskSubmissions?: Record<string, RawSubmission> };
         return { id: d.id, displayName: data.displayName, taskSubmissions: data.taskSubmissions };
       }));
-    }, () => undefined);
+    }, (err) => {
+      console.warn('[PhotoReviewConsole] submissions listener error', err);
+      setLoadError(true);
+    });
   }, [ownerUid, gameId, runId]);
 
   const { pending, reviewed, pendingCount } = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
@@ -912,7 +921,7 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
     );
   }
 
-  if (pendingCount === 0 && reviewed.length === 0) return null;
+  if (pendingCount === 0 && reviewed.length === 0 && !loadError) return null;
 
   return (
     <Card className="p-4 mt-4">
@@ -923,6 +932,10 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
         )}
       </div>
       <p className="text-[11px] text-zinc-500 mb-3">{rc.photoReviewHelp}</p>
+
+      {loadError && (
+        <p className="text-[11px] text-neon-red mb-3" role="status">{rc.photoReviewLoadError}</p>
+      )}
 
       {pending.length === 0
         ? <p className="text-zinc-500 text-sm">{rc.photoReviewNone}</p>
@@ -971,6 +984,14 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
           <div className="space-y-1">
             {reviewed.map((row) => {
               const key = submissionKey(row);
+              // Reviewed rows are terminal, so a further reject is never useful:
+              // an APPROVED row has no server-side score clawback, and RE-rejecting
+              // an already-REJECTED row is a no-op that only re-opens the note
+              // prompt and fires a pointless callable. Either way the affordance is
+              // DISABLED with a status-specific reason rather than inviting the act.
+              const rejectReason = row.status === 'approved'
+                ? rc.photoReviewRejectDisabled
+                : rc.photoReviewAlreadyRejected;
               return (
                 <div key={key} className="flex items-center gap-2 text-[11px]">
                   <span className={row.status === 'approved' ? 'text-neon-green' : 'text-neon-red'}>
@@ -978,17 +999,12 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
                   </span>
                   <span dir="auto" className="text-zinc-300 truncate flex-1">{row.displayName}</span>
                   <span dir="auto" className="text-zinc-600 truncate">{row.taskId}</span>
-                  {/* An approved row can never be "rejected" back: the server has no
-                      score clawback, so the button is DISABLED and says why rather
-                      than flipping a status string while the points quietly stay.
-                      A rejected row can still be approved (it was never scored). */}
                   <button
                     className="text-zinc-500 disabled:text-zinc-700 disabled:cursor-not-allowed"
-                    disabled={!canReject(row.status) || reviewAction.isBusy(key)}
-                    title={canReject(row.status) ? undefined : rc.photoReviewRejectDisabled}
-                    onClick={() => { void reviewAction.run(row, false).catch(() => undefined); }}
+                    disabled
+                    title={rejectReason}
                   >
-                    {canReject(row.status) ? rc.photoReviewReject : rc.photoReviewRejectDisabled}
+                    {rejectReason}
                   </button>
                 </div>
               );

@@ -13,7 +13,8 @@
 // A drag is disambiguated by `active.data.current.type` ('task' | 'stage'), so
 // the old TASK_DND_MIME dataTransfer sniffing is gone.
 import type { Stage } from '@rushpoint/shared';
-import { useDroppable } from '@dnd-kit/core';
+import { closestCenter, useDroppable } from '@dnd-kit/core';
+import type { CollisionDetection } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import PacingBar from './PacingBar';
@@ -22,6 +23,51 @@ import { useT } from './LanguageContext';
 /** Rail id namespace — a stage is both a sortable ITEM (its own id) and a task
  *  drop TARGET (this prefixed id), so the two never collide in one context. */
 export const STAGE_DROP_PREFIX = 'stage-drop:';
+
+// ── R1: type-aware collision resolution ─────────────────────────────────────
+// A rail entry registers TWO droppables on the SAME DOM node — the stage
+// SORTABLE ('stage', bare id) and, layered on top, the task DROP target
+// ('stage-drop', prefixed id). They share one rect / one centre, so plain
+// `closestCenter` sees a zero-distance TIE and breaks it by droppable
+// registration order. That silently no-ops one of the two gestures: a task
+// dropped on a rail entry resolves to the bare stage id (so the
+// `stage-drop:` branch in onDragEnd is skipped and the move is lost), OR a
+// stage reorder resolves to the prefixed id (so `findIndex` returns -1 and the
+// reorder is lost). Only one gesture can "win" per registration order.
+//
+// The fix makes collision resolution depend on WHAT is being dragged: filter
+// the candidate droppables to the ones the active drag may legally land on,
+// then delegate to closestCenter. `isValidDropTarget` is the pure, unit-tested
+// core (scripts/test-builder-dnd.ts).
+export type BuilderDragType = 'task' | 'stage';
+export type BuilderDropType = 'task' | 'stage' | 'stage-drop';
+
+/** Whether a drag of `activeType` may resolve onto a droppable of
+ *  `candidateType`. Pure — the whole R1 fix hinges on this table. */
+export function isValidDropTarget(
+  activeType: BuilderDragType,
+  candidateType: BuilderDropType | undefined,
+): boolean {
+  // A STAGE reorders only among the bare stage sortables. The co-located
+  // 'stage-drop' target (and any task) is off-limits, so a reorder can never
+  // resolve to a prefixed id and no-op.
+  if (activeType === 'stage') return candidateType === 'stage';
+  // A TASK lands on another task (reorder / cross-stage insert) or on a rail
+  // entry's 'stage-drop' target (append to that stage) — never on the bare
+  // stage sortable, which would make the primary cross-stage move no-op.
+  return candidateType === 'task' || candidateType === 'stage-drop';
+}
+
+/** DndContext `collisionDetection`: keep only the droppables the active drag may
+ *  legally hit, then run closestCenter over that subset. Removes the spatial tie
+ *  between the two co-located rail droppables. */
+export const railAwareCollisionDetection: CollisionDetection = (args) => {
+  const activeType = args.active.data.current?.type as BuilderDragType | undefined;
+  if (activeType !== 'task' && activeType !== 'stage') return closestCenter(args);
+  const droppableContainers = args.droppableContainers.filter((c) =>
+    isValidDropTarget(activeType, c.data.current?.type as BuilderDropType | undefined));
+  return closestCenter({ ...args, droppableContainers });
+};
 
 function RailEntry({ stage, index, active, onSelect, taskDragging }: {
   stage: Stage; index: number; active: boolean; onSelect: () => void;

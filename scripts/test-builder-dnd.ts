@@ -8,6 +8,7 @@ import {
   clampRequiredTaskCount, moveTaskBetweenStages, normalizeGroups, setTaskGroup,
   removeTaskFromGroups, groupIndexOfTask, type ReorderStage, type GroupLike,
 } from '../apps/creator-web/src/lib/reorder';
+import { isValidDropTarget } from '../apps/creator-web/src/components/StageRail';
 // Imported from SOURCE (never the built shared dist) so this lane needs no build
 // step and can never assert against a stale artifact — same rule as
 // scripts/test-mutual-exclusion.ts.
@@ -360,6 +361,44 @@ const gstage = (id: string, taskIds: string[], groups?: GroupLike[], requiredTas
   }
   check('property: 400 seeded op sequences keep every stage winnable, non-empty and single-claim',
     bad === 0, badDetail);
+}
+
+// ── 13. R1 — type-aware collision resolution ────────────────────────────────
+// A rail entry stacks a stage SORTABLE ('stage', bare id) and a task DROP
+// target ('stage-drop', prefixed id) on ONE node — identical centre. Plain
+// closestCenter ties and breaks by registration order, silently no-oping one
+// gesture. `isValidDropTarget` filters candidates by the ACTIVE drag type so
+// the tie is removed and BOTH gestures land.
+{
+  // A dragged TASK may land on another task (reorder / cross-stage insert) or a
+  // rail entry's stage-drop target, but NEVER the bare stage sortable — that is
+  // exactly the co-located droppable that made the primary cross-stage move
+  // no-op.
+  check('drop: task → task is valid', isValidDropTarget('task', 'task') === true);
+  check('drop: task → stage-drop is valid', isValidDropTarget('task', 'stage-drop') === true);
+  check('drop: task → bare stage is REJECTED (R1 cross-stage move fix)',
+    isValidDropTarget('task', 'stage') === false);
+
+  // A dragged STAGE reorders only among bare stage sortables; the co-located
+  // stage-drop target (and any task) is off-limits, so a reorder can't resolve
+  // to a prefixed id and no-op.
+  check('drop: stage → bare stage is valid', isValidDropTarget('stage', 'stage') === true);
+  check('drop: stage → stage-drop is REJECTED (R1 reorder fix)',
+    isValidDropTarget('stage', 'stage-drop') === false);
+  check('drop: stage → task is rejected', isValidDropTarget('stage', 'task') === false);
+
+  // A candidate with no declared type is never a valid target.
+  check('drop: task → undefined type is rejected', isValidDropTarget('task', undefined) === false);
+  check('drop: stage → undefined type is rejected', isValidDropTarget('stage', undefined) === false);
+
+  // The essential invariant: for EITHER drag type, the two co-located rail
+  // droppables can never BOTH be candidates, so there is no zero-distance tie.
+  for (const active of ['task', 'stage'] as const) {
+    const stageOk = isValidDropTarget(active, 'stage');
+    const stageDropOk = isValidDropTarget(active, 'stage-drop');
+    check(`drop: ${active} drag never accepts BOTH co-located rail droppables`,
+      !(stageOk && stageDropOk), `${stageOk} / ${stageDropOk}`);
+  }
 }
 
 console.log(`\n${failures === 0 ? 'ALL BUILDER-DND TESTS PASSED' : failures + ' CHECK(S) FAILED'}`);

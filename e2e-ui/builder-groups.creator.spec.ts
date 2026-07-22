@@ -174,11 +174,9 @@ test.describe('Builder exclusive groups + drag and drop', () => {
     await expect(page.locator('[aria-label*="חלופה"]')).toHaveCount(0);
   });
 
-  // ONE pointer-drag happy path and no more: dnd-kit pointer drags need several
-  // intermediate mouse moves and are timing sensitive, so a suite of them buys
-  // flakiness rather than coverage. Cross-stage pointer drags onto the rail are
-  // verified by hand; the logic they run is the same `moveTaskBetweenStages` the
-  // ⋯ test above drives deterministically.
+  // Pointer drags are kept to the two that carry unique risk: a within-stage
+  // reorder, and the cross-stage rail drop below. dnd-kit pointer drags need
+  // several intermediate moves and are timing sensitive, so we don't pile on more.
   test('pointer drag reorders a task', async ({ page }) => {
     test.setTimeout(60_000);
     const titles = () => page.locator('.grid > div .text-sm.font-semibold').allTextContents();
@@ -197,6 +195,44 @@ test.describe('Builder exclusive groups + drag and drop', () => {
     await page.mouse.up();
 
     await expect.poll(async () => (await titles())[0]).not.toBe(before);
+  });
+
+  // R1 regression: a task dragged onto a rail STAGE entry must actually change
+  // stages. The rail entry stacks two droppables on one node (the stage sortable
+  // AND a 'stage-drop:' target with an identical centre); under plain
+  // closestCenter the zero-distance tie could resolve to the bare stage id and the
+  // move would SILENTLY no-op (the task springs back). This exercises the real
+  // collision resolution the ⋯-menu path never touches — the only automated proof
+  // of the cross-stage DROP, as opposed to the cross-stage MOVE logic.
+  test('pointer drag onto a rail stage entry moves the task across stages', async ({ page }) => {
+    test.setTimeout(60_000);
+    const inCanvas = (title: string) => page.locator(`[role="button"][aria-label="${title}"]`);
+    // "הגעה לשוק" is ungrouped, so the move is a clean stage change with no group strip.
+    await expect(inCanvas('הגעה לשוק')).toBeVisible();
+
+    const handle = inCanvas('הגעה לשוק').locator('span[role="button"][aria-label^="גררו כדי לשנות סדר"]');
+    const railFinal = page.locator('aside div.cursor-pointer', { hasText: 'הסיום' }).first();
+    const from = (await handle.boundingBox())!;
+    const to = (await railFinal.boundingBox())!;
+
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    // PointerSensor has a ~180ms activation delay — hold still before moving.
+    await page.waitForTimeout(300);
+    for (let i = 1; i <= 8; i++) {
+      await page.mouse.move(
+        from.x + (to.x + to.width / 2 - from.x) * (i / 8),
+        from.y + (to.y + to.height / 2 - from.y) * (i / 8),
+        { steps: 2 },
+      );
+    }
+    await page.mouse.up();
+
+    // The task left the current stage's canvas (would still be here if R1 no-oped)…
+    await expect.poll(async () => inCanvas('הגעה לשוק').count()).toBe(0);
+    // …and now lives in the final stage.
+    await page.getByText('הסיום').first().click();
+    await expect(inCanvas('הגעה לשוק')).toBeVisible();
   });
 
   test('keyboard drag reorders a task without a pointer', async ({ page }) => {

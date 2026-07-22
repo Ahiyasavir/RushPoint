@@ -6,7 +6,7 @@ import type {
 import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, MeasuringStrategy,
-  closestCenter, useSensor, useSensors,
+  useSensor, useSensors,
 } from '@dnd-kit/core';
 import type {
   Announcements, DragEndEvent, DragStartEvent, KeyboardCoordinateGetter, ScreenReaderInstructions,
@@ -16,7 +16,7 @@ import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea 
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 import TaskLibrary from '../components/TaskLibrary';
-import StageRail, { STAGE_DROP_PREFIX } from '../components/StageRail';
+import StageRail, { STAGE_DROP_PREFIX, railAwareCollisionDetection } from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
 import TaskCard, { GROUP_STYLES, type TaskGroupBadge } from '../components/TaskCard';
 import ExclusiveGroupsModal from '../components/ExclusiveGroupsModal';
@@ -906,7 +906,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
     // gets the full height and never clips, and the page never scrolls.
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCenter}
+      // Type-aware (R1): the rail's two co-located droppables would otherwise
+      // tie under plain closestCenter and silently no-op one of the gestures.
+      collisionDetection={railAwareCollisionDetection}
       accessibility={{ announcements, screenReaderInstructions }}
       // Always-remeasure is what lets a droppable that MOUNTS mid-drag (a row the
       // virtualizer reveals while auto-scrolling) still be a valid target.
