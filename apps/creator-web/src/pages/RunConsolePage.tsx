@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { TV_ROUTE_PARAM, RECAP_ROUTE_PARAM, hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, type ChatMessage } from '@rushpoint/shared';
+import { hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, type ChatMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -21,7 +22,22 @@ import {
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
-import { Badge, Button, Card, Input, Label, Spinner } from '../components/ui';
+import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
+import RichTooltip from '../components/RichTooltip';
+// Progressive disclosure (change: run-console-progressive-disclosure): the
+// console's layout, action severity, share links and human labels are pure
+// decisions that live in lib/ with tests, so the chrome and the summary badges
+// cannot drift apart.
+import {
+  buildRunConsolePlan, planHasPanel, readGroupState, writeGroupState, groupStateKey,
+  DEFAULT_GROUP_OPEN,
+  type PanelId, type RunStatus, type RunConsoleGroup, type GroupOpenState, type CollapsibleGroupId,
+} from '../lib/runConsoleLayout';
+import {
+  runActionVariant, parseScoreDelta, FLASH_MISSION_TTL_SECONDS, FLASH_MISSION_TTL_MINUTES,
+} from '../lib/runConsoleActions';
+import { buildShareArtifacts, type ShareArtifactId } from '../lib/runShareArtifacts';
+import { resolveTeamLabel, resolveTaskLabel } from '../lib/runConsoleLabels';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { playAlert, unlockAudio } from '../lib/sound';
@@ -123,6 +139,138 @@ export default function RunConsolePage() {
     return () => clearInterval(id);
   }, [gameId, runId, ownerUid, run?.status, run?.leaderboard?.frozen]);
 
+  // A FINISHED run's teams / feed / chat no longer change, so a live listener on
+  // them is pure cost that never fires again — and these three were lifted to the
+  // page, so they now open for every console visit rather than only when someone
+  // expanded the panel. Read once when the run is over, subscribe only while it
+  // is live. Returns an unsubscribe (or undefined for the one-shot read).
+  const watchOrRead = (
+    ref: Query<DocumentData>,
+    live: boolean,
+    onData: (snap: QuerySnapshot<DocumentData>) => void,
+    onError: (err: unknown) => void = () => undefined,
+  ): (() => void) | undefined => {
+    if (!live) {
+      let cancelled = false;
+      getDocs(ref).then((snap) => { if (!cancelled) onData(snap); }).catch(onError);
+      return () => { cancelled = true; };
+    }
+    return onSnapshot(ref, onData, onError);
+  };
+  const runLive = run?.status !== 'finished';
+
+  // ── Moderation + report feeds (change: run-console-progressive-disclosure) ──
+  // These listeners live HERE and not inside their panels. The disclosure plan
+  // decides whether a FOLDED group renders and what its header badge says, and a
+  // collapsed group renders no children, so a panel that never mounted could
+  // never report its own count. One place owns the numbers; the panels render.
+  const [teamDocs, setTeamDocs] = useState<SubmissionTeamDoc[]>([]);
+  // A read failure must NOT look like "no pending photos": at a live event a
+  // manager would silently miss submissions. The listener auto retries, so this
+  // clears itself on the next good snapshot.
+  const [photoLoadError, setPhotoLoadError] = useState(false);
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    setPhotoLoadError(false);
+    const ref = collection(db, FIRESTORE_PATHS.teamsCol(ownerUid, gameId, runId));
+    return watchOrRead(ref, runLive, (snap) => {
+      setPhotoLoadError(false);
+      setTeamDocs(snap.docs.map((d) => {
+        const data = d.data() as { displayName?: string; taskSubmissions?: Record<string, RawSubmission> };
+        return { id: d.id, displayName: data.displayName, taskSubmissions: data.taskSubmissions };
+      }));
+    }, (err) => {
+      console.warn('[RunConsole] submissions listener error', err);
+      setPhotoLoadError(true);
+    });
+  }, [gameId, runId, ownerUid, runLive]);
+  const photoQueues = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
+
+  const [feedItems, setFeedItems] = useState<FeedItemRow[]>([]);
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    const ref = query(
+      collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`),
+      where('active', '==', true),
+    );
+    return watchOrRead(ref, runLive, (snap) => {
+      const rows = snap.docs.map((d) => ({ ...(d.data() as Omit<FeedItemRow, 'id'>), id: d.id }));
+      rows.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+      setFeedItems(rows);
+    }, () => undefined);
+  }, [gameId, runId, ownerUid, runLive]);
+
+  const [chatThreads, setChatThreads] = useState<ChatThreadRow[]>([]);
+  const [chatSeen, setChatSeen] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!gameId || !runId) return;
+    const ref = collection(db, FIRESTORE_PATHS.runChatCol(ownerUid, gameId, runId));
+    return watchOrRead(ref, runLive, (snap) => {
+      const rows = snap.docs.map((d) => {
+        const data = d.data() as { messages?: ChatMessage[]; updatedAt?: string };
+        return { teamId: d.id, messages: data.messages ?? [], updatedAt: data.updatedAt ?? '' };
+      });
+      rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      setChatThreads(rows);
+    }, () => undefined);
+  }, [gameId, runId, ownerUid, runLive]);
+  const unreadChatThreads = chatThreads.reduce(
+    (n, th) => n + (th.messages.length > (chatSeen[th.teamId] ?? 0) ? 1 : 0), 0);
+
+  // Survey results, loaded here for the same reason (a folded group's panel
+  // cannot load them and then say how many there are).
+  const [surveyResults, setSurveyResults] = useState<SurveyResultRow[] | null>(null);
+  const [surveyLoading, setSurveyLoading] = useState(false);
+  const loadSurvey = useCallback(() => {
+    if (!gameId || !runId) return;
+    setSurveyLoading(true);
+    getRunSurveyResults({ gameId, runId })
+      .then((d) => setSurveyResults(d.results))
+      .catch(() => undefined)
+      .finally(() => setSurveyLoading(false));
+  }, [gameId, runId]);
+  useEffect(() => { loadSurvey(); }, [loadSurvey]);
+
+  // Task titles, so the review queue shows a task's NAME where it used to print
+  // a raw Firestore id. One owner scoped read of a game the owner already holds.
+  const [taskTitles, setTaskTitles] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!gameId) return;
+    let alive = true;
+    getGame({ gameId })
+      .then(({ game }) => {
+        if (!alive) return;
+        const map = new Map<string, string>();
+        for (const stage of game.stages ?? []) {
+          for (const task of stage.tasks ?? []) map.set(task.id, task.title);
+        }
+        setTaskTitles(map);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [gameId]);
+
+  // Which groups this creator left open on this run. A display preference only
+  // (run docs are server write only); malformed or stale storage degrades to the
+  // defaults instead of throwing on a live console.
+  const [openGroups, setOpenGroups] = useState<GroupOpenState>(DEFAULT_GROUP_OPEN);
+  useEffect(() => {
+    if (!runId) return;
+    try { setOpenGroups(readGroupState(localStorage.getItem(groupStateKey(runId)), DEFAULT_GROUP_OPEN)); }
+    catch { setOpenGroups(DEFAULT_GROUP_OPEN); }
+  }, [runId]);
+  const persistGroups = useCallback((next: GroupOpenState) => {
+    try { localStorage.setItem(groupStateKey(runId ?? ''), writeGroupState(next)); } catch { /* storage off */ }
+    return next;
+  }, [runId]);
+  const toggleGroup = useCallback((id: CollapsibleGroupId) => {
+    setOpenGroups((cur) => persistGroups({ ...cur, [id]: !cur[id] }));
+  }, [persistGroups]);
+  const openGroupNow = useCallback((id: CollapsibleGroupId) => {
+    setOpenGroups((cur) => (cur[id] ? cur : persistGroups({ ...cur, [id]: true })));
+  }, [persistGroups]);
+
+
   const ctx = { ownerUid, gameId: gameId!, runId: runId! };
 
   async function startAll() {
@@ -148,6 +296,10 @@ export default function RunConsolePage() {
     try {
       const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
       setStaffPin(pin);
+      // The PIN + staff link render inside the (collapsed by default) share
+      // group, so open it: a host must never have to hunt for what they just
+      // created.
+      openGroupNow('shareAndScreens');
     } catch { await dialog.alert(t.runConsole.staffInviteFailed); }
   }
   async function refreshStandings(publish?: boolean) {
@@ -180,6 +332,9 @@ export default function RunConsolePage() {
   if (!run) return <Spinner label={t.runConsole.loadingRun} />;
 
   const finished = run.status === 'finished';
+  const rc = t.runConsole;
+  // Narrowed once, so the panel renderers below do not each need a non null assertion.
+  const activeRun = run;
 
   // Single source of truth for the number we show organizers: the ranked score
   // from the (auto-refreshed) leaderboard snapshot — the SAME value the live
@@ -190,246 +345,383 @@ export default function RunConsolePage() {
     (run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]),
   );
 
-  return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-brand text-2xl font-extrabold tracking-tight text-[--ink-1]">{t.runConsole.liveRun}</h1>
-          <div className="flex flex-wrap items-center gap-2 mt-1.5">
-            <Badge color={finished ? 'zinc' : 'green'}>
-              {run.status === 'draft' ? t.runConsole.statusDraft
-                : run.status === 'finished' ? t.runConsole.statusFinished
-                : t.runConsole.statusLive}
-            </Badge>
-            {run.billingType && (
-              <Badge color={run.billingType === 'test' ? 'gold' : run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
-                {run.billingType === 'test' ? t.runConsole.testRun
-                  : run.billingType === 'free' ? t.runConsole.freeRun
-                  : run.billingType === 'pro' ? t.runConsole.proRun
-                  : t.runConsole.creditRun}
-              </Badge>
-            )}
-            <span className="text-zinc-500 text-sm">
-              {t.runConsole.participants({ n: run.participantCount ?? teams.length, max: String(run.maxParticipants ?? '∞') })}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-col items-stretch gap-2">
-          <JoinShare accessCode={run.accessCode} onShareBoard={ensureBoardPublished} />
-          <StationQrPrint gameId={gameId!} />
-        </div>
-      </div>
+  // ONE pass decides which panels render, which group each sits in, and what a
+  // folded group reports on its header, so a badge and its panel can never
+  // disagree (change: run-console-progressive-disclosure). Panel visibility is
+  // decided ONLY here: no `{!finished && …}` conditions in the body.
+  const plan = buildRunConsolePlan({
+    status: run.status === 'finished' ? 'finished' : run.status === 'draft' ? 'draft' : 'live',
+    teamCount: teams.length,
+    alertCount: alerts.length,
+    pendingPhotoCount: photoQueues.pendingCount,
+    photoQueueCount: photoQueues.pending.length + photoQueues.reviewed.length + (photoLoadError ? 1 : 0),
+    feedItemCount: feedItems.length,
+    chatThreadCount: chatThreads.length,
+    unreadChatThreads,
+    hotZoneActive: !!run.hotZone && hotZoneMultiplier(run.hotZone, run.hotZone.center, Date.now()) > 1,
+    hasLeaderboard: (run.leaderboard?.rankings.length ?? 0) > 0,
+    hasStaffPin: !!staffPin,
+    surveyResultCount: surveyResults === null ? null : surveyResults.length,
+  });
+  const has = (panel: PanelId) => planHasPanel(plan, panel);
 
-      {/* Live SOS / alerts — the organizer sees these the moment a team raises one */}
-      {alerts.length > 0 && (
-        <Card className="p-4 border-neon-red/40">
-          <div className="text-sm font-medium mb-2 text-neon-red">{t.runConsole.activeAlerts({ n: alerts.length })}</div>
-          <div className="space-y-2">
-            {alerts.map((a) => (
-              <div key={a.id} className="flex items-center gap-3 text-sm">
-                <span className="uppercase text-neon-red font-medium">{t.runConsole.alertType(a.type)}</span>
-                <span className="text-zinc-500 text-xs">{t.runConsole.team({ id: a.teamId.slice(0, 8) })}</span>
-                {a.message && <span className="text-zinc-300 flex-1 truncate">{a.message}</span>}
-                {a.lat != null && a.lng != null && (
-                  <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{t.runConsole.map}</a>
-                )}
-                <Button variant="subtle" className="text-xs ms-auto" onClick={() => ack(a.id)}>{t.runConsole.acknowledge}</Button>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
+  const groupTitles: Record<CollapsibleGroupId, string> = {
+    teamsAndScores: rc.groupTeams,
+    moderation: rc.groupModeration,
+    gameMechanics: rc.groupMechanics,
+    shareAndScreens: rc.groupShare,
+    afterTheRun: rc.groupAfter,
+  };
 
-      {/* Run controls — the organizer's primary live-ops actions, grouped as one bar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-3">
-        <Button disabled={busy || finished} onClick={startAll}>{t.runConsole.startAllTeams}</Button>
-        <Button variant="ghost" disabled={busy || finished} onClick={() => refreshStandings()}>{t.runConsole.refreshStandings}</Button>
-        <Button variant="ghost" onClick={invite}>{t.runConsole.inviteStaffPin}</Button>
-        <Button variant="danger" className="ms-auto" disabled={busy || finished} onClick={finalize}>{t.runConsole.finalizeRun}</Button>
-      </div>
-      {staffPin && <StaffInviteCard ctx={ctx} pin={staffPin} />}
+  // What a FOLDED group still says about itself. Built from the plan's summary,
+  // which is the same value the expanded panel renders.
+  function groupMeta(group: RunConsoleGroup) {
+    const chips: { text: string; color: 'zinc' | 'gold' | 'cyan' | 'red' }[] = [];
+    const s = group.summary;
+    if (s.teamCount) chips.push({ text: rc.summaryTeams({ n: s.teamCount }), color: 'zinc' });
+    if (s.pendingPhotos) chips.push({ text: rc.photoReviewCount({ n: s.pendingPhotos }), color: 'gold' });
+    if (s.unreadChats) chips.push({ text: rc.groupUnreadChats({ n: s.unreadChats }), color: 'cyan' });
+    if (s.hotZoneActive) chips.push({ text: rc.groupHotZoneOn, color: 'red' });
+    if (chips.length === 0) return undefined;
+    return (
+      <span className="flex flex-wrap items-center gap-1">
+        {chips.map((chip) => <Badge key={chip.text} color={chip.color}>{chip.text}</Badge>)}
+      </span>
+    );
+  }
 
-      {/* Live-ops + post-run organizer tools (deferred-UI wiring) */}
-      <div className="grid md:grid-cols-2 gap-5">
-        {!finished && <HotZonePanel ctx={ctx} hotZone={run.hotZone ?? null} />}
-        <PostRunLinks accessCode={run.accessCode} finished={finished} onShareBoard={ensureBoardPublished} />
-      </div>
-      {finished && <RunSummaryPanel accessCode={run.accessCode} />}
-      {finished && <AnalyticsPanel accessCode={run.accessCode} />}
-      {finished && <HeatmapPanel accessCode={run.accessCode} />}
-      {finished && <FeedbackPanel gameId={gameId} runId={runId} />}
-      <SurveyResultsPanel gameId={gameId} runId={runId} />
+  async function adjustScore(team: RunTeamRow) {
+    const raw = await dialog.prompt(rc.scoreAdjustmentPrompt);
+    const delta = parseScoreDelta(raw);
+    // `parseInt(v) || 0` used to send a zero delta for any garbage input,
+    // writing a permanent audit entry for a change that never happened.
+    if (delta === null) { if (raw != null && raw.trim() !== '') await dialog.alert(rc.scoreAdjustmentInvalid); return; }
+    const signed = delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`;
+    if (!(await dialog.confirm(
+      rc.adjustScoreConfirm({ team: team.displayName, delta: signed }),
+      rc.adjustScoreConfirmTitle, true,
+    ))) return;
+    await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'manual' });
+    await loadTeams();
+  }
 
-      <div className="grid lg:grid-cols-3 gap-5">
-        {/* Teams */}
-        <div className="lg:col-span-2">
+  async function skipTeamStage(team: RunTeamRow) {
+    if (!(await dialog.confirm(rc.skipConfirm, undefined, true))) return;
+    try { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }
+    catch { await dialog.alert(rc.skipFailed); }
+  }
+
+  function renderPanel(panel: PanelId) {
+    switch (panel) {
+      case 'teams':
+        return (
           <Card className="p-4">
-            <div className="text-sm font-medium mb-3">{t.runConsole.teamsTitle}</div>
+            <div className="text-sm font-medium mb-3">{rc.teamsTitle}</div>
             {teams.length === 0 ? (
-              <p className="text-zinc-500 text-sm">{t.runConsole.noOneJoinedYet}</p>
+              <EmptyState icon="👥" title={rc.noOneJoinedTitle} body={rc.noOneJoinedYet} />
             ) : (
               <div className="space-y-2">
                 {teams.map((team) => (
-                  <div key={team.id} className="flex items-center gap-3 p-2 rounded-lg bg-app-bg">
-                    <div className="flex-1">
-                      <div className="text-sm text-zinc-200">{team.displayName}</div>
+                  <div key={team.id} className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-app-bg">
+                    <div className="flex-1 min-w-[10rem]">
+                      <div dir="auto" className="text-sm text-zinc-200">{team.displayName}</div>
                       <div className="text-[11px] text-zinc-500">
                         {team.finished
-                          ? t.runConsole.teamStatusFinished
+                          ? rc.teamStatusFinished
                           : !team.launched
-                            ? t.runConsole.teamStatusWaiting
+                            ? rc.teamStatusWaiting
                             : team.activeStageOrder != null
-                              ? t.runConsole.teamStageLabel({ n: team.activeStageOrder + 1 })
-                              : t.runConsole.teamStatusBetween}
-                        {' · '}{t.runConsole.stageDone({ n: team.completedStages })}
+                              ? rc.teamStageLabel({ n: team.activeStageOrder + 1 })
+                              : rc.teamStatusBetween}
+                        {' · '}{rc.stageDone({ n: team.completedStages })}
                       </div>
                     </div>
                     {/* Ranked score from the leaderboard snapshot — identical to
                         the live-standings panel + TV. Falls back to the raw earned
-                        tally only until the first snapshot exists for this run. */}
+                        tally only until the first snapshot exists for this activeRun. */}
                     <div className="text-neon-green font-mono font-semibold">
                       {rankedScoreById.get(team.id) ?? team.score}
                     </div>
-                    <button className="text-[11px] text-zinc-400 hover:text-zinc-200"
-                      onClick={async () => {
-                        if (!(await dialog.confirm(t.runConsole.skipConfirm, undefined, true))) return;
-                        try { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }
-                        catch { await dialog.alert(t.runConsole.skipFailed); }
-                      }}>
-                      {t.runConsole.skip}
-                    </button>
-                    <button className="text-[11px] text-zinc-400 hover:text-neon-red"
-                      onClick={async () => {
-                        const v = await dialog.prompt(t.runConsole.scoreAdjustmentPrompt); if (!v) return;
-                        await adjustTeamScore({ ...ctx, teamId: team.id, delta: parseInt(v) || 0, reason: 'manual' }); await loadTeams();
-                      }}>
-                      ±
-                    </button>
+                    <Button
+                      variant={runActionVariant('skipStage')}
+                      className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg"
+                      aria-label={rc.skipAria({ team: team.displayName })}
+                      onClick={() => void skipTeamStage(team)}
+                    >
+                      {rc.skip}
+                    </Button>
+                    {/* Rewriting a team's score is destructive, so it is labelled,
+                        named for assistive tech, separated from the routine skip
+                        control, and confirmed with the team and the signed delta.
+                        It used to be a bare '±' glyph with no accessible name. */}
+                    <Button
+                      variant={runActionVariant('adjustTeamScore')}
+                      className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg ms-1"
+                      aria-label={rc.adjustScoreAria({ team: team.displayName })}
+                      onClick={() => void adjustScore(team)}
+                    >
+                      {rc.adjustScore}
+                    </Button>
                   </div>
                 ))}
               </div>
             )}
           </Card>
+        );
+
+      case 'liveStandings':
+        return (
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-medium">{rc.liveStandings}</div>
+              <button
+                className={`text-[11px] px-2 py-1 rounded-md ${activeRun.leaderboard!.published ? 'bg-neon-green/15 text-neon-green' : 'bg-app-raised text-zinc-400'}`}
+                disabled={busy}
+                onClick={() => refreshStandings(!activeRun.leaderboard!.published)}
+              >
+                {activeRun.leaderboard!.published ? rc.standingsVisibleToTeams : rc.standingsHiddenFromTeams}
+              </button>
+            </div>
+            {/* Show ALL teams — at 20 teams a slice(0,12) hid ranks 13-20 mid-activeRun. */}
+            <div className="space-y-1">
+              {activeRun.leaderboard!.rankings.map((r) => (
+                <div key={r.teamId} className="flex items-center gap-3 text-sm">
+                  <span className="w-6 text-zinc-500">{r.rank}</span>
+                  <span dir="auto" className="flex-1 text-zinc-200">{r.teamName}</span>
+                  <span className="text-[11px] text-zinc-500">{rc.stageDone({ n: r.completedStages })}</span>
+                  <span className="text-neon-green font-mono">{r.score}</span>
+                </div>
+              ))}
+            </div>
+            <div className="text-[11px] text-zinc-600 mt-2">
+              {rc.organizerOnlyUpdated({ time: new Date(activeRun.leaderboard!.updatedAt).toLocaleTimeString() })}
+            </div>
+          </Card>
+        );
+
+      // The organizer ALWAYS sees the final standings (this reads the run doc
+      // directly); `published` only controls the participant surfaces — with
+      // manual reveal on, finalizeRun leaves the board unpublished and this
+      // button is how the host reveals it.
+      case 'finalStandings':
+        return (
+          <Card className="p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="text-sm font-medium">{rc.finalLeaderboard}</div>
+              {activeRun.leaderboard!.published ? (
+                <span className="text-[11px] px-2 py-1 rounded-md bg-neon-green/15 text-neon-green">
+                  {rc.standingsVisibleToTeams}
+                </span>
+              ) : (
+                <Button className="px-3 py-1.5 text-xs" disabled={busy} onClick={() => void revealStandings()}>
+                  {rc.revealStandings}
+                </Button>
+              )}
+            </div>
+            {!activeRun.leaderboard!.published && (
+              <div className="text-[11px] text-amber-400/90 mb-3">{rc.standingsHiddenUntilReveal}</div>
+            )}
+            <div className="space-y-1">
+              {activeRun.leaderboard!.rankings.map((r) => (
+                <div key={r.teamId} className="flex items-center gap-3 text-sm">
+                  <span className="w-6 text-zinc-500">{r.rank}</span>
+                  <span dir="auto" className="flex-1 text-zinc-200">{r.teamName}</span>
+                  <span className="text-neon-green font-mono">{r.score}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+
+      case 'hotZone': return <HotZonePanel ctx={ctx} hotZone={activeRun.hotZone ?? null} />;
+      case 'flashMission': return <FlashMissionCard ctx={ctx} />;
+      case 'trackables': return <TrackablesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} />;
+      case 'zones': return <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />;
+
+      case 'photoReview':
+        return (
+          <PhotoReviewConsole
+            ctx={ctx}
+            pending={photoQueues.pending}
+            reviewed={photoQueues.reviewed}
+            pendingCount={photoQueues.pendingCount}
+            loadError={photoLoadError}
+            taskTitles={taskTitles}
+          />
+        );
+      case 'feed': return <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} items={feedItems} />;
+      case 'chat':
+        return (
+          <ChatConsole
+            ctx={ctx}
+            teams={teams}
+            threads={chatThreads}
+            seen={chatSeen}
+            onSeen={(teamId, count) => setChatSeen((s) => (s[teamId] === count ? s : { ...s, [teamId]: count }))}
+          />
+        );
+
+      case 'shareScreens':
+        return (
+          <ShareScreens
+            accessCode={activeRun.accessCode}
+            ctx={ctx}
+            status={finished ? 'finished' : 'live'}
+            hasStaffPin={!!staffPin}
+            onShareBoard={ensureBoardPublished}
+          />
+        );
+      case 'staffInvite': return <StaffInviteCard ctx={ctx} pin={staffPin!} />;
+
+      case 'runSummary': return <RunSummaryPanel accessCode={activeRun.accessCode} />;
+      case 'analytics': return <AnalyticsPanel accessCode={activeRun.accessCode} />;
+      case 'heatmap': return <HeatmapPanel accessCode={activeRun.accessCode} />;
+      case 'feedback': return <FeedbackPanel gameId={gameId} runId={runId} />;
+      case 'survey': return <SurveyResultsPanel results={surveyResults} loading={surveyLoading} onRefresh={loadSurvey} />;
+
+      // The primary zone is rendered inline below, never through this switch.
+      default: return null;
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-brand text-2xl font-extrabold tracking-tight text-[--ink-1]">{rc.liveRun}</h1>
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
+            <Badge color={finished ? 'zinc' : 'green'}>
+              {run.status === 'draft' ? rc.statusDraft
+                : run.status === 'finished' ? rc.statusFinished
+                : rc.statusLive}
+            </Badge>
+            {run.billingType && (
+              <span className="inline-flex items-center gap-1">
+                <Badge color={run.billingType === 'test' ? 'gold' : run.billingType === 'pro' ? 'green' : run.billingType === 'credit' ? 'cyan' : 'zinc'}>
+                  {run.billingType === 'test' ? rc.testRun
+                    : run.billingType === 'free' ? rc.freeRun
+                    : run.billingType === 'pro' ? rc.proRun
+                    : rc.creditRun}
+                </Badge>
+                {/* The four billing chips used to sit beside the status with
+                    nothing anywhere explaining what they mean. */}
+                <RichTooltip concept="runBilling" />
+              </span>
+            )}
+            <span className="text-zinc-500 text-sm">
+              {rc.participants({ n: run.participantCount ?? teams.length, max: String(run.maxParticipants ?? '∞') })}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── PRIMARY ZONE ────────────────────────────────────────────────────────
+          Only what the next five minutes need: the code + QR, the join link, the
+          station QR sheet, Start all teams, live alerts, the broadcast and the
+          live team map. Never collapsible, and nothing else lives here. */}
+      <div className="grid lg:grid-cols-3 gap-5 items-start">
+        <div className="lg:col-span-2 space-y-4">
+          {/* Live SOS / alerts — the organizer sees these the moment a team raises one */}
+          {has('alerts') && (
+            <Card className="p-4 border-neon-red/40">
+              <div className="text-sm font-medium mb-2 text-neon-red">{rc.activeAlerts({ n: alerts.length })}</div>
+              <div className="space-y-2">
+                {alerts.map((a) => (
+                  <div key={a.id} className="flex flex-wrap items-center gap-3 text-sm">
+                    <span className="uppercase text-neon-red font-medium">{rc.alertType(a.type)}</span>
+                    {/* A host cannot act on a truncated document id: show the team's name. */}
+                    <span dir="auto" className="text-zinc-400 text-xs">
+                      {resolveTeamLabel(a.teamId, teams, (id) => rc.unknownTeam({ id }))}
+                    </span>
+                    {a.message && <span dir="auto" className="text-zinc-300 flex-1 truncate">{a.message}</span>}
+                    {a.lat != null && a.lng != null && (
+                      <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{rc.map}</a>
+                    )}
+                    <Button variant="subtle" className="min-h-0 px-2.5 py-1 text-xs rounded-lg ms-auto" onClick={() => ack(a.id)}>{rc.acknowledge}</Button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Routine live-ops actions. Ending the run is NOT here: it sits in its
+              own separated end-of-run row at the bottom of the console. */}
+          {has('startTeams') && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-3">
+              <Button variant={runActionVariant('startTeams')} disabled={busy} onClick={startAll}>{rc.startAllTeams}</Button>
+              <Button variant="ghost" disabled={busy} onClick={() => refreshStandings()}>{rc.refreshStandings}</Button>
+              <Button variant="ghost" onClick={invite}>{rc.inviteStaffPin}</Button>
+            </div>
+          )}
 
           {/* Live team map — where every team is right now, fed by GPS pings. */}
-          {!finished && teams.length > 0 && (
-            <Card className="p-4 mt-4">
-              <div className="text-sm font-medium mb-3">{t.runConsole.liveTeamMap}</div>
+          {has('liveMap') && (
+            <Card className="p-4">
+              <div className="text-sm font-medium mb-3">{rc.liveTeamMap}</div>
               <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
             </Card>
           )}
-
-          {/* Trackable collectibles — author items + see who's carrying them. */}
-          {!finished && <TrackablesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} />}
-
-          {/* Territory zones — author capturable zones + see who holds them. */}
-          {!finished && <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />}
-
-          {/* Photo approval queue — submissions waiting for a human, streamed live
-              from the run's team docs. Sits ABOVE the feed: pending work outranks
-              the gallery of already-approved photos (wave-e task 13). */}
-          <PhotoReviewConsole ctx={ctx} />
-
-          {/* Live photo feed — approved photos broadcast to participants, with
-              a hide button per card for moderation (live-photo-feed). */}
-          <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />
-
-          {/* Team ↔ HQ chat — per-team threads with unread badges; HQ replies
-              as from:'hq' (team-hq-chat). */}
-          {!finished && <ChatConsole ctx={ctx} teams={teams} />}
-
-          {/* Live standings — computed on demand mid-run without ending it. */}
-          {!finished && run.leaderboard && run.leaderboard.rankings.length > 0 && (
-            <Card className="p-4 mt-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-medium">{t.runConsole.liveStandings}</div>
-                <button
-                  className={`text-[11px] px-2 py-1 rounded-md ${run.leaderboard.published ? 'bg-neon-green/15 text-neon-green' : 'bg-app-raised text-zinc-400'}`}
-                  disabled={busy}
-                  onClick={() => refreshStandings(!run.leaderboard!.published)}
-                >
-                  {run.leaderboard.published ? t.runConsole.standingsVisibleToTeams : t.runConsole.standingsHiddenFromTeams}
-                </button>
-              </div>
-              {/* Show ALL teams — at 20 teams a slice(0,12) hid ranks 13-20 mid-run. */}
-              <div className="space-y-1">
-                {run.leaderboard.rankings.map((r) => (
-                  <div key={r.teamId} className="flex items-center gap-3 text-sm">
-                    <span className="w-6 text-zinc-500">{r.rank}</span>
-                    <span className="flex-1 text-zinc-200">{r.teamName}</span>
-                    <span className="text-[11px] text-zinc-500">{t.runConsole.stageDone({ n: r.completedStages })}</span>
-                    <span className="text-neon-green font-mono">{r.score}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="text-[11px] text-zinc-600 mt-2">
-                {t.runConsole.organizerOnlyUpdated({ time: new Date(run.leaderboard.updatedAt).toLocaleTimeString() })}
-              </div>
-            </Card>
-          )}
-
-          {/* Final standings. The organizer ALWAYS sees them (this reads the run
-              doc directly); `published` only controls the participant surfaces —
-              with manual reveal on, finalizeRun leaves the board unpublished and
-              this button is how the host reveals it. */}
-          {finished && run.leaderboard && (
-            <Card className="p-4 mt-4">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div className="text-sm font-medium">{t.runConsole.finalLeaderboard}</div>
-                {run.leaderboard.published ? (
-                  <span className="text-[11px] px-2 py-1 rounded-md bg-neon-green/15 text-neon-green">
-                    {t.runConsole.standingsVisibleToTeams}
-                  </span>
-                ) : (
-                  <Button className="px-3 py-1.5 text-xs" disabled={busy} onClick={() => void revealStandings()}>
-                    {t.runConsole.revealStandings}
-                  </Button>
-                )}
-              </div>
-              {!run.leaderboard.published && (
-                <div className="text-[11px] text-amber-400/90 mb-3">
-                  {t.runConsole.standingsHiddenUntilReveal}
-                </div>
-              )}
-              <div className="space-y-1">
-                {run.leaderboard.rankings.map((r) => (
-                  <div key={r.teamId} className="flex items-center gap-3 text-sm">
-                    <span className="w-6 text-zinc-500">{r.rank}</span>
-                    <span className="flex-1 text-zinc-200">{r.teamName}</span>
-                    <span className="text-neon-green font-mono">{r.score}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
         </div>
 
-        {/* Live-ops */}
         <div className="space-y-4">
-          <Broadcast ctx={ctx} teams={teams} />
+          {has('joinShare') && <JoinShare accessCode={run.accessCode} />}
+          {has('stationQr') && <StationQrPrint gameId={gameId!} />}
+          {has('broadcast') && <AnnouncementCard ctx={ctx} teams={teams} />}
         </div>
       </div>
+
+      {/* ── Everything else: named groups, collapsed by default, each reporting
+          its live contents while folded. Nothing is more than one labelled click
+          away and nothing was removed. */}
+      {plan.groups.filter((group) => group.collapsible).map((group) => {
+        const id = group.id as CollapsibleGroupId;
+        return (
+          <Advanced
+            key={id}
+            title={groupTitles[id]}
+            meta={groupMeta(group)}
+            open={!!openGroups[id]}
+            onToggle={() => toggleGroup(id)}
+          >
+            {group.panels.map((panel) => <div key={panel}>{renderPanel(panel)}</div>)}
+          </Advanced>
+        );
+      })}
+
+      {/* ── End of run ─────────────────────────────────────────────────────────
+          Deliberately out of the routine control bar: this ends the game for
+          every team, and it used to sit one mis-click from "Refresh standings". */}
+      {!finished && (
+        <div className="rounded-2xl border border-rp-alert/30 bg-rp-alert/5 p-4 flex flex-wrap items-center gap-3">
+          <div className="flex-1 min-w-[14rem]">
+            <div className="text-sm font-semibold text-[--ink-1]">{rc.endOfRunTitle}</div>
+            <p className="text-xs text-[--ink-3] mt-1 leading-relaxed">{rc.endOfRunHelp}</p>
+          </div>
+          <Button variant={runActionVariant('finalizeRun')} disabled={busy} onClick={finalize}>{t.liveRuns.endRun}</Button>
+        </div>
+      )}
     </div>
   );
 }
 
+
 // Access code + shareable join link + QR — participants scan to land in the app
 // with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
-function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBoard?: () => Promise<void> }) {
+// Only the two first-five-minutes artifacts live here now: the code a host reads
+// out and the join link/QR players scan. The public board, ceremony, TV, recap
+// and staff links moved to the one consolidated "Share and screens" surface
+// (change: run-console-progressive-disclosure).
+function JoinShare({ accessCode }: { accessCode: string }) {
   const t = useT();
   const link = `${PLAY_URL}/?code=${accessCode}`;
-  const boardLink = `${PLAY_URL}/?board=${accessCode}`;
   const [qr, setQr] = useState('');
-  const [copied, setCopied] = useState('');
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     QRCode.toDataURL(link, { margin: 1, width: 200 }).then(setQr).catch(() => setQr(''));
   }, [link]);
-  async function copy(url: string, which: string) {
-    // Copy synchronously with the click (clipboard needs the user gesture),
-    // THEN publish the board for audience-facing links.
-    try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { /* no clipboard */ }
-    if (which !== 'join') await onShareBoard?.();
+  async function copy() {
+    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
   }
   return (
     <Card className="px-5 py-4 text-center">
@@ -437,16 +729,8 @@ function JoinShare({ accessCode, onShareBoard }: { accessCode: string; onShareBo
       <div className="text-2xl font-mono font-bold text-neon-green tracking-[0.3em] mb-2">{accessCode}</div>
       {qr && <img src={qr} alt={t.runConsole.joinQrCode} className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
       <div className="mt-2 flex flex-col gap-1">
-        <button className="text-xs text-neon-green hover:underline" onClick={() => copy(link, 'join')}>
-          {copied === 'join' ? t.runConsole.linkCopied : t.runConsole.copyJoinLink}
-        </button>
-        <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(boardLink, 'board')}>
-          {copied === 'board' ? t.runConsole.linkCopied : t.runConsole.copyBoardLink}
-        </button>
-        {/* Ceremony mode (ceremony-mode): the same board link with &ceremony plays
-            the awards finale (slideshow → podium reveal → standings). */}
-        <button className="text-xs text-zinc-400 hover:text-zinc-200 hover:underline" onClick={() => copy(`${boardLink}&ceremony`, 'ceremony')}>
-          {copied === 'ceremony' ? t.runConsole.linkCopied : t.runConsole.ceremonyLinkLabel}
+        <button className="text-xs text-neon-green hover:underline" onClick={copy}>
+          {copied ? t.runConsole.linkCopied : t.runConsole.copyJoinLink}
         </button>
       </div>
       {/* Temporary per-run phone ceiling (run-device-cap). Reads the SAME shared
@@ -575,14 +859,15 @@ function StationQrPrint({ gameId }: { gameId: string }) {
   );
 }
 
-function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; runId: string }; teams: RunTeamRow[] }) {
+// The announcement is a first-five-minutes control, so it lives in the primary
+// zone. Its label used to read "Announcement (persists)", leaking an
+// implementation detail where an explanation belongs: the persistence is now
+// explained by a tooltip (change: run-console-progressive-disclosure).
+function AnnouncementCard({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; runId: string }; teams: RunTeamRow[] }) {
   const t = useT();
   const [msg, setMsg] = useState('');
   const [teamTarget, setTeamTarget] = useState('');   // '' ⇒ all teams (global)
-  const [flash, setFlash] = useState('');
-  const [pts, setPts] = useState(50);
   const [busyMsg, setBusyMsg] = useState(false);
-  const [busyFlash, setBusyFlash] = useState(false);
 
   async function sendAnnouncement() {
     setBusyMsg(true);
@@ -594,43 +879,67 @@ function Broadcast({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; ru
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyMsg(false); }
   }
+
+  return (
+    <Card className="p-4 space-y-2">
+      <div className="flex items-center gap-1.5">
+        <Label>{t.runConsole.announcementPersists}</Label>
+        <RichTooltip concept="announcementPersistence" />
+      </div>
+      <select
+        className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+        value={teamTarget}
+        onChange={(e) => setTeamTarget(e.target.value)}
+      >
+        <option value="">{t.runConsole.announceAllTeams}</option>
+        {teams.map((team) => (
+          <option key={team.id} value={team.id}>{t.runConsole.announceToTeam({ name: team.displayName })}</option>
+        ))}
+      </select>
+      <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.runConsole.announcementPlaceholder} dir="auto" />
+      <Button variant={runActionVariant('broadcastAnnouncement')} className="w-full" disabled={!msg || busyMsg} onClick={sendAnnouncement}>
+        {t.runConsole.broadcast}
+      </Button>
+    </Card>
+  );
+}
+
+// A flash mission is an optional game system, not a first-five-minutes control,
+// so it sits in the "game systems" group. Its lifetime used to be a bare
+// `ttlSeconds: 600` at the call site, knowable only by reading the source: the
+// payload and the copy now read the same exported constant.
+function FlashMissionCard({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+  const t = useT();
+  const [flash, setFlash] = useState('');
+  const [pts, setPts] = useState(50);
+  const [busyFlash, setBusyFlash] = useState(false);
+
   async function sendFlash() {
     setBusyFlash(true);
-    try { await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: 600 }); setFlash(''); toast.success(t.runConsole.flashSent); }
+    try {
+      await pushFlashMission({ ...ctx, title: flash, bonusPoints: Math.max(0, pts), ttlSeconds: FLASH_MISSION_TTL_SECONDS });
+      setFlash('');
+      toast.success(t.runConsole.flashSent);
+    }
     catch { await dialog.alert(t.runConsole.broadcastFailed); }
     finally { setBusyFlash(false); }
   }
 
   return (
-    <>
-      <Card className="p-4 space-y-2">
-        <Label>{t.runConsole.announcementPersists}</Label>
-        <select
-          className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-          value={teamTarget}
-          onChange={(e) => setTeamTarget(e.target.value)}
-        >
-          <option value="">{t.runConsole.announceAllTeams}</option>
-          {teams.map((team) => (
-            <option key={team.id} value={team.id}>{t.runConsole.announceToTeam({ name: team.displayName })}</option>
-          ))}
-        </select>
-        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.runConsole.announcementPlaceholder} />
-        <Button className="w-full" disabled={!msg || busyMsg} onClick={sendAnnouncement}>
-          {t.runConsole.broadcast}
-        </Button>
-      </Card>
-      <Card className="p-4 space-y-2">
+    <Card className="p-4 space-y-2">
+      <div className="flex items-center gap-1.5">
         <Label>{t.runConsole.flashMissionTitle}</Label>
-        <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} />
-        <div className="flex gap-2">
-          <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} />
-          <Button disabled={!flash || busyFlash} onClick={sendFlash}>
-            {t.runConsole.push}
-          </Button>
-        </div>
-      </Card>
-    </>
+        <RichTooltip concept="flashMission" />
+      </div>
+      <p className="text-[11px] text-zinc-500">{t.runConsole.flashMissionTtlNote({ minutes: FLASH_MISSION_TTL_MINUTES })}</p>
+      <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} dir="auto" />
+      <div className="flex gap-2">
+        <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} />
+        <Button variant={runActionVariant('pushFlashMission')} disabled={!flash || busyFlash} onClick={sendFlash}>
+          {t.runConsole.push}
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -662,7 +971,10 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
 
   return (
     <Card className="p-4 space-y-3">
-      <div className="text-sm font-semibold">{t.runConsole.hotZoneTitle}</div>
+      <div className="flex items-center gap-1.5">
+        <div className="text-sm font-semibold">{t.runConsole.hotZoneTitle}</div>
+        <RichTooltip concept="hotZone" />
+      </div>
       <p className="text-xs text-zinc-500 leading-relaxed">{t.runConsole.hotZoneHelp}</p>
       {active && hotZone ? (
         <div className="space-y-2 text-sm">
@@ -686,30 +998,90 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
   );
 }
 
-// ── Post-run shareable links (tv-leaderboard / run-recap) ─────────────────────
-function PostRunLinks({ accessCode, finished, onShareBoard }: { accessCode: string; finished: boolean; onShareBoard?: () => Promise<void> }) {
-  const t = useT();
-  const [copied, setCopied] = useState('');
-  const tvUrl = `${PLAY_URL}/?${TV_ROUTE_PARAM}=${accessCode}`;
-  const recapUrl = `${PLAY_URL}/?${RECAP_ROUTE_PARAM}=${accessCode}`;
+// ── One share surface (change: run-console-progressive-disclosure) ────────────
+// A run has SEVEN shareable artifacts, and they used to be spread across three
+// cards, two of them labelled with nothing but the emoji '🔗'. Now every one has
+// a name, a line saying who it is for, and a named copy action; the URLs come
+// from buildShareArtifacts so they are identical to the ones hosts already have.
+function ShareScreens({ accessCode, ctx, status, hasStaffPin, onShareBoard }: {
+  accessCode: string;
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  status: RunStatus;
+  hasStaffPin: boolean;
+  onShareBoard?: () => Promise<void>;
+}) {
+  const rc = useT().runConsole;
+  const [copied, setCopied] = useState<ShareArtifactId | ''>('');
+  const artifacts = buildShareArtifacts({
+    playUrl: PLAY_URL, accessCode, ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId,
+    hasStaffPin, status,
+  });
 
-  async function copy(url: string, which: string) {
-    try { await navigator.clipboard.writeText(url); setCopied(which); setTimeout(() => setCopied(''), 2000); } catch { window.open(url, '_blank'); }
-    if (which === 'tv') await onShareBoard?.();
+  const NAME: Record<ShareArtifactId, string> = {
+    accessCode: rc.shareAccessCodeName, joinLink: rc.shareJoinName, boardLink: rc.shareBoardName,
+    ceremonyLink: rc.shareCeremonyName, tvScreen: rc.shareTvName, recap: rc.shareRecapName,
+    staffLink: rc.shareStaffName,
+  };
+  const DESC: Record<ShareArtifactId, string> = {
+    accessCode: rc.shareAccessCodeDesc, joinLink: rc.shareJoinDesc, boardLink: rc.shareBoardDesc,
+    ceremonyLink: rc.shareCeremonyDesc, tvScreen: rc.shareTvDesc, recap: rc.shareRecapDesc,
+    staffLink: rc.shareStaffDesc,
+  };
+
+  async function copy(entry: ReturnType<typeof buildShareArtifacts>[number]) {
+    // Copy synchronously with the click (the clipboard needs the user gesture),
+    // THEN publish the board for the audience facing links.
+    try {
+      await navigator.clipboard.writeText(entry.copyValue);
+      setCopied(entry.id);
+      setTimeout(() => setCopied(''), 2000);
+    } catch { /* no clipboard */ }
+    if (entry.requiresPublish) await onShareBoard?.();
   }
 
   return (
     <Card className="p-4 space-y-3">
-      <div className="text-sm font-semibold">{t.runConsole.postRunTitle}</div>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={async () => { window.open(tvUrl, '_blank'); await onShareBoard?.(); }}>{t.runConsole.tvScreen}</Button>
-        <Button variant="ghost" onClick={() => copy(tvUrl, 'tv')}>{copied === 'tv' ? t.runConsole.linkCopied : '🔗'}</Button>
-        {finished && (
-          <>
-            <Button variant="ghost" onClick={() => window.open(recapUrl, '_blank')}>{t.runConsole.shareRecap}</Button>
-            <Button variant="ghost" onClick={() => copy(recapUrl, 'recap')}>{copied === 'recap' ? t.runConsole.linkCopied : '🔗'}</Button>
-          </>
-        )}
+      <div className="text-sm font-semibold">{rc.shareTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed">{rc.shareIntro}</p>
+      <div className="space-y-2">
+        {artifacts.map((entry) => (
+          <div key={entry.id} className="rounded-lg bg-app-bg p-3 flex flex-wrap items-center gap-2">
+            <div className="flex-1 min-w-[12rem]">
+              <div className="text-sm text-zinc-200">{NAME[entry.id]}</div>
+              <div className="text-[11px] text-zinc-500 leading-relaxed">{DESC[entry.id]}</div>
+              {!entry.available && (
+                <div className="text-[11px] text-amber-400/90 mt-0.5">
+                  {entry.unavailableUntilFinished ? rc.shareAfterRunOnly
+                    : entry.unavailableAfterFinish ? rc.shareWhileOpenOnly
+                    : rc.shareStaffLocked}
+                </div>
+              )}
+            </div>
+            {entry.id === 'accessCode' && (
+              <span className="font-mono text-neon-green tracking-[0.2em] text-sm">{accessCode}</span>
+            )}
+            <Button
+              variant="ghost"
+              className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
+              disabled={!entry.available}
+              aria-label={rc.shareCopyAria({ name: NAME[entry.id] })}
+              onClick={() => void copy(entry)}
+            >
+              {copied === entry.id ? rc.linkCopied : rc.shareCopyAction}
+            </Button>
+            {entry.url && (
+              <Button
+                variant="ghost"
+                className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
+                disabled={!entry.available}
+                aria-label={rc.shareOpenAria({ name: NAME[entry.id] })}
+                onClick={async () => { window.open(entry.url!, '_blank'); if (entry.requiresPublish) await onShareBoard?.(); }}
+              >
+                {rc.shareOpenAction}
+              </Button>
+            )}
+          </div>
+        ))}
       </div>
     </Card>
   );
@@ -752,7 +1124,7 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
   }
 
   return (
-    <Card className="p-4 mt-4">
+    <Card className="p-4">
       <div className="text-sm font-medium mb-1">🎒 {rc.trackablesTitle}</div>
       <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.trackablesHelp}</p>
       <div className="flex gap-2 mb-3">
@@ -812,7 +1184,7 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
   }
 
   return (
-    <Card className="p-4 mt-4">
+    <Card className="p-4">
       <div className="text-sm font-medium mb-1">🚩 {rc.zonesTitle}</div>
       <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.zonesHelp}</p>
       <div className="flex flex-wrap gap-2 mb-2">
@@ -852,31 +1224,19 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
 //
 // The owner already has rules-level read on every team doc of its own run
 // (firestore.rules, match /teams/{teamId}), so no rules or index change is needed.
-function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; runId: string } }) {
+//
+// The queue itself is now computed by the page (the disclosure plan needs the
+// pending count for a FOLDED group's badge, and a collapsed group renders no
+// children), so this panel is presentational.
+function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, taskTitles }: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  pending: SubmissionRow[];
+  reviewed: SubmissionRow[];
+  pendingCount: number;
+  loadError: boolean;
+  taskTitles: ReadonlyMap<string, string>;
+}) {
   const rc = useT().runConsole;
-  const [teamDocs, setTeamDocs] = useState<SubmissionTeamDoc[]>([]);
-  // A read failure must NOT look like "no pending photos": at a live event a
-  // manager would silently miss submissions. Track it and show a distinct line
-  // (the listener auto-retries, so it clears itself on the next good snapshot).
-  const [loadError, setLoadError] = useState(false);
-  const { ownerUid, gameId, runId } = ctx;
-
-  useEffect(() => {
-    setLoadError(false);
-    const ref = collection(db, FIRESTORE_PATHS.teamsCol(ownerUid, gameId, runId));
-    return onSnapshot(ref, (snap) => {
-      setLoadError(false);
-      setTeamDocs(snap.docs.map((d) => {
-        const data = d.data() as { displayName?: string; taskSubmissions?: Record<string, RawSubmission> };
-        return { id: d.id, displayName: data.displayName, taskSubmissions: data.taskSubmissions };
-      }));
-    }, (err) => {
-      console.warn('[PhotoReviewConsole] submissions listener error', err);
-      setLoadError(true);
-    });
-  }, [ownerUid, gameId, runId]);
-
-  const { pending, reviewed, pendingCount } = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
 
   async function review(row: SubmissionRow, approved: boolean) {
     let note = '';
@@ -921,10 +1281,12 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
     );
   }
 
-  if (pendingCount === 0 && reviewed.length === 0 && !loadError) return null;
+  // The task's NAME, not the raw Firestore id the queue used to print where a
+  // task's name belongs (change: run-console-progressive-disclosure).
+  const taskLabel = (taskId: string) => resolveTaskLabel(taskId, taskTitles, (id) => rc.unknownTask({ id }));
 
   return (
-    <Card className="p-4 mt-4">
+    <Card className="p-4">
       <div className="flex items-center justify-between mb-1">
         <div className="text-sm font-medium">📷 {rc.photoReview}</div>
         {pendingCount > 0 && (
@@ -948,7 +1310,7 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
                   <Media row={row} />
                   <div dir="auto" className="text-xs text-zinc-200 truncate mt-2">{row.displayName}</div>
                   <div dir="auto" className="text-[11px] text-zinc-500 truncate">
-                    {rc.photoReviewTaskLabel} {row.taskId}
+                    {rc.photoReviewTaskLabel} {taskLabel(row.taskId)}
                   </div>
                   {row.submittedAt && (
                     <div className="text-[11px] text-zinc-600">
@@ -998,7 +1360,7 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
                     {row.status === 'approved' ? rc.photoReviewTagApproved : rc.photoReviewTagRejected}
                   </span>
                   <span dir="auto" className="text-zinc-300 truncate flex-1">{row.displayName}</span>
-                  <span dir="auto" className="text-zinc-600 truncate">{row.taskId}</span>
+                  <span dir="auto" className="text-zinc-600 truncate">{taskLabel(row.taskId)}</span>
                   <button
                     className="text-zinc-500 disabled:text-zinc-700 disabled:cursor-not-allowed"
                     disabled
@@ -1018,23 +1380,12 @@ function PhotoReviewConsole({ ctx }: { ctx: { ownerUid: string; gameId: string; 
 
 // Live photo feed console (change: live-photo-feed): the run's active feed items
 // (owner reads the collection directly; server writes only) with a hide action.
-function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: string; runId: string }) {
+// The feed listener moved to the page so a FOLDED moderation group can report
+// its contents; this panel renders what it is given.
+type FeedItemRow = { id: string; taskTitle: string; teamName: string; photoUrl: string; reactions?: Record<string, number>; createdAt?: string };
+
+function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gameId: string; runId: string; items: FeedItemRow[] }) {
   const rc = useT().runConsole;
-  const [items, setItems] = useState<{ id: string; taskTitle: string; teamName: string; photoUrl: string; reactions?: Record<string, number>; createdAt?: string }[]>([]);
-
-  useEffect(() => {
-    const ref = query(
-      collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`),
-      where('active', '==', true),
-    );
-    return onSnapshot(ref, (snap) => {
-      const rows = snap.docs.map((d) => ({ ...(d.data() as { taskTitle: string; teamName: string; photoUrl: string; reactions?: Record<string, number>; createdAt?: string }), id: d.id }));
-      rows.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-      setItems(rows);
-    }, () => undefined);
-  }, [ownerUid, gameId, runId]);
-
-  if (items.length === 0) return null;
 
   async function hide(itemId: string) {
     if (!(await dialog.confirm(rc.feedHideConfirm, undefined, true))) return;
@@ -1042,7 +1393,7 @@ function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: st
   }
 
   return (
-    <Card className="p-4 mt-4">
+    <Card className="p-4">
       <div className="text-sm font-medium mb-3">📸 {rc.feedTitle({ n: items.length })}</div>
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {items.map((item) => (
@@ -1056,9 +1407,15 @@ function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: st
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) || ''}
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) > 0 ? ' ❤' : ''}
                 </span>
-                <button className="text-[11px] text-neon-red" onClick={() => void hide(item.id)}>
+                {/* Hiding a player's photo is cautionary, so it is classified
+                    like every other console control rather than styled ad hoc. */}
+                <Button
+                  variant={runActionVariant('hideFeedPhoto')}
+                  className="min-h-0 px-2 py-0.5 text-[11px] rounded-lg"
+                  onClick={() => void hide(item.id)}
+                >
                   {rc.feedHideAction}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -1073,25 +1430,19 @@ function FeedConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: st
 // thread with new messages since it was last opened shows an unread badge (local).
 interface ChatThreadRow { teamId: string; messages: ChatMessage[]; updatedAt: string }
 
-function ChatConsole({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; runId: string }; teams: RunTeamRow[] }) {
+// The thread listener and the read/unread bookkeeping moved to the page, which
+// needs the unread count for the folded moderation badge.
+function ChatConsole({ ctx, teams, threads, seen, onSeen }: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  teams: RunTeamRow[];
+  threads: ChatThreadRow[];
+  seen: Record<string, number>;
+  onSeen: (teamId: string, count: number) => void;
+}) {
   const rc = useT().runConsole;
-  const [threads, setThreads] = useState<ChatThreadRow[]>([]);
   const [openTeam, setOpenTeam] = useState<string | null>(null);
-  const [seen, setSeen] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    const ref = collection(db, FIRESTORE_PATHS.runChatCol(ctx.ownerUid, ctx.gameId, ctx.runId));
-    return onSnapshot(ref, (snap) => {
-      const rows = snap.docs.map((d) => {
-        const data = d.data() as { messages?: ChatMessage[]; updatedAt?: string };
-        return { teamId: d.id, messages: data.messages ?? [], updatedAt: data.updatedAt ?? '' };
-      });
-      rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-      setThreads(rows);
-    }, () => undefined);
-  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
 
   // Keep the currently-open thread marked read as its message count grows — an HQ
   // reply (or a message that arrives while HQ is watching) must not re-badge the
@@ -1100,17 +1451,16 @@ function ChatConsole({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; 
     if (!openTeam) return;
     const th = threads.find((x) => x.teamId === openTeam);
     if (!th) return;
-    setSeen((s) => (s[openTeam] === th.messages.length ? s : { ...s, [openTeam]: th.messages.length }));
-  }, [openTeam, threads]);
+    onSeen(openTeam, th.messages.length);
+  }, [openTeam, threads, onSeen]);
 
-  if (threads.length === 0) return null;
-
-  const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
+  // A team's NAME, never a truncated document id.
+  const nameFor = (teamId: string) => resolveTeamLabel(teamId, teams, (id) => rc.unknownTeam({ id }));
 
   function expand(teamId: string, count: number) {
     setOpenTeam((cur) => {
       const next = cur === teamId ? null : teamId;
-      if (next) setSeen((s) => ({ ...s, [teamId]: count }));
+      if (next) onSeen(teamId, count);
       return next;
     });
     setDraft('');
@@ -1130,7 +1480,7 @@ function ChatConsole({ ctx, teams }: { ctx: { ownerUid: string; gameId: string; 
   const totalUnread = threads.reduce((n, th) => n + (th.messages.length > (seen[th.teamId] ?? 0) ? 1 : 0), 0);
 
   return (
-    <Card className="p-4 mt-4">
+    <Card className="p-4">
       <div className="text-sm font-medium mb-3">
         💬 {rc.chatTitle}
         {totalUnread > 0 && (
@@ -1604,30 +1954,21 @@ function Distribution({ title, bars }: { title: string; bars: [string, number][]
 // ── Survey results (change: survey-tasks) — owner/staff read-only aggregation ──
 // Per-choice bar counts for choice surveys; a {teamName, response} list for
 // free-text. Fetched on mount + a manual refresh (live poll results during a run).
-function SurveyResultsPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
+// Loading moved to the page: a collapsed group's panel cannot load the results
+// and then report how many there are, which is what the plan needs to decide
+// whether the group renders at all. Rendering is unchanged.
+function SurveyResultsPanel({ results, loading, onRefresh }: {
+  results: SurveyResultRow[] | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
   const t = useT();
-  const [results, setResults] = useState<SurveyResultRow[] | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(() => {
-    if (!gameId || !runId) return;
-    setLoading(true);
-    getRunSurveyResults({ gameId, runId })
-      .then((d) => setResults(d.results))
-      .catch(() => undefined)
-      .finally(() => setLoading(false));
-  }, [gameId, runId]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // No survey tasks in this game ⇒ render nothing (keep the console uncluttered).
-  if (results !== null && results.length === 0) return null;
 
   return (
     <Card className="p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">{t.runConsole.surveyTitle}</div>
-        <Button variant="ghost" className="text-xs" disabled={loading} onClick={load}>
+        <Button variant="ghost" className="text-xs" disabled={loading} onClick={onRefresh}>
           {loading ? t.runConsole.surveyRefreshing : t.runConsole.surveyRefresh}
         </Button>
       </div>

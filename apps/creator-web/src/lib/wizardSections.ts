@@ -62,8 +62,24 @@ export function defaultOpenSections(task: Task): Record<SectionKey, boolean> {
     unlock: (task.unlockAfterTaskIds?.length ?? 0) > 0,
     media: (task.media?.length ?? 0) > 0,
     rules: !!task.requirePresence || !!task.hideLocation,
-    advanced: false,
+    // ONE rule, two consumers (change: builder-first-task-flow): the section
+    // opens exactly when its badge would show a count, so a configured expiry or
+    // a carried release instant can never be invisible at rest.
+    advanced: sectionSummary('advanced', task) > 0,
   };
+}
+
+// The advanced section's OPTIONAL settings: the fields a fresh blankTask() does
+// NOT carry. `pointValue`, `estimatedMinutes` and `maxConcurrentTeams` are
+// excluded because every task ships with them, so counting them would badge the
+// whole game (which is the same as no badge at all); `geofenceRadiusMeters` is
+// excluded because selecting a located trigger mode auto seeds it, making it a
+// default rather than a decision.
+function advancedSettingCount(task: Task): number {
+  const minutes = (v: number | undefined): boolean => typeof v === 'number' && Number.isFinite(v) && v > 0;
+  return (minutes(task.expiresAfterMinutes) ? 1 : 0)
+    + (minutes(task.releaseAfterMinutes) ? 1 : 0)
+    + (filled(task.releaseAt) ? 1 : 0);
 }
 
 /**
@@ -77,7 +93,7 @@ export function sectionSummary(key: SectionKey, task: Task): number {
     case 'unlock': return task.unlockAfterTaskIds?.length ?? 0;
     case 'media': return task.media?.length ?? 0;
     case 'rules': return (task.requirePresence ? 1 : 0) + (task.hideLocation ? 1 : 0);
-    case 'advanced':
+    case 'advanced': return advancedSettingCount(task);
     default:
       return 0;
   }

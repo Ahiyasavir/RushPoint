@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Skeleton } from '../components/ui';
+import { Button, Card, EmptyState, Skeleton } from '../components/ui';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
 import { useLiveRuns } from '../hooks/useLiveRuns';
@@ -46,7 +46,14 @@ export default function RunsOverviewPage() {
       )}
 
       {runs && runs.length === 0 ? (
-        <Card className="p-8 text-center text-zinc-500">{r.empty}</Card>
+        <Card className="p-0">
+          <EmptyState
+            icon="🏁"
+            title={r.emptyTitle}
+            body={r.empty}
+            action={<Button onClick={() => nav('/')}>{r.emptyCta}</Button>}
+          />
+        </Card>
       ) : (
         <div className="space-y-3">
           {(runs ?? []).map((run) => (

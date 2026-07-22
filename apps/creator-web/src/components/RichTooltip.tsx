@@ -11,8 +11,14 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from './LanguageContext';
+import { FLASH_MISSION_TTL_MINUTES } from '../lib/runConsoleActions';
 
-export type TooltipConcept = 'geofence' | 'hint' | 'concurrent' | 'difficulty';
+// Builder concepts read their copy from t.builder.*; the Run Console concepts
+// (change: run-console-progressive-disclosure) read theirs from t.runConsole.*.
+// A concept without a diagram renders text only, which is why `svgs` is partial.
+export type TooltipConcept =
+  | 'geofence' | 'hint' | 'concurrent' | 'difficulty'
+  | 'flashMission' | 'announcementPersistence' | 'hotZone' | 'runBilling';
 
 type ConceptTooltip = { concept: TooltipConcept; title?: never; body?: never; svg?: never };
 type DirectTooltip = { concept?: never; title: string; body: string; svg?: ReactNode };
@@ -21,7 +27,7 @@ type TooltipProps = (ConceptTooltip | DirectTooltip) & { children?: ReactNode };
 // Only the (illustrative, asset-light) SVGs live here; the title + body come from
 // i18n so the tooltip is localized. The difficulty diagram's axis labels are
 // passed in (easyLabel/hardLabel) so they localize too.
-function buildSvgs(easyLabel: string, hardLabel: string): Record<TooltipConcept, ReactNode> {
+function buildSvgs(easyLabel: string, hardLabel: string): Partial<Record<TooltipConcept, ReactNode>> {
   return {
     geofence: (
         <svg viewBox="0 0 120 60" className="w-full h-14">
@@ -73,12 +79,18 @@ type Coords = { top: number; left: number; placement: 'top' | 'bottom' };
 
 export default function RichTooltip({ concept, title: titleProp, body: bodyProp, svg: svgProp, children }: TooltipProps) {
   const id = useId();
-  const b = useT().builder;
+  const t = useT();
+  const b = t.builder;
+  const rc = t.runConsole;
   const TEXT: Record<TooltipConcept, { title: string; body: string }> = {
     geofence: { title: b.tipGeofenceTitle, body: b.tipGeofenceBody },
     hint: { title: b.tipHintTitle, body: b.tipHintBody },
     concurrent: { title: b.tipConcurrentTitle, body: b.tipConcurrentBody },
     difficulty: { title: b.tipDifficultyTitle, body: b.tipDifficultyBody },
+    flashMission: { title: rc.tipFlashMissionTitle, body: rc.tipFlashMissionBody({ minutes: FLASH_MISSION_TTL_MINUTES }) },
+    announcementPersistence: { title: rc.tipAnnouncementTitle, body: rc.tipAnnouncementBody },
+    hotZone: { title: rc.tipHotZoneTitle, body: rc.tipHotZoneBody },
+    runBilling: { title: rc.tipBillingTitle, body: rc.tipBillingBody },
   };
   const svgs = buildSvgs(b.diffEasy, b.diffHard);
   const d = concept
@@ -170,7 +182,7 @@ export default function RichTooltip({ concept, title: titleProp, body: bodyProp,
           className="pointer-events-none z-[60] rounded-xl border border-[--rp-border] bg-[--surface-1] p-3 shadow-soft"
         >
           <div className="text-xs font-semibold text-[--ink-1] mb-1">{d.title}</div>
-          <div className="rounded-lg bg-[--surface-2] text-[--ink-2] mb-1.5">{d.svg}</div>
+          {d.svg && <div className="rounded-lg bg-[--surface-2] text-[--ink-2] mb-1.5">{d.svg}</div>}
           <div className="text-[11px] text-[--ink-3] leading-snug">{d.body}</div>
         </div>,
         document.body,

@@ -12,8 +12,10 @@ import { barMode, runConsolePath, selectFeaturedRun, shouldShowBar } from '../ho
 // Persistent floating control bar for a creator's live run (docs/wave-a/active-run-bar.md).
 // Mounted app-wide as a sibling of DialogHost/ToastHost so it survives route changes:
 // wherever the creator wanders, the run they launched is one tap away — plus a
-// guarded "End run". It hides on the featured run's own console and on /live
-// (those surfaces already own the controls) and collapses to a pill in the Builder,
+// guarded "End run" (the SAME verb the console uses — one action, one name). It
+// hides on ANY run console and on /live (those surfaces already own the
+// controls, and the bar features one run, so on another run's console its
+// "End run" would end the wrong event) and collapses to a pill in the Builder,
 // whose h-screen 3-pane workspace runs to the viewport edge.
 export default function ActiveRunBar() {
   const { user } = useAuth();

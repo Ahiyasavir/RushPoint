@@ -1,17 +1,30 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import type { Game } from '@rushpoint/shared';
-import { PAYMENTS_ENABLED, resolvePlayOrigin, validateUnlockGraph } from '@rushpoint/shared';
+import type { Game, ScoringPreset } from '@rushpoint/shared';
+import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
-import { Badge, Button, Card, Skeleton } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
+import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
+import { toast } from '../components/toast';
 import { ShareSheet } from '../components/ShareSheet';
 import { TEMPLATES, type GameTemplate } from '../templates';
-import { isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
+import { firstLaunchBlocker, type ReadinessIssue } from '../lib/gameReadiness';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
+import { useLiveRuns } from '../hooks/useLiveRuns';
+import { liveRunForGame } from '../lib/creatorNav';
+import {
+  KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY,
+  buildOnboardingChecklist, readKnownGameCount, readPreviewedGames, skeletonCardCount,
+  type OnboardingStepId,
+} from '../lib/creatorOnboarding';
+import {
+  CREATE_GAME_TARGET, QUICK_CARD_IDS, describeGameSettings, quickCardTarget,
+  templateDescription, templateLabel,
+} from '../lib/templateLabels';
 
 // Module-level cache so navigating back to dashboard is instant (no spinner).
 // Scoped to the owner uid: sign-out doesn't reload the page, so without the uid
@@ -35,6 +48,70 @@ function getAccentBar(g: Game): string {
   return 'from-rp-fire to-rp-amber';
 }
 
+// localStorage is read through these so a blocked or malformed store degrades to
+// a sensible default instead of throwing on first paint.
+function readFlag(key: string): boolean {
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+function readStoredPreviewed(): string[] {
+  try { return readPreviewedGames(localStorage.getItem(PREVIEWED_STORAGE_KEY)); } catch { return []; }
+}
+
+// First-run checklist. Every step's state is derived by buildOnboardingChecklist
+// from the creator's real games and runs, so there is deliberately no
+// "mark as done" control here.
+function OnboardingChecklist({ checklist, onDismiss }: {
+  checklist: { steps: { id: OnboardingStepId; done: boolean }[]; completedCount: number };
+  onDismiss: () => void;
+}) {
+  const t = useT();
+  const o = t.dashboard.onboarding;
+  return (
+    <section className="mb-10 rounded-3xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] backdrop-blur-sm p-6 animate-fade-up">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 className="font-brand text-xl font-extrabold text-[--ink-1]">{o.title}</h2>
+          <p className="text-sm text-[--ink-3] mt-1">{o.body}</p>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className="text-xs font-semibold text-[--ink-3] tabular-nums">
+            {o.progress({ done: checklist.completedCount, total: checklist.steps.length })}
+          </span>
+          <button
+            onClick={onDismiss}
+            className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+          >
+            {o.dismiss}
+          </button>
+        </div>
+      </div>
+      <ol className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+        {checklist.steps.map((step, i) => {
+          const copy = o.steps[step.id];
+          return (
+            <li key={step.id}
+              className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+                step.done ? 'border-rp-go/40 bg-rp-go/5' : 'border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40'}`}
+            >
+              <span aria-hidden="true"
+                className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                  step.done ? 'bg-rp-go/20 text-rp-go' : 'bg-[--surface-2] text-[--ink-3]'}`}
+              >
+                {step.done ? '✓' : i + 1}
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[--ink-1]">{copy.title}</div>
+                <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{copy.body}</p>
+                {step.done && <span className="sr-only">{o.stepDone}</span>}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
 const TASK_TYPE_EMOJI: Record<string, string> = {
   field: '📍', self_report: '✅', smart_station: '🔢',
   photo: '📷', quiz: '❓', numeric: '#️⃣', geofence: '📡', sequence: '🧩', survey: '🗳️',
@@ -56,7 +133,19 @@ export default function DashboardPage() {
 
   const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
   const [picking, setPicking] = useState(false);
+  // The template the creator selected but has not confirmed yet — the moment the
+  // play mode and scoring style are DISCLOSED instead of silently assigned.
+  const [chosen, setChosen] = useState<GameTemplate | null>(null);
+  const [chosenPreset, setChosenPreset] = useState<ScoringPreset>('smart_weighted');
+  // First-run checklist. Only `dismissed` is stored; every step is derived.
+  const [dismissed, setDismissed] = useState(() => readFlag(ONBOARDING_DISMISSED_KEY));
+  const previewedGameIds = readStoredPreviewed();
+  const { runs: liveRuns } = useLiveRuns();
   const [sharing, setSharing] = useState<Game | null>(null);
+  // The game whose delete confirmation is open (change: recoverable-game-deletion).
+  // A creator destroyed a real game with the old single-click dialog.confirm, so
+  // deleting now costs a deliberate act: type this game's title.
+  const [deleting, setDeleting] = useState<Game | null>(null);
 
   // Double-click / re-entrancy guards (change: wave-b/async-action-guard). A
   // `useState` busy flag can't stop a second click in the SAME React batch —
@@ -64,7 +153,7 @@ export default function DashboardPage() {
   // callable. These hold for the whole duration of the promise instead.
   // launch/publish/delete are keyed by game id so acting on one card never
   // blocks another.
-  const newGameAction = useAsyncAction(newGame);
+  const newGameAction = useAsyncAction<[GameTemplate, ScoringPreset?], void>(newGame);
   const launchAction = useAsyncAction<[Game, { testDrive?: boolean }?], void>(launch, (g) => g.id);
   const publishAction = useAsyncAction(togglePublish, (g: Game) => g.id);
   const removeAction = useAsyncAction(remove, (g: Game) => g.id);
@@ -75,6 +164,9 @@ export default function DashboardPage() {
     try {
       const { games } = await listGames();
       if (user?.uid) _gamesCache = { uid: user.uid, data: games, ts: Date.now() };
+      // Remember the count so the NEXT first paint draws a placeholder that
+      // matches what this creator actually has (never six cards for zero games).
+      try { localStorage.setItem(KNOWN_GAME_COUNT_KEY, String(games.length)); } catch { /* storage unavailable */ }
       setGames(games);
     } catch (e) {
       // Escape the spinner on a first-load failure, but never blank an already-
@@ -98,36 +190,74 @@ export default function DashboardPage() {
     return () => { document.body.style.overflow = prev; };
   }, [picking]);
 
-  async function newGame(tpl: GameTemplate) {
+  async function newGame(tpl: GameTemplate, preset: ScoringPreset = tpl.scoringPreset) {
     setPicking(false);
-    const title = tpl.key === 'blank' ? d.untitledGame : tpl.label;
-    const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
-    const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
-    await updateGame({ gameId, stages, scoringPreset: tpl.scoringPreset });
-    // Invalidate the games cache — otherwise returning to the dashboard within
-    // the TTL serves a stale list that's missing this just-created game.
-    _gamesCache = null;
-    nav(`/build/${gameId}`);
+    setChosen(null);
+    // The title follows the interface language now that the name is translated.
+    const title = tpl.key === 'blank' ? d.untitledGame : templateLabel(tpl.key, t);
+    try {
+      const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
+      const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
+      // Same callable, same fields — but with the scoring style the creator saw
+      // and could change, rather than one assigned invisibly.
+      // Wrong-answer cost (change: wrong-answer-cost): NEW games are seeded at the
+      // default level so brute forcing a quiz is no longer free. It is written
+      // explicitly (never inferred from an absent field) so the Builder's selector
+      // shows the creator what they got, and so no PRE-EXISTING game is ever
+      // changed underneath a live run.
+      await updateGame({
+        gameId, stages, scoringPreset: preset,
+        scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
+      });
+      // Invalidate the games cache — otherwise returning to the dashboard within
+      // the TTL serves a stale list that's missing this just-created game.
+      _gamesCache = null;
+      nav(`/build/${gameId}`);
+    } catch (e) {
+      // The picker closes FIRST, so a failure here used to leave the creator on
+      // an unchanged dashboard with no game, no navigation and no error at all
+      // (change: play-no-silent-failures). Re-open the picker so the choice the
+      // creator already made is not lost.
+      console.error('[dashboard] create from template failed:', e);
+      await dialog.alert(d.templateFailed);
+      setPicking(true);
+      setChosen(tpl);
+      setChosenPreset(preset);
+    }
+  }
+
+  // The Dashboard's rendering of a readiness issue. The wording for the three
+  // issues the old inline guards could produce is unchanged, byte for byte; the
+  // fourth (a stage with no tasks) reuses the Builder's readiness label, which
+  // the Dashboard could never reach before because it never ran that rule.
+  function launchBlockedMessage(issue: ReadinessIssue): string {
+    switch (issue.code) {
+      case 'stageHasNoTask':
+        // No stageId at all = a game with no stages, the old d.emptyBody case.
+        return issue.stageId
+          ? `${b.issueStageHasNoTask}\n${issue.stageTitle || b.untitledStage}`
+          : d.emptyBody;
+      case 'taskNotCompletable':
+        return b.taskNotCompletable(issue.taskTitle || b.untitledTask);
+      case 'taskNotPlaced':
+        return b.taskNeedsLocation(issue.taskTitle || b.untitledTask);
+      case 'stageUnwinnable':
+        return b.stageUnwinnable(issue.stageTitle || b.stageTitlePlaceholder);
+    }
   }
 
   async function launch(g: Game, opts?: { testDrive?: boolean }) {
-    if (g.stages.length === 0) { await dialog.alert(d.emptyBody); return; }
-    // Don't launch an unplayable game: a quiz/numeric/station/sequence task missing
-    // its answer key can never be completed (updateGame doesn't reject these).
-    const badTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
-    if (badTask) { await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return; }
-    // Block a located task left at (0,0): a radius/exact task with no real pin would
-    // route teams to the null island (Gulf of Guinea) and can never be completed.
-    const noPinTask = g.stages.flatMap((s) => s.tasks).find((tk) => !isTaskLocationValid(tk));
-    if (noPinTask) { await dialog.alert(b.taskNeedsLocation(noPinTask.title || b.untitledTask)); return; }
-    // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
-    // actually complete (the Builder only shows a soft warning; the Dashboard has
-    // no stage view at all, so this is the only place it's caught from here).
-    const brokenStage = g.stages.find((s) => {
-      const r = validateUnlockGraph(s);
-      return r.warnings.length > 0 || r.errors.length > 0;
-    });
-    if (brokenStage) { await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return; }
+    // ONE launch rule (change: builder-first-task-flow). These used to be four
+    // inline predicates duplicating the Builder's guards, and they had already
+    // drifted: the Dashboard never checked for a stage with NO tasks, so it
+    // would happily launch a game the Builder refused. `lib/gameReadiness` is
+    // now the single source of truth for both. The Dashboard has no readiness
+    // panel to point at, so it still names one offender, exactly as before.
+    const blocker = firstLaunchBlocker(g);
+    if (blocker) {
+      await dialog.alert(launchBlockedMessage(blocker));
+      return;
+    }
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
@@ -143,20 +273,50 @@ export default function DashboardPage() {
     }
   }
 
+  // Deleting is now reversible AND deliberate. The old body was a single
+  // dialog.confirm whose accept button was one click away from an irreversible
+  // recursiveDelete of the game and every run, team and photo under it.
   async function remove(g: Game) {
-    if (!(await dialog.confirm(d.deleteConfirm(g.title), d.deleteBtn, true))) return;
-    await deleteGame({ gameId: g.id });
-    void load(true);
+    try {
+      await deleteGame({ gameId: g.id });
+      setDeleting(null);
+      void load(true);
+    } catch (e) {
+      // The one expected failure: a run is still in progress. The server message
+      // names the access code, so surface it rather than a generic error.
+      const msg = e instanceof Error ? e.message : d.deleteFailed;
+      setDeleting(null);
+      await dialog.alert(msg);
+    }
   }
 
   async function togglePublish(g: Game) {
-    await publishGame({ gameId: g.id, visibility: g.visibility === 'public' ? 'private' : 'public' });
-    void load(true);
+    try {
+      await publishGame({ gameId: g.id, visibility: g.visibility === 'public' ? 'private' : 'public' });
+      void load(true);
+    } catch (e) {
+      // A failed publish used to be reported ONLY by the badge not changing
+      // (change: play-no-silent-failures).
+      console.error('[dashboard] publishGame failed:', e);
+      toast.error(d.publishFailed);
+    }
   }
 
   if (!games) return <DashboardSkeleton />;
 
   const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
+  // Derived from the creator's REAL games and runs. Nothing here reads a stored
+  // progress flag, so the list can never claim a step is behind them when it is not.
+  const checklist = buildOnboardingChecklist({
+    games: games.map((g) => ({ id: g.id, stages: g.stages, playCount: g.playCount })),
+    runs: (liveRuns ?? []).map((r) => ({ runId: r.runId })),
+    previewedGameIds,
+    dismissed,
+  });
+  function dismissChecklist() {
+    setDismissed(true);
+    try { localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1'); } catch { /* storage unavailable */ }
+  }
   const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? d.creatorFallback;
 
   return (
@@ -177,13 +337,24 @@ export default function DashboardPage() {
             <p className="text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
           </div>
 
-          <Button
-            disabled={busy}
-            onClick={() => setPicking(true)}
-            className="!px-6 !py-2.5 !text-sm shrink-0 flex items-center gap-2"
-          >
-            {d.newGame}
-          </Button>
+          <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
+            <Button
+              disabled={busy}
+              onClick={() => setPicking(true)}
+              className="!px-6 !py-2.5 !text-sm flex items-center gap-2"
+            >
+              {d.newGame}
+            </Button>
+            {/* Recently deleted (change: recoverable-game-deletion). A rarely
+                opened recovery surface, so it lives here rather than competing
+                with Build/Gallery/Wallet in the top nav. */}
+            <button
+              onClick={() => nav('/trash')}
+              className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            >
+              {d.trashLink}
+            </button>
+          </div>
         </div>
 
         {/* Stats row */}
@@ -212,19 +383,23 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* ── First-run checklist (change: creator-onboarding-and-plain-language) ── */}
+      {checklist.visible && (
+        <OnboardingChecklist checklist={checklist} onDismiss={dismissChecklist} />
+      )}
+
       {/* ── Empty state ───────────────────────────────────────────────────── */}
       {games.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center">
-          <div
-            className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mb-6"
-            style={{ background: 'linear-gradient(135deg, rgba(255,87,34,0.15) 0%, rgba(255,179,0,0.10) 100%)', boxShadow: '0 0 40px rgba(255,87,34,0.15)' }}
-          >🗺️</div>
-          <h3 className="font-brand text-2xl font-bold text-[--ink-1] mb-2">{d.emptyTitle}</h3>
-          <p className="text-[--ink-3] text-sm mb-8 max-w-xs leading-relaxed">{d.emptyBody}</p>
-          <Button disabled={busy} onClick={() => setPicking(true)} className="!px-8 !py-3 !text-base">
-            {d.emptyBtn}
-          </Button>
-        </div>
+        <EmptyState
+          icon="🗺️"
+          title={d.emptyTitle}
+          body={d.emptyBody}
+          action={
+            <Button disabled={busy} onClick={() => setPicking(true)} className="!px-8 !py-3 !text-base">
+              {d.emptyBtn}
+            </Button>
+          }
+        />
 
       ) : (
         /* ── Game cards ──────────────────────────────────────────────────── */
@@ -232,6 +407,9 @@ export default function DashboardPage() {
           {games.map((g, idx) => {
             const taskCount = g.stages.reduce((s, st) => s + st.tasks.length, 0);
             const allTaskTypes = [...new Set(g.stages.flatMap(st => st.tasks.map(tsk => tsk.type)))].slice(0, 4);
+            // A run in progress is now reachable from the game it belongs to,
+            // which is what replaces the removed top-level "Live runs" menu.
+            const live = liveRunForGame(g.id, liveRuns);
 
             return (
               <div key={g.id} className="animate-fade-up" style={{ animationDelay: `${idx * 60}ms` }}>
@@ -266,6 +444,16 @@ export default function DashboardPage() {
                       <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                       <span>{d.cardPlays(g.playCount ?? 0)}</span>
                     </div>
+
+                    {live && (
+                      <button
+                        onClick={() => nav(`/run/${live.gameId}/${live.runId}`)}
+                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-rp-alert bg-rp-alert/10 hover:bg-rp-alert/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
+                      >
+                        <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rp-alert animate-pulse" />
+                        {d.cardOpenRun}
+                      </button>
+                    )}
 
                     <div className="flex gap-2 mt-auto">
                       <button
@@ -309,7 +497,7 @@ export default function DashboardPage() {
                       <button
                         className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40 disabled:opacity-40 disabled:cursor-not-allowed"
                         disabled={removeAction.isBusy(g.id)}
-                        onClick={() => void removeAction.run(g)}
+                        onClick={() => setDeleting(g)}
                       >
                         {d.cardDelete}
                       </button>
@@ -367,10 +555,10 @@ export default function DashboardPage() {
               (PAYMENTS_ENABLED === false), matching the hidden /wallet nav + route. */}
           <div className="grid sm:grid-cols-3 gap-4">
             {d.quickCards
-              .map((a, i) => ({ a, target: ['/', '/gallery', '/wallet'][i] ?? '/' }))
-              .filter(({ target }) => PAYMENTS_ENABLED || target !== '/wallet')
+              .map((a, i) => ({ a, id: QUICK_CARD_IDS[i], target: quickCardTarget(QUICK_CARD_IDS[i], games) }))
+              .filter(({ id }) => PAYMENTS_ENABLED || id !== 'wallet')
               .map(({ a, target }, i) => (
-                <button key={a.title} onClick={() => nav(target)}
+                <button key={a.title} onClick={() => { if (target === CREATE_GAME_TARGET) setPicking(true); else nav(target); }}
                   className="group text-start rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] backdrop-blur-sm p-5 hover:-translate-y-1 hover:border-rp-fire/30 hover:shadow-[0_12px_32px_-12px_rgba(255,87,34,0.25)] transition-all duration-200 animate-fade-up"
                   style={{ animationDelay: `${160 + i * 60}ms` }}
                 >
@@ -386,7 +574,7 @@ export default function DashboardPage() {
 
       {/* ── Template picker modal ─────────────────────────────────────────── */}
       {picking && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setPicking(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
             className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
@@ -398,7 +586,7 @@ export default function DashboardPage() {
                 <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
                 <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
               </div>
-              <button onClick={() => setPicking(false)}
+              <button onClick={() => { setPicking(false); setChosen(null); }}
                 className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
             </div>
             {/* Body — bounded to the modal; the compact cards fit without scrolling
@@ -406,17 +594,54 @@ export default function DashboardPage() {
                 a very short viewport. */}
             <div className="overflow-y-auto p-5 pt-4">
               <div className="grid sm:grid-cols-2 gap-2.5">
-                {TEMPLATES.map((tpl) => (
-                  <button key={tpl.key} disabled={busy} onClick={() => void newGameAction.run(tpl)}
-                    className="flex items-start gap-3 text-start rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group">
+                {TEMPLATES.map((tpl) => {
+                  const selected = chosen?.key === tpl.key;
+                  return (
+                  <button key={tpl.key} disabled={busy}
+                    onClick={() => { setChosen(tpl); setChosenPreset(tpl.scoringPreset); }}
+                    aria-pressed={selected}
+                    className={`flex items-start gap-3 text-start rounded-xl border bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group ${
+                      selected ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}>
                     <div className="text-2xl leading-none shrink-0 mt-0.5">{tpl.emoji}</div>
                     <div className="min-w-0">
-                      <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{tpl.label}</div>
-                      <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{tpl.description}</div>
+                      <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{templateLabel(tpl.key, t)}</div>
+                      <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{templateDescription(tpl.key, t)}</div>
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
+
+              {/* Nothing that shapes the game is assigned invisibly: the play mode
+                  and the scoring style are stated here, and the scoring style can
+                  be changed BEFORE the game is created. */}
+              {chosen && (
+                <div className="mt-4 rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40 p-4">
+                  <p className="text-[11px] text-[--ink-3] mb-3">{d.settingsIntro}</p>
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label>{d.modeLabel}</Label>
+                      <p className="text-sm text-[--ink-2]">{describeGameSettings(chosen.mode, chosenPreset, t).mode}</p>
+                    </div>
+                    <div>
+                      <Label>{d.scoringLabel}</Label>
+                      <Select value={chosenPreset} onChange={(e) => setChosenPreset(e.target.value as ScoringPreset)}>
+                        <option value="time_only">{d.scoringTimeOnly}</option>
+                        <option value="fixed_points_speed">{d.scoringFixedPointsSpeed}</option>
+                        <option value="smart_weighted">{d.scoringSmartWeighted}</option>
+                      </Select>
+                    </div>
+                  </div>
+                  <Button
+                    className="mt-4 w-full"
+                    disabled={busy}
+                    loading={newGameAction.busy}
+                    onClick={() => void newGameAction.run(chosen, chosenPreset)}
+                  >
+                    {d.createFromTemplate}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>,
@@ -437,6 +662,70 @@ export default function DashboardPage() {
           onClose={() => setSharing(null)}
         />
       )}
+
+      {/* ── Delete confirmation (change: recoverable-game-deletion) ────────── */}
+      {deleting && createPortal(
+        <DeleteGameDialog
+          game={deleting}
+          busy={removeAction.isBusy(deleting.id)}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => void removeAction.run(deleting)}
+        />,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+// Two-step, type-the-title confirmation for deleting a game.
+//
+// Reuses the mechanics and tone of the Settings danger zone (SettingsPage
+// DangerCard) with ONE deliberate difference: the creator types the GAME'S OWN
+// TITLE, not a fixed word. The incident was deleting the WRONG game, and a fixed
+// word like "DELETE" reads identically on every card, so it cannot discriminate
+// between two of them. The copy also states the truth that is now true: the game
+// is recoverable for the whole retention window.
+function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
+  game: Game;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const t = useT();
+  const d = t.dashboard;
+  const [typed, setTyped] = useState('');
+  const confirmed = matchesGameDeleteConfirmation(typed, game.title);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div
+        className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="font-brand font-bold text-rp-alert text-lg mb-1">{d.deleteDialogTitle}</div>
+        <p className="text-xs text-[--ink-2] leading-relaxed mb-1">{d.deleteDialogBody(game.title)}</p>
+        <p className="text-xs text-[--ink-3] leading-relaxed mb-4">{d.deleteDialogRecoverable(GAME_TRASH_RETENTION_DAYS)}</p>
+
+        <Label>{d.deleteDialogHint}</Label>
+        <Input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder={game.title}
+          disabled={busy}
+          autoFocus
+          dir="auto"
+        />
+
+        <div className="flex gap-2 mt-4">
+          <Button variant="danger" disabled={!confirmed || busy} loading={busy} onClick={onConfirm}>
+            {d.deleteDialogCta}
+          </Button>
+          <Button variant="ghost" disabled={busy} onClick={onCancel}>
+            {d.deleteDialogCancel}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -444,6 +733,11 @@ export default function DashboardPage() {
 // Content-shaped loading placeholder mirroring the hero + stats + card grid, so
 // the first paint has the same footprint as the loaded dashboard (no layout jump).
 function DashboardSkeleton() {
+  // A creator with no games used to watch six game-card placeholders resolve
+  // into an empty state. Draw only what this account is known to have.
+  let known: number | null = null;
+  try { known = readKnownGameCount(localStorage.getItem(KNOWN_GAME_COUNT_KEY)); } catch { /* storage unavailable */ }
+  const cards = skeletonCardCount(known);
   return (
     <div className="animate-fade-up">
       <div className="mb-10 pb-10 border-b border-[--rp-border]">
@@ -460,7 +754,7 @@ function DashboardSkeleton() {
         </div>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-        {Array.from({ length: 6 }).map((_, i) => (
+        {Array.from({ length: cards }).map((_, i) => (
           <div key={i} className="rounded-2xl border border-[--rp-border] p-5 flex flex-col gap-4">
             <div className="flex items-start justify-between gap-3">
               <Skeleton className="h-5 w-32" />

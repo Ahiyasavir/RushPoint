@@ -10,13 +10,22 @@ import { useT } from './LanguageContext';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
+// Copying a library task brings its APPROXIMATE area, never the author's exact
+// pin (change: task-library-map-view). The copy path was the second door onto the
+// same secret: `coordinates` used to be the exact authored point, so "copy a task"
+// was a way to read it — including for a hidden-location task whose location is
+// the puzzle. A copied mission is being re-sited anyway, and an unplaced one flows
+// through the Builder's normal "needs placement" path.
 function toTask(pt: PublicTask): Task {
   return {
     id: uuid(),
     title: pt.title,
     description: pt.description,
     type: pt.type,
-    coordinates: pt.coordinates,
+    // `Task.coordinates` is required, so an absent area falls back to the SAME
+    // (0,0) placeholder `blankTask()` uses — the Builder's established "not placed
+    // yet" value, which its placement validation already rejects.
+    coordinates: pt.approxLocation ?? { lat: 0, lng: 0 },
     difficulty: pt.difficulty,
     estimatedMinutes: pt.estimatedMinutes,
     pointValue: pt.pointValue,

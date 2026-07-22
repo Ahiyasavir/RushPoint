@@ -1,12 +1,34 @@
 // Pure navigation + metadata for the 3-step task wizard
-// (change: v2.1-builder-shell-redesign). Extracted so the step-gating rules are
-// unit-testable without rendering. Steps are ordered by decision priority:
-//   1 Location → 2 Details → 3 Interaction.
+// (change: v2.1-builder-shell-redesign; reordered by builder-first-task-flow).
+// Extracted so the step-gating rules are unit-testable without rendering.
+//
+// Steps are ordered the way a creator thinks (change: builder-first-task-flow):
+//   1 Details → 2 Interaction → 3 Placement.
+// Naming is the first thing asked and the ONLY forward gate; placement is last
+// and never blocks navigation. An unplaced task is reported by the readiness
+// surface (lib/gameReadiness) instead, which also refuses the launch.
 import type { Task, TaskType } from '@rushpoint/shared';
 import { validateOrderItems } from '@rushpoint/shared';
 
+// Step POSITIONS (1 based) — the wizard holds one of these as its current step.
 export const WIZARD_STEPS = [1, 2, 3] as const;
 export type WizardStep = (typeof WIZARD_STEPS)[number];
+
+// The declared step sequence. The tabs, the bodies and the labels all read this
+// one array, so a tab and the body under it can never disagree.
+export type WizardStepKey = 'details' | 'interaction' | 'placement';
+export const WIZARD_STEP_ORDER: readonly WizardStepKey[] = ['details', 'interaction', 'placement'];
+
+/** The key of the step at a 1 based position (clamped to the declared order). */
+export function stepKeyAt(position: number): WizardStepKey {
+  const i = Math.min(Math.max(Math.round(position), 1), WIZARD_STEP_ORDER.length);
+  return WIZARD_STEP_ORDER[i - 1];
+}
+
+/** The 1 based position of a step key. */
+export function stepIndexOf(key: WizardStepKey): number {
+  return WIZARD_STEP_ORDER.indexOf(key) + 1;
+}
 
 const genId = () =>
   (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
@@ -28,24 +50,39 @@ export function blankTask(id: string = genId()): Task {
   };
 }
 
-export const STEP_LABELS: Record<WizardStep, string> = {
-  1: 'Location',
-  2: 'Details',
-  3: 'Interaction',
+// Developer-facing fallback labels (the UI reads t.builder.step*).
+export const STEP_LABELS: Record<WizardStepKey, string> = {
+  details: 'Details',
+  interaction: 'Interaction',
+  placement: 'Placement',
 };
 
-// A located task needs a real pin; a locationless/instant task never does.
-export function isTaskLocationValid(task: Task): boolean {
-  if (task.locationless || task.triggerMode === 'locationless' || task.triggerMode === 'instant') return true;
-  return task.coordinates.lat !== 0 || task.coordinates.lng !== 0;
+// Placement has THREE states, not two (change: builder-first-task-flow):
+//   notRequired — the trigger needs no coordinates at all
+//   placed      — a real pin was dropped
+//   unplaced    — a located task still sitting on the {0,0} sentinel blankTask
+//                 ships. This is not an error while authoring; it is an
+//                 unfinished step, disclosed calmly on the placement step and
+//                 listed as a launch blocker on the readiness surface.
+export type PlacementState = 'placed' | 'unplaced' | 'notRequired';
+
+export function taskPlacementState(task: Task): PlacementState {
+  if (task.locationless || task.triggerMode === 'locationless' || task.triggerMode === 'instant') return 'notRequired';
+  return task.coordinates.lat !== 0 || task.coordinates.lng !== 0 ? 'placed' : 'unplaced';
 }
 
-// Step 1 is always passable (a sensible default location/mode is pre-seeded).
-// Step 2 blocks forward until the task has a title. Step 3 is terminal.
-export function canGoNext(step: WizardStep, task: Task): boolean {
-  if (step === 1) return true;
-  if (step === 2) return task.title.trim() !== '';
-  return false;
+// A located task needs a real pin; a locationless/instant task never does.
+// ONE rule, expressed once: this is `taskPlacementState` read as a boolean.
+export function isTaskLocationValid(task: Task): boolean {
+  return taskPlacementState(task) !== 'unplaced';
+}
+
+// Naming is the wizard's ONLY forward gate. Interaction and placement never
+// block: an unpinned or answer-key-less task is reported by the readiness
+// surface, not by a disabled control (change: builder-first-task-flow).
+export function canGoNext(step: WizardStepKey, task: Task): boolean {
+  if (step === 'details') return task.title.trim() !== '';
+  return true;
 }
 
 export function canGoBack(step: WizardStep): boolean {

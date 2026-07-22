@@ -1,8 +1,13 @@
 // Quick-start game templates — pre-fill the Builder with a working structure the
 // creator can then edit. Each `build()` returns fresh stages (new ids each time).
-// Labels/content are Hebrew (creator-web is Hebrew-first). The niche templates
-// (bar/bat mitzvah, youth trip, team gibush) target RushPoint's launch wedges so
-// a creator goes from idea to a runnable game in seconds.
+// The niche templates (bar/bat mitzvah, youth trip, team gibush) target
+// RushPoint's launch wedges so a creator goes from idea to a runnable game in
+// seconds.
+//
+// The picker's NAME + DESCRIPTION are NOT here: they live in both translation
+// maps and resolve through lib/templateLabels.ts, because these literals used to
+// make an English creator's very first screen Hebrew. The seeded stage/task
+// CONTENT below stays as authored Hebrew demo data.
 import type { Stage, Task, ScoringPreset, GameMode } from '@rushpoint/shared';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
@@ -27,9 +32,7 @@ const checkin = (title: string, description: string): Task =>
 
 export interface GameTemplate {
   key: string;
-  label: string;
   emoji: string;
-  description: string;
   mode: GameMode;
   scoringPreset: ScoringPreset;
   build: () => Stage[];
@@ -38,8 +41,7 @@ export interface GameTemplate {
 export const TEMPLATES: GameTemplate[] = [
   // ── Launch-wedge niche templates (shown first) ──────────────────────────────
   {
-    key: 'bar_mitzvah', label: 'בר / בת מצווה', emoji: '🎉',
-    description: 'מסע חוגג עם משימות צילום, טריוויה על חתן/כלת השמחה ואתגרים.',
+    key: 'bar_mitzvah', emoji: '🎉',
     mode: 'team', scoringPreset: 'fixed_points_speed',
     build: () => [
       stage('יוצאים לדרך', [photo('צילום קבוצתי', 'צלמו את כל הקבוצה קופצת באוויר ביחד!')]),
@@ -51,8 +53,7 @@ export const TEMPLATES: GameTemplate[] = [
     ],
   },
   {
-    key: 'youth_trip', label: 'טיול שכבה / תנועת נוער', emoji: '🏕️',
-    description: 'מסלול עם נקודות ציון, חידות שביל וצילומי שכבה, מושלם למדריכים.',
+    key: 'youth_trip', emoji: '🏕️',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('נקודת ריכוז', [checkin('הגעה לנקודת המפגש', 'כל הקבוצה הגיעה לנקודת הריכוז? סמנו צ׳ק-אין.')]),
@@ -64,8 +65,7 @@ export const TEMPLATES: GameTemplate[] = [
     ],
   },
   {
-    key: 'team_gibush', label: 'גיבוש צוות', emoji: '🤝',
-    description: 'אתגרי צוות, משימת רצף ושאלת סיום לגיבושים בעבודה או ביחידה.',
+    key: 'team_gibush', emoji: '🤝',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('משימת פתיחה', [task({
@@ -86,14 +86,12 @@ export const TEMPLATES: GameTemplate[] = [
 
   // ── Generic starters ────────────────────────────────────────────────────────
   {
-    key: 'blank', label: 'דף ריק', emoji: '📄',
-    description: 'שלב אחד ריק, בנו אותו איך שבא לכם.',
+    key: 'blank', emoji: '📄',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [stage('שלב 1', [task({ title: '' })])],
   },
   {
-    key: 'riddle', label: 'ציד חידות', emoji: '🗝️',
-    description: 'פתרו חידה בכל עצירה כדי לפתוח את הבאה.',
+    key: 'riddle', emoji: '🗝️',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('הרמז הראשון', [quiz(
@@ -108,8 +106,7 @@ export const TEMPLATES: GameTemplate[] = [
     ],
   },
   {
-    key: 'photo', label: 'מסע צילום', emoji: '📸',
-    description: 'שובל של משימות צילום ברחבי האזור שלכם.',
+    key: 'photo', emoji: '📸',
     mode: 'team', scoringPreset: 'fixed_points_speed',
     build: () => [
       stage('סלפי ליד ציון דרך', [photo('סלפי קבוצתי', 'צלמו סלפי קבוצתי מול ציון הדרך המרכזי.')]),
@@ -118,8 +115,7 @@ export const TEMPLATES: GameTemplate[] = [
     ],
   },
   {
-    key: 'trivia', label: 'שביל טריוויה', emoji: '❓',
-    description: 'שאלות רב-ברירה בכל עצירה.',
+    key: 'trivia', emoji: '❓',
     mode: 'individual', scoringPreset: 'fixed_points_speed',
     build: () => [
       stage('חימום', [quiz(

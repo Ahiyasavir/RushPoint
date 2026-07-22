@@ -22,16 +22,33 @@ import type {
   RunHeatmapResult,
   Trackable,
   CaptureZone,
+  GameFile,
 } from '@rushpoint/shared';
 
 // ── Games ──
 export const createGame    = callable<CreateGamePayload, { gameId: string }>('createGame');
 export const updateGame    = callable<UpdateGamePayload, { ok: boolean }>('updateGame');
-export const deleteGame    = callable<{ gameId: string }, { ok: boolean }>('deleteGame');
+// SOFT delete (change: recoverable-game-deletion): tombstones the game and
+// revokes its join codes. Destroys nothing — see purgeGameNow / the trash view.
+export const deleteGame    = callable<{ gameId: string }, { ok: boolean; deletedAt: string; purgeDueAt: string | null }>('deleteGame');
 export const duplicateGame = callable<{ gameId: string; sourceOwnerUid?: string }, { gameId: string }>('duplicateGame');
 export const publishGame   = callable<{ gameId: string; visibility: 'public' | 'private' }, { ok: boolean; visibility: string }>('publishGame');
 export const getGame       = callable<{ gameId: string }, { game: Game }>('getGame');
 export const listGames     = callable<void, { games: Game[] }>('listGames');
+// Creator-owned portability (change: game-file-export-import). exportGameFile is
+// OWNER-ONLY: the document it returns deliberately contains answer keys, hint text,
+// station codes and hidden-location coordinates, so it must never be surfaced
+// anywhere but the owner's own console. importGameFile always creates a NEW game.
+export const exportGameFile = callable<{ gameId: string }, { file: GameFile }>('exportGameFile');
+export const importGameFile = callable<{ file: GameFile }, { gameId: string; stageCount: number }>('importGameFile');
+
+// ── Game trash (change: recoverable-game-deletion) ──
+// deleteGame no longer destroys anything: it tombstones the game, which stays
+// recoverable for `retentionDays` before it is permanently purged.
+export type TrashedGame = Game & { purgeDueAt: string | null };
+export const listDeletedGames = callable<void, { games: TrashedGame[]; retentionDays: number }>('listDeletedGames');
+export const restoreGame      = callable<{ gameId: string }, { ok: boolean; alreadyRestored?: boolean; restoredCodes?: number }>('restoreGame');
+export const purgeGameNow     = callable<{ gameId: string }, { ok: boolean }>('purgeGameNow');
 
 // ── Runs ──
 export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, { runId: string; accessCode: string }>('launchRun');
@@ -110,9 +127,19 @@ export interface RunTeamRow {
 }
 
 // ── Gallery ──
-export const searchGallery     = callable<{ query?: string; tags?: string[]; limit?: number }, { games: PublicGame[] }>('searchGallery');
-export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; limit?: number }, { tasks: PublicTask[] }>('searchTaskLibrary');
-export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: boolean }>('incrementTaskCopyCount');
+// Results come back most-popular-first (relevance first when a query is set), and
+// `likedIds` is the CALLER'S own likes among the returned items — so the like
+// button renders correctly on first paint with no second round trip and without
+// any client ever reading the (server-only) publicLikes collection.
+export const searchGallery     = callable<{ query?: string; tags?: string[]; limit?: number }, { games: PublicGame[]; likedIds: string[] }>('searchGallery');
+export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; limit?: number }, { tasks: PublicTask[]; likedIds: string[] }>('searchTaskLibrary');
+export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: boolean; applied?: boolean }>('incrementTaskCopyCount');
+// Desired-END-STATE setter, not a toggle: sending `liked: true` twice is a no-op,
+// so a retry or a double tap can never double-count (change: gallery-popularity-ranking).
+export const setPublicLike     = callable<
+  { kind: 'game' | 'task'; itemId: string; liked: boolean },
+  { liked: boolean; likeCount: number; popularity: number }
+>('setPublicLike');
 
 // ── Account management ──
 export const updateMyProfile = callable<{ displayName: string }, { ok: boolean; displayName: string }>('updateMyProfile');

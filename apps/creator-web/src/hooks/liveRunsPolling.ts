@@ -40,17 +40,29 @@ export function runConsolePath(run: Pick<LiveRunSummary, 'gameId' | 'runId'>): s
   return `/run/${run.gameId}/${run.runId}`;
 }
 
+/** True for the `/run/:gameId/:runId` route shape — ANY run console, not one run's. */
+export function isRunConsolePath(pathname: string): boolean {
+  const parts = pathname.split('?')[0].split('#')[0].replace(/\/+$/, '').split('/');
+  // ['', 'run', gameId, runId]
+  return parts.length === 4 && parts[0] === '' && parts[1] === 'run' && !!parts[2] && !!parts[3];
+}
+
 /**
  * The bar is a shortcut back to a run you navigated away from, so it hides where
- * those controls already live: the featured run's own console and the /live
- * overview. It stays visible everywhere else, Builder included (in compact mode).
+ * those controls already live: ANY run console and the /live overview. It stays
+ * visible everywhere else, Builder included (in compact mode).
+ *
+ * It suppresses on any console, not only the featured run's: the bar features
+ * exactly one run (`selectFeaturedRun`), so with two live runs a creator sitting
+ * in run B's console used to see a bar whose "End run" finalizes run A — ending
+ * the wrong event, irreversibly, on the wrong participants.
  */
 export function shouldShowBar({
   authed, featured, pathname,
 }: { authed: boolean; featured: LiveRunSummary | null; pathname: string }): boolean {
   if (!authed || !featured) return false;
   if (pathname === '/live' || pathname.startsWith('/live/')) return false;
-  if (pathname === runConsolePath(featured)) return false;
+  if (isRunConsolePath(pathname)) return false;
   return true;
 }
 

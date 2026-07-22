@@ -77,13 +77,27 @@ describe('liveRunsPolling — bar visibility', () => {
     expect(shouldShowBar({ authed: true, featured, pathname: '/build/g1' })).toBe(true);
   });
 
-  it('is hidden on the console of the featured run only', () => {
+  it('is hidden on the console of the featured run', () => {
     expect(shouldShowBar({ authed: true, featured, pathname: '/run/g1/r1' })).toBe(false);
-    expect(shouldShowBar({ authed: true, featured, pathname: '/run/g9/r9' })).toBe(true);
+  });
+
+  // The wrong-run bug: with two live runs the bar features run A, so sitting in
+  // run B's console used to still show a bar whose "End run" finalizes run A.
+  it('is hidden on ANY run console, not only the featured run\'s', () => {
+    expect(shouldShowBar({ authed: true, featured, pathname: '/run/g9/r9' })).toBe(false);
+    expect(shouldShowBar({ authed: true, featured, pathname: '/run/g1/r2' })).toBe(false);
+    expect(shouldShowBar({ authed: true, featured, pathname: '/run/g2/r1' })).toBe(false);
+  });
+
+  it('still shows on routes that merely start with the run prefix', () => {
+    expect(shouldShowBar({ authed: true, featured, pathname: '/runs' })).toBe(true);
+    expect(shouldShowBar({ authed: true, featured, pathname: '/run' })).toBe(true);
+    expect(shouldShowBar({ authed: true, featured, pathname: '/run/g1' })).toBe(true);
   });
 
   it('is hidden on the live-runs overview', () => {
     expect(shouldShowBar({ authed: true, featured, pathname: '/live' })).toBe(false);
+    expect(shouldShowBar({ authed: true, featured, pathname: '/live/anything' })).toBe(false);
   });
 });
 

@@ -9,6 +9,7 @@ import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { useAuth } from '../components/AuthGate';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { classifyBillingError } from '../lib/callErrors';
 import { useT } from '../components/LanguageContext';
 
 const PACKAGE_ORDER: EventPackageId[] = ['starter', 'standard', 'pro_pack'];
@@ -21,8 +22,21 @@ export default function WalletPage() {
   const [status, setStatus] = useState<WalletStatus | null>(null);
   const [txns, setTxns] = useState<WalletTransaction[]>([]);
   const [inviting, setInviting] = useState(false);
+  // A failed getWalletStatus used to leave `status` null forever, and `!status`
+  // renders a Spinner — a PERMANENT spinner on the page where a creator pays
+  // (change: play-no-silent-failures). Same shape DashboardPage already uses:
+  // escape the loading state, log the real error, show localized copy.
+  const [statusErr, setStatusErr] = useState(false);
 
-  async function loadStatus() { setStatus(await getWalletStatus()); }
+  async function loadStatus() {
+    try {
+      setStatusErr(false);
+      setStatus(await getWalletStatus());
+    } catch (e) {
+      console.error('[wallet] getWalletStatus failed:', e);
+      setStatusErr(true);
+    }
+  }
   useEffect(() => { void loadStatus(); }, []);
 
   // Transactions are owner-readable directly (firestore.rules) — live list.
@@ -41,7 +55,12 @@ export default function WalletPage() {
       const res = await purchaseCredits({ packageId });
       if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
       await loadStatus(); // emulator grants instantly
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : w.purchaseFailed); }
+    } catch (e) {
+      // Never render a raw English server message at the moment money is
+      // involved: map by error code, log the original.
+      console.error('[wallet] purchaseCredits failed:', e);
+      await dialog.alert(w[classifyBillingError(e)]);
+    }
   }
 
   async function goPro(interval: 'month' | 'year') {
@@ -49,7 +68,10 @@ export default function WalletPage() {
       const res = await subscribePro({ interval });
       if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
       await loadStatus();
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : w.subscriptionFailed); }
+    } catch (e) {
+      console.error('[wallet] subscribePro failed:', e);
+      await dialog.alert(w[classifyBillingError(e)]);
+    }
   }
 
   // These MOVE MONEY, so a second click in the same React batch (which a
@@ -60,7 +82,18 @@ export default function WalletPage() {
   // Same shape the JSX already used: the in-flight key, or null when idle.
   const busy: string | null = buyAction.busyKeys[0] ?? proAction.busyKeys[0] ?? null;
 
-  if (!status) return <Spinner label={w.loading} />;
+  if (!status) {
+    if (!statusErr) return <Spinner label={w.loading} />;
+    return (
+      <div className="max-w-2xl mx-auto animate-fade-up">
+        <Card className="p-8 text-center">
+          <div className="text-3xl mb-3">⚠️</div>
+          <p className="text-sm text-[--ink-2] mb-4">{w.statusFailed}</p>
+          <Button onClick={() => void loadStatus()}>{w.retry}</Button>
+        </Card>
+      </div>
+    );
+  }
 
   const isPro = status.plan === 'pro';
 

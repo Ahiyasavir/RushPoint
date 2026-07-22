@@ -4,7 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
+import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, MeasuringStrategy,
   useSensor, useSensors,
@@ -12,8 +12,11 @@ import {
 import type {
   Announcements, DragEndEvent, DragStartEvent, KeyboardCoordinateGetter, ScreenReaderInstructions,
 } from '@dnd-kit/core';
-import { getGame, updateGame, launchRun } from '../services/calls';
-import { Advanced, Badge, Button, Card, Input, Label, Select, Spinner, Textarea } from '../components/ui';
+import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '../services/calls';
+// Creator-owned portability (change: game-file-export-import): the SAME pure
+// parser the server runs, so the Builder can refuse a bad file instantly.
+import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
+import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 import TaskLibrary from '../components/TaskLibrary';
@@ -28,11 +31,15 @@ import {
 } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
-import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
+import { blankTask } from '../lib/wizardLogic';
+// ONE readiness computation, shared by the persistent panel and the launch guard
+// (change: builder-first-task-flow), so the two can never drift.
+import { computeGameReadiness, canLaunchGame, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
 import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
+import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -172,6 +179,18 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
   );
 }
 
+// Records the dashboard checklist's one non-derivable step (design D2):
+// previewing is a Builder tab, not a mutation, so it leaves no trace in
+// Firestore. Local-only and best-effort — a blocked localStorage just means the
+// step reads as not done.
+function markGamePreviewed(gameId: string) {
+  try {
+    const prev = readPreviewedGames(localStorage.getItem(PREVIEWED_STORAGE_KEY));
+    if (prev.includes(gameId)) return;
+    localStorage.setItem(PREVIEWED_STORAGE_KEY, writePreviewedGames([...prev, gameId]));
+  } catch { /* storage unavailable — the step simply stays unticked */ }
+}
+
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
@@ -189,6 +208,12 @@ export default function BuilderPage() {
   const { undo, redo, canUndo, canRedo } = history;
   const [tab, setTab] = useState<BuilderTab>('build');
   const [activeStageId, setActiveStageId] = useState<string | null>(null);
+  // The readiness surface (change: builder-first-task-flow): a persistent list of
+  // every launch blocker, openable without attempting a launch. `focusIssue`
+  // carries an activated entry down to the build tab, which opens the offending
+  // task with its message already visible.
+  const [readinessOpen, setReadinessOpen] = useState(false);
+  const [focusIssue, setFocusIssue] = useState<{ stageId: string; taskId: string; nonce: number } | null>(null);
   const [status, setStatus] = useState<SaveStatus>('saved');
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
@@ -198,6 +223,8 @@ export default function BuilderPage() {
   const gameRef = useRef<Game | null>(null);
   const savedSnapshot = useRef<string>('');
   const saveTimer = useRef<number>();
+  // Hidden file picker behind the Builder's "load a copy" action.
+  const importInput = useRef<HTMLInputElement>(null);
   useEffect(() => { gameRef.current = game; }, [game]);
 
   useEffect(() => {
@@ -285,39 +312,60 @@ export default function BuilderPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
+  // ── Creator-owned portability (change: game-file-export-import) ──
+  // A game the creator holds a file of is a game no infrastructure failure can
+  // take away. Export saves the game after any pending edit so the file is never
+  // one autosave behind what is on screen.
+  async function exportToFile() {
+    if (!game) return;
+    window.clearTimeout(saveTimer.current);
+    if (!(await save())) { await dialog.alert(b.saveFailed); return; }
+    try {
+      const { file } = await exportGameFile({ gameId: game.id });
+      const url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = gameFileFilename(game.title);
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      await dialog.alert(e instanceof Error ? e.message : b.exportFailed);
+    }
+  }
+
+  async function importFromFile(file: File) {
+    let doc: unknown;
+    try {
+      doc = JSON.parse(await file.text());
+    } catch {
+      await dialog.alert(b.importNotAFile); return;
+    }
+    // Client-side pre-check with the SAME pure parser the server runs, so an
+    // obviously bad file fails instantly with the real reason instead of a round trip.
+    const pre = parseGameFile(doc);
+    if (pre.errors.length > 0) { await dialog.alert(pre.errors.join(' · ')); return; }
+    try {
+      const { gameId } = await importGameFile({ file: doc as GameFile });
+      nav(`/build/${gameId}`);
+    } catch (e) {
+      await dialog.alert(e instanceof Error ? e.message : b.importFailed);
+    }
+  }
+
   async function saveAndLaunch(testDrive = false) {
     if (!game) return;
     window.clearTimeout(saveTimer.current);
     // Don't launch on top of a failed save — the run would use stale/unsaved data.
     if (!(await save())) { await dialog.alert(b.saveFailed); return; }
-    if (game.stages.length === 0 || game.stages.some((s) => s.tasks.length === 0)) {
-      await dialog.alert(b.everyStageNeedsTask); return;
-    }
-    // Block launching an unplayable game: a quiz/numeric/station/sequence task with
-    // no answer key can never be completed by a participant. The wizard's Done gate
-    // only covers closing via Done — a task closed with ✕/Esc, or edited then left
-    // incomplete, would otherwise ship. updateGame doesn't reject these server-side.
-    const badTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskInteractionValid(tk));
-    if (badTask) {
-      await dialog.alert(b.taskNotCompletable(badTask.title || b.untitledTask)); return;
-    }
-    // Block a located task left at the null island (0,0): a radius/exact task with
-    // no real pin would route every team to the Gulf of Guinea and can never be
-    // completed. The wizard's step-1 gate only blocks its own Next — a task closed
-    // via ✕/Esc or reached by jumping tabs can still ship with (0,0) coordinates.
-    const noPinTask = game.stages.flatMap((s) => s.tasks).find((tk) => !isTaskLocationValid(tk));
-    if (noPinTask) {
-      await dialog.alert(b.taskNeedsLocation(noPinTask.title || b.untitledTask)); return;
-    }
-    // Block an unwinnable stage: requiredTaskCount higher than the tasks teams can
-    // actually complete (a stale count left after deleting tasks, or a broken
-    // unlock graph). The Builder shows a soft warning, but nothing stops launch.
-    const brokenStage = game.stages.find((s) => {
-      const r = validateUnlockGraph(s);
-      return r.warnings.length > 0 || r.errors.length > 0;
-    });
-    if (brokenStage) {
-      await dialog.alert(b.stageUnwinnable(brokenStage.title || b.stageTitlePlaceholder)); return;
+    // ONE launch rule (change: builder-first-task-flow). This used to be four
+    // sequential guards, each naming a single offender in its own alert and
+    // returning, so three broken tasks cost three failed launch attempts. The
+    // rules now live in lib/gameReadiness, which also renders the persistent
+    // readiness panel, so the guard and the panel cannot disagree. A refused
+    // launch points at the panel instead of naming one offender.
+    if (!canLaunchGame(game)) {
+      setReadinessOpen(true);
+      await dialog.alert(b.launchBlockedSeeReadiness); return;
     }
     try {
       const { runId } = await launchRun({ gameId: game.id, testDrive });
@@ -390,6 +438,38 @@ export default function BuilderPage() {
           </button>
         </div>
 
+        {/* Creator-owned portability: save this game to a file you keep, or build
+            a new game from one. Import always creates a NEW game. */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            onClick={() => { void exportToFile(); }}
+            title={b.exportFileHint}
+            aria-label={b.exportFile}
+            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+          >
+            ↓
+          </button>
+          <button
+            onClick={() => importInput.current?.click()}
+            title={b.importFileHint}
+            aria-label={b.importFile}
+            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+          >
+            ↑
+          </button>
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) void importFromFile(f);
+            }}
+          />
+        </div>
+
         {/* Centered tab strip */}
         <nav role="tablist" className="flex-1 flex items-center justify-center gap-1">
           {BUILDER_TAB_IDS.map((id) => (
@@ -397,7 +477,7 @@ export default function BuilderPage() {
               key={id}
               role="tab"
               aria-selected={tab === id}
-              onClick={() => { void save(); setTab(id); }}
+              onClick={() => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 tab === id
                   ? 'bg-rp-fire/10 text-rp-fire'
@@ -408,6 +488,21 @@ export default function BuilderPage() {
           ))}
         </nav>
 
+        {/* Readiness, beside the launch controls: everything that would refuse a
+            launch, listed at once, before a launch is attempted. */}
+        <ReadinessPanel
+          game={game}
+          open={readinessOpen}
+          onToggle={() => setReadinessOpen((o) => !o)}
+          onActivate={(issue) => {
+            setReadinessOpen(false);
+            if (!issue.stageId) return; // an empty game has nothing to navigate to
+            setTab('build');
+            setActiveStageId(issue.stageId);
+            if (issue.taskId) setFocusIssue({ stageId: issue.stageId, taskId: issue.taskId, nonce: Date.now() });
+          }}
+        />
+
         <Button variant="ghost" onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
         <Button onClick={() => saveAndLaunch(false)} className="shrink-0">{b.launchRun}</Button>
       </header>
@@ -415,7 +510,7 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} />}
+        {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} />}
         {tab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
         {tab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
         {tab === 'analytics' && (
@@ -426,6 +521,77 @@ export default function BuilderPage() {
           </Card>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Readiness surface (change: builder-first-task-flow) ──────────────────────
+// The one place a creator learns why a launch would be refused. It lists EVERY
+// blocking issue at once (`computeGameReadiness` is also the launch guard), it
+// is reachable without attempting a launch, and each entry navigates to the
+// thing to fix. An empty result is the ready-to-launch state.
+function ReadinessPanel({ game, open, onToggle, onActivate }: {
+  game: Game; open: boolean; onToggle: () => void; onActivate: (issue: ReadinessIssue) => void;
+}) {
+  const b = useT().builder;
+  const issues = computeGameReadiness(game);
+  const ISSUE_LABEL: Record<ReadinessCode, string> = {
+    stageHasNoTask: b.issueStageHasNoTask,
+    taskNotCompletable: b.issueTaskNotCompletable,
+    taskNotPlaced: b.issueTaskNotPlaced,
+    stageUnwinnable: b.issueStageUnwinnable,
+  };
+  const where = (issue: ReadinessIssue): string => {
+    const stage = issue.stageTitle || b.untitledStage;
+    return issue.taskId ? `${stage} · ${issue.taskTitle || b.untitledTask}` : stage;
+  };
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={b.readinessAria(issues.length)}
+        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+          issues.length === 0
+            ? 'border-rp-go/40 text-rp-go hover:bg-[--surface-2]'
+            : 'border-rp-amber/50 text-rp-amber hover:bg-[--surface-2]'}`}
+      >
+        <span aria-hidden>{issues.length === 0 ? '✓' : '⚠'}</span>
+        <span className="hidden md:inline">{b.readinessTitle}</span>
+        {issues.length > 0 && <Badge color="gold">{b.readinessCount(issues.length)}</Badge>}
+      </button>
+
+      {open && (
+        <div className="absolute z-50 end-0 top-full mt-1 w-[22rem] max-w-[calc(100vw-1.5rem)] rounded-xl border border-[--rp-border] bg-[--surface-1] shadow-soft">
+          <Advanced dense title={b.readinessTitle} open onToggle={onToggle}>
+            {issues.length === 0 ? (
+              <EmptyState icon="🚀" title={b.readinessReadyTitle} body={b.readinessReadyBody} />
+            ) : (
+              <div className="space-y-1">
+                <p className="text-[11px] text-[--ink-3] leading-snug">{b.readinessIntro}</p>
+                <ul className="space-y-1 max-h-72 overflow-y-auto">
+                  {issues.map((issue, i) => (
+                    <li key={`${issue.code}-${issue.stageId}-${issue.taskId ?? ''}-${i}`}>
+                      <button
+                        type="button"
+                        onClick={() => onActivate(issue)}
+                        disabled={!issue.stageId}
+                        className="w-full text-start rounded-lg border border-[--rp-border] px-2 py-1.5 hover:bg-[--surface-2] disabled:hover:bg-transparent disabled:opacity-70"
+                      >
+                        <span className="block text-[12px] text-[--ink-1]">{ISSUE_LABEL[issue.code]}</span>
+                        {issue.stageId && (
+                          <span dir="auto" className="block text-[11px] text-[--ink-3] truncate">{where(issue)}</span>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </Advanced>
+        </div>
+      )}
     </div>
   );
 }
@@ -507,6 +673,26 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
               <div className="text-xs text-zinc-500">{b.presetLabels[p].desc}</div>
             </button>
           ))}
+        </div>
+
+        {/* Wrong-answer cost (change: wrong-answer-cost). Absent = 'off', which is
+            exactly how every game authored before this change behaves, so nothing
+            in flight changes. New games are seeded at DEFAULT_WRONG_ANSWER_LEVEL. */}
+        <Label>{b.wrongAnswerCost}</Label>
+        <p className="text-xs text-zinc-500 -mt-2 mb-2">{b.wrongAnswerCostHint}</p>
+        <div className="space-y-2">
+          {WRONG_ANSWER_LEVEL_ORDER.map((lv) => {
+            const current = game.scoringOptions?.wrongAnswerPenalty ?? 'off';
+            return (
+              <button key={lv}
+                onClick={() => patch({ scoringOptions: { ...(game.scoringOptions ?? {}), wrongAnswerPenalty: lv } })}
+                className={`w-full text-start p-3 rounded-lg border ${
+                  current === lv ? 'border-neon-green/50 bg-neon-green/10' : 'border-glass-border'}`}>
+                <div className="text-sm font-medium text-zinc-200">{b.wrongAnswerLevels[lv].name}</div>
+                <div className="text-xs text-zinc-500">{b.wrongAnswerLevels[lv].desc}</div>
+              </button>
+            );
+          })}
         </div>
       </Advanced>
 
@@ -767,9 +953,12 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
+  // An activated readiness entry (change: builder-first-task-flow). The `nonce`
+  // makes re-activating the SAME entry a new request.
+  focusIssue?: { stageId: string; taskId: string; nonce: number } | null;
 }) {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
@@ -778,7 +967,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   // so the stage reads calm at rest — just its name and task cards. It collapses
   // again whenever the creator switches stages, keeping every stage calm by default.
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
+  // `revealAll` is set only when the editor was opened from the readiness
+  // surface, so the creator does not land on a silent form after clicking the
+  // statement of the problem.
+  const [editing, setEditing] = useState<{ stageId: string; taskId: string; revealAll?: boolean } | null>(null);
   // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
   // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
   // the team on completion, runs/helpers.ts), so an isFinal flag left on a
@@ -982,6 +1174,15 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   // opens calm regardless of the last stage's drawer state.
   useEffect(() => { setSettingsOpen(false); }, [activeStage?.id]);
 
+  // Land on the offending task when a readiness entry is activated, with its
+  // message already visible.
+  useEffect(() => {
+    if (!focusIssue) return;
+    setSettingsOpen(false);
+    setEditing({ stageId: focusIssue.stageId, taskId: focusIssue.taskId, revealAll: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusIssue?.nonce]);
+
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
@@ -1181,6 +1382,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
           key={editingTask.id}
           task={editingTask}
           gameId={game.id}
+          revealAll={editing.revealAll}
           siblings={editingStage.tasks}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
@@ -1247,9 +1449,11 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
   siblings?: Task[];
+  // Opened from a readiness entry: show that task's validation messages at once.
+  revealAll?: boolean;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -1296,7 +1500,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings }: {
   return (
     <SlidePanel shown={shown}>
       <div className="flex-1 min-h-0 p-2.5">
-        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} />
+        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} />
         {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
       </div>
     </SlidePanel>

@@ -8,6 +8,11 @@ import {
   signInWithPopup,
   signInWithCredential,
   reauthenticateWithCredential,
+  reauthenticateWithPopup,
+  linkWithCredential,
+  linkWithPopup,
+  unlink,
+  getAdditionalUserInfo,
   updateProfile,
   updateEmail,
   updatePassword,
@@ -28,6 +33,15 @@ import {
 } from 'firebase/storage';
 import { resolveEmulatorHost, isEmulatorBuild } from '@rushpoint/shared';
 import { buildEmulatorGoogleClaims } from './authClaims';
+import {
+  GOOGLE_PROVIDER_ID,
+  activeSignInMethods,
+  checkGoogleLinkEmail,
+  googleEmailFromLink,
+  needsRollback,
+  type ProviderRef,
+  type GoogleLinkRefusal,
+} from '../lib/signInMethods';
 
 // Emulator-safe defaults: the Firebase SDK only needs non-empty apiKey/appId
 // strings to initialize locally. projectId MUST match .firebaserc + the seed.
@@ -200,11 +214,11 @@ export function watchAuth(cb: (user: User | null) => void) {
 
 // ── Account management (self-service, all on the caller's own identity) ───────
 
-// True when the account has an email/password credential (vs. Google-only).
-// Email & password changes require re-auth with the current password, which
-// only password accounts can satisfy.
-export function hasPasswordProvider(): boolean {
-  return auth.currentUser?.providerData.some((p) => p.providerId === 'password') ?? false;
+// The sign-in providers currently attached to the signed-in account. This is the ONE
+// provider-inspection path in the app: Settings derives every method status, every offered
+// action and every re-auth decision from it via lib/signInMethods.ts (pure).
+export function listSignInProviders(): ProviderRef[] {
+  return (auth.currentUser?.providerData ?? []).map((p) => ({ providerId: p.providerId, email: p.email }));
 }
 
 // Re-establish a recent login (required by Firebase before sensitive changes).
@@ -230,6 +244,111 @@ export async function changeMyEmail(currentPassword: string, newEmail: string) {
 export async function changeMyPassword(currentPassword: string, newPassword: string) {
   const user = await reauthWithPassword(currentPassword);
   await updatePassword(user, newPassword);
+}
+
+// ── Sign-in methods: add the one the account is missing (creator-signin-methods) ──
+//
+// Both operations act on `auth.currentUser` through client SDK APIs, against the caller's own
+// ID token — no callable, no rules change. Nothing here can REMOVE a provider (except the
+// mismatch rollback undoing its own link), so a "last remaining sign-in method" lockout is
+// unreachable.
+
+// Re-confirm the current password (for `auth/requires-recent-login` on a password account).
+export async function reauthWithCurrentPassword(currentPassword: string): Promise<void> {
+  await reauthWithPassword(currentPassword);
+}
+
+// Re-confirm identity through Google (for a Google-only account).
+export async function reauthWithGoogle(): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not signed in');
+  if (!emulatorBuild) {
+    await reauthenticateWithPopup(user, googleProvider);
+    return;
+  }
+  // Emulator build: `auth` is emulated, so the real chooser runs on the non-emulated
+  // instance and the identity is bridged in as a Google credential (same trick as
+  // signInWithGoogle, unify-email-google-login).
+  const { user: identity } = await signInWithPopup(googleAuth, googleProvider);
+  const claims = JSON.stringify(buildEmulatorGoogleClaims(identity));
+  await reauthenticateWithCredential(user, GoogleAuthProvider.credential(claims));
+}
+
+// Give a Google-only account an email+password credential. `updatePassword` can't do this —
+// it needs a password provider to already exist — so the credential is LINKED instead. The
+// account's own email is used; changing the address stays in the Email card.
+export async function addPasswordToAccount(newPassword: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user?.email) throw new Error('Not signed in');
+  await linkWithCredential(user, EmailAuthProvider.credential(user.email, newPassword));
+  await user.reload();
+}
+
+export type LinkGoogleResult =
+  | { ok: true; email: string }
+  | { ok: false; reason: GoogleLinkRefusal | 'rollback-failed'; accountEmail: string; googleEmail: string };
+
+/**
+ * Link Google to the signed-in account, but ONLY when the chosen Google identity carries the
+ * same email address. See design.md Decision 2:
+ *   - emulator build → the real chooser runs on the non-emulated instance, so the identity is
+ *     known BEFORE anything is mutated: pre-validate, then link. No rollback is reachable.
+ *   - production → `linkWithPopup` resolves AFTER Firebase applied the link, so validate the
+ *     result and `unlink` on mismatch. `login_hint` only steers the chooser; it is never the guard.
+ * Every verdict comes from lib/signInMethods.ts; this function holds no policy of its own.
+ */
+export async function linkGoogleToAccount(): Promise<LinkGoogleResult> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Not signed in');
+  const accountEmail = user.email;
+
+  if (emulatorBuild) {
+    const { user: identity } = await signInWithPopup(googleAuth, googleProvider);
+    const verdict = checkGoogleLinkEmail(accountEmail, identity.email);
+    if (!verdict.ok) return verdict;
+    const claims = JSON.stringify(buildEmulatorGoogleClaims(identity));
+    await linkWithCredential(user, GoogleAuthProvider.credential(claims));
+    await user.reload();
+    return { ok: true, email: verdict.email };
+  }
+
+  // A fresh provider so `login_hint` never leaks onto the shared sign-in provider.
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({
+    prompt: 'select_account',
+    ...(accountEmail ? { login_hint: accountEmail } : {}),
+  });
+
+  const hadGoogleBefore = activeSignInMethods(listSignInProviders()).google;
+  const result = await linkWithPopup(user, provider);
+  const profileEmail = getAdditionalUserInfo(result)?.profile?.email;
+  const googleEmail = googleEmailFromLink(
+    result.user.providerData,
+    typeof profileEmail === 'string' ? profileEmail : undefined,
+  );
+  const verdict = checkGoogleLinkEmail(accountEmail, googleEmail);
+
+  if (verdict.ok) {
+    await user.reload();
+    return { ok: true, email: verdict.email };
+  }
+
+  if (needsRollback(hadGoogleBefore, verdict)) {
+    try {
+      await unlink(user, GOOGLE_PROVIDER_ID);
+    } catch {
+      // The account may still carry the wrong provider. Never report success over that.
+      await user.reload().catch(() => { /* offline; the caller still shows the warning */ });
+      return {
+        ok: false,
+        reason: 'rollback-failed',
+        accountEmail: verdict.accountEmail,
+        googleEmail: verdict.googleEmail,
+      };
+    }
+  }
+  await user.reload();
+  return verdict;
 }
 
 // Promise that resolves to the current (or next) signed-in user, or null.

@@ -7,6 +7,8 @@ import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
 import { ToastHost } from './components/toast';
 import ActiveRunBar from './components/ActiveRunBar';
+import { buildNavDestinations } from './lib/creatorNav';
+import AppFooter from './components/AppFooter';
 
 const DashboardPage  = lazy(() => import('./pages/DashboardPage'));
 const BuilderPage    = lazy(() => import('./pages/BuilderPage'));
@@ -15,6 +17,8 @@ const WalletPage     = lazy(() => import('./pages/WalletPage'));
 const RunConsolePage = lazy(() => import('./pages/RunConsolePage'));
 const RunsOverviewPage = lazy(() => import('./pages/RunsOverviewPage'));
 const SettingsPage   = lazy(() => import('./pages/SettingsPage'));
+// Recently deleted games (change: recoverable-game-deletion).
+const TrashPage      = lazy(() => import('./pages/TrashPage'));
 const LegalPage      = lazy(() => import('./pages/LegalPage'));
 
 function useDarkMode() {
@@ -45,14 +49,13 @@ export default function App() {
   // Close the drawer whenever the route changes (a link was tapped).
   useEffect(() => { setMenuOpen(false); }, [pathname]);
 
-  // Free mode: hide the wallet/credits surface entirely while payments are off.
-  const NAV = [
-    { to: '/',        label: t.nav.myGames,  end: true },
-    { to: '/live',    label: t.nav.liveRuns },
-    { to: '/gallery', label: t.nav.gallery },
-    ...(PAYMENTS_ENABLED ? [{ to: '/wallet', label: t.nav.wallet }] : []),
-    { to: '/settings',label: t.nav.settings },
-  ];
+  // One rule, rendered twice (desktop links + mobile drawer), so the two can
+  // never diverge. Free mode hides the wallet entry; `/live` is no longer a
+  // primary destination but its ROUTE below stays registered.
+  const NAV = buildNavDestinations({ paymentsEnabled: PAYMENTS_ENABLED }).map((n) => ({
+    ...n,
+    label: t.nav[n.id],
+  }));
 
   return (
     // The Builder is an app-like, fixed-height workspace (no page scroll); every
@@ -148,14 +151,23 @@ export default function App() {
             <Route path="/build/:gameId"       element={<BuilderPage />} />
             <Route path="/gallery"             element={<GalleryPage />} />
             {PAYMENTS_ENABLED && <Route path="/wallet" element={<WalletPage />} />}
+            {/* Not in the primary nav (see buildNavDestinations), but deliberately
+                still registered: the floating bar's "+N more" navigates here and
+                bookmarks must keep resolving. */}
             <Route path="/live"                element={<RunsOverviewPage />} />
             <Route path="/run/:gameId/:runId"  element={<RunConsolePage />} />
             <Route path="/settings"            element={<SettingsPage />} />
+            <Route path="/trash"               element={<TrashPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>
         </Suspense>
       </main>
+
+      {/* Legal footer — skipped in the Builder for the same reason as the header:
+          that route is a fixed-height workspace that must not grow a page scroll. */}
+      {!isBuilder && <AppFooter />}
+
       {/* Sibling of the hosts (outside <main>) so it survives every route change. */}
       <ActiveRunBar />
       <DialogHost />
