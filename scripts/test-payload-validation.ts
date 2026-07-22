@@ -5,6 +5,7 @@
 import {
   ValidationError,
   requireString,
+  stripUnsafeDisplayChars,
   optionalString,
   optionalNonNegativeNumber,
   optionalBoolean,
@@ -48,6 +49,22 @@ check('null rejected', rejects(() => requireString(null, 'taskId')) instanceof V
   check('  constraint names the max length', !!e && e.constraint.includes(String(MAX_CODE_LEN)));
 }
 check('string at the size limit accepted', requireString('x'.repeat(MAX_CODE_LEN), 'code', MAX_CODE_LEN).length === MAX_CODE_LEN);
+
+// ── requireString display-char strip (wave-h H3) ──────────────────────────────
+// Strips control / bidi-override / zero-width spoofing chars but keeps ordinary
+// text — Hebrew letters and the plain LRM/RLM directional marks are preserved.
+check('strips a bidi RLO override (U+202E)', requireString('Ann‮yob', 'displayName') === 'Annyob');
+check('strips zero-width chars (U+200B/200C/200D)', requireString('a​b‌c‍d', 'displayName') === 'abcd');
+check('strips a BOM / ZWNBSP (U+FEFF)', requireString('﻿hi', 'displayName') === 'hi');
+check('strips C0 controls (U+0000-001F)', requireString('abc', 'displayName') === 'abc');
+check('strips C1 controls + DEL (U+007F-009F)', requireString('abc', 'displayName') === 'abc');
+check('strips a bidi isolate (U+2066-2069)', requireString('x⁦y⁩z', 'displayName') === 'xyz');
+check('KEEPS Hebrew letters intact', requireString('שלום', 'displayName') === 'שלום');
+check('KEEPS plain LRM/RLM directional marks (U+200E/200F)', requireString('a‎b‏c', 'displayName') === 'a‎b‏c');
+check('an all-invisible string is rejected non-empty', rejects(() => requireString('​‮﻿', 'displayName')) instanceof ValidationError);
+// stripUnsafeDisplayChars is exported + pure (tested directly).
+check('stripUnsafeDisplayChars leaves clean text untouched', stripUnsafeDisplayChars('Hello World') === 'Hello World');
+check('stripUnsafeDisplayChars is a no-op on Hebrew', stripUnsafeDisplayChars('שלום') === 'שלום');
 
 // ── optionalString ────────────────────────────────────────────────────────────
 check('optionalString absent → undefined', optionalString(undefined, 'note', MAX_NOTE_LEN) === undefined);

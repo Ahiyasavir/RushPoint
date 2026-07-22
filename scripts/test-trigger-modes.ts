@@ -43,6 +43,15 @@ check('instant passes even with a huge distance', evaluateTrigger('instant', 999
 // ── radius/exact require a finite distance ───────────────────────────────────
 check('radius without distance is not ok', evaluateTrigger('radius', undefined, 40).ok === false);
 
+// ── radius <= 0 falls back to the default (wave-h #4 defense-in-depth) ────────
+// A task persisted with geofenceRadiusMeters:0 must NOT become permanently
+// unwinnable (0 limit → distanceM>0 rejects any real GPS). Guard mirrors
+// evaluatePresence: a non-positive radius uses defaultRadiusFor instead.
+check('radius@0 falls back to default(40): accepts 30m', evaluateTrigger('radius', 30, 0).ok === true);
+check('radius@0 falls back to default(40): rejects 60m', evaluateTrigger('radius', 60, 0).ok === false);
+check('radius@negative falls back to default(40): accepts 30m', evaluateTrigger('radius', 30, -5).ok === true);
+check('exact@0 falls back to default(4): accepts 3m', evaluateTrigger('exact', 3, 0).ok === true);
+
 // ── hidden-location: same accept/reject, but the reject reason leaks no distance
 // (change: hidden-location-task). A player must not be able to triangulate the
 // hidden spot by reading the distance out of repeated rejections.

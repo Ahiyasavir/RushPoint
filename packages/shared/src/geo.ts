@@ -81,7 +81,11 @@ export function evaluateTrigger(
   if (distanceM == null || !Number.isFinite(distanceM)) {
     return { ok: false, reason: 'Location required to check in here' };
   }
-  const limit = radiusM != null && Number.isFinite(radiusM) ? radiusM : defaultRadiusFor(mode);
+  // radiusM must be POSITIVE to be honored — a 0/negative radius (hand-crafted or
+  // legacy data) would make `distanceM > 0` reject any real GPS, permanently
+  // stranding a player at the correct spot. Fall back to the mode default, exactly
+  // as evaluatePresence does (wave-h defense-in-depth; the Builder already clamps).
+  const limit = radiusM != null && Number.isFinite(radiusM) && radiusM > 0 ? radiusM : defaultRadiusFor(mode);
   if (distanceM > limit) {
     // Hidden-location tasks (treasure-hunt) must not leak the distance — otherwise
     // a player could triangulate the secret spot by polling completeTask. Return a

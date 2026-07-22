@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -142,6 +142,13 @@ async function mirrorToChat(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      // wave-h P2 #1: bound the outbound webhook. pushAnnouncement/pushFlashMission
+      // AWAIT this mirror, so a slow allow-listed endpoint would otherwise hang the
+      // owner-console callable up to the function timeout (and hold a billable
+      // instance). AbortSignal.timeout is a Node-20 global. The surrounding
+      // try/catch already fails open, so a timeout (AbortError) never breaks the
+      // participant-facing broadcast (the Firestore write already committed).
+      signal: AbortSignal.timeout(3000),
     });
   } catch (e) {
     functions.logger.warn('mirrorToChat failed', { ownerUid, gameId, err: String(e) });
@@ -811,6 +818,9 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
       tasks: {
         id: string;
         hintAutoRevealAttempts?: number;
+        releaseAt?: string;
+        releaseAfterMinutes?: number;
+        expiresAfterMinutes?: number;
         smart?: { secretCode?: string; attemptLimit?: number };
       }[];
     }[];
@@ -824,6 +834,38 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   if (!stationTask) {
     throw new functions.https.HttpsError('not-found', 'Task not found in game');
   }
+
+  // wave-h #2: an EXPIRED / not-yet-RELEASED smart_station is refused by its own
+  // completion callable, exactly as completeTask does — the shared
+  // completeTaskForTeam choke point never carried this gate, so each wrapper must.
+  // Otherwise a station that expires WHILE a team holds it could still be scored by
+  // POSTing the code afterward (or a scheduled station completed before its window).
+  // Loads the run once, only when the task actually carries a schedule/expiry gate.
+  if (stationTask.releaseAt || stationTask.releaseAfterMinutes || stationTask.expiresAfterMinutes) {
+    const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
+    const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
+    if (!isReleased(stationTask, launchedAt, Date.now())) {
+      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
+    }
+    if (isExpired(stationTask, launchedAt, Date.now())) {
+      throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
+    }
+  }
+
+  // wave-h #1: enforce the station's attemptLimit (mirrors submitTaskAnswer's cap at
+  // runs/index.ts). The per team/task wrong-code count already lives in
+  // team.taskAttempts[taskId] (incremented below); refuse once the cap is reached
+  // BEFORE the compare — even a correct code is blocked once locked, so a short /
+  // numeric secretCode can't be brute-forced. Previously the cap was only COUNTED
+  // here, never enforced (a silent no-op vs the same control on a quiz).
+  const stationAttemptLimit = stationTask.smart?.attemptLimit;
+  if (stationAttemptLimit && stationAttemptLimit > 0) {
+    const attempts = (team as { taskAttempts?: Record<string, number> }).taskAttempts?.[taskId] ?? 0;
+    if (attemptLimitReached(attempts, stationAttemptLimit)) {
+      throw new functions.https.HttpsError('resource-exhausted', 'No attempts left for this task');
+    }
+  }
+
   const expectedCode = stationTask.smart?.secretCode;
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${resolvedTeamId}`);
   if (!expectedCode || expectedCode.trim().toLowerCase() !== code.trim().toLowerCase()) {
@@ -916,10 +958,13 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   let feedTask: FeedTaskVisibilityInput | undefined;
   // audio-tasks: the task's captureKind rides the SAME snapshot (no extra read).
   let kind: MediaKind = 'photo';
+  // wave-h #3: the task's schedule/expiry gate rides the SAME snapshot too — no
+  // extra read on the common (no-gate) path. Undefined when the task can't resolve.
+  let scheduleGate: { releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number } | undefined;
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
+      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; releaseAt?: string; releaseAfterMinutes?: number; expiresAfterMinutes?: number; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
@@ -929,6 +974,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
         taskTitle = task.title ?? '';
         feedTask = { hideLocation: task.hideLocation };
         kind = task.smart?.captureKind === 'audio' ? 'audio' : 'photo';
+        scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes };
         break;
       }
     }
@@ -956,6 +1002,20 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   //  2. if the task is already completed, or its submission is already approved,
   //     return an idempotent no-op WITHOUT writing.
   assertStageActiveForTask(team, taskId);
+  // wave-h #3: an EXPIRED / not-yet-RELEASED photo task is refused, same gate as
+  // completeTask/verifyStationCode (the shared completeTaskForTeam choke point never
+  // carried it). Placed here so the existing stage-active / idempotency / slot
+  // guards are untouched; loads the run once, only when the task is actually gated.
+  if (scheduleGate && (scheduleGate.releaseAt || scheduleGate.releaseAfterMinutes || scheduleGate.expiresAfterMinutes)) {
+    const runSnap = await db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}`).get();
+    const launchedAt = (runSnap.data() as { launchedAt?: string } | undefined)?.launchedAt;
+    if (!isReleased(scheduleGate, launchedAt, Date.now())) {
+      throw new functions.https.HttpsError('failed-precondition', 'This task is not available yet');
+    }
+    if (isExpired(scheduleGate, launchedAt, Date.now())) {
+      throw new functions.https.HttpsError('failed-precondition', 'This task has expired');
+    }
+  }
   const priorSubmission = (team as { taskSubmissions?: Record<string, { status?: string }> })
     .taskSubmissions?.[taskId];
   const taskAlreadyCompleted = team.stages.some((s) =>

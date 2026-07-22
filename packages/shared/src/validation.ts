@@ -110,12 +110,34 @@ function fail(field: string, constraint: string, [en, he]: [string, string]): ne
   throw new ValidationError({ field, constraint, message: en, messageHe: he });
 }
 
-/** Required, non-empty string of bounded length. Returns the trimmed value. */
+// Characters that never belong in a human-visible string but can spoof the
+// creator/staff console (display-spoofing hardening — wave-h H3; there is no DOM
+// XSS since React escapes). Stripped:
+//   • C0/C1 control chars — U+0000–U+001F, U+007F–U+009F (incl. DEL)
+//   • bidi OVERRIDE + ISOLATE formatters — U+202A–U+202E, U+2066–U+2069
+//     (RLO/LRO reorder glyphs to impersonate another name; isolates hide text)
+//   • zero-width chars — U+200B–U+200D, U+FEFF (invisible padding / BOM)
+// Deliberately KEPT: Hebrew letters (U+0590–U+05FF) and the plain directional
+// marks LRM/RLM (U+200E/U+200F) that legitimate RTL content relies on — the strip
+// stops at U+200D so LRM/RLM pass through untouched.
+const UNSAFE_DISPLAY_CHARS = new RegExp(
+  "[\u0000-\u001F\u007F-\u009F\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]",
+  "g",
+);
+
+/** Remove control / bidi-override / zero-width spoofing chars; keep ordinary text
+ *  (Hebrew + LRM/RLM preserved). Pure — unit-tested directly. */
+export function stripUnsafeDisplayChars(value: string): string {
+  return value.replace(UNSAFE_DISPLAY_CHARS, '');
+}
+
+/** Required, non-empty string of bounded length. Returns the trimmed value with
+ *  control / bidi-override / zero-width spoofing chars stripped (wave-h H3). */
 export function requireString(value: unknown, field: string, max: number = MAX_ID_LEN): string {
   if (value === undefined || value === null) fail(field, 'required', MESSAGES.required(field));
   if (typeof value !== 'string') fail(field, 'type:string', MESSAGES.string(field));
   if ((value as string).length > max) fail(field, `maxLength:${max}`, MESSAGES.maxLen(field, max));
-  const trimmed = (value as string).trim();
+  const trimmed = stripUnsafeDisplayChars(value as string).trim();
   if (!trimmed) fail(field, 'nonEmpty', MESSAGES.empty(field));
   return trimmed;
 }

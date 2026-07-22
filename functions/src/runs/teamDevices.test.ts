@@ -119,6 +119,15 @@ describe('generateDeviceJoinCode', () => {
     const b = generateDeviceJoinCode(rng);
     expect(a).toBe(b);
   });
+
+  // wave-h H1: production path (no injected rng) uses crypto.randomInt per char.
+  test('the default (crypto) path emits valid-length, in-alphabet codes', () => {
+    for (let i = 0; i < 200; i += 1) {
+      const code = generateDeviceJoinCode();
+      expect(code).toHaveLength(DEVICE_JOIN_CODE_LENGTH);
+      for (const ch of code) expect(DEVICE_JOIN_CODE_ALPHABET).toContain(ch);
+    }
+  });
 });
 
 describe('canAttachDevice', () => {

@@ -3614,6 +3614,81 @@ async function main() {
 
   }); // scenario: attempt limit
 
+  await scenario('smart_station attempt-limit + release/expiry gates (wave-h)', async () => {
+    // The shared completeTaskForTeam choke point never carried the attempt-limit or
+    // release/expiry gates, so each wrapper must. submitTaskAnswer/completeTask do;
+    // this proves verifyStationCode + submitStationPhoto now do too.
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gH } = await creator.call('createGame', { title: 'Station Gates Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gH, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'hs0', order: 0, title: 'Gated stations', isFinal: true, tasks: [
+        { id: 'ws-lock', title: 'Code with a cap', type: 'smart_station', triggerMode: 'locationless',
+          coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'code_verification', secretCode: 'GOLD', attemptLimit: 2 } },
+        { id: 'ws-exp', title: 'Pop-up code station', type: 'smart_station', triggerMode: 'locationless',
+          coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+          expiresAfterMinutes: 0.2, // 12s
+          smart: { enabled: true, verificationType: 'code_verification', secretCode: 'SILVER' } },
+        { id: 'wp-exp', title: 'Pop-up photo station', type: 'photo', triggerMode: 'locationless',
+          coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 9,
+          expiresAfterMinutes: 0.2, // 12s
+          smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true } },
+      ] }],
+    });
+    const { runId: rH, accessCode: cH } = await creator.call('launchRun', { gameId: gH });
+    const pH = makeParty('stationGates');
+    const pHCred = await signInAnonymously(pH.auth);
+    const hUid = pHCred.user.uid;
+    await pH.call('joinRun', { code: cH, displayName: 'Gatekeeper' });
+    await creator.call('startTeams', { gameId: gH, runId: rH });
+    const CH = { ownerUid: OWNER, gameId: gH, runId: rH };
+
+    // ── attempt-limit lockout (wave-h #1) ──────────────────────────────────────
+    // Two wrong codes exhaust attemptLimit:2; the 3rd attempt is refused with
+    // resource-exhausted even though it is the CORRECT code.
+    await expectError('station attempt-limit: 1st wrong code rejected',
+      pH.call('verifyStationCode', { ...CH, teamId: hUid, taskId: 'ws-lock', code: 'WRONG1' }),
+      { match: /incorrect code/i });
+    await expectError('station attempt-limit: 2nd wrong code rejected',
+      pH.call('verifyStationCode', { ...CH, teamId: hUid, taskId: 'ws-lock', code: 'WRONG2' }),
+      { match: /incorrect code/i });
+    let stationExhausted = false;
+    try {
+      await pH.call('verifyStationCode', { ...CH, teamId: hUid, taskId: 'ws-lock', code: 'GOLD' }); // correct
+    } catch (e) {
+      stationExhausted = e.code === 'functions/resource-exhausted' || /attempts left/i.test(e.message);
+    }
+    check('station attempt-limit: 3rd attempt refused even with the correct code', stationExhausted);
+
+    // ── live gated station is NOT false-rejected (gate lets an open task through) ─
+    // ws-exp has an expiry gate but is still OPEN here: a wrong code must reach the
+    // normal 'Incorrect code' path, proving the release/expiry gate does not block a
+    // live station.
+    await expectError('station expiry: an OPEN gated station still grades codes',
+      pH.call('verifyStationCode', { ...CH, teamId: hUid, taskId: 'ws-exp', code: 'NOPE' }),
+      { match: /incorrect code/i });
+
+    // ── wait for the 12s expiry window to close (server clock, not a blind sleep) ─
+    const launchedMs = Date.parse((await creator.getDocAt(`users/${OWNER}/games/${gH}/runs/${rH}`)).data?.launchedAt);
+    const closeAt = launchedMs + 0.2 * 60_000 + 700; // +0.7s server-clock margin
+    if (Date.now() < closeAt) await new Promise((r) => setTimeout(r, closeAt - Date.now()));
+
+    // ── verifyStationCode expiry gate (wave-h #2) ──────────────────────────────
+    // An expired smart_station rejects the CORRECT code instead of scoring it.
+    await expectError('station expiry: verifyStationCode refuses the correct code after expiry',
+      pH.call('verifyStationCode', { ...CH, teamId: hUid, taskId: 'ws-exp', code: 'SILVER' }),
+      { match: /expired/i });
+
+    // ── submitStationPhoto expiry gate (wave-h #3) ─────────────────────────────
+    // An expired photo task refuses a submit (a valid, IDOR-scoped Storage URL, so
+    // the refusal comes from the expiry gate, not requireStorageUrl).
+    const hPhotoUrl = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rH}/teams/${hUid}/late.jpg`)}?alt=media`;
+    await expectError('station expiry: submitStationPhoto refuses a submit after expiry',
+      pH.call('submitStationPhoto', { ...CH, teamId: hUid, taskId: 'wp-exp', photoUrl: hPhotoUrl }),
+      { match: /expired/i });
+  }); // scenario: smart_station gates
+
   await scenario('guardian consent gate', async () => {
 
   // ── 17. Guardian consent gate (guardian-consent-qr) ────────────────────────
