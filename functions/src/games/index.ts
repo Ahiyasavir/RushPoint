@@ -32,9 +32,30 @@ import {
   validateSurveyChoices,
   sumEstimatedMinutes,
   gameStructureProblems,
+  // What a PUBLIC task may say about where it is (change: task-library-map-view).
+  publicTaskLocation,
   stripUnsafeDisplayChars,
   cleanGameInstructions,
+  FIRESTORE_PATHS,
+  // Game trash / tombstone lifecycle (change: recoverable-game-deletion).
+  type Run,
+  type AccessCode,
+  GAME_TRASH_RETENTION_DAYS,
+  isGameDeleted,
+  visibleGames,
+  deletedGames,
+  gamePurgeDueAt,
+  // Creator-owned portable game file (change: game-file-export-import).
+  serializeGameToFile,
+  parseGameFile,
 } from '@rushpoint/shared';
+import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
+import {
+  auditBestEffort, AUDIT_GAME_DELETED, AUDIT_GAME_RESTORED, AUDIT_GAME_PURGED,
+} from '../obs/audit';
+// Gallery ranking signals (change: gallery-popularity-ranking) — the single
+// transactional writer, so a counter can never move without its score.
+import { bumpPublicSignals, scoreFor } from '../gallery/popularityStore';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
 
@@ -94,6 +115,47 @@ function sanitizeStagesText(stages: Stage[] | undefined): Stage[] | undefined {
     })),
   }));
 }
+
+/**
+ * Every save-blocking problem with an authored `stages` array. THE SINGLE SOURCE
+ * shared by updateGame (Builder save) and importGameFile (restore from a creator's
+ * own file), so a game restored from a file can never be accepted on terms an
+ * authored one would be refused — and vice versa.
+ *
+ * Covers: structural winnability (empty-task stage, uncompletable task, negative
+ * pointValue/difficulty/estimatedMinutes — shared with publishGame), the per-stage
+ * unlock prerequisite graph (no self-reference, no cross-stage/unknown ids, no
+ * cycles), availability windows (an expiry at or before its release can never be
+ * played), ordering-quiz rules (quiz-only, one grading mode per task, 3–10 valid
+ * items) and survey-choice rules (2–8 non-empty options).
+ */
+function stagesProblems(stages: Stage[] | undefined): string[] {
+  const problems: string[] = [];
+  problems.push(...gameStructureProblems(stages));
+  for (const stage of stages ?? []) {
+    problems.push(...validateUnlockGraph(stage).errors);
+    for (const task of stage.tasks ?? []) {
+      const windowError = validateAvailabilityWindow(task);
+      if (windowError) problems.push(`Task "${task.title || task.id}": ${windowError}`);
+      if (task.orderItems !== undefined) {
+        const label = `Task "${task.title || task.id}"`;
+        if (task.type !== 'quiz') {
+          problems.push(`${label}: ordering items are only valid on a quiz task`);
+        } else if ((task.choices?.length ?? 0) > 0 || (task.answers?.length ?? 0) > 0) {
+          problems.push(`${label}: a quiz cannot mix ordering items with choices or typed answers`);
+        }
+        const orderError = validateOrderItems(task.orderItems);
+        if (orderError) problems.push(`${label}: ${orderError}`);
+      }
+      if (task.surveyChoices !== undefined) {
+        const choiceError = validateSurveyChoices(task.surveyChoices);
+        if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
+      }
+    }
+  }
+  return problems;
+}
+
 
 // ─── createGame ───────────────────────────────────────────────────────────────
 
@@ -159,6 +221,9 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if ((snap.data() as Game).ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your game');
   }
+  // A game in the trash is not editable (change: recoverable-game-deletion) —
+  // otherwise a stale Builder tab could keep writing to a "deleted" game.
+  assertGameNotDeleted(snap.data() as Game);
 
   const updates: Partial<Game> & { updatedAt: string } = { updatedAt: new Date().toISOString() };
   if (title !== undefined)              updates.title = stripUnsafeDisplayChars(title).trim();
@@ -171,43 +236,9 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     // least one prerequisite-free task, so the stage stays routable). Task
     // expiry (change: task-expiry): a relative expiry at or before a relative
     // release is an empty availability window and can never be played.
-    const problems: string[] = [];
-    // Structural winnability (wave-j J2/J3/J4): empty-task stage + uncompletable
-    // task + negative pointValue/difficulty/estimatedMinutes — the same rule
-    // launchRun enforces at launch, applied at save so a broken shape never persists
-    // and never reaches publishGame / the gallery. Shared SOURCE with publishGame.
-    problems.push(...gameStructureProblems(stages));
-    for (const stage of stages ?? []) {
-      problems.push(...validateUnlockGraph(stage).errors);
-      for (const task of stage.tasks ?? []) {
-        const windowError = validateAvailabilityWindow(task);
-        if (windowError) problems.push(`Task "${task.title || task.id}": ${windowError}`);
-        // Ordering quiz (change: quiz-ordering): orderItems only on a quiz task,
-        // never mixed with choices/typed answers (one grading mode per task), and
-        // the item list itself must be valid (3 to 10 non-empty distinct items).
-        if (task.orderItems !== undefined) {
-          const label = `Task "${task.title || task.id}"`;
-          if (task.type !== 'quiz') {
-            problems.push(`${label}: ordering items are only valid on a quiz task`);
-          } else if ((task.choices?.length ?? 0) > 0 || (task.answers?.length ?? 0) > 0) {
-            problems.push(`${label}: a quiz cannot mix ordering items with choices or typed answers`);
-          }
-          const orderError = validateOrderItems(task.orderItems);
-          if (orderError) problems.push(`${label}: ${orderError}`);
-        }
-        // Survey (change: survey-tasks): surveyChoices, when present, must be a
-        // 2–8 non-empty-string list (absent ⇒ a free-text survey).
-        if (task.surveyChoices !== undefined) {
-          const choiceError = validateSurveyChoices(task.surveyChoices);
-          if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
-        }
-        // Unwinnable-task + negative-value guards live in gameStructureProblems
-        // above (shared with publishGame): a quiz with no answer, numeric with no
-        // numericAnswer, smart_station with no secretCode, sequence with no steps,
-        // an empty-task stage, or a negative pointValue/difficulty are all rejected
-        // there so a direct callable (bypassing the Wizard) can't persist them.
-      }
-    }
+    // Save-time validation, shared verbatim with importGameFile (stagesProblems
+    // above) so the Builder save path and the file-restore path can never drift.
+    const problems = stagesProblems(stages);
     if (problems.length > 0) {
       throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
     }
@@ -293,40 +324,232 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
 });
 
 
-// ─── deleteGame ───────────────────────────────────────────────────────────────
+// ─── Game trash: soft delete · restore · permanent purge ──────────────────────
+//
+// THE INCIDENT (change: recoverable-game-deletion): deleteGame used to end in
+// `db.recursiveDelete(ref)`, which destroys the game document AND every run, team,
+// feed item, feedback response and location-track document beneath it. A creator
+// clicked Delete on a game card and a real game with a finished run, a team and
+// its whole history ceased to exist. There was no soft delete, no undo, no audit
+// record — and no accessCodes cleanup, so the run's join code stayed behind
+// pointing at nothing (a participant typing it hit a dangling reference).
+//
+// Deletion is now a TOMBSTONE. Destruction happens only after the grace period or
+// on an explicit, separate request, and lives in exactly one function
+// (purgeGameTree) shared by all three destruction entry points.
+
+/** Remove the game's public gallery index (doc + its task rows). Idempotent. */
+async function removeGalleryIndex(gameId: string): Promise<void> {
+  await db.doc(`publicGames/${gameId}`).delete().catch((e) => logBestEffort('publicGames.delete', { gameId }, e));
+  // Chunked: a large game can have >500 public tasks, past the per-batch cap.
+  const publicTasksSnap = await db.collection('publicTasks')
+    .where('sourceGameId', '==', gameId).get();
+  await deleteDocsInChunks(publicTasksSnap.docs.map((d) => d.ref));
+}
+
+/** Every access code pointing at a run of this game. Needs the ownerUid+gameId index. */
+async function gameAccessCodes(ownerUid: string, gameId: string) {
+  const snap = await db.collection('accessCodes')
+    .where('ownerUid', '==', ownerUid)
+    .where('gameId', '==', gameId)
+    .get();
+  return snap.docs;
+}
+
+/**
+ * PERMANENT destruction. The old deleteGame body, plus the accessCodes cleanup it
+ * was missing. Only ever reached from purgeGameNow (owner, explicit) or the
+ * scheduled sweep (grace period elapsed) — never from a single creator click.
+ */
+export async function purgeGameTree(ownerUid: string, gameId: string, operatorId: string): Promise<void> {
+  const ref = db.doc(gamePath(ownerUid, gameId));
+  const snap = await ref.get();
+  if (!snap.exists) return; // already gone — purge is idempotent
+  const game = snap.data() as Game;
+
+  await removeGalleryIndex(gameId);
+
+  // Purge uploaded photos for every run of this game BEFORE the Firestore tree
+  // (which holds the runIds) goes away — otherwise they orphan in Storage.
+  const runsSnap = await db.collection(`${gamePath(ownerUid, gameId)}/runs`).get();
+  await deleteRunsPhotos(runsSnap.docs.map((d) => d.id));
+  // Creator-authored task media (gameMedia/{uid}/games/{gameId}/…) would
+  // otherwise orphan in Storage forever once the game doc is gone.
+  await deleteGameMedia(ownerUid, gameId);
+
+  // THE ORPHAN BUG: the original deleteGame never touched accessCodes, so a code
+  // survived its destroyed game and a participant entering it hit a dangling
+  // reference. deleteMyAccount always did this; deleteGame now does too.
+  const codes = await gameAccessCodes(ownerUid, gameId);
+  await deleteDocsInChunks(codes.map((d) => d.ref))
+    .catch((e) => logBestEffort('accessCodes.purge', { ownerUid, gameId }, e));
+
+  await db.recursiveDelete(ref);
+
+  await auditBestEffort({
+    operatorId, actionType: AUDIT_GAME_PURGED, gameId,
+    gameTitle: game.title, reason: 'permanent destruction after soft delete',
+  });
+}
+
+
+// ─── deleteGame (SOFT) ────────────────────────────────────────────────────────
 
 export const deleteGame = loggedCallable('deleteGame', async (data, context) => {
   const uid = requireAuth(context);
   const { gameId } = data as { gameId: string };
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
+  // Loads + owner check + refuses a game that is ALREADY in the trash, so a
+  // second delete is not-found and can never overwrite the original deletedAt
+  // (which would silently restart the grace-period clock).
+  const game = await loadOwnedLiveGame(uid, gameId);
+  const ref = db.doc(gamePath(uid, gameId));
+
+  // A run that is not finished is participants physically standing in a street
+  // holding phones. The old code deleted it out from under them. Refuse outright
+  // rather than soft-delete: every play/staff path reaches the run THROUGH this
+  // game doc, so a "deleted" game with a live run is an incoherent state.
+  const runsSnap = await db.collection(`${gamePath(uid, gameId)}/runs`).get();
+  const liveRun = runsSnap.docs
+    .map((d) => d.data() as Run)
+    .find((r) => r.status !== 'finished');
+  if (liveRun) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      `This game has a run in progress (code ${liveRun.accessCode}). Finalize it before deleting the game.`,
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  // Unconditional (not only when visibility === 'public'): a stale gallery row
+  // from an earlier publish must not outlive the game either.
+  await removeGalleryIndex(gameId);
+
+  // Revoke, do NOT delete, the join codes. A released code could be handed to a
+  // different creator's run by uniqueCode() inside the 30-day window, so restore
+  // would return a game whose shared links are dead or point somewhere else.
+  // 'revoked' is an already-supported AccessCodeStatus that getJoinInfo / joinRun
+  // already refuse with a clear message — the honest answer the dangling code
+  // never gave. Stamped with THIS deletion so restore reinstates only these.
+  const codes = await gameAccessCodes(uid, gameId);
+  if (codes.length > 0) {
+    const batch = db.batch();
+    for (const d of codes) {
+      const c = d.data() as AccessCode;
+      if (c.status === 'revoked') continue; // already revoked for another reason — leave it alone
+      batch.update(d.ref, {
+        status: 'revoked',
+        revokedByGameDeletionAt: now,
+        revokedFromStatus: c.status,
+      });
+    }
+    await batch.commit().catch((e) => logBestEffort('accessCodes.revoke', { gameId }, e));
+  }
+
+  // The tombstone itself. Nothing beneath the game is touched — that is what
+  // makes restore complete.
+  await ref.update({ deletedAt: now, deletedBy: uid, updatedAt: now });
+
+  await auditBestEffort({
+    operatorId: uid, actionType: AUDIT_GAME_DELETED, gameId,
+    gameTitle: game.title, newValue: now,
+    reason: `soft delete, recoverable for ${GAME_TRASH_RETENTION_DAYS} days`,
+  });
+
+  return { ok: true, deletedAt: now, purgeDueAt: gamePurgeDueAt(now) };
+});
+
+
+// ─── listDeletedGames ─────────────────────────────────────────────────────────
+// The "recently deleted" view. Same query shape as listGames, opposite filter.
+
+export const listDeletedGames = loggedCallable('listDeletedGames', async (_data, context) => {
+  const uid = requireAuth(context);
+  const snap = await db.collection(gamesCol(uid))
+    .orderBy('updatedAt', 'desc')
+    .limit(200)
+    .get();
+  const games = deletedGames(snap.docs.map((d) => d.data() as Game)).map((g) => ({
+    ...g,
+    // Derived, never stored: a persisted purge date would go stale the moment the
+    // retention constant changed.
+    purgeDueAt: gamePurgeDueAt(g.deletedAt),
+  }));
+  return { games, retentionDays: GAME_TRASH_RETENTION_DAYS };
+});
+
+
+// ─── restoreGame ──────────────────────────────────────────────────────────────
+
+export const restoreGame = loggedCallable('restoreGame', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId } = data as { gameId: string };
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+
   const ref = db.doc(gamePath(uid, gameId));
   const snap = await ref.get();
+  // Purged (or never existed) — the console tells the creator it is gone for good
+  // rather than promising a recovery it cannot deliver.
   if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  if ((snap.data() as Game).ownerUid !== uid) {
-    throw new functions.https.HttpsError('permission-denied', 'Not your game');
-  }
-
-  // Remove the public index if the game was public
   const game = snap.data() as Game;
-  if (game.visibility === 'public') {
-    await db.doc(`publicGames/${gameId}`).delete().catch((e) => logBestEffort('publicGames.delete', { gameId }, e));
-    // Remove public tasks from this game (chunked: a large game can have >500).
-    const publicTasksSnap = await db.collection('publicTasks')
-      .where('sourceGameId', '==', gameId).get();
-    await deleteDocsInChunks(publicTasksSnap.docs.map((d) => d.ref));
+  if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
+
+  // Idempotent: restoring a game that is not in the trash (a double click, two
+  // open tabs) is a no-op success, never an error the creator has to interpret.
+  if (!isGameDeleted(game)) return { ok: true, alreadyRestored: true };
+
+  const tombstone = game.deletedAt!;
+  const now = new Date().toISOString();
+
+  await ref.update({
+    deletedAt: admin.firestore.FieldValue.delete(),
+    deletedBy: admin.firestore.FieldValue.delete(),
+    // Deliberately NOT re-published: re-indexing into the public gallery must go
+    // back through publishGame, which re-runs the structural winnability guard.
+    visibility: 'private',
+    updatedAt: now,
+  });
+
+  // Reinstate ONLY the codes this deletion revoked. A code the owner revoked for
+  // an unrelated reason carries no revokedByGameDeletionAt and stays revoked.
+  const codes = await gameAccessCodes(uid, gameId);
+  const mine = codes.filter((d) => (d.data() as AccessCode).revokedByGameDeletionAt === tombstone);
+  if (mine.length > 0) {
+    const batch = db.batch();
+    for (const d of mine) {
+      const c = d.data() as AccessCode;
+      batch.update(d.ref, {
+        status: c.revokedFromStatus ?? 'unused',
+        revokedByGameDeletionAt: admin.firestore.FieldValue.delete(),
+        revokedFromStatus: admin.firestore.FieldValue.delete(),
+      });
+    }
+    await batch.commit().catch((e) => logBestEffort('accessCodes.unrevoke', { gameId }, e));
   }
 
-  // Purge uploaded photos for every run of this game, then recursively delete
-  // the game and all its subcollections (runs → teams → locations …). A plain
-  // doc delete would orphan those subcollections in Firestore.
-  const runsSnap = await db.collection(`${gamePath(uid, gameId)}/runs`).get();
-  await deleteRunsPhotos(runsSnap.docs.map((d) => d.id));
-  // Creator-authored task media (gameMedia/{uid}/games/{gameId}/…) would
-  // otherwise orphan in Storage forever once the game doc is gone.
-  await deleteGameMedia(uid, gameId);
+  await auditBestEffort({
+    operatorId: uid, actionType: AUDIT_GAME_RESTORED, gameId,
+    gameTitle: game.title, previousValue: tombstone,
+    reason: 'restored from trash',
+  });
 
-  await db.recursiveDelete(ref);
+  return { ok: true, restoredCodes: mine.length };
+});
+
+
+// ─── purgeGameNow (owner: "delete permanently") ───────────────────────────────
+
+export const purgeGameNow = loggedCallable('purgeGameNow', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId } = data as { gameId: string };
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+
+  // Requires an existing tombstone (failed-precondition otherwise) so this can
+  // never be used as a one-call hard delete — the exact defect being fixed.
+  await loadOwnedTrashedGame(uid, gameId);
+  await purgeGameTree(uid, gameId, uid);
   return { ok: true };
 });
 
@@ -344,6 +567,10 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
 
   if (!sourceSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const sourceGame = sourceSnap.data() as Game;
+  // A trashed game cannot be duplicated by anyone, including its owner
+  // (change: recoverable-game-deletion) — a copy would resurrect content the
+  // creator asked to delete, and would survive the purge of the original.
+  assertGameNotDeleted(sourceGame);
 
   // Enforce: can only copy public games from other creators
   if (ownerUid !== uid && sourceGame.visibility !== 'public') {
@@ -371,10 +598,12 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
 
   await newRef.set(copy);
 
-  // Increment original's playCount (best-effort)
+  // Increment original's playCount (best-effort). The PUBLIC bump goes through
+  // bumpPublicSignals so the gallery's ranking score is recomputed with the
+  // counter, never after it (change: gallery-popularity-ranking).
   if (ownerUid !== uid) {
     sourceRef.update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
-    db.doc(`publicGames/${gameId}`).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
+    bumpPublicSignals('game', gameId, { uses: 1 }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
   }
 
   return { gameId: newRef.id };
@@ -401,6 +630,9 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   }
 
   const game = snap.data() as Game;
+  // A trashed game can never be (re-)listed in the public gallery
+  // (change: recoverable-game-deletion).
+  assertGameNotDeleted(game);
   const now = new Date().toISOString();
 
   if (visibility === 'public') {
@@ -425,6 +657,21 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
     const creatorSnap = await admin.auth().getUser(uid).catch((e) => { logBestEffort('auth.getUser', { uid }, e); return null; });
     const ownerDisplayName = creatorSnap?.displayName ?? undefined;
 
+    // Re-publish must PRESERVE accumulated ranking signals (change:
+    // gallery-popularity-ranking). This path `set`s the gallery documents whole,
+    // so before this fix editing-and-republishing a game silently reset every
+    // task's copyCount to 0 — and would have wiped every like too. Read what is
+    // already there and carry the counters forward.
+    const priorGameSnap = await db.doc(FIRESTORE_PATHS.publicGame(gameId)).get()
+      .catch((e) => { logBestEffort('publicGames.readPrior', { gameId }, e); return null; });
+    const priorGame = (priorGameSnap?.data() ?? {}) as Partial<PublicGame>;
+    const priorTasksSnap = await db.collection('publicTasks')
+      .where('sourceGameId', '==', gameId).get()
+      .catch((e) => { logBestEffort('publicTasks.readPrior', { gameId }, e); return null; });
+    const priorTasks = new Map<string, Partial<PublicTask>>(
+      (priorTasksSnap?.docs ?? []).map((d) => [d.id, d.data() as Partial<PublicTask>]),
+    );
+
     const publicGame: PublicGame = {
       id: gameId,
       ownerUid: uid,
@@ -446,18 +693,32 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
       // Accurate GPS requirement derived from task trigger modes at publish time,
       // so the welcome screen never trusts free-text "no GPS" claims in copy.
       requirement: describeGameRequirements(game),
+      // Ranking signals survive a re-publish; the score is recomputed from them
+      // below so the stored ordering field can never lag its own counters.
+      likeCount: priorGame.likeCount ?? 0,
       createdAt: game.createdAt,
       updatedAt: now,
     };
+    publicGame.popularity = scoreFor('game', publicGame);
 
     const batch = db.batch();
     batch.set(db.doc(`publicGames/${gameId}`), publicGame);
 
     // Index each task individually for the task library
     for (const task of allTasks) {
-      const publicTaskRef = db.doc(`publicTasks/${gameId}_${task.id}`);
+      const publicTaskId = `${gameId}_${task.id}`;
+      const publicTaskRef = db.doc(FIRESTORE_PATHS.publicTask(publicTaskId));
+      const prior = priorTasks.get(publicTaskId) ?? {};
+      // Location contract (change: task-library-map-view): publicTasks is
+      // world-readable, so it gets a coarse ~1 km AREA and never the authored
+      // point — and a hideLocation / locationless / unplaced task gets NOTHING.
+      // The exclusion is applied here, at the write, because a renderer-side
+      // filter protects only readers who use our renderer. The deprecated
+      // `coordinates` key is deliberately not written at all, so re-publishing
+      // also erases it from a document written by the old code.
+      const approxLocation = publicTaskLocation(task);
       const publicTask: PublicTask = {
-        id: `${gameId}_${task.id}`,
+        id: publicTaskId,
         sourceGameId: gameId,
         sourceGameTitle: game.title,
         ownerUid: uid,
@@ -465,14 +726,19 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
         title: task.title,
         description: task.description,
         type: task.type,
-        coordinates: task.coordinates,
+        ...(approxLocation ? { approxLocation } : {}),
         difficulty: task.difficulty,
         estimatedMinutes: task.estimatedMinutes,
         pointValue: task.pointValue,
         tags: task.tags,
-        copyCount: 0,
-        createdAt: now,
+        // Preserved across a re-publish, along with createdAt — the newness term
+        // of the score must date from FIRST publication, otherwise re-publishing
+        // would be a way to permanently refresh your own ranking.
+        copyCount: prior.copyCount ?? 0,
+        likeCount: prior.likeCount ?? 0,
+        createdAt: prior.createdAt ?? now,
       };
+      publicTask.popularity = scoreFor('task', publicTask);
       batch.set(publicTaskRef, publicTask);
     }
     await batch.commit();
@@ -504,6 +770,8 @@ export const getGame = loggedCallable('getGame', async (data, context) => {
   if (game.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your game');
   }
+  // A game in the trash reads as gone (change: recoverable-game-deletion).
+  assertGameNotDeleted(game);
   return { game };
 });
 
@@ -516,7 +784,11 @@ export const listGames = loggedCallable('listGames', async (_data, context) => {
     .orderBy('updatedAt', 'desc')
     .limit(200) // bound the read — a creator's game list is not unbounded in the UI
     .get();
-  const games = snap.docs.map((d) => d.data() as Game);
+  // Trashed games are filtered IN MEMORY, not in the query: Firestore's
+  // `where('deletedAt','==',null)` does NOT match documents that lack the field,
+  // so a server-side filter would require backfilling `deletedAt: null` onto
+  // every existing game. Absence of the field stays the normal state.
+  const games = visibleGames(snap.docs.map((d) => d.data() as Game));
   return { games };
 });
 
@@ -547,6 +819,12 @@ export const checkChallengeAnswer = loggedCallable('checkChallengeAnswer', async
     throw new functions.https.HttpsError('not-found', 'Challenge not available');
   }
   const game = gameSnap.data() as Game;
+  // Defense in depth (change: recoverable-game-deletion): soft-delete already
+  // removes the publicGames row above, but a stale index row must never keep a
+  // trashed game's answer key checkable from an unauthenticated surface.
+  if (isGameDeleted(game)) {
+    throw new functions.https.HttpsError('not-found', 'Challenge not available');
+  }
   const task = game.stages.flatMap((s) => s.tasks).find((t) => t.id === taskId);
   if (!task) {
     throw new functions.https.HttpsError('not-found', 'Task not found');
@@ -585,6 +863,9 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
   if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = snap.data() as Game;
   if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
+  // A trashed game cannot be translated into a fresh copy
+  // (change: recoverable-game-deletion) — same reasoning as duplicateGame.
+  assertGameNotDeleted(game);
 
   const lang = targetLang.trim();
 
@@ -624,4 +905,103 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
   };
   await newRef.set(copy);
   return { gameId: newRef.id, targetLang: lang };
+});
+
+
+// ─── exportGameFile / importGameFile (change: game-file-export-import) ─────────
+//
+// THE INCIDENT: a creator's real game was destroyed and could not be recovered,
+// because it existed in exactly ONE place and the creator had no copy of their
+// own. Trash/restore and platform backups all live on infrastructure the creator
+// neither controls nor can inspect. These two callables give the creator a FILE.
+//
+// ⚠️ SECURITY — the exported document CONTAINS server-secret material (quiz
+// `answers`, the authored `orderItems` order, `numericAnswer`, `steps[].answer`,
+// the paid `hint` text, `smart.secretCode`, and the real coordinates of
+// `hideLocation` tasks). That is deliberate: an export without the answer keys
+// restores an UNPLAYABLE game. It therefore may only ever be produced for the
+// authenticated OWNER of that game:
+//   • there is NO `sourceOwnerUid` parameter (unlike duplicateGame) and NO
+//     public-game path — publishing exposes the sanitized publicTasks projection,
+//     never the answer key, so a published game is not exportable by strangers;
+//   • a trashed game reads as not-found, exactly like getGame;
+//   • nothing here is reachable from a participant/staff callable, and no part of
+//     the document is copied into publicGames / publicTasks / any run document.
+
+export const exportGameFile = loggedCallable('exportGameFile', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId } = (data ?? {}) as { gameId?: string };
+  if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
+
+  const snap = await db.doc(gamePath(uid, gameId)).get();
+  if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = snap.data() as Game;
+  if (game.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your game');
+  }
+  assertGameNotDeleted(game);
+
+  return { file: serializeGameToFile(game) };
+});
+
+
+export const importGameFile = loggedCallable('importGameFile', async (data, context) => {
+  const uid = requireAuth(context);
+  const { file } = (data ?? {}) as { file?: unknown };
+
+  // Layer 1+2 — envelope (format · schema version · size caps) and shape. Pure,
+  // never throws, and returns NO game unless every check passed, so a malformed
+  // file can never leave half a game behind.
+  const { game: parsed, errors } = parseGameFile(file);
+  if (errors.length > 0 || !parsed) {
+    throw new functions.https.HttpsError('invalid-argument', errors.join(' · ') || 'Invalid game file');
+  }
+
+  // Layer 3 — the SAME semantic guards updateGame runs, from the same helper, so
+  // an imported game can never be accepted on terms an authored one would not be.
+  const stages = (parsed.stages ?? []) as Stage[];
+  const problems = stagesProblems(stages);
+  if (problems.length > 0) {
+    throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
+  }
+
+  // Layer 4 — the same normalizers/trust boundaries: display-char stripping on
+  // authored titles/descriptions, and the task-media origin gate (a media
+  // reference whose Storage object is gone is dropped here rather than persisted
+  // as a dead pointer). Both return NEW arrays — never dotted-update an array
+  // element, it coerces the array to a map.
+  const safeStages = normalizeStagesMedia(sanitizeStagesText(stages)) ?? [];
+  const instructions = parsed.instructions ? cleanGameInstructions(parsed.instructions) : undefined;
+
+  const now = new Date().toISOString();
+  const ref = db.collection(gamesCol(uid)).doc();
+
+  // Server-owned identity is assigned HERE, never honoured from the file: an
+  // `ownerUid` in a document must not be an account-transfer primitive, and
+  // `visibility` may only ever change through publishGame (which re-runs the
+  // structural winnability guard before indexing into the public gallery).
+  const game: Game = {
+    ...(parsed as Partial<Game>),
+    id: ref.id,
+    ownerUid: uid,
+    title: stripUnsafeDisplayChars(parsed.title).trim(),
+    stages: safeStages,
+    scoringPreset: parsed.scoringPreset ?? DEFAULT_SCORING_PRESET,
+    registrationFields: parsed.registrationFields ?? DEFAULT_REGISTRATION_FIELDS,
+    mode: parsed.mode ?? 'individual',
+    tags: parsed.tags ?? [],
+    visibility: 'private',
+    playCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (instructions) game.instructions = instructions; else delete game.instructions;
+
+  // ONE write. Deliberately not createGame + updateGame (two writes, which can
+  // strand an empty game if the second fails) — and deliberately a fresh document
+  // rather than an overwrite: an overwrite's failure mode is losing a game, which
+  // is the exact thing this change exists to prevent.
+  await ref.set(game);
+
+  return { gameId: ref.id, stageCount: safeStages.length };
 });

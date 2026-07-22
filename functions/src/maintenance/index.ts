@@ -16,8 +16,16 @@
 import * as functions from 'firebase-functions';
 import { loggedCallable } from '../obs/log';
 import { db, storage } from '../firebase';
-import { RUN_DATA_RETENTION_DAYS } from '@rushpoint/shared';
+import {
+  RUN_DATA_RETENTION_DAYS,
+  GAME_TRASH_RETENTION_DAYS, isPurgeDue, type Game,
+} from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
+// Game trash purge (change: recoverable-game-deletion). purgeGameTree is the ONE
+// destruction implementation, shared with the owner-triggered purgeGameNow.
+import { purgeGameTree } from '../games/index';
+import { AUDIT_SYSTEM_OPERATOR } from '../obs/audit';
+import { backfillPublicTaskCoordinates } from './publicTaskBackfill';
 
 // Admin only (platform maintenance). No emulator bypass — the e2e suite mints
 // a real `admin` custom-token claim against the Auth emulator, so tests hit
@@ -164,6 +172,48 @@ export async function sweepExpiredRuns(now = new Date()): Promise<PruneResult[]>
 }
 
 
+// ─── Game trash purge sweep (change: recoverable-game-deletion) ──────────────
+//
+// deleteGame no longer destroys anything: it writes a `deletedAt` tombstone and
+// the game stays recoverable for GAME_TRASH_RETENTION_DAYS. This is the other end
+// of that contract — the sweep that actually destroys a game once its grace
+// period has elapsed.
+//
+// It DELIBERATELY reuses the existing daily retention schedule below instead of
+// adding a second scheduler: same cadence, same timezone, one job to reason about.
+//
+// The query is an inequality on a COLLECTION-GROUP scope, which Firestore does not
+// auto-index — see the `games.deletedAt` COLLECTION_GROUP fieldOverride in
+// firestore.indexes.json. `isPurgeDue` (shared, pure) makes the final call, so a
+// corrupt/unparseable tombstone is never destroyed.
+
+export async function sweepPurgeableGames(
+  now = new Date(),
+  days: number = GAME_TRASH_RETENTION_DAYS,
+): Promise<Array<{ ownerUid: string; gameId: string }>> {
+  const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+  const snap = await db
+    .collectionGroup('games')
+    .where('deletedAt', '<=', cutoff)
+    .get();
+
+  const purged: Array<{ ownerUid: string; gameId: string }> = [];
+  for (const gameDoc of snap.docs) {
+    const game = gameDoc.data() as Game;
+    // Re-check with the shared predicate: the query is the cheap filter, this is
+    // the authority (and it fails closed on an unparseable timestamp).
+    if (!isPurgeDue(game.deletedAt, now, days)) continue;
+    // path: users/{ownerUid}/games/{gameId}
+    const parts = gameDoc.ref.path.split('/');
+    const ownerUid = parts[1];
+    const gameId = parts[3];
+    await purgeGameTree(ownerUid, gameId, AUDIT_SYSTEM_OPERATOR);
+    purged.push({ ownerUid, gameId });
+  }
+  return purged;
+}
+
+
 // ─── Scheduled daily sweep ──────────────────────────────────────────────────
 export const pruneExpiredRunData = functions.pubsub
   .schedule('every 24 hours')
@@ -171,6 +221,9 @@ export const pruneExpiredRunData = functions.pubsub
   .onRun(async () => {
     const results = await sweepExpiredRuns();
     functions.logger.info(`pruneExpiredRunData: pruned ${results.length} run(s)`, { results });
+    // Same daily job destroys games whose 30-day trash window has elapsed.
+    const purgedGames = await sweepPurgeableGames();
+    functions.logger.info(`pruneExpiredRunData: purged ${purgedGames.length} deleted game(s)`, { purgedGames });
     return null;
   });
 
@@ -181,6 +234,40 @@ export const pruneExpiredRunDataNow = loggedCallable('pruneExpiredRunDataNow', a
   const results = await sweepExpiredRuns();
   return { ok: true, prunedCount: results.length, results };
 });
+
+// Game trash purge, on demand (change: recoverable-game-deletion). Mirrors
+// pruneExpiredRunDataNow: the scheduled sweep is not callable, so without this
+// there is no way to exercise or force the purge path.
+//
+// `graceDays` is an ADMIN-ONLY override, and it is what makes the grace period
+// provable in both directions without waiting a month (30 ⇒ nothing purged,
+// 0 ⇒ purged). Same gate and same trust level as pruneRunNow — assertAdmin has no
+// emulator bypass, and it can only ever destroy games that are ALREADY tombstoned.
+export const purgeDeletedGamesNow = loggedCallable('purgeDeletedGamesNow', async (data, context) => {
+  assertAdmin(context);
+  const { graceDays } = (data ?? {}) as { graceDays?: number };
+  const days = typeof graceDays === 'number' && Number.isFinite(graceDays) && graceDays >= 0
+    ? graceDays
+    : GAME_TRASH_RETENTION_DAYS;
+  const purged = await sweepPurgeableGames(new Date(), days);
+  return { ok: true, purgedCount: purged.length, graceDays: days, purged };
+});
+
+// publicTasks legacy-coordinate backfill (change: public-task-coordinates-backfill).
+// Admin-only and paged: `startAfter` continues from a previous call's `cursor`,
+// so a large library is swept in bounded chunks instead of one timeout-prone
+// pass. `dryRun` reports what would change and writes nothing.
+export const backfillPublicTaskCoordinatesNow = loggedCallable(
+  'backfillPublicTaskCoordinatesNow',
+  async (data, context) => {
+    assertAdmin(context);
+    const { limit, startAfter, dryRun } = (data ?? {}) as {
+      limit?: number; startAfter?: string | null; dryRun?: boolean;
+    };
+    const result = await backfillPublicTaskCoordinates({ limit, startAfter, dryRun });
+    return { ok: true, ...result };
+  },
+);
 
 export const pruneRunNow = loggedCallable('pruneRunNow', async (data, context) => {
   assertAdmin(context);

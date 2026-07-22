@@ -24,7 +24,8 @@ export * from './games/index';
 export * from './gallery/index';
 export { updateMyProfile, exportMyData, deleteMyAccount } from './users/index';
 export {
-  pruneExpiredRunData, pruneExpiredRunDataNow, pruneRunNow,
+  pruneExpiredRunData, pruneExpiredRunDataNow, pruneRunNow, purgeDeletedGamesNow,
+  backfillPublicTaskCoordinatesNow,
 } from './maintenance/index';
 export {
   getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
@@ -95,29 +96,9 @@ function assertStaffOrOwner(
 
 
 // ─── Audit trail ──────────────────────────────────────────────────────────────
-
-interface AuditEntry {
-  runId?: string;
-  teamId?: string;
-  teamName?: string;
-  operatorId: string;
-  actionType: string;
-  previousValue?: number | string | null;
-  newValue?: number | string | null;
-  reason?: string;
-  [key: string]: unknown;
-}
-
-async function writeAuditLog(entry: AuditEntry): Promise<void> {
-  await db.collection('auditLogs').add({
-    ...entry,
-    teamName:      entry.teamName ?? null,
-    previousValue: entry.previousValue ?? null,
-    newValue:      entry.newValue ?? null,
-    reason:        entry.reason ?? '',
-    timestamp:     new Date().toISOString(),
-  });
-}
+// The writer now lives in obs/audit.ts so the games domain can record destructive
+// actions too (change: recoverable-game-deletion). Behaviour is unchanged.
+import { writeAuditLog } from './obs/audit';
 
 
 // ─── Chat integrations (change: chat-integrations) ─────────────────────────────

@@ -15,7 +15,7 @@ import { loggedCallable, logBestEffort } from '../obs/log';
 import { db, auth } from '../firebase';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
-import type { Game, Wallet } from '@rushpoint/shared';
+import { isGameDeleted, type Game, type Wallet } from '@rushpoint/shared';
 
 import { requireAuth } from '../auth';
 
@@ -81,6 +81,11 @@ export const exportMyData = loggedCallable('exportMyData', async (_data, context
       return {
         ...game,
         runCount: runsSnap?.size ?? 0,
+        // Trashed games are DELIBERATELY included (change: recoverable-game-deletion).
+        // A right-of-access export must describe the data we actually still hold;
+        // silently omitting a soft-deleted game would make the export a false
+        // statement. Flagged so the creator can see which ones are in the trash.
+        deleted: isGameDeleted(game),
       };
     }),
   );

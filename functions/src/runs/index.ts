@@ -68,6 +68,12 @@ import {
   lockedTaskIds,
   resolveExclusions,
   isHintFree,
+  // Wrong-answer cost (change: wrong-answer-cost): escalating, capped, preset-aware.
+  resolveWrongAnswerLevel,
+  wrongAnswerCost,
+  cooldownRemainingSeconds,
+  hashAnswerForReplay,
+  answerCostDisplay,
   isOrderingTask,
   matchesOrderedAnswer,
   validateSurveyResponse,
@@ -95,6 +101,8 @@ import {
 } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
+// Gallery ranking signals (change: gallery-popularity-ranking).
+import { bumpPublicSignals } from '../gallery/popularityStore';
 import { assignTask, releaseTask, computeSkillRatio, buildRecommendations, withLockRetry } from '../routing/assignNextTask';
 import type { NoAssignmentReason } from '../routing/assignNextTask';
 import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
@@ -113,6 +121,11 @@ import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
 import { requireAuth } from '../auth';
 import { shouldFeedTask } from '../feedVisibility';
 import { applyStageCompletion } from './helpers';
+// Game trash / tombstone (change: recoverable-game-deletion): a soft-deleted game
+// must be invisible on every run-facing path too — launch, join, instant play, the
+// shareable board, the recap, and the GM overview.
+import { assertGameNotDeleted } from '../games/lifecycle';
+import { isGameDeleted } from '@rushpoint/shared';
 
 function gamePath(ownerUid: string, gameId: string) {
   return `users/${ownerUid}/games/${gameId}`;
@@ -200,6 +213,10 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
   if (game.ownerUid !== uid) throw new functions.https.HttpsError('permission-denied', 'Not your game');
+  // A game in the trash can never go live (change: recoverable-game-deletion).
+  // Paired with deleteGame's refusal to delete a game with an unfinished run,
+  // this is what makes "a tombstoned game never has a live run" an invariant.
+  assertGameNotDeleted(game);
   if (game.stages.length === 0) {
     throw new functions.https.HttpsError('failed-precondition', 'Game has no stages — add at least one stage before launching');
   }
@@ -318,6 +335,13 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
   // drive is a rehearsal, not a play, so it is excluded (change: test-drive-mode).
   if (!testDrive) {
     db.doc(gamePath(uid, gameId)).update({ playCount: admin.firestore.FieldValue.increment(1) }).catch((e) => logBestEffort('game.playCount.increment', { gameId }, e));
+    // …and on the PUBLIC gallery doc, with its ranking score recomputed in the
+    // same transaction (change: gallery-popularity-ranking). Before this, only
+    // duplicateGame bumped the public counter, so the "plays" a creator saw in
+    // the gallery counted copies but not actual launches. No-ops for a private
+    // game (no public doc). Best-effort: a gallery counter must never be able to
+    // fail a run launch.
+    bumpPublicSignals('game', gameId, { uses: 1 }).catch((e) => logBestEffort('publicGames.playCount.increment', { gameId }, e));
   }
 
   return { runId: runRef.id, accessCode: code };
@@ -348,6 +372,10 @@ export const getJoinInfo = loggedCallable('getJoinInfo', async (data, context) =
   ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
+  // Belt and braces (change: recoverable-game-deletion): soft-delete revokes the
+  // code (refused above), but a code that predates this change, or one revoked
+  // then hand-edited, must still not open a trashed game's join screen.
+  assertGameNotDeleted(game);
   const run = runSnap.exists ? (runSnap.data() as Run) : null;
 
   return {
@@ -436,6 +464,9 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   ]);
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
+  // Nobody joins a trashed game (change: recoverable-game-deletion). Checked
+  // BEFORE the already-joined fast paths so a rejoin can't slip through either.
+  assertGameNotDeleted(game);
 
   if (existingTeam.exists) {
     return { teamId, runId, gameId, ownerUid, alreadyJoined: true };
@@ -1792,6 +1823,10 @@ export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async
   const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
+  // The shareable board link dies with the game (change: recoverable-game-deletion)
+  // and comes back with a restore — "deleted" has to mean deleted everywhere,
+  // including the public surfaces the creator already handed out.
+  assertGameNotDeleted(game);
   const runSnap = await db.doc(runPath(c.ownerUid, c.gameId, c.runId)).get();
   const run = runSnap.exists ? (runSnap.data() as Run) : null;
 
@@ -1861,6 +1896,10 @@ export const getRunRecap = loggedCallable('getRunRecap', async (data, context) =
 
   const gameSnap = await db.doc(gamePath(c.ownerUid, c.gameId)).get();
   const game = gameSnap.exists ? (gameSnap.data() as Game) : null;
+  // The shared recap dies with the game too (change: recoverable-game-deletion).
+  // getRunRecap tolerates a MISSING game (a pruned run), so this is an explicit
+  // tombstone check rather than a not-exists one.
+  assertGameNotDeleted(game);
   const teamsSnap = await db.collection(teamsCol(c.ownerUid, c.gameId, c.runId)).get();
   const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
 
@@ -2094,6 +2133,10 @@ export const startInstantPlay = loggedCallable('startInstantPlay', async (data, 
   const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
   const game = gameSnap.data() as Game;
+  // No instant play on a trashed game (change: recoverable-game-deletion). The
+  // publicGames row is removed at soft-delete, but this closes the window where a
+  // cached/stale index row could still start a brand-new run under a deleted game.
+  assertGameNotDeleted(game);
   if (!game.allowInstantPlay) {
     throw new functions.https.HttpsError('failed-precondition', 'This game is not open for instant play');
   }
@@ -3244,7 +3287,8 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const task = findGameTask(gameSnap.data() as Game, taskId);
+  const game = gameSnap.data() as Game;
+  const task = findGameTask(game, taskId);
   if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
   if (task.type !== 'quiz' && task.type !== 'numeric' && task.type !== 'survey') {
     throw new functions.https.HttpsError('failed-precondition', 'Task does not take an answer');
@@ -3311,16 +3355,78 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // Task expiry (change: task-expiry): a closed task takes no more answers.
   await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
 
-  // row 42: enforce the task's answer attempt limit server-side. Read the team's
-  // recorded wrong-answer count for this task; refuse once the cap is reached
-  // (even a correct answer is blocked once locked — no infinite brute force).
+  // ── Pre-grade gates ─────────────────────────────────────────────────────────
+  // Everything below runs BEFORE the answer is graded, on ONE team read. Order
+  // matters and is deliberate:
+  //   1. attempt limit  — a locked task must cost nothing at all (row 42)
+  //   2. replay guard   — a retried identical submission is not a new attempt
+  //   3. retry cooldown — a wrong-answer lockout, checked before grading so a
+  //                       team cannot fire every option while it is running
   const attemptLimit = task.smart?.attemptLimit;
   const teamRef = db.doc(`users/${ctx.ownerUid}/games/${ctx.gameId}/runs/${ctx.runId}/teams/${teamId}`);
-  if (attemptLimit && attemptLimit > 0) {
+  // Wrong-answer cost (change: wrong-answer-cost). Absent config ⇒ 'off' ⇒ this
+  // whole block is a no-op and the callable behaves exactly as it did before.
+  const costLevel = resolveWrongAnswerLevel(game, task);
+  const costActive = costLevel !== 'off';
+
+  // One read serves the attempt limit, the replay guard and the cooldown. It
+  // still only happens when SOMETHING needs it, so a plain task with no limit,
+  // no hint escalation and no cost level performs exactly as many reads as before.
+  const needsTeamRead = (attemptLimit != null && attemptLimit > 0) || costActive;
+  let attempts = 0;
+  let penaltyRec: { charged: number; lastHash: string; cooldownUntil: number } | undefined;
+  if (needsTeamRead) {
     const teamSnap = await teamRef.get();
-    const attempts = (teamSnap.data() as { taskAttempts?: Record<string, number> } | undefined)?.taskAttempts?.[taskId] ?? 0;
-    if (attemptLimitReached(attempts, attemptLimit)) {
-      throw new functions.https.HttpsError('resource-exhausted', 'No attempts left for this task');
+    const teamData = teamSnap.data() as Pick<RunTeam, 'taskAttempts' | 'answerPenalties'> | undefined;
+    attempts = teamData?.taskAttempts?.[taskId] ?? 0;
+    penaltyRec = teamData?.answerPenalties?.[taskId];
+  }
+
+  // 1. row 42: enforce the task's answer attempt limit server-side. Refuse once
+  // the cap is reached (even a correct answer is blocked once locked — no
+  // infinite brute force). Unchanged, and still FIRST: a locked task must never
+  // be charged, cooled down, or graded.
+  if (attemptLimit && attemptLimit > 0 && attemptLimitReached(attempts, attemptLimit)) {
+    throw new functions.https.HttpsError('resource-exhausted', 'No attempts left for this task');
+  }
+
+  // The answer as the replay guard sees it. Computed for both shapes so an
+  // ordering arrangement is deduped the same way a typed answer is.
+  const submissionHash = costActive
+    ? hashAnswerForReplay(ordering ? (orderedAnswer as string[]).map(String) : String(answer))
+    : '';
+
+  // 2. Replay guard — a network retry, a double tap, or an offline replay of the
+  // SAME wrong answer is a replay of a call the server already graded, not a new
+  // attempt. Return the stored verdict: no attempt recorded, no points charged,
+  // no cooldown started or extended. Checked BEFORE the cooldown so a double tap
+  // during a lockout gets a clean replay rather than an error. A brute-forcer
+  // submits DIFFERENT answers by definition, so this cannot be abused.
+  if (costActive && penaltyRec && submissionHash && penaltyRec.lastHash === submissionHash) {
+    return {
+      correct: false,
+      replay: true,
+      penalty: 0,
+      attemptsUsed: attempts,
+      cooldownUntil: penaltyRec.cooldownUntil ?? 0,
+      retryAfterSeconds: cooldownRemainingSeconds(penaltyRec.cooldownUntil, Date.now()),
+    };
+  }
+
+  // 3. Retry cooldown. It MUST gate before grading: grading first would let a
+  // team fire every remaining option during the lockout and the deterrent would
+  // be exactly zero. The wait is bounded by the level's ceiling and the level's
+  // free attempts mean a first wrong answer never blocks anyone. The message
+  // carries only a duration, never anything about the answer. A test-drive
+  // rehearsal skips the wait — the run-doc read happens ONLY on the would-block
+  // path, mirroring the presence gate above, so a real run is byte-identical.
+  if (costActive && penaltyRec) {
+    const waitSeconds = cooldownRemainingSeconds(penaltyRec.cooldownUntil, Date.now());
+    if (waitSeconds > 0 && !(await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Wrong answer cooldown, try again in ${waitSeconds}s`,
+      );
     }
   }
 
@@ -3329,18 +3435,78 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     : matchesTaskAnswer(task, String(answer));
   if (!correct) {
     // Record the wrong attempt under a real nested map (not a dotted key).
-    // Tracked when EITHER consumer needs it: the attempt-limit cap (row 42) or
-    // hint auto escalation (change: hint-auto-escalation) — wrong ordering
-    // arrangements flow through here too and count the same.
+    // Tracked when ANY consumer needs it: the attempt-limit cap (row 42), hint
+    // auto escalation (change: hint-auto-escalation), or the wrong-answer cost
+    // curve (change: wrong-answer-cost) — wrong ordering arrangements flow
+    // through here too and count the same.
     const trackAttempts =
-      (attemptLimit != null && attemptLimit > 0) || (task.hintAutoRevealAttempts ?? 0) > 0;
-    if (trackAttempts) {
-      await teamRef.set(
-        { taskAttempts: { [taskId]: admin.firestore.FieldValue.increment(1) } },
-        { merge: true },
-      );
+      (attemptLimit != null && attemptLimit > 0) ||
+      (task.hintAutoRevealAttempts ?? 0) > 0 ||
+      costActive;
+    if (!costActive) {
+      if (trackAttempts) {
+        await teamRef.set(
+          { taskAttempts: { [taskId]: admin.firestore.FieldValue.increment(1) } },
+          { merge: true },
+        );
+      }
+      return { correct: false };
     }
-    return { correct: false };
+
+    // A cost level is active ⇒ charge it. A transaction (the same shape
+    // requestTaskHint already uses) because the cumulative point CAP and the
+    // replay guard are read-modify-write decisions that FieldValue.increment
+    // alone cannot honour under a race. This is NOT the completeTask hot path:
+    // it only runs when the team got the answer wrong, and the correct-answer
+    // path below keeps its transaction-free flow untouched.
+    const nowMs = Date.now();
+    const charged = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(teamRef);
+      if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+      const t = snap.data() as RunTeam;
+      const prior = t.answerPenalties?.[taskId];
+      // Re-decide inside the transaction: a concurrent duplicate that lost the
+      // race must not be charged a second time either.
+      if (prior && prior.lastHash === submissionHash) {
+        return {
+          points: 0,
+          cooldownUntil: prior.cooldownUntil ?? 0,
+          attemptsUsed: t.taskAttempts?.[taskId] ?? attempts,
+          replay: true,
+        };
+      }
+      const priorAttempts = t.taskAttempts?.[taskId] ?? 0;
+      const priorCharged = prior?.charged ?? 0;
+      const cost = wrongAnswerCost(costLevel, game.scoringPreset, priorAttempts + 1, priorCharged);
+      const cooldownUntil = cost.cooldownSeconds > 0 ? nowMs + cost.cooldownSeconds * 1000 : 0;
+      // Real nested objects only. `bonusPenalty` is the same channel paid hints
+      // and manual adjustments use, so buildRankings is untouched and the live
+      // and final boards cannot drift. applyPenalties already floors the score
+      // at 0, so no charge can push a team negative.
+      tx.update(teamRef, {
+        taskAttempts: { ...(t.taskAttempts ?? {}), [taskId]: priorAttempts + 1 },
+        answerPenalties: {
+          ...(t.answerPenalties ?? {}),
+          [taskId]: {
+            charged: priorCharged + cost.points,
+            lastHash: submissionHash,
+            cooldownUntil,
+          },
+        },
+        ...(cost.points > 0 ? { bonusPenalty: (t.bonusPenalty ?? 0) + cost.points } : {}),
+        updatedAt: new Date().toISOString(),
+      });
+      return { points: cost.points, cooldownUntil, attemptsUsed: priorAttempts + 1, replay: false };
+    });
+
+    return {
+      correct: false,
+      penalty: charged.points,
+      cooldownUntil: charged.cooldownUntil,
+      retryAfterSeconds: cooldownRemainingSeconds(charged.cooldownUntil, Date.now()),
+      attemptsUsed: charged.attemptsUsed,
+      replay: charged.replay,
+    };
   }
 
   const now = new Date().toISOString();
@@ -3537,6 +3703,29 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
           ) {
             safe.hintFreeNow = true;
           }
+          // Wrong-answer cost (change: wrong-answer-cost): tell the participant
+          // what a wrong answer will cost BEFORE they answer. A cost nobody was
+          // warned about is not a game mechanic. Display-only and derived purely
+          // from the level table plus the team's OWN progress, so it carries no
+          // fragment of an answer key; the real charge is re-decided inside
+          // submitTaskAnswer's transaction. Omitted entirely when the level is
+          // 'off', so a game authored before this change ships an identical payload.
+          if (
+            assignedActiveRec?.taskId === t.id &&
+            (t.type === 'quiz' || t.type === 'numeric')
+          ) {
+            const level = resolveWrongAnswerLevel(game, t);
+            if (level !== 'off') {
+              const penRec = team.answerPenalties?.[t.id];
+              safe.answerCost = answerCostDisplay(
+                level,
+                game.scoringPreset,
+                team.taskAttempts?.[t.id] ?? 0,
+                penRec?.charged ?? 0,
+                penRec?.cooldownUntil ?? 0,
+              );
+            }
+          }
           return safe;
         })
       : [];
@@ -3688,10 +3877,19 @@ export const listLiveRuns = loggedCallable('listLiveRuns', async (_data, context
     const parts = d.ref.path.split('/'); // users/{ownerUid}/games/{gameId}/runs/{runId}
     const gameId = parts[3];
     let gameTitle = '';
+    // Trashed games are dropped from the GM overview (change:
+    // recoverable-game-deletion). deleteGame refuses while a run is unfinished so
+    // this should be empty in practice, but the overview is a collection-GROUP
+    // query that never touches the game doc for filtering — a legacy row must not
+    // resurrect a deleted game on the operations dashboard.
+    let deleted = false;
     try {
       const gs = await db.doc(`users/${uid}/games/${gameId}`).get();
-      gameTitle = (gs.data() as Game | undefined)?.title ?? '';
+      const g = gs.data() as Game | undefined;
+      gameTitle = g?.title ?? '';
+      deleted = isGameDeleted(g);
     } catch { /* title is best-effort */ }
+    if (deleted) return null;
     let unackedAlerts = 0;
     try {
       const agg = await d.ref.collection('alerts').where('acknowledged', '==', false).count().get();
@@ -3709,8 +3907,9 @@ export const listLiveRuns = loggedCallable('listLiveRuns', async (_data, context
     };
   }));
 
-  runs.sort((a, b) => (b.launchedAt ?? '').localeCompare(a.launchedAt ?? ''));
-  return { runs };
+  const visible = runs.filter((r): r is NonNullable<typeof r> => r !== null);
+  visible.sort((a, b) => (b.launchedAt ?? '').localeCompare(a.launchedAt ?? ''));
+  return { runs: visible };
 });
 
 

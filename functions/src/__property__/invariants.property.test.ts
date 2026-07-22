@@ -12,9 +12,10 @@ import { describe, test, expect } from 'vitest';
 import {
   speedBonus, SPEED_BONUS_CAP, sigmoidMultiplier, taskScoreSmart, taskScoreFixed,
   matchesTaskAnswer, evaluateTrigger, rateLimit, haversineKm,
+  wrongAnswerCost, cooldownRemainingSeconds, hashAnswerForReplay, WRONG_ANSWER_LEVELS,
 } from '@rushpoint/shared';
 import { buildRankings } from '../runs/index';
-import type { Game, RunTeam } from '@rushpoint/shared';
+import type { Game, RunTeam, ScoringPreset, WrongAnswerLevel } from '@rushpoint/shared';
 
 // ── Seeded RNG (reproducible: a failure always repeats) ───────────────────────
 function makeRng(seed: number) {
@@ -374,6 +375,109 @@ describe('haversineKm — metric invariants', () => {
       expect(d).toBeGreaterThanOrEqual(0);
       expect(Math.abs(d - haversineKm(b, a))).toBeLessThan(1e-9);
       expect(haversineKm(a, a)).toBeLessThan(1e-9);
+    }
+  });
+});
+
+// ── Wrong-answer cost (change: wrong-answer-cost) ─────────────────────────────
+// The curve charges bonusPenalty, so a NaN or a negative here would poison every
+// finisher's Z-score, and an uncapped charge could spiral one bad question into an
+// unwinnable game. These properties pin exactly that.
+describe('wrongAnswerCost — penalty invariants', () => {
+  const LEVELS: WrongAnswerLevel[] = ['off', 'gentle', 'standard', 'strict'];
+  const PRESETS: ScoringPreset[] = ['time_only', 'fixed_points_speed', 'smart_weighted'];
+  const GARBAGE = [NaN, Infinity, -Infinity, -7, 0, 1.5];
+
+  test('finite, non-negative, and inside both caps for ANY input (incl. garbage)', () => {
+    const rng = makeRng(21);
+    for (let i = 0; i < N; i++) {
+      const level = LEVELS[Math.floor(rng() * LEVELS.length)];
+      const preset = PRESETS[Math.floor(rng() * PRESETS.length)];
+      const attempt = rng() < 0.15 ? GARBAGE[i % GARBAGE.length] : Math.floor(rng() * 20);
+      const charged = rng() < 0.15 ? GARBAGE[i % GARBAGE.length] : Math.floor(rng() * 200);
+      const c = wrongAnswerCost(level, preset, attempt, charged);
+      const tuning = WRONG_ANSWER_LEVELS[level];
+      expect(Number.isFinite(c.points)).toBe(true);
+      expect(c.points).toBeGreaterThanOrEqual(0);
+      expect(c.points).toBeLessThanOrEqual(tuning.maxPoints);
+      expect(Number.isFinite(c.cooldownSeconds)).toBe(true);
+      expect(c.cooldownSeconds).toBeGreaterThanOrEqual(0);
+      expect(c.cooldownSeconds).toBeLessThanOrEqual(tuning.maxCooldownSeconds);
+    }
+  });
+
+  test('the cumulative point cap can never be exceeded, however many wrong answers', () => {
+    for (const level of LEVELS) {
+      for (const preset of PRESETS) {
+        let charged = 0;
+        for (let attempt = 1; attempt <= 40; attempt++) {
+          const c = wrongAnswerCost(level, preset, attempt, charged);
+          expect(charged + c.points).toBeLessThanOrEqual(WRONG_ANSWER_LEVELS[level].maxPoints);
+          charged += c.points;
+        }
+        expect(charged).toBeLessThanOrEqual(WRONG_ANSWER_LEVELS[level].maxPoints);
+      }
+    }
+  });
+
+  test('cumulative points are non-decreasing and the cooldown is monotonic in attempts', () => {
+    for (const level of LEVELS) {
+      let charged = 0;
+      let prevCooldown = -1;
+      for (let attempt = 1; attempt <= 30; attempt++) {
+        const c = wrongAnswerCost(level, 'smart_weighted', attempt, charged);
+        // per-attempt points fall to 0 once the cap is spent, so the honest
+        // monotonic quantity is the CUMULATIVE charge.
+        expect(c.points).toBeGreaterThanOrEqual(0);
+        charged += c.points;
+        expect(c.cooldownSeconds).toBeGreaterThanOrEqual(prevCooldown);
+        prevCooldown = c.cooldownSeconds;
+      }
+    }
+  });
+
+  test('time_only never charges points; the cooldown is identical across presets', () => {
+    for (const level of LEVELS) {
+      for (let attempt = 1; attempt <= 12; attempt++) {
+        const t = wrongAnswerCost(level, 'time_only', attempt, 0);
+        const p = wrongAnswerCost(level, 'fixed_points_speed', attempt, 0);
+        expect(t.points).toBe(0);
+        expect(t.cooldownSeconds).toBe(p.cooldownSeconds);
+      }
+    }
+  });
+
+  test('level off is a total no-op (every pre-existing game)', () => {
+    const rng = makeRng(22);
+    for (let i = 0; i < N; i++) {
+      const preset = PRESETS[Math.floor(rng() * PRESETS.length)];
+      const c = wrongAnswerCost('off', preset, Math.floor(rng() * 50), Math.floor(rng() * 500));
+      expect(c).toEqual({ points: 0, cooldownSeconds: 0, chargedIndex: 0 });
+    }
+  });
+
+  test('cooldownRemainingSeconds is non-negative, finite, and fails OPEN on garbage', () => {
+    const rng = makeRng(23);
+    const now = 1_800_000_000_000;
+    for (let i = 0; i < N; i++) {
+      const until = rng() < 0.15 ? GARBAGE[i % GARBAGE.length] : now + (rng() - 0.4) * 300_000;
+      const left = cooldownRemainingSeconds(until, now);
+      expect(Number.isFinite(left)).toBe(true);
+      expect(left).toBeGreaterThanOrEqual(0);
+      if (!Number.isFinite(until) || until <= now) expect(left).toBe(0);
+    }
+  });
+
+  test('the replay hash is stable, normalizing, and collision-free on the sampled space', () => {
+    const rng = makeRng(24);
+    const seen = new Map<string, string>();
+    for (let i = 0; i < N; i++) {
+      const raw = Math.floor(rng() * 100000).toString(36);
+      const mangled = `  ${[...raw].map((ch) => (rng() < 0.5 ? ch.toUpperCase() : ch)).join('')} `;
+      expect(hashAnswerForReplay(mangled)).toBe(hashAnswerForReplay(raw));
+      const prior = seen.get(hashAnswerForReplay(raw));
+      if (prior !== undefined) expect(prior).toBe(raw);   // same hash ⇒ same answer
+      seen.set(hashAnswerForReplay(raw), raw);
     }
   });
 });
