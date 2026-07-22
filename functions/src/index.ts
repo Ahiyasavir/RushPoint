@@ -17,6 +17,7 @@ function generatePin(): string {
 }
 import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
+import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
 // ─── Domain modules ────────────────────────────────────────────────────────────
 export * from './games/index';
@@ -909,12 +910,16 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   let autoApprove = false;
   let taskTitle = '';
   let feedEnabled = true;
+  // wave-f S1: the resolved task's hidden-location flag decides whether its
+  // photo may enter the run-wide live feed (shouldFeedTask). Left undefined when
+  // the task can't be resolved — shouldFeedTask then fails closed.
+  let feedTask: FeedTaskVisibilityInput | undefined;
   // audio-tasks: the task's captureKind rides the SAME snapshot (no extra read).
   let kind: MediaKind = 'photo';
   if (gameSnap.exists) {
     const game = gameSnap.data() as {
       photoFeedEnabled?: boolean;
-      stages: { tasks: { id: string; title?: string; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
+      stages: { tasks: { id: string; title?: string; hideLocation?: boolean; smart?: { autoApprove?: boolean; captureKind?: MediaKind } }[] }[];
     };
     feedEnabled = game.photoFeedEnabled !== false;
     for (const stage of game.stages) {
@@ -922,6 +927,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
       if (task) {
         autoApprove = task.smart?.autoApprove === true;
         taskTitle = task.title ?? '';
+        feedTask = { hideLocation: task.hideLocation };
         kind = task.smart?.captureKind === 'audio' ? 'audio' : 'photo';
         break;
       }
@@ -992,7 +998,10 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // audio-tasks non-goal: audio submissions never enter the photo feed.
     // WO Fix 4: gated on `completed` (like the sibling releaseTask) so a duplicate
     // autoApprove submission — which returns completed:false — cannot flood the feed.
-    if (completed && feedEnabled && kind !== 'audio') {
+    // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely — its
+    // photo (taken AT the secret spot) would leak the location to teams still
+    // hunting it, defeating the wave-D hidden-task gating.
+    if (completed && feedEnabled && kind !== 'audio' && shouldFeedTask(feedTask)) {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
@@ -1060,13 +1069,17 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
       const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
       const game = gameSnap.data() as {
         photoFeedEnabled?: boolean;
-        stages?: { tasks: { id: string; title?: string }[] }[];
+        stages?: { tasks: { id: string; title?: string; hideLocation?: boolean }[] }[];
       } | undefined;
       if (game && game.photoFeedEnabled !== false) {
         let taskTitle = '';
+        // wave-f S1: same hidden-location feed-exclusion decision as the
+        // submitStationPhoto autoApprove path — shared via shouldFeedTask so the
+        // two write sites cannot diverge. Undefined ⇒ fails closed.
+        let feedTask: FeedTaskVisibilityInput | undefined;
         for (const stage of game.stages ?? []) {
           const task = stage.tasks.find((t) => t.id === taskId);
-          if (task) { taskTitle = task.title ?? ''; break; }
+          if (task) { taskTitle = task.title ?? ''; feedTask = { hideLocation: task.hideLocation }; break; }
         }
         const teamData = (await teamRef.get()).data() as {
           displayName?: string;
@@ -1077,7 +1090,9 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         // audio-tasks non-goal: audio submissions never enter the photo feed.
         // WO Fix 4: gated on `completed` — a re-approval of an already-completed
         // task returns completed:false and must not re-emit a feed item.
-        if (completed && submittedPhotoUrl && submission?.mediaKind !== 'audio') {
+        // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely
+        // (photo would leak the secret spot to teams still hunting it).
+        if (completed && submittedPhotoUrl && submission?.mediaKind !== 'audio' && shouldFeedTask(feedTask)) {
           await writeFeedItem(ownerUid, gameId, runId, {
             taskId,
             taskTitle,
