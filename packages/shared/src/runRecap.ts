@@ -37,8 +37,19 @@ type RecapRun = Pick<Run, 'leaderboard'>;
  * leaderboard ordering when present), every team's approved/correct photo, and
  * headline stats. Rejected/pending photos and cleared photoUrls (post-prune) are
  * excluded; standings are always returned (a pruned run just yields no photos).
+ *
+ * `hiddenTaskIds` (wave-g #2) is the set of task ids whose location is hidden
+ * (`hideLocation`); their photos are excluded so a staged/published recap can't
+ * leak a hidden-spot photo to teams still hunting — mirroring the live-feed
+ * `shouldFeedTask` exclusion. The caller (in `functions/`, where the game doc is
+ * loaded) resolves the set via `shouldFeedTask`; this stays pure. Omitted ⇒ no
+ * filter (back-compat).
  */
-export function buildRunRecap(teams: RecapTeam[], run: RecapRun): RunRecap {
+export function buildRunRecap(
+  teams: RecapTeam[],
+  run: RecapRun,
+  hiddenTaskIds?: ReadonlySet<string>,
+): RunRecap {
   const rankings = run.leaderboard?.rankings;
   const standings: RunRecapStanding[] = rankings && rankings.length > 0
     ? rankings.map((r) => ({
@@ -58,6 +69,7 @@ export function buildRunRecap(teams: RecapTeam[], run: RecapRun): RunRecap {
   for (const t of teams) {
     for (const stage of t.stages ?? []) {
       for (const rec of stage.tasks ?? []) {
+        if (hiddenTaskIds?.has(rec.taskId)) continue; // hidden-location photo: never in recap
         const ok = rec.verificationOutcome === 'approved' || rec.verificationOutcome === 'correct';
         if (ok && rec.photoUrl) {
           photos.push({ teamId: t.id, teamName: nameById.get(t.id) ?? t.displayName, photoUrl: rec.photoUrl });

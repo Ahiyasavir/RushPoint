@@ -9,8 +9,8 @@ function ok(cond: boolean, msg: string) {
 }
 
 // ── buildRunRecap ────────────────────────────────────────────────────────────
-const photoTask = (outcome: string, url?: string) => ({
-  taskId: 't', taskIndex: 0, status: 'completed', verificationOutcome: outcome, photoUrl: url,
+const photoTask = (outcome: string, url?: string, taskId = 't') => ({
+  taskId, taskIndex: 0, status: 'completed', verificationOutcome: outcome, photoUrl: url,
 });
 const teams = [
   { id: 'A', displayName: 'Alpha', score: 100, stages: [{ tasks: [photoTask('approved', 'a.jpg'), photoTask('rejected', 'bad.jpg')] }] },
@@ -41,6 +41,22 @@ ok(recapPruned.standings.length === 2, 'pruned run → standings intact');
 // No leaderboard → fall back to score order.
 const noLb = buildRunRecap(teams, { leaderboard: undefined } as never);
 ok(noLb.standings[0].teamId === 'A' && noLb.standings[0].rank === 1, 'fallback sorts by score');
+
+// Hidden-location filter (wave-g #2): an approved photo on a hidden-location task
+// must be EXCLUDED from the recap (mirrors the live-feed shouldFeedTask exclusion),
+// while a normal-task photo is kept. Filtering by task id keeps buildRunRecap pure.
+const hiddenTeams = [
+  { id: 'H', displayName: 'Hydra', score: 90, stages: [{ tasks: [
+    photoTask('approved', 'normal.jpg', 'openTask'),
+    photoTask('approved', 'secret-spot.jpg', 'hiddenTask'),
+  ] }] },
+] as never[];
+const recapNoFilter = buildRunRecap(hiddenTeams, { leaderboard: undefined } as never);
+ok(recapNoFilter.photos.length === 2, 'no filter arg → both photos (back-compat)');
+const recapFiltered = buildRunRecap(hiddenTeams, { leaderboard: undefined } as never, new Set(['hiddenTask']));
+ok(recapFiltered.photos.some((p) => p.photoUrl === 'normal.jpg'), 'normal-task photo kept');
+ok(!recapFiltered.photos.some((p) => p.photoUrl === 'secret-spot.jpg'), 'hidden-location photo excluded');
+ok(recapFiltered.stats.photoCount === 1, 'photoCount reflects hidden exclusion');
 
 // ── computeMontageGrid ───────────────────────────────────────────────────────
 function gridOk(n: number, expectCols: number, expectRows: number) {

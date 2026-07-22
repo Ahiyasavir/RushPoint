@@ -1407,24 +1407,30 @@ async function main() {
   await creator.call('updateGame', {
     gameId: gE,
     scoringPreset: 'fixed_points_speed',
+    // Both the escalation task (e-1) and the threshold-less control (e-2) live in
+    // the SAME stage so that requestTaskHint's stage-scope guard (wave-g #1) is
+    // satisfied for both — a hint for a FUTURE/locked stage is (correctly) denied,
+    // so the control-charge assertion must exercise an ACTIVE-stage task. e-2 is
+    // gated behind e-1 via unlockAfterTaskIds so routing never assigns it (keeping
+    // e-1 the sole assigned task, and e-2 absent from activeStageTasks), while its
+    // stage stays active so its paid hint still charges.
     stages: [
       {
-        id: 'st-e1', order: 0, title: 'Struggle here',
-        tasks: [{
-          id: 'e-1', title: 'Name the city', type: 'quiz', locationless: true,
-          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
-          answers: ['jerusalem'],
-          hint: 'Look for the golden dome.', hintPenalty: 25, hintAutoRevealAttempts: 2,
-        }],
-      },
-      {
-        id: 'st-e2', order: 1, title: 'Control', isFinal: true,
-        tasks: [{
-          id: 'e-2', title: 'Control quiz', type: 'quiz', locationless: true,
-          coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
-          answers: ['haifa'],
-          hint: 'Control hint text.', hintPenalty: 25,
-        }],
+        id: 'st-e1', order: 0, title: 'Struggle here', isFinal: true,
+        tasks: [
+          {
+            id: 'e-1', title: 'Name the city', type: 'quiz', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
+            answers: ['jerusalem'],
+            hint: 'Look for the golden dome.', hintPenalty: 25, hintAutoRevealAttempts: 2,
+          },
+          {
+            id: 'e-2', title: 'Control quiz', type: 'quiz', locationless: true,
+            coordinates: { lat: 0, lng: 0 }, difficulty: 4, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 3,
+            answers: ['haifa'], unlockAfterTaskIds: ['e-1'],
+            hint: 'Control hint text.', hintPenalty: 25,
+          },
+        ],
       },
     ],
   });
@@ -4728,12 +4734,13 @@ async function main() {
       stages: [
         { id: 'sl-1', order: 0, title: 'Stage One', tasks: [
           { id: 'sl-t1', title: 'Warm', type: 'self_report', triggerMode: 'locationless', locationless: true,
-            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+            coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+            hint: 'Active-stage hint you are allowed to see.', hintPenalty: 15 },
         ] },
         { id: 'sl-2', order: 1, title: 'Stage Two (locked)', isFinal: true, tasks: [
           { id: 'sl-quiz', title: 'Locked quiz', type: 'quiz', locationless: true,
             coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 5, pointValue: 80, maxConcurrentTeams: 9,
-            answers: ['open'] },
+            answers: ['open'], hint: 'SECRET future-stage spot — must not leak.', hintPenalty: 30 },
           { id: 'sl-field', title: 'Locked check-in', type: 'field', triggerMode: 'locationless', locationless: true,
             coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 5, pointValue: 60, maxConcurrentTeams: 9 },
         ] },
@@ -4758,6 +4765,17 @@ async function main() {
     await expectError('stage-2 quiz rejected via submitTaskAnswer while stage 1 active',
       p.call('submitTaskAnswer', { ...CS, taskId: 'sl-quiz', answer: 'open' }),
       { codeIn: ['functions/failed-precondition'], match: /stage|locked|active/i });
+    // requestTaskHint must carry the SAME stage-scope guard (wave-g #1): paying to
+    // reveal a locked/future stage's hint is a scout-ahead / hidden-spot oracle.
+    await expectError('stage-2 hint rejected via requestTaskHint while stage 1 active',
+      p.call('requestTaskHint', { ...CS, taskId: 'sl-quiz' }),
+      { codeIn: ['functions/failed-precondition'], match: /stage|locked|active/i });
+    // ...but the ACTIVE-stage task's hint must still reveal (intended by design —
+    // e.g. a hidden-location find-the-spot hint for the spot you are hunting NOW).
+    const activeHint = await p.call('requestTaskHint', { ...CS, taskId: 'sl-t1' });
+    check('active-stage hint still reveals via requestTaskHint',
+      activeHint?.hint === 'Active-stage hint you are allowed to see.',
+      JSON.stringify(activeHint));
 
     const after = await p.call('getMyTeamState', { code: sc });
     check('stage-lock: still exactly one active stage after the rejections',

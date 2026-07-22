@@ -109,6 +109,7 @@ import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
 
 import { requireAuth } from '../auth';
+import { shouldFeedTask } from '../feedVisibility';
 import { applyStageCompletion } from './helpers';
 
 function gamePath(ownerUid: string, gameId: string) {
@@ -1833,7 +1834,18 @@ export const getRunRecap = loggedCallable('getRunRecap', async (data, context) =
   const teamsSnap = await db.collection(teamsCol(c.ownerUid, c.gameId, c.runId)).get();
   const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
 
-  const recap = buildRunRecap(teams, run ?? { leaderboard: undefined });
+  // wave-g #2: exclude hidden-location tasks' photos from the recap, mirroring the
+  // live-feed exclusion via the same shouldFeedTask predicate (single source of
+  // truth, fail-closed). Resolved here where the game doc is loaded, so
+  // buildRunRecap stays pure (takes only a set of ids).
+  const hiddenTaskIds = new Set<string>();
+  for (const stage of game?.stages ?? []) {
+    for (const task of stage.tasks ?? []) {
+      if (!shouldFeedTask({ hideLocation: task.hideLocation })) hiddenTaskIds.add(task.id);
+    }
+  }
+
+  const recap = buildRunRecap(teams, run ?? { leaderboard: undefined }, hiddenTaskIds);
   return {
     title: game?.branding?.name ?? game?.title ?? 'RushPoint',
     branding: game?.branding ?? null,
@@ -2928,7 +2940,14 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
-  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  // Same stage-scope guard as every answer/interaction callable (submitTaskAnswer,
+  // submitSequenceStep, verifyStationCode, reportArrival): a hint may only be
+  // revealed for a task in the team's ACTIVE (or already-completed) stage. Without
+  // this, requestTaskHint is a future-stage oracle — pay to reveal the sealed
+  // find-the-spot hint of a hidden-location task in a stage you have not reached.
+  // Revealing the current active-stage hidden task's hint pre-arrival stays allowed.
+  assertStageActiveForTask(team, taskId);
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
