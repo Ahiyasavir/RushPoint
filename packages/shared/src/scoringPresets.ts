@@ -79,9 +79,11 @@ export function scoreFixedPointsSpeed(
 
 // Awarded score for a single task under this preset
 export function taskScoreFixed(task: Pick<{ pointValue: number }, 'pointValue'>): number {
-  // Guard malformed/legacy data: a non-numeric pointValue would return NaN,
-  // which poisons the team's total and every leaderboard comparison.
-  return Number.isFinite(task.pointValue) ? task.pointValue : 0;
+  // Guard malformed/legacy data: a non-numeric pointValue would return NaN, which
+  // poisons the team's total; a NEGATIVE pointValue would SUBTRACT from the total
+  // (wave-i B1 / wave-j J4). Clamp to >= 0 — mirrors taskScoreSmart's difficulty
+  // clamp — so no per-task record can ever push a team's earned score down.
+  return Number.isFinite(task.pointValue) ? Math.max(0, task.pointValue) : 0;
 }
 
 
@@ -209,10 +211,10 @@ export function skipAward(
     case 'time_only':
       return 0;
     case 'fixed_points_speed':
-      // Guard a missing/non-finite pointValue (legacy/hand-written task), matching
-      // taskScoreFixed — otherwise a skipped task could award NaN and poison the
-      // whole leaderboard's comparisons (nightly hardening).
-      return Number.isFinite(task.pointValue) ? task.pointValue : 0;
+      // Guard a missing/non-finite AND negative pointValue (legacy/hand-written
+      // task), matching taskScoreFixed — otherwise a skipped task could award NaN
+      // or a negative value and poison the whole leaderboard (nightly hardening / J4).
+      return Number.isFinite(task.pointValue) ? Math.max(0, task.pointValue) : 0;
     case 'smart_weighted':
       // On-target sigmoid score (x=1)
       return taskScoreSmart(task.difficulty, task.estimatedMinutes, task.estimatedMinutes);

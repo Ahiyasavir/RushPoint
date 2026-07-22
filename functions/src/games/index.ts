@@ -31,7 +31,8 @@ import {
   validateOrderItems,
   validateSurveyChoices,
   sumEstimatedMinutes,
-  taskCompletabilityError,
+  gameStructureProblems,
+  stripUnsafeDisplayChars,
   cleanGameInstructions,
 } from '@rushpoint/shared';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
@@ -75,6 +76,25 @@ function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined 
   }));
 }
 
+// Strip control / bidi-override / zero-width spoofing chars from every authored
+// stage + task title/description (wave-j J6) before persisting. Returns a NEW
+// stages array (never dotted-update an array element — coerces it to a map).
+// Only display text is touched; answer keys, coordinates, and types are untouched.
+function sanitizeStagesText(stages: Stage[] | undefined): Stage[] | undefined {
+  if (!Array.isArray(stages)) return stages;
+  const clean = (s: string | undefined): string | undefined =>
+    s === undefined ? undefined : stripUnsafeDisplayChars(s);
+  return stages.map((stage) => ({
+    ...stage,
+    title: clean(stage.title) ?? stage.title,
+    tasks: (stage.tasks ?? []).map((task) => ({
+      ...task,
+      title: clean(task.title) ?? task.title,
+      ...(task.description !== undefined ? { description: clean(task.description) } : {}),
+    })),
+  }));
+}
+
 // ─── createGame ───────────────────────────────────────────────────────────────
 
 export const createGame = loggedCallable('createGame', async (data, context) => {
@@ -91,8 +111,11 @@ export const createGame = loggedCallable('createGame', async (data, context) => 
   const game: Game = {
     id: ref.id,
     ownerUid: uid,
-    title: title.trim(),
-    description: description?.trim(),
+    // Strip control / bidi-override / zero-width spoofing chars from authored text
+    // (wave-j J6) so a title/description can't impersonate another name in the
+    // creator, play, or staff console — mirrors requireString on the callables.
+    title: stripUnsafeDisplayChars(title).trim(),
+    description: description ? stripUnsafeDisplayChars(description).trim() : description,
     mode,
     stages: [],
     scoringPreset: DEFAULT_SCORING_PRESET,
@@ -138,8 +161,8 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   }
 
   const updates: Partial<Game> & { updatedAt: string } = { updatedAt: new Date().toISOString() };
-  if (title !== undefined)              updates.title = title.trim();
-  if (description !== undefined)        updates.description = description?.trim();
+  if (title !== undefined)              updates.title = stripUnsafeDisplayChars(title).trim();
+  if (description !== undefined)        updates.description = description ? stripUnsafeDisplayChars(description).trim() : description;
   if (mode !== undefined)               updates.mode = mode;
   if (stages !== undefined) {
     // Save-time validation. Unlockable tasks (change: unlockable-tasks): the
@@ -149,6 +172,11 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     // expiry (change: task-expiry): a relative expiry at or before a relative
     // release is an empty availability window and can never be played.
     const problems: string[] = [];
+    // Structural winnability (wave-j J2/J3/J4): empty-task stage + uncompletable
+    // task + negative pointValue/difficulty/estimatedMinutes — the same rule
+    // launchRun enforces at launch, applied at save so a broken shape never persists
+    // and never reaches publishGame / the gallery. Shared SOURCE with publishGame.
+    problems.push(...gameStructureProblems(stages));
     for (const stage of stages ?? []) {
       problems.push(...validateUnlockGraph(stage).errors);
       for (const task of stage.tasks ?? []) {
@@ -173,20 +201,20 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
           const choiceError = validateSurveyChoices(task.surveyChoices);
           if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
         }
-        // Unwinnable-task guard: mirrors the creator-web Wizard's client-side
-        // isTaskInteractionValid, but enforced server-side so a direct callable
-        // invocation (bypassing the Wizard) can't persist a quiz with no answer,
-        // numeric with no numericAnswer, smart_station with no secretCode, or
-        // sequence with no steps — every participant attempt at such a task
-        // would otherwise fail forever.
-        const completabilityError = taskCompletabilityError(task);
-        if (completabilityError) problems.push(completabilityError);
+        // Unwinnable-task + negative-value guards live in gameStructureProblems
+        // above (shared with publishGame): a quiz with no answer, numeric with no
+        // numericAnswer, smart_station with no secretCode, sequence with no steps,
+        // an empty-task stage, or a negative pointValue/difficulty are all rejected
+        // there so a direct callable (bypassing the Wizard) can't persist them.
       }
     }
     if (problems.length > 0) {
       throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
     }
-    updates.stages = normalizeStagesMedia(stages);
+    // Strip control / bidi-override / zero-width spoofing chars from every authored
+    // title/description (game handled below; stage + task here) before persisting
+    // (wave-j J6). Returns a NEW stages array (never dotted-update an array element).
+    updates.stages = normalizeStagesMedia(sanitizeStagesText(stages));
   }
   if (scoringPreset !== undefined)      updates.scoringPreset = scoringPreset;
   if (scoringOptions !== undefined)     updates.scoringOptions = scoringOptions;
@@ -376,6 +404,19 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   const now = new Date().toISOString();
 
   if (visibility === 'public') {
+    // Winnability guard (wave-j J2): publishing indexes the game into the public
+    // gallery where it can be duplicated and (with allowInstantPlay) played from a
+    // "Play now" link — so an empty game, a 0-task stage, an uncompletable task, or a
+    // negative-value task would pollute the gallery and dead-end a first-time player.
+    // Run the SAME structural guard launchRun runs, BEFORE indexing. failed-precondition
+    // matches launchRun's sibling style.
+    if (game.stages.length === 0) {
+      throw new functions.https.HttpsError('failed-precondition', 'Game has no stages — add at least one stage before publishing');
+    }
+    const problems = gameStructureProblems(game.stages);
+    if (problems.length > 0) {
+      throw new functions.https.HttpsError('failed-precondition', problems.join(' · '));
+    }
     // Compute summary stats
     const allTasks = game.stages.flatMap((s) => s.tasks);
     const estimatedTotalMinutes = sumEstimatedMinutes(allTasks);
@@ -566,11 +607,17 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
 
   const now = new Date().toISOString();
   const newRef = db.collection(gamesCol(uid)).doc();
+  // SECURITY (wave-j J7): mirror duplicateGame — never carry the source's private
+  // Slack/Teams webhook secret into the copy, and reset marketplace opt-in so a
+  // translated copy isn't silently instant-playable/published. (Own-game-only today,
+  // but keeps translateGame consistent with duplicateGame's security posture.)
+  const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeNewGame } = newGame;
   const copy: Game = {
-    ...newGame,
+    ...safeNewGame,
     id: newRef.id,
     ownerUid: uid,
     visibility: 'private',
+    allowInstantPlay: false,
     playCount: 0,
     createdAt: now,
     updatedAt: now,

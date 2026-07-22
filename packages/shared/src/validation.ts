@@ -13,6 +13,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { isValidCoord } from './geo';
+import { taskCompletabilityError } from './taskCompletability';
+import type { Stage } from './types';
 
 /** Size caps that defend against oversized-string / payload-bloat submissions. */
 export const MAX_ID_LEN = 200;
@@ -129,6 +131,41 @@ const UNSAFE_DISPLAY_CHARS = new RegExp(
  *  (Hebrew + LRM/RLM preserved). Pure — unit-tested directly. */
 export function stripUnsafeDisplayChars(value: string): string {
   return value.replace(UNSAFE_DISPLAY_CHARS, '');
+}
+
+// ─── Structural winnability guard (wave-j J2/J3/J4) ───────────────────────────
+// The single SOURCE of the "a broken game can't be saved or published" rule,
+// mirroring launchRun's launch-time defense (functions/src/runs/index.ts) so a
+// broken shape is rejected at every authoring surface, not only at launch:
+//   • an empty-task stage becomes active but never completes → the run strands;
+//   • a task with no usable answer key (quiz/numeric/smart_station/sequence) can
+//     never be completed by any participant (taskCompletabilityError);
+//   • a NEGATIVE pointValue subtracts from the team total, and a negative
+//     difficulty / estimatedMinutes skews smart_weighted routing & scoring.
+// Pure (no Firebase) → shared by updateGame (save) + publishGame (gallery) and
+// unit-tested directly. An empty `stages` array is fine (a game still being built).
+export function gameStructureProblems(stages: Stage[] | undefined): string[] {
+  const problems: string[] = [];
+  for (const stage of stages ?? []) {
+    if ((stage.tasks?.length ?? 0) === 0) {
+      problems.push(`Stage "${stage.title || stage.id}" needs at least one task`);
+    }
+    for (const task of stage.tasks ?? []) {
+      const completabilityError = taskCompletabilityError(task);
+      if (completabilityError) problems.push(completabilityError);
+      const label = `Task "${task.title || task.id}"`;
+      if (typeof task.pointValue === 'number' && !(task.pointValue >= 0)) {
+        problems.push(`${label}: point value cannot be negative`);
+      }
+      if (typeof task.difficulty === 'number' && !(task.difficulty >= 0)) {
+        problems.push(`${label}: difficulty cannot be negative`);
+      }
+      if (typeof task.estimatedMinutes === 'number' && !(task.estimatedMinutes >= 0)) {
+        problems.push(`${label}: estimated minutes cannot be negative`);
+      }
+    }
+  }
+  return problems;
 }
 
 /** Required, non-empty string of bounded length. Returns the trimmed value with

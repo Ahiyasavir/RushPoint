@@ -48,6 +48,17 @@ ok(quizSepOnly.game.stages.length === 0, 'separator-only quiz omitted from game'
 const numNoAnswer = parseGameRows([{ title: 'N', type: 'numeric', answer: 'abc' }]);
 ok(numNoAnswer.errors.some((e) => e.field === 'answer'), 'numeric with non-number flagged');
 
+// smart_station / sequence are permanently uncompletable in a flat sheet (no
+// secret-code / no steps column) — must be flagged, not silently imported into a
+// game that updateGame/launchRun would then reject wholesale (wave-j J5).
+const station = parseGameRows([{ title: 'Vault', type: 'smart_station', lat: '31.7', lng: '35.1' }]);
+ok(station.errors.some((e) => e.field === 'type'), 'smart_station row flagged (no secret code)');
+ok(station.game.stages.length === 0, 'uncompletable smart_station omitted from game');
+
+const sequence = parseGameRows([{ title: 'Trail', type: 'sequence', lat: '31.7', lng: '35.1' }]);
+ok(sequence.errors.some((e) => e.field === 'type'), 'sequence row flagged (no steps)');
+ok(sequence.game.stages.length === 0, 'uncompletable sequence omitted from game');
+
 const badCoords = parseGameRows([{ title: 'C', type: 'field', lat: '999', lng: '999' }]);
 ok(badCoords.errors.some((e) => e.field === 'coordinates'), 'invalid coordinates flagged');
 
