@@ -64,3 +64,11 @@ android.keystore
 /app/
 twa-manifest.json.bak
 android.keystore.pub.pem
+
+# Scratch auth tokens from manual callable probing (contain real idTokens) and
+# the generated tunnel-redirect staging dir — never commit either.
+.tokwork/
+tok1.json
+call.sh
+.hosting-tunnel/
+firebase.tunnel.json
