@@ -10,11 +10,13 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   PLAY_PACKAGE_NAME,
+  PLAY_MIN_TARGET_SDK,
   normalizeFingerprint,
   isValidAndroidPackageName,
   buildAssetLinks,
   validateAssetLinks,
   validateWebManifestForPlay,
+  validateAndroidTargetSdk,
 } from '../packages/shared/src/playStore';
 
 let failures = 0;
@@ -119,6 +121,36 @@ const no512any = { ...goodManifest, icons: [
   { src: '/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
 ] };
 check('manifest: missing 512 any icon fails', validateWebManifestForPlay(no512any).ok === false);
+
+// ── validateAndroidTargetSdk (change: play-store-eligibility) ─────────────────
+// Play REJECTS new apps/updates that target an API level below its rolling
+// minimum. Bubblewrap generates the Android project at `play:twa:init` time, so
+// the gradle file is absent in a fresh checkout — absent must SKIP (nothing to
+// assert), never fail, or the gate would cry wolf on every clean clone.
+const skipped = validateAndroidTargetSdk(null);
+check('targetSdk: absent gradle skips rather than fails', skipped.ok === true && skipped.skipped === true);
+check('targetSdk: absent gradle reports no version', skipped.targetSdk === null);
+check('targetSdk: empty gradle skips', validateAndroidTargetSdk('').skipped === true);
+
+const gradleOk = `android {\n  defaultConfig {\n    targetSdkVersion ${PLAY_MIN_TARGET_SDK}\n  }\n}`;
+const okRes = validateAndroidTargetSdk(gradleOk);
+check('targetSdk: at the minimum passes', okRes.ok === true && okRes.skipped === false);
+check('targetSdk: parses the version', okRes.targetSdk === PLAY_MIN_TARGET_SDK);
+
+check('targetSdk: above the minimum passes',
+  validateAndroidTargetSdk(`targetSdkVersion ${PLAY_MIN_TARGET_SDK + 1}`).ok === true);
+check('targetSdk: modern `targetSdk = N` syntax parsed',
+  validateAndroidTargetSdk(`targetSdk = ${PLAY_MIN_TARGET_SDK}`).targetSdk === PLAY_MIN_TARGET_SDK);
+
+const stale = validateAndroidTargetSdk(`targetSdkVersion ${PLAY_MIN_TARGET_SDK - 2}`);
+check('targetSdk: below the minimum fails', stale.ok === false);
+check('targetSdk: below-minimum problem names the required level',
+  stale.problems.some((p) => p.includes(String(PLAY_MIN_TARGET_SDK))));
+
+const noDecl = validateAndroidTargetSdk('android {\n  defaultConfig {\n  }\n}');
+check('targetSdk: gradle without a declaration fails', noDecl.ok === false && noDecl.skipped === false);
+check('targetSdk: commented-out declaration is not counted',
+  validateAndroidTargetSdk(`// targetSdkVersion ${PLAY_MIN_TARGET_SDK}`).ok === false);
 
 // ── Real-file guard: the shipped play-web manifest must stay install-ready ─────
 const here = dirname(fileURLToPath(import.meta.url));

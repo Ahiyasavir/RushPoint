@@ -53,6 +53,10 @@ const HE = {
     joinFailed: 'ההצטרפות נכשלה',
     gameFull: 'המשחק מלא, בדקו מול המארגן',
     connectionError: 'בעיית חיבור. בדקו את הקליטה ונסו שוב.',
+    // In-app legal links (Google Play requirement — the policy governing the
+    // photo feed must be reachable by the people posting to it).
+    legalTerms: 'תנאי שימוש',
+    legalPrivacy: 'מדיניות פרטיות',
   },
   promo: {
     badge: 'משחק שדה מבית RushPoint',
@@ -372,6 +376,30 @@ const HE = {
     feedItemCaption: ({ team, task }: { team: string; task: string }) => `${team} · ${task}`,
     feedReactAria: ({ emoji }: { emoji: string }) => `הוספת תגובה ${emoji}`,
     feedReactFailed: 'התגובה לא נשלחה, נסו שוב',
+    // Report + mute (change: feed-ugc-safety)
+    feedReport: 'דיווח',
+    feedReportAria: ({ team }: { team: string }) => `דיווח על התמונה של ${team}`,
+    feedReportTitle: 'דיווח על התמונה',
+    feedReportPrompt: 'בחרו סיבה. התמונה תיעלם מהמסך שלכם מיד.',
+    feedReasonInappropriate: 'תוכן לא הולם',
+    feedReasonHarassment: 'הצקה או פגיעה',
+    feedReasonPrivacy: 'פגיעה בפרטיות',
+    feedReasonOther: 'סיבה אחרת',
+    feedReportDone: 'תודה על הדיווח. התמונה הוסתרה במכשיר שלכם.',
+    feedReportRemoved: 'תודה על הדיווח. התמונה הוסרה מהפיד עד לבדיקה.',
+    feedReportFailed: 'הדיווח לא נשלח, אבל התמונה הוסתרה במכשיר שלכם.',
+    feedMuteTeam: 'השתקת הקבוצה',
+    feedMuteTeamAria: ({ team }: { team: string }) => `השתקת התמונות של ${team}`,
+    feedMuteTeamConfirm: ({ team }: { team: string }) => `להסתיר במכשיר הזה את כל התמונות של ${team}?`,
+    feedMutedNote: ({ n }: { n: number }) => `${n} תמונות מוסתרות במכשיר הזה.`,
+    feedMuteUndo: 'ביטול ההסתרות',
+    // Staff moderation view (change: feed-ugc-safety)
+    feedHiddenBadge: 'מוסתר',
+    feedAutoHidden: 'הוסתר אוטומטית בעקבות דיווחים',
+    feedReportCountLabel: ({ n }: { n: number }) => `${n} דיווחים`,
+    feedReasonSummary: ({ reasons }: { reasons: string }) => `סיבות: ${reasons}`,
+    feedRestore: 'שחזור',
+    feedRestoreConfirm: 'להחזיר את התמונה לפיד של כל המשתתפים?',
   },
   chat: {
     chatTitle: '💬 צ׳אט עם המטה',
@@ -513,6 +541,10 @@ const EN: typeof HE = {
     joinFailed: 'Join failed',
     gameFull: 'This game is full, check with your host',
     connectionError: 'Connection problem. Check your connection and try again.',
+    // In-app legal links (Google Play requirement — the policy governing the
+    // photo feed must be reachable by the people posting to it).
+    legalTerms: 'Terms of Use',
+    legalPrivacy: 'Privacy Policy',
   },
   promo: {
     badge: 'RushPoint field game',
@@ -832,6 +864,30 @@ const EN: typeof HE = {
     feedItemCaption: ({ team, task }: { team: string; task: string }) => `${team} · ${task}`,
     feedReactAria: ({ emoji }: { emoji: string }) => `React ${emoji}`,
     feedReactFailed: 'Reaction did not send, try again',
+    // Report + mute (change: feed-ugc-safety)
+    feedReport: 'Report',
+    feedReportAria: ({ team }: { team: string }) => `Report the photo from ${team}`,
+    feedReportTitle: 'Report this photo',
+    feedReportPrompt: 'Pick a reason. The photo disappears from your screen right away.',
+    feedReasonInappropriate: 'Inappropriate content',
+    feedReasonHarassment: 'Harassment or bullying',
+    feedReasonPrivacy: 'Privacy violation',
+    feedReasonOther: 'Something else',
+    feedReportDone: 'Thanks for reporting. The photo is hidden on your device.',
+    feedReportRemoved: 'Thanks for reporting. The photo was removed pending review.',
+    feedReportFailed: 'The report did not send, but the photo is hidden on your device.',
+    feedMuteTeam: 'Mute this team',
+    feedMuteTeamAria: ({ team }: { team: string }) => `Mute photos from ${team}`,
+    feedMuteTeamConfirm: ({ team }: { team: string }) => `Hide every photo from ${team} on this device?`,
+    feedMutedNote: ({ n }: { n: number }) => `${n} photos hidden on this device.`,
+    feedMuteUndo: 'Undo hiding',
+    // Staff moderation view (change: feed-ugc-safety)
+    feedHiddenBadge: 'Hidden',
+    feedAutoHidden: 'Hidden after reports',
+    feedReportCountLabel: ({ n }: { n: number }) => `${n} reports`,
+    feedReasonSummary: ({ reasons }: { reasons: string }) => `Reasons: ${reasons}`,
+    feedRestore: 'Restore',
+    feedRestoreConfirm: "Restore this photo to everyone's feed?",
   },
   chat: {
     chatTitle: '💬 Chat with HQ',

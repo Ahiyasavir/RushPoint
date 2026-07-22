@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -713,6 +713,27 @@ async function writeFeedItem(
 }
 
 
+// Run membership shared by every feed callable (change: feed-ugc-safety
+// refactor — reactToFeedItem and reportFeedItem had identical copy-pasted
+// try/catch bodies; this is the single source of truth for both). A
+// participant of THIS run (any attached device) is allowed and their teamId
+// is returned; the owner and run-scoped staff are also allowed (returns
+// undefined — they have no team); a stranger is denied. Authz semantics are
+// IDENTICAL to the pre-refactor inline bodies.
+async function assertRunMemberOrStaff(
+  uid: string,
+  context: functions.https.CallableContext,
+  ctx: { ownerUid: string; gameId: string; runId: string },
+): Promise<string | undefined> {
+  try {
+    const { teamId } = await resolveCallerTeam(uid, ctx);
+    return teamId;
+  } catch {
+    assertStaffOrOwner(context, ctx.ownerUid, ctx.runId);
+    return undefined;
+  }
+}
+
 // ─── reactToFeedItem (change: live-photo-feed) ─────────────────────────────────
 // One emoji reaction per uid per feed item; re-reacting switches the emoji and
 // never double-counts (pure applyReaction reducer inside a transaction).
@@ -732,11 +753,7 @@ export const reactToFeedItem = loggedCallable('reactToFeedItem', async (data, co
 
   // Run membership: a participant of THIS run (any attached device) may react;
   // the owner and run-scoped staff may too. Strangers are denied.
-  try {
-    await resolveCallerTeam(uid, { ownerUid, gameId, runId });
-  } catch {
-    assertStaffOrOwner(context, ownerUid, runId);
-  }
+  await assertRunMemberOrStaff(uid, context, { ownerUid, gameId, runId });
 
   const itemRef = db.doc(FIRESTORE_PATHS.feedItem(ownerUid, gameId, runId, itemId));
   const result = await db.runTransaction(async (tx) => {
@@ -761,22 +778,92 @@ export const reactToFeedItem = loggedCallable('reactToFeedItem', async (data, co
 });
 
 
-// ─── hideFeedItem (change: live-photo-feed) ────────────────────────────────────
-// Moderation: staff/owner hides a feed item (listener filters active == true).
-// Same shape as deactivateAnnouncement.
-export const hideFeedItem = loggedCallable('hideFeedItem', async (data, context) => {
-  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
-  const { ownerUid, gameId, runId, itemId } = data as {
+// ─── reportFeedItem (change: feed-ugc-safety) ──────────────────────────────────
+// Any run participant (any device on any team), staff, or the owner may report a
+// feed item from a closed reason set. Reports auto-hide an item at
+// FEED_AUTO_HIDE_REPORTS distinct reporterKeys via the pure applyReport reducer.
+//
+// DESIGN AMENDMENT: reportedBy is keyed by the caller's **teamId**, not uid —
+// shared team devices (multiple uids per team) would otherwise let one team
+// reach the auto-hide threshold by itself. A staff/owner reporter (no team) is
+// keyed by the sentinel `staff:<uid>`.
+export const reportFeedItem = loggedCallable('reportFeedItem', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'reportFeedItem');
+  const { ownerUid, gameId, runId, itemId, reason } = data as {
     ownerUid: string;
     gameId: string;
     runId: string;
     itemId: string;
+    reason: string;
+  };
+  if (!ownerUid || !gameId || !runId || !itemId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId, itemId required');
+  }
+  if (!(FEED_REPORT_REASONS as readonly string[]).includes(reason)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Invalid report reason');
+  }
+
+  // Run membership: a participant of THIS run (any attached device) may report;
+  // the owner and run-scoped staff may too. Strangers are denied. Resolve the
+  // reporter's teamId for the distinctness key (see DESIGN AMENDMENT above); a
+  // staff/owner reporter has no team, so falls back to the sentinel below.
+  const teamId = await assertRunMemberOrStaff(uid, context, { ownerUid, gameId, runId });
+  const reporterKey = teamId ?? `staff:${uid}`;
+
+  const itemRef = db.doc(FIRESTORE_PATHS.feedItem(ownerUid, gameId, runId, itemId));
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(itemRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Feed item not found');
+    const item = snap.data() as FeedItem;
+    // Unlike reactToFeedItem, an already-inactive item still accepts reports —
+    // reporting an item a rival already got auto-hidden must stay idempotent.
+    const applied = applyReport(item, reporterKey, reason);
+    // Whole nested map (never dotted .set({merge}) keys); scalars alongside.
+    const update: Record<string, unknown> = {
+      reportedBy: applied.reportedBy,
+      reportCount: applied.reportCount,
+      active: applied.active,
+    };
+    if (applied.hidden) {
+      update.hiddenAt = applied.hiddenAt;
+      update.hiddenBy = applied.hiddenBy;
+    }
+    tx.update(itemRef, update);
+    return { reportCount: applied.reportCount, hidden: applied.hidden };
+  });
+
+  return { ok: true, ...result };
+});
+
+
+// ─── hideFeedItem (change: live-photo-feed) ────────────────────────────────────
+// Moderation: staff/owner hides a feed item (listener filters active == true).
+// Same shape as deactivateAnnouncement. `restore` (change: feed-ugc-safety)
+// reverses an auto-hide (or a staff hide) and disarms future auto-hiding for
+// this item via `reportsCleared` — authz stays identical for both directions.
+export const hideFeedItem = loggedCallable('hideFeedItem', async (data, context) => {
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  const { ownerUid, gameId, runId, itemId, restore } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    itemId: string;
+    restore?: boolean;
   };
   if (!itemId) throw new functions.https.HttpsError('invalid-argument', 'itemId required');
 
-  await db
-    .doc(FIRESTORE_PATHS.feedItem(ownerUid, gameId, runId, itemId))
-    .update({ active: false, hiddenAt: new Date().toISOString(), hiddenBy: context.auth!.uid });
+  const itemRef = db.doc(FIRESTORE_PATHS.feedItem(ownerUid, gameId, runId, itemId));
+  if (restore) {
+    await itemRef.update({
+      active: true,
+      hiddenAt: admin.firestore.FieldValue.delete(),
+      hiddenBy: admin.firestore.FieldValue.delete(),
+      reportsCleared: true,
+    });
+  } else {
+    await itemRef.update({ active: false, hiddenAt: new Date().toISOString(), hiddenBy: context.auth!.uid });
+  }
 
   return { ok: true };
 });

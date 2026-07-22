@@ -269,10 +269,20 @@ export const reactToFeedItem = callable<
 >('reactToFeedItem');
 
 // Staff/owner moderation: hide a feed item (listeners filter active == true).
+// `restore` (change: feed-ugc-safety) reverses a hide (auto or staff) and
+// disarms future auto-hiding for the item; authz is unchanged (staff/owner).
 export const hideFeedItem = callable<
-  Ctx & { itemId: string },
+  Ctx & { itemId: string; restore?: boolean },
   { ok: boolean }
 >('hideFeedItem');
+
+// Any run participant (or staff/owner) reports a feed item from a closed
+// reason set (change: feed-ugc-safety). Idempotent per caller's team; a
+// second distinct team's report may auto-hide the item (`hidden: true`).
+export const reportFeedItem = callable<
+  Ctx & { itemId: string; reason: 'inappropriate' | 'harassment' | 'privacy' | 'other' },
+  { ok: boolean; reportCount: number; hidden: boolean }
+>('reportFeedItem');
 
 export const staffSignIn = callable<
   // `name` is the staffer's self-declared display name (attribution only — the

@@ -1023,6 +1023,18 @@ export interface FeedItem {
   createdAt: string;
   hiddenAt?: string;
   hiddenBy?: string;
+  /**
+   * reporterKey (teamId, or `staff:<uid>`) → reason (change: feed-ugc-safety).
+   * Written only by reportFeedItem via the pure applyReport reducer.
+   */
+  reportedBy?: Record<string, string>;
+  /** Number of distinct reporterKeys in reportedBy (change: feed-ugc-safety). */
+  reportCount?: number;
+  /**
+   * Set by hideFeedItem({ restore: true }) — disarms auto-hide permanently for
+   * this item even as further reports keep accumulating (change: feed-ugc-safety).
+   */
+  reportsCleared?: boolean;
 }
 
 export interface TeamLocation {

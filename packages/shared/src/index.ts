@@ -42,6 +42,8 @@ export * from './hintEscalation';
 export * from './ordering';
 export * from './survey';
 export * from './feedReactions';
+export * from './feedReports';
+export * from './feedMute';
 export * from './ceremony';
 export * from './announcements';
 export * from './powerUps';

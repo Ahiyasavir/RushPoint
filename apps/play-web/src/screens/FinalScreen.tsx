@@ -9,10 +9,7 @@ import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
 import { fireConfetti } from '../lib/confetti';
-
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+import { creatorUrl } from '../lib/creatorUrl';
 
 function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -94,10 +91,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
       const { sharePodium } = await import('../lib/podiumCard');
       await sharePodium(podium, {
         gameName: game.branding?.name ?? game.title,
-        ctaUrl: CREATOR_URL,
+        ctaUrl: creatorUrl(),
         text: t.final.shareText({
           team: team.displayName, game: game.branding?.name ?? game.title,
-          rankPart: '', timePart: '', url: CREATOR_URL.replace(/^https?:\/\//, ''),
+          rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
         }),
       });
     } finally { setBusy(false); }
@@ -112,10 +109,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
       await sharePhoto(firstPhotoUrl, {
         playBaseUrl: playBase,
         gameId: (game as { id?: string }).id ?? null,
-        urlText: CREATOR_URL.replace(/^https?:\/\//, ''),
+        urlText: creatorUrl().replace(/^https?:\/\//, ''),
         caption: t.final.shareText({
           team: team.displayName, game: game.branding?.name ?? game.title,
-          rankPart: '', timePart: '', url: CREATOR_URL.replace(/^https?:\/\//, ''),
+          rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
         }),
       });
     } finally { setBusy(false); }
@@ -132,7 +129,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         game: name,
         rankPart,
         timePart,
-        url: CREATOR_URL.replace(/^https?:\/\//, ''),
+        url: creatorUrl().replace(/^https?:\/\//, ''),
       });
       const { shareStoryCard } = await import('../lib/storyCard');
       const result = await shareStoryCard({
@@ -142,7 +139,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         rank: myRank,
         totalTime: totalSec != null ? fmtDuration(totalSec) : undefined,
         stagesDone: `${completedStages.length}/${team.stages.length}`,
-        ctaUrl: CREATOR_URL,
+        ctaUrl: creatorUrl(),
       }, text);
       if (result === 'downloaded' || result === 'copied') { setShared(true); setTimeout(() => setShared(false), 2500); }
     } finally { setBusy(false); }
@@ -295,7 +292,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           mode (no payment/upsell surface). The ?ref tag credits the host with a
           free run if a participant signs up as a creator. */}
       {PAYMENTS_ENABLED && run.billingType !== 'pro' && (
-        <a href={`${CREATOR_URL}/?ref=${team.ownerUid}`} target="_blank" rel="noreferrer"
+        <a href={`${creatorUrl()}/?ref=${team.ownerUid}`} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">
             <span>⚡</span> {t.final.poweredBy}

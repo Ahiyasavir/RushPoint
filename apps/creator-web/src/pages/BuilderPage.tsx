@@ -473,7 +473,9 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           onChange={(e) => patch({ photoFeedEnabled: e.target.checked })} />
         {b.photoFeedLabel}
       </label>
-      <p className="text-xs text-zinc-500 -mt-2">{b.photoFeedHint}</p>
+      <p className="text-xs text-zinc-400 -mt-2">{b.photoFeedHint}</p>
+      {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
+      <p className="text-xs text-zinc-500 -mt-3">{b.photoFeedResponsibility}</p>
 
       {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
       <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">

@@ -20,6 +20,13 @@ const set = PII_BULK_SUBCOLLECTIONS as readonly string[];
 // J3 — the regression this fix closes: location-bearing SOS/breach alerts are purged.
 check('alerts is in the bulk-delete set', set.includes('alerts'), JSON.stringify(set));
 
+// Team↔HQ chat threads (change: feed-ugc-safety). Each doc holds free-typed message
+// text plus `senderName` — participant-authored PII every bit as much as a photo URL.
+// The privacy policy's participant-deletion clause promises chat is deleted with the
+// run, so leaving it out of the purge would make the Play Data Safety declaration
+// inaccurate, not merely untidy.
+check('chat is in the bulk-delete set', set.includes('chat'), JSON.stringify(set));
+
 // Guard the pre-existing location/PII subcollections so the refactor keeps purging them.
 for (const name of ['teamLocations', 'locationTrack', 'zones', 'feedItems']) {
   check(`${name} still purged`, set.includes(name));

@@ -81,6 +81,28 @@ export function logBestEffort(op: string, ctx: Record<string, unknown>, err: unk
   active.warn('bestEffort.failed', { op, ...redact(ctx), err: String(err) });
 }
 
+// Cost containment (change: cost-containment-max-instances): no callable in this
+// codebase has ever set maxInstances, so a runaway loop or an abuse spike can
+// scale to Google's project-wide instance ceiling and generate a real bill. Every
+// callable is built via loggedCallable (verified: zero direct
+// `functions.https.onCall` call sites elsewhere), so capping here bounds the
+// worst case for all ~85 of them by construction — no per-call-site discipline
+// required. 10 concurrent instances comfortably covers this app's realistic peak
+// (a few hundred concurrent participants firing short, cheap callables) while
+// keeping worst-case spend bounded; a genuinely heavy callable can still opt
+// into a higher ceiling by passing its own `maxInstances` in runtimeOpts.
+export const DEFAULT_MAX_INSTANCES = 10;
+
+/**
+ * Merge a per-callable `maxInstances` cost cap into runtimeOpts. Additive, not
+ * exclusive: existing timeout/memory settings are preserved, and an explicit
+ * `maxInstances` on the passed opts always wins (lets a heavy callable raise its
+ * own ceiling) — the default only fills the gap when the caller didn't set one.
+ */
+export function resolveRuntimeOpts(runtimeOpts?: functions.RuntimeOptions): functions.RuntimeOptions {
+  return { maxInstances: DEFAULT_MAX_INSTANCES, ...runtimeOpts };
+}
+
 // firebase-functions v1 onCall handler signature is (data: any, context). We
 // mirror it so loggedCallable is a drop-in for functions.https.onCall — only the
 // opening line of each callable changes.
@@ -114,8 +136,7 @@ export function loggedCallable(
   handler: CallableHandler,
   runtimeOpts?: functions.RuntimeOptions,
 ) {
-  const target = runtimeOpts ? functions.runWith(runtimeOpts) : functions;
-  return target.https.onCall(async (data, context) =>
+  return functions.runWith(resolveRuntimeOpts(runtimeOpts)).https.onCall(async (data, context) =>
     logCall(
       { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
       // Backstop: a callable must never return a non-finite number — one Infinity

@@ -1943,11 +1943,24 @@ async function main() {
     const fpCred = await signInAnonymously(fp.auth);
     const fUid = fpCred.user.uid;
     await fp.call('joinRun', { code: fc, displayName: 'Feed Lions' });
+    // Two more teams, joined up front, so the report/auto-hide/restore block
+    // below (feed-ugc-safety) has distinct TEAMS to report with — the design
+    // amendment keys reportedBy by teamId, not uid, precisely so one team's
+    // extra devices can't reach the auto-hide threshold alone.
+    const fp2 = makeParty('feedPlayer2');
+    const fp2Cred = await signInAnonymously(fp2.auth);
+    const fUid2 = fp2Cred.user.uid;
+    await fp2.call('joinRun', { code: fc, displayName: 'Feed Tigers' });
+    const fp3 = makeParty('feedPlayer3');
+    const fp3Cred = await signInAnonymously(fp3.auth);
+    const fUid3 = fp3Cred.user.uid;
+    await fp3.call('joinRun', { code: fc, displayName: 'Feed Bears' });
     await creator.call('startTeams', { gameId: fg, runId: fr });
     const FCTX = { ownerUid: OWNER, gameId: fg, runId: fr };
     const feedCol = `users/${OWNER}/games/${fg}/runs/${fr}/feedItems`;
-    const feedPhotoUrl = (name) =>
-      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${fr}/teams/${fUid}/${name}`)}?alt=media`;
+    const feedPhotoUrlFor = (teamUid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${fr}/teams/${teamUid}/${name}`)}?alt=media`;
+    const feedPhotoUrl = (name) => feedPhotoUrlFor(fUid, name);
 
     // 1) Auto-approved photo → a feed item appears, with the denormalized fields.
     const auto = await fp.call('submitStationPhoto', { ...FCTX, teamId: fUid, taskId: 'fp-auto', photoUrl: feedPhotoUrl('a.jpg') });
@@ -2077,6 +2090,81 @@ async function main() {
       fp.call('reactToFeedItem', { ...FCTX, itemId: item2.id, emoji: '👍' }),
       { codeIn: ['functions/not-found'] });
 
+    // 5c) reportFeedItem (change: feed-ugc-safety) — a FRESH item (item1/item2 are
+    //     already spoken for by the reaction/hide assertions above and by the
+    //     ceremony check below). fp2 submits a third auto-approved photo.
+    const item3Photo = feedPhotoUrlFor(fUid2, 'c.jpg');
+    const item3Submit = await fp2.call('submitStationPhoto', {
+      ...FCTX, teamId: fUid2, taskId: 'fp-auto', photoUrl: item3Photo,
+    });
+    check('report: seed item3 auto-approves', item3Submit?.autoApproved === true, JSON.stringify(item3Submit));
+    const afterItem3 = await fp2.getColAt(feedCol);
+    const item3 = afterItem3.find((d) => d.teamId === fUid2);
+    check('report: item3 exists and is active', item3?.active === true, JSON.stringify(item3));
+
+    const rep1 = await fp.call('reportFeedItem', { ...FCTX, itemId: item3.id, reason: 'inappropriate' });
+    check('report: first report (team1) succeeds with reportCount 1',
+      rep1?.ok === true && rep1?.reportCount === 1, JSON.stringify(rep1));
+    const item3AfterRep1 = (await fp.getColAt(feedCol)).find((d) => d.id === item3.id);
+    check('report: item stays active after one report', item3AfterRep1?.active === true, JSON.stringify(item3AfterRep1));
+
+    const rep1Again = await fp.call('reportFeedItem', { ...FCTX, itemId: item3.id, reason: 'inappropriate' });
+    check('report: the SAME team reporting again does not inflate the count (idempotent)',
+      rep1Again?.ok === true && rep1Again?.reportCount === 1, JSON.stringify(rep1Again));
+
+    // A second device on the SAME team (fp is the founding device of team fUid;
+    // no second device is joined here, so this call already covers the "same
+    // reporterKey" path above.) The design-amendment-specific guarantee — that a
+    // team's OWN second device cannot double the count — is proven in the pure
+    // lane (scripts/test-feed-reports.ts); this e2e assertion instead proves the
+    // team-vs-team distinctness that actually drives auto-hide below.
+
+    await expectError('report: an invalid reason is rejected',
+      fp.call('reportFeedItem', { ...FCTX, itemId: item3.id, reason: 'because' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('report: a stranger (not in the run, not staff) is denied',
+      feedStranger.call('reportFeedItem', { ...FCTX, itemId: item3.id, reason: 'inappropriate' }),
+      { codeIn: ['functions/permission-denied', 'functions/not-found'] });
+
+    // A second DISTINCT team (fp3, team fUid3) reports the same item → auto-hide.
+    const rep2 = await fp3.call('reportFeedItem', { ...FCTX, itemId: item3.id, reason: 'harassment' });
+    check('report: a second distinct team hides the item', rep2?.ok === true && rep2?.hidden === true && rep2?.reportCount === 2, JSON.stringify(rep2));
+    const item3AfterHide = (await fp.getColAt(feedCol)).find((d) => d.id === item3.id);
+    check('report: auto-hidden item flips active:false with hiddenBy auto:reports',
+      item3AfterHide?.active === false && item3AfterHide?.hiddenBy === 'auto:reports' && typeof item3AfterHide?.hiddenAt === 'string',
+      JSON.stringify(item3AfterHide));
+    await expectError('report: a reaction on an auto-hidden item is rejected (existing behavior still holds)',
+      fp.call('reactToFeedItem', { ...FCTX, itemId: item3.id, emoji: '👍' }),
+      { codeIn: ['functions/not-found'] });
+
+    // 5d) hideFeedItem restore (change: feed-ugc-safety) — authz unchanged, then
+    //     reportsCleared disarms auto-hide while reports keep counting.
+    await expectError('restore: a participant cannot restore',
+      fp.call('hideFeedItem', { ...FCTX, itemId: item3.id, restore: true }),
+      { codeIn: ['functions/permission-denied'] });
+
+    const restored = await creator.call('hideFeedItem', { ...FCTX, itemId: item3.id, restore: true });
+    check('restore: owner restores the auto-hidden item', restored?.ok === true, JSON.stringify(restored));
+    const item3AfterRestore = (await fp.getColAt(feedCol)).find((d) => d.id === item3.id);
+    check('restore: item is active again with hiddenAt/hiddenBy cleared and reportsCleared true',
+      item3AfterRestore?.active === true && item3AfterRestore?.hiddenAt === undefined
+        && item3AfterRestore?.hiddenBy === undefined && item3AfterRestore?.reportsCleared === true,
+      JSON.stringify(item3AfterRestore));
+
+    // A THIRD distinct reporter (a new team) does NOT re-hide the restored item —
+    // reportsCleared disarms auto-hide permanently, while the count still climbs.
+    const thirdTeam = makeParty('feedPlayer4');
+    const thirdCred = await signInAnonymously(thirdTeam.auth);
+    await thirdTeam.call('joinRun', { code: fc, displayName: 'Feed Wolves' });
+    await creator.call('startTeams', { gameId: fg, runId: fr });
+    const rep3 = await thirdTeam.call('reportFeedItem', { ...FCTX, itemId: item3.id, reason: 'privacy' });
+    check('restore: a third distinct reporter does not re-hide (hidden:false)',
+      rep3?.ok === true && rep3?.hidden === false && rep3?.reportCount === 3, JSON.stringify(rep3));
+    const item3AfterThird = (await fp.getColAt(feedCol)).find((d) => d.id === item3.id);
+    check('restore: item stays active after the third report despite the count reaching 3',
+      item3AfterThird?.active === true, JSON.stringify(item3AfterThird));
+
     // 5b) Ceremony mode (ceremony-mode): getPublicLeaderboard carries the
     //     server-selected top-liked ceremonyFeed — published-gated, hidden items
     //     excluded, and shaped exactly {taskTitle,teamName,photoUrl,totalReactions}.
@@ -2087,8 +2175,15 @@ async function main() {
     await creator.call('refreshLeaderboard', { ...FCTX, publish: true });
     const postCeremony = await fp.call('getPublicLeaderboard', { code: fc });
     const cf = postCeremony?.ceremonyFeed ?? [];
-    check('ceremony: post-publish ceremonyFeed carries the liked item only (hidden excluded)',
-      cf.length === 1 && cf[0]?.taskTitle === 'Snap the mural' && cf[0]?.totalReactions === 2,
+    // feed-ugc-safety changed this scenario's end state: item3 was auto-hidden by
+    // two reports and then RESTORED by the owner, so it is legitimately back in the
+    // ceremony feed (with 0 reactions). item2 stays owner-hidden. Asserting item2's
+    // ABSENCE by photoUrl tests "hidden items are excluded" directly, instead of
+    // inferring it from a total count that any new feed item would break.
+    check('ceremony: post-publish ceremonyFeed excludes the hidden item, liked item ranks first',
+      cf.length === 2
+        && cf[0]?.taskTitle === 'Snap the mural' && cf[0]?.totalReactions === 2
+        && !cf.some((x) => x.photoUrl === item2.photoUrl),
       JSON.stringify(cf));
     check('ceremony: feed is capped at 20', cf.length <= 20, String(cf.length));
     check('ceremony: sorted by totalReactions desc',
@@ -5650,6 +5745,15 @@ async function main() {
       // other-run staff isn't scoped to this run, so its HQ send is denied.
       ['stranger', str, 'sendTeamChatMessage', { ownerUid: OWNER, gameId: ag, runId: ar, text: 'sneak in' }],
       ['other-run staff', staffB, 'sendTeamChatMessage', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, text: 'not my run' }],
+      // feed-ugc-safety: reportFeedItem — a run participant is proven ALLOWED in
+      // the 'live photo feed' scenario above; here we prove a stranger and staff
+      // scoped to a DIFFERENT run are denied. The authz check runs before the
+      // item lookup, so a non-existent itemId still exercises the right branch.
+      ['stranger', str, 'reportFeedItem', { ownerUid: OWNER, gameId: ag, runId: ar, itemId: 'fake', reason: 'inappropriate' }],
+      ['other-run staff', staffB, 'reportFeedItem', { ownerUid: OWNER, gameId: ag, runId: ar, itemId: 'fake', reason: 'inappropriate' }],
+      // feed-ugc-safety: hideFeedItem({ restore: true }) is staff/owner-only,
+      // same as a plain hide — a participant must not be able to restore either.
+      ['participant', pl, 'hideFeedItem', { ownerUid: OWNER, gameId: ag, runId: ar, itemId: 'fake', restore: true }],
     ];
     for (const [who, party, fn, payload] of rows) {
       await expectError(`authz: ${who} is denied ${fn}`, party.call(fn, payload), { codeIn: DENY });

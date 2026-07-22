@@ -1,7 +1,7 @@
 {
   "packageId": "app.rushpoint.play",
   "host": "rushpoint-play.web.app",
-  "name": "RushPoint — Field Game",
+  "name": "RushPoint Field Game",
   "launcherName": "RushPoint",
   "display": "standalone",
   "orientation": "portrait",

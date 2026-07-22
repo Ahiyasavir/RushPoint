@@ -16,6 +16,16 @@
 /** Canonical Android application id for the play-web TWA (reverse-DNS of rushpoint.app). */
 export const PLAY_PACKAGE_NAME = 'app.rushpoint.play';
 
+/**
+ * Lowest Android API level Google Play accepts for a new app or an update.
+ * Play raises this every year (API 35 = Android 15, the floor since Aug 2025) and
+ * REJECTS uploads below it. Bubblewrap picks the level when it generates the
+ * Android project, so nothing in this repo would otherwise notice a stale value —
+ * `validateAndroidTargetSdk` + `npm run play:store:check` close that gap.
+ * Bump this constant when Play's floor rises.
+ */
+export const PLAY_MIN_TARGET_SDK = 35;
+
 /** One Digital Asset Links statement — grants a package permission to handle the origin's URLs. */
 export interface AssetLinkStatement {
   relation: string[];
@@ -137,6 +147,66 @@ export function validateAssetLinks(value: unknown): AssetLinksValidation {
     }
   });
   return { ok: problems.length === 0, problems };
+}
+
+/** Result of validating the generated Android project's target API level. */
+export interface TargetSdkValidation {
+  ok: boolean;
+  /** The parsed level, or null when nothing could be read. */
+  targetSdk: number | null;
+  /** True when the Android project does not exist yet — nothing to assert. */
+  skipped: boolean;
+  problems: string[];
+}
+
+/**
+ * Validate the target API level of the Bubblewrap-generated Android project
+ * against Play's current floor.
+ *
+ * `buildGradle` is the raw text of the generated `app/build.gradle` (Groovy) —
+ * pass `null`/`''` when the file does not exist. That case **skips** (ok, with
+ * `skipped: true`): the Android project is only created by `npm run play:twa:init`
+ * and is gitignored, so a fresh checkout has nothing to check and must not fail.
+ * Once the file exists, a missing or too-low declaration is a hard failure — that
+ * is precisely the state Play rejects at upload.
+ *
+ * Accepts both the legacy `targetSdkVersion N` and the modern `targetSdk = N`
+ * spellings, with or without `=`. Line comments are stripped first so a
+ * commented-out declaration never counts as a real one. Pure — no I/O.
+ */
+export function validateAndroidTargetSdk(
+  buildGradle: string | null | undefined,
+  minRequired: number = PLAY_MIN_TARGET_SDK,
+): TargetSdkValidation {
+  if (typeof buildGradle !== 'string' || buildGradle.trim().length === 0) {
+    return { ok: true, targetSdk: null, skipped: true, problems: [] };
+  }
+  // Strip `//` line comments so a commented-out declaration is not mistaken for
+  // the live one (Bubblewrap's template ships several commented examples).
+  const source = buildGradle.replace(/\/\/.*$/gm, '');
+  const match = /\btargetSdk(?:Version)?\s*=?\s*(\d+)/.exec(source);
+  if (!match) {
+    return {
+      ok: false,
+      targetSdk: null,
+      skipped: false,
+      problems: [
+        `no targetSdkVersion declaration found in the generated Android project (Play requires >= ${minRequired})`,
+      ],
+    };
+  }
+  const targetSdk = Number(match[1]);
+  if (targetSdk < minRequired) {
+    return {
+      ok: false,
+      targetSdk,
+      skipped: false,
+      problems: [
+        `targetSdkVersion is ${targetSdk} but Google Play requires >= ${minRequired} — Play will reject this upload. Update @bubblewrap/cli and re-run "npm run play:twa:init".`,
+      ],
+    };
+  }
+  return { ok: true, targetSdk, skipped: false, problems: [] };
 }
 
 interface ManifestIcon {

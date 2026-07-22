@@ -8,6 +8,7 @@
 
 import admin from 'firebase-admin';
 import { seedSansana, GAME_ID as SANSANA_GAME_ID } from './lib/sansana-game-def.mjs';
+import { seedQaGame, GAME_ID as QA_GAME_ID, CODE as QA_CODE } from './lib/qa-game-def.mjs';
 
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
 
@@ -122,6 +123,20 @@ async function ensureSansana(now) {
   console.log('[seed] Sansana seeded — join code SANSANA, in the public gallery.');
 }
 
+// ── QA playground (idempotent restore) ───────────────────────────────────────
+// The "every task type in one game" QA game — same reboot-survival reasoning as
+// Sansana above. See scripts/lib/qa-game-def.mjs.
+async function ensureQaGame(now) {
+  const snap = await db.doc(`publicGames/${QA_GAME_ID}`).get();
+  if (snap.exists) {
+    console.log('[seed] QA playground already present — skipped.');
+    return;
+  }
+  console.log('[seed] Seeding the QA playground…');
+  await seedQaGame(admin, db, auth, now);
+  console.log(`[seed] QA playground seeded — join code ${QA_CODE}.`);
+}
+
 async function seedDemo(now) {
   console.log('[seed] Empty database — seeding v2 demo data…');
 
@@ -192,6 +207,7 @@ async function main() {
   else console.log('[seed] accessCodes already present — skipping demo seed.');
 
   await ensureSansana(now);
+  await ensureQaGame(now);
 }
 
 main().catch((err) => { console.error('[seed] Seed failed:', err); process.exit(1); });

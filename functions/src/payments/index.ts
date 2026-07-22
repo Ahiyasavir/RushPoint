@@ -5,7 +5,7 @@
 // e2e work without Stripe keys.
 
 import * as functions from 'firebase-functions';
-import { loggedCallable, logBestEffort } from '../obs/log';
+import { loggedCallable, logBestEffort, DEFAULT_MAX_INSTANCES } from '../obs/log';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
 import {
@@ -305,7 +305,10 @@ export const claimReferral = loggedCallable('claimReferral', async (data, contex
 // ─── stripeWebhook ────────────────────────────────────────────────────────────
 // HTTP handler (not callable) for Stripe checkout/subscription lifecycle events.
 
-export const stripeWebhook = functions.https.onRequest(async (req, res) => {
+// This is an onRequest HTTP endpoint, not a callable, so it bypasses
+// loggedCallable's instance cap entirely — it's publicly reachable and needs its
+// own maxInstances or it inherits no bound at all (cost-containment-max-instances).
+export const stripeWebhook = functions.runWith({ maxInstances: DEFAULT_MAX_INSTANCES }).https.onRequest(async (req, res) => {
   // Free mode: the webhook is inert — acknowledge with 200 and mutate nothing.
   if (!PAYMENTS_ENABLED) {
     res.status(200).json({ received: true, paymentsEnabled: false });

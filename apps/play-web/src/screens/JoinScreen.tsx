@@ -5,11 +5,41 @@ import { saveSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { unlockAudio } from '../lib/sound';
+import { creatorUrl } from '../lib/creatorUrl';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Firebase callable codes that mean "transient / connectivity", not a bad code —
 // surfaced to the player as a single "check your connection" message.
 const CONNECTION_CODES = new Set(['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated']);
+
+// The legal documents are React Router routes on the CREATOR hosting target
+// (/privacy, /terms) — play-web has no router, so it links out. The origin comes
+// from lib/creatorUrl (shared with the finish-screen referral link) and resolves
+// at render time, so this file never reads the browser URL at module scope — see
+// the P9 regression guard in scripts/test-i18n-parity.ts.
+
+/**
+ * In-app link to the Terms and the Privacy Policy. Google Play requires the
+ * privacy policy to be reachable in-app, and its UGC policy requires the content
+ * policy governing the live photo feed to be reachable by the participants who
+ * post to it — which is exactly this app's audience (change: feed-ugc-safety).
+ */
+function LegalFooter() {
+  const { t } = useT();
+  const base = creatorUrl();
+  const linkClass = 'underline underline-offset-2 hover:text-zinc-300 transition-colors';
+  return (
+    <p className="text-center text-[11px] text-zinc-500 mt-4">
+      <a href={`${base}/terms`} target="_blank" rel="noopener noreferrer" className={linkClass}>
+        {t.join.legalTerms}
+      </a>
+      <span className="mx-1.5" aria-hidden>·</span>
+      <a href={`${base}/privacy`} target="_blank" rel="noopener noreferrer" className={linkClass}>
+        {t.join.legalPrivacy}
+      </a>
+    </p>
+  );
+}
 
 export default function JoinScreen({ initialCode, onJoined, onStaff }: {
   /**
@@ -292,6 +322,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
             <p className="text-center text-[11px] text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
               <span className="text-rp-go">●</span> {t.join.noAccountNeeded}
             </p>
+            <LegalFooter />
           </div>
         </div>
       </div>
@@ -397,6 +428,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               value={values.teamName ?? ''}
               dir="auto"
               placeholder={t.join.teamNamePlaceholder}
+              data-testid="join-team-name"
               className={fieldErrors.has('teamName') ? 'border-rp-alert' : ''}
               onChange={(e) => setValues({ ...values, teamName: e.target.value })}
             />
@@ -419,6 +451,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
                   <Input
                     ref={(el: HTMLInputElement | null) => { memberRefs.current[i] = el; }}
                     value={m} placeholder={t.join.memberPlaceholder(i + 1)}
+                    data-testid="join-member"
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
                     <button aria-label={t.join.removeMember(m)} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
@@ -451,6 +484,9 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
       </Button>
       </>
       )}
+      {/* Also on the registration step: a deep link with a code skips step 1
+          entirely, so this is the only legal surface those players ever see. */}
+      <LegalFooter />
     </Screen>
   );
 }

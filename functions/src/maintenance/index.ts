@@ -43,6 +43,12 @@ interface RunRef {
 //   • alerts                        — SOS + safe_zone_breach docs carry raw lat/lng
 //                                     (functions/src/index.ts triggerSOS + breach),
 //                                     exactly the "GPS location pings" the policy purges
+//   • chat                          — team↔HQ threads: free-typed message text +
+//                                     senderName (change: feed-ugc-safety). Added when
+//                                     the privacy policy gained a participant-deletion
+//                                     clause promising chat is purged with the run —
+//                                     a Play Data Safety declaration has to match what
+//                                     the code actually does.
 // Pure list (no I/O) so the delete-set is unit-testable without an emulator.
 export const PII_BULK_SUBCOLLECTIONS = [
   'teamLocations',
@@ -50,6 +56,7 @@ export const PII_BULK_SUBCOLLECTIONS = [
   'zones',
   'feedItems',
   'alerts',
+  'chat',
 ] as const;
 
 interface PruneResult {

@@ -155,6 +155,16 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **בקשת מחיקה:** יוצרים יכולים לבקש מחיקת חשבון וכל הנתונים הקשורים אליו על-ידי פנייה ל-privacy@rushpoint.app. ביצוע המחיקה תוך 30 יום.
 
+### 7.1 בקשת מחיקה של משתתף (ללא חשבון)
+
+סעיף זה משלים את פסקת "בקשת מחיקה" שלעיל, החלה על בעלי חשבון יוצר. משתתף שהצטרף לריצה באמצעות קוד גישה, ללא יצירת חשבון, **רשאי אף הוא לבקש את מחיקת הנתונים שנאספו עליו באותה ריצה**, ובכלל זה: נתוני מיקום GPS שנאספו במהלך הריצה, תמונות שהעלה, הקלטות קול שהעלה, הודעות ששלח בצ׳אט הצוות, ושם הצוות ו/או שם התצוגה שבחר.
+
+**כיצד מגישים בקשה:** בפנייה לאותה כתובת — **privacy@rushpoint.app**. הצטרפות לריצה היא אנונימית ואינה מקושרת לשם אמיתי ו/או לכתובת דואר אלקטרוני, ולכן איננו יכולים לאתר את הנתונים לפי זהות הפונה. כדי שנוכל לאתר את הנתונים בפועל, יש לציין בפנייה פרטים מזהים של הריצה: **קוד הגישה, תאריך האירוע, ושם הצוות** (וככל שידוע — שם המשחק ו/או שם המארגן). נטפל בבקשה במסגרת הזמנים המפורטת בפסקת "בקשת מחיקה" שלעיל.
+
+**דרך חלופית — פנייה למארגן:** ניתן לפנות ישירות ליוצר המשחק שהפעיל את הריצה. ליוצר יש גישה לכלי הניהול של הריצה, והוא יכול להסיר את התוכן של הצוות שלך (לרבות הסתרת תמונות מהפיד) ו/או למחוק את הריצה כולה.
+
+**מחיקה אוטומטית ממילא:** גם ללא בקשה, חלק מהנתונים נמחקים אוטומטית לפי טבלת תקופות השמירה שבתחילת סעיף זה — **נתוני מיקום GPS גולמיים ותמונות שהועלו נמחקים אוטומטית 90 יום מסיום הריצה**. נתונים שאינם מפורטים בנפרד בטבלה (כגון הקלטות קול והודעות צ׳אט) נמחקים יחד עם נתוני הריצה כאשר היוצר מוחק את הריצה ו/או את חשבונו, וניתן לבקש את הסרתם מוקדם יותר לפי סעיף זה.
+
 ## 8. זכויות נושא המידע
 
 מכוח חוק הגנת הפרטיות, תשמ"א-1981, עומדות לך הזכויות הבאות:
@@ -379,6 +389,16 @@ We implement security measures in accordance with the Israeli Privacy Protection
 
 **Deletion request:** Creators can request deletion of their account and all associated data by contacting privacy@rushpoint.app. Deletion is carried out within 30 days.
 
+### 7.1 Participant Deletion Requests (No Account)
+
+This Section supplements the "Deletion request" paragraph above, which applies to Creator account holders. A participant who joined a run using an access code, without creating an account, **may also request deletion of the data collected about them in that run**, including: GPS location data collected during the run, photos they uploaded, audio recordings they uploaded, messages they sent in team chat, and the team name and/or display name they chose.
+
+**How to request:** contact the same address — **privacy@rushpoint.app**. Joining a run is anonymous and is not linked to a real name or email address, so we cannot locate the data from the requester's identity alone. So that we can actually find the data, please include identifying details of the run in your request: **the access code, the event date, and the team name** (and, if known, the game name and/or the organizer's name). We handle such requests within the timeframe stated in the "Deletion request" paragraph above.
+
+**Alternative — ask the organizer:** you may instead contact the Creator who ran the event directly. The Creator has access to the run's management tools and can remove your team's content (including hiding photos from the feed) and/or delete the entire run.
+
+**Automatic deletion regardless:** even without a request, some data is deleted automatically per the retention table at the start of this Section — **raw GPS location data and uploaded photos are auto-deleted 90 days after run completion**. Data not separately listed in that table (such as audio recordings and chat messages) is deleted together with the run's data when the Creator deletes the run and/or their account, and may be removed sooner on request under this Section.
+
 ## 8. Data Subject Rights
 
 Under Israel's Protection of Privacy Law, 5741-1981, you have the following rights:
@@ -541,6 +561,24 @@ The Company will respond to requests within 30 days.
 - תוכן הפורץ זכויות יוצרים ו/או סימני מסחר של צדדים שלישיים
 - תוכן המכוון משתתפים לאזורים מסוכנים, נכסים פרטיים ללא אישור, ו/או מתקנים מוגבלים
 - תוכן הנוגד את הוראות כל דין ישראלי ו/או בינלאומי
+
+### 5.5 תוכן שמעלים משתתפים ופיד התמונות החי
+
+סעיף זה חל על תוכן שמשתתפים מעלים במהלך ריצה, ובפרט על תמונות המוצגות בפיד התמונות החי. **סעיף 5.4 (איסורים על תוכן) חל במלואו גם על תוכן שמעלים משתתפים**; סעיף זה מוסיף עליו ואינו בא במקומו.
+
+**(א) איסורי העלאה:** משתתף לא יעלה תוכן מן הסוגים המנויים בסעיף 5.4, ובכלל זה תוכן פוגעני, מטריד, מאיים, גזעני ו/או משפיל, תוכן בעל אופי מיני ו/או בוטה, תוכן הפוגע בפרטיותו של אדם אחר ו/או מציג אדם ללא הסכמתו, תוכן המפר זכויות של צד שלישי, וכל תוכן הנוגד את הוראות הדין.
+
+**(ב) חשיפה לכל הקבוצות בריצה:** כאשר פיד התמונות החי מופעל במשחק, תמונה שהועלתה ואושרה מוצגת **לכל הקבוצות המשתתפות באותה ריצה**, ולא רק ליוצר ולצוות השטח שלו. אין להעלות תוכן שאינך מעוניין שכלל המשתתפים בריצה יראו.
+
+**(ג) דיווח על תוכן:** **כל משתתף** רשאי לדווח על כל תמונה בפיד, ישירות מתוך האפליקציה, באמצעות בחירת סיבה מתוך רשימה סגורה.
+
+**(ד) הסרה עד לבדיקה:** תוכן שדווח מוסר מן הפיד עד לבדיקתו. תוכן שהוסר אינו מוצג עוד למשתתפים ואינו נכלל בטקס הסיום. המדווח מפסיק לראות את התוכן שעליו דיווח באופן מיידי.
+
+**(ה) סמכות הסרה:** יוצר המשחק וצוות השטח שלו רשאים להסתיר כל תמונה בכל עת, וכן להחזיר תמונה שהוסרה בטעות. RushPoint רשאית אף היא להסיר תוכן, להפסיק את השתתפותו של משתתף בריצה, ולנקוט בצעדים לפי סעיף 12, בכל מקרה של הפרת סעיף זה.
+
+**(ו) "השתקת קבוצה" — הבהרה:** האפשרות להשתיק קבוצה באפליקציית המשתתף מסתירה את תמונות אותה קבוצה **במכשיר שבו בוצעה ההשתקה בלבד**. משתתפים מצטרפים בזיהוי אנונימי וללא חשבון, ולפיכך אין מדובר בחסימה של זהות ו/או של משתמש: ההשתקה אינה עוברת בין מכשירים, אינה משפיעה על משתתפים אחרים, ואינה מסירה את התוכן עצמו.
+
+**(ז) אחריות היוצר:** יוצר המשחק אחראי לתוכן שמעלים משתתפי האירוע שלו, לרבות ניטור הפיד במהלך הריצה ותגובה לדיווחים. יוצר שאינו מעוניין בשיתוף תמונות בין הקבוצות רשאי לכבות את פיד התמונות החי בהגדרות המשחק לפני ההשקה.
 
 ## 6. אחריות יוצר המשחק ובטיחות גופנית של משתתפים
 
@@ -778,6 +816,24 @@ It is **strictly prohibited** to create and/or upload:
 - Content that infringes third-party copyrights and/or trademarks
 - Content that directs participants to dangerous areas, private property without permission, and/or restricted facilities
 - Content that contravenes any Israeli and/or international law
+
+### 5.5 Participant-Uploaded Content and the Live Photo Feed
+
+This Section governs content uploaded by participants during a run, and in particular photos displayed in the live photo feed. **Section 5.4 (Content Prohibitions) applies in full to participant-uploaded content as well**; this Section adds to it and does not replace it.
+
+**(a) Upload prohibitions:** a participant may not upload content of the kinds listed in Section 5.4, including offensive, harassing, threatening, racist, and/or degrading content; sexual and/or graphic content; content that violates another person's privacy and/or depicts a person without their consent; content that infringes third-party rights; and any content that contravenes applicable law.
+
+**(b) Visibility to every team in the run:** when the live photo feed is enabled for a game, an uploaded and approved photo is shown to **every team taking part in that run**, not only to the Creator and their designated staff. Do not upload content you are not willing for all participants in the run to see.
+
+**(c) Reporting content:** **any participant** may report any photo in the feed, directly from the app, by selecting a reason from a closed list.
+
+**(d) Removal pending review:** reported content is removed from the feed pending review. Removed content is no longer shown to participants and is excluded from the closing ceremony. The reporting participant stops seeing the content they reported immediately.
+
+**(e) Removal authority:** the game's Creator and their designated staff may hide any photo at any time, and may restore a photo removed in error. RushPoint may likewise remove content, end a participant's participation in a run, and take action under Section 12, in any case of a breach of this Section.
+
+**(f) "Mute this team" — clarification:** the option to mute a team in the participant app hides that team's photos **on the device where the mute was applied only**. Participants join anonymously and without an account, so this is not identity-level or user-level blocking: a mute does not carry across devices, does not affect other participants, and does not remove the content itself.
+
+**(g) Creator responsibility:** the game's Creator is responsible for the content uploaded by the participants of their event, including monitoring the feed during the run and acting on reports. A Creator who does not want photos shared between teams may turn the live photo feed off in the game settings before launch.
 
 ## 6. Creator Responsibility and Participant Physical Safety
 
