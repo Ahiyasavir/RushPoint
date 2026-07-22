@@ -29,6 +29,7 @@ import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 import { storyFieldCount } from '../lib/wizardSections';
+import { parseTagsInput } from '../lib/tags';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -450,11 +451,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <Label>{b.shortDescription}</Label>
         <Input value={game.description ?? ''} onChange={(e) => patch({ description: e.target.value })} placeholder={b.shortDescriptionPlaceholder} dir="auto" />
       </div>
-      <div>
-        <Label>{b.tagsLabel}</Label>
-        <Input value={game.tags.join(', ')} onChange={(e) => patch({ tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })}
-          placeholder={b.tagsPlaceholder} dir="auto" />
-      </div>
+      <TagsField game={game} patch={patch} />
 
       <InstructionsField game={game} patch={patch} />
 
@@ -561,6 +558,35 @@ function InstructionsField({ game, patch }: { game: Game; patch: (p: Partial<Gam
 // incoming-webhook URL. Validated client-side (same shared allow-list the server
 // enforces) on blur — only an empty or valid URL is committed, so autosave never
 // POSTs an invalid URL the server would reject.
+// The comma-separated tags input. The visible field keeps the RAW string the
+// creator typed (so spaces and commas survive as they type "chutz, park"); the
+// clean Game.tags array is derived via parseTagsInput on every change. Without
+// this, binding value={tags.join(', ')} + split-on-change consumed the separator
+// mid-typing and made the field unusable for more than one tag.
+function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
+  const [raw, setRaw] = useState(game.tags.join(', '));
+  // Resync the raw string only when the persisted tags diverge from what the raw
+  // string would produce — i.e. an async load or undo/redo, NOT the creator's own
+  // keystrokes (which must keep their in-progress separators intact).
+  useEffect(() => {
+    const derived = parseTagsInput(raw);
+    if (JSON.stringify(derived) !== JSON.stringify(game.tags)) setRaw(game.tags.join(', '));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game.tags]);
+  return (
+    <div>
+      <Label>{b.tagsLabel}</Label>
+      <Input
+        value={raw}
+        onChange={(e) => { setRaw(e.target.value); patch({ tags: parseTagsInput(e.target.value) }); }}
+        placeholder={b.tagsPlaceholder}
+        dir="auto"
+      />
+    </div>
+  );
+}
+
 function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
   const b = useT().builder;
   const [val, setVal] = useState(game.integrationWebhookUrl ?? '');
