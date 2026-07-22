@@ -35,6 +35,23 @@ interface RunRef {
   runId: string;
 }
 
+// Run-level subcollections whose docs are bulk-deleted wholesale by the retention
+// prune. Every one holds raw participant PII — GPS pings or names/photo URLs:
+//   • teamLocations / locationTrack — live GPS pings + append-only movement track
+//   • zones                         — capture zones carry the owning team's name
+//   • feedItems                     — live photo feed: photo URLs + team names
+//   • alerts                        — SOS + safe_zone_breach docs carry raw lat/lng
+//                                     (functions/src/index.ts triggerSOS + breach),
+//                                     exactly the "GPS location pings" the policy purges
+// Pure list (no I/O) so the delete-set is unit-testable without an emulator.
+export const PII_BULK_SUBCOLLECTIONS = [
+  'teamLocations',
+  'locationTrack',
+  'zones',
+  'feedItems',
+  'alerts',
+] as const;
+
 interface PruneResult {
   runId: string;
   locationsDeleted: number;
@@ -47,25 +64,23 @@ interface PruneResult {
 export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<PruneResult> {
   const runPath = `users/${ownerUid}/games/${gameId}/runs/${runId}`;
 
-  // 1) Delete the live GPS ping docs (teamLocations subcollection). This can run
-  //    to thousands of docs, so it must be deleted in batch-sized chunks. The
-  //    append-only movement-heatmap track (locationTrack) is raw GPS PII too — purge it.
-  const locSnap = await db.collection(`${runPath}/teamLocations`).get();
-  const trackSnap = await db.collection(`${runPath}/locationTrack`).get();
+  // 1) Delete every wholesale-purged raw-PII subcollection (GPS pings + names/URLs).
+  //    These can run to thousands of docs, so they're deleted in batch-sized chunks.
+  //    PII_BULK_SUBCOLLECTIONS covers teamLocations, the append-only movement track
+  //    (locationTrack), capture zones, the live photo feed, and — critically — the
+  //    `alerts` subcollection whose SOS/safe_zone_breach docs carry raw lat/lng.
+  const bulkRefs: FirebaseFirestore.DocumentReference[] = [];
+  for (const sub of PII_BULK_SUBCOLLECTIONS) {
+    const snap = await db.collection(`${runPath}/${sub}`).get();
+    for (const d of snap.docs) bulkRefs.push(d.ref);
+  }
   // Trackable travel-log entries name teams (PII) — purge them (keep the trackable docs).
   const trackablesSnap = await db.collection(`${runPath}/trackables`).get();
-  const trackableLogRefs: FirebaseFirestore.DocumentReference[] = [];
   for (const td of trackablesSnap.docs) {
     const logSnap = await td.ref.collection('log').get();
-    for (const ld of logSnap.docs) trackableLogRefs.push(ld.ref);
+    for (const ld of logSnap.docs) bulkRefs.push(ld.ref);
   }
-  // Capture zones carry the owning team's display name (mild PII) — purge them too.
-  const zonesSnap = await db.collection(`${runPath}/zones`).get();
-  // Live photo feed items carry photo URLs + team names (live-photo-feed) — purge.
-  const feedSnap = await db.collection(`${runPath}/feedItems`).get();
-  const locationsDeleted = await deleteDocsInChunks(
-    [...locSnap.docs, ...trackSnap.docs, ...zonesSnap.docs, ...feedSnap.docs].map((d) => d.ref).concat(trackableLogRefs),
-  );
+  const locationsDeleted = await deleteDocsInChunks(bulkRefs);
 
   // 2) Clear photo URLs from each team's submissions (keep scores/answers), and
   //    clear any guardian-consent PII (the guardian's name).
