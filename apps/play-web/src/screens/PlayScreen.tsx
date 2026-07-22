@@ -7,7 +7,7 @@ import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { isFatalSyncError } from '../lib/syncError';
-import { Button, Progress, Screen } from '../components/ui';
+import { Button, Collapsible, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
@@ -646,22 +646,16 @@ function FeedSection({ ctx, myUid }: { ctx: Session; myUid: string }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   return (
-    <div className="mb-3 rounded-xl bg-app-card border border-glass-border">
-      <button
-        className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span>{t.feed.feedToggle}</span>
-        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-3">
-          <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
-            <FeedPanel ctx={ctx} myUid={myUid} />
-          </Suspense>
-        </div>
-      )}
-    </div>
+    <Collapsible
+      className="mb-3"
+      open={open}
+      onToggle={() => setOpen((o) => !o)}
+      header={<span>{t.feed.feedToggle}</span>}
+    >
+      <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+        <FeedPanel ctx={ctx} myUid={myUid} />
+      </Suspense>
+    </Collapsible>
   );
 }
 
@@ -707,11 +701,11 @@ function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
   }
 
   return (
-    <div className="mb-3 rounded-xl bg-app-card border border-glass-border">
-      <button
-        className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
-        onClick={toggle}
-      >
+    <Collapsible
+      className="mb-3"
+      open={open}
+      onToggle={toggle}
+      header={
         <span className="flex items-center gap-2">
           {t.chat.chatTitle}
           {unread && !open && (
@@ -720,16 +714,12 @@ function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
             </span>
           )}
         </span>
-        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-3">
-          <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
-            <ChatPanel ctx={ctx} teamId={teamId} />
-          </Suspense>
-        </div>
-      )}
-    </div>
+      }
+    >
+      <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+        <ChatPanel ctx={ctx} teamId={teamId} />
+      </Suspense>
+    </Collapsible>
   );
 }
 

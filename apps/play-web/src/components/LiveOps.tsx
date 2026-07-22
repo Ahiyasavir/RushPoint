@@ -5,6 +5,7 @@ import { db } from '../services/firebase';
 import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
 import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
+import { Collapsible } from './ui';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
@@ -176,19 +177,17 @@ function LeaderboardPeek({
   const mine = leaderboard.rankings.find((r) => r.teamId === myTeamId);
 
   return (
-    <div className="rounded-xl bg-app-card border border-glass-border">
-      <button
-        className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span>🏆 {translations[lang].liveOps.leaderboardHeading}
+    <Collapsible
+      open={open}
+      onToggle={() => setOpen((o) => !o)}
+      bodyClassName="px-3 pb-2 space-y-1"
+      header={
+        <span className="truncate">🏆 {translations[lang].liveOps.leaderboardHeading}
           {leaderboard.frozen && <span className="ms-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
           {mine && <span className="ms-2 text-accent font-mono">#{mine.rank}</span>}
         </span>
-        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-2 space-y-1">
+      }
+    >
           {top.map((r) => (
             <div
               key={r.teamId}
@@ -200,8 +199,6 @@ function LeaderboardPeek({
               </span>
             </div>
           ))}
-        </div>
-      )}
-    </div>
+    </Collapsible>
   );
 }

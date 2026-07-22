@@ -14,7 +14,7 @@ export function Button({
       active:brightness-90 active:scale-[0.98]
     `,
     ghost: `
-      bg-white/80 text-zinc-500
+      bg-white/80 text-zinc-400 font-semibold
       border border-glass-border
       active:bg-glass-hover
       shadow-[0_1px_4px_rgba(26,10,0,0.06)]
@@ -111,4 +111,39 @@ export function Screen({ children }: { children: ReactNode }) {
 // Shimmer + reduced-motion handling live in index.css (.rp-skeleton).
 export function Skeleton({ className = '' }: { className?: string }) {
   return <div aria-hidden="true" className={`rp-skeleton rounded-xl ${className}`} />;
+}
+
+// Collapsible section — the one shared shell for every expandable panel in the
+// participant app (live-ops leaderboard peek, photo feed, team↔HQ chat, …). It
+// unifies what were three hand-rolled headers with slightly different padding,
+// tap targets and chevron glyphs into one calm, consistent rhythm:
+//   • a comfortable ≥44px touch target (was ~32px — below the a11y minimum)
+//   • `aria-expanded` for assistive tech
+//   • a single chevron that rotates on open instead of swapping ▲/▼ glyphs
+// State stays fully controlled by the caller (open/onToggle), so behaviour and
+// any open-time side effects (e.g. marking chat read) are preserved exactly.
+export function Collapsible({
+  header, open, onToggle, children, className = '', bodyClassName = 'px-3 pb-3',
+}: {
+  header: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  className?: string;
+  bodyClassName?: string;
+}) {
+  return (
+    <div className={`rounded-xl bg-app-card border border-glass-border ${className}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between gap-2 px-3 py-3 min-h-[44px] text-sm font-medium text-zinc-300 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/40 rounded-xl"
+      >
+        <span className="flex items-center gap-2 min-w-0">{header}</span>
+        <span aria-hidden="true" className={`text-zinc-500 shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+      {open && <div className={bodyClassName}>{children}</div>}
+    </div>
+  );
 }
