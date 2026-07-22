@@ -9,6 +9,10 @@
   --surface-0: #FFFFFF;
   --surface-1: #F6F7FB;
   --surface-2: #ECEEF5;
+  /* Raised panel + its hover (RunConsole feedback/survey panels). Previously
+     undefined -> those panels rendered with no background. */
+  --rp-raised: #ECEEF5;
+  --rp-card:   #E3E6F0;
   --rp-border: #E0E3ED;
   --ink-1: #0A0C1A;
   --ink-2: #3D4259;
@@ -54,6 +58,8 @@ html.dark {
   --surface-0: #07080F;
   --surface-1: #0D0E1A;
   --surface-2: #141626;
+  --rp-raised: #141626;
+  --rp-card:   #1B1E30;
   --rp-border: rgba(255,255,255,0.07);
   --ink-1: #E8EAFF;
   --ink-2: #8890B8;

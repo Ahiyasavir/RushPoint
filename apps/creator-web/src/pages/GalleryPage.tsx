@@ -78,22 +78,29 @@ export default function GalleryPage() {
   const copyAction = useAsyncAction(copy, (g: PublicGame) => g.id);
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold mb-1">{gl.title}</h1>
-      <p className="text-zinc-500 text-sm mb-5">{gl.subtitle}</p>
+    <div className="max-w-6xl mx-auto animate-fade-up">
+      <header className="mb-6">
+        <h1 className="font-brand text-3xl font-extrabold tracking-tight text-[--ink-1]">{gl.title}</h1>
+        <p className="text-[--ink-3] text-sm mt-1.5 max-w-lg leading-relaxed">{gl.subtitle}</p>
+      </header>
 
-      <div className="flex gap-2 mb-4 items-center">
-        {(['games', 'tasks'] as const).map((tb) => (
-          <button key={tb} onClick={() => setTab(tb)}
-            className={`px-3 py-1.5 rounded-lg text-sm ${tab === tb ? 'bg-app-raised text-zinc-100' : 'text-zinc-400'}`}>
-            {tb === 'games' ? gl.tabGames : gl.tabTasks}
-          </button>
-        ))}
+      {/* Toolbar: source tabs + (games only) list/map view toggle */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="inline-flex gap-1 rounded-xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-1">
+          {(['games', 'tasks'] as const).map((tb) => (
+            <button key={tb} onClick={() => setTab(tb)}
+              className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                tab === tb ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
+              {tb === 'games' ? gl.tabGames : gl.tabTasks}
+            </button>
+          ))}
+        </div>
         {tab === 'games' && (
-          <div className="ms-auto flex gap-1 bg-app-raised rounded-lg p-0.5">
+          <div className="ms-auto inline-flex gap-1 rounded-xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-1">
             {(['list', 'map'] as const).map((v) => (
               <button key={v} onClick={() => setView(v)}
-                className={`px-3 py-1 rounded-md text-xs ${view === v ? 'bg-neon-green/15 text-neon-green' : 'text-zinc-400'}`}>
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  view === v ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
                 {v === 'list' ? gl.viewList : gl.viewMap}
               </button>
             ))}
@@ -101,10 +108,10 @@ export default function GalleryPage() {
         )}
       </div>
 
-      <div className="flex gap-2 mb-5">
+      <div className="flex gap-2 mb-6">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={gl.searchPlaceholder}
           onKeyDown={(e) => { if (e.key === 'Enter') void searchAction.run(); }} />
-        <Button loading={searchAction.busy} onClick={() => void searchAction.run()}>{gl.searchBtn}</Button>
+        <Button loading={searchAction.busy} onClick={() => void searchAction.run()} className="shrink-0">{gl.searchBtn}</Button>
       </div>
 
       {tab === 'games' && view === 'map' && games && games.length > 0 && (
@@ -117,17 +124,23 @@ export default function GalleryPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((pg) => (
-            <Card key={pg.id} className={`p-4 flex flex-col gap-2 scroll-mt-20 transition ${focusId === pg.id ? 'ring-2 ring-neon-green' : ''}`}>
-              <div id={`game-${pg.id}`} className="flex items-start justify-between">
-                <h3 className="font-semibold">{pg.title}</h3>
+            <Card key={pg.id} className={`p-4 flex flex-col gap-2.5 scroll-mt-20 transition ${focusId === pg.id ? 'ring-2 ring-rp-fire' : ''}`}>
+              <div id={`game-${pg.id}`} className="flex items-start justify-between gap-2">
+                <h3 className="font-brand font-bold text-[--ink-1] leading-snug flex-1">{pg.title}</h3>
                 <Badge color="cyan">{MODE_LABEL[pg.mode] ?? pg.mode}</Badge>
               </div>
-              <p className="text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">{pg.description}</p>
-              <div className="flex gap-2 text-[11px] text-zinc-500">
-                <span>{gl.stages(pg.stageCount)}</span>·<span>{gl.tasks(pg.taskCount)}</span>·<span>~{pg.estimatedTotalMinutes}m</span>·<span>{gl.plays(pg.playCount)}</span>
+              <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{pg.description}</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                <span>{gl.stages(pg.stageCount)}</span>
+                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                <span>{gl.tasks(pg.taskCount)}</span>
+                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                <span>~{pg.estimatedTotalMinutes}m</span>
+                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                <span>{gl.plays(pg.playCount)}</span>
               </div>
-              {pg.approxLocation?.label && <span className="text-[11px] text-zinc-600">📍 {pg.approxLocation.label}</span>}
-              <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-1" onClick={() => void copyAction.run(pg)}>{gl.copyBtn}</Button>
+              {pg.approxLocation?.label && <span className="text-[11px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
+              <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={() => void copyAction.run(pg)}>{gl.copyBtn}</Button>
             </Card>
           ))}
         </div>
@@ -139,13 +152,19 @@ export default function GalleryPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {tasks.map((tk) => (
-            <Card key={tk.id} className="p-4 flex flex-col gap-2">
-              <h3 className="font-semibold text-sm">{tk.title}</h3>
-              <p className="text-xs text-zinc-500 line-clamp-2 min-h-[2rem]">{tk.description}</p>
-              <div className="flex gap-2 text-[11px] text-zinc-500">
-                <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>·<span>{gl.metaDiff(tk.difficulty)}</span>·<span>{gl.metaPts(tk.pointValue)}</span>·<span>{gl.metaCopies(tk.copyCount)}</span>
+            <Card key={tk.id} className="p-4 flex flex-col gap-2.5">
+              <h3 className="font-brand font-bold text-sm text-[--ink-1] leading-snug">{tk.title}</h3>
+              <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{tk.description}</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>
+                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                <span>{gl.metaDiff(tk.difficulty)}</span>
+                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                <span>{gl.metaPts(tk.pointValue)}</span>
+                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                <span>{gl.metaCopies(tk.copyCount)}</span>
               </div>
-              <span className="text-[11px] text-zinc-600">{gl.from(tk.sourceGameTitle ?? '')}</span>
+              <span className="text-[11px] text-[--ink-3] mt-auto">{gl.from(tk.sourceGameTitle ?? '')}</span>
             </Card>
           ))}
         </div>

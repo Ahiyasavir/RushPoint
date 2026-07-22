@@ -195,8 +195,8 @@ export default function RunConsolePage() {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">{t.runConsole.liveRun}</h1>
-          <div className="flex items-center gap-2 mt-1">
+          <h1 className="font-brand text-2xl font-extrabold tracking-tight text-[--ink-1]">{t.runConsole.liveRun}</h1>
+          <div className="flex flex-wrap items-center gap-2 mt-1.5">
             <Badge color={finished ? 'zinc' : 'green'}>
               {run.status === 'draft' ? t.runConsole.statusDraft
                 : run.status === 'finished' ? t.runConsole.statusFinished
@@ -241,12 +241,12 @@ export default function RunConsolePage() {
         </Card>
       )}
 
-      {/* Actions */}
-      <div className="flex flex-wrap gap-2">
+      {/* Run controls — the organizer's primary live-ops actions, grouped as one bar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-3">
         <Button disabled={busy || finished} onClick={startAll}>{t.runConsole.startAllTeams}</Button>
         <Button variant="ghost" disabled={busy || finished} onClick={() => refreshStandings()}>{t.runConsole.refreshStandings}</Button>
         <Button variant="ghost" onClick={invite}>{t.runConsole.inviteStaffPin}</Button>
-        <Button variant="danger" disabled={busy || finished} onClick={finalize}>{t.runConsole.finalizeRun}</Button>
+        <Button variant="danger" className="ms-auto" disabled={busy || finished} onClick={finalize}>{t.runConsole.finalizeRun}</Button>
       </div>
       {staffPin && <StaffInviteCard ctx={ctx} pin={staffPin} />}
 
