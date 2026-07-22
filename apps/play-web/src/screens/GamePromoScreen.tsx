@@ -17,6 +17,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
   const [starting, setStarting] = useState(false);
   const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [copied, setCopied] = useState(false);
+  const [startErr, setStartErr] = useState(false);
 
   async function shareGame() {
     const url = window.location.href;
@@ -27,6 +28,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
 
   async function playNow() {
     setStarting(true);
+    setStartErr(false);
     try {
       await ensureAuth();
       const name = t.promo.soloPlayer;
@@ -37,7 +39,12 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
       };
       saveSession(session);
       onInstantPlay(session);
-    } catch { setStarting(false); }
+    } catch {
+      // A stranger's first-ever tap on RushPoint used to fail in total silence:
+      // the button simply un-pressed (change: play-no-silent-failures).
+      setStarting(false);
+      setStartErr(true);
+    }
   }
 
   useEffect(() => {
@@ -169,9 +176,14 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           <div className="text-sm font-semibold text-zinc-200 mb-1">{t.promo.playingTitle}</div>
           <p className="text-xs text-zinc-500 mb-4">{t.promo.playingSub}</p>
           {game.allowInstantPlay && (
-            <Button className="mb-2" disabled={starting} onClick={playNow}>
+            <Button className="mb-2" loading={starting} onClick={playNow}>
               {starting ? t.promo.starting : t.promo.playNow}
             </Button>
+          )}
+          {startErr && (
+            <p role="status" aria-live="polite" className="mb-2 text-xs font-medium text-rp-alert">
+              ⚠ {t.promo.startFailed}
+            </p>
           )}
           <Button variant={game.allowInstantPlay ? 'ghost' : 'primary'} onClick={onPlay}>{t.promo.haveCode}</Button>
           <button

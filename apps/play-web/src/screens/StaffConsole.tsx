@@ -21,10 +21,12 @@ import {
   clearStaffSession,
   type StaffSession,
 } from '../store';
-import { Button, Card, Input, Screen } from '../components/ui';
+import { Button, Card, Collapsible, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { feedback } from '../lib/sound';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { classifyStaffError, announcementPayload, type StaffFailure } from '../lib/failureCopy';
+import { dialog } from '../components/dialog';
 
 // ── A flattened pending photo submission row (one per team×task) ──
 interface PendingSubmission {
@@ -155,6 +157,7 @@ function StaffSignIn({
           />
           <Input
             value={pin}
+            dir="ltr"
             onChange={(e) => setPin(e.target.value)}
             placeholder={t.staff.pin}
             inputMode="numeric"
@@ -181,13 +184,28 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const [pending, setPending] = useState<PendingSubmission[]>([]);
   const [teams, setTeams] = useState<TeamRow[]>([]);
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [readErr, setReadErr] = useState('');
+  // Volunteers read this, so it is a CLASSIFICATION, never the server's English
+  // text (change: play-no-silent-failures). `sessionExpired` also unlocks the way
+  // back to the PIN screen, which an expired token otherwise had no path to.
+  const [readErr, setReadErr] = useState<StaffFailure | null>(null);
+  // A score adjustment used to land with NO feedback at all: the buttons sat ~4px
+  // apart with no confirm and no undo, so a mis-tapped -5 was indistinguishable
+  // from nothing happening. Confirm AFTER the callable resolves (never before —
+  // a volunteer awards points dozens of times a run and a modal per tap is
+  // unusable), so a wrong one is visible and correctable with its opposite.
+  const [adjustAck, setAdjustAck] = useState<Record<string, string>>({});
+  const ackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  useEffect(() => {
+    const timers = ackTimers.current;
+    return () => { for (const id of Object.values(timers)) clearTimeout(id); };
+  }, []);
 
   // Live pending photo submissions + team scores across all teams in the run.
   // One snapshot feeds both the photo-review queue and the manual bonus panel.
   useEffect(() => {
     const ref = collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/teams`);
     return onSnapshot(ref, (snap) => {
+      setReadErr(null); // a successful snapshot clears a stale error
       const rows: PendingSubmission[] = [];
       const teamRows: TeamRow[] = [];
       snap.forEach((doc) => {
@@ -217,7 +235,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       teamRows.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
       setPending(rows);
       setTeams(teamRows);
-    }, (e) => setReadErr(e.message));
+    }, (e) => setReadErr(classifyStaffError(e)));
   }, [ownerUid, gameId, runId]);
 
   // Live unacknowledged SOS / alerts.
@@ -231,6 +249,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       where('acknowledged', '==', false),
     );
     return onSnapshot(ref, (snap) => {
+      setReadErr(null); // a successful snapshot clears a stale error
       const rows: Alert[] = snap.docs.map((d) => {
         const a = d.data() as Partial<Alert>;
         return {
@@ -253,14 +272,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         if (isNew) feedback('alert');
       }
       setAlerts(rows);
-    }, (e) => setReadErr(e.message));
+    }, (e) => setReadErr(classifyStaffError(e)));
   }, [ownerUid, gameId, runId]);
 
   async function review(s: PendingSubmission, approved: boolean) {
     try {
       await reviewStationSubmission({ ...ctx, teamId: s.teamId, taskId: s.taskId, approved });
     } catch (e) {
-      setReadErr(e instanceof Error ? e.message : t.staff.reviewFailed);
+      setReadErr(classifyStaffError(e));
     }
   }
 
@@ -268,7 +287,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     try {
       await acknowledgeAlert({ ...ctx, alertId: a.id });
     } catch (e) {
-      setReadErr(e instanceof Error ? e.message : t.staff.ackFailed);
+      setReadErr(classifyStaffError(e));
     }
   }
 
@@ -277,8 +296,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   async function adjust(team: TeamRow, delta: number) {
     try {
       await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'staff' });
+      const label = t.staff.adjustApplied({ delta: delta > 0 ? `+${delta}` : String(delta) });
+      setAdjustAck((a) => ({ ...a, [team.id]: label }));
+      clearTimeout(ackTimers.current[team.id]);
+      ackTimers.current[team.id] = setTimeout(() => {
+        setAdjustAck((a) => { const next = { ...a }; delete next[team.id]; return next; });
+      }, 3000);
     } catch (e) {
-      setReadErr(e instanceof Error ? e.message : t.staff.adjustFailed);
+      setReadErr(classifyStaffError(e));
     }
   }
 
@@ -299,10 +324,22 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           <h1 className="font-brand text-xl font-extrabold text-accent">{t.staff.title}</h1>
           <p className="text-zinc-500 text-xs">{staff.name}</p>
         </div>
-        <button className="text-zinc-500 text-sm" onClick={onSignOut}>{t.staff.signOut}</button>
+        <button
+          className="inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-zinc-500 text-sm"
+          onClick={() => { void dialog.confirm(t.staff.signOutConfirm, { danger: true }).then((ok) => { if (ok) onSignOut(); }); }}
+        >{t.staff.signOut}</button>
       </header>
 
-      {readErr && <p className="text-danger text-xs mb-3">{readErr}</p>}
+      {readErr && (
+        <div role="status" aria-live="polite" className="mb-3">
+          <p className="text-danger text-xs">⚠ {t.staff[readErr.key]}</p>
+          {readErr.sessionExpired && (
+            <button className="mt-1 text-xs font-semibold text-accent underline" onClick={onSignOut}>
+              {t.staff.backToSignIn}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── SOS alerts ── */}
       <section className="mb-6">
@@ -364,14 +401,14 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   : <div className="text-xs text-zinc-600 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
                 <div className="flex gap-2">
                   <button
-                    className="flex-1 py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
+                    className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
                     disabled={reviewAction.isBusy(key)}
                     onClick={() => void reviewAction.run(s, true)}
                   >
                     {t.staff.approve}
                   </button>
                   <button
-                    className="flex-1 py-2 rounded-lg bg-danger text-white font-semibold text-sm disabled:opacity-40"
+                    className="flex-1 min-h-[44px] py-2 rounded-lg bg-transparent border border-danger/50 text-danger font-semibold text-sm disabled:opacity-40"
                     disabled={reviewAction.isBusy(key)}
                     onClick={() => void reviewAction.run(s, false)}
                   >
@@ -396,18 +433,30 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                 <div className="min-w-0">
                   <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{tm.displayName}</div>
                   <div className="text-xs text-zinc-500">{t.staff.scoreLabel} {tm.score}</div>
+                  {adjustAck[tm.id] && (
+                    <div role="status" aria-live="polite" className="text-xs font-semibold text-accent">
+                      ✓ {adjustAck[tm.id]}
+                    </div>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {[-10, -5, 5, 10].map((d) => (
-                    <button
-                      key={d}
-                      className={`w-9 h-9 rounded-lg text-sm font-bold border disabled:opacity-40 ${
-                        d > 0 ? 'bg-accent/15 text-accent border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
-                      }`}
-                      disabled={adjustAction.isBusy(tm.id)}
-                      aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
-                      onClick={() => void adjustAction.run(tm, d)}
-                    >{d > 0 ? `+${d}` : d}</button>
+                {/* Two groups with a wide separator: -5 and +5 used to sit ~4px
+                    apart, so the deduct and the award were one thumb-width from
+                    each other on a control with no undo. */}
+                <div className="flex items-center gap-4 shrink-0">
+                  {[[-10, -5], [5, 10]].map((group) => (
+                    <div key={group[0]} className="flex items-center gap-2">
+                      {group.map((d) => (
+                        <button
+                          key={d}
+                          className={`w-11 h-11 rounded-lg text-sm font-bold border disabled:opacity-40 ${
+                            d > 0 ? 'bg-accent/15 text-accent border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
+                          }`}
+                          disabled={adjustAction.isBusy(tm.id)}
+                          aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
+                          onClick={() => void adjustAction.run(tm, d)}
+                        >{d > 0 ? `+${d}` : d}</button>
+                      ))}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -499,19 +548,19 @@ function StaffChatSection({
 
   return (
     <section className="mb-6">
-      <button
-        className="w-full flex items-center justify-between text-sm font-semibold text-zinc-300 mb-2"
-        onClick={() => setOpen((o) => !o)}
+      <Collapsible
+        open={open}
+        onToggle={() => setOpen((o) => !o)}
+        header={(
+          <>
+            💬 {t.chat.chatTitle}
+            {totalUnread > 0 && (
+              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{totalUnread}</span>
+            )}
+          </>
+        )}
       >
-        <span className="flex items-center gap-2">
-          💬 {t.chat.chatTitle}
-          {totalUnread > 0 && (
-            <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{totalUnread}</span>
-          )}
-        </span>
-        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
+        {(
         threads.length === 0
           ? <p className="text-zinc-600 text-sm">{t.chat.chatEmpty}</p>
           : threads.map((th) => {
@@ -571,7 +620,8 @@ function StaffChatSection({
               </Card>
             );
           })
-      )}
+        )}
+      </Collapsible>
     </section>
   );
 }
@@ -584,18 +634,17 @@ function StaffFeedSection({ ctx }: { ctx: { ownerUid: string; gameId: string; ru
   const myUid = uid();
   return (
     <section className="mb-6">
-      <button
-        className="w-full flex items-center justify-between text-sm font-semibold text-zinc-300 mb-2"
-        onClick={() => setOpen((o) => !o)}
+      <Collapsible
+        open={open}
+        onToggle={() => setOpen((o) => !o)}
+        header={<span>📸 {t.feed.feedTitle}</span>}
       >
-        <span>📸 {t.feed.feedTitle}</span>
-        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && myUid && (
-        <Suspense fallback={<div className="h-24 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <FeedPanel ctx={ctx} myUid={myUid} moderate />
-        </Suspense>
-      )}
+        {myUid && (
+          <Suspense fallback={<div className="h-24 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
+            <FeedPanel ctx={ctx} myUid={myUid} moderate />
+          </Suspense>
+        )}
+      </Collapsible>
     </section>
   );
 }
@@ -605,11 +654,26 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
   const [msg, setMsg] = useState('');
   const [msgHe, setMsgHe] = useState('');
   const [sent, setSent] = useState(false);
+  const [err, setErr] = useState('');
 
+  // change: play-no-silent-failures. Two defects lived here:
+  //   1. the button was gated on the ENGLISH field in a Hebrew-first product, so
+  //      a Hebrew volunteer filled the Hebrew box and the button stayed greyed
+  //      out with nothing to read;
+  //   2. send() had no try/catch and useAsyncAction.run RE-THROWS, so a failed
+  //      broadcast to every team showed nothing at all — and the drafts were
+  //      cleared before the call could reject.
+  // Both drafts are now cleared only on success.
   async function send() {
-    if (!msg.trim()) return;
-    setSent(false);
-    await pushAnnouncement({ ...ctx, message: msg.trim(), messageHe: msgHe.trim() || undefined });
+    const payload = announcementPayload(msg, msgHe);
+    if (!payload) return;
+    setSent(false); setErr('');
+    try {
+      await pushAnnouncement({ ...ctx, ...payload });
+    } catch {
+      setErr(t.staff.broadcastFailed);
+      return;
+    }
     setMsg(''); setMsgHe(''); setSent(true);
     setTimeout(() => setSent(false), 2500);
   }
@@ -621,11 +685,14 @@ function AnnouncementComposer({ ctx }: { ctx: { ownerUid: string; gameId: string
   return (
     <section className="pt-2 border-t border-glass-border">
       <h2 className="text-sm font-semibold text-zinc-300 mb-2">📢 {t.staff.announcement}</h2>
+      {/* Hebrew is the primary field (this is a Hebrew-first product and the
+          volunteers are Hebrew speakers); English is explicitly optional. */}
       <div className="space-y-2">
-        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.staff.msgEn} />
-        <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder={t.staff.msgHe} dir="rtl" />
+        <Input value={msgHe} onChange={(e) => setMsgHe(e.target.value)} placeholder={t.staff.msgHePrimary} dir="rtl" />
+        <Input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder={t.staff.msgEnOptional} dir="ltr" />
       </div>
-      <Button disabled={busy || !msg.trim()} loading={busy} onClick={() => void sendAction.run()} className="mt-3">
+      {err && <p role="status" aria-live="polite" className="text-danger text-xs mt-2">⚠ {err}</p>}
+      <Button disabled={busy || (!msg.trim() && !msgHe.trim())} loading={busy} onClick={() => void sendAction.run()} className="mt-3">
         {sent ? t.staff.sent : t.staff.broadcast}
       </Button>
     </section>

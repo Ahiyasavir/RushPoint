@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs, defaultRadiusFor } from '@rushpoint/shared';
+import { haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
@@ -17,7 +17,10 @@ import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { quizAttemptGuard } from '../lib/interaction';
+import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
 // lazyWithRetry so a stale-shell chunk 404 self-heals instead of hanging the
@@ -86,7 +89,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     inFlight.current = false;
     setBusy(false);
   }
-  const [msg, setMsg] = useState('');
+  // The task card's message sink carries BOTH progress ("uploading…") and
+  // rejections ("too far"). They used to render identically in neutral grey with
+  // no aria-live, so a player could not tell a failure from progress and a screen
+  // reader announced neither (change: play-no-silent-failures). The tone now
+  // travels with the text; `showError` / `showProgress` are the only writers.
+  const [msg, setMsg] = useState<TaskMessage | null>(null);
+  const showError    = (text: string) => setMsg({ text, tone: 'error' });
+  const showProgress = (text: string) => setMsg({ text, tone: 'progress' });
+  const clearMsg     = () => setMsg(null);
   const [hint, setHint] = useState<string | null>(null);
   const [routingError, setRoutingError] = useState(false);
   const [routingAttempt, setRoutingAttempt] = useState(0);
@@ -158,16 +169,69 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignedRec, unassigned.length, routingAttempt, readOnly]);
 
+  // Routing wait (change: play-no-silent-failures): "finding your next task" used
+  // to be a motionless sentence with no spinner and no escape, able to sit for the
+  // whole ~70s callable deadline. Track the wait so the card can reveal a retry.
+  const [routingWaitMs, setRoutingWaitMs] = useState(0);
+  useEffect(() => {
+    if (assignedRec || unassigned.length === 0) return;
+    setRoutingWaitMs(0);
+    const started = Date.now();
+    const id = window.setInterval(() => setRoutingWaitMs(Date.now() - started), 1000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assignedRec?.taskId, unassigned.length, routingAttempt]);
+
   const task: SafeTask | undefined = assignedRec
     ? state.activeStageTasks.find((t) => t.id === assignedRec.taskId)
     : undefined;
 
   // Clear a revealed hint / message when the assigned task changes.
-  useEffect(() => { setHint(null); setMsg(''); }, [assignedRec?.taskId]);
+  useEffect(() => { setHint(null); setMsg(null); }, [assignedRec?.taskId]);
+
+  // Wrong-answer cost (change: wrong-answer-cost): what a wrong answer just cost,
+  // and the retry lockout it started. The SERVER is the only authority (it
+  // re-checks on submit); this drives the countdown and stops the player from
+  // spending a call they already know will be refused.
+  // SCOPED TO THE TASK IT WAS EARNED ON. TaskRunner outlives a reassignment (see
+  // the hint/message reset above), so a bare number would carry task A's lockout
+  // onto task B — a team whose task expired, was skipped by staff, or was
+  // re-routed in a partial stage would find B's submit button dead with a
+  // countdown naming no reason. Keyed state makes a task change clear it.
+  const [cooldown, setCooldown] = useState<{ taskId: string | null; until: number }>(
+    { taskId: null, until: 0 },
+  );
+  const cooldownUntil = cooldown.taskId === (assignedRec?.taskId ?? null) ? cooldown.until : 0;
+  const setCooldownUntil = (until: number) => {
+    const taskId = assignedRec?.taskId ?? null;
+    // Raise-only WITHIN one task, so an out-of-order response can't shorten a
+    // live lockout; a different task replaces it outright.
+    setCooldown((c) => (c.taskId === taskId ? { taskId, until: Math.max(c.until, until) } : { taskId, until }));
+  };
+  // Wrong-answer retry lockout (change: wrong-answer-cost). The server ships the
+  // authoritative expiry on the task (`answerCost.cooldownUntil`) and again on
+  // every wrong submission; adopt whichever is later so a reload mid-lockout
+  // still counts down instead of silently unlocking the submit button.
+  const serverCooldown = task?.answerCost?.cooldownUntil ?? 0;
+  useEffect(() => {
+    if (serverCooldown > 0) setCooldownUntil(serverCooldown);
+  }, [serverCooldown, assignedRec?.taskId]);
+  const [cooldownNow, setCooldownNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) return;
+    setCooldownNow(Date.now());
+    const id = window.setInterval(() => setCooldownNow(Date.now()), 500);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil]);
+  const cooldownLeft = cooldownRemainingSeconds(cooldownUntil, cooldownNow);
 
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
   const frozen = busy || readOnly;
+  // The GRADED answer controls additionally freeze during a wrong-answer retry
+  // lockout. Deliberately narrower than `frozen`: a cooling-down team can still
+  // reveal a hint, call for help, or trigger SOS.
+  const answerFrozen = frozen || cooldownLeft > 0;
   // A residual storage-path rejection (change: fix-photo-camera-capture): normal
   // camera capture always uploads to the team folder, but map any leftover
   // storage-path error to plain "retake" copy rather than the developer message.
@@ -176,26 +240,28 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     return /team folder|could not be saved|לתיקיית הקבוצה|לשמור את התמונה/.test(raw);
   }
 
-  function submitError(e: unknown, fallback: string): string {
+  // Returns the classification, not just the text: every value this produces is
+  // a rejection, so it is always the 'error' tone. Callers pass it to setMsg.
+  function submitError(e: unknown, fallback: string): TaskMessage {
     const raw = e instanceof Error ? e.message : '';
-    if (raw.includes('not-controller')) return t.devices.controlMoved;
+    if (raw.includes('not-controller')) return { text: t.devices.controlMoved, tone: 'error' };
     // The common server rejections are stable English `failed-precondition`
     // messages — localize them (keeping the distance number) instead of leaking
     // untranslated text to the player.
     const tooFar = raw.match(/Too far from the spot \((\d+)\s*m away\)/i);
-    if (tooFar) return t.task.tooFar({ m: Number(tooFar[1]) });
-    if (raw.includes('Not within the POI radius')) return t.task.notWithinRadius;
-    if (raw.includes('This task has expired')) return t.task.submitExpired;
-    if (raw.includes('Location required to check in here')) return t.task.locationRequired;
-    if (raw.includes('keep following the clue')) return t.task.notHereYet;
-    if (raw.includes('This task is not available yet')) return t.task.notAvailableYet;
-    if (raw.includes('No hint available')) return t.task.noHint;
-    if (raw.includes('already finished')) return t.task.raceFinished;
-    if (raw.includes('No active stage')) return t.task.noActiveStageSubmit;
-    if (raw.includes('not found')) return t.task.stateGone;
+    if (tooFar) return { text: t.task.tooFar({ m: Number(tooFar[1]) }), tone: 'error' };
+    if (raw.includes('Not within the POI radius')) return { text: t.task.notWithinRadius, tone: 'error' };
+    if (raw.includes('This task has expired')) return { text: t.task.submitExpired, tone: 'error' };
+    if (raw.includes('Location required to check in here')) return { text: t.task.locationRequired, tone: 'error' };
+    if (raw.includes('keep following the clue')) return { text: t.task.notHereYet, tone: 'error' };
+    if (raw.includes('This task is not available yet')) return { text: t.task.notAvailableYet, tone: 'error' };
+    if (raw.includes('No hint available')) return { text: t.task.noHint, tone: 'error' };
+    if (raw.includes('already finished')) return { text: t.task.raceFinished, tone: 'error' };
+    if (raw.includes('No active stage')) return { text: t.task.noActiveStageSubmit, tone: 'error' };
+    if (raw.includes('not found')) return { text: t.task.stateGone, tone: 'error' };
     // Default: NEVER leak an un-whitelisted English server message into a
     // Hebrew-default participant app — fall back to the localized copy.
-    return fallback;
+    return { text: fallback, tone: 'error' };
   }
 
   // M4: don't fire a submit while offline — the callable would fail with a raw
@@ -203,7 +269,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // ConnectionBanner already shows the offline state). Returns true when blocked.
   function blockedOffline(offlineMsg: string = t.task.offlineSubmit): boolean {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      setMsg(offlineMsg);
+      showError(offlineMsg);
       return true;
     }
     return false;
@@ -255,7 +321,27 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         </Card>
       );
     }
-    return <Card className="p-6 text-center text-zinc-500">{t.task.routing}</Card>;
+    // A visible spinner for the whole wait, and after ~12s the same retry the
+    // routingError branch already offers, so a slow assignment is never a
+    // motionless dead end (change: play-no-silent-failures).
+    return (
+      <Card className="p-6 text-center space-y-3">
+        <div className="flex items-center justify-center gap-2">
+          <span aria-hidden="true" className="w-5 h-5 rounded-full border-2 border-accent/30 border-t-accent animate-spin shrink-0" />
+          <p role="status" aria-live="polite" className="text-sm text-zinc-500">{t.task.routing}</p>
+        </div>
+        {shouldOfferRetry(routingWaitMs, routingAttempt) && (
+          <Button variant="ghost" data-testid="routing-retry" onClick={() => {
+            // Clear the single-flight guard: the player explicitly asked for
+            // another attempt, and without this the effect would short-circuit.
+            routingInFlight.current = false;
+            setRoutingAttempt((n) => n + 1);
+          }}>
+            {t.task.retryRouting}
+          </Button>
+        )}
+      </Card>
+    );
   }
 
   // H2: a stuck geofence player is never dead-ended — this raises an SOS/host
@@ -289,7 +375,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function field() {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     withLocation(
       (lat, lng) => { void submitCheckIn({ lat, lng }); },
       () => {
@@ -297,7 +383,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         // accept the check-in from anywhere so the creator can rehearse from their desk.
         // Send NO synthetic coords — the server bypass keys on the run flag, not location.
         if (session.isTestDrive) { void submitCheckIn(); return; }
-        setMsg(t.task.gpsWarning); end();
+        showError(t.task.gpsWarning); end();
       },
     );
   }
@@ -308,7 +394,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function geofenceTestCheckIn() {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     withLocation(
       (lat, lng) => { void submitCheckIn({ lat, lng }); },
       () => { void submitCheckIn(); },
@@ -323,12 +409,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function checkArrival() {
     if (blockedOffline(t.task.arrivalNeedsOnline)) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     const submitArrival = async (coords?: { lat: number; lng: number }) => {
       try {
         const res = await reportArrival({ ...ctx, taskId: task!.id, ...(coords ?? {}) });
-        if (res.arrived) { setMsg(t.task.arrivalUnlocked); onChanged(); }
-        else setMsg(t.task.notThereYet);
+        if (res.arrived) { showProgress(t.task.arrivalUnlocked); onChanged(); }
+        else showError(t.task.notThereYet);
       } catch (e) { setMsg(submitError(e, t.task.notThereYet)); }
       finally { end(); }
     };
@@ -338,7 +424,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         // Test run: unseal from anywhere (desk rehearsal). No synthetic coords — the
         // server bypass keys on run.isTestDrive, never on faked/leaked hidden coords.
         if (session.isTestDrive) { void submitArrival(); return; }
-        setMsg(t.task.gpsWarning); end();
+        showError(t.task.gpsWarning); end();
       },
     );
   }
@@ -346,12 +432,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function verify(code: string) {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     try {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
       onChanged();
     } catch (e) {
-      setMsg(e instanceof Error && e.message.includes('not-controller') ? t.devices.controlMoved : t.task.wrongCode);
+      showError(e instanceof Error && e.message.includes('not-controller') ? t.devices.controlMoved : t.task.wrongCode);
     } finally { end(); }
   }
 
@@ -362,15 +448,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function photo(file: File) {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     try {
-      setMsg(t.task.uploadingPhoto);
+      showProgress(t.task.uploadingPhoto);
       const url = await uploadTaskPhoto(file, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
       const res = await submitStationPhoto({ ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: url });
-      setMsg(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
-      setMsg(isStoragePathError(e) ? t.task.photoSaveRetry : submitError(e, t.task.uploadFailed));
+      if (isStoragePathError(e)) showError(t.task.photoSaveRetry); else setMsg(submitError(e, t.task.uploadFailed));
     } finally { end(); }
   }
 
@@ -380,16 +466,16 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function audio(blob: Blob, contentType: string) {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     try {
-      setMsg(t.task.uploadingAudio);
+      showProgress(t.task.uploadingAudio);
       const up = await uploadTaskAudio(blob, {
         runId: session.runId, teamId: state.team.id, taskId: task!.id, contentType,
       });
       const res = await submitStationPhoto({
         ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
       });
-      setMsg(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
       onChanged();
     } catch (e) {
       setMsg(submitError(e, t.task.uploadFailed));
@@ -405,23 +491,43 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (task?.requirePresence) {
       withLocation(
         (lat, lng) => { void run({ lat, lng }); },
-        () => { setMsg(t.task.gpsWarning); end(); },
+        () => { showError(t.task.gpsWarning); end(); },
       );
     } else {
       void run(undefined);
     }
   }
 
+  // Wrong answers seen on THIS device, this session (change: play-touch-rtl-a11y).
+  // The participant payload carries smart.attemptLimit but never the team's
+  // server-side taskAttempts, so this is an optimistic lower bound on attempts
+  // used — which makes the "attempts left" it feeds an UPPER bound, never an
+  // understatement. The server stays the only authority on the real cap.
+  const [wrongAttempts, setWrongAttempts] = useState<Record<string, number>>({});
+
+  // Turn a wrong-answer response into the local message + lockout. A `replay`
+  // (a network retry of the identical answer) charged nothing, so it must not
+  // inflate the local attempt count either.
+  function applyAnswerCost(res: { penalty?: number; cooldownUntil?: number; replay?: boolean }, fallback: string) {
+    if (res.cooldownUntil) setCooldownUntil(res.cooldownUntil);
+    if (res.replay) { showError(fallback); return; }
+    const id = task!.id;
+    setWrongAttempts((w) => ({ ...w, [id]: (w[id] ?? 0) + 1 }));
+    if (res.penalty && res.penalty > 0) showError(t.task.answerCostCharged({ points: res.penalty }));
+    else if (task?.answerCost) showError(t.task.answerCostNone);
+    else showError(fallback);
+  }
+
   // quiz / numeric / survey — submit a typed or chosen answer
   async function answer(text: string) {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text, ...(coords ?? {}) });
         if (res.correct) onChanged();
-        else setMsg(t.task.notQuite);
+        else applyAnswerCost(res, t.task.notQuite);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
       } finally { end(); }
@@ -433,12 +539,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   async function submitOrdered(items: string[]) {
     if (blockedOffline()) return;
     if (!begin()) return;
-    setMsg('');
+    clearMsg();
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items, ...(coords ?? {}) });
         if (res.correct) onChanged();
-        else setMsg(t.task.orderingWrong);
+        else applyAnswerCost(res, t.task.orderingWrong);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
       } finally { end(); }
@@ -452,11 +558,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     // Re-entrant tap while a step is in flight → not accepted, so the input keeps
     // what the player typed (no double submit, no premature clear).
     if (!begin()) return false;
-    setMsg('');
+    clearMsg();
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
-      if (res.stepCorrect) { onChanged(); if (!res.taskComplete) setMsg(`${t.task.stepOf({ step: res.stepsDone, total: res.totalSteps })} ✓`); }
-      else setMsg(t.task.notQuite);
+      if (res.stepCorrect) { onChanged(); if (!res.taskComplete) showProgress(`${t.task.stepOf({ step: res.stepsDone, total: res.totalSteps })} ✓`); }
+      else showError(t.task.notQuite);
       return res.stepCorrect;
     } catch (e) {
       setMsg(submitError(e, t.task.failed));
@@ -475,7 +581,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     // resolved) — report "arrived" so GeofenceAuto stays latched and lets the
     // in-flight call decide; it un-latches itself on a genuine failure.
     if (!begin()) return Promise.resolve(true);
-    setMsg('');
+    clearMsg();
     return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
       .then(() => { onChanged(); return true; })
       .catch((e) => { setMsg(submitError(e, t.task.checkinFailed)); return false; })
@@ -496,7 +602,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       }
       const res = await requestTaskHint({ ...ctx, taskId: task!.id });
       setHint(res.hint);
-      if (res.penalty === 0 && res.free) setMsg(t.task.hintRevealedFree);
+      if (res.penalty === 0 && res.free) showProgress(t.task.hintRevealedFree);
     } catch (e) {
       setMsg(submitError(e, t.task.noHint));
     } finally { end(); }
@@ -544,13 +650,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <div className="mt-3">
             <button onClick={revealHint} disabled={frozen}
               aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
-              className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+              className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-accent-warm hover:underline disabled:opacity-40">
               💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
             </button>
           </div>
         )}
         {hint && <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>}
-        {msg && <p className="mt-3 text-sm text-zinc-300">{msg}</p>}
+        {msg && (
+          <p role="status" aria-live="polite" dir="auto" className={taskMessageClass(msg.tone)}>
+            {msg.tone === 'error' ? `⚠ ${msg.text}` : msg.text}
+          </p>
+        )}
       </Card>
     );
   }
@@ -580,7 +690,27 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <p className="text-[11px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
         </div>
       ) : (
-        <DistanceBadge task={task} />
+        <>
+          <DistanceBadge task={task} />
+          <NavigateHereLink task={task} />
+        </>
+      )}
+
+      {/* Wrong-answer cost (change: wrong-answer-cost): state the rule BEFORE the
+          player answers, then count the retry lockout down. Rendered only when the
+          creator set a cost level, so a game authored before this change shows
+          nothing new. Says what a wrong answer COSTS, never what the answer is. */}
+      {task.answerCost && (
+        <p role="status" aria-live="polite" dir="auto" data-testid="answer-cost-notice"
+          className="mt-3 text-xs text-zinc-400 bg-app-raised border border-glass-border rounded-lg px-3 py-2">
+          {cooldownLeft > 0
+            ? `⏳ ${t.task.answerCooldown({ sec: cooldownLeft })}`
+            : task.answerCost.freeAttemptsLeft > 0
+              ? `🙂 ${t.task.answerCostFreeTries({ n: task.answerCost.freeAttemptsLeft })}`
+              : task.answerCost.nextPoints > 0
+                ? `⚠ ${t.task.answerCostNotice({ points: task.answerCost.nextPoints, sec: task.answerCost.nextCooldownSeconds })}`
+                : `⚠ ${t.task.answerCostNoticeTime({ sec: task.answerCost.nextCooldownSeconds })}`}
+        </p>
       )}
 
       <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
@@ -596,10 +726,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           task.orderItems && task.orderItems.length > 0
             // Ordering quiz: the items arrive server-shuffled (per-team seed);
             // key by task id so a new task reseeds the local arrangement.
-            ? <OrderingEntry key={task.id} items={task.orderItems} busy={frozen} onSubmit={submitOrdered} />
-            : <QuizEntry task={task} busy={frozen} onSubmit={answer} />
+            ? <OrderingEntry key={task.id} items={task.orderItems} busy={answerFrozen} onSubmit={submitOrdered} />
+            : <QuizEntry task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
-          <NumericEntry busy={frozen} onSubmit={answer} />
+          <NumericEntry busy={answerFrozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
             <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp} helpSent={helpSent} />
@@ -636,16 +766,21 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
               // Hint auto escalation: the server says this hint is free right now —
               // highlight it so a stuck team actually takes the help.
               ? <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintFreeNow}
-                  className="text-xs font-semibold text-accent bg-accent/10 border border-accent/30 rounded-full px-3 py-1.5 hover:bg-accent/20 disabled:opacity-40">
+                  className="inline-flex items-center min-h-[44px] text-xs font-semibold text-accent bg-accent/10 border border-accent/30 rounded-full px-4 py-2 hover:bg-accent/20 disabled:opacity-40">
                   🎁 {t.task.hintFreeNow}
                 </button>
-              : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })} className="text-xs text-accent-warm hover:underline disabled:opacity-40">
+              : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+                  className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-accent-warm hover:underline disabled:opacity-40">
                   💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
                 </button>}
         </div>
       )}
 
-      {msg && <p className="text-center text-sm mt-3 text-zinc-300">{msg}</p>}
+      {msg && (
+        <p role="status" aria-live="polite" dir="auto" className={taskMessageClass(msg.tone)}>
+          {msg.tone === 'error' ? `⚠ ${msg.text}` : msg.text}
+        </p>
+      )}
     </Card>
   );
 }
@@ -724,6 +859,43 @@ function DistanceBadge({ task }: { task: SafeTask }) {
   );
 }
 
+// Hand the current task's location to a REAL navigation app
+// (change: play-navigate-handoff). Participants previously had no way to do this
+// at all: the only waze/maps link in the app belonged to staff. Rendered as a
+// sibling of DistanceBadge rather than inside it, because the badge returns null
+// until GPS has a fix and a player without a fix needs directions most.
+//
+// Whether a link may be shown is NOT decided here — navigationTarget() owns that,
+// so a hidden-location task (whose coordinates are the puzzle answer) can never
+// be handed off no matter where this component is rendered.
+function NavigateHereLink({ task }: { task: SafeTask }) {
+  const { t } = useT();
+  const target = navigationTarget(task);
+  if (!target) return null;
+  return (
+    <div className="flex items-center gap-2 -ms-1" aria-label={t.task.navigateAria}>
+      <a
+        href={wazeUrl(target)}
+        target="_blank"
+        rel="noreferrer"
+        data-testid="task-navigate-waze"
+        className="inline-flex items-center gap-1 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold text-accent hover:underline"
+      >
+        🧭 {t.task.navigateHere}
+      </a>
+      <a
+        href={googleMapsUrl(target)}
+        target="_blank"
+        rel="noreferrer"
+        data-testid="task-navigate-maps"
+        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-xs text-zinc-500 hover:underline"
+      >
+        {t.task.navigateMaps}
+      </a>
+    </div>
+  );
+}
+
 function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; onSubmit: (code: string) => void }) {
   const { t } = useT();
   const [code, setCode] = useState('');
@@ -742,7 +914,7 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
   }
   return (
     <div className="space-y-3">
-      <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder={label}
+      <Input value={code} dir="ltr" onChange={(e) => setCode(e.target.value)} placeholder={label}
         className="text-center font-mono tracking-widest" data-testid="task-code-input" />
       <Button disabled={busy || !code} onClick={() => onSubmit(code)} data-testid="task-code-submit">{t.task.verify}</Button>
       {canScan && (
@@ -753,14 +925,29 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
 }
 
 // Quiz — tap a choice, or type a free-text answer.
-function QuizEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; onSubmit: (a: string) => void }) {
+function QuizEntry({ task, busy, wrongSoFar, onSubmit }: {
+  task: SafeTask; busy: boolean; wrongSoFar: number; onSubmit: (a: string) => void;
+}) {
   const { t } = useT();
   const [val, setVal] = useState('');
   if (task.choices && task.choices.length > 0) {
+    // A choice submits on its own tap, with nothing staged. That is fine while a
+    // wrong answer is free, but when the creator set smart.attemptLimit the
+    // server refuses at the cap ('resource-exhausted') — so on THAT task alone,
+    // one misclick burns a finite attempt and can lock the task for good. Confirm
+    // only in that case; an unlimited quiz keeps submitting on the first tap
+    // (change: play-touch-rtl-a11y).
+    const choose = (c: string) => {
+      const guard = quizAttemptGuard(task.smart?.attemptLimit, wrongSoFar);
+      if (!guard.needsConfirm) { onSubmit(c); return; }
+      void dialog
+        .confirm(t.task.attemptConfirm({ remaining: guard.remaining }), { confirmLabel: t.task.attemptConfirmBtn })
+        .then((ok) => { if (ok) onSubmit(c); });
+    };
     return (
       <div className="space-y-2">
         {task.choices.map((c) => (
-          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full"
+          <Button key={c} variant="ghost" disabled={busy} onClick={() => choose(c)} className="w-full"
             data-testid="quiz-choice" data-choice={c}>
             <span dir="auto">{c}</span>
           </Button>
@@ -834,10 +1021,10 @@ function OrderingEntry({ items, busy, onSubmit }: {
             <span dir="auto" className="flex-1 min-w-0 text-sm text-zinc-100">{item}</span>
             <button onClick={() => move(i, -1)} disabled={busy || i === 0}
               aria-label={`${t.task.orderingMoveUp} ${i + 1}`} data-testid="ordering-up" data-item={item}
-              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↑</button>
             <button onClick={() => move(i, 1)} disabled={busy || i === arranged.length - 1}
               aria-label={`${t.task.orderingMoveDown} ${i + 1}`} data-testid="ordering-down" data-item={item}
-              className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
+              className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg bg-app border border-glass-border text-zinc-300 disabled:opacity-30">↓</button>
           </li>
         ))}
       </ol>

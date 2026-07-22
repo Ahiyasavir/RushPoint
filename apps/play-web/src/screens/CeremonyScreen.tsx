@@ -176,7 +176,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
                   {MEDALS[i] ?? r.rank}
                 </span>
                 <div dir="auto" className="flex-1 min-w-0 text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
-                <div className="text-right">
+                <div className="text-end">
                   {isTimeOnly ? (
                     <div className="text-3xl font-brand font-extrabold font-mono tabular-nums" style={{ color: accent }}>{fmtTime(r) || '—'}</div>
                   ) : (

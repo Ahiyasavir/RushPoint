@@ -5,6 +5,7 @@ import { db } from '../services/firebase';
 import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
 import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
+import { TAP_PAD } from '../lib/interaction';
 import { Collapsible } from './ui';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
@@ -126,7 +127,7 @@ export default function LiveOps({
                 <p className="text-xs text-zinc-400">{label}</p>
                 <p dir="auto" className="text-sm font-mono text-accent">{notice}</p>
               </div>
-              <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
+              <button aria-label={translations[lang].liveOps.dismiss} className={`text-zinc-500 text-xs shrink-0 ${TAP_PAD}`} onClick={() => dismiss(a.id)}>✕</button>
             </div>
           );
         }
@@ -134,7 +135,7 @@ export default function LiveOps({
           <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/10 border border-accent/30 px-3 py-2">
             <span className="text-sm">📢</span>
             <p dir="auto" className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
-            <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
+            <button aria-label={translations[lang].liveOps.dismiss} className={`text-zinc-500 text-xs shrink-0 ${TAP_PAD}`} onClick={() => dismiss(a.id)}>✕</button>
           </div>
         );
       })}

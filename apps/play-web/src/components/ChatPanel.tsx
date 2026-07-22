@@ -17,6 +17,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
   const [messages, setMessages] = useState<ChatMessage[] | null>(null);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const { ownerUid, gameId, runId } = ctx;
   const myUid = uid(); // stable for the session; drives own-vs-others attribution
@@ -41,12 +42,15 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
     const clean = text.trim();
     if (!clean || sending) return;
     setSending(true);
+    setSendFailed(false);
     try {
       await sendTeamChatMessage({ ...ctx, text: clean });
       setText('');
     } catch {
-      // The listener reconciles; a retry is one tap away. Keep the text so the
-      // player does not lose what they typed.
+      // Keep the text so the player does not lose what they typed, AND say so:
+      // a silently-kept draft read as "my message just vanished"
+      // (change: play-no-silent-failures).
+      setSendFailed(true);
     } finally {
       setSending(false);
     }
@@ -90,6 +94,11 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
           })
         )}
       </div>
+      {sendFailed && (
+        <p role="status" aria-live="polite" className="text-xs font-medium text-rp-alert">
+          ⚠ {t.chat.sendFailedRetry}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <input
           value={text}

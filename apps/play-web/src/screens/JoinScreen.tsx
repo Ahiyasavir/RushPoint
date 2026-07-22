@@ -5,41 +5,17 @@ import { saveSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { unlockAudio } from '../lib/sound';
-import { creatorUrl } from '../lib/creatorUrl';
+import LegalFooter from '../components/LegalFooter';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { TAP_TARGET } from '../lib/interaction';
 
 // Firebase callable codes that mean "transient / connectivity", not a bad code —
 // surfaced to the player as a single "check your connection" message.
 const CONNECTION_CODES = new Set(['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated']);
 
-// The legal documents are React Router routes on the CREATOR hosting target
-// (/privacy, /terms) — play-web has no router, so it links out. The origin comes
-// from lib/creatorUrl (shared with the finish-screen referral link) and resolves
-// at render time, so this file never reads the browser URL at module scope — see
-// the P9 regression guard in scripts/test-i18n-parity.ts.
-
-/**
- * In-app link to the Terms and the Privacy Policy. Google Play requires the
- * privacy policy to be reachable in-app, and its UGC policy requires the content
- * policy governing the live photo feed to be reachable by the participants who
- * post to it — which is exactly this app's audience (change: feed-ugc-safety).
- */
-function LegalFooter() {
-  const { t } = useT();
-  const base = creatorUrl();
-  const linkClass = 'underline underline-offset-2 hover:text-zinc-300 transition-colors';
-  return (
-    <p className="text-center text-[11px] text-zinc-500 mt-4">
-      <a href={`${base}/terms`} target="_blank" rel="noopener noreferrer" className={linkClass}>
-        {t.join.legalTerms}
-      </a>
-      <span className="mx-1.5" aria-hidden>·</span>
-      <a href={`${base}/privacy`} target="_blank" rel="noopener noreferrer" className={linkClass}>
-        {t.join.legalPrivacy}
-      </a>
-    </p>
-  );
-}
+// The legal footer moved to components/LegalFooter so the Final screen can show
+// the same links (a player who finishes without ever re-reading Join still needs
+// a route to the privacy policy).
 
 export default function JoinScreen({ initialCode, onJoined, onStaff }: {
   /**
@@ -228,7 +204,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               aria-checked={sound}
               aria-label={sound ? t.common.soundOn : t.common.soundOff}
               title={sound ? t.common.soundOn : t.common.soundOff}
-              className={`text-xs font-semibold border rounded-full w-7 h-7 flex items-center justify-center transition-colors ${
+              className={`text-xs font-semibold border rounded-full w-11 h-11 flex items-center justify-center transition-colors ${
                 sound ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
               }`}
             >
@@ -240,7 +216,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               aria-checked={colorblind}
               aria-label={t.common.colorblindMode}
               title={t.common.colorblindMode}
-              className={`text-xs font-semibold border rounded-full w-7 h-7 flex items-center justify-center transition-colors ${
+              className={`text-xs font-semibold border rounded-full w-11 h-11 flex items-center justify-center transition-colors ${
                 colorblind ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
               }`}
             >
@@ -262,6 +238,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
             <input
               ref={codeRef}
               value={code}
+              dir="ltr"
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               placeholder={t.join.codePlaceholder}
               className="
@@ -385,6 +362,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               <p className="text-sm text-zinc-400 mb-4 leading-relaxed">{t.devices.attachExplain}</p>
               <Input
                 value={teamCode}
+                dir="ltr"
                 onChange={(e) => setTeamCode(e.target.value.toUpperCase())}
                 placeholder={t.devices.teamCodePlaceholder}
                 className="text-center font-mono text-xl tracking-[0.4em] mb-3"
@@ -454,7 +432,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
                     data-testid="join-member"
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
-                    <button aria-label={t.join.removeMember(m)} className="px-3 text-rp-alert font-bold" onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                    <button aria-label={t.join.removeMember(m)} className={`${TAP_TARGET} shrink-0 flex items-center justify-center text-rp-alert font-bold`} onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
                   )}
                 </div>
               ))}

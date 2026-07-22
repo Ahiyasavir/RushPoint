@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -97,6 +97,12 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
   // right now (time or wrong-attempt threshold met). The charge decision is
   // re-made server-side inside requestTaskHint, so this can never mischarge.
   hintFreeNow?: boolean;
+  // Wrong-answer cost (change: wrong-answer-cost): server-computed, display-only.
+  // Present only on the team's ACTIVE graded task and only when the creator set a
+  // cost level, so a game authored before this change never carries it. Derived
+  // from the team's own progress; it says what a wrong answer COSTS, never what
+  // the answer is.
+  answerCost?: AnswerCostDisplay;
   // Hidden-location tasks have their coordinates stripped server-side and carry
   // `locationHidden`; the client suppresses the pin and shows `locationClue`.
   coordinates?: Task['coordinates'];
@@ -112,6 +118,11 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
     // audio-tasks: on a photo task, capture an audio clip instead of a photo.
     captureKind?: 'photo' | 'audio';
     stationCoords?: { lat: number; lng: number };
+    // How many wrong answers this task allows before submitTaskAnswer refuses
+    // with 'resource-exhausted'. Already shipped by sanitizeTaskForParticipant;
+    // the client needs it so a single mis-tap can't silently spend one
+    // (change: play-touch-rtl-a11y).
+    attemptLimit?: number;
   };
 };
 
@@ -195,7 +206,20 @@ export const submitTaskAnswer = callable<
   // quiz/numeric take `answer`; an ordering quiz takes `orderedAnswer` (the
   // player's arrangement) instead — the server rejects a mixed/missing payload.
   Ctx & { taskId: string; answer?: string; orderedAnswer?: string[]; lat?: number; lng?: number },
-  { correct: boolean; nextTaskId?: string | null }
+  {
+    correct: boolean;
+    nextTaskId?: string | null;
+    // Wrong-answer cost (change: wrong-answer-cost). Present on the wrong path
+    // only, and only when the creator set a cost level. `penalty` is the points
+    // just charged (always 0 under the time_only preset, which has no points),
+    // `retryAfterSeconds` / `cooldownUntil` drive the retry countdown, and
+    // `replay` marks a duplicate submission that was deliberately NOT charged.
+    penalty?: number;
+    cooldownUntil?: number;
+    retryAfterSeconds?: number;
+    attemptsUsed?: number;
+    replay?: boolean;
+  }
 >('submitTaskAnswer');
 
 export const submitSequenceStep = callable<

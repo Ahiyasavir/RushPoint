@@ -2,9 +2,14 @@ import React, { forwardRef } from 'react';
 import type { ReactNode, ButtonHTMLAttributes, InputHTMLAttributes } from 'react';
 import { useT } from '../i18nContext';
 
-export function Button({
+// forwardRef so a caller can move focus to a button — the confirmation dialog
+// must put focus on its confirm control when it opens (change: play-touch-rtl-a11y).
+export const Button = forwardRef<
+  HTMLButtonElement,
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger'; loading?: boolean }
+>(function Button({
   variant = 'primary', className = '', children, loading = false, disabled, ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger'; loading?: boolean }) {
+}, ref) {
   const map: Record<string, string> = {
     primary: `
       bg-gradient-to-r from-[#C2410C] to-[#B45309]
@@ -27,6 +32,7 @@ export function Button({
   };
   return (
     <button
+      ref={ref}
       className={`inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${map[variant]} ${className}`}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
@@ -38,7 +44,7 @@ export function Button({
       {children}
     </button>
   );
-}
+});
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className = '', ...rest }, ref) {

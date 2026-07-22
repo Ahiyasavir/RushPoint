@@ -466,7 +466,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         </div>
       )}
       <button onClick={() => void shareAction.run()} disabled={sharing}
-        className="self-end text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
+        className="self-end inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
         {sharing ? t.play.creating : t.play.shareProgress}
       </button>
 
@@ -488,14 +488,22 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         ) : state.nextStageReleaseAt && state.nextStageReleaseAt > Date.now() ? (
           <StageDropCountdown releaseAt={state.nextStageReleaseAt} onOpen={refresh} />
         ) : (
-          <p className="text-center text-zinc-500 mt-10">{t.play.noActiveStage}</p>
+          /* Not a dead end any more (change: play-no-silent-failures): a bare
+              sentence gave the player nothing to do. Same recovery shape as the
+              load-failure state above. */
+          <div className="flex flex-col items-center text-center gap-2 mt-10">
+            <div className="text-4xl">⏳</div>
+            <p className="text-sm font-semibold text-zinc-200">{t.play.noActiveStageTitle}</p>
+            <p className="text-xs text-zinc-500">{t.play.noActiveStageBody}</p>
+            <Button variant="ghost" className="mt-1" onClick={() => void refresh()}>{t.common.tryAgain}</Button>
+          </div>
         )}
       </div>
 
       {/* SECONDARY: standings, feed, chat, trackables, territory, devices — the
           lower-priority status content lives below the task and scrolls within its
           own bounded region so it never pushes the task off-screen. */}
-      <div className="mt-1 max-h-[60vh] overflow-y-auto -mx-1 px-1">
+      <div className="mt-1 -mx-1 px-1">
         {!isController && (
           <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
             👀 {t.devices.viewingBanner({ name: controllerName })}
@@ -565,6 +573,8 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
     bump((x) => x + 1);
   }
   return (
+    <>
+    <EscapeKey onEscape={dismiss} />
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
       <div className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
         {pick.beat.imageUrl && (
@@ -580,7 +590,24 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
         </div>
       </div>
     </div>
+    </>
   );
+}
+
+// A full-screen overlay must be dismissible from the keyboard
+// (change: play-touch-rtl-a11y). Kept as a nodeless component so each overlay
+// subscribes only while it is actually mounted.
+function EscapeKey({ onEscape }: { onEscape: () => void }) {
+  const cb = useRef(onEscape);
+  cb.current = onEscape;
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') { e.preventDefault(); cb.current(); }
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+  return null;
 }
 
 // Game intro primer (change: game-intro-instructions): the game-level "How to play"
@@ -625,6 +652,7 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
       </button>
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
+          <EscapeKey onEscape={() => setOpen(false)} />
           <div className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
             {ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-48 object-cover" />}
             <div className="p-5 space-y-3">
@@ -737,12 +765,18 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
   }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
   useEffect(() => { void load(); }, [load]);
 
+  // Per-row failure copy (change: play-no-silent-failures): this used to be an
+  // empty catch, so a rejected pick up looked exactly like nothing happening.
+  const [errors, setErrors] = useState<Record<string, string>>({});
   async function act(tr: Trackable, action: 'pickup' | 'drop') {
+    setErrors((e) => ({ ...e, [tr.id]: '' }));
     try {
       const args = { ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId, trackableId: tr.id };
       if (action === 'pickup') await pickUpTrackable(args); else await dropTrackable(args);
       await load();
-    } catch { /* surfaced by a no-op; the list reloads */ }
+    } catch {
+      setErrors((e) => ({ ...e, [tr.id]: t.play.actionFailed }));
+    }
   }
   // Keyed in-flight guard (change: wave-b/async-action-guard): a double-tapped
   // "pick up" fired pickUpTrackable twice; different trackables stay independent.
@@ -757,7 +791,8 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
           const mine = tr.currentHolderTeamId === myTeamId;
           const held = !!tr.currentHolderTeamId;
           return (
-            <div key={tr.id} className="flex items-center gap-2">
+            <div key={tr.id}>
+            <div className="flex items-center gap-2">
               <span className="flex-1 text-sm text-zinc-200" dir="auto">
                 {tr.name}
                 {mine ? ` · ${t.trackables.carrying}` : held ? ` · ${t.trackables.held}` : ''}
@@ -774,6 +809,10 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
                 </button>
               ))}
             </div>
+            {errors[tr.id] && (
+              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-rp-alert">⚠ {errors[tr.id]}</p>
+            )}
+            </div>
           );
         })}
       </div>
@@ -785,12 +824,18 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
 // owner; a controller standing inside a zone can capture (or flip) it for bonus points.
 function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zones: CaptureZone[]; ctx: Session; myTeamId: string; isController: boolean; me: { lat: number; lng: number } | null; onCaptured: () => void }) {
   const { t } = useT();
+  // Per-row failure copy (change: play-no-silent-failures): capturing AWARDS
+  // POINTS, and both the no-GPS path and the rejection path used to be silent.
+  const [errors, setErrors] = useState<Record<string, string>>({});
   async function capture(z: CaptureZone) {
-    if (!me) return;
+    setErrors((e) => ({ ...e, [z.id]: '' }));
+    if (!me) { setErrors((e) => ({ ...e, [z.id]: t.play.locationNotReady })); return; }
     try {
       await captureZone({ ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId, zoneId: z.id, lat: me.lat, lng: me.lng });
       onCaptured(); // refresh both the map circles and this list
-    } catch { /* out of range / already yours — list reloads */ }
+    } catch {
+      setErrors((e) => ({ ...e, [z.id]: t.play.actionFailed }));
+    }
   }
   // Keyed in-flight guard (change: wave-b/async-action-guard): captureZone awards
   // points, so a double-tapped capture was a real double-award window.
@@ -804,17 +849,25 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
         {zones.map((z) => {
           const mine = z.ownerTeamId === myTeamId;
           return (
-            <div key={z.id} className="flex items-center gap-2">
+            <div key={z.id}>
+            <div className="flex items-center gap-2">
               <span className="flex-1 text-sm text-zinc-200" dir="auto">
                 {z.title}
                 <span className="text-zinc-500"> · {z.ownerTeamId ? (mine ? t.zones.yours : t.zones.heldBy({ name: z.ownerTeamName ?? '' })) : t.zones.open}</span>
               </span>
               {isController && !mine && (
-                <button disabled={captureAction.isBusy(z.id) || !me} onClick={() => void captureAction.run(z)}
+                /* No longer disabled on a missing fix: a greyed button with no
+                   reason is the dead end the audit found. Tapping now explains
+                   that GPS has not settled yet, and calls nothing. */
+                <button disabled={captureAction.isBusy(z.id)} onClick={() => void captureAction.run(z)}
                   className="text-xs font-bold px-3 py-1 rounded-full bg-rp-fire/15 text-rp-fire border border-rp-fire/30 disabled:opacity-40">
                   {t.zones.capture}
                 </button>
               )}
+            </div>
+            {errors[z.id] && (
+              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-rp-alert">⚠ {errors[z.id]}</p>
+            )}
             </div>
           );
         })}
@@ -923,7 +976,8 @@ function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedA
           )}
         </div>
       </div>
-      <button onClick={onLeave} className="text-xs text-zinc-500">{t.play.leave}</button>
+      <button onClick={onLeave} aria-label={t.play.leaveAria}
+        className="inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-zinc-500">{t.play.leave}</button>
     </div>
   );
 }

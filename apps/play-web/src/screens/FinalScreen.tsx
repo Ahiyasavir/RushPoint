@@ -10,6 +10,7 @@ import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
 import { fireConfetti } from '../lib/confetti';
 import { creatorUrl } from '../lib/creatorUrl';
+import LegalFooter from '../components/LegalFooter';
 
 function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -303,6 +304,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         </a>
       )}
       <Button variant="ghost" onClick={onLeave} className="mt-2">{t.final.leave}</Button>
+      {/* Same legal links as the Join screen. Once a player has finished they
+          never pass through Join again, so without this the privacy policy
+          would be unreachable from the last screen they actually look at. */}
+      <LegalFooter />
     </Screen>
   );
 }

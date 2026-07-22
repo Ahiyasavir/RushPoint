@@ -101,7 +101,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
                   <div className="text-sm font-semibold text-rp-fire">{t.tv.nowLeading}</div>
                 )}
               </div>
-              <div className="text-right">
+              <div className="text-end">
                 {(() => {
                   // A finished team shows its real completion time; a still-playing
                   // team's time is an ever-growing ELAPSED value — mark it (⏱ prefix,

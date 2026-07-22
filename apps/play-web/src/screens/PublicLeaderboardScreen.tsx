@@ -22,6 +22,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   const [err, setErr] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -57,7 +58,10 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     const url = window.location.href;
     const nav = navigator as Navigator & { share?: (d: { title?: string; url?: string }) => Promise<void> };
     if (nav.share) { try { await nav.share({ title: data?.title ?? 'RushPoint', url }); return; } catch { /* cancelled */ } }
-    try { await navigator.clipboard.writeText(url); } catch { /* no clipboard */ }
+    // Confirm the copy (change: play-no-silent-failures): a clipboard write with
+    // an empty catch gave the visitor no way to know whether anything happened.
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { /* no clipboard */ }
   }
 
   if (data === undefined) {
@@ -79,7 +83,10 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
             {t.board.unavailable}
           </h1>
           <p className="text-zinc-500 text-sm">{err || t.board.notFound}</p>
-          <Button className="mt-2" onClick={onJoin}>{t.board.enterCode}</Button>
+          {/* The only CTA used to ask for a code the visitor does not have
+              (change: play-no-silent-failures). `load` is a stable useCallback. */}
+          <Button className="mt-2" loading={refreshing} onClick={() => void load()}>{t.board.retry}</Button>
+          <Button variant="ghost" onClick={onJoin}>{t.board.enterCode}</Button>
         </div>
       </Screen>
     );
@@ -205,7 +212,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         )}
       </div>
 
-      <Button variant="ghost" className="mt-4" onClick={share}>{t.board.share}</Button>
+      <Button variant="ghost" className="mt-4" onClick={share}>{copied ? t.board.linkCopied : t.board.share}</Button>
       <a href={CREATOR_URL} target="_blank" rel="noreferrer"
         className="block text-center text-sm font-semibold py-3 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
       >
