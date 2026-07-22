@@ -7,29 +7,14 @@ import type { HTMLAttributes } from 'react';
 import type { Task, TaskType } from '@rushpoint/shared';
 import { normalizeTriggerMode } from '@rushpoint/shared';
 import { taskPreviewLine, TYPE_FAMILY_COLOR, type PreviewLabels } from '../lib/taskCardPreview';
+import { GROUP_STYLES } from '../lib/groupStyles';
 import { useT } from './LanguageContext';
 import { BuilderIcon, TRIGGER_ICON_NAME } from './builderIcons';
 
-/**
- * Palette for mutually exclusive task groups (change: builder-dnd-groups).
- *
- * ⚠ These MUST stay literal, complete class strings. Tailwind scans source text,
- * so a computed `bg-${hue}-500/20` would be purged out of the bundle and the
- * badge would render colourless. Index into this array, never build the string.
- *
- * Colour is never the ONLY carrier: every badge also shows the group LETTER and
- * a border, and every group is named in text in the strip and the modal, so the
- * surface is colourblind safe for everyone with no mode switch (creator-web has
- * no colourblind flag). Past 6 groups the colour repeats but the letter does not.
- */
-export const GROUP_STYLES = [
-  { badge: 'bg-cyan-500/20 text-cyan-200 border-cyan-400', ring: 'ring-cyan-400/70' },
-  { badge: 'bg-amber-500/20 text-amber-200 border-amber-400', ring: 'ring-amber-400/70' },
-  { badge: 'bg-violet-500/20 text-violet-200 border-violet-400', ring: 'ring-violet-400/70' },
-  { badge: 'bg-emerald-500/20 text-emerald-200 border-emerald-400', ring: 'ring-emerald-400/70' },
-  { badge: 'bg-pink-500/20 text-pink-200 border-pink-400', ring: 'ring-pink-400/70' },
-  { badge: 'bg-orange-500/20 text-orange-200 border-orange-400', ring: 'ring-orange-400/70' },
-] as const;
+// The exclusive-group palette now lives in a pure, React-free lib so it can be
+// unit-tested directly. Re-exported here so existing importers (BuilderPage,
+// ExclusiveGroupsModal) keep importing it from '../components/TaskCard'.
+export { GROUP_STYLES } from '../lib/groupStyles';
 
 /** Membership in the owning stage's EFFECTIVE exclusive groups, precomputed by
  *  BuilderPage. Undefined = ungrouped or in an inert group ⇒ no badge, no ring. */
@@ -105,12 +90,16 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
         if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); }
       }}
-      style={{ borderInlineStartColor: color }}
-      className={`group/card w-full text-start rounded-xl border border-[--rp-border] border-s-[4px] bg-[--surface-1] px-4 py-3
+      // Calm colour treatment (docs/wave-l/task-card-colour-refine.md): no more
+      // full-height saturated type slab; type is a small dot in the pill below.
+      // An ungrouped card is a clean neutral panel; a grouped card gets a slim
+      // leading accent + the letter badge (colourblind-safe). One ring system
+      // (the brand fire selection ring), no competing group ring.
+      className={`group/card w-full text-start rounded-xl border border-[--rp-border] bg-[--surface-1] px-4 py-3
         flex flex-col gap-2 transition-colors hover:bg-[--surface-2] cursor-pointer
         focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
         ${active ? 'ring-2 ring-rp-fire/60' : ''} ${dragging ? 'opacity-40' : ''}
-        ${style && !active ? `ring-1 ring-inset ${style.ring}` : ''}`}
+        ${style ? `border-s-[3px] ${style.accent}` : ''}`}
     >
       <div className="flex items-center gap-2 min-w-0">
         <span
@@ -121,7 +110,11 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
           className="shrink-0 select-none text-[--ink-3] cursor-grab active:cursor-grabbing touch-none
             focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 rounded"
         >⠿</span>
-        <span className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded shrink-0" style={{ background: `${color}22`, color }}>
+        {/* Type chip: a small filled dot carries the family hue (the only saturated
+            pixel); the label stays neutral + legible, so the grid reads calm. */}
+        <span className="inline-flex items-center gap-1.5 shrink-0 text-[10px] font-semibold uppercase tracking-wide
+          px-2 py-0.5 rounded bg-[--surface-2] text-[--ink-2] border border-[--rp-border]">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} aria-hidden="true" />
           {typeLabel[task.type]}
         </span>
         {/* Exclusive-group badge: letter + border + colour, so hue is never the
