@@ -56,3 +56,4 @@ export * from './locationLeak';
 export * from './runCapacity';
 export * from './taskCompletability';
 export * from './mutualExclusion';
+export * from './playStore';

@@ -12,7 +12,7 @@ const SECTIONS = {
   privacy: {
     he: {
       title: 'מדיניות פרטיות',
-      updated: 'עודכן לאחרונה: יוני 2026',
+      updated: 'עודכן לאחרונה: יולי 2026',
       body: `
 ## 1. מבוא ותחולה
 
@@ -97,6 +97,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - סוג מכשיר, מערכת הפעלה, גרסת דפדפן
 - נתוני ביצועים אנונימיים (זמני תגובה, שגיאות)
 - מספר משחקים, ריצות, ומשתתפים לכל חשבון יוצר
+- **דוחות קריסה (Sentry):** כאשר תכונה זו מופעלת בסביבת הייצור, שגיאות יישום (crash reports) הכוללות כתובת IP, מעקב קריאות טכני (stack trace), וסוג הדפדפן/מכשיר נשלחות לספק ניטור השגיאות שלנו לצורך איתור ותיקון תקלות בלבד. ראה סעיף 5 לפרטי ספק המשנה.
 
 ## 4. מטרות עיבוד המידע
 
@@ -120,9 +121,15 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **MapTiler AG**: ספק אריחי המפה. MapTiler מקבל בקשות אריחים סטנדרטיות ואינו מקבל נתוני מיקום של משתתפים ספציפיים.
 
-**יוצרי המשחקים**: יוצר שמפעיל ריצה רואה את המיקום הנוכחי של הצוותות (בזמן ריצה בלבד), ניקוד, תשובות, ותמונות שהועלו. הוא גם רואה נתונים שמשתתפים מסרו בשדות מותאמים. ראה סעיף 3.5.
+**Sentry (Functional Software, Inc.)**: ספק ניטור שגיאות/קריסות אפליקציה, פעיל רק כאשר מוגדר בסביבת הייצור. מקבל דוחות קריסה טכניים (ראה סעיף 3.6) לצורך תחזוקת השירות בלבד — לא לצרכי שיווק ו/או פרופיילינג.
+
+**יוצרי המשחקים**: יוצר שמפעיל ריצה רואה את המיקום הנוכחי של הצוותות (בזמן ריצה בלבד), ניקוד, תשובות, ותמונות שהועלו. הוא גם רואה נתונים שמשתתפים מסרו בשדות מותאמים, לרבות שם אפוטרופוס במקרה של הסכמת הורים (ראה סעיף 11). ראה סעיף 3.5.
 
 **רשויות:** נמסור מידע לרשויות אכיפת חוק אך ורק בהתאם לחובה חוקית מפורשת או צו שיפוטי בר-תוקף.
+
+**עדכון רשימת ספקי המשנה:** נעדכן רשימה זו כאשר נוסיף ו/או נחליף ספק משנה מהותי, ונודיע על שינוי כאמור בהתאם לסעיף 15 (שינויים במדיניות).
+
+**הסכם עיבוד נתונים (DPA) ליוצרים:** יוצר שהוא עסק הכפוף לדין הגנת מידע זר (למשל GDPR) ואוסף מידע אישי של משתתפים דרך שדות מותאמים (סעיף 3.5) פועל כ"בקר מידע" (data controller) לגבי אותו מידע, כאשר RushPoint פועלת כ"מעבד מידע" (data processor) מטעמו. יוצר כאמור רשאי לפנות ל-**legal@rushpoint.app** לקבלת הסכם עיבוד נתונים (DPA) חתום הכולל את פרטי ספקי המשנה שלנו והתחייבויותינו כמעבד.
 
 ## 6. אבטחת מידע
 
@@ -134,7 +141,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - **כללי Firestore:** כתיבה לנתוני ריצות, ניקוד ומיקום מותרת לשרת בלבד; לקוחות מקבלים קריאה מוגבלת
 - **אימות דו-שלבי:** מומלץ לכל חשבוני יוצר
 
-בתרחיש של דלף מידע שעלול לפגוע בנושא מידע, נודיע לנפגעים ולרשות הגנת הפרטיות בהתאם לדרישות החוק.
+**נוהל תגובה לאירועי אבטחה:** בתרחיש של דלף מידע שעלול לפגוע בנושא מידע, ננקוט בפעולות הבאות: (1) בלימת האירוע ותיקון הפרצה מיידית; (2) הערכת היקף המידע והאנשים שנפגעו; (3) הודעה לרשות הגנת הפרטיות ולנפגעים **ללא דיחוי בלתי סביר ולכל המאוחר בתוך 72 שעות** ממועד היוודע לנו האירוע, ככל שהדבר ניתן בנסיבות העניין ובהתאם לדרישות חוק הפרטיות ותקנות האבטחה (ולמשתמשי GDPR — ראה גם סעיף 13); (4) מסירת פרטים על האירוע, ההשלכות הצפויות, והצעדים שננקטו ו/או מומלצים לצמצום הנזק.
 
 ## 7. שמירת מידע ומחיקה
 
@@ -178,17 +185,47 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 ## 11. ילדים ובני נוער
 
-השירות מיועד לאנשים מגיל 16 ומעלה. אנו לא אוספים ביודעין מידע אישי ממשתמשים מתחת לגיל 16. אם נודע לנו שנאסף מידע כזה, נמחק אותו לאלתר. הורה ו/או אפוטרופוס המודע לרישום קטין מתחת לגיל 16 מוזמן לפנות אלינו.
+**יוצרי משחקים (בעלי חשבון):** יצירת חשבון יוצר מיועדת לאנשים מגיל 16 ומעלה בלבד. אנו לא אוספים ביודעין פרטי חשבון יוצר ממי שמתחת לגיל 16.
+
+**משתתפים קטינים:** בשונה מיוצרים, השירות מותאם גם לאירועים שבהם המשתתפים הם קטינים (למשל קבוצות נוער, בר/בת מצווה) — זהו שימוש נפוץ וצפוי בפלטפורמה. יוצר שמפעיל אירוע כזה **חייב** להפעיל את מנגנון "הסכמת הורים" בהגדרות הריצה; במצב זה קבוצת קטין לא תוכל להתחיל לשחק ללא רישום הסכמה מפורשת של הורה ו/או אפוטרופוס (שם + חתימת אישור דיגיטלית), הנשמרת על גבי רשומת הצוות ונמחקת בהתאם לתקופת השמירה בסעיף 7. **האחריות המלאה** להפעלת מנגנון ההסכמה, ולוודא שהוא תואם את מדיניות בית הספר/הארגון ואת חוק הפרטיות, מוטלת על יוצר האירוע (ראה גם סעיף 6.1 בתנאי השימוש).
+
+אנו לא אוספים ביודעין מידע אישי של קטין מחוץ למסגרת מנגנון ההסכמה האמור. אם נודע לנו שנאסף מידע כאמור שלא כדין, נמחק אותו לאלתר. הורה ו/או אפוטרופוס המודע לאיסוף מידע על קטין שלא כדין מוזמן לפנות אלינו ל-privacy@rushpoint.app.
 
 ## 12. העברות מידע בינלאומיות
 
 נתוני המשתמשים מאוחסנים בשרתי Google Cloud Platform ועשויים לעבור עיבוד בשרתים מחוץ לישראל. Google מחויבת למנגנוני הגנה מחמירים (SCCs) התואמים דרישות הגנת הפרטיות הישראליות.
 
-## 13. שינויים במדיניות
+## 13. משתמשים באיחוד האירופי / אזור הכלכלי האירופי (GDPR)
+
+אם אתה נמצא באיחוד האירופי, ה-EEA, בריטניה, ו/או שיפוט אחר עם דין הגנת מידע דומה, סעיף זה משלים (ואינו גורע מ-) הזכויות שבסעיף 8:
+
+**13.1 בסיסים חוקיים לעיבוד (סעיף 6 GDPR):** אנו מעבדים מידע על בסיס: **ביצוע חוזה** (הפעלת חשבונך, ניתוב, ניקוד) · **הסכמה** (מיקום GPS בזמן ריצה, הסכמת הורים, דיוור שיווקי — ניתנים לביטול בכל עת) · **אינטרס לגיטימי** (אבטחת מידע, מניעת הונאה, תחזוקת השירות ודוחות קריסה) · **חובה חוקית** (תגובה לצווים).
+
+**13.2 נציג באיחוד האירופי:** במידה שנדרש על-פי דין, פרטי נציג באיחוד האירופי יפורסמו בעמוד זה ו/או יימסרו לפי בקשה בכתובת privacy@rushpoint.app.
+
+**13.3 זכויות נוספות:** זכות הגבלת עיבוד, זכות התנגדות לעיבוד מבוסס אינטרס לגיטימי, וזכות שלא להיות כפוף להחלטה אוטומטית מהותית (איננו מבצעים החלטות כאלה — ראה סעיף 4).
+
+**13.4 העברות בינלאומיות:** נתונים מועברים מחוץ ל-EEA (לשרתי Google Cloud, ראה סעיף 12) בכפוף למנגנוני הגנה חוזיים מוכרים (Standard Contractual Clauses).
+
+**13.5 תלונה לרשות מפקחת:** לך הזכות להגיש תלונה לרשות ההגנת מידע המוסמכת במדינת מגוריך, במקום עבודתך, ו/או במקום האירוע הנטען, בנוסף לכל זכות אחרת.
+
+## 14. תושבי קליפורניה (CCPA/CPRA)
+
+אם אתה תושב קליפורניה, בנוסף לזכויות שבסעיף 8 עומדות לך הזכויות הבאות מכוח ה-CCPA/CPRA:
+
+- **זכות דעת:** לדעת אילו קטגוריות מידע אישי נאספו, מקורן, ומטרת העיבוד (ראה סעיפים 3-4).
+- **זכות מחיקה:** כאמור בסעיף 8.
+- **זכות תיקון:** כאמור בסעיף 8.
+- **זכות "לא למכור/לשתף":** **אנו לא מוכרים ולא משתפים ("sell"/"share" כהגדרתם ב-CCPA) מידע אישי** תמורת תשלום ו/או לצרכי פרסום התנהגותי חוצה-הקשרים. אין צורך לממש opt-out כי אין מכירה/שיתוף מלכתחילה.
+- **איסור אפליה:** לא נפלה לרעה בשירות ו/או במחיר בשל מימוש זכות מהזכויות שלעיל.
+
+לממש זכויות אלה: **privacy@rushpoint.app**.
+
+## 15. שינויים במדיניות
 
 במקרה של שינויים מהותיים, נודיע בהודעה בתוך הפלטפורמה לפחות 14 יום לפני כניסתם לתוקף. המשך שימוש לאחר מועד הכניסה לתוקף מהווה הסכמה לשינויים.
 
-## 14. יצירת קשר
+## 16. יצירת קשר
 
 לכל שאלה, בקשה לעיון, תיקון, ו/או מחיקה:
 
@@ -200,7 +237,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
     },
     en: {
       title: 'Privacy Policy',
-      updated: 'Last updated: June 2026',
+      updated: 'Last updated: July 2026',
       body: `
 ## 1. Introduction and Scope
 
@@ -285,6 +322,7 @@ By joining a game that includes custom fields, the participant consents to the C
 - Device type, operating system, browser version
 - Anonymous performance data (response times, errors)
 - Number of games, runs, and participants per Creator account
+- **Crash reports (Sentry):** when this feature is enabled in production, application error reports — including IP address, technical stack trace, and browser/device type — are sent to our error-monitoring sub-processor solely to diagnose and fix defects. See Section 5 for sub-processor details.
 
 ## 4. Purposes of Data Processing
 
@@ -308,9 +346,15 @@ We **do not sell or rent** personal data. We share data with:
 
 **MapTiler AG**: map tiles provider. MapTiler receives standard tile requests and does not receive individual participant location data.
 
-**Game Creators**: a Creator who runs a game can see current team locations (during the run only), scores, submitted answers, uploaded photos, and data entered in custom fields. See Section 3.5.
+**Sentry (Functional Software, Inc.)**: our crash/error-monitoring provider, active only when configured in production. Receives technical crash reports (see Section 3.6) solely for service maintenance — never for marketing or profiling.
+
+**Game Creators**: a Creator who runs a game can see current team locations (during the run only), scores, submitted answers, uploaded photos, and data entered in custom fields, including a guardian's name where guardian consent applies (see Section 11). See Section 3.5.
 
 **Authorities:** we will disclose data to law enforcement only when required by an explicit legal obligation or a valid court order.
+
+**Sub-processor list updates:** we will update this list whenever we add or replace a material sub-processor, and will notify users of such changes per Section 15 (Policy Changes).
+
+**Data Processing Addendum (DPA) for Creators:** a Creator who is a business subject to foreign data-protection law (e.g. the GDPR) and who collects participants' personal data via custom fields (Section 3.5) acts as the "data controller" for that data, with RushPoint acting as its "data processor." Such a Creator may contact **legal@rushpoint.app** to receive a signed Data Processing Addendum detailing our sub-processors and our obligations as processor.
 
 ## 6. Data Security
 
@@ -322,7 +366,7 @@ We implement security measures in accordance with the Israeli Privacy Protection
 - **Firestore security rules:** writing to run data, scores, and location is restricted to the server only; clients receive limited read access
 - **Two-factor authentication:** recommended for all Creator accounts
 
-In the event of a data breach likely to affect a data subject, we will notify those affected and the Privacy Authority as required by law.
+**Incident response procedure:** in the event of a data breach likely to affect a data subject, we will: (1) contain the incident and remediate the vulnerability immediately; (2) assess the scope of data and individuals affected; (3) notify the Privacy Protection Authority and affected individuals **without undue delay, and no later than 72 hours** after we become aware of the incident, where feasible, in accordance with the Privacy Protection Law, the Data Security Regulations, and (for GDPR-covered users) Section 13 below; (4) provide details of the incident, its likely consequences, and the measures taken and/or recommended to mitigate harm.
 
 ## 7. Data Retention and Deletion
 
@@ -365,17 +409,47 @@ In accordance with the Communications Law (Telecommunications and Broadcasts) Am
 
 ## 11. Children and Minors
 
-The Service is intended for users aged 16 and over. We do not knowingly collect personal data from users under 16. If we become aware that such data has been collected, we will delete it immediately. A parent or guardian who is aware of a minor under 16 having registered is invited to contact us.
+**Creators (account holders):** creating a Creator account is intended for people aged 16 and over only. We do not knowingly collect Creator account data from anyone under 16.
+
+**Minor participants:** unlike Creators, the Service is also designed for events where participants are minors (e.g. youth groups, bar/bat mitzvah events) — this is a common and expected use of the platform. A Creator running such an event **must** enable the "guardian consent" mechanism in the run's settings; with it enabled, a minor's team cannot start playing until a parent and/or guardian records explicit consent (name + digital confirmation), which is stored on the team record and deleted per the retention schedule in Section 7. **Full responsibility** for enabling this mechanism, and for ensuring it satisfies applicable school/organizational policy and privacy law, rests with the event's Creator (see also Section 6.1 of the Terms of Service).
+
+We do not knowingly collect a minor's personal data outside this consent mechanism. If we become aware that such data was collected unlawfully, we will delete it immediately. A parent or guardian aware of unlawful data collection about a minor is invited to contact us at privacy@rushpoint.app.
 
 ## 12. International Data Transfers
 
 User data is stored on Google Cloud Platform servers and may be processed on servers outside Israel. Google is committed to strict protection mechanisms (SCCs) compatible with Israeli privacy requirements.
 
-## 13. Policy Changes
+## 13. Users in the EU / European Economic Area (GDPR)
+
+If you are located in the EU, the EEA, the UK, and/or another jurisdiction with similar data-protection law, this section supplements (and does not diminish) the rights in Section 8:
+
+**13.1 Legal bases for processing (GDPR Art. 6):** we process data based on: **contract performance** (running your account, routing, scoring) · **consent** (in-run GPS location, guardian consent, marketing communications — withdrawable at any time) · **legitimate interest** (data security, fraud prevention, service maintenance and crash reports) · **legal obligation** (responding to court orders).
+
+**13.2 EU representative:** where required by law, EU representative details will be published on this page and/or provided on request at privacy@rushpoint.app.
+
+**13.3 Additional rights:** the right to restrict processing, the right to object to processing based on legitimate interest, and the right not to be subject to a solely automated decision with legal effect (we do not make such decisions — see Section 4).
+
+**13.4 International transfers:** data is transferred outside the EEA (to Google Cloud servers, see Section 12) subject to recognized contractual safeguards (Standard Contractual Clauses).
+
+**13.5 Complaint to a supervisory authority:** you have the right to lodge a complaint with the data-protection authority competent for your place of residence, your workplace, and/or the place of the alleged infringement, in addition to any other right.
+
+## 14. California Residents (CCPA/CPRA)
+
+If you are a California resident, in addition to the rights in Section 8 you have the following rights under the CCPA/CPRA:
+
+- **Right to know:** which categories of personal data were collected, their source, and the purpose of processing (see Sections 3-4).
+- **Right to delete:** as described in Section 8.
+- **Right to correct:** as described in Section 8.
+- **Right not to be "sold"/"shared":** **we do not sell or share ("sell"/"share" as defined by the CCPA) personal data** for money and/or for cross-context behavioral advertising. There is no need to exercise an opt-out because there is no sale/sharing in the first place.
+- **Non-discrimination:** we will not discriminate in service and/or pricing for exercising any of the above rights.
+
+To exercise these rights: **privacy@rushpoint.app**.
+
+## 15. Policy Changes
 
 For material changes, we will notify users via an in-platform notice at least 14 days before the changes take effect. Continued use after the effective date constitutes acceptance of the changes.
 
-## 14. Contact
+## 16. Contact
 
 For any question, access request, correction, or deletion request:
 
@@ -390,7 +464,7 @@ The Company will respond to requests within 30 days.
   terms: {
     he: {
       title: 'תנאי שימוש',
-      updated: 'עודכן לאחרונה: יוני 2026',
+      updated: 'עודכן לאחרונה: יולי 2026',
       body: `
 ## 1. כללי וקבלת התנאים
 
@@ -398,7 +472,7 @@ The Company will respond to requests within 30 days.
 
 **בלחיצה על "יצירת חשבון", בכניסה למשחק, ו/או בכל שימוש אחר בשירות, אתה מצהיר שקראת, הבנת, ומסכים לתנאים אלו על כל חלקיהם.**
 
-אם אינך מסכים, אנא אל תשתמש בשירות. גיל מינימלי: 16 שנה. אם אתה בין 16 ל-18, השימוש כפוף להסכמת הורה או אפוטרופוס.
+אם אינך מסכים, אנא אל תשתמש בשירות. **יצירת חשבון יוצר** מותרת מגיל 16 ומעלה בלבד; אם אתה בין 16 ל-18, השימוש כפוף להסכמת הורה או אפוטרופוס. **השתתפות במשחק** אפשרית גם למי שמתחת לגיל 16, ובלבד שהיוצר הפעיל את מנגנון הסכמת ההורים הנדרש — ראה סעיף 6.1(ז) ומדיניות הפרטיות סעיף 11.
 
 ## 2. הגדרות
 
@@ -487,6 +561,8 @@ The Company will respond to requests within 30 days.
 **(ה) היתרים וביטוח:** כי קיבל את כל ההיתרים הנדרשים לשימוש בשטחים ציבוריים ו/או פרטיים הכלולים במסלול, ובמידת הצורך, רכש ביטוח אחריות מקצועית לאירוע.
 
 **(ו) ציות לחוק:** כי האירוע עומד בכל דרישות החוק הישראלי הרלוונטיות.
+
+**(ז) קטינים:** כי אם צפוי שמשתתפים באירוע יהיו מתחת לגיל 16, הפעיל את מנגנון "הסכמת הורים" בהגדרות הריצה לפני תחילת המשחק, וכי ידוע לו שהפעלת אירוע עם קטינים ללא מנגנון זה מהווה הפרה של תנאים אלו.
 
 ### 6.2 ויתור מוחלט על תביעות כנגד החברה
 
@@ -625,7 +701,7 @@ The Company will respond to requests within 30 days.
     },
     en: {
       title: 'Terms of Service',
-      updated: 'Last updated: June 2026',
+      updated: 'Last updated: July 2026',
       body: `
 ## 1. Acceptance of Terms
 
@@ -633,7 +709,7 @@ Welcome to RushPoint. These Terms of Service ("Terms") govern your access to and
 
 **By clicking "Create Account", joining a game, and/or using the Service in any other way, you represent that you have read, understood, and agree to these Terms in their entirety.**
 
-If you do not agree, please do not use the Service. Minimum age: 16. If you are between 16 and 18, use is subject to parental or guardian consent.
+If you do not agree, please do not use the Service. **Creating a Creator account** is permitted from age 16 and over only; if you are between 16 and 18, use is subject to parental or guardian consent. **Participating in a game** is possible for those under 16 as well, provided the Creator has enabled the required guardian-consent mechanism — see Section 6.1(g) and Privacy Policy Section 11.
 
 ## 2. Definitions
 
@@ -722,6 +798,8 @@ Game Creators on the RushPoint platform are **independent event organizers** onl
 **(e) Permits and insurance:** that they obtained all permits required for use of any public and/or private spaces included in the route, and where necessary, purchased professional liability insurance for the event.
 
 **(f) Legal compliance:** that the event complies with all applicable Israeli legal requirements.
+
+**(g) Minors:** that if participants in the event are expected to be under 16, they enabled the "guardian consent" mechanism in the run's settings before the game starts, and that running an event with minors without this mechanism is a breach of these Terms.
 
 ### 6.2 Full Waiver of Claims against the Company
 

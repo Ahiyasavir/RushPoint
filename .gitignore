@@ -53,3 +53,14 @@ test-results/
 
 # ngrok playtest tunnel secrets
 .tunnel.env
+
+# Google Play TWA build (Bubblewrap) — signing keystore + build outputs are
+# secret / generated; only twa-manifest.json is checked in. See PLAY_STORE.md.
+android.keystore
+*.keystore
+*.jks
+*.aab
+*.apk
+/app/
+twa-manifest.json.bak
+android.keystore.pub.pem

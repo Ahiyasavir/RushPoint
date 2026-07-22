@@ -1,0 +1,40 @@
+{
+  "packageId": "app.rushpoint.play",
+  "host": "rushpoint-play.web.app",
+  "name": "RushPoint — Field Game",
+  "launcherName": "RushPoint",
+  "display": "standalone",
+  "orientation": "portrait",
+  "themeColor": "#F97316",
+  "themeColorDark": "#F97316",
+  "navigationColor": "#FBF7F0",
+  "navigationColorDark": "#0A0A0A",
+  "navigationDividerColor": "#FBF7F0",
+  "navigationDividerColorDark": "#0A0A0A",
+  "backgroundColor": "#FBF7F0",
+  "enableNotifications": false,
+  "startUrl": "/",
+  "iconUrl": "https://rushpoint-play.web.app/icon-512.png",
+  "maskableIconUrl": "https://rushpoint-play.web.app/icon-512-maskable.png",
+  "monochromeIconUrl": "",
+  "shortcuts": [],
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "rushpoint"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "webManifestUrl": "https://rushpoint-play.web.app/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://rushpoint-play.web.app/",
+  "minSdkVersion": 21,
+  "orientationLock": false,
+  "_comment": "Single source of truth for `npm run play:twa:init` (Bubblewrap). host/startUrl/iconUrl/webManifestUrl MUST match the deployed play-web origin — https://rushpoint-play.web.app by default (see DEPLOY.md). If a custom domain (e.g. play.rushpoint.app) is configured, update every URL here AND deploy the generated /.well-known/assetlinks.json at that origin. Colors mirror apps/play-web/public/manifest.webmanifest. The signingKey keystore (android.keystore, alias `rushpoint`) is generated locally and is gitignored — see PLAY_STORE.md."
+}
