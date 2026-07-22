@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
@@ -29,6 +30,7 @@ import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 import { storyFieldCount } from '../lib/wizardSections';
+import { stageSettingsState, requiredChipText } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
@@ -714,6 +716,44 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 }
 
 // ── Step 2: Stages & Tasks ──
+
+// A calm, tappable at-rest summary pill (change: wave-k stage-editor-redesign).
+// It appears ONLY when a stage setting is non-default, so a default stage shows
+// none of them, and tapping it opens the stage-settings drawer to adjust it.
+function SummaryChip({ onClick, title, children }: { onClick: () => void; title: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className="inline-flex items-center gap-1 rounded-full border border-[--rp-border] bg-[--surface-2]/60
+        ps-2 pe-2.5 py-1 text-[11px] font-medium text-[--ink-2] tabular-nums
+        hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+    >
+      {children}
+    </button>
+  );
+}
+
+// One labelled control inside the stage-settings drawer: a friendly icon + title
+// over the actual control, generously spaced so the drawer reads as a short list
+// of choices rather than a dense form.
+function SettingRow({ icon, title, hint, children }: {
+  icon: string; title: string; hint?: string; children: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <span aria-hidden className="text-base leading-6 shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="text-xs font-semibold text-[--ink-2]" title={hint}>{title}</div>
+        <div className="text-xs text-[--ink-3]">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
@@ -734,6 +774,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
   const [groupsOpen, setGroupsOpen] = useState(false);
+  // The stage-settings drawer starts CLOSED (change: wave-k stage-editor-redesign)
+  // so the stage reads calm at rest — just its name and task cards. It collapses
+  // again whenever the creator switches stages, keeping every stage calm by default.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editing, setEditing] = useState<{ stageId: string; taskId: string } | null>(null);
   // Enforce the invariant the Builder UI implies — `isFinal` is only offered on
   // the LAST stage. The server treats ANY isFinal stage as the finale (finishing
@@ -927,6 +971,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
     return { index: i, letter: b.exclusiveGroupLetter(i), size: activeEffectiveGroups[i].length };
   };
 
+  // Which advanced settings apply / are non-default for the active stage — the
+  // pure decision core that drives the calm-at-rest header (change: wave-k).
+  const settings = activeStage ? stageSettingsState(activeStage, { isFirstStage }) : null;
+  // Collapse the settings drawer whenever the shown stage changes, so every stage
+  // opens calm regardless of the last stage's drawer state.
+  useEffect(() => { setSettingsOpen(false); }, [activeStage?.id]);
+
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
@@ -960,7 +1011,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
       <div className="flex-1 min-w-0 h-full flex flex-col gap-3 pe-1 pt-0.5">
         {activeStage && (
           <>
-            <div className="shrink-0 space-y-3">
+            <div className="shrink-0 space-y-2">
+            {/* Title row — the calm centre of the stage at rest: just the name,
+                the finale toggle on the last stage, and delete. */}
             <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
@@ -970,101 +1023,168 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                 </label>
               )}
               {game.stages.length > 1 && (
-                <button className="text-neon-red text-sm shrink-0" onClick={() => removeStage(activeStage.id)}>✕</button>
+                <button className="text-neon-red text-sm shrink-0" aria-label={b.exclusiveClose} onClick={() => removeStage(activeStage.id)}>✕</button>
               )}
             </div>
 
-            {/* Stage rules strip — the completion rule and the scheduled release
-                folded into ONE compact, wrap-friendly row so the header stops
-                eating three full-width lines of the shell (wave-a task 6).
-                Logical spacing only (gap-x/gap-y/px/py) so it stays RTL-correct. */}
-            {(m > 1 || !isFirstStage) && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-[--rp-border] bg-[--surface-2]/40 px-3 py-2 text-xs text-zinc-400">
-                {/* Completion rule — only meaningful with a pool of tasks */}
-                {m > 1 && (
-                  <div className="flex items-center flex-wrap gap-1.5 min-w-0 text-start">
-                    <span>{b.completionLead}</span>
-                    <Select
-                      className="w-auto py-1"
-                      value={String(req)}
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value);
-                        updateStage(activeStage.id, { requiredTaskCount: n >= m ? undefined : n });
-                      }}
-                    >
-                      {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
-                    </Select>
-                    <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
-                  </div>
-                )}
-
-                {m > 1 && !isFirstStage && (
-                  <span aria-hidden className="h-4 w-px bg-[--rp-border]" />
-                )}
-
-                {/* Scheduled release — a timed drop of this stage (change:
-                    scheduled-release). The long unit sentence is kept as the
-                    tooltip; the row shows only the short unit. */}
-                {!isFirstStage && (
-                  <div className="flex items-center flex-wrap gap-1.5 min-w-0 text-start" title={b.releaseAfterUnit}>
-                    <span>{b.releaseLead}</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      className="w-16 py-1"
-                      value={activeStage.releaseAfterMinutes ?? ''}
-                      placeholder="0"
-                      aria-label={b.releaseAfterUnit}
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value, 10);
-                        updateStage(activeStage.id, {
-                          releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined,
-                        });
-                      }}
-                    />
-                    <span>{b.releaseUnitShort}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Mutually exclusive task groups — SUMMARY strip (change:
-                builder-dnd-groups). One line whose height is constant in the
-                number of TASKS (it only wraps with the number of groups, which is
-                realistically 2 or 3), replacing the old chip table that drew one
-                chip per task per group. Editing happens in the modal; the badges
-                on the task cards are where the membership is actually read. */}
-            {m > 1 && (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-[--rp-border] bg-[--surface-2]/40 px-3 py-2 text-xs text-zinc-400 text-start">
-                <span title={b.exclusiveHint}>{b.exclusiveLead}</span>
-                {activeEffectiveGroups.map((members, gi) => {
-                  const letter = b.exclusiveGroupLetter(gi);
-                  const st = GROUP_STYLES[gi % GROUP_STYLES.length];
-                  return (
-                    <button
-                      key={letter}
-                      type="button"
-                      aria-label={b.exclusiveChipAria(letter, members.length)}
-                      title={b.exclusiveChipAria(letter, members.length)}
-                      onClick={() => setGroupsOpen(true)}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5 hover:text-zinc-200"
-                    >
-                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
-                      <span className="tabular-nums">{b.taskCount(members.length)}</span>
-                    </button>
-                  );
-                })}
-                {activeEffectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
+            {/* ── Settings bar (change: wave-k stage-editor-redesign) ──────────
+                ONE thin row: a single "stage settings" affordance plus at-rest
+                summary chips that appear ONLY for a non-default setting. A calm
+                default stage shows just the settings toggle; a configured stage
+                advertises what is set with a tappable chip, so a folded setting is
+                never lost. The old three stacked setting boxes are gone from the
+                surface — they live in the drawer below. */}
+            {settings && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  className="ms-auto rounded-full border border-[--rp-border] px-2 py-0.5 hover:text-zinc-200"
-                  onClick={() => setGroupsOpen(true)}
-                >{b.exclusiveOpenEditor}</button>
+                  onClick={() => setSettingsOpen((o) => !o)}
+                  aria-expanded={settingsOpen}
+                  aria-label={b.stageSettingsAria(settings.activeCount)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
+                    ${settingsOpen
+                      ? 'border-rp-fire/50 bg-rp-fire/10 text-rp-fire'
+                      : 'border-[--rp-border] bg-[--surface-2]/60 text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
+                >
+                  <span aria-hidden>⚙</span>
+                  <span>{b.stageSettings}</span>
+                  {settings.activeCount > 0 && (
+                    <span aria-hidden className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rp-fire text-white text-[10px] font-bold leading-none tabular-nums">{settings.activeCount}</span>
+                  )}
+                  <span aria-hidden className={`transition-transform duration-200 ${settingsOpen ? 'rotate-90' : ''}`}>›</span>
+                </button>
+
+                {/* Completion chip — only when a partial count is set */}
+                {settings.requiredActive && (
+                  <SummaryChip onClick={() => setSettingsOpen(true)} title={b.completionChipAria(settings.requiredValue, m)}>
+                    <span aria-hidden>🎯</span>
+                    <span>{requiredChipText(settings.requiredValue, m)}</span>
+                  </SummaryChip>
+                )}
+                {/* Timed release chip — only when a positive delay is set */}
+                {settings.releaseActive && (
+                  <SummaryChip onClick={() => setSettingsOpen(true)} title={b.releaseChipAria(settings.releaseMinutes)}>
+                    <span aria-hidden>⏰</span>
+                    <span>{settings.releaseMinutes} {b.releaseUnitShort}</span>
+                  </SummaryChip>
+                )}
+                {/* Story chip — a folded story is invisible otherwise */}
+                {settings.storyActive && (
+                  <SummaryChip onClick={() => setSettingsOpen(true)} title={b.storyTitle}>
+                    <span aria-hidden>📖</span>
+                    <span>{b.storyTitle}</span>
+                  </SummaryChip>
+                )}
+                {/* Exclusive groups: the at-rest indicator is the coloured letter
+                    badge on each task card (colourblind safe: letter + border +
+                    colour). One small chip here jumps straight to the editor. */}
+                {settings.groupsActive && (
+                  <SummaryChip onClick={() => setGroupsOpen(true)} title={b.exclusiveChipAria(b.exclusiveGroupLetter(0), settings.groupCount)}>
+                    <span aria-hidden>🔀</span>
+                    <span>{b.taskCount(settings.groupCount)}</span>
+                  </SummaryChip>
+                )}
               </div>
             )}
 
+            {/* ── Settings drawer: soft height reveal (grid-rows 0fr → 1fr) ─────
+                A friendly, generously spaced list of the advanced controls, each
+                offered only when it applies to THIS stage. Everything the old
+                stacked boxes held is here, one tap away, and nothing is removed. */}
+            {settings && (
+              <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${settingsOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                <div className="overflow-hidden min-h-0">
+                  <div className="rounded-xl border border-[--rp-border] bg-[--surface-2]/40 p-3.5 space-y-3.5">
+                    <p className="text-xs text-[--ink-3]">{b.stageSettingsIntro}</p>
+
+                    {/* Task completion — how many of the pool a team must finish */}
+                    {settings.requiredApplies && (
+                      <SettingRow icon="🎯" title={b.settingCompletionTitle}>
+                        <div className="flex items-center flex-wrap gap-1.5 text-start">
+                          <span>{b.completionLead}</span>
+                          <Select
+                            className="w-auto py-1"
+                            value={String(req)}
+                            aria-label={b.settingCompletionTitle}
+                            onChange={(e) => {
+                              const n = parseInt(e.target.value);
+                              updateStage(activeStage.id, { requiredTaskCount: n >= m ? undefined : n });
+                            }}
+                          >
+                            {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
+                              <option key={n} value={n}>{n}</option>
+                            ))}
+                          </Select>
+                          <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
+                        </div>
+                      </SettingRow>
+                    )}
+
+                    {/* Timed release — when this later stage opens */}
+                    {settings.releaseApplies && (
+                      <SettingRow icon="⏰" title={b.settingReleaseTitle} hint={b.releaseAfterUnit}>
+                        <div className="flex items-center flex-wrap gap-1.5 text-start">
+                          <span>{b.releaseLead}</span>
+                          <Input
+                            type="number"
+                            min={0}
+                            className="w-16 py-1"
+                            value={activeStage.releaseAfterMinutes ?? ''}
+                            placeholder="0"
+                            aria-label={b.releaseAfterUnit}
+                            onChange={(e) => {
+                              const n = parseInt(e.target.value, 10);
+                              updateStage(activeStage.id, {
+                                releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined,
+                              });
+                            }}
+                          />
+                          <span>{b.releaseUnitShort}</span>
+                        </div>
+                      </SettingRow>
+                    )}
+
+                    {/* Alternative tasks — the exclusive-group editor lives in its
+                        own focused modal; here we show the current groups and a
+                        clear way in. The task cards carry the letter badges. */}
+                    {settings.groupsApply && (
+                      <SettingRow icon="🔀" title={b.settingGroupsTitle} hint={b.exclusiveHint}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {activeEffectiveGroups.map((members, gi) => {
+                            const letter = b.exclusiveGroupLetter(gi);
+                            const st = GROUP_STYLES[gi % GROUP_STYLES.length];
+                            return (
+                              <span
+                                key={letter}
+                                title={b.exclusiveChipAria(letter, members.length)}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5"
+                              >
+                                <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
+                                <span className="tabular-nums">{b.taskCount(members.length)}</span>
+                              </span>
+                            );
+                          })}
+                          {activeEffectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
+                          <button
+                            type="button"
+                            className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-rp-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
+                            onClick={() => setGroupsOpen(true)}
+                          >{b.exclusiveOpenEditor}</button>
+                        </div>
+                      </SettingRow>
+                    )}
+
+                    {/* Chapter story — the existing sub-disclosure, folded into the
+                        drawer so it no longer occupies the calm surface. */}
+                    <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Warnings stay ALWAYS visible — the unwinnable-stage guard must
+                surface whether or not the drawer is open (invariant). */}
             {/* Exclusion ceiling vs requiredTaskCount: an explicit count above what
                 the groups leave attainable ends the stage early (see
                 docs/wave-b/mutually-exclusive-tasks.md §2.2). Non-blocking. */}
@@ -1085,8 +1205,6 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
             {partialStageStarvationWarning(activeStage) && (
               <p className="text-xs text-amber-400">⚠ {b.partialStarvationWarn}</p>
             )}
-
-            <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
             </div>
 
             <div className="flex-1 min-h-0">
