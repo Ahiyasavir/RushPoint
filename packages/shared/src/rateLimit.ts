@@ -91,4 +91,31 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   getRunDiscoveryPois: { max: 60, windowMs: MIN }, // poll; reads a whole subcollection
   getJoinInfo: { max: 30, windowMs: MIN },
   updateLocation: { max: 120, windowMs: MIN }, // a live ping every few seconds is fine
+
+  // Public, unauthenticated-audience reads. These are the only callables an
+  // outsider can reach without joining a run, so they are the cheapest surface
+  // to bill someone through — each one fans out to a multi-doc Firestore read.
+  // Budgets are per-uid; an anonymous uid is free to mint, so treat these as a
+  // brake on casual scripting, not a hard wall (App Check is the real fix).
+  searchGallery: { max: 60, windowMs: MIN }, // browsing the gallery is bursty; reads ≤50 docs/call
+  searchTaskLibrary: { max: 60, windowMs: MIN }, // same, reads ≤100 docs/call
+  getPublicLeaderboard: { max: 60, windowMs: MIN }, // a shared board page polls this
+
+  // Live-ops / creator-console reads and mutations that were enforcing against
+  // an UNDEFINED bucket — i.e. silently fail-open (see rateLimitCoverage.test.ts).
+  // Values follow the existing split: polls generous, doc-writing actions tight.
+  listLiveRuns: { max: 60, windowMs: MIN }, // dashboard poll
+  getMyProfile: { max: 60, windowMs: MIN },
+  getRunHeatmap: { max: 30, windowMs: MIN }, // aggregates every location ping in a run
+  getRunSurveyResults: { max: 30, windowMs: MIN },
+  getRunTrackables: { max: 60, windowMs: MIN }, // poll
+  getRunZones: { max: 60, windowMs: MIN }, // poll
+  startInstantPlay: { max: 10, windowMs: MIN }, // provisions a whole run — keep tight
+  createTrackable: { max: 20, windowMs: MIN }, // writes a doc per call
+  createZone: { max: 20, windowMs: MIN }, // writes a doc per call
+  deleteZone: { max: 20, windowMs: MIN },
+  captureZone: { max: 30, windowMs: MIN }, // in-play action, contested by design
+  joinTeamAsDevice: { max: 10, windowMs: MIN }, // matches joinRun — same "get onto a team" weight
+  transferController: { max: 20, windowMs: MIN },
+  claimController: { max: 20, windowMs: MIN },
 };

@@ -1779,6 +1779,9 @@ export const refreshLeaderboard = loggedCallable('refreshLeaderboard', async (da
 
 export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  // Shareable board pages poll this, so the budget is generous — but it was
+  // previously unmetered, and it reads the run + every team on it per call.
+  await enforceRateLimit(context.auth.uid, 'getPublicLeaderboard');
   const { code } = data as { code: string };
   const normalizedCode = validate(() => normalizeAccessCode(code));
 

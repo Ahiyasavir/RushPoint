@@ -4,6 +4,7 @@
 import * as functions from 'firebase-functions';
 import { FieldValue } from 'firebase-admin/firestore';
 import { loggedCallable } from '../obs/log';
+import { enforceRateLimit } from '../rateLimitStore';
 import { db } from '../firebase';
 import type { PublicGame, PublicTask } from '@rushpoint/shared';
 
@@ -21,7 +22,15 @@ export function publicTextMatch(haystacks: Array<string | undefined | null>, que
 
 // ─── searchGallery ───────────────────────────────────────────────────────────
 
-export const searchGallery = loggedCallable('searchGallery', async (data, _context) => {
+// The gallery is PUBLIC content, but the callable is not a public firehose: it
+// fans out to a ≤50-doc Firestore read per call and was previously reachable by
+// anyone on the internet with no auth and no budget. Requiring an auth context
+// (anonymous sign-in is enough — participants already have one) gives us a uid
+// to meter, which is the only thing that makes a rate limit possible at all.
+export const searchGallery = loggedCallable('searchGallery', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  await enforceRateLimit(context.auth.uid, 'searchGallery');
+
   const { query = '', tags = [], limit = 20 } = data as {
     query?: string;
     tags?: string[];
@@ -49,7 +58,11 @@ export const searchGallery = loggedCallable('searchGallery', async (data, _conte
 
 // ─── searchTaskLibrary ────────────────────────────────────────────────────────
 
-export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data, _context) => {
+// Same reasoning as searchGallery — and a wider blast radius (≤100 docs/call).
+export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  await enforceRateLimit(context.auth.uid, 'searchTaskLibrary');
+
   const { query = '', tags = [], limit = 30 } = data as {
     query?: string;
     tags?: string[];
