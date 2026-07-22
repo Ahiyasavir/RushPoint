@@ -163,7 +163,7 @@ export default function DashboardPage() {
     <div className="animate-fade-up">
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <div className="relative mb-10 pb-10 border-b border-[--rp-border]">
+      <div className="relative overflow-hidden mb-10 pb-10 border-b border-[--rp-border]">
         <div className="absolute -top-8 -left-8 w-96 h-48 bg-gradient-radial from-rp-fire/8 to-transparent pointer-events-none" />
 
         <div className="relative flex flex-col sm:flex-row sm:items-end justify-between gap-6">

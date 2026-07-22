@@ -57,7 +57,7 @@ export default function App() {
   return (
     // The Builder is an app-like, fixed-height workspace (no page scroll); every
     // other route is a normal scrolling document.
-    <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'h-screen overflow-hidden flex flex-col' : 'min-h-screen'}`}>
+    <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'h-screen overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}`}>
 
       {/* ── Animated mesh gradient ── */}
       <div className="rp-mesh-layer" aria-hidden="true">
