@@ -10,7 +10,7 @@
 // disclosure rules are testable without rendering a pixel.
 //
 // Run by scripts/run-unit-tests.mjs via `npm test`.
-import { stageSettingsState, requiredChipText } from '../apps/creator-web/src/lib/stageSettings';
+import { stageSettingsState, stageChips } from '../apps/creator-web/src/lib/stageSettings';
 import { blankTask } from '../apps/creator-web/src/lib/wizardLogic';
 import type { Stage } from '@rushpoint/shared';
 
@@ -32,6 +32,7 @@ const calm: Stage = { id: 's0', order: 0, title: 'Start', tasks: tasks(1) };
   ok(s.groupsApply === false, 'grouping does not apply to a one-task stage');
   ok(s.storyActive === false, 'a fresh stage has no story');
   ok(s.activeCount === 0, 'a calm default stage has zero active advanced settings');
+  ok(stageChips(s).length === 0, 'a calm default stage surfaces no status chips');
 }
 
 // ── A rich, NON-first stage: 6 tasks, required 3, two groups, a story ────────
@@ -56,6 +57,10 @@ const rich: Stage = {
   ok(s.groupsActive === true, 'grouping is active when an effective group exists');
   ok(s.storyActive === true, 'story is active when a field is authored');
   ok(s.activeCount === 3, 'required + groups + story = three active settings (release off)');
+  // The at-rest read-only status chips are DERIVED from the same state, in a fixed
+  // order — one door in (the ⚙ pill); the chips only advertise a folded setting.
+  ok(JSON.stringify(stageChips(s)) === JSON.stringify(['completion', 'story', 'groups']),
+    'rich stage surfaces completion + story + groups chips (release off), in order');
 }
 
 // ── requiredTaskCount default / undefined is NOT active ──────────────────────
@@ -71,6 +76,7 @@ ok(stageSettingsState({ ...rich, requiredTaskCount: undefined }, { isFirstStage:
   const s = stageSettingsState({ ...calm, tasks: tasks(2), releaseAfterMinutes: 15 }, { isFirstStage: false });
   ok(s.releaseActive === true, 'a positive delay on a non-first stage is active');
   ok(s.releaseMinutes === 15, 'the configured delay is surfaced');
+  ok(stageChips(s).includes('release'), 'a timed non-first stage surfaces the release chip');
 }
 ok(stageSettingsState({ ...calm, releaseAfterMinutes: 15 }, { isFirstStage: true }).releaseActive === false,
   'a delay on the first stage is inert (release never applies there)');
@@ -83,10 +89,6 @@ ok(stageSettingsState({ ...calm, tasks: tasks(2), releaseAfterMinutes: 0 }, { is
   ok(s.groupCount === 0, 'a one-member group is inert and not counted');
   ok(s.groupsActive === false, 'an inert group does not make grouping active');
 }
-
-// ── Summary-chip fraction text ────────────────────────────────────────────────
-ok(requiredChipText(3, 6) === '3/6', 'chip fraction reads N/M');
-ok(requiredChipText(1, 2) === '1/2', 'chip fraction handles small pools');
 
 console.log(failed === 0
   ? `\n✅ ALL STAGE SETTINGS TESTS PASSED (${passed})`

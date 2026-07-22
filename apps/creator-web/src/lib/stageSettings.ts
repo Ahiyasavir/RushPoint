@@ -81,8 +81,18 @@ export function stageSettingsState(stage: Stage, opts: { isFirstStage: boolean }
   };
 }
 
-/** Fraction shown on the completion summary chip, e.g. "3/6". Language-neutral:
- *  the surrounding label + aria come from i18n, only the digits live here. */
-export function requiredChipText(requiredValue: number, taskCount: number): string {
-  return `${requiredValue}/${taskCount}`;
+/** One kind of at-rest status chip, in the order they surface on the stage header. */
+export type StageChipKind = 'completion' | 'release' | 'story' | 'groups';
+
+/** The read-only status chips a stage advertises — one per non-default setting, in a
+ *  fixed order. They are indicators only: the single door into the settings is the ⚙
+ *  pill (which opens the side panel), so the chips never open anything themselves.
+ *  Derived here (not inline in the view) so "which chips show" is testable. */
+export function stageChips(s: StageSettingsState): StageChipKind[] {
+  const chips: StageChipKind[] = [];
+  if (s.requiredActive) chips.push('completion');
+  if (s.releaseActive) chips.push('release');
+  if (s.storyActive) chips.push('story');
+  if (s.groupsActive) chips.push('groups');
+  return chips;
 }

@@ -30,7 +30,8 @@ import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
 import { blankTask, isTaskInteractionValid, isTaskLocationValid } from '../lib/wizardLogic';
 import { storyFieldCount } from '../lib/wizardSections';
-import { stageSettingsState, requiredChipText } from '../lib/stageSettings';
+import { stageSettingsState, stageChips } from '../lib/stageSettings';
+import type { StageSettingsState } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
@@ -717,23 +718,20 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 
 // ── Step 2: Stages & Tasks ──
 
-// A calm, tappable at-rest summary pill (change: wave-k stage-editor-redesign).
-// It appears ONLY when a stage setting is non-default, so a default stage shows
-// none of them, and tapping it opens the stage-settings drawer to adjust it.
-function SummaryChip({ onClick, title, children }: { onClick: () => void; title: string; children: ReactNode }) {
+// A calm, READ-ONLY at-rest status chip (change: wave-k stage-settings-sidepanel).
+// It appears ONLY when a stage setting is non-default, so a default stage shows none
+// of them. It advertises a folded setting so nothing is lost — it is NOT a button:
+// the single door into the settings is the ⚙ pill (which opens the side panel), so
+// the chips no longer duplicate that entry point ("two doors to one room").
+function StatusChip({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <span
       title={title}
-      aria-label={title}
-      className="inline-flex items-center gap-1 rounded-full border border-[--rp-border] bg-[--surface-2]/60
-        ps-2 pe-2.5 py-1 text-[11px] font-medium text-[--ink-2] tabular-nums
-        hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+      className="inline-flex items-center gap-1 rounded-full border border-[--rp-border] bg-[--surface-2]/40
+        ps-2 pe-2.5 py-1 text-[11px] font-medium text-[--ink-2] tabular-nums"
     >
       {children}
-    </button>
+    </span>
   );
 }
 
@@ -948,6 +946,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
     if (!stage) return;
     const t = blankTask();
     updateStage(stageId, { tasks: [...stage.tasks, t] });
+    setSettingsOpen(false);
     setEditing({ stageId, taskId: t.id });
   }
 
@@ -955,7 +954,6 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
   const editingTask = editingStage?.tasks.find((t) => t.id === editing?.taskId);
 
   const m = activeStage ? activeStage.tasks.length : 0;
-  const req = activeStage ? (activeStage.requiredTaskCount ?? m) : 0;
   const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
   // Scheduled-release: the first stage opens at run start, so timed release only
   // applies to later stages (a timed "drop" of a chapter mid-game / on day N).
@@ -1038,7 +1036,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setSettingsOpen((o) => !o)}
+                  // The single door into the settings: opening the side panel closes
+                  // any open task editor so only one right-hand pane is ever mounted.
+                  onClick={() => { setEditing(null); setSettingsOpen((o) => !o); }}
                   aria-expanded={settingsOpen}
                   aria-label={b.stageSettingsAria(settings.activeCount)}
                   className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors
@@ -1055,136 +1055,53 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
                   <span aria-hidden className={`transition-transform duration-200 ${settingsOpen ? 'rotate-90' : ''}`}>›</span>
                 </button>
 
-                {/* Completion chip — only when a partial count is set */}
-                {settings.requiredActive && (
-                  <SummaryChip onClick={() => setSettingsOpen(true)} title={b.completionChipAria(settings.requiredValue, m)}>
-                    <span aria-hidden>🎯</span>
-                    <span>{requiredChipText(settings.requiredValue, m)}</span>
-                  </SummaryChip>
-                )}
-                {/* Timed release chip — only when a positive delay is set */}
-                {settings.releaseActive && (
-                  <SummaryChip onClick={() => setSettingsOpen(true)} title={b.releaseChipAria(settings.releaseMinutes)}>
-                    <span aria-hidden>⏰</span>
-                    <span>{settings.releaseMinutes} {b.releaseUnitShort}</span>
-                  </SummaryChip>
-                )}
-                {/* Story chip — a folded story is invisible otherwise */}
-                {settings.storyActive && (
-                  <SummaryChip onClick={() => setSettingsOpen(true)} title={b.storyTitle}>
-                    <span aria-hidden>📖</span>
-                    <span>{b.storyTitle}</span>
-                  </SummaryChip>
-                )}
-                {/* Exclusive groups: the at-rest indicator is the coloured letter
-                    badge on each task card (colourblind safe: letter + border +
-                    colour). One small chip here jumps straight to the editor. */}
-                {settings.groupsActive && (
-                  <SummaryChip onClick={() => setGroupsOpen(true)} title={b.exclusiveChipAria(b.exclusiveGroupLetter(0), settings.groupCount)}>
-                    <span aria-hidden>🔀</span>
-                    <span>{b.taskCount(settings.groupCount)}</span>
-                  </SummaryChip>
-                )}
+                {/* Read-only status chips — one per non-default setting, derived by
+                    the pure `stageChips`. They only advertise a folded setting; the
+                    ⚙ pill above is the single way to open the settings to change it.
+                    The completion chip reads in words ("3 מתוך 6 משימות") instead of
+                    the old ambiguous 🎯 fraction. Exclusive groups also show their
+                    colourblind-safe letter badge on each task card. */}
+                {stageChips(settings).map((kind) => {
+                  switch (kind) {
+                    case 'completion':
+                      return (
+                        <StatusChip key={kind} title={b.completionChipAria(settings.requiredValue, m)}>
+                          <span>{b.completionChipLabel(settings.requiredValue, m)}</span>
+                        </StatusChip>
+                      );
+                    case 'release':
+                      return (
+                        <StatusChip key={kind} title={b.releaseChipAria(settings.releaseMinutes)}>
+                          <span aria-hidden>⏰</span>
+                          <span>{settings.releaseMinutes} {b.releaseUnitShort}</span>
+                        </StatusChip>
+                      );
+                    case 'story':
+                      return (
+                        <StatusChip key={kind} title={b.storyTitle}>
+                          <span aria-hidden>📖</span>
+                          <span>{b.storyTitle}</span>
+                        </StatusChip>
+                      );
+                    case 'groups':
+                      return (
+                        <StatusChip key={kind} title={b.exclusiveChipAria(b.exclusiveGroupLetter(0), settings.groupCount)}>
+                          <span aria-hidden>🔀</span>
+                          <span>{b.taskCount(settings.groupCount)}</span>
+                        </StatusChip>
+                      );
+                    default:
+                      return null;
+                  }
+                })}
               </div>
             )}
 
-            {/* ── Settings drawer: soft height reveal (grid-rows 0fr → 1fr) ─────
-                A friendly, generously spaced list of the advanced controls, each
-                offered only when it applies to THIS stage. Everything the old
-                stacked boxes held is here, one tap away, and nothing is removed. */}
-            {settings && (
-              <div className={`grid transition-[grid-template-rows] duration-300 ease-out ${settingsOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                <div className="overflow-hidden min-h-0">
-                  <div className="rounded-xl border border-[--rp-border] bg-[--surface-2]/40 p-3.5 space-y-3.5">
-                    <p className="text-xs text-[--ink-3]">{b.stageSettingsIntro}</p>
-
-                    {/* Task completion — how many of the pool a team must finish */}
-                    {settings.requiredApplies && (
-                      <SettingRow icon="🎯" title={b.settingCompletionTitle}>
-                        <div className="flex items-center flex-wrap gap-1.5 text-start">
-                          <span>{b.completionLead}</span>
-                          <Select
-                            className="w-auto py-1"
-                            value={String(req)}
-                            aria-label={b.settingCompletionTitle}
-                            onChange={(e) => {
-                              const n = parseInt(e.target.value);
-                              updateStage(activeStage.id, { requiredTaskCount: n >= m ? undefined : n });
-                            }}
-                          >
-                            {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
-                              <option key={n} value={n}>{n}</option>
-                            ))}
-                          </Select>
-                          <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
-                        </div>
-                      </SettingRow>
-                    )}
-
-                    {/* Timed release — when this later stage opens */}
-                    {settings.releaseApplies && (
-                      <SettingRow icon="⏰" title={b.settingReleaseTitle} hint={b.releaseAfterUnit}>
-                        <div className="flex items-center flex-wrap gap-1.5 text-start">
-                          <span>{b.releaseLead}</span>
-                          <Input
-                            type="number"
-                            min={0}
-                            className="w-16 py-1"
-                            value={activeStage.releaseAfterMinutes ?? ''}
-                            placeholder="0"
-                            aria-label={b.releaseAfterUnit}
-                            onChange={(e) => {
-                              const n = parseInt(e.target.value, 10);
-                              updateStage(activeStage.id, {
-                                releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined,
-                              });
-                            }}
-                          />
-                          <span>{b.releaseUnitShort}</span>
-                        </div>
-                      </SettingRow>
-                    )}
-
-                    {/* Alternative tasks — the exclusive-group editor lives in its
-                        own focused modal; here we show the current groups and a
-                        clear way in. The task cards carry the letter badges. */}
-                    {settings.groupsApply && (
-                      <SettingRow icon="🔀" title={b.settingGroupsTitle} hint={b.exclusiveHint}>
-                        <div className="flex flex-wrap items-center gap-2">
-                          {activeEffectiveGroups.map((members, gi) => {
-                            const letter = b.exclusiveGroupLetter(gi);
-                            const st = GROUP_STYLES[gi % GROUP_STYLES.length];
-                            return (
-                              <span
-                                key={letter}
-                                title={b.exclusiveChipAria(letter, members.length)}
-                                className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5"
-                              >
-                                <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
-                                <span className="tabular-nums">{b.taskCount(members.length)}</span>
-                              </span>
-                            );
-                          })}
-                          {activeEffectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
-                          <button
-                            type="button"
-                            className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-rp-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
-                            onClick={() => setGroupsOpen(true)}
-                          >{b.exclusiveOpenEditor}</button>
-                        </div>
-                      </SettingRow>
-                    )}
-
-                    {/* Chapter story — the existing sub-disclosure, folded into the
-                        drawer so it no longer occupies the calm surface. */}
-                    <StageStory stage={activeStage} onChange={(n) => updateStage(activeStage.id, { narrative: n })} />
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* The advanced controls now live in the StageSettingsPanel side pane
+                (opened by the ⚙ pill), so they no longer sit on the calm surface. */}
 
             {/* Warnings stay ALWAYS visible — the unwinnable-stage guard must
-                surface whether or not the drawer is open (invariant). */}
+                surface whether or not the panel is open (invariant). */}
             {/* Exclusion ceiling vs requiredTaskCount: an explicit count above what
                 the groups leave attainable ends the stage early (see
                 docs/wave-b/mutually-exclusive-tasks.md §2.2). Non-blocking. */}
@@ -1211,7 +1128,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
               <TaskCanvas
                 tasks={activeStage.tasks}
                 activeTaskId={editing?.stageId === activeStage.id ? editing?.taskId : undefined}
-                onSelect={(taskId) => setEditing({ stageId: activeStage.id, taskId })}
+                onSelect={(taskId) => { setSettingsOpen(false); setEditing({ stageId: activeStage.id, taskId }); }}
                 stageId={activeStage.id}
                 groupOf={groupOf}
                 moveTargets={game.stages
@@ -1232,6 +1149,22 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
         <TaskLibrary
           onInsert={(task) => insertFromLibrary(libraryFor, task)}
           onClose={() => setLibraryFor(null)}
+        />
+      )}
+
+      {/* Stage settings as a slide-in side pane — the same shell as the task
+          editor (change: wave-k stage-settings-sidepanel). It and the task editor
+          are mutually exclusive (one right-hand pane), so opening it shrinks the
+          centre canvas horizontally instead of pushing the task grid down. */}
+      {settingsOpen && activeStage && settings && !editing && (
+        <StageSettingsPanel
+          key={activeStage.id}
+          stage={activeStage}
+          settings={settings}
+          effectiveGroups={activeEffectiveGroups}
+          onUpdateStage={(p) => updateStage(activeStage.id, p)}
+          onOpenGroups={() => setGroupsOpen(true)}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -1347,37 +1280,176 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Inline third pane: a width-clipping wrapper (no sibling reflow) holds a
-  // fixed-width panel that slides in via transform. The centre canvas (flex-1
-  // min-w-0) naturally yields the space, matching the redesign mockup.
+  // Inline third pane, via the shared SlidePanel shell (change: wave-k
+  // stage-settings-sidepanel) — the stage-settings pane reuses the exact same shell
+  // so the two disclosures slide/size/collapse identically. The centre canvas
+  // (flex-1 min-w-0) yields the space; no separate title bar here (the close control
+  // lives in the wizard's tab row, reclaiming ~45px of chrome for the content).
+  return (
+    <SlidePanel shown={shown}>
+      <div className="flex-1 min-h-0 p-2.5">
+        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} />
+        {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
+      </div>
+    </SlidePanel>
+  );
+}
+
+// Shared slide-in side-pane shell (change: wave-k stage-settings-sidepanel).
+// Extracted from the task editor so the stage-settings pane presents identically:
+// a width-clipping <aside> that grows from 0 (no sibling reflow, the centre canvas
+// yields), holding a fixed-width panel that slides in via transform. From lg up it
+// is an inline pane; below lg it becomes a full-height sheet pinned to the inline
+// end (a hard 500px pane would otherwise be pushed off a phone screen). The caller
+// owns `shown` so it can drive the mount slide-in. The `!` widths win over the
+// inline style, which only drives the lg open/close animation.
+function SlidePanel({ shown, children }: { shown: boolean; children: ReactNode }) {
   return (
     <aside
-      // From lg up this is the inline third pane the redesign describes. Below lg
-      // the three panes no longer fit side by side, so the editor becomes a
-      // full-height sheet pinned to the inline end instead — a hard 500px pane
-      // used to be pushed off the edge of a phone screen entirely, taking the
-      // whole task editor with it (change: task-builder-ui). The `!` width wins
-      // over the inline style, which only drives the lg open/close animation.
       className="shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out
         max-lg:fixed max-lg:inset-y-0 max-lg:end-0 max-lg:z-40 max-lg:!w-[min(100vw,32rem)] max-lg:p-2 max-lg:shadow-soft"
       style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
     >
-      {/* Full-height panel: it matches the fixed-height workspace row, so the
-          wizard's footer + all content stay visible (never clipped). It is wide
-          (460px) so the wizard has room to lay out without vertical scrolling. */}
-      {/* No separate title bar — the close control lives in the wizard's tab row,
-          reclaiming ~45px of chrome for the actual content. */}
       <div
         style={{ willChange: 'transform', width: 'min(500px, calc(100vw - 1.5rem))' }}
         className={`h-full flex flex-col rounded-xl border border-[--rp-border] bg-[--surface-1] overflow-hidden max-lg:!w-full
           transition-transform duration-200 ease-out ${shown ? 'translate-x-0' : 'translate-x-full'}`}
       >
-        <div className="flex-1 min-h-0 p-2.5">
-          <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} />
-          {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
-        </div>
+        {children}
       </div>
     </aside>
+  );
+}
+
+// Stage settings, in the SAME slide-in shell as the task editor (change: wave-k
+// stage-settings-sidepanel). Opened by the ⚙ pill; Esc closes it, mirroring the
+// task editor. Holds every advanced control (completion count, timed release,
+// exclusive groups entry, chapter story) — each offered only when it applies to
+// this stage. Presentation only; all state still flows through `onUpdateStage`.
+function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, onOpenGroups, onClose }: {
+  stage: Stage;
+  settings: StageSettingsState;
+  effectiveGroups: string[][];
+  onUpdateStage: (p: Partial<Stage>) => void;
+  onOpenGroups: () => void;
+  onClose: () => void;
+}) {
+  const b = useT().builder;
+  const m = stage.tasks.length;
+  const req = stage.requiredTaskCount ?? m;
+  const [shown, setShown] = useState(false);
+
+  // Slide in on mount (drives the shared shell's width + transform).
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setShown(true));
+    return () => cancelAnimationFrame(r);
+  }, []);
+
+  // Esc closes the pane, matching the task editor.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <SlidePanel shown={shown}>
+      <div className="flex-1 min-h-0 p-2.5 flex flex-col">
+        {/* Header: ⚙ title + close ✕ — one compact row, like the wizard's tab row. */}
+        <div className="flex items-center gap-1.5 pb-2 shrink-0">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span aria-hidden className="text-base leading-none">⚙</span>
+            <span className="text-sm font-semibold text-[--ink-1] truncate">{b.stageSettings}</span>
+          </div>
+          <button onClick={onClose} aria-label={b.closePanel}
+            className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+            ✕
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto pe-0.5 space-y-3.5">
+          <p className="text-xs text-[--ink-3]">{b.stageSettingsIntro}</p>
+
+          {/* Task completion — how many of the pool a team must finish */}
+          {settings.requiredApplies && (
+            <SettingRow icon="☑️" title={b.settingCompletionTitle}>
+              <div className="flex items-center flex-wrap gap-1.5 text-start">
+                <span>{b.completionLead}</span>
+                <Select
+                  className="w-auto py-1"
+                  value={String(req)}
+                  aria-label={b.settingCompletionTitle}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value);
+                    onUpdateStage({ requiredTaskCount: n >= m ? undefined : n });
+                  }}
+                >
+                  {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </Select>
+                <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
+              </div>
+            </SettingRow>
+          )}
+
+          {/* Timed release — when this later stage opens */}
+          {settings.releaseApplies && (
+            <SettingRow icon="⏰" title={b.settingReleaseTitle} hint={b.releaseAfterUnit}>
+              <div className="flex items-center flex-wrap gap-1.5 text-start">
+                <span>{b.releaseLead}</span>
+                <Input
+                  type="number"
+                  min={0}
+                  className="w-16 py-1"
+                  value={stage.releaseAfterMinutes ?? ''}
+                  placeholder="0"
+                  aria-label={b.releaseAfterUnit}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    onUpdateStage({ releaseAfterMinutes: Number.isFinite(n) && n > 0 ? n : undefined });
+                  }}
+                />
+                <span>{b.releaseUnitShort}</span>
+              </div>
+            </SettingRow>
+          )}
+
+          {/* Alternative tasks — the exclusive-group editor lives in its own focused
+              modal; here we show the current groups and a clear way in. The task
+              cards carry the colourblind-safe letter badges. */}
+          {settings.groupsApply && (
+            <SettingRow icon="🔀" title={b.settingGroupsTitle} hint={b.exclusiveHint}>
+              <div className="flex flex-wrap items-center gap-2">
+                {effectiveGroups.map((members, gi) => {
+                  const letter = b.exclusiveGroupLetter(gi);
+                  const st = GROUP_STYLES[gi % GROUP_STYLES.length];
+                  return (
+                    <span
+                      key={letter}
+                      title={b.exclusiveChipAria(letter, members.length)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5"
+                    >
+                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
+                      <span className="tabular-nums">{b.taskCount(members.length)}</span>
+                    </span>
+                  );
+                })}
+                {effectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
+                <button
+                  type="button"
+                  className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-rp-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
+                  onClick={onOpenGroups}
+                >{b.exclusiveOpenEditor}</button>
+              </div>
+            </SettingRow>
+          )}
+
+          {/* Chapter story — the existing sub-disclosure. */}
+          <StageStory stage={stage} onChange={(n) => onUpdateStage({ narrative: n })} />
+        </div>
+      </div>
+    </SlidePanel>
   );
 }
 
