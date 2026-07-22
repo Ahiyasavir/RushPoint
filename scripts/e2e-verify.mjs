@@ -538,7 +538,7 @@ async function main() {
   check('getMyTeamState returns the team', state?.team?.displayName === 'The Test Lions');
   check('team is active after startTeams', state?.team?.status === 'active', state?.team?.status);
   check('first stage is active', state?.team?.stages?.[0]?.status === 'active');
-  const activeTask = state?.activeStageTasks?.[0];
+  const activeTask = state?.activeStageTasks?.find((t) => t.id === CODE_TASK_ID);
   check('active task content is exposed', activeTask?.id === CODE_TASK_ID);
   check('secretCode is stripped from participant payload', activeTask?.smart?.secretCode === undefined);
   // Allowlist (not blocklist): a NEW field on Task fails here until it is
@@ -575,7 +575,7 @@ async function main() {
 
   let d2State = await device2.call('getMyTeamState', { code: accessCode });
   check('viewer device sees the same team state',
-    d2State?.team?.displayName === 'The Test Lions' && d2State?.activeStageTasks?.[0]?.id === CODE_TASK_ID);
+    d2State?.team?.displayName === 'The Test Lions' && d2State?.activeStageTasks?.find((t) => t.id === CODE_TASK_ID)?.id === CODE_TASK_ID);
   check('viewer device is reported as viewer', d2State?.myRole === 'viewer', d2State?.myRole);
   check('team doc lists both device uids',
     Array.isArray(d2State?.team?.deviceUids) &&
@@ -1228,7 +1228,7 @@ async function main() {
 
   // The hint TEXT must not be leaked in the task payload.
   const s3 = await player3.call('getMyTeamState', { code: c3 });
-  const htask = s3?.activeStageTasks?.[0];
+  const htask = s3?.activeStageTasks?.find((t) => t.id === 'h-1');
   check('hint text is NOT leaked to participants', htask?.hint === undefined && htask?.hasHint === true, JSON.stringify({ hint: htask?.hint, hasHint: htask?.hasHint }));
 
   const hintRes = await player3.call('requestTaskHint', { ownerUid: creatorCred.user.uid, gameId: g3, runId: r3, taskId: 'h-1' });
@@ -2162,6 +2162,115 @@ async function main() {
     check('feed: prune deletes every feed item', afterPrune.length === 0, String(afterPrune.length));
   });
 
+  // wave-f S1: a HIDDEN-LOCATION photo task must NOT enter the run-wide live feed —
+  // its photo (taken AT the secret spot) leaks the location to teams still hunting
+  // it, reopening the wave-D hidden-task secrecy the feed guard (shouldFeedTask)
+  // exists to protect. FULL exclusion: neither the task's id NOR its title may
+  // reach the feed. Guarded at BOTH feed-write sites, so this scenario exercises
+  // the submitStationPhoto autoApprove path AND the reviewStationSubmission staff
+  // approve path — and, at each site, asserts a NORMAL task still feeds (the guard
+  // must not over-suppress). See docs/wave-f/feed-title-leak.md.
+  await scenario('hidden-location task is excluded from the live photo feed', async () => {
+    const OWNER = creatorCred.user.uid;
+    const HIDDEN_TITLE = 'Secret waterfall selfie';
+    const NORMAL_TITLE = 'Snap the fountain';
+    const feedPhotoUrl = (rid, uid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rid}/teams/${uid}/${name}`)}?alt=media`;
+    const hiddenPhotoTask = (id, title, order, autoApprove) => ({
+      id, title, type: 'photo', triggerMode: 'radius',
+      hideLocation: true, coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40,
+      locationClue: 'Where water never stops',
+      difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3,
+      smart: { enabled: true, verificationType: 'photo_upload', autoApprove },
+    });
+    const normalPhotoTask = (id, title, order, autoApprove) => ({
+      id, title, type: 'photo',
+      coordinates: { lat: 31.79 + order * 0.005, lng: 35.2 + order * 0.005 },
+      difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3,
+      smart: { enabled: true, verificationType: 'photo_upload', autoApprove },
+    });
+
+    // ── PATH 1: submitStationPhoto autoApprove ────────────────────────────────
+    // Stage 1 = normal autoApprove photo (must feed). Stage 2 (final) = hidden
+    // autoApprove photo (must NOT feed).
+    const { gameId: ag } = await creator.call('createGame', { title: 'Hidden Feed Auto', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: ag, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'ha-1', order: 0, title: 'Normal shot', tasks: [normalPhotoTask('ha-normal', NORMAL_TITLE, 0, true)] },
+        { id: 'ha-2', order: 1, title: 'Secret shot', isFinal: true, tasks: [hiddenPhotoTask('ha-hidden', HIDDEN_TITLE, 1, true)] },
+      ],
+    });
+    const { runId: ar, accessCode: ac } = await creator.call('launchRun', { gameId: ag });
+    const ap = makeParty('hiddenFeedAuto');
+    const apCred = await signInAnonymously(ap.auth);
+    const apUid = apCred.user.uid;
+    await ap.call('joinRun', { code: ac, displayName: 'Auto Seekers' });
+    await creator.call('startTeams', { gameId: ag, runId: ar });
+    const ACTX = { ownerUid: OWNER, gameId: ag, runId: ar };
+    const aFeedCol = `users/${OWNER}/games/${ag}/runs/${ar}/feedItems`;
+
+    // Normal task completes + broadcasts.
+    const autoNormal = await ap.call('submitStationPhoto', { ...ACTX, teamId: apUid, taskId: 'ha-normal', photoUrl: feedPhotoUrl(ar, apUid, 'n.jpg') });
+    check('hidden-feed(auto): normal photo auto-approves', autoNormal?.autoApproved === true, JSON.stringify(autoNormal));
+    // Arrive at the hidden spot so it is revealed + completable, then submit it.
+    const arr = await ap.call('reportArrival', { ...ACTX, taskId: 'ha-hidden', lat: 31.78, lng: 35.21 });
+    check('hidden-feed(auto): arrival at the hidden spot latches', arr?.arrived === true, JSON.stringify(arr));
+    const autoHidden = await ap.call('submitStationPhoto', { ...ACTX, teamId: apUid, taskId: 'ha-hidden', photoUrl: feedPhotoUrl(ar, apUid, 'h.jpg') });
+    check('hidden-feed(auto): hidden photo still auto-approves (completion unaffected)', autoHidden?.autoApproved === true, JSON.stringify(autoHidden));
+
+    const aFeed = await creator.getColAt(aFeedCol);
+    const aTaskIds = aFeed.map((d) => d.taskId);
+    check('hidden-feed(auto): the NORMAL task feeds (guard does not over-suppress)',
+      aTaskIds.includes('ha-normal'), JSON.stringify(aTaskIds));
+    check('hidden-feed(auto): the HIDDEN task is excluded from the feed (photo leaks the secret spot)',
+      !aTaskIds.includes('ha-hidden'), JSON.stringify(aTaskIds));
+    check('hidden-feed(auto): the hidden task TITLE never reaches the feed',
+      !aFeed.some((d) => d.taskTitle === HIDDEN_TITLE), JSON.stringify(aFeed.map((d) => d.taskTitle)));
+
+    // ── PATH 2: reviewStationSubmission (staff approve) ───────────────────────
+    // Mirror the exclusion on the OTHER feed-write site. Stage 1 = hidden
+    // staff-reviewed photo (must NOT feed on approval). Stage 2 (final) = normal
+    // staff-reviewed photo (must feed on approval).
+    const { gameId: rg } = await creator.call('createGame', { title: 'Hidden Feed Review', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: rg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'hr-1', order: 0, title: 'Secret review', tasks: [hiddenPhotoTask('hr-hidden', HIDDEN_TITLE, 0, false)] },
+        { id: 'hr-2', order: 1, title: 'Normal review', isFinal: true, tasks: [normalPhotoTask('hr-normal', NORMAL_TITLE, 1, false)] },
+      ],
+    });
+    const { runId: rr, accessCode: rc } = await creator.call('launchRun', { gameId: rg });
+    const rp = makeParty('hiddenFeedReview');
+    const rpCred = await signInAnonymously(rp.auth);
+    const rpUid = rpCred.user.uid;
+    await rp.call('joinRun', { code: rc, displayName: 'Review Seekers' });
+    await creator.call('startTeams', { gameId: rg, runId: rr });
+    const RCTX = { ownerUid: OWNER, gameId: rg, runId: rr };
+    const rFeedCol = `users/${OWNER}/games/${rg}/runs/${rr}/feedItems`;
+
+    // Hidden staff-reviewed task: arrive, submit (pending), owner approves.
+    const rArr = await rp.call('reportArrival', { ...RCTX, taskId: 'hr-hidden', lat: 31.78, lng: 35.21 });
+    check('hidden-feed(review): arrival at the hidden spot latches', rArr?.arrived === true, JSON.stringify(rArr));
+    await rp.call('submitStationPhoto', { ...RCTX, teamId: rpUid, taskId: 'hr-hidden', photoUrl: feedPhotoUrl(rr, rpUid, 'h.jpg') });
+    const revHidden = await creator.call('reviewStationSubmission', { ...RCTX, teamId: rpUid, taskId: 'hr-hidden', approved: true });
+    check('hidden-feed(review): staff approves the hidden photo', revHidden?.approved === true, JSON.stringify(revHidden));
+
+    const feedAfterHidden = await creator.getColAt(rFeedCol);
+    check('hidden-feed(review): approving the HIDDEN task broadcasts NO feed item',
+      !feedAfterHidden.some((d) => d.taskId === 'hr-hidden'), JSON.stringify(feedAfterHidden.map((d) => d.taskId)));
+    check('hidden-feed(review): the hidden task TITLE never reaches the feed on the staff path',
+      !feedAfterHidden.some((d) => d.taskTitle === HIDDEN_TITLE), JSON.stringify(feedAfterHidden.map((d) => d.taskTitle)));
+
+    // Normal staff-reviewed task (stage 2, now active): submit + approve → feeds.
+    await rp.call('submitStationPhoto', { ...RCTX, teamId: rpUid, taskId: 'hr-normal', photoUrl: feedPhotoUrl(rr, rpUid, 'n.jpg') });
+    const revNormal = await creator.call('reviewStationSubmission', { ...RCTX, teamId: rpUid, taskId: 'hr-normal', approved: true });
+    check('hidden-feed(review): staff approves the normal photo', revNormal?.approved === true, JSON.stringify(revNormal));
+    const feedAfterNormal = await creator.getColAt(rFeedCol);
+    check('hidden-feed(review): the NORMAL task feeds on the staff path (guard does not over-suppress)',
+      feedAfterNormal.some((d) => d.taskId === 'hr-normal'), JSON.stringify(feedAfterNormal.map((d) => d.taskId)));
+  }); // scenario: hidden-location feed secrecy
+
   await scenario('task types: quiz · numeric · geofence · sequence · trigger modes', async () => {
 
   // ── 14. New task types: quiz · numeric · geofence · sequence ────────────────
@@ -2210,7 +2319,7 @@ async function main() {
 
   // quiz: secrets stripped, choices present; wrong rejected, right advances
   const sq = await player4.call('getMyTeamState', { code: c4 });
-  const qTask = sq?.activeStageTasks?.[0];
+  const qTask = sq?.activeStageTasks?.find((t) => t.id === 'q1');
   check('quiz: answers stripped but choices sent', qTask?.answers === undefined && Array.isArray(qTask?.choices), JSON.stringify({ answers: qTask?.answers, choices: qTask?.choices }));
   const wrongQ = await player4.call('submitTaskAnswer', { ...C4, taskId: 'q1', answer: 'London' });
   check('quiz: wrong answer rejected', wrongQ?.correct === false);
@@ -2245,7 +2354,7 @@ async function main() {
 
   // sequence: step prompts sent (no answers); steps advance in order
   const sSeq = await player4.call('getMyTeamState', { code: c4 });
-  const seqTask = sSeq?.activeStageTasks?.[0];
+  const seqTask = sSeq?.activeStageTasks?.find((t) => t.id === 'sq1');
   check('sequence: step prompts sent without answers',
     Array.isArray(seqTask?.steps) && seqTask.steps.length === 3 && seqTask.steps.every((s) => s.answer === undefined),
     JSON.stringify(seqTask?.steps));
@@ -2290,7 +2399,7 @@ async function main() {
 
   // sanitized payload: requirePresence visible, answers stripped.
   const sP = await playerP.call('getMyTeamState', { code: cP });
-  const pTask = sP?.activeStageTasks?.[0];
+  const pTask = sP?.activeStageTasks?.find((t) => t.id === 'pq1');
   check('presence: requirePresence exposed to client', pTask?.requirePresence === true, JSON.stringify(pTask?.requirePresence));
   check('presence: answers still stripped', pTask?.answers === undefined && pTask?.numericAnswer === undefined);
 
@@ -3290,6 +3399,88 @@ async function main() {
       JSON.stringify((sV2?.activeStageTasks ?? []).map((t) => t.id)));
     for (const t of sV2?.activeStageTasks ?? []) assertTaskPayloadAllowlisted(`visibility(${t.id})`, t);
   }); // scenario: task visibility gating
+
+  await scenario('stuck-next-task regression (wave-f): routable task never reads as locked; routing works without coords', async () => {
+    // A real player on a multi-task stage (with a hidden-location task) got dead
+    // ended: the client mis-read every unassigned task as "locked" (its content is
+    // omitted by wave D, so the old `activeStageTasks.find(...)` lookup was always
+    // undefined ⇒ "locked"), and a GPS failure surfaced as the terminal
+    // "couldn't get your next task". This proves the WIRE now carries the truth:
+    //   Bug A — the server ships `lockedTaskIds` (genuinely gated ids only), so a
+    //           routable-but-unassigned task is NOT reported locked.
+    //   Bug B — routing assigns the next task with NO coordinates (the server
+    //           defaults location and routes by load), so a GPS failure is not a
+    //           routing failure. This asserts the server side; the client no longer
+    //           dead-ends on GPS denial (see TaskRunner).
+    const { gameId: gW } = await creator.call('createGame', { title: 'Stuck Next Task', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gW,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{
+        id: 's-wf', order: 0, title: 'Mixed stage', isFinal: true,
+        tasks: [
+          // Routable, locationless (transit 0) ⇒ deterministically routed first.
+          { id: 't-open', title: 'Open task', type: 'self_report', triggerMode: 'instant',
+            locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9 },
+          // Genuinely gated: locked until t-open is completed.
+          { id: 't-gated', title: 'Gated task', type: 'self_report', triggerMode: 'instant',
+            locationless: true, unlockAfterTaskIds: ['t-open'],
+            difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9 },
+          // Hidden-location, NO gate ⇒ routable (just not picked first). It must
+          // NOT be reported locked — that was the false-positive dead-end.
+          { id: 't-hidden', title: 'Buried thing', type: 'field', triggerMode: 'instant',
+            hideLocation: true, coordinates: { lat: 31.7767, lng: 35.2345 }, locationClue: 'By the old gate',
+            difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9 },
+        ],
+      }],
+    });
+    const { runId: rW, accessCode: cW } = await creator.call('launchRun', { gameId: gW });
+    const pW = makeParty('stuckWF'); await signInAnonymously(pW.auth);
+    await pW.call('joinRun', { code: cW, displayName: 'Stuck Fox' });
+    await creator.call('startTeams', { gameId: gW, runId: rW });
+    const CW = { ownerUid: creatorCred.user.uid, gameId: gW, runId: rW };
+
+    const s0 = await pW.call('getMyTeamState', { code: cW });
+    const assigned0 = s0?.team?.stages?.[0]?.tasks?.find((r) => r.status === 'assigned')?.taskId;
+    check('wave-f: the locationless open task is routed first (deterministic)',
+      assigned0 === 't-open', String(assigned0));
+
+    // Bug A — the wire carries genuine lock state, ids only.
+    check('wave-f: getMyTeamState returns a lockedTaskIds array',
+      Array.isArray(s0?.lockedTaskIds), JSON.stringify(s0?.lockedTaskIds));
+    check('wave-f: the genuinely gated task IS reported locked',
+      (s0?.lockedTaskIds ?? []).includes('t-gated'), JSON.stringify(s0?.lockedTaskIds));
+    check('wave-f: a routable (hidden, ungated) unassigned task is NOT reported locked',
+      !(s0?.lockedTaskIds ?? []).includes('t-hidden'), JSON.stringify(s0?.lockedTaskIds));
+
+    // The exact client decision (TaskRunner.allRemainingLocked): every unassigned
+    // task in lockedTaskIds. A routable task remains ⇒ this MUST be false, so the
+    // player sees the routing spinner, not the false "all locked" dead-end.
+    const unassigned0 = (s0?.team?.stages?.[0]?.tasks ?? []).filter((r) => r.status === 'unassigned');
+    const lockedIds0 = s0?.lockedTaskIds ?? [];
+    const allRemainingLocked0 = unassigned0.length > 0 && unassigned0.every((r) => lockedIds0.includes(r.taskId));
+    check('wave-f: client allRemainingLocked is FALSE while a routable task remains (no false dead-end)',
+      allRemainingLocked0 === false, JSON.stringify({ unassigned: unassigned0.map((r) => r.taskId), lockedIds0 }));
+
+    // Bug B — complete the open task WITHOUT coordinates. The auto-reassign runs
+    // with a defaulted location and MUST still hand out a next task (no dead-end).
+    const done = await pW.call('completeTask', { ...CW, taskId: 't-open' });
+    check('wave-f: completing without coords routes the next task (coordless routing works)',
+      done?.ok === true && done?.nextTaskId != null, JSON.stringify(done));
+
+    // requestNextTask with NO lat/lng must also resolve to a task (never reject) —
+    // the direct proof that the terminal routingError was client GPS-gating, not a
+    // server throw.
+    const nextNoCoords = await pW.call('requestNextTask', { ...CW });
+    check('wave-f: requestNextTask without coords returns a task (no reject, no null)',
+      nextNoCoords?.taskId != null, JSON.stringify(nextNoCoords));
+
+    // After t-open is done, t-gated is unlocked ⇒ no longer in lockedTaskIds.
+    const s1 = await pW.call('getMyTeamState', { code: cW });
+    check('wave-f: a task whose prerequisite is now met drops out of lockedTaskIds',
+      !(s1?.lockedTaskIds ?? []).includes('t-gated'), JSON.stringify(s1?.lockedTaskIds));
+    for (const t of s1?.activeStageTasks ?? []) assertTaskPayloadAllowlisted(`wave-f(${t.id})`, t);
+  }); // scenario: stuck-next-task regression (wave-f)
 
   await scenario('task media (upload URL + YouTube round-trip, external URL dropped)', async () => {
 
