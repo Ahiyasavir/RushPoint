@@ -92,7 +92,7 @@ function RailEntry({ stage, index, active, onSelect, taskDragging }: {
       ref={(el) => { setNodeRef(el); drop.setNodeRef(el); }}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       onClick={onSelect}
-      className={`cursor-pointer rounded-xl border p-2.5 transition-colors ${
+      className={`cursor-pointer rounded-xl border p-2.5 transition-colors w-40 shrink-0 sm:w-auto sm:shrink ${
         active ? 'border-rp-fire bg-rp-fire/10' : 'border-[--rp-border] hover:bg-[--surface-2]'
       } ${isDragging ? 'opacity-40' : ''} ${taskOver ? 'outline-dashed outline-2 outline-rp-fire' : ''}`}
     >
@@ -128,29 +128,33 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
 }) {
   const b = useT().builder;
   return (
-    <aside className="w-40 sm:w-52 shrink-0 space-y-2 h-full overflow-y-auto pe-0.5">
-      <div className="flex items-center justify-between px-1">
+    // Phone: a full-width, horizontally-scrolling strip that sits above the
+    // canvas. Desktop (≥sm): the classic vertical side rail.
+    <aside className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto pe-0.5">
+      <div className="flex items-center justify-between px-1 mb-1 sm:mb-0">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
         <span className="text-[10px] text-[--ink-4]">{stages.length}</span>
       </div>
-      <SortableContext items={stages.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-        {stages.map((s, idx) => (
-          <RailEntry
-            key={s.id}
-            stage={s}
-            index={idx}
-            active={s.id === activeStageId}
-            onSelect={() => onSelect(s.id)}
-            taskDragging={taskDragging}
-          />
-        ))}
-      </SortableContext>
-      <button
-        onClick={onAdd}
-        className="w-full rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] text-sm py-2 hover:border-rp-fire/60 hover:text-rp-fire transition-colors"
-      >
-        ＋ {b.addStage}
-      </button>
+      <div className="flex sm:flex-col items-stretch gap-2 overflow-x-auto sm:overflow-visible pb-1 sm:pb-0">
+        <SortableContext items={stages.map((s) => s.id)} strategy={verticalListSortingStrategy}>
+          {stages.map((s, idx) => (
+            <RailEntry
+              key={s.id}
+              stage={s}
+              index={idx}
+              active={s.id === activeStageId}
+              onSelect={() => onSelect(s.id)}
+              taskDragging={taskDragging}
+            />
+          ))}
+        </SortableContext>
+        <button
+          onClick={onAdd}
+          className="shrink-0 w-32 sm:w-full rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] text-sm px-3 py-2 whitespace-nowrap hover:border-rp-fire/60 hover:text-rp-fire transition-colors"
+        >
+          ＋ {b.addStage}
+        </button>
+      </div>
     </aside>
   );
 }

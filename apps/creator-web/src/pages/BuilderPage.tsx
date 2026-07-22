@@ -996,8 +996,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
       onDragEnd={onDragEnd}
       onDragCancel={() => setActiveDrag(null)}
     >
-    <div className="flex gap-3 h-full min-h-0">
-      {/* ── Left rail: stage navigator (also the cross-stage drop target) ── */}
+    <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 h-full min-h-0">
+      {/* ── Left rail: stage navigator (also the cross-stage drop target).
+          On a phone it stacks on top as a horizontal, scrollable stage strip
+          so the canvas below gets the full width. ── */}
       <StageRail
         stages={game.stages}
         activeStageId={activeStage?.id ?? null}
@@ -1010,7 +1012,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
           contains it; the task cards provide the structure. A flex column: the
           stage header is fixed, the task canvas flexes and owns the ONLY scroll
           (no more nested double-scrollbar), the add-tiles stay pinned below. ── */}
-      <div className="flex-1 min-w-0 h-full flex flex-col gap-3 pe-1 pt-0.5">
+      <div className="flex-1 min-w-0 min-h-0 sm:h-full flex flex-col gap-3 pe-1 pt-0.5">
         {activeStage && (
           <>
             <div className="shrink-0 space-y-2">
