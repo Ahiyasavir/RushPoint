@@ -3794,7 +3794,7 @@ async function main() {
 
     const { runId: dpRun, accessCode: dpCode } = await creator.call('launchRun', { gameId: dpGame });
     const dpPlayer = makeParty('dpPlayer');
-    await signInAnonymously(dpPlayer.auth);
+    const dpCred = await signInAnonymously(dpPlayer.auth);
     await dpPlayer.call('joinRun', { code: dpCode, displayName: 'Explorer' });
     await creator.call('startTeams', { gameId: dpGame, runId: dpRun });
 
@@ -3830,6 +3830,23 @@ async function main() {
     try { await dpPlayer.call('claimDiscoveryPoi', { code: dpCode, poiId: 'poiA', lat: POI.lat, lng: POI.lng, answer: 'fountain' }); }
     catch (e) { dup = e.code === 'functions/already-exists'; }
     check('discovery: double-claim → already-exists', dup);
+
+    // Wave-G #1: the bonus must reach the LEADERBOARD, not just team.score. The team
+    // has completed NO field task, so its ONLY points are the 40-pt discovery bonus —
+    // which buildRankings can only see through the bonusPenalty channel. Assert it
+    // ranks on both the live board (refreshLeaderboard) and the frozen final board
+    // (finalizeRun). Before the fix (bonus written to team.score, a channel
+    // buildRankings ignores) both would read 0.
+    const dpLive = await creator.call('refreshLeaderboard', { gameId: dpGame, runId: dpRun, publish: false });
+    const dpLiveEntry = (dpLive?.rankings ?? []).find((r) => r.teamId === dpCred.user.uid);
+    check('discovery: bonus reaches the LIVE leaderboard (score 40)',
+      dpLiveEntry?.score === 40, JSON.stringify(dpLiveEntry));
+
+    await creator.call('finalizeRun', { gameId: dpGame, runId: dpRun });
+    const dpFinal = (await adminSdk.firestore().doc(`users/${creatorCred.user.uid}/games/${dpGame}/runs/${dpRun}`).get()).data()?.leaderboard;
+    const dpFinalEntry = (dpFinal?.rankings ?? []).find((r) => r.teamId === dpCred.user.uid);
+    check('discovery: bonus reaches the FROZEN FINAL leaderboard (score 40)',
+      dpFinalEntry?.score === 40, JSON.stringify(dpFinalEntry));
   }); // scenario: discovery POIs
 
   // ── Hot Zone bonus (activate/deactivate + multiplied score) ─────────────────

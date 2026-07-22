@@ -143,6 +143,41 @@ describe('buildRankings — fixed_points_speed bonus gated on completion', () =>
   });
 });
 
+// Wave-G #1 (discovery-poi-bonus-channel): claimDiscoveryPoi awards its surprise-
+// trivia-waypoint bonus. buildRankings derives ranked score ONLY from
+// stages[].earnedScore + completionBonus − bonusPenalty, and NEVER reads team.score.
+// So a bonus must ride the counted bonusPenalty channel (a bonus is a NEGATIVE penalty,
+// exactly like captureZone) to appear on the live + final board. This locks the fix
+// direction: a bonusPenalty of -40 with no completed tasks must rank as score 40, and a
+// team.score set WITHOUT a matching bonusPenalty must NOT affect the ranking.
+describe('buildRankings — bonus rides the bonusPenalty channel, not team.score', () => {
+  const bonusViaPenalty = (id: string, bonus: number): RunTeam => ({
+    id, displayName: id, status: 'active',
+    startedAt: new Date(1_700_000_000_000).toISOString(), finishedAt: undefined,
+    score: 0, bonusPenalty: -bonus, // negative penalty == positive bonus
+    stages: [{ stageId: 's0', status: 'active', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'assigned' }] }],
+  } as unknown as RunTeam);
+
+  const bonusViaTeamScoreOnly = (id: string, bonus: number): RunTeam => ({
+    id, displayName: id, status: 'active',
+    startedAt: new Date(1_700_000_000_000).toISOString(), finishedAt: undefined,
+    score: bonus, bonusPenalty: 0, // the OLD (broken) channel — must be ignored by ranking
+    stages: [{ stageId: 's0', status: 'active', tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'assigned' }] }],
+  } as unknown as RunTeam);
+
+  for (const preset of ['fixed_points_speed', 'smart_weighted'] as Game['scoringPreset'][]) {
+    test(`[${preset}] a -40 bonusPenalty (no completed tasks) ranks as score 40`, () => {
+      const board = buildRankings(game(preset), [bonusViaPenalty('a', 40)], now);
+      expect(board[0].score).toBe(40);
+    });
+
+    test(`[${preset}] team.score alone does NOT reach the ranking (stays 0)`, () => {
+      const board = buildRankings(game(preset), [bonusViaTeamScoreOnly('a', 40)], now);
+      expect(board[0].score).toBe(0);
+    });
+  }
+});
+
 // WO Fix 3: the time_only sort branch had no terminal teamId tie-break, so two
 // teams that tie on both duration and completedStages kept their (unordered
 // Firestore) input order — the live/public board could churn between refreshes.

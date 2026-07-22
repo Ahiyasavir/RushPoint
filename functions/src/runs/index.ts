@@ -715,7 +715,21 @@ export async function completeTaskForTeam(
     if (!teamSnap.exists) return { completed: false, heldSlot: false };
     const team = teamSnap.data() as RunTeam;
     const runSnapTx = await tx.get(runRef);
-    const counts = (runSnapTx.data() as { taskCounts?: Record<string, number> } | undefined)?.taskCounts ?? {};
+    const runTx = runSnapTx.data() as { taskCounts?: Record<string, number>; status?: string } | undefined;
+    // Wave-G #2 (finalize-vs-last-completion TOCTOU): the pre-txn status read at :681
+    // can go stale. finalizeRun is a plain non-transactional update that can commit
+    // status:'finished' + freeze the board BETWEEN that read and this commit, so a team
+    // completing its LAST task exactly at run-end would land its score AFTER the board
+    // froze → dropped from the published final standings (the auto path never recovers).
+    // Re-check status here, inside the txn, on the run doc we already re-read for
+    // taskCounts (still a read-before-write; no extra read, no disturbance to the
+    // station-slot reservation / withLockRetry / idempotency guards). This closes the
+    // window the pre-txn guard only narrows. failed-precondition is a NON-contention
+    // error, so withLockRetry rethrows it immediately (never spins the retry loop).
+    if (runTx?.status === 'finished') {
+      throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+    }
+    const counts = runTx?.taskCounts ?? {};
 
     // WO Fix 2: stage 0 is 'active' at join (buildInitialStages) while the team is
     // still launched:false, so a team could grade stage-1 tasks BEFORE the host
@@ -1421,6 +1435,17 @@ export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data
       const bonus = Math.max(0, poi.bonusPoints ?? 0);
       tx.update(teamRef, {
         discoveryState,
+        // Wave-G #1: the RANKING must reflect the bonus. buildRankings derives every
+        // ranked score from stages[].earnedScore + completionBonus − bonusPenalty and
+        // NEVER reads team.score, so the bonus rides the counted bonusPenalty channel
+        // (a bonus is a NEGATIVE penalty), exactly as captureZone does — otherwise it's
+        // invisible on both the live and frozen-final boards.
+        bonusPenalty: (team.bonusPenalty ?? 0) - bonus,
+        // DISPLAY channel: team.score is the running total the participant's own
+        // PlayScreen header + StaffConsole show DIRECTLY (not via rankings), kept in step
+        // by completeTask/skipStage. Keep bumping it so the header doesn't visibly drop
+        // the discovery bonus. buildRankings ignores team.score, so maintaining BOTH does
+        // NOT double-count in the standings.
         score: (team.score ?? 0) + bonus,
         updatedAt: now,
       });
