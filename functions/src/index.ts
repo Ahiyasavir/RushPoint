@@ -498,7 +498,10 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
   const chatRef = db.doc(FIRESTORE_PATHS.runChat(ownerUid, gameId, runId, resolvedTeamId));
   const messageId = db.collection('_').doc().id;
   const at = new Date().toISOString();
-  const msg: ChatMessage = { id: messageId, from, senderName, text, at };
+  // Stamp the caller uid so a client can attribute each line to its true author
+  // regardless of `from` (an owner who plays their own game is stamped from:'hq'
+  // yet must still read as themselves). Display-only — authz is the claims check.
+  const msg: ChatMessage = { id: messageId, from, senderId: uid, senderName, text, at };
 
   await db.runTransaction(async (tx) => {
     const snap = await tx.get(chatRef);

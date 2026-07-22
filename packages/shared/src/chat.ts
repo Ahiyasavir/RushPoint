@@ -22,9 +22,35 @@ export const CHAT_TEXT_MAX_LEN = MAX_MESSAGE_LEN;
 export interface ChatMessage {
   id: string;                 // server-minted (db.collection('_').doc().id)
   from: 'team' | 'hq';
+  senderId?: string;          // caller uid (server-set); lets a client tell its OWN
+                              //   lines apart from others' regardless of `from` —
+                              //   e.g. an owner who plays their own game is stamped
+                              //   from:'hq' yet must still read as themselves.
+                              //   Optional so legacy messages (pre-field) still render.
   senderName: string;         // team.displayName | staff/owner display name
   text: string;               // sanitized, 1..MAX_MESSAGE_LEN
   at: string;                 // ISO timestamp (server clock)
+}
+
+/** Which visual side a chat line belongs to, from the viewer's perspective:
+ *  'me' = the viewer authored it, 'hq' = the HQ/staff side, 'other' = another
+ *  participant (e.g. a teammate on a shared device). */
+export type ChatSide = 'me' | 'hq' | 'other';
+
+/**
+ * Pure sender-attribution decision (the display trust boundary, unit-tested without
+ * a client). A message is 'me' whenever its server-stamped `senderId` matches the
+ * viewer's uid — this WINS over `from`, so an owner who plays their own game (server
+ * stamps their line from:'hq' because uid === ownerUid) still reads as themselves
+ * instead of every one of their own messages showing as "HQ". Legacy messages with
+ * no `senderId` fall back to the `from` flag.
+ */
+export function chatMessageSide(
+  msg: { senderId?: string; from: 'team' | 'hq' },
+  myUid: string | null | undefined,
+): ChatSide {
+  if (myUid && msg.senderId === myUid) return 'me';
+  return msg.from === 'hq' ? 'hq' : 'other';
 }
 
 /** One thread doc per team. `deviceUids` is MIRRORED from the team doc on every

@@ -3341,6 +3341,95 @@ async function main() {
       { match: /not|permission|found/i });
   }); // scenario: hidden-location arrival authz
 
+  await scenario('hidden-mission map: completedTaskPins is a leak-safe trail (completed only)', async () => {
+    // change: hidden-mission-map. While the ACTIVE mission is a still-sealed
+    // hidden target, the play map plots the SAFE trail of missions the team has
+    // ALREADY COMPLETED (their own coordinates + title) plus the client's GPS —
+    // never the sealed target. getMyTeamState's new `completedTaskPins` channel is
+    // built BY CONSTRUCTION from completed RunTaskRecords only, so it is
+    // structurally incapable of shipping a hidden-not-arrived / unassigned /
+    // sealed task's location. This is the wire-level proof of that guarantee.
+    //
+    // Deterministic setup (single-task early stages force the routing so we KNOW
+    // exactly what is completed; the final stage's locked sibling can never be
+    // assigned before the hidden task, so the hidden task is the sealed active one
+    // and the sibling stays unassigned):
+    //   Stage A: cp-located    — a located mission → completed → SHOULD pin.
+    //   Stage B: cp-anywhere    — a LOCATIONLESS mission → completed → OMITTED (no coords).
+    //   Stage C: cp-hidden      — hidden target → assigned + SEALED → MUST NOT pin.
+    //            cp-locked       — unlock-gated on cp-hidden → unassigned → MUST NOT pin.
+    const { gameId: gCP } = await creator.call('createGame', { title: 'Trail of Pins', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gCP,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'cp-sA', order: 0, title: 'Reached spot', isFinal: false,
+          tasks: [{ id: 'cp-located', title: 'Fountain plaza', type: 'field', triggerMode: 'radius',
+            coordinates: { lat: 32.1, lng: 34.8 }, geofenceRadiusMeters: 40,
+            difficulty: 2, estimatedMinutes: 3, pointValue: 50, maxConcurrentTeams: 9 }] },
+        { id: 'cp-sB', order: 1, title: 'Anywhere', isFinal: false,
+          tasks: [{ id: 'cp-anywhere', title: 'Do it anywhere', type: 'self_report', triggerMode: 'locationless',
+            locationless: true, coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 30, maxConcurrentTeams: 9 }] },
+        { id: 'cp-sC', order: 2, title: 'The secret', isFinal: true,
+          tasks: [
+            { id: 'cp-hidden', title: 'The buried key', type: 'field', triggerMode: 'radius',
+              hideLocation: true, coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40,
+              locationClue: 'Beneath the third arch', difficulty: 3, estimatedMinutes: 5,
+              pointValue: 80, maxConcurrentTeams: 9 },
+            { id: 'cp-locked', title: 'The vault', type: 'field', triggerMode: 'radius',
+              coordinates: { lat: 31.79, lng: 35.22 }, geofenceRadiusMeters: 40,
+              unlockAfterTaskIds: ['cp-hidden'], difficulty: 3, estimatedMinutes: 5,
+              pointValue: 80, maxConcurrentTeams: 9 },
+          ] },
+      ],
+    });
+    const { runId: rCP, accessCode: cCP } = await creator.call('launchRun', { gameId: gCP });
+    const pCP = makeParty('pinsTrail'); await signInAnonymously(pCP.auth);
+    await pCP.call('joinRun', { code: cCP, displayName: 'Trailblazer' });
+    await creator.call('startTeams', { gameId: gCP, runId: rCP });
+    const CCP = { ownerUid: creatorCred.user.uid, gameId: gCP, runId: rCP };
+
+    // Stage A: complete the located mission (server-validated GPS check-in).
+    await pCP.call('completeTask', { ...CCP, taskId: 'cp-located', lat: 32.1, lng: 34.8 });
+    // Stage B: complete the locationless mission (coords ignored for locationless).
+    await pCP.call('completeTask', { ...CCP, taskId: 'cp-anywhere' });
+
+    // Stage C: the hidden task is now the sealed active mission; the locked sibling
+    // is unassigned. This is the moment the play map would plot the trail.
+    const sCP = await pCP.call('getMyTeamState', { code: cCP });
+    const assignedC = sCP?.team?.stages?.[2]?.tasks?.find((r) => r.status === 'assigned')?.taskId;
+    check('pins: the hidden task is the sealed active mission', assignedC === 'cp-hidden', String(assignedC));
+    const hiddenC = sCP?.activeStageTasks?.find((t) => t.id === 'cp-hidden');
+    check('pins: hidden active task is STILL sealed (no coords/title, arrivalPending)',
+      hiddenC?.arrivalPending === true && hiddenC?.title === undefined && hiddenC?.coordinates === undefined,
+      JSON.stringify(hiddenC));
+
+    const pins = sCP?.completedTaskPins;
+    check('pins: completedTaskPins is an array', Array.isArray(pins), JSON.stringify(pins));
+    const ids = (pins ?? []).map((p) => p.id);
+    // (1) The completed LOCATED mission is pinned, with its REAL coords + title
+    //     sourced from the game task (not the team record).
+    const locatedPin = (pins ?? []).find((p) => p.id === 'cp-located');
+    check('pins: completed located mission is pinned with its real coords + title',
+      locatedPin?.coordinates?.lat === 32.1 && locatedPin?.coordinates?.lng === 34.8 &&
+        locatedPin?.title === 'Fountain plaza',
+      JSON.stringify(locatedPin));
+    // (2) The SEALED hidden active target is absent — its coordinates never ride
+    //     out through this channel.
+    check('pins: the sealed hidden active target is NOT pinned', !ids.includes('cp-hidden'), ids.join(','));
+    // (3) An unassigned/locked task is absent.
+    check('pins: an unassigned (locked) task is NOT pinned', !ids.includes('cp-locked'), ids.join(','));
+    // (4) A completed LOCATIONLESS mission is omitted (nothing to pin).
+    check('pins: a completed locationless mission is omitted', !ids.includes('cp-anywhere'), ids.join(','));
+    // Whole-channel sweep: the hidden target's real coordinates must appear NOWHERE
+    // in the pins (the located pin lives far away at 32.1/34.8, so a stray 31.78 /
+    // 35.21 would mean the sealed spot leaked through completedTaskPins).
+    check('pins: the sealed target coordinates appear nowhere in completedTaskPins',
+      !JSON.stringify(pins ?? []).includes('31.78') && !JSON.stringify(pins ?? []).includes('35.21'),
+      'sealed hidden coordinates leaked into completedTaskPins');
+  }); // scenario: hidden-mission map completedTaskPins
+
   await scenario('task visibility gating (non-assigned tasks are absent from the wire)', async () => {
     // play-task-gating (wave D), the second security win of this change: a
     // multi-task stage used to ship EVERY task's quiz choices at once, so a
@@ -5328,6 +5417,14 @@ async function main() {
     check('chat: order is chronological (team then hq)',
       chat?.messages?.[0]?.from === 'team' && chat?.messages?.[1]?.from === 'hq',
       chat?.messages?.map((m) => m.from).join(','));
+    // wave-j sender attribution: sendTeamChatMessage stamps senderId so the client
+    // can label the true author (fixes every message showing as HQ when the owner
+    // plays their own game). The two authors' ids must differ.
+    check('chat: team message carries senderId == the participant uid',
+      chat?.messages?.[0]?.senderId === founderUid, chat?.messages?.[0]?.senderId);
+    check('chat: HQ message carries a senderId that differs from the participant',
+      !!chat?.messages?.[1]?.senderId && chat.messages[1].senderId !== founderUid,
+      chat?.messages?.[1]?.senderId);
 
     // 3. A staff token also replies as HQ.
     const { pin: chatPin } = await creator.call('inviteStaff', {

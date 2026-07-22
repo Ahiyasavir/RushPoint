@@ -4,8 +4,8 @@
 // and this bundle only mount when the team opens chat. Any attached device may send.
 import { useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
-import { db } from '../services/firebase';
+import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, type ChatMessage } from '@rushpoint/shared';
+import { db, uid } from '../services/firebase';
 import { sendTeamChatMessage } from '../services/calls';
 import { saveChatSeen } from '../store';
 import { useT } from '../i18nContext';
@@ -19,6 +19,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const { ownerUid, gameId, runId } = ctx;
+  const myUid = uid(); // stable for the session; drives own-vs-others attribution
 
   // Single-doc listen on this team's thread.
   useEffect(() => {
@@ -62,18 +63,24 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
           <p dir="auto" className="text-center text-sm text-zinc-500 py-4">{t.chat.chatEmpty}</p>
         ) : (
           messages.map((m) => {
-            const hq = m.from === 'hq';
+            // Attribute by the message's real author, not a fixed label: my own
+            // lines read as me (right-aligned) even when the server stamped them
+            // from:'hq' (owner playing their own game); HQ replies read as "המטה";
+            // a teammate's line shows the team name. (fix-chat-sender-attribution)
+            const side = chatMessageSide(m, myUid);
+            const mine = side === 'me';
+            const label = side === 'me' ? t.devices.youTag
+              : side === 'hq' ? t.chat.chatHq
+              : m.senderName;
             return (
-              <div key={m.id} className={`flex flex-col ${hq ? 'items-start' : 'items-end'}`}>
-                <span className="text-[11px] text-zinc-500 mb-0.5">
-                  {hq ? t.chat.chatHq : m.senderName}
-                </span>
+              <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                <span className="text-[11px] text-zinc-500 mb-0.5">{label}</span>
                 <div
                   dir="auto"
-                  className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ${
-                    hq
-                      ? 'bg-app-raised border border-glass-border text-zinc-200 text-start'
-                      : 'bg-accent/15 border border-accent/40 text-zinc-100 text-start'
+                  className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${
+                    mine
+                      ? 'bg-accent/15 border border-accent/40 text-zinc-100'
+                      : 'bg-app-raised border border-glass-border text-zinc-200'
                   }`}
                 >
                   {m.text}

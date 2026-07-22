@@ -13,7 +13,7 @@ import {
   adjustTeamScore,
   sendTeamChatMessage,
 } from '../services/calls';
-import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, type ChatMessage } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, type ChatMessage } from '@rushpoint/shared';
 import type { StaffCtx } from '../lib/playRoute';
 import {
   loadStaffSession,
@@ -445,6 +445,7 @@ function StaffChatSection({
   const [openTeam, setOpenTeam] = useState<string | null>(null);
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [draft, setDraft] = useState('');
+  const myUid = uid(); // this staffer's uid — drives own-vs-other-HQ attribution
 
   useEffect(() => {
     const ref = collection(db, FIRESTORE_PATHS.runChatCol(ctx.ownerUid, ctx.gameId, ctx.runId));
@@ -529,12 +530,22 @@ function StaffChatSection({
                 {expanded && (
                   <div className="mt-2 flex flex-col gap-2">
                     <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
-                      {th.messages.map((m) => (
-                        <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
-                          <span className="text-[11px] text-zinc-500">{m.from === 'hq' ? t.chat.chatHq : m.senderName}</span>
-                          <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-accent/15 border border-accent/40 text-zinc-100' : 'bg-app-raised border border-glass-border text-zinc-200'}`}>{m.text}</div>
-                        </div>
-                      ))}
+                      {th.messages.map((m) => {
+                        // Attribute from THIS staffer's angle: their own replies read
+                        // as them (right), another HQ member's as "המטה", the team's
+                        // lines as the team name (left). (fix-chat-sender-attribution)
+                        const side = chatMessageSide(m, myUid);
+                        const hqSide = side !== 'other'; // 'me' or another HQ member
+                        const label = side === 'me' ? t.devices.youTag
+                          : side === 'hq' ? t.chat.chatHq
+                          : m.senderName;
+                        return (
+                          <div key={m.id} className={`flex flex-col ${hqSide ? 'items-end' : 'items-start'}`}>
+                            <span className="text-[11px] text-zinc-500">{label}</span>
+                            <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${hqSide ? 'bg-accent/15 border border-accent/40 text-zinc-100' : 'bg-app-raised border border-glass-border text-zinc-200'}`}>{m.text}</div>
+                          </div>
+                        );
+                      })}
                     </div>
                     <div className="flex items-center gap-2">
                       <input
