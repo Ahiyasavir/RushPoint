@@ -157,7 +157,7 @@ helpers are **internal** (not triggers) — never re-export them.
 
 | Module | Callables |
 |---|---|
-| `games/index.ts` | createGame · updateGame · deleteGame · duplicateGame · publishGame · getGame · listGames |
+| `games/index.ts` | createGame · updateGame · **deleteGame (SOFT: tombstone + 30-day trash)** · **listDeletedGames** · **restoreGame** · **purgeGameNow** · duplicateGame · publishGame · getGame · listGames |
 | `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · finalizeRun · **refreshLeaderboard** · **getPublicLeaderboard** · listRunTeams · completeTask · requestNextTask · **requestTaskHint** · getRecommendedTasks · checkOutTask · getMyTeamState |
 | `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount |
 | `payments/index.ts` | getWallet · **getWalletStatus** · **purchaseCredits** · **subscribePro** · **claimReferral** · stripeWebhook (onRequest) |

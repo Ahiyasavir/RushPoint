@@ -741,7 +741,11 @@ All re-exported from `functions/src/index.ts`. Internal helpers (`completeTaskFo
 |---|---|---|
 | `createGame` | owner | New empty game (private, default preset/fields). |
 | `updateGame` | owner | Patch any subset of game fields (only provided keys). |
-| `deleteGame` | owner | Removes gallery index + public tasks, purges run photos, `recursiveDelete`s the game tree. |
+| `deleteGame` | owner | **Soft delete** (change: recoverable-game-deletion). Refused while any run is not `finished`. Removes the gallery index + public tasks, **revokes** (does not delete) the game's `accessCodes`, and writes a `deletedAt`/`deletedBy` tombstone. Destroys nothing; writes a `game_deleted` audit entry. |
+| `listDeletedGames` | owner | The trash view: tombstoned games plus each one's `purgeDueAt` and the retention window. |
+| `restoreGame` | owner | Clears the tombstone, reinstates the access codes that deletion revoked, returns the game (and its runs/teams) intact as **private**. Idempotent; `not-found` once purged. |
+| `purgeGameNow` | owner | Permanent destruction of a **tombstoned** game (`failed-precondition` otherwise): gallery index, run photos, game media, access codes, `recursiveDelete`. Writes `game_purged`. |
+| `purgeDeletedGamesNow` | admin | Runs the grace-period purge sweep on demand (optional `graceDays` override). The same sweep runs daily inside `pruneExpiredRunData`. |
 | `duplicateGame` | owner | Copies own game or any **public** game; new private copy, increments source `playCount`. |
 | `publishGame` | owner | Toggle `public`/`private`; syncs `publicGames` + per-task `publicTasks` index. |
 | `getGame` | owner | Returns the full game template. |
