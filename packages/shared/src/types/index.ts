@@ -27,6 +27,8 @@ export const COLLECTIONS = {
   // Public gallery
   PUBLIC_GAMES:  'publicGames',
   PUBLIC_TASKS:  'publicTasks',
+  // One like per (kind, item, user) — see FIRESTORE_PATHS.publicLike.
+  PUBLIC_LIKES:  'publicLikes',
 
   // Payments
   WALLETS:      'wallets',
@@ -67,6 +69,16 @@ export const FIRESTORE_PATHS = {
 
   publicGame:  (gameId: string) => `publicGames/${gameId}`,
   publicTask:  (taskId: string) => `publicTasks/${taskId}`,
+
+  // Public-content likes (change: gallery-popularity-ranking). The document id is
+  // DERIVED from (kind, itemId, uid), so "one like per user per item" is a
+  // property of the address itself — a second like from the same user resolves to
+  // the same document and cannot create a second record, whatever the client
+  // sends. Server-write-only; clients can neither read nor write this collection
+  // (like state is served back through the gallery search callables).
+  publicLike:    (kind: 'game' | 'task', itemId: string, uid: string) =>
+    `publicLikes/${kind}_${itemId}_${uid}`,
+  publicLikesCol: () => 'publicLikes',
 
   // Hidden geofenced discovery POIs on a game (surprise-trivia-waypoints).
   // Creator read/write; play clients denied (coordinates are server-secret).
@@ -288,6 +300,13 @@ export interface Task {
   // passthrough. Absent = the hint stays paid forever.
   hintAutoRevealMinutes?: number;
   hintAutoRevealAttempts?: number;
+  // Wrong-answer cost (change: wrong-answer-cost): per-task override of the game's
+  // `scoringOptions.wrongAnswerPenalty`, so one brutal final riddle can be stricter
+  // than the warm-up. Absent = inherit the game level (which itself defaults to
+  // `off`). Carries no secret — it says what a wrong answer costs, never what the
+  // answer is — so it is a sanitizer passthrough and the participant is TOLD the
+  // rule before they answer.
+  wrongAnswerPenalty?: WrongAnswerLevel;
   // ── Verification config by type. Answer keys (answers/numericAnswer/
   //    steps[].answer) are SERVER-SECRET — stripped from the participant payload. ──
   // quiz: render `choices` as buttons (if present) else a text box; correct
@@ -446,9 +465,21 @@ export interface ExclusiveTaskGroup {
 // Stored at: users/{ownerUid}/games/{gameId}
 // The canonical definition a Creator builds. Instantiated into Runs.
 
+// Wrong-answer cost (change: wrong-answer-cost). How much a wrong answer on a
+// graded task (quiz / numeric / ordering) costs the team. Four strictness levels
+// so a kids' hunt and a competitive gibush can share one product. The numbers
+// behind each level live in packages/shared/src/wrongAnswerPenalty.ts.
+//
+// ABSENT MEANS `off`, which is byte-for-byte the pre-change behavior — every game
+// authored before this change keeps costing nothing, and no run in flight changes
+// its rules. New games are seeded at DEFAULT_WRONG_ANSWER_LEVEL ('standard').
+export type WrongAnswerLevel = 'off' | 'gentle' | 'standard' | 'strict';
+
 export interface ScoringOptions {
   transitPenaltyEnabled?: boolean;  // exponential late penalty for distance-based stages
   sprintPenaltyEnabled?: boolean;   // exponential late penalty for timed stages
+  // Game-wide default strictness for a wrong answer. A task may override it.
+  wrongAnswerPenalty?: WrongAnswerLevel;
 }
 
 export interface GameBranding {
@@ -515,6 +546,15 @@ export interface Game {
   // standings regardless (they read the run doc directly); this flag gates only
   // the PARTICIPANT-visible board. Never denormalized into publicGames.
   manualLeaderboardReveal?: boolean;
+  // Trash / tombstone (change: recoverable-game-deletion). PRESENCE of a non-empty
+  // `deletedAt` means the game is deleted: it disappears from listGames, the
+  // gallery and every play surface, but nothing beneath it is destroyed until the
+  // grace period elapses (GAME_TRASH_RETENTION_DAYS) or the owner asks for
+  // permanent destruction. Absence is the normal state, so existing games need no
+  // migration. SERVER-WRITTEN ONLY — firestore.rules rejects any client write that
+  // introduces, changes or removes these two fields. See gameLifecycle.ts.
+  deletedAt?: string;
+  deletedBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -547,6 +587,14 @@ export interface PublicGame {
   // Game intro primer (change: game-intro-instructions): denormalized for the
   // pre-join promo teaser so a player can preview how the game plays before joining.
   instructions?: GameInstructions;
+  // ── Popularity ranking (change: gallery-popularity-ranking) ──
+  // SERVER-WRITE-ONLY, both of them. `likeCount` is the number of distinct users
+  // who liked this game; `popularity` is popularityScore() applied to playCount +
+  // likeCount + createdAt and is the field Firestore actually orders by. Optional
+  // because games published before this change have neither — every reader treats
+  // undefined as 0 and the document self-heals on its next signal.
+  likeCount?: number;
+  popularity?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -562,12 +610,45 @@ export interface PublicTask {
   title: string;
   description?: string;
   type: TaskType;
-  coordinates: GeoPoint;
+  /**
+   * @deprecated (change: task-library-map-view) The EXACT authored coordinate.
+   * publicTasks is world-readable (`allow read: if true`), so publishing this was
+   * a live exposure — and it was written even for `hideLocation` tasks, whose
+   * coordinates are server-secret everywhere else in this codebase. No longer
+   * written by publishGame and no longer read by anything; `searchTaskLibrary`
+   * strips it from its response so documents published before that change stop
+   * serving exact points too. Optional only so legacy stored docs still parse.
+   */
+  coordinates?: GeoPoint;
+  /**
+   * Coarse ~1 km area pin (change: task-library-map-view) — the centre of the grid
+   * cell containing the authored coordinate, via `approximatePublicPoint`. ABSENT
+   * for `hideLocation` tasks, locationless tasks and unplaced tasks: the exclusion
+   * is applied at the WRITE, so no world-readable document ever holds the value.
+   * The only location field any reader may use.
+   */
+  approxLocation?: GeoPoint;
   difficulty: number;
   estimatedMinutes: number;
   pointValue: number;
   tags?: string[];
   copyCount: number;
+  // Popularity ranking (change: gallery-popularity-ranking) — server-write-only,
+  // same contract as PublicGame above. `uses` for a task is its copyCount.
+  likeCount?: number;
+  popularity?: number;
+  createdAt: string;
+}
+
+// Stored at: publicLikes/{kind}_{itemId}_{uid}  (FIRESTORE_PATHS.publicLike)
+// One creator's like of one public game or public task. Written only by the
+// setPublicLike callable; clients can neither read nor write it.
+export interface PublicLike {
+  id: string;
+  kind: 'game' | 'task';
+  /** publicGames/{itemId} or publicTasks/{itemId}. */
+  itemId: string;
+  uid: string;
   createdAt: string;
 }
 
@@ -776,6 +857,16 @@ export interface RunTeam {
   evacuatedFrom?: string | null;
   // Tasks for which this team has already paid to reveal the hint (charge once).
   taskHintsUsed?: string[];
+  // Wrong answers recorded per task: taskId → count. Read by the attempt limit
+  // (attemptLimitReached), by hint auto escalation (isHintFree) and by the
+  // wrong-answer cost curve. A MAP field keyed by taskId, never an array element.
+  taskAttempts?: Record<string, number>;
+  // Wrong-answer cost ledger (change: wrong-answer-cost), taskId → state. A real
+  // nested map; never written through a dotted key.
+  //   charged       points already taken off this team for this task (enforces the cap)
+  //   lastHash      hash of the last wrong answer (the duplicate-submission replay guard)
+  //   cooldownUntil epoch ms the retry lockout expires; 0 when not cooling down
+  answerPenalties?: Record<string, { charged: number; lastHash: string; cooldownUntil: number }>;
   // Per-sequence-task progress: taskId → number of steps completed so far.
   taskStepProgress?: Record<string, number>;
   // Shared team devices (change: shared-team-devices). Absent on legacy docs —
@@ -858,6 +949,16 @@ export interface AccessCode {
   teamId?: string | null;
   createdAt: string;
   usedAt?: string | null;
+  // Game trash (change: recoverable-game-deletion). Soft-deleting a game REVOKES
+  // its codes rather than deleting them: a released code could be handed to a
+  // different creator's run by uniqueCode() inside the grace period, so restoring
+  // the game would hand back dead (or worse, misdirected) shared links. These two
+  // fields let restore reinstate EXACTLY the codes this deletion revoked —
+  // `revokedByGameDeletionAt` mirrors the game's `deletedAt` verbatim, and
+  // `revokedFromStatus` is the status to put back. A code revoked for any other
+  // reason carries neither field and is never resurrected by a restore.
+  revokedByGameDeletionAt?: string;
+  revokedFromStatus?: AccessCodeStatus;
 }
 
 

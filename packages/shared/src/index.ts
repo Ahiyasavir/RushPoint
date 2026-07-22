@@ -8,7 +8,17 @@ export * from './registration';
 export * from './freeMode';
 export * from './staffThrottle';
 export * from './rateLimit';
+// Public gallery / task library ranking (change: gallery-popularity-ranking).
+export * from './popularity';
+// What a PUBLIC task may say about where it is (change: task-library-map-view).
+export * from './publicTaskLocation';
+// One-off repair of documents published before that contract existed
+// (change: public-task-coordinates-backfill).
+export * from './publicTaskBackfill';
 export * from './answerAttempts';
+// What a wrong answer costs (change: wrong-answer-cost) — escalating, capped,
+// preset-aware. Shared by the charge, the participant display and the Builder.
+export * from './wrongAnswerPenalty';
 export * from './guardianConsent';
 export * from './safeZone';
 export * from './shareBranding';
@@ -59,3 +69,7 @@ export * from './runCapacity';
 export * from './taskCompletability';
 export * from './mutualExclusion';
 export * from './playStore';
+// Game trash / tombstone lifecycle (change: recoverable-game-deletion).
+export * from './gameLifecycle';
+// Creator-owned portable game file (change: game-file-export-import).
+export * from './gameFile';

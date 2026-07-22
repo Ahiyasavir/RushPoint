@@ -100,6 +100,12 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   searchGallery: { max: 60, windowMs: MIN }, // browsing the gallery is bursty; reads ≤50 docs/call
   searchTaskLibrary: { max: 60, windowMs: MIN }, // same, reads ≤100 docs/call
   getPublicLeaderboard: { max: 60, windowMs: MIN }, // a shared board page polls this
+  // Public-content likes (change: gallery-popularity-ranking). Tighter than the
+  // 60/min browse budgets because a like is a WRITE that moves a public ranking,
+  // generous enough that a creator liking their way down a gallery page is never
+  // throttled. Same residual gap as the reads above: an anonymous uid is free to
+  // mint, so this is a brake on casual scripting — App Check is the real fix.
+  setPublicLike: { max: 30, windowMs: MIN },
 
   // Live-ops / creator-console reads and mutations that were enforcing against
   // an UNDEFINED bucket — i.e. silently fail-open (see rateLimitCoverage.test.ts).
