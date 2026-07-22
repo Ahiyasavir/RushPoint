@@ -13,6 +13,7 @@
 // The resolver is therefore the single authority: URL beats persisted state.
 import {
   resolvePlayRoute,
+  resumeOrJoin,
   parseStaffParam,
   buildStaffParam,
   stripStaffParams,
@@ -143,6 +144,29 @@ const sess = (code: string): SessionRef => ({ code });
   ok(resolvePlayRoute({ search: '?challenge=bogus', session: null }).route.kind === 'join', 'malformed challenge falls through');
   ok(resolvePlayRoute({ search: '', session: null }).route.kind === 'join', 'bare URL → join');
   ok(resolvePlayRoute({ search: '?board=', session: null }).route.kind === 'join', 'empty board value is not a route');
+}
+
+// ── resumeOrJoin: an already-joined player dismissing an overlay (finding #1) ──
+// A player WITH a session opens a shared ?board=/?recap= link (dropped in team
+// chat), taps "join" → the overlay is dismissed but its route.kind stays board/
+// recap (the resolver never downgrades those to `play` for a joined device). The
+// bottom render must RESUME their game, not strand them on a blank JoinScreen.
+{
+  const boardRoute = resolvePlayRoute({ search: '?board=ABC', session: sess('MYCODE') }).route;
+  ok(boardRoute.kind === 'board', 'a joined player on a ?board= link still resolves to the board overlay');
+  ok(resumeOrJoin(boardRoute, true) === 'play',
+    'dismissing a board overlay with a live session RESUMES play, not JoinScreen');
+
+  const recapRoute = resolvePlayRoute({ search: '?recap=ABC', session: sess('MYCODE') }).route;
+  ok(resumeOrJoin(recapRoute, true) === 'play',
+    'dismissing a recap overlay with a live session RESUMES play');
+
+  // The legitimate no-session path must NOT regress: a visitor with no session who
+  // dismisses an informational overlay still lands on the join screen.
+  ok(resumeOrJoin(resolvePlayRoute({ search: '?board=ABC', session: null }).route, false) === 'join',
+    'a visitor with NO session dismissing a board overlay still gets JoinScreen');
+  ok(resumeOrJoin({ kind: 'join', code: null }, false) === 'join', 'no session + join route → join');
+  ok(resumeOrJoin({ kind: 'play' }, true) === 'play', 'the plain play route always resumes play');
 }
 
 // ── Precedence sweep (the table, top to bottom) ──────────────────────────────

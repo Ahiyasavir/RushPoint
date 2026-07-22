@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { haversineKm, expiryInstantMs, defaultRadiusFor } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
@@ -17,9 +17,12 @@ import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
-const QrScanner = lazy(() => import('./QrScanner'));
+// lazyWithRetry so a stale-shell chunk 404 self-heals instead of hanging the
+// scanner overlay on a spinner after a redeploy (wave-g robustness #2).
+const QrScanner = lazyWithRetry('qrscanner', () => import('./QrScanner'));
 
 // Creator-authored task media (change: task-media-attachments): images render as
 // <img>, uploaded videos as inline <video controls>, YouTube as a lazy iframe embed
@@ -62,6 +65,27 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     [session.ownerUid, session.gameId, session.runId],
   );
   const [busy, setBusy] = useState(false);
+  // Same-batch double-tap guard (wave-g robustness #3): `setBusy(true)` is async,
+  // so two taps dispatched in ONE React batch (a mobile ghost-tap / jittery tap)
+  // both read `busy === false` and BOTH fire the callable before the `disabled`
+  // re-render lands — the exact window `useAsyncAction` exists to close. These
+  // handlers are heterogeneous (withLocation callbacks, value-returning) so they
+  // use the same in-flight-guard PATTERN via a synchronous ref instead: `begin`
+  // rejects a re-entrant tap, `end` releases (paired with the existing busy state
+  // for the disabled/frozen UI). `submitStationPhoto` is the one whose double-fire
+  // is costliest (a wasted second upload), so closing this window matters most for
+  // photo/audio even though the server is idempotent under a genuine double-submit.
+  const inFlight = useRef(false);
+  function begin(): boolean {
+    if (inFlight.current) return false; // re-entrant tap in the same batch — ignore
+    inFlight.current = true;
+    setBusy(true);
+    return true;
+  }
+  function end() {
+    inFlight.current = false;
+    setBusy(false);
+  }
   const [msg, setMsg] = useState('');
   const [hint, setHint] = useState<string | null>(null);
   const [routingError, setRoutingError] = useState(false);
@@ -254,14 +278,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   async function field() {
     if (blockedOffline()) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     withLocation(
       async (lat, lng) => {
         try { await completeTask({ ...ctx, taskId: task!.id, lat, lng }); onChanged(); }
         catch (e) { setMsg(submitError(e, t.task.failed)); }
-        finally { setBusy(false); }
+        finally { end(); }
       },
-      () => { setMsg(t.task.gpsWarning); setBusy(false); },
+      () => { setMsg(t.task.gpsWarning); end(); },
     );
   }
 
@@ -272,7 +297,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // not an error, and never carries a distance.
   async function checkArrival() {
     if (blockedOffline(t.task.arrivalNeedsOnline)) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     withLocation(
       async (lat, lng) => {
         try {
@@ -280,21 +306,22 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           if (res.arrived) { setMsg(t.task.arrivalUnlocked); onChanged(); }
           else setMsg(t.task.notThereYet);
         } catch (e) { setMsg(submitError(e, t.task.notThereYet)); }
-        finally { setBusy(false); }
+        finally { end(); }
       },
-      () => { setMsg(t.task.gpsWarning); setBusy(false); },
+      () => { setMsg(t.task.gpsWarning); end(); },
     );
   }
 
   async function verify(code: string) {
     if (blockedOffline()) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     try {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
       onChanged();
     } catch (e) {
       setMsg(e instanceof Error && e.message.includes('not-controller') ? t.devices.controlMoved : t.task.wrongCode);
-    } finally { setBusy(false); }
+    } finally { end(); }
   }
 
   // Camera capture → compressed upload → submit (change: fix-photo-camera-capture).
@@ -303,7 +330,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // error to plain "retake" copy instead of the developer-oriented message.
   async function photo(file: File) {
     if (blockedOffline()) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     try {
       setMsg(t.task.uploadingPhoto);
       const url = await uploadTaskPhoto(file, { runId: session.runId, teamId: state.team.id, taskId: task!.id });
@@ -312,7 +340,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       onChanged();
     } catch (e) {
       setMsg(isStoragePathError(e) ? t.task.photoSaveRetry : submitError(e, t.task.uploadFailed));
-    } finally { setBusy(false); }
+    } finally { end(); }
   }
 
   // audio-tasks: a recorded clip rides the SAME photo pipeline — upload the blob
@@ -320,7 +348,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // server validates it against the task's captureKind.
   async function audio(blob: Blob, contentType: string) {
     if (blockedOffline()) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     try {
       setMsg(t.task.uploadingAudio);
       const up = await uploadTaskAudio(blob, {
@@ -333,7 +362,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       onChanged();
     } catch (e) {
       setMsg(submitError(e, t.task.uploadFailed));
-    } finally { setBusy(false); }
+    } finally { end(); }
   }
 
   // Presence-gated answer tasks (change: quiz-location-verification): when the
@@ -345,7 +374,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (task?.requirePresence) {
       withLocation(
         (lat, lng) => { void run({ lat, lng }); },
-        () => { setMsg(t.task.gpsWarning); setBusy(false); },
+        () => { setMsg(t.task.gpsWarning); end(); },
       );
     } else {
       void run(undefined);
@@ -355,7 +384,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // quiz / numeric / survey — submit a typed or chosen answer
   async function answer(text: string) {
     if (blockedOffline()) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text, ...(coords ?? {}) });
@@ -363,7 +393,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         else setMsg(t.task.notQuite);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
-      } finally { setBusy(false); }
+      } finally { end(); }
     });
   }
 
@@ -371,7 +401,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // A wrong arrangement keeps their layout (they refine, not restart).
   async function submitOrdered(items: string[]) {
     if (blockedOffline()) return;
-    setBusy(true); setMsg('');
+    if (!begin()) return;
+    setMsg('');
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items, ...(coords ?? {}) });
@@ -379,7 +410,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         else setMsg(t.task.orderingWrong);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
-      } finally { setBusy(false); }
+      } finally { end(); }
     });
   }
 
@@ -387,7 +418,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // accepted so the input is cleared only on success (P3).
   async function sequenceStep(stepIndex: number, ans: string): Promise<boolean> {
     if (blockedOffline()) return false;
-    setBusy(true); setMsg('');
+    // Re-entrant tap while a step is in flight → not accepted, so the input keeps
+    // what the player typed (no double submit, no premature clear).
+    if (!begin()) return false;
+    setMsg('');
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
       if (res.stepCorrect) { onChanged(); if (!res.taskComplete) setMsg(`${t.task.stepOf({ step: res.stepsDone, total: res.totalSteps })} ✓`); }
@@ -396,7 +430,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } catch (e) {
       setMsg(submitError(e, t.task.failed));
       return false;
-    } finally { setBusy(false); }
+    } finally { end(); }
   }
 
   // geofence — auto check-in once the watcher reports we're inside the radius.
@@ -406,29 +440,35 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // transient/rejected completeTask would freeze auto check-in for good.
   function geofenceArrive(la: number, ln: number): Promise<boolean> {
     if (readOnly || blockedOffline()) return Promise.resolve(false);
-    setBusy(true); setMsg('');
+    // A check-in is already in flight (the watcher fired again before the first
+    // resolved) — report "arrived" so GeofenceAuto stays latched and lets the
+    // in-flight call decide; it un-latches itself on a genuine failure.
+    if (!begin()) return Promise.resolve(true);
+    setMsg('');
     return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
       .then(() => { onChanged(); return true; })
       .catch((e) => { setMsg(submitError(e, t.task.checkinFailed)); return false; })
-      .finally(() => setBusy(false));
+      .finally(() => end());
   }
 
   async function revealHint() {
     if (hint) return;
-    // Hint auto escalation: when the server flagged the hint FREE, skip the
-    // cost confirmation (the charge decision is re-made server-side anyway).
-    if (!task!.hintFreeNow) {
-      const cost = task!.hintPenalty ?? 25;
-      if (!(await dialog.confirm(t.task.hintConfirm({ cost }), { confirmLabel: t.task.hintConfirmBtn }))) return;
-    }
-    setBusy(true);
+    // Guard the confirm + the charge as ONE unit so a same-batch double tap can't
+    // open two dialogs or fire two requestTaskHint charges.
+    if (!begin()) return;
     try {
+      // Hint auto escalation: when the server flagged the hint FREE, skip the
+      // cost confirmation (the charge decision is re-made server-side anyway).
+      if (!task!.hintFreeNow) {
+        const cost = task!.hintPenalty ?? 25;
+        if (!(await dialog.confirm(t.task.hintConfirm({ cost }), { confirmLabel: t.task.hintConfirmBtn }))) return;
+      }
       const res = await requestTaskHint({ ...ctx, taskId: task!.id });
       setHint(res.hint);
       if (res.penalty === 0 && res.free) setMsg(t.task.hintRevealedFree);
     } catch (e) {
       setMsg(submitError(e, t.task.noHint));
-    } finally { setBusy(false); }
+    } finally { end(); }
   }
 
   // Partial stages ("complete N of M") show progress so the team knows how many

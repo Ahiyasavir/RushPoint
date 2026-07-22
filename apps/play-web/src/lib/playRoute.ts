@@ -204,3 +204,21 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   // 10. Plain join screen.
   return { route: { kind: 'join', code: null }, clearSession: false };
 }
+
+/**
+ * The bottom render decision AFTER the informational overlays (board / recap /
+ * challenge / promo / ceremony) have been shown-and-dismissed in-app.
+ *
+ * wave-g robustness #1: those overlay routes keep their own `route.kind` even once
+ * the visitor taps "join" and the overlay is dismissed — the resolver never
+ * downgrades `?board=` to `play` for an already-joined device (board outranks a
+ * session resume so a player CAN peek at the leaderboard first). If we only
+ * resumed on `route.kind === 'play'`, a joined player who opened a shared board
+ * link and dismissed it would be stranded on a blank JoinScreen. So: a device that
+ * still holds a session RESUMES play regardless of the residual overlay route; a
+ * visitor with NO session falls through to the join screen exactly as before.
+ */
+export function resumeOrJoin(route: PlayRoute, hasSession: boolean): 'play' | 'join' {
+  if (route.kind === 'play') return 'play';
+  return hasSession ? 'play' : 'join';
+}

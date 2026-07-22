@@ -1,8 +1,10 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Live photo feed moderation (live-photo-feed): lazy, loads on first open.
-const FeedPanel = lazy(() => import('../components/FeedPanel'));
+// lazyWithRetry so a stale-shell chunk 404 self-heals after a redeploy (wave-g #2).
+const FeedPanel = lazyWithRetry('feed', () => import('../components/FeedPanel'));
 import {
   staffSignIn,
   reviewStationSubmission,

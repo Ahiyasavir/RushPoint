@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { ensureAuth } from './services/firebase';
 import { clearSession, loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
@@ -7,43 +7,18 @@ import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 import { I18nProvider, useT } from './i18nContext';
 import { unlockAudio } from './lib/sound';
-import { resolvePlayRoute, stripStaffParams } from './lib/playRoute';
-// Ceremony mode (change: ceremony-mode): lazy so the slideshow/confetti code
-// stays out of the main bundle (same pattern as the MapLibre chunk).
-const CeremonyScreen = lazy(() => import('./screens/CeremonyScreen'));
-const GamePromoScreen = lazy(() => import('./screens/GamePromoScreen'));
-const PublicLeaderboardScreen = lazy(() => import('./screens/PublicLeaderboardScreen'));
-const ChallengeTeaser = lazy(() => import('./screens/ChallengeTeaser'));
-const TvLeaderboard = lazy(() => import('./screens/TvLeaderboard'));
-const RunRecap = lazy(() => import('./screens/RunRecap'));
-
-/**
- * `React.lazy` + a stale service-worker shell is a trap: the cached index.html can
- * reference a hashed chunk that no longer exists, the dynamic import rejects, and
- * Suspense hangs on the spinner forever — which looks exactly like the staff
- * deep-link bug this change fixes. Reload ONCE (guarded per tab) to pick up a
- * fresh shell; if it fails again, rethrow so the ErrorBoundary shows something real.
- */
-function lazyWithRetry<P extends object>(
-  key: string,
-  factory: () => Promise<{ default: ComponentType<P> }>,
-) {
-  return lazy<ComponentType<P>>(() =>
-    factory().catch((err) => {
-      const flag = `rushpoint.chunkReload.${key}`;
-      let already = true;
-      try {
-        already = sessionStorage.getItem(flag) === '1';
-        if (!already) sessionStorage.setItem(flag, '1');
-      } catch { /* private mode — fall through and rethrow */ }
-      if (!already) {
-        window.location.reload();
-        return new Promise<{ default: ComponentType<P> }>(() => { /* never resolves; the reload takes over */ });
-      }
-      throw err;
-    }),
-  );
-}
+import { resolvePlayRoute, resumeOrJoin, stripStaffParams } from './lib/playRoute';
+import { lazyWithRetry } from './lib/lazyWithRetry';
+// Every participant-facing chunk goes through lazyWithRetry so a stale
+// service-worker shell (old hashed chunk 404s after a redeploy) self-heals with a
+// one-shot reload instead of hanging Suspense forever — previously only
+// StaffConsole was protected (wave-g robustness #2).
+const CeremonyScreen = lazyWithRetry('ceremony', () => import('./screens/CeremonyScreen'));
+const GamePromoScreen = lazyWithRetry('promo', () => import('./screens/GamePromoScreen'));
+const PublicLeaderboardScreen = lazyWithRetry('board', () => import('./screens/PublicLeaderboardScreen'));
+const ChallengeTeaser = lazyWithRetry('challenge', () => import('./screens/ChallengeTeaser'));
+const TvLeaderboard = lazyWithRetry('tv', () => import('./screens/TvLeaderboard'));
+const RunRecap = lazyWithRetry('recap', () => import('./screens/RunRecap'));
 
 const StaffConsole = lazyWithRetry('staff', () => import('./screens/StaffConsole'));
 
@@ -234,10 +209,18 @@ function AppInner() {
     );
   }
 
+  // wave-g robustness #1: a player WITH an active session who opened an
+  // informational overlay (`?board=`/`?recap=`/`?challenge=`/`?game=`) then tapped
+  // its "join" button set `dismissed`, dropping the overlay. The bottom render only
+  // resumed PlayScreen when `route.kind === 'play'` — which it isn't for those
+  // routes — so they landed on a blank JoinScreen (progress survived in
+  // localStorage, but it read as being kicked out). resumeOrJoin resumes play
+  // whenever a session exists; a visitor with NO session still gets JoinScreen.
+  const bottom = resumeOrJoin(route, !!session);
   return (
     <>
       <ConnectionBanner />
-      {route.kind === 'play' && session
+      {bottom === 'play' && session
         ? <PlayScreen session={session} onLeave={() => setSession(null)} />
         : <JoinScreen
             initialCode={route.kind === 'join' ? route.code : null}

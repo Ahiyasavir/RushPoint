@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
@@ -14,13 +14,16 @@ import TaskRunner from '../components/TaskRunner';
 import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
 import type { NavTarget } from '../components/NavMap';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Lazy-loaded so the heavy MapLibre bundle isn't in the initial download — the
 // join screen doesn't need it; it loads when the participant starts racing.
-const NavMap = lazy(() => import('../components/NavMap'));
+// lazyWithRetry so a stale-shell chunk 404 after a redeploy self-heals instead of
+// hanging the map on a spinner for a mid-game player (wave-g robustness #2).
+const NavMap = lazyWithRetry('navmap', () => import('../components/NavMap'));
 // Live photo feed (live-photo-feed): lazy so the feed chunk loads on first open.
-const FeedPanel = lazy(() => import('../components/FeedPanel'));
+const FeedPanel = lazyWithRetry('feed', () => import('../components/FeedPanel'));
 // Team ↔ HQ chat (team-hq-chat): lazy so the chat chunk + listener load on first open.
-const ChatPanel = lazy(() => import('../components/ChatPanel'));
+const ChatPanel = lazyWithRetry('chat', () => import('../components/ChatPanel'));
 import LiveOps from '../components/LiveOps';
 import FinalScreen from './FinalScreen';
 import { formatDuration } from '../lib/boardTime';
