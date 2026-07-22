@@ -425,6 +425,21 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         .filter((t): t is NavTarget => t !== null)
     : [];
 
+  // Hidden-mission map (change: hidden-mission-map): while the team's ACTIVE
+  // mission is a still-sealed hidden target, the normal map has no pin to show and
+  // used to fall back to a placeholder. Instead, plot the SAFE trail of missions
+  // they've already completed (server-provided `completedTaskPins`, built from
+  // completed records only) plus their own GPS. We do NOT plot the hidden active
+  // target — its coordinates stay sealed until reportArrival. For a NORMAL active
+  // task these stay empty, so its map is byte-identical to before (its own pin).
+  const activeMissionSealed = state.activeStageTasks.some((c) => c.arrivalPending);
+  const completedPins: NavTarget[] = activeMissionSealed
+    ? (state.completedTaskPins ?? []).map((p) => ({
+        id: p.id, lat: p.coordinates.lat, lng: p.coordinates.lng, title: p.title, active: false,
+      }))
+    : [];
+  const mapTargets = [...targets, ...completedPins];
+
   const powerUpArmed = team.powerUps?.active === 'double_points';
 
   return (
@@ -460,7 +475,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           under status panels and the screen scrolled to find it. */}
       {(activeStage || zones.length > 0) && (
         <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <NavMap targets={targets} me={me} hotZone={state.run.hotZone} zones={zones} myTeamId={team.id} accent={accent} className="h-52 mb-4" />
+          <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} className="h-52 mb-4" />
         </Suspense>
       )}
 

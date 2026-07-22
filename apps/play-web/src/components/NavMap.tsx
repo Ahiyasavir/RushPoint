@@ -29,7 +29,7 @@ function zoneColor(z: CaptureZone, myTeamId?: string): string {
 }
 
 export default function NavMap({
-  targets, me, hotZone = null, zones = [], myTeamId, accent = '#F97316', className = '',
+  targets, me, hotZone = null, zones = [], myTeamId, accent = '#F97316', className = '', keepMapWithMe = false,
 }: {
   targets: NavTarget[];
   me?: { lat: number; lng: number } | null;
@@ -38,6 +38,13 @@ export default function NavMap({
   myTeamId?: string;
   accent?: string;
   className?: string;
+  // Hidden-mission map (change: hidden-mission-map): keep the map alive showing
+  // just the player's own GPS dot even when there is no target pin and no overlay
+  // — used while the active mission is a still-sealed hidden target so the player
+  // still sees where they are (plus any completed-mission trail pins passed as
+  // targets). Off by default, so every other caller's placeholder-when-empty
+  // behavior (e.g. a locationless-only stage) is byte-identical to before.
+  keepMapWithMe?: boolean;
 }) {
   const { t } = useT();
   const ref = useRef<HTMLDivElement>(null);
@@ -59,6 +66,10 @@ export default function NavMap({
     ...(isHotZoneActive(hotZone, Date.now()) && hotZone ? [{ lat: hotZone.center.lat, lng: hotZone.center.lng }] : []),
   ];
   const hasOverlay = overlayPts.length > 0;
+
+  // Hidden-mission map: with no target pin and no overlay, a valid `me` alone is
+  // enough to keep the map alive (show the GPS dot) when the caller opts in.
+  const hasMe = keepMapWithMe && !!me && isValidCoord(me.lat, me.lng);
 
   // Latest hot zone, read inside styledata (which fires on setStyle) so the
   // overlay is re-applied after a tile-style switch wipes GeoJSON layers.
@@ -131,7 +142,7 @@ export default function NavMap({
   // Create the map once.
   useEffect(() => {
     if (!ref.current || map.current) return;
-    const first = valid[0] ?? overlayPts[0];
+    const first = valid[0] ?? overlayPts[0] ?? (hasMe && me ? { lat: me.lat, lng: me.lng } : undefined);
     map.current = new maplibregl.Map({
       container: ref.current,
       // Honor the current mode so a map RE-created after its targets briefly
@@ -159,7 +170,7 @@ export default function NavMap({
     // full target list) so the happy path, where targets are present throughout,
     // is byte-identical to `[]` (the value never changes, so it fires once).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [valid.length === 0 && !hasOverlay]);
+  }, [valid.length === 0 && !hasOverlay && !hasMe]);
 
   // Switch tile style on mode change (HTML markers persist across setStyle).
   useEffect(() => {
@@ -234,7 +245,7 @@ export default function NavMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valid.length, me?.lat, me?.lng]);
 
-  if (valid.length === 0 && !hasOverlay) {
+  if (valid.length === 0 && !hasOverlay && !hasMe) {
     return (
       <div className={`rounded-2xl bg-app-card border border-glass-border flex items-center justify-center text-zinc-600 text-sm ${className}`}>
         {t.task.mapAppears}

@@ -129,6 +129,14 @@ export interface MyTeamState {
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
   activeStageTasks: SafeTask[];
+  // Completed-mission pins (change: hidden-mission-map): the coordinates + title of
+  // every mission this team has ALREADY COMPLETED, across all stages — a trail of
+  // where they've been. Built server-side by construction from completed task
+  // records only, so it can never carry a hidden-not-arrived / unassigned / sealed
+  // task's location. The play map plots these + the client's own GPS while the
+  // active mission is a still-sealed hidden target. Locationless/coordinate-less
+  // completed tasks are omitted, so this can be shorter than the completed count.
+  completedTaskPins: { id: string; coordinates: { lat: number; lng: number }; title: string }[];
   // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
   // GENUINELY gated (release-scheduled and not yet released, or unlock-gated with
   // an unmet prerequisite) — i.e. routing cannot hand them out yet. Ids only, no

@@ -98,6 +98,7 @@ import { assignTask, releaseTask, computeSkillRatio, buildRecommendations, withL
 import type { NoAssignmentReason } from '../routing/assignNextTask';
 import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
+import { buildCompletedPins } from './completedPins';
 import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
   attachedDeviceUids, controllerUidOf, canAddRunDevice, MAX_RUN_DEVICES,
@@ -3551,9 +3552,26 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     })
     .filter(Boolean);
 
+  // ── Completed-mission pins (change: hidden-mission-map) ─────────────────────
+  // A SAFE map channel: the coordinates of every mission this team has ALREADY
+  // COMPLETED, across ALL stages — a trail of where they've been. Built BY
+  // CONSTRUCTION from the team's completed RunTaskRecords joined to the game task
+  // coords, so it is structurally incapable of shipping a non-completed task's
+  // location (a hidden-not-arrived task, an unassigned task, or the active sealed
+  // target). Leak-safe on the same principle as revealing a hidden task's coords
+  // AFTER arrival: you can't un-find a spot you've stood on. Locationless /
+  // coordinate-less completed tasks are simply omitted. The play map plots these +
+  // the client's own GPS while the active mission is a still-sealed hidden target,
+  // instead of the old map placeholder.
+  const completedTaskPins = buildCompletedPins(
+    team.stages,
+    orderedStages.flatMap((s) => s.tasks),
+  );
+
   return {
     team,
     stageNarratives,
+    completedTaskPins,
     run: {
       id: run.id, status: run.status, accessCode: run.accessCode,
       billingType: run.billingType ?? 'free',
