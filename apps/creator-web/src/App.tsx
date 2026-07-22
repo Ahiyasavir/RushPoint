@@ -37,7 +37,13 @@ export default function App() {
   const t = useT();
   // The Builder is a full-width workspace (3-pane shell); every other route reads
   // best as a centred column. Widen the main container only on /build/*.
-  const isBuilder = useLocation().pathname.startsWith('/build/');
+  const pathname = useLocation().pathname;
+  const isBuilder = pathname.startsWith('/build/');
+
+  // Mobile nav drawer: below `sm` the inline links collapse behind a hamburger.
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Close the drawer whenever the route changes (a link was tapped).
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
 
   // Free mode: hide the wallet/credits surface entirely while payments are off.
   const NAV = [
@@ -64,11 +70,20 @@ export default function App() {
           header bar (logo + back) so the workspace gets the full viewport height. */}
       {!isBuilder && (
       <header className="sticky top-0 z-30 shrink-0 border-b border-[--rp-border] bg-[--surface-1]/80 dark:bg-[--surface-0]/70 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-6">
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center gap-3 sm:gap-6">
+          {/* Hamburger — mobile only; toggles the collapsed nav drawer. */}
+          <button
+            onClick={() => setMenuOpen((o) => !o)}
+            className="sm:hidden w-9 h-9 -ms-1 rounded-lg flex items-center justify-center text-lg hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+            aria-label={menuOpen ? t.common.closeMenu : t.common.openMenu}
+            aria-expanded={menuOpen}
+          >
+            {menuOpen ? '✕' : '☰'}
+          </button>
           <NavLink to="/" className="font-brand text-xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent tracking-tight">
             RushPoint
           </NavLink>
-          <nav className="flex items-center gap-0.5 flex-1">
+          <nav className="hidden sm:flex items-center gap-0.5 flex-1">
             {NAV.map((n) => (
               <NavLink
                 key={n.to}
@@ -86,6 +101,8 @@ export default function App() {
               </NavLink>
             ))}
           </nav>
+          {/* On mobile the inline nav is gone; this spacer keeps the controls end-aligned. */}
+          <div className="flex-1 sm:hidden" aria-hidden="true" />
           <span className="text-xs text-[--ink-3] hidden sm:block truncate max-w-[160px]">{user?.displayName ?? user?.email}</span>
           <button
             onClick={() => setDark((d) => !d)}
@@ -99,6 +116,28 @@ export default function App() {
             {t.common.signOut}
           </button>
         </div>
+        {/* Mobile nav drawer — collapses the inline links below `sm`. Closes on
+            selection via the pathname effect above. */}
+        {menuOpen && (
+          <nav className="sm:hidden border-t border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-0] px-3 py-2 flex flex-col gap-0.5">
+            {NAV.map((n) => (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                end={n.end}
+                className={({ isActive }) =>
+                  `px-3 py-2 rounded-lg text-sm font-medium text-start transition-all duration-150 ${
+                    isActive
+                      ? 'bg-rp-fire/10 text-rp-fire dark:bg-rp-fire/15'
+                      : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'
+                  }`
+                }
+              >
+                {n.label}
+              </NavLink>
+            ))}
+          </nav>
+        )}
       </header>
       )}
 

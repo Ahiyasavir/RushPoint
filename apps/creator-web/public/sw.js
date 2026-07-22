@@ -9,7 +9,7 @@
  * would serve stale game state, so we let every non-GET and every cross-origin
  * request fall straight through to the network.
  */
-const CACHE = 'rushpoint-admin-shell-v2';
+const CACHE = 'rushpoint-admin-shell-v3';
 const SHELL = [
   '/', '/index.html', '/manifest.webmanifest',
   '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png',
@@ -49,17 +49,20 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first, then populate the cache on first network hit.
+  // Static assets: NETWORK-FIRST, cache as offline fallback. A previous cache-first
+  // strategy meant an installed PWA kept serving a stale bundle forever — code
+  // edits (and dev-server/playtest updates) never reached the device because the
+  // worker answered from cache and never re-fetched. Network-first always prefers
+  // fresh content when online, and still falls back to the cache in a dead zone.
   event.respondWith(
-    caches.match(req).then((cached) =>
-      cached ||
-      fetch(req).then((res) => {
+    fetch(req)
+      .then((res) => {
         if (res.ok && res.type === 'basic') {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
-      }),
-    ),
+      })
+      .catch(() => caches.match(req)),
   );
 });

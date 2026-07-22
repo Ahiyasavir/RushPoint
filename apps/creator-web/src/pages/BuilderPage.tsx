@@ -6,7 +6,7 @@ import type {
 } from '@rushpoint/shared';
 import { PRESET_LABELS, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
 import {
-  DndContext, DragOverlay, KeyboardSensor, PointerSensor, MeasuringStrategy,
+  DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, MeasuringStrategy,
   useSensor, useSensors,
 } from '@dnd-kit/core';
 import type {
@@ -872,6 +872,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId }: {
     // A short press + movement tolerance: without it a tap on a card (which opens
     // the panel) and a scroll swipe on a tablet both register as drags.
     useSensor(PointerSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+    // Touch devices: a longer press-and-hold starts a drag, so a plain finger
+    // swipe scrolls the workspace instead of accidentally reordering. Without a
+    // dedicated TouchSensor, drag-reorder is unreliable on a phone/tablet.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: arrowKeyCoordinates }),
   );
   const dragName = (id: string): string => {

@@ -128,7 +128,7 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
 }) {
   const b = useT().builder;
   return (
-    <aside className="w-52 shrink-0 space-y-2 h-full overflow-y-auto pe-0.5">
+    <aside className="w-40 sm:w-52 shrink-0 space-y-2 h-full overflow-y-auto pe-0.5">
       <div className="flex items-center justify-between px-1">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
         <span className="text-[10px] text-[--ink-4]">{stages.length}</span>
