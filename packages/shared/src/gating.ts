@@ -7,6 +7,8 @@
 // backward compatibility). NOT a secret — the locked-task UI names its
 // prerequisites, so the field passes through the participant sanitizer.
 
+import { isReleased, type ReleaseGate } from './schedule';
+
 /** A thing that may carry a same-stage prerequisite gate (a Task). */
 export interface UnlockGate {
   unlockAfterTaskIds?: string[];
@@ -23,6 +25,35 @@ export function isUnlocked(gate: UnlockGate | null | undefined, completedTaskIds
   const prereqs = gate?.unlockAfterTaskIds;
   if (!Array.isArray(prereqs) || prereqs.length === 0) return true;
   return prereqs.every((id) => completedTaskIds.includes(id));
+}
+
+/**
+ * wave-f (next-task-regression, Bug A). Given the UNASSIGNED, not-yet-completed
+ * tasks of a team's active stage, return the ids that are GENUINELY gated — a
+ * task routing cannot hand out yet because it is either release-scheduled and not
+ * yet released, or unlock-gated with an unmet prerequisite. A task that is merely
+ * "unassigned because routing has not picked it yet" is NOT locked and is absent
+ * from the result.
+ *
+ * This is the server-authoritative signal getMyTeamState ships to the play client
+ * so it can distinguish "locked" from "awaiting routing" WITHOUT the client
+ * re-shipping non-assigned task content (wave D omits it from the payload). It
+ * mirrors the `allLocked` arm of the routing candidate filter
+ * (classifyNoAssignment / assignTask) — station-cap ("stationsFull") and expiry
+ * are transient/swept states, deliberately NOT treated as locked here.
+ *
+ * Pure: no I/O, so it is unit-tested (scripts/test-locked-task-ids.ts) without the
+ * emulator. `runStartedAt` is the run's launchedAt; `nowMs` the server clock.
+ */
+export function lockedTaskIds(
+  candidates: (UnlockGate & ReleaseGate & { id: string })[],
+  completedTaskIds: string[],
+  runStartedAt: string | number | null | undefined,
+  nowMs: number,
+): string[] {
+  return candidates
+    .filter((t) => !isReleased(t, runStartedAt, nowMs) || !isUnlocked(t, completedTaskIds))
+    .map((t) => t.id);
 }
 
 /** Minimal task shape validateUnlockGraph needs (id + optional gate). */

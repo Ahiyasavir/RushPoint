@@ -129,6 +129,13 @@ export interface MyTeamState {
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
   activeStageTasks: SafeTask[];
+  // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
+  // GENUINELY gated (release-scheduled and not yet released, or unlock-gated with
+  // an unmet prerequisite) — i.e. routing cannot hand them out yet. Ids only, no
+  // content. The play UI uses this to distinguish "all remaining tasks are locked"
+  // from "unassigned because routing hasn't picked one yet", since wave D omits
+  // non-assigned task content from `activeStageTasks`.
+  lockedTaskIds?: string[];
   // Narrative chapters: intro/outro beats for stages the team has reached (active or
   // completed). The play UI shows an intro when a chapter opens, an outro when it ends.
   stageNarratives?: StageNarrative[];

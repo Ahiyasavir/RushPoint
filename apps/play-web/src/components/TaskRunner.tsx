@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs, isUnlocked, defaultRadiusFor } from '@rushpoint/shared';
+import { haversineKm, expiryInstantMs, defaultRadiusFor } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
@@ -78,21 +78,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   const assignedRec = stage.tasks.find((t) => t.status === 'assigned');
   const unassigned  = stage.tasks.filter((t) => t.status === 'unassigned');
 
-  // M2: are ALL remaining (unassigned) tasks still unlock-gated? Uses the same
-  // shared `isUnlocked` the server routing/completion guard uses, so this display
-  // can't disagree with why routing handed back nothing.
-  const completedTaskIds = state.team.stages
-    .flatMap((s) => s.tasks)
-    .filter((rec) => rec.status === 'completed')
-    .map((rec) => rec.taskId);
-  // play-task-gating: an unassigned task is no longer shipped to the client at
-  // all, so `c` is normally undefined here. A task we cannot even see is one we
-  // certainly cannot act on, so treat "no content" as locked — otherwise the
-  // "everything left is locked" explanation would silently stop appearing.
-  const allRemainingLocked = unassigned.length > 0 && unassigned.every((rec) => {
-    const c = state.activeStageTasks.find((x) => x.id === rec.taskId);
-    return !c || !isUnlocked(c, completedTaskIds);
-  });
+  // M2 / wave-f (next-task-regression, Bug A): are ALL remaining (unassigned)
+  // tasks GENUINELY gated (routing cannot hand any of them out yet)? wave D omits
+  // non-assigned task content from the payload, so we can no longer look a task up
+  // in `activeStageTasks` to answer this (that lookup is always undefined now and
+  // made EVERY unassigned task look "locked" — a false dead-end even while routing
+  // could assign one this instant). The authoritative signal is the server's
+  // `lockedTaskIds` (release/unlock-gated ids), driven by game-rule + team-record
+  // state, not by whether content happens to be on the wire.
+  const lockedIds = state.lockedTaskIds ?? [];
+  const allRemainingLocked = unassigned.length > 0
+    && unassigned.every((rec) => lockedIds.includes(rec.taskId));
 
   // If multi-task stage and nothing assigned yet, request a routing decision once.
   // A failed request surfaces a retryable error instead of an infinite spinner.
@@ -104,8 +100,16 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (routingInFlight.current) return; // don't stampede a slow request
     routingInFlight.current = true;
     setRoutingError(false);
-    withLocation(
-      (lat, lng) => requestNextTask({ ...ctx, lat, lng })
+    // wave-f (next-task-regression, Bug B): routing does NOT require a GPS fix —
+    // the server defaults an absent location to a constant and routes by load
+    // (requestNextTask: `teamLoc = lat/lng ?? {0,0}`). So a GPS denial/timeout
+    // must NOT map to the terminal "couldn't get your next task" dead-end (a 5 s
+    // timeout indoors / on a permission prompt is common, and the retry just
+    // re-timed-out). We try for a precise fix, but on failure route WITHOUT coords
+    // (degraded transit, still assigns) instead of erroring. `routingError` now
+    // fires ONLY on a genuine requestNextTask rejection — its honest meaning.
+    const requestRouting = (coords?: { lat: number; lng: number }) =>
+      requestNextTask({ ...ctx, ...(coords ?? {}) })
         .then((res) => {
           if (res.reason === 'stationsFull') {
             // Transient: every eligible station is at capacity. Show the waiting
@@ -122,8 +126,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           routingInFlight.current = false;
           onChanged();
         })
-        .catch(() => { routingInFlight.current = false; setRoutingError(true); }),
-      () => { routingInFlight.current = false; setRoutingError(true); },
+        .catch(() => { routingInFlight.current = false; setRoutingError(true); });
+    withLocation(
+      (lat, lng) => { void requestRouting({ lat, lng }); },
+      () => { void requestRouting(undefined); },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assignedRec, unassigned.length, routingAttempt, readOnly]);
@@ -212,8 +218,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         </Card>
       );
     }
-    // M2: the only remaining tasks are unlock-gated (routing returns nothing) —
-    // explain the gate instead of spinning. The LockedTasksList below names them.
+    // M2 / wave-f: EVERY remaining task is genuinely gated (server `lockedTaskIds`
+    // covers all of them) so routing has nothing to hand out — explain the gate
+    // instead of spinning forever. Per wave D privacy the gated task titles are NOT
+    // shipped, so the copy no longer promises a visible list.
     if (allRemainingLocked) {
       return (
         <Card className="p-6 text-center space-y-2">

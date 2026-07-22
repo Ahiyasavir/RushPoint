@@ -64,6 +64,7 @@ import {
   releaseInstantMs,
   isExpired,
   isUnlocked,
+  lockedTaskIds,
   resolveExclusions,
   isHintFree,
   isOrderingTask,
@@ -3446,6 +3447,28 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
         })
       : [];
 
+  // ── Genuine lock signal (change: wave-f next-task-regression, Bug A) ─────────
+  // wave D omits every non-assigned task from `activeStageTasks`, so the client
+  // can no longer look up an unassigned task's content to decide whether it is
+  // unlock/release-gated vs merely awaiting routing. Ship the server's
+  // authoritative verdict instead: the ids of active-stage tasks that are
+  // GENUINELY gated. Ids only, no content — the client already holds these ids in
+  // team.stages[].tasks[].taskId, and this is a response-level field (not a task
+  // payload), so the sanitizer allowlist is unaffected and nothing new leaks.
+  const completedActiveIds = team.stages
+    .flatMap((s) => s.tasks)
+    .filter((r) => r.status === 'completed')
+    .map((r) => r.taskId);
+  const unassignedActive =
+    activeStageIdx >= 0 && orderedStages[activeStageIdx]
+      ? orderedStages[activeStageIdx].tasks.filter(
+          (t) => recByTaskId.get(t.id)?.status === 'unassigned',
+        )
+      : [];
+  const activeLockedTaskIds = lockedTaskIds(
+    unassignedActive, completedActiveIds, run.launchedAt, Date.now(),
+  );
+
   // If the team is between stages waiting on a timed drop, the instant the next
   // locked stage unlocks — so the play UI can render a "next chapter unlocks in…"
   // countdown. null when nothing is waiting on a schedule.
@@ -3522,6 +3545,11 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       instructions: cleanGameInstructions(game.instructions) ?? null,
     },
     activeStageTasks,
+    // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
+    // genuinely release/unlock-gated (routing cannot hand them out yet). The play
+    // UI uses this — NOT the presence of omitted content — to decide "all
+    // remaining locked" vs "awaiting routing".
+    lockedTaskIds: activeLockedTaskIds,
     // Shared team devices: who controls + this caller's own role, so every
     // attached phone can render controller/viewer UI without extra reads.
     myRole: resolveDeviceRole(team, uid),
