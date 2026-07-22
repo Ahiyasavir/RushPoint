@@ -131,6 +131,19 @@ export function evaluatePresence(
 }
 
 /**
+ * Whether a proximity/presence gate is satisfied (change: testdrive-here-bypass).
+ * In a TEST RUN (server-authoritative `run.isTestDrive`) any submission passes so a
+ * creator can rehearse the whole course from their desk; in a real run the distance
+ * verdict rules (the anti-cheat that rejects far-away check-ins). `isTestDrive` MUST
+ * come from the CF-written run doc, never a client payload/header/flag — only the
+ * literal boolean `true` bypasses (a real run's absent flag is identity: for any
+ * `distanceOk`, `proximitySatisfied(distanceOk, undefined) === distanceOk`).
+ */
+export function proximitySatisfied(distanceOk: boolean, isTestDrive?: boolean): boolean {
+  return isTestDrive === true || distanceOk;
+}
+
+/**
  * Resolve the effective trigger mode for a (possibly legacy) task. An explicit
  * `triggerMode` wins; otherwise `locationless` → 'locationless', a `geofence`
  * type → 'radius', and everything else defaults to 'radius'. Keeps the invariant

@@ -31,6 +31,7 @@ import {
   normalizeTriggerMode,
   evaluateTrigger,
   evaluatePresence,
+  proximitySatisfied,
   attemptLimitReached,
   matchesTaskAnswer,
   hotZoneMultiplier,
@@ -2093,6 +2094,21 @@ export const startInstantPlay = loggedCallable('startInstantPlay', async (data, 
   if (!game.allowInstantPlay) {
     throw new functions.https.HttpsError('failed-precondition', 'This game is not open for instant play');
   }
+  // Guardian-consent gate (wave-J J1): a game requiring guardian consent CANNOT be
+  // started via instant-play. Instant-play is anonymous, on-demand, self-guided solo
+  // play with no organizer and no out-of-band guardian channel, so there is no way to
+  // collect a valid consent record before handing out play — startTeams' consent flow
+  // (requestGuardianConsent → guardian link → grantGuardianConsent, then the
+  // isConsentSatisfied filter) has no analogue here. Rather than seed launched:true +
+  // assign a task with zero consent (letting a minor play unchecked), refuse the
+  // instant-play path entirely. Mirrors startTeams' intent (consent required ⇒ no play
+  // without it) without weakening any other surface.
+  if (game.requiresGuardianConsent) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'This game requires guardian consent and cannot be started with instant play',
+    );
+  }
   if (!game.stages?.length) {
     throw new functions.https.HttpsError('failed-precondition', 'Game has no stages');
   }
@@ -2903,18 +2919,25 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
     const c = gtask.coordinates;
     const hasRealCoords = !!c && isValidCoord(c.lat, c.lng) && (c.lat !== 0 || c.lng !== 0);
     if ((mode === 'radius' || mode === 'exact') && hasRealCoords) {
+      // Test-run bypass (wave-J): in a TEST run the creator may check in from their
+      // desk, so a would-reject verdict is overridden — but ONLY on the reject path,
+      // via a lazy run-doc read, so a real run's happy path is byte-identical (zero
+      // extra reads). The accept keys solely on the CF-written run.isTestDrive flag.
       if (lat == null || lng == null || !isValidCoord(lat, lng)) {
-        throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
-      }
-      const distM = haversineKm({ lat, lng }, c!) * 1000;
-      // Hidden-location tasks gate identically but the rejection must not leak the
-      // distance (otherwise the secret spot is triangulable by polling).
-      const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters, { hidden: !!gtask.hideLocation });
-      if (!verdict.ok) {
-        const fallback = gtask.hideLocation
-          ? 'Not here yet — keep following the clue'
-          : `Too far from the spot (${Math.round(distM)}m away)`;
-        throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? fallback);
+        if (!proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+          throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
+        }
+      } else {
+        const distM = haversineKm({ lat, lng }, c!) * 1000;
+        // Hidden-location tasks gate identically but the rejection must not leak the
+        // distance (otherwise the secret spot is triangulable by polling).
+        const verdict = evaluateTrigger(mode, distM, gtask.geofenceRadiusMeters, { hidden: !!gtask.hideLocation });
+        if (!verdict.ok && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+          const fallback = gtask.hideLocation
+            ? 'Not here yet — keep following the clue'
+            : `Too far from the spot (${Math.round(distM)}m away)`;
+          throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? fallback);
+        }
       }
     }
   }
@@ -2947,7 +2970,10 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
-  if (team.outOfBounds === true) {
+  // Test-run bypass (wave-J): a desk rehearsal must never dead-end on the safe-zone
+  // latch. The run-doc read happens ONLY when already flagged out of bounds (an
+  // abnormal path), so the normal happy path adds zero reads and stays byte-identical.
+  if (team.outOfBounds === true && !(await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
     return { taskId: null, outOfBounds: true };
   }
   const now = new Date().toISOString();
@@ -3070,16 +3096,21 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
   const mode = normalizeTriggerMode(task);
   if ((mode === 'radius' || mode === 'exact') && hasRealCoords) {
     // Arrival is NEVER self-declared: no coordinates ⇒ no reveal. Same wording
-    // family as the check-in path.
+    // family as the check-in path. Test-run bypass (wave-J): in a TEST run the
+    // creator unseals from their desk, so a would-reject verdict is overridden —
+    // ONLY on the reject path (lazy run-doc read), keeping a real run byte-identical.
     if (lat == null || lng == null || !isValidCoord(lat, lng)) {
-      throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
-    }
-    const distM = haversineKm({ lat, lng }, c!) * 1000;
-    const verdict = evaluateTrigger(mode, distM, task.geofenceRadiusMeters, { hidden: true });
-    if (!verdict.ok) {
-      // Reason strings for hidden tasks are digit-free by contract; never fall
-      // back to a message that carries the distance.
-      return { arrived: false, reason: verdict.reason ?? 'Not here yet — keep following the clue' };
+      if (!proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+        throw new functions.https.HttpsError('failed-precondition', 'Location required to check in here');
+      }
+    } else {
+      const distM = haversineKm({ lat, lng }, c!) * 1000;
+      const verdict = evaluateTrigger(mode, distM, task.geofenceRadiusMeters, { hidden: true });
+      if (!verdict.ok && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
+        // Reason strings for hidden tasks are digit-free by contract; never fall
+        // back to a message that carries the distance.
+        return { arrived: false, reason: verdict.reason ?? 'Not here yet — keep following the clue' };
+      }
     }
   }
 
@@ -3163,6 +3194,17 @@ export function assertStageActiveForTask(team: RunTeam, taskId: string): void {
   }
 }
 
+// Test-run proximity bypass (change: testdrive-here-bypass, wave-J). A LAZY
+// run-doc read used ONLY on a would-reject proximity path: in a real run the gate
+// passes on distance before this is ever called, so the happy path adds ZERO reads
+// and stays byte-identical. The bypass keys on nothing but the CF-written run doc's
+// `isTestDrive` flag — never a client payload/header/flag. A missing doc/flag ⇒
+// false (treated as a real run), so the anti-cheat can never be relaxed by accident.
+async function runIsTestDrive(ownerUid: string, gameId: string, runId: string): Promise<boolean> {
+  const snap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+  return (snap.data() as Run | undefined)?.isTestDrive === true;
+}
+
 // Task expiry guard shared by the answer callables (change: task-expiry). Reads
 // the run doc for `launchedAt` only when the task actually carries an expiry —
 // zero extra reads on the common (no-expiry) path.
@@ -3217,7 +3259,11 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // attempt-limit slot. The reason carries no distance and no answer (safe for hidden).
   if (task.requirePresence) {
     const verdict = evaluatePresence(task.coordinates, { lat, lng }, task.geofenceRadiusMeters);
-    if (!verdict.ok) {
+    // Test-run bypass (wave-J): a desk rehearsal answers from anywhere. The run-doc
+    // read happens ONLY on the would-reject path, so a real run is byte-identical.
+    // evaluatePresence also returns ok:false for missing GPS, so this one wrap
+    // covers both the too-far and the no-coords case.
+    if (!verdict.ok && !proximitySatisfied(false, await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
       throw new functions.https.HttpsError('failed-precondition', verdict.reason ?? 'Move closer to answer this task');
     }
   }

@@ -1396,6 +1396,56 @@ async function main() {
 
   }); // scenario: test drive
 
+  await scenario('test drive proximity bypass (far check-in accepted; real run rejects)', async () => {
+
+  // ── Test-drive "I'm here" proximity bypass (change: testdrive-here-bypass) ───
+  // In a TEST run every proximity/presence gate accepts a submission regardless of
+  // distance (desk rehearsal); a REAL run's anti-cheat still rejects the same far
+  // check-in. Asserts BOTH directions for completeTask (field/radius) AND
+  // reportArrival (hidden-location) so the SPOOF contract can't silently regress.
+  const FAR = { lat: 32.5, lng: 34.9 };   // ~90 km from the task coordinates
+  const { gameId: gPB } = await creator.call('createGame', { title: 'Proximity Bypass Game', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gPB,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'pb-s', order: 0, title: 'On site', isFinal: true,
+      tasks: [
+        { id: 'pb-field', title: 'Check in here', type: 'field',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5, pointValue: 30, maxConcurrentTeams: 3 },
+        { id: 'pb-hidden', title: 'Secret spot', type: 'field', hideLocation: true,
+          coordinates: { lat: 31.90, lng: 35.05 }, locationClue: 'Follow the clue',
+          difficulty: 2, estimatedMinutes: 5, pointValue: 30, maxConcurrentTeams: 3 },
+      ],
+    }],
+  });
+
+  // (a) TEST run — a far-away check-in and a far-away hidden-arrival BOTH pass.
+  const { runId: rPBT, accessCode: cPBT } = await creator.call('launchRun', { gameId: gPB, testDrive: true });
+  const pbT = makeParty('pbTester'); await signInAnonymously(pbT.auth);
+  await pbT.call('joinRun', { code: cPBT, displayName: 'Desk tester' });
+  await creator.call('startTeams', { gameId: gPB, runId: rPBT });
+  const farCheckIn = await pbT.call('completeTask', { taskId: 'pb-field', code: cPBT, ...FAR });
+  check('test run ACCEPTS a far-away completeTask (desk rehearsal)', farCheckIn?.ok === true, JSON.stringify(farCheckIn));
+  const farArrival = await pbT.call('reportArrival', { taskId: 'pb-hidden', code: cPBT, ...FAR });
+  check('test run UNSEALS a hidden task from afar (reportArrival)', farArrival?.arrived === true, JSON.stringify(farArrival));
+
+  // (b) REAL run — the SAME far submissions are rejected (anti-cheat holds).
+  const { runId: rPBN, accessCode: cPBN } = await creator.call('launchRun', { gameId: gPB });
+  const pbN = makeParty('pbReal'); await signInAnonymously(pbN.auth);
+  await pbN.call('joinRun', { code: cPBN, displayName: 'Real player' });
+  await creator.call('startTeams', { gameId: gPB, runId: rPBN });
+  await expectError('real run REJECTS the same far-away completeTask (SPOOF holds)',
+    pbN.call('completeTask', { taskId: 'pb-field', code: cPBN, ...FAR }),
+    { codeIn: ['functions/failed-precondition'], match: /too far/i });
+  const realArrival = await pbN.call('reportArrival', { taskId: 'pb-hidden', code: cPBN, ...FAR });
+  check('real run does NOT unseal a hidden task from afar', realArrival?.arrived === false, JSON.stringify(realArrival));
+
+  await creator.call('finalizeRun', { gameId: gPB, runId: rPBT });
+  await creator.call('finalizeRun', { gameId: gPB, runId: rPBN });
+
+  }); // scenario: test drive proximity bypass
+
   await scenario('hint auto escalation (attempts path → free hint)', async () => {
 
   // ── Hint auto escalation (change: hint-auto-escalation) ─────────────────────
@@ -3118,6 +3168,16 @@ async function main() {
     await creator.call('publishGame', { gameId: gN2, visibility: 'public' });
     await expectError('instant: a non-opted-in game is refused',
       pI.call('startInstantPlay', { gameId: gN2 }), { codeIn: ['functions/failed-precondition'] });
+
+    // J1 (wave-J privacy): a game that requires guardian consent CANNOT be started
+    // via instant play — the consent gate only existed in startTeams, letting a
+    // minor play an allowInstantPlay + requiresGuardianConsent game with zero consent.
+    const { gameId: gGC } = await creator.call('createGame', { title: 'Consent Instant', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gGC, allowInstantPlay: true, requiresGuardianConsent: true, minAge: 13, stages: oneStage('gc-s') });
+    await creator.call('publishGame', { gameId: gGC, visibility: 'public' });
+    await expectError('instant: a guardian-consent game is refused (J1 bypass closed)',
+      pI.call('startInstantPlay', { gameId: gGC, displayName: 'Minor' }),
+      { codeIn: ['functions/failed-precondition'], match: /guardian consent/i });
   }); // scenario: marketplace instant play
 
   await scenario('territory capture (zones + capture bonus + flip)', async () => {

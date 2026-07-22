@@ -276,17 +276,42 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } catch { /* let the player tap again; nothing persisted */ }
   }
 
+  // Submit a check-in through completeTask (field / self_report / geofence all use
+  // it). Sends REAL coords when the argument is present, OMITS them when not — never
+  // synthetic at-the-spot coords (that would leak a hidden task's secret location and
+  // pollute the movement heatmap). Callers decide when omission is allowed.
+  async function submitCheckIn(coords?: { lat: number; lng: number }) {
+    try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); onChanged(); }
+    catch (e) { setMsg(submitError(e, t.task.failed)); }
+    finally { end(); }
+  }
+
   async function field() {
     if (blockedOffline()) return;
     if (!begin()) return;
     setMsg('');
     withLocation(
-      async (lat, lng) => {
-        try { await completeTask({ ...ctx, taskId: task!.id, lat, lng }); onChanged(); }
-        catch (e) { setMsg(submitError(e, t.task.failed)); }
-        finally { end(); }
+      (lat, lng) => { void submitCheckIn({ lat, lng }); },
+      () => {
+        // Test run (server-authoritative run.isTestDrive, tied to the TEST RUN banner):
+        // accept the check-in from anywhere so the creator can rehearse from their desk.
+        // Send NO synthetic coords — the server bypass keys on the run flag, not location.
+        if (session.isTestDrive) { void submitCheckIn(); return; }
+        setMsg(t.task.gpsWarning); end();
       },
-      () => { setMsg(t.task.gpsWarning); end(); },
+    );
+  }
+
+  // Geofence auto-fires only on-site; a test run gives the creator an explicit
+  // "I'm here" escape hatch (real coords when granted, omitted when not) so the
+  // course is walkable from the desk. Only rendered when session.isTestDrive.
+  async function geofenceTestCheckIn() {
+    if (blockedOffline()) return;
+    if (!begin()) return;
+    setMsg('');
+    withLocation(
+      (lat, lng) => { void submitCheckIn({ lat, lng }); },
+      () => { void submitCheckIn(); },
     );
   }
 
@@ -299,16 +324,22 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (blockedOffline(t.task.arrivalNeedsOnline)) return;
     if (!begin()) return;
     setMsg('');
+    const submitArrival = async (coords?: { lat: number; lng: number }) => {
+      try {
+        const res = await reportArrival({ ...ctx, taskId: task!.id, ...(coords ?? {}) });
+        if (res.arrived) { setMsg(t.task.arrivalUnlocked); onChanged(); }
+        else setMsg(t.task.notThereYet);
+      } catch (e) { setMsg(submitError(e, t.task.notThereYet)); }
+      finally { end(); }
+    };
     withLocation(
-      async (lat, lng) => {
-        try {
-          const res = await reportArrival({ ...ctx, taskId: task!.id, lat, lng });
-          if (res.arrived) { setMsg(t.task.arrivalUnlocked); onChanged(); }
-          else setMsg(t.task.notThereYet);
-        } catch (e) { setMsg(submitError(e, t.task.notThereYet)); }
-        finally { end(); }
+      (lat, lng) => { void submitArrival({ lat, lng }); },
+      () => {
+        // Test run: unseal from anywhere (desk rehearsal). No synthetic coords — the
+        // server bypass keys on run.isTestDrive, never on faked/leaked hidden coords.
+        if (session.isTestDrive) { void submitArrival(); return; }
+        setMsg(t.task.gpsWarning); end();
       },
-      () => { setMsg(t.task.gpsWarning); end(); },
     );
   }
 
@@ -504,6 +535,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}
           </Button>
+          {session.isTestDrive && (
+            <p className="text-[11px] text-zinc-500 mt-2 text-center" data-testid="testdrive-hint">{t.task.testDriveHint}</p>
+          )}
         </div>
 
         {task.hasHint && !hint && (
@@ -567,7 +601,16 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         ) : task.type === 'numeric' ? (
           <NumericEntry busy={frozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
-          <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp} helpSent={helpSent} />
+          <>
+            <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp} helpSent={helpSent} />
+            {session.isTestDrive && (
+              <div className="mt-3">
+                <Button disabled={frozen} onClick={geofenceTestCheckIn} data-testid="task-geofence-testdrive-checkin">
+                  {t.task.testDriveImHere}
+                </Button>
+              </div>
+            )}
+          </>
         ) : task.type === 'sequence' ? (
           <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen} onSubmit={sequenceStep} />
         ) : task.type === 'survey' ? (
@@ -578,6 +621,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <PhotoEntry busy={frozen} onSubmit={photo} />
         )}
       </div>
+
+      {/* Test-run affordance hint: explain why proximity checks are relaxed for the
+          check-in / geofence task types (server-authoritative run.isTestDrive). */}
+      {session.isTestDrive && (task.type === 'field' || task.type === 'self_report' || task.type === 'geofence') && (
+        <p className="text-[11px] text-zinc-500 mt-2 text-center" data-testid="testdrive-hint">{t.task.testDriveHint}</p>
+      )}
 
       {task.hasHint && (
         <div className="mt-3">
