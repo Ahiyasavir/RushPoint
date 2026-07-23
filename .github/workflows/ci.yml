@@ -126,13 +126,6 @@ jobs:
       - name: Storage-rules tests (participant media scoping)
         run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/test-storage-rules.mjs"
 
-      # completeTaskForTeam is an INTERNAL helper, so the callable-only e2e suite
-      # cannot reach it. This is the regression test for the station-occupancy slot
-      # being released in the SAME transaction as the completion (a leak that has
-      # shipped before).
-      - name: Atomic complete-and-release (internal helper)
-        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/test-atomic-release.mjs"
-
       # Concurrent load smoke: 8 teams play a real game at once, then the run's
       # leaderboard invariants + station-slot accounting are audited. Catches
       # concurrency regressions (station-cap races, lock-timeout handling, score

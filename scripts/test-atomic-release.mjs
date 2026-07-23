@@ -1,3 +1,16 @@
+// ⚠ OBSOLETE — CANNOT RUN AGAINST THE CURRENT BUILD. Do not wire this into a gate
+// until it is rewritten; CI proved it fails with ERR_MODULE_NOT_FOUND.
+//
+// It imports `functions/lib/runs/index.js`, but functions is now built by esbuild
+// as a SINGLE BUNDLE (`functions/package.json` -> `esbuild src/index.ts --bundle
+// --outfile=lib/index.js`). There is no per-module output, and completeTaskForTeam
+// is an internal, non-exported function inside that bundle, so it is unreachable
+// by import at any path.
+//
+// The behaviour it guarded is NOT uncovered: the station-occupancy slot returning
+// to 0 after a completion is asserted at the callable level by scripts/e2e-verify.mjs
+// and audited by scripts/simulate-run.mjs. Rewriting this to assert through a
+// callable, or exporting the internal for test, would restore the direct check.
 // WO Fix 1 — atomic complete-and-release, deterministic emulator integration test.
 //
 // completeTaskForTeam is an INTERNAL helper (not a callable), so the callable-only
