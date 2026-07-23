@@ -10,6 +10,7 @@ import admin from 'firebase-admin';
 import { publicTaskLocation } from '@rushpoint/shared';
 import { seedSansana, GAME_ID as SANSANA_GAME_ID } from './lib/sansana-game-def.mjs';
 import { seedQaGame, GAME_ID as QA_GAME_ID, CODE as QA_CODE } from './lib/qa-game-def.mjs';
+import { seedSpyAcademy, GAME_ID as SPY_GAME_ID, CODE as SPY_CODE } from './lib/spy-academy-game-def.mjs';
 
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
 
@@ -138,6 +139,22 @@ async function ensureQaGame(now) {
   console.log(`[seed] QA playground seeded — join code ${QA_CODE}.`);
 }
 
+// ── Flagship instant-play demo (idempotent restore) ──────────────────────────
+// "אקדמיית הסוכנים" — the FACE of the app: the game the creator landing page's
+// "try a sample game" button opens via startInstantPlay. Locationless, staffless,
+// auto-approving, playable anywhere in seconds. Same reboot-survival reasoning as
+// Sansana/QA above. See scripts/lib/spy-academy-game-def.mjs.
+async function ensureSpyAcademy(now) {
+  const snap = await db.doc(`publicGames/${SPY_GAME_ID}`).get();
+  if (snap.exists) {
+    console.log('[seed] Flagship spy-academy demo already present — skipped.');
+    return;
+  }
+  console.log('[seed] Seeding the flagship spy-academy demo…');
+  await seedSpyAcademy(admin, db, auth, now);
+  console.log(`[seed] Flagship demo seeded — instant play, join code ${SPY_CODE}.`);
+}
+
 async function seedDemo(now) {
   console.log('[seed] Empty database — seeding v2 demo data…');
 
@@ -215,6 +232,7 @@ async function main() {
 
   await ensureSansana(now);
   await ensureQaGame(now);
+  await ensureSpyAcademy(now);
 }
 
 main().catch((err) => { console.error('[seed] Seed failed:', err); process.exit(1); });

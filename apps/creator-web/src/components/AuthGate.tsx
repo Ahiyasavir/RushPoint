@@ -23,12 +23,17 @@ const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'))
 
 const LEGAL_PATHS = ['/privacy', '/terms'];
 
-// The participant app, for the no-signup "try a sample game" demo link. The seed
-// always keeps a live demo run reachable with the PLAY01 access code.
+// The participant app, for the no-signup "try a sample game" demo link. This
+// opens the FLAGSHIP instant-play demo ("אקדמיית הסוכנים"): the `?game=<id>` promo
+// route lets a first-time visitor start a fresh solo run through startInstantPlay
+// — free, anonymous, staffless, playable from anywhere on earth, no organizer and
+// no access code. Seeded (gallery-published, allowInstantPlay:true) by
+// scripts/lib/spy-academy-game-def.mjs. Change: flagship-instant-demo.
+const DEMO_GAME_ID = 'demo-instant-spy';
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
-const DEMO_URL = `${PLAY_URL}/?code=PLAY01`;
+const DEMO_URL = `${PLAY_URL}/?game=${DEMO_GAME_ID}`;
 
 interface AuthCtx {
   user: User | null;
