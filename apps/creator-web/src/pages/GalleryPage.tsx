@@ -12,6 +12,12 @@ import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage, isCoarsePub
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useT } from '../components/LanguageContext';
 
+// Fetch limits mirror the server HARD_CAPs in functions/src/gallery/index.ts
+// (searchTaskLibrary: 100, searchGallery: 50) so the map/list cover as many
+// missions/games as the backend will serve instead of the callable defaults.
+const TASK_LIBRARY_FETCH_LIMIT = 100;
+const GALLERY_FETCH_LIMIT = 50;
+
 export default function GalleryPage() {
   const nav = useNavigate();
   const t = useT();
@@ -98,11 +104,11 @@ export default function GalleryPage() {
     if (tab === 'games') setGames(null); else setTasks(null);
     try {
       if (tab === 'games') {
-        const { games, likedIds } = await searchGallery({ query: q });
+        const { games, likedIds } = await searchGallery({ query: q, limit: GALLERY_FETCH_LIMIT });
         setGames(games);
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(games.map((g) => [g.id, deriveLikeView(g, likedIds)])) }));
       } else {
-        const { tasks, likedIds } = await searchTaskLibrary({ query: q });
+        const { tasks, likedIds } = await searchTaskLibrary({ query: q, limit: TASK_LIBRARY_FETCH_LIMIT });
         setTasks(tasks);
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(tasks.map((tk) => [tk.id, deriveLikeView(tk, likedIds)])) }));
       }
