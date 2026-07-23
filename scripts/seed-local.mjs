@@ -7,6 +7,7 @@
 //   Join codes:     PLAY01  (and 1234)
 
 import admin from 'firebase-admin';
+import { publicTaskLocation } from '@rushpoint/shared';
 import { seedSansana, GAME_ID as SANSANA_GAME_ID } from './lib/sansana-game-def.mjs';
 import { seedQaGame, GAME_ID as QA_GAME_ID, CODE as QA_CODE } from './lib/qa-game-def.mjs';
 
@@ -170,10 +171,16 @@ async function seedDemo(now) {
   });
   const pb = db.batch();
   for (const t of allTasks) {
+    // publicTasks is world-readable, so it gets the coarse ~1 km AREA and never the
+    // authored point — same rule publishGame applies (change:
+    // public-task-area-visibility). Omitted entirely for hidden / locationless /
+    // unplaced tasks, which is also what makes them absent from the library map.
+    const approxLocation = publicTaskLocation(t);
     pb.set(db.doc(`publicTasks/${GAME_ID}_${t.id}`), {
       id: `${GAME_ID}_${t.id}`, sourceGameId: GAME_ID, sourceGameTitle: game.title,
       ownerUid: OWNER_UID, ownerDisplayName: 'Demo Creator',
-      title: t.title, description: t.description, type: t.type, coordinates: t.coordinates,
+      title: t.title, description: t.description, type: t.type,
+      ...(approxLocation ? { approxLocation } : {}),
       difficulty: t.difficulty, estimatedMinutes: t.estimatedMinutes, pointValue: t.pointValue,
       tags: t.tags ?? [], copyCount: 0, createdAt: now,
     });

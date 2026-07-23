@@ -13,6 +13,7 @@
 //   node scripts/seed-games-youth.mjs
 
 import admin from 'firebase-admin';
+import { publicTaskLocation } from '@rushpoint/shared';
 
 const PROJECT_ID = 'rushpoint-pwa-7daaa';
 
@@ -1153,6 +1154,11 @@ async function seedGame(game) {
   // Public task library
   const batch = db.batch();
   for (const t of allTasks) {
+    // publicTasks is world-readable: the coarse ~1 km AREA, never the authored
+    // point, and NOTHING at all for a hidden / locationless / unplaced task
+    // (change: public-task-area-visibility). This writer previously copied
+    // `t.coordinates` through unconditionally — with no hideLocation branch at all.
+    const approxLocation = publicTaskLocation(t);
     batch.set(db.doc(`publicTasks/${game.id}_${t.id}`), {
       id: `${game.id}_${t.id}`,
       sourceGameId: game.id,
@@ -1162,7 +1168,7 @@ async function seedGame(game) {
       title: t.title,
       description: t.description ?? '',
       type: t.type,
-      coordinates: t.coordinates,
+      ...(approxLocation ? { approxLocation } : {}),
       difficulty: t.difficulty,
       estimatedMinutes: t.estimatedMinutes,
       pointValue: t.pointValue,

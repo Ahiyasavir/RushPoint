@@ -40,6 +40,8 @@
 // emulator boot by scripts/seed-local.mjs so it never disappears.
 // ═══════════════════════════════════════════════════════════════════════════════
 
+import { publicTaskLocation } from '@rushpoint/shared';
+
 export const PROJECT = 'rushpoint-pwa-7daaa';
 
 export const OWNER_UID = 'qa-creator';
@@ -382,11 +384,17 @@ export async function seedQaGame(admin, db, auth, now) {
   });
   const pb = db.batch();
   for (const t of allTasks) {
+    // publicTasks is world-readable: the coarse ~1 km AREA, never the authored
+    // point, and NOTHING at all for a hidden / locationless / unplaced task
+    // (change: public-task-area-visibility). The old `hideLocation ? {0,0}`
+    // improvisation is gone — the shared rule already omits the field, and a
+    // stored (0,0) is still a stored field the map would have to special-case.
+    const approxLocation = publicTaskLocation(t);
     pb.set(db.doc(`publicTasks/${GAME_ID}_${t.id}`), {
       id: `${GAME_ID}_${t.id}`, sourceGameId: GAME_ID, sourceGameTitle: GAME_META.title,
       ownerUid: OWNER_UID, ownerDisplayName: 'QA Creator',
       title: t.title, description: t.description ?? '', type: t.type,
-      coordinates: t.hideLocation ? { lat: 0, lng: 0 } : t.coordinates,
+      ...(approxLocation ? { approxLocation } : {}),
       difficulty: t.difficulty, estimatedMinutes: t.estimatedMinutes, pointValue: t.pointValue,
       tags: t.tags ?? [], copyCount: 0, createdAt: now,
     });

@@ -20,6 +20,15 @@
 //   EMU_BACKUP_KEEP_DAILY       daily tier  — most recent D days      (default 14)
 //   EMU_BACKUP_MAX_BYTES        absolute footprint cap                (default 512 MiB)
 //   EMU_BACKUP_EXPORT_TIMEOUT_MS  kill a wedged export after this     (default 90000)
+//   EMU_BACKUP_READY_PROBE_TIMEOUT_MS  bound the readiness probe (a hung/rejecting
+//                                 probe resolves "not ready" instead of hanging tick)
+//                                                                     (default 5000)
+//   EMU_BACKUP_SHOUT_MIN_GAP_MS  minimum gap between two IDENTICAL health banners. The
+//                                 health assessment + heartbeat still run every watchdog
+//                                 tick; only the banner is throttled. A level change (or
+//                                 the first banner) always prints immediately. 0 disables
+//                                 the throttle.
+//                                        (default max(60000, EMU_BACKUP_INTERVAL_MS))
 //
 // RECOMMENDED (not wired here): call `--snapshot-now --pin` at the top of
 // scripts/emulator-restore.mjs and of `npm run seed:reset`. Both overwrite emulator
@@ -33,7 +42,7 @@ import { fileURLToPath } from 'node:url';
 import {
   snapshotName, selectRestoreTarget, snapshotTimeMs,
   isEmulatorReady, canAttemptExport, canStartExport, didExportSucceed,
-  planRetention, assessLoopHealth,
+  planRetention, assessLoopHealth, probeReadyWithTimeout, shouldShoutHealth,
 } from './lib/emulatorBackup.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,6 +67,28 @@ const PROJECT = process.env.RUSHPOINT_APP_ID || 'rushpoint-pwa-7daaa';
 // `emulators:export` itself talks to.
 const HUB = process.env.FIREBASE_EMULATOR_HUB || '127.0.0.1:4400';
 const READY_POLL_MS = 2_000;
+// The incident: `isReadyNow()` was awaited with no bound in `tick()`. When the
+// emulator died mid-probe the await never settled, so reportHealth()/writeStatus()
+// — which run AFTER it — never fired: the heartbeat froze silently for hours while
+// setInterval kept queuing ticks that wedged on the same probe. probeReadyWithTimeout
+// makes a hung/rejecting/throwing probe resolve to "not ready" instead — see
+// scripts/lib/emulatorBackup.mjs. A few seconds is generous for a healthy Hub (the
+// probe itself already times out its fetch at 1.5s) while still bounding a genuinely
+// wedged one.
+const READY_PROBE_TIMEOUT_MS = Number(process.env.EMU_BACKUP_READY_PROBE_TIMEOUT_MS || 5_000);
+// The watchdog is what makes the heartbeat/health independent of the probe AND of a
+// slow export: it runs on its own wall-clock cadence and re-asserts reportHealth() +
+// writeStatus() regardless of whether a tick is currently in flight. assessLoopHealth
+// is pure and time-based, so it needs no coordination with tick to run correctly.
+const WATCHDOG_MS = Math.min(READY_PROBE_TIMEOUT_MS, 5_000);
+// …but the watchdog cadence must NOT become the banner's cadence. reportHealth() shouted
+// unconditionally, which was once per snapshot interval until the watchdog started calling
+// it every ~5s: ~720 six-line red banners an hour, burying the emulator/dev-stack output a
+// human needs to diagnose the very failure being announced. The health assessment and the
+// heartbeat still run every watchdog tick; only the banner is throttled — to one snapshot
+// interval, floored at 60s (a shorter floor re-creates the firehose for small intervals).
+// Level changes and the first banner are always immediate, so nothing new is ever delayed.
+const SHOUT_MIN_GAP_MS = Number(process.env.EMU_BACKUP_SHOUT_MIN_GAP_MS ?? Math.max(60_000, INTERVAL_MS));
 
 function listBackups() {
   if (!fs.existsSync(BACKUP_DIR)) return [];
@@ -137,30 +168,45 @@ function humanAge(ms) {
   return m < 90 ? `${m}m ago` : `${Math.round(m / 60)}h ago`;
 }
 
-/** A banner, not a log line. Repeated every tick while the condition holds, on stderr. */
+/** A banner, not a log line. Repeated (rate-limited) while the condition holds, on stderr. */
 function shout(lines) {
   const width = Math.max(...lines.map((l) => l.length)) + 4;
   const bar = '!'.repeat(width);
   process.stderr.write(`\n\x1b[1;31m${bar}\n${lines.map((l) => `! ${l.padEnd(width - 4)} !`).join('\n')}\n${bar}\x1b[0m\n`);
 }
 
+// Last-shout state for the banner rate limiter. Deliberately NOT part of `state`:
+// STATUS.json is the machine-readable heartbeat, and how recently a human-facing banner
+// was printed is not part of the loop's published health.
+let lastShoutMs = null;
+let lastShoutHealth = null;
+
+// ASSESS + PERSIST run on every watchdog tick (~5s) — that cadence is the whole point of
+// the watchdog and must not get coarser. Only the BANNER is rate-limited: at 5s it would
+// print ~720 times an hour and bury the emulator output needed to diagnose the incident
+// it is announcing. shouldShoutHealth keeps every informative case immediate (first
+// banner, any level change, clock skew) and suppresses only verbatim repetition.
 function reportHealth() {
+  const now = Date.now();
   state.health = assessLoopHealth({
     lastSuccessMs: state.lastSuccessAt,
-    nowMs: Date.now(),
+    nowMs: now,
     intervalMs: INTERVAL_MS,
     consecutiveFailures: state.consecutiveFailures,
     startedMs: state.startedAt,
   });
-  if (state.health === 'stalled' || state.health === 'degraded') {
-    const age = state.lastSuccessAt ? humanAge(Date.now() - state.lastSuccessAt) : 'NEVER (no snapshot has ever succeeded)';
-    shout([
-      `BACKUP LOOP ${state.health.toUpperCase()} — THE EMULATOR IS NOT BEING BACKED UP`,
-      `last successful snapshot: ${age}`,
-      `consecutive export failures: ${state.consecutiveFailures}${state.lastError ? ` (${state.lastError})` : ''}`,
-      `check: node scripts/emulator-backup.mjs --status`,
-    ]);
-  }
+  if (!shouldShoutHealth({
+    health: state.health, lastShoutMs, lastShoutHealth, nowMs: now, minGapMs: SHOUT_MIN_GAP_MS,
+  })) return;
+  lastShoutMs = now;
+  lastShoutHealth = state.health;
+  const age = state.lastSuccessAt ? humanAge(now - state.lastSuccessAt) : 'NEVER (no snapshot has ever succeeded)';
+  shout([
+    `BACKUP LOOP ${state.health.toUpperCase()} — THE EMULATOR IS NOT BEING BACKED UP`,
+    `last successful snapshot: ${age}`,
+    `consecutive export failures: ${state.consecutiveFailures}${state.lastError ? ` (${state.lastError})` : ''}`,
+    `check: node scripts/emulator-backup.mjs --status`,
+  ]);
 }
 
 function printStatus() {
@@ -253,8 +299,15 @@ async function probeHubReady() {
   }
 }
 
-async function isReadyNow() {
+async function rawIsReady() {
   return isEmulatorReady(await probeHubReady());
+}
+
+// Every call site (the boot-wait loop, tick(), snapshotNow) goes through this bounded
+// wrapper — see READY_PROBE_TIMEOUT_MS above for why. A hung/rejecting probe now
+// resolves to `false` (not ready) instead of hanging its caller forever.
+async function isReadyNow() {
+  return probeReadyWithTimeout(rawIsReady, READY_PROBE_TIMEOUT_MS);
 }
 
 /** One-shot snapshot for use immediately before a destructive operation. */
@@ -274,11 +327,27 @@ async function snapshotNow({ pin }) {
   console.log(path.join(BACKUP_DIR, name));
 }
 
+// The watchdog: re-asserts the heartbeat + health assessment on its own wall-clock
+// cadence, independent of whatever tick() is doing. This is what makes the "safety
+// net stopped and nobody noticed" incident structurally impossible: even if a tick
+// is wedged (a slow/hung export, or — before the fix above — a hung readiness probe),
+// the heartbeat file still advances and `--status`/an external checker can still see
+// a stalled loop. assessLoopHealth is pure/time-based, so it needs nothing from tick
+// to run correctly.
+function watchdogTick() {
+  state.updatedAt = Date.now();
+  reportHealth();
+  writeStatus();
+}
+
 async function loop() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   console.log(`[backup] snapshots every ${Math.round(INTERVAL_MS / 1000)}s → ${BACKUP_DIR}`);
   console.log(`[backup] retention: ${RETENTION.recent} recent + ${RETENTION.hourly} hourly + ${RETENTION.daily} daily, cap ${(RETENTION.maxBytes / 1048576).toFixed(0)} MB`);
   writeStatus();
+  // Started before the boot-wait and before the first tick so the heartbeat/health
+  // are live from process start, not gated on either ever completing.
+  setInterval(watchdogTick, WATCHDOG_MS);
 
   // Wait for the emulator suite to be FULLY ready before the first export — a
   // snapshot taken mid-boot wedges Firestore. Bounded backoff, one quiet notice,

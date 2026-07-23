@@ -1314,6 +1314,15 @@ async function main() {
   check('2nd wrong answer charges 10 points', w2?.penalty === 10, JSON.stringify(w2));
   check('2nd wrong answer starts a 15 second cooldown',
     w2?.retryAfterSeconds > 0 && w2?.retryAfterSeconds <= 15, String(w2?.retryAfterSeconds));
+  // retry-lockout-clock-skew: the lockout travels as a DURATION computed against
+  // the SERVER clock. A duration is meaningful on any device; the absolute
+  // instant it replaces was only meaningful on the clock that produced it, and a
+  // participant phone counting it against its own clock froze itself out.
+  check('the lockout ships as a server-computed remaining duration',
+    w2?.retryAfterMs > 0 && w2?.retryAfterMs <= 15_000, String(w2?.retryAfterMs));
+  check('retryAfterMs and retryAfterSeconds describe the same wait',
+    Math.ceil(w2.retryAfterMs / 1000) === w2.retryAfterSeconds,
+    JSON.stringify({ ms: w2?.retryAfterMs, s: w2?.retryAfterSeconds }));
   const sWA2 = await pWA.call('getMyTeamState', { code: cWA });
   check('the charge landed on bonusPenalty (never on buildRankings)',
     (sWA2?.team?.bonusPenalty ?? 0) === 10, String(sWA2?.team?.bonusPenalty));
@@ -1322,6 +1331,11 @@ async function main() {
   const w2dup = await pWA.call('submitTaskAnswer', { ...waCtx, taskId: 'wa-1', answer: 'wrong-b' });
   check('a duplicate identical wrong answer is an idempotent replay',
     w2dup?.correct === false && w2dup?.replay === true && (w2dup?.penalty ?? 0) === 0, JSON.stringify(w2dup));
+  // The replay reply must carry the SAME duration shape, or a double-tapping
+  // client would lose its countdown and hammer a call the server refuses.
+  check('the replay reply also carries the remaining duration',
+    typeof w2dup?.retryAfterMs === 'number' && w2dup.retryAfterMs > 0 && w2dup.retryAfterMs <= 15_000,
+    String(w2dup?.retryAfterMs));
   const sWA3 = await pWA.call('getMyTeamState', { code: cWA });
   check('the replay did not double-charge bonusPenalty', (sWA3?.team?.bonusPenalty ?? 0) === 10, String(sWA3?.team?.bonusPenalty));
   check('the replay did not inflate the attempt count', (sWA3?.team?.taskAttempts?.['wa-1'] ?? 0) === 2, JSON.stringify(sWA3?.team?.taskAttempts));
@@ -1342,9 +1356,14 @@ async function main() {
   check('a cooldown refusal consumes no attempt and charges nothing',
     (sWA4?.team?.taskAttempts?.['wa-1'] ?? 0) === 2 && (sWA4?.team?.bonusPenalty ?? 0) === 10,
     JSON.stringify({ a: sWA4?.team?.taskAttempts, bp: sWA4?.team?.bonusPenalty }));
-  check('the cooldown is surfaced to the participant so the UI can count it down',
-    (sWA4?.activeStageTasks?.find((t) => t.id === 'wa-1')?.answerCost?.cooldownUntil ?? 0) > Date.now(),
-    JSON.stringify(sWA4?.activeStageTasks?.find((t) => t.id === 'wa-1')?.answerCost));
+  // retry-lockout-clock-skew: assert a DURATION, deliberately NOT `cooldownUntil
+  // > Date.now()` — that old assertion compared a server instant to the test
+  // runner's own clock, i.e. it was written in the very units that broke players.
+  const acWA4 = sWA4?.activeStageTasks?.find((t) => t.id === 'wa-1')?.answerCost;
+  check('the cooldown is surfaced to the participant as a remaining duration',
+    acWA4?.cooldownRemainingMs > 0 && acWA4?.cooldownRemainingMs <= 90_000, JSON.stringify(acWA4));
+  check('the deprecated absolute expiry is still shipped for older cached bundles',
+    (acWA4?.cooldownUntil ?? 0) > 0, JSON.stringify(acWA4?.cooldownUntil));
 
   // ── B. Escalation + the cap, in a TEST-DRIVE run (the cooldown is waived so a
   //       rehearsal does not spend 90 s waiting — and that waiver is asserted). ─
@@ -4232,6 +4251,7 @@ async function main() {
   const { runId: r7, accessCode: c7 } = await creator.call('launchRun', { gameId: g7 });
   const wanderer = makeParty('wanderer');
   await signInAnonymously(wanderer.auth);
+  const wandererUid = wanderer.auth.currentUser.uid; // uid == teamId for participants
   await wanderer.call('joinRun', { code: c7, displayName: 'Wanderer' });
   await creator.call('startTeams', { gameId: g7, runId: r7 });
   const C7 = { ownerUid: creatorCred.user.uid, gameId: g7, runId: r7 };
@@ -4244,6 +4264,53 @@ async function main() {
   check('safe-zone: returning inside clears outOfBounds', back?.outOfBounds === false, JSON.stringify(back));
   const resumed = await wanderer.call('requestNextTask', { ...C7, lat: 31.78, lng: 35.21 });
   check('safe-zone: assignment resumes inside the zone', resumed?.outOfBounds !== true, JSON.stringify(resumed));
+
+  // ── Out-of-bounds recovery (change: out-of-bounds-recovery) ────────────────
+  // The latch used to be openable by exactly ONE thing: a later GPS fix proving the
+  // team came back. A phone with denied/dead/inaccurate location therefore stranded
+  // its team behind an actionless card for the rest of the run, and no staff member
+  // or creator could do anything about it. These assertions pin the escape hatch.
+  await wanderer.call('updateLocation', { ...C7, lat: 32.5, lng: 35.9 });
+  const stuck = await wanderer.call('requestNextTask', { ...C7, lat: 32.5, lng: 35.9 });
+  check('oob: still paused while a fresh confident fix is outside', stuck?.outOfBounds === true, JSON.stringify(stuck));
+
+  let participantRelease = false;
+  try {
+    await wanderer.call('clearTeamOutOfBounds', { ...C7, teamId: wandererUid });
+  } catch (e) {
+    participantRelease = e.code === 'functions/permission-denied';
+  }
+  check('oob: a participant cannot release themselves', participantRelease);
+
+  const released = await creator.call('clearTeamOutOfBounds', { ...C7, teamId: wandererUid, reason: 'e2e' });
+  check('oob: owner can release a stuck team', released?.ok === true && typeof released?.overrideUntil === 'string', JSON.stringify(released));
+  const rescued = await creator.call('listRunTeams', { gameId: g7, runId: r7 });
+  check('oob: listRunTeams exposes the flag (cleared after release)',
+    rescued?.teams?.some((t) => t.id === wandererUid && t.outOfBounds === false), JSON.stringify(rescued?.teams));
+  const assignedAgain = await wanderer.call('requestNextTask', { ...C7, lat: 32.5, lng: 35.9 });
+  check('oob: released team is assigned a task again',
+    assignedAgain?.outOfBounds !== true && typeof assignedAgain?.taskId === 'string',
+    JSON.stringify(assignedAgain));
+
+  // The grace window is the whole point: without it the same broken phone's next bad
+  // fix re-latches the team seconds after the rescue and staff cannot win. The REASON
+  // is asserted too — `outOfBounds === false` alone would also be satisfied by a fix
+  // that simply landed inside, which is not what this line is about.
+  const duringGrace = await wanderer.call('updateLocation', { ...C7, lat: 32.5, lng: 35.9 });
+  check('oob: an out-of-zone ping during the grace window does not re-latch',
+    duringGrace?.outOfBounds === false && duringGrace?.reason === 'override', JSON.stringify(duringGrace));
+
+  // A fix too imprecise to place the team relative to the boundary must never flag it.
+  // This needs its OWN team: the wanderer is inside an active staff override, and
+  // override outranks every sensor branch in evaluateSafeZoneStatus — so asserting
+  // low confidence on the wanderer would pass for the override's reason and prove
+  // nothing about accuracy at all.
+  const blurry = makeParty('blurryFix');
+  await signInAnonymously(blurry.auth);
+  await blurry.call('joinRun', { code: c7, displayName: 'Blurry' });
+  const vague = await blurry.call('updateLocation', { ...C7, lat: 32.5, lng: 35.9, accuracyMeters: 900 });
+  check('oob: a low-confidence fix is not treated as a breach',
+    vague?.outOfBounds === false && vague?.reason === 'low_confidence', JSON.stringify(vague));
 
   }); // scenario: safe-zone
 
@@ -6409,6 +6476,66 @@ async function main() {
     // Admin retention sweep (idempotent no-op when nothing is expired).
     const sweep = await platformAdmin.call('pruneExpiredRunDataNow', {});
     check('pruneExpiredRunDataNow runs the retention sweep', sweep?.ok === true, JSON.stringify(sweep));
+
+    // ── Abandoned-run retention (change: run-retention-completeness) ──────────
+    // The sweep used to select ONLY `status == 'finished'`, which is written only
+    // by finalizeRun — so a run the creator never finalized was retained forever,
+    // contradicting the Privacy Policy's 90-day promise. Back-date a run that is
+    // still `live` past the window and assert the sweep now reaches it; and
+    // assert a FRESH live run is untouched by the very same sweep (the safety
+    // half — a live game must never be wiped mid-play).
+    const retDb = adminSdk.firestore();
+    const oldIso = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const staleRunPath = `users/${OWNER}/games/${cvGame}/runs/${cvRun}`;
+    const staleBefore = (await retDb.doc(staleRunPath).get()).data() ?? {};
+    // Seed a raw GPS ping. Without one the "pings are gone" assertion below would
+    // read 0 both before and after and could never fail — this scenario never calls
+    // updateLocation, so the subcollection is empty to begin with.
+    await retDb.doc(`${staleRunPath}/teamLocations/${cvUid}`).set({
+      teamId: cvUid, lat: 31.78, lng: 35.21, accuracyMeters: 12, updatedAt: oldIso,
+    });
+    const staleLocsBefore = await retDb.collection(`${staleRunPath}/teamLocations`).get();
+    check('retention fixture: the abandoned run really has a GPS ping to lose',
+      staleLocsBefore.size > 0, `size=${staleLocsBefore.size}`);
+    await retDb.doc(staleRunPath).set(
+      { status: 'live', createdAt: oldIso, launchedAt: oldIso, updatedAt: oldIso },
+      { merge: true },
+    );
+    // A second, deliberately FRESH live run in the same tree.
+    const freshRunPath = `users/${OWNER}/games/${cvGame}/runs/e2e-retention-fresh`;
+    const nowIso = new Date().toISOString();
+    await retDb.doc(freshRunPath).set({
+      id: 'e2e-retention-fresh', gameId: cvGame, ownerUid: OWNER, status: 'live',
+      accessCode: 'E2ERET', billingType: 'free', maxParticipants: 5, participantCount: 0,
+      createdAt: nowIso, launchedAt: nowIso, updatedAt: nowIso,
+    });
+
+    const sweep2 = await platformAdmin.call('pruneExpiredRunDataNow', {});
+    check('retention sweep succeeds with an abandoned run present', sweep2?.ok === true, JSON.stringify(sweep2));
+    check('the sweep names the abandoned run in its own results',
+      (sweep2?.results ?? []).some((r) => r?.runId === cvRun),
+      JSON.stringify((sweep2?.results ?? []).map((r) => r?.runId)));
+
+    const staleAfter = (await retDb.doc(staleRunPath).get()).data() ?? {};
+    check('abandoned (never-finalized) run IS pruned by the retention sweep',
+      typeof staleAfter.piiPrunedAt === 'string' && staleAfter.piiPrunedAt.length > 0,
+      JSON.stringify({ piiPrunedAt: staleAfter.piiPrunedAt ?? null }));
+    const staleLocs = await retDb.collection(`${staleRunPath}/teamLocations`).get();
+    check('abandoned-run prune removes its raw GPS pings', staleLocs.size === 0, `size=${staleLocs.size}`);
+
+    const freshAfter = (await retDb.doc(freshRunPath).get()).data() ?? {};
+    check('a FRESH live run is never touched by the retention sweep',
+      freshAfter.piiPrunedAt === undefined,
+      JSON.stringify({ piiPrunedAt: freshAfter.piiPrunedAt ?? null }));
+
+    // Restore the borrowed run's original timestamps/status for later scenarios.
+    await retDb.doc(staleRunPath).set({
+      status: staleBefore.status ?? 'live',
+      createdAt: staleBefore.createdAt ?? nowIso,
+      launchedAt: staleBefore.launchedAt ?? nowIso,
+      updatedAt: staleBefore.updatedAt ?? nowIso,
+    }, { merge: true });
+    await retDb.doc(freshRunPath).delete();
   });
 
   // ═══ Wave 1 Fix 1: access-code normalization (no opaque 500s) ════════════════
@@ -6775,6 +6902,99 @@ async function main() {
       && !ALLOWED_SMART_KEYS.has('popularity') && !ALLOWED_SMART_KEYS.has('likeCount'));
   });
 
+  // (change: game-task-tags) AUTHORED BUT NOT RUN — a live playtest stack owned the
+  // emulator when this was written, so `npm run e2e` could not be started. Treat
+  // these checks as unverified until someone runs the suite.
+  //
+  // The server used to do a bare `updates.tags = tags` off the client payload, so a
+  // client could store 10 000 tags — or one a megabyte long — which then rode into
+  // the WORLD-READABLE publicGames/publicTasks and back out of searchGallery to
+  // every reader. `normalizeTags` (@rushpoint/shared) now guards every write path.
+  // NOTE: no allowlist edit is needed — `tags` is already in ALLOWED_TASK_KEYS.
+  await scenario('game + task tags are normalized server-side and reach the gallery', async () => {
+    const HOSTILE_GAME_TAGS = [
+      'Park', 'park', 'PARK',           // case-insensitive dedupe, first casing wins
+      '  spaced  out  ', '',            // trimmed + internal whitespace collapsed; blank dropped
+      'a, b',                           // a comma INSIDE an array element still splits
+      'x'.repeat(120),                  // over-long → truncated
+      ...Array.from({ length: 50 }, (_, i) => `bulk${i}`), // over the count cap
+    ];
+    const { gameId: gT } = await creator.call('createGame', {
+      title: 'Tagged Hunt 🏷️', mode: 'team', tags: HOSTILE_GAME_TAGS,
+    });
+
+    const created = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gT}`)).data ?? {};
+    check('createGame clamps the stored tag COUNT', Array.isArray(created.tags) && created.tags.length <= 20,
+      String(created.tags?.length));
+    check('createGame clamps every stored tag LENGTH',
+      (created.tags ?? []).every((t) => typeof t === 'string' && t.length > 0 && t.length <= 40));
+    check('createGame de-duplicates case-insensitively, first casing wins',
+      (created.tags ?? []).filter((t) => t.toLowerCase() === 'park').length === 1
+      && (created.tags ?? []).includes('Park'), JSON.stringify(created.tags?.slice(0, 6)));
+    check('createGame collapses internal whitespace', (created.tags ?? []).includes('spaced out'),
+      JSON.stringify(created.tags?.slice(0, 6)));
+    check('createGame splits a comma inside an array element',
+      (created.tags ?? []).includes('a') && (created.tags ?? []).includes('b'));
+
+    // updateGame: game tags AND task tags, both un-normalized on the wire.
+    await creator.call('updateGame', {
+      gameId: gT,
+      tags: ['חוץ', 'חוץ', 'העיר העתיקה', 'Jerusalem'],
+      stages: [
+        { id: 'tg0', order: 0, title: 'Stage', isFinal: true, tasks: [
+          { id: 'tg-a', title: 'Tagged mission', type: 'self_report', triggerMode: 'instant',
+            coordinates: { lat: 31.7767, lng: 35.2345 }, difficulty: 2, estimatedMinutes: 3,
+            pointValue: 20, maxConcurrentTeams: 5,
+            tags: ['Photo', 'photo', '  ', 'y'.repeat(90),
+              ...Array.from({ length: 40 }, (_, i) => `t${i}`)] },
+        ] },
+      ],
+    });
+    const saved = (await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gT}`)).data ?? {};
+    check('updateGame preserves Hebrew tags byte-for-byte',
+      (saved.tags ?? []).includes('חוץ') && (saved.tags ?? []).includes('העיר העתיקה'),
+      JSON.stringify(saved.tags));
+    check('updateGame de-duplicates the repeated Hebrew tag',
+      (saved.tags ?? []).filter((t) => t === 'חוץ').length === 1, JSON.stringify(saved.tags));
+    const savedTask = (saved.stages?.[0]?.tasks ?? [])[0] ?? {};
+    check('updateGame normalizes TASK tags too', Array.isArray(savedTask.tags)
+      && savedTask.tags.length <= 20
+      && savedTask.tags.every((t) => t.length > 0 && t.length <= 40)
+      && savedTask.tags.filter((t) => t.toLowerCase() === 'photo').length === 1,
+      JSON.stringify(savedTask.tags?.slice(0, 5)));
+    check('stages survived as an ARRAY (never a dotted array-element update)',
+      Array.isArray(saved.stages) && Array.isArray(saved.stages[0]?.tasks));
+
+    // Publish → the world-readable copies are bounded too, and searchGallery
+    // actually RETURNS the tags (nothing strips them on the way out).
+    await creator.call('publishGame', { gameId: gT, visibility: 'public' });
+    const pubGame = (await creator.getDocAt(`publicGames/${gT}`)).data ?? {};
+    check('publishGame writes bounded tags into publicGames',
+      Array.isArray(pubGame.tags) && pubGame.tags.length <= 20
+      && pubGame.tags.every((t) => t.length <= 40), JSON.stringify(pubGame.tags));
+    const pubTask = (await creator.getDocAt(`publicTasks/${gT}_tg-a`)).data ?? {};
+    check('publishGame writes bounded tags into publicTasks',
+      Array.isArray(pubTask.tags) && pubTask.tags.length <= 20
+      && pubTask.tags.every((t) => t.length <= 40), JSON.stringify(pubTask.tags));
+
+    const galT = await creator.call('searchGallery', { query: 'Tagged Hunt' });
+    const foundGame = (galT?.games ?? []).find((g) => g.id === gT);
+    check('searchGallery RETURNS the game tags (the UI has something to render)',
+      Array.isArray(foundGame?.tags) && foundGame.tags.length > 0, JSON.stringify(foundGame?.tags));
+    const libT = await creator.call('searchTaskLibrary', { query: 'Tagged mission', limit: 100 });
+    const foundTask = (libT?.tasks ?? []).find((t) => t.id === `${gT}_tg-a`);
+    check('searchTaskLibrary RETURNS the task tags',
+      Array.isArray(foundTask?.tags) && foundTask.tags.length > 0, JSON.stringify(foundTask?.tags));
+
+    // The `tags` filter argument must still work against the normalized values.
+    const byTag = await creator.call('searchGallery', { query: '', tags: ['Jerusalem'], limit: 50 });
+    check('searchGallery can still filter by a stored tag',
+      (byTag?.games ?? []).some((g) => g.id === gT), String((byTag?.games ?? []).length));
+
+    check('tags needed NO participant-allowlist change (already allowlisted)',
+      ALLOWED_TASK_KEYS.has('tags'));
+  });
+
   // (change: task-library-map-view) Authored blind — no emulator was available in
   // the change that added it. Executed green on 2026-07-23 (7 checks) together
   // with the legacy-coordinate backfill sweep below.
@@ -7080,6 +7300,52 @@ async function main() {
         ] },
       ] } } }),
       { codeIn: ['functions/invalid-argument'] });
+    // ── (8b) Hostile files (change: game-import-hardening) ───────────────────
+    // A hand-edited file is untrusted input. Each of these used to be either an
+    // opaque `internal` (a TypeError deeper in the pipeline) or an ACCEPT, and
+    // each must now be a clean, actionable `invalid-argument`.
+    const withTaskOverride = (over) => ({ ...file, game: { ...file.game, stages: [
+      { id: 'hz0', order: 0, title: 'Hostile', isFinal: true, tasks: [
+        { id: 'hz-a', title: 'T', type: 'self_report', triggerMode: 'instant',
+          coordinates: { lat: 31.7767, lng: 35.2345 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, ...over },
+      ] },
+    ] } });
+
+    await expectError('import: a number where `answers` belongs is invalid-argument, not internal',
+      creator.call('importGameFile', { file: withTaskOverride({ type: 'quiz', choices: ['a'], answers: 5 }) }),
+      { codeIn: ['functions/invalid-argument'] });
+    // FORBIDDEN_KEYS is ['__proto__','constructor','prototype'] and this exercises
+    // it with `constructor`, deliberately NOT `__proto__`. A literal `__proto__`
+    // key cannot survive the callable transport at all: both the client encoder
+    // (@firebase/util mapValues) and the server decoder (firebase-functions
+    // `decode`) rebuild every object with `obj[k] = …`, and for the key
+    // "__proto__" that assignment hits Object.prototype's SETTER — it changes the
+    // new object's prototype and creates no own property, so the key is gone
+    // before the callable body ever sees it. Asserting on it here would have been
+    // a test of the SDK, failing for a reason that has nothing to do with the
+    // guard under test. `constructor` is an ordinary writable data property, so it
+    // arrives intact and reaches scanCandidateGraph as an own key.
+    await expectError('import: a prototype-pollution key nested in task media is refused',
+      creator.call('importGameFile', {
+        file: withTaskOverride({
+          media: [{ id: 'm', kind: 'image', url: 'https://x/y.png', constructor: { polluted: true } }],
+        }),
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('import: an over-long answers list is refused',
+      creator.call('importGameFile', {
+        file: withTaskOverride({ type: 'quiz', answers: Array.from({ length: 1001 }, () => 'a') }),
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('import: an over-deep document is refused, not a 500',
+      creator.call('importGameFile', {
+        file: { ...file, game: { ...file.game, branding: (() => {
+          let n = 1; for (let i = 0; i < 60; i++) n = { n }; return n;
+        })() } },
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+
     check('import: no half-game was written by any refusal', (await countGames()) === beforeBad,
       `${beforeBad} → ${await countGames()}`);
 
@@ -7095,6 +7361,23 @@ async function main() {
     check('import: a forged visibility/playCount is ignored',
       forged?.visibility === 'private' && forged?.playCount === 0,
       `${forged?.visibility} / ${forged?.playCount}`);
+
+    // The rest of the smuggling surface (change: game-import-hardening): a trash
+    // tombstone, an owner SECRET, and wallet/credit-shaped fields must not ride
+    // in on a file either.
+    const { gameId: gSmuggle } = await creator.call('importGameFile', {
+      file: { ...file, game: { ...file.game,
+        deletedAt: '1999-01-01T00:00:00.000Z', deletedBy: 'somebody-else',
+        integrationWebhookUrl: 'https://hooks.example.com/secret', integrationPlatform: 'slack',
+        credits: 1000000, wallet: { balance: 1000000 } } },
+    });
+    const { game: smuggled } = await creator.call('getGame', { gameId: gSmuggle });
+    check('import: tombstone / webhook secret / wallet fields never ride in on a file',
+      smuggled?.deletedAt === undefined && smuggled?.deletedBy === undefined
+      && smuggled?.integrationWebhookUrl === undefined && smuggled?.integrationPlatform === undefined
+      && smuggled?.credits === undefined && smuggled?.wallet === undefined,
+      JSON.stringify({ deletedAt: smuggled?.deletedAt, hook: smuggled?.integrationWebhookUrl,
+        credits: smuggled?.credits, wallet: smuggled?.wallet }));
   }); // scenario: game file export/import
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════

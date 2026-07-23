@@ -22,7 +22,9 @@ import {
   assertFails,
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, getDocs, collection, setDoc } from 'firebase/firestore';
+import {
+  doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, deleteField,
+} from 'firebase/firestore';
 import { ref, uploadBytes, getBytes } from 'firebase/storage';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -96,6 +98,10 @@ async function main() {
     // client must be able neither to forge one nor to clear one.
     await setDoc(doc(db, `users/${OWNER}/games/TRASHED-GAME`),
       { title: 'Trashed', deletedAt: '2026-07-01T00:00:00.000Z', deletedBy: OWNER });
+    // A second trashed game, so the hard-delete assertions below never depend on
+    // (or disturb) the fixture the tombstone-forge assertions use.
+    await setDoc(doc(db, `users/${OWNER}/games/TRASHED-GAME-2`),
+      { title: 'Trashed 2', deletedAt: '2026-07-02T00:00:00.000Z', deletedBy: OWNER });
   });
 
   const owner = testEnv.authenticatedContext(OWNER).firestore();
@@ -148,6 +154,34 @@ async function main() {
     assertFails(setDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed' })));
   await check('owner CAN still write an ordinary (tombstone-free) game doc',
     assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'G' })));
+  // [firestore-rules-coverage] Destroying a game is a FIVE-system act — the game
+  // subtree, the publicGames/publicTasks gallery index, the accessCodes pointers,
+  // Storage photos + game media, and the audit record. Only purgeGameTree does all
+  // five. A raw client delete does exactly one: the gallery row keeps serving the
+  // game to the world with no owner doc left to unpublish it, the codes dangle, and
+  // the run subtree is left orphaned AND unpurgeable (purgeGameNow requires a
+  // tombstone that no longer exists). So the delete VERB is denied outright.
+  await check('owner CANNOT hard-delete their own game doc (destruction is CF-only)',
+    assertFails(deleteDoc(doc(owner, `users/${OWNER}/games/${GAME}`))));
+  await check('owner CANNOT hard-delete a TRASHED game (purge is CF-only)',
+    assertFails(deleteDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME-2`))));
+  // The tombstone is a RECORD, not a single field: `deletedBy` is as server-only as
+  // `deletedAt`, so it can be neither re-attributed nor erased by a client.
+  await check('owner CANNOT change deletedBy on a trashed game',
+    assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { deletedBy: OTHER })));
+  await check('owner CANNOT remove deletedBy while keeping deletedAt',
+    assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { deletedBy: deleteField() })));
+  await check('owner CANNOT clear deletedAt by deleting the field',
+    assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { deletedAt: deleteField() })));
+  await check('owner CANNOT move deletedAt forward (restart the grace period)',
+    assertFails(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { deletedAt: '2026-07-20T00:00:00.000Z' })));
+  // …and the guard must NOT become "a trashed game is read-only".
+  await check('owner CAN still edit an ordinary field of a trashed game',
+    assertSucceeds(updateDoc(doc(owner, `users/${OWNER}/games/TRASHED-GAME`), { title: 'Trashed (renamed)' })));
+  // The delete verb under a run: `allow write: if false` covers it, asserted once
+  // as a class so a future verb split there cannot silently open it.
+  await check('owner CANNOT delete a team doc (server-only state, delete verb too)',
+    assertFails(deleteDoc(doc(owner, `${runPath}/teams/${TEAM}`))));
   await check('client CANNOT enumerate the publicLikes collection',
     assertFails(getDocs(collection(other, 'publicLikes'))));
   // [callable-rate-limiting #19] per-uid rate-limit counters are server-only.
@@ -168,11 +202,29 @@ async function main() {
   // cannot be enumerated (list) — that would leak every run's identifiers.
   await check('accessCodes: get by known code is allowed', assertSucceeds(getDoc(doc(other, `accessCodes/ABC123`))));
   await check('accessCodes: listing the collection is denied', assertFails(getDocs(collection(other, `accessCodes`))));
+  // [firestore-rules-coverage] The trash is a per-tenant view. A tombstoned game is
+  // still a game document, so it must be exactly as private as a live one — and the
+  // listing surface behind listDeletedGames must not be enumerable by anyone else.
+  await check('other user CANNOT read another creator\'s TRASHED game',
+    assertFails(getDoc(doc(other, `users/${OWNER}/games/TRASHED-GAME`))));
+  await check('other user CANNOT list another creator\'s games (their trash)',
+    assertFails(getDocs(collection(other, `users/${OWNER}/games`))));
+  await check('owner CAN list their own games (trash view is derived from this)',
+    assertSucceeds(getDocs(collection(owner, `users/${OWNER}/games`))));
 
   console.log('\n── Staff scoping: a staff token is confined to its one run ──');
   await check('scoped staff CAN read a team in its run', assertSucceeds(getDoc(doc(staff, `${runPath}/teams/${TEAM}`))));
   await check('scoped staff CAN read alerts in its run', assertSucceeds(getDoc(doc(staff, `${runPath}/alerts/a1`))));
   await check('staff for a DIFFERENT run CANNOT read this run\'s team', assertFails(getDoc(doc(wrongStaff, `${runPath}/teams/${TEAM}`))));
+  // [firestore-rules-coverage] …and the ownerUid claim is checked too, not only the
+  // runId: a staff token minted by another creator's run must not reach this tenant.
+  const foreignStaff = testEnv
+    .authenticatedContext('staff3', { staff: true, ownerUid: OTHER, gameId: GAME, runId: RUN })
+    .firestore();
+  await check('staff of a DIFFERENT OWNER CANNOT read this run\'s team',
+    assertFails(getDoc(doc(foreignStaff, `${runPath}/teams/${TEAM}`))));
+  await check('staff of a DIFFERENT OWNER CANNOT read this run\'s alerts',
+    assertFails(getDoc(doc(foreignStaff, `${runPath}/alerts/a1`))));
 
   console.log('\n── Team ↔ HQ chat: read surface mirrors the team doc; writes CF-only ──');
   const device = testEnv.authenticatedContext(DEVICE).firestore();
@@ -209,6 +261,15 @@ async function main() {
   console.log('\n── Public/join reads behave as designed ──');
   await check('anyone (even anon) CAN read publicGames', assertSucceeds(getDoc(doc(anon, `publicGames/${GAME}`))));
   await check('anyone (even anon) CAN read publicTasks', assertSucceeds(getDoc(doc(anon, `publicTasks/${GAME}_t1`))));
+  // [firestore-rules-coverage / task-library-map-view] publicTasks is world-readable
+  // BY DESIGN, so its location privacy can NOT be a rules guarantee: rules gate
+  // documents, not fields, and every write here is Admin SDK (rules never evaluate).
+  // What rules CAN promise — and what these two assert — is that no client writes
+  // the collection at all, including the published-area field.
+  await check('client CANNOT write publicTasks.approxLocation (area is CF-written)',
+    assertFails(setDoc(doc(owner, `publicTasks/${GAME}_t1`), { approxLocation: { lat: 31.78, lng: 35.22 } })));
+  await check('a non-owner CANNOT write another creator\'s publicGames row',
+    assertFails(setDoc(doc(other, `publicGames/${GAME}`), { title: 'defaced' })));
   await check('authed user CAN read an access code to join', assertSucceeds(getDoc(doc(team, `accessCodes/ABC123`))));
   await check('anon CANNOT read an access code (auth required)', assertFails(getDoc(doc(anon, `accessCodes/ABC123`))));
   await check('owner CAN write own game template (builder responsiveness)', assertSucceeds(setDoc(doc(owner, `users/${OWNER}/games/${GAME}`), { title: 'edited' })));

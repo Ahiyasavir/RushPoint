@@ -171,26 +171,45 @@ check('an arrangement never collides with the joined string form',
 check('the hash is a short opaque token, never the player text',
   !hashAnswerForReplay('Jerusalem').includes('erusalem'));
 
+// The display object now takes the SERVER clock and emits a remaining DURATION
+// (change: retry-lockout-clock-skew); a fixed instant keeps these deterministic.
+const NOW_MS = 1_800_000_000_000;
+
 // ── The participant-facing display object ────────────────────────────────────
 {
-  const fresh = answerCostDisplay('standard', 'fixed_points_speed', 0, 0, 0);
+  const fresh = answerCostDisplay('standard', 'fixed_points_speed', 0, 0, 0, NOW_MS);
   check('display: a fresh standard task announces one free attempt',
     fresh.freeAttemptsLeft === 1 && fresh.nextPoints === 0 && fresh.nextCooldownSeconds === 0,
     JSON.stringify(fresh));
-  const afterOne = answerCostDisplay('standard', 'fixed_points_speed', 1, 0, 0);
+  const afterOne = answerCostDisplay('standard', 'fixed_points_speed', 1, 0, 0, NOW_MS);
   check('display: after the free attempt the next wrong answer is priced',
     afterOne.freeAttemptsLeft === 0 && afterOne.nextPoints === 10 &&
     afterOne.nextCooldownSeconds === 15, JSON.stringify(afterOne));
-  const capped = answerCostDisplay('standard', 'fixed_points_speed', 6, 60, 0);
+  const capped = answerCostDisplay('standard', 'fixed_points_speed', 6, 60, 0, NOW_MS);
   check('display: past the cap the next answer costs 0 points but still time',
     capped.nextPoints === 0 && capped.nextCooldownSeconds > 0, JSON.stringify(capped));
-  const timed = answerCostDisplay('standard', 'time_only', 1, 0, 0);
+  const timed = answerCostDisplay('standard', 'time_only', 1, 0, 0, NOW_MS);
   check('display: time_only advertises no point cost',
     timed.nextPoints === 0 && timed.nextCooldownSeconds === 15, JSON.stringify(timed));
   check('display: level is carried so the UI can stay silent when off',
-    answerCostDisplay('off', 'time_only', 3, 0, 0).level === 'off');
+    answerCostDisplay('off', 'time_only', 3, 0, 0, NOW_MS).level === 'off');
   check('display: charged so far is reported back',
-    answerCostDisplay('standard', 'fixed_points_speed', 3, 30, 0).charged === 30);
+    answerCostDisplay('standard', 'fixed_points_speed', 3, 30, 0, NOW_MS).charged === 30);
+  // retry-lockout-clock-skew: the display carries a remaining DURATION computed
+  // against the SERVER clock, so a device with a wrong clock still counts down
+  // the right number of seconds. A live lockout 40 s out reports 40 000 ms.
+  const cooling = answerCostDisplay(
+    'standard', 'fixed_points_speed', 2, 10,
+    { charged: 10, lastHash: 'h', cooldownUntil: NOW_MS + 40_000, lastFailureAt: NOW_MS - 5_000, lockoutMs: 45_000 },
+    NOW_MS,
+  );
+  check('display: a live lockout is reported as a remaining duration',
+    cooling.cooldownRemainingMs === 40_000, JSON.stringify(cooling));
+  check('display: the deprecated absolute expiry is still carried for older bundles',
+    cooling.cooldownUntil === NOW_MS + 40_000, String(cooling.cooldownUntil));
+  check('display: an expired lockout reports 0 ms, never a negative remainder',
+    answerCostDisplay('standard', 'fixed_points_speed', 2, 10,
+      { charged: 10, lastHash: 'h', cooldownUntil: NOW_MS - 1 }, NOW_MS).cooldownRemainingMs === 0);
 }
 
 console.log(`\n${failures === 0 ? 'ALL WRONG-ANSWER-PENALTY TESTS PASSED' : failures + ' FAILED'}`);

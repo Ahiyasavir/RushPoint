@@ -369,6 +369,55 @@ export function assessLoopHealth({ lastSuccessMs, nowMs, intervalMs, consecutive
 }
 
 /**
+ * Default minimum wall-clock gap between two identical health banners (ms). One minute
+ * is the floor; the loop raises it to its own snapshot interval so, at defaults, an
+ * unhealthy loop shouts at most once per missed snapshot opportunity.
+ */
+export const DEFAULT_HEALTH_SHOUT_GAP_MS = 60_000;
+
+/**
+ * Whether the loop should emit its loud health banner right now
+ * (change: emulator-backup-tiered-retention, task 6.7).
+ *
+ * The banner used to fire on EVERY health assessment. That was once per snapshot
+ * interval — minutes apart — until the watchdog began re-asserting health every ~5s to
+ * keep the heartbeat independent of a wedged tick. At that cadence the same 6-line
+ * bright-red banner prints ~720 times an hour and buries the emulator / dev-stack output
+ * a person needs in order to diagnose the very incident it is warning about. A signal
+ * that drowns its own context is not a signal.
+ *
+ * So: ASSESSING health and PERSISTING it stay on the watchdog cadence (unchanged — the
+ * heartbeat and `--status` must never get coarser); only the SHOUTING is rate-limited,
+ * and only in the one case where repetition adds nothing — the identical level, already
+ * announced, moments ago. Everything that carries new information is exempt:
+ *   - `ok`/`starting`             → never shouts at all.
+ *   - no banner shown yet         → shout NOW; a suppressed first banner is a silent net.
+ *   - the level CHANGED           → shout NOW. An escalation (degraded → stalled) is the
+ *                                   most important thing this function can say and must
+ *                                   never wait out a gap.
+ *   - the clock moved BACKWARDS   → shout NOW. A negative "elapsed" must never read as
+ *                                   "just shouted" and mute the banner until the clock
+ *                                   catches up (potentially forever). The caller re-stamps
+ *                                   `lastShoutMs` after shouting, so this self-corrects
+ *                                   after exactly one banner.
+ * Otherwise: stay quiet until `minGapMs` has elapsed.
+ *
+ * `minGapMs` of exactly 0 explicitly disables rate limiting (always shout); anything
+ * non-finite or negative falls back to the default rather than to "always" or "never".
+ * Pure — no clock, no I/O; `nowMs` and the last-shout state are supplied by the caller.
+ */
+export function shouldShoutHealth({ health, lastShoutMs, lastShoutHealth, nowMs, minGapMs } = {}) {
+  if (health !== 'degraded' && health !== 'stalled') return false;   // nothing to shout about
+  if (!Number.isFinite(lastShoutMs)) return true;                    // never shouted (incl. null/undefined/NaN)
+  if (health !== lastShoutHealth) return true;                       // level changed — never swallow an escalation
+  const gap = Number.isFinite(minGapMs) && minGapMs >= 0 ? Number(minGapMs) : DEFAULT_HEALTH_SHOUT_GAP_MS;
+  const elapsed = Number(nowMs) - Number(lastShoutMs);
+  if (!Number.isFinite(elapsed)) return true;                        // unusable clock → err loud
+  if (elapsed < 0) return true;                                      // clock skew → shout and re-stamp
+  return elapsed >= gap;
+}
+
+/**
  * The loop's full gate before spawning an export: the existing readiness + interval gate,
  * PLUS a re-entrancy refusal. `tick` is async but driven by a bare setInterval that never
  * awaits it, so without this two ticks can stack exports against one emulator — and an
@@ -377,6 +426,55 @@ export function assessLoopHealth({ lastSuccessMs, nowMs, intervalMs, consecutive
 export function canStartExport({ inFlight, ready, lastTs, nowTs, intervalMs }) {
   if (inFlight === true) return false;
   return canAttemptExport({ ready, lastTs, nowTs, intervalMs });
+}
+
+/**
+ * Bound an arbitrary readiness probe to a hard timeout so a hung/rejecting/throwing
+ * probe can never block its caller forever (change: emulator-backup-liveness-watchdog).
+ *
+ * The incident: `tick()` awaited `isReadyNow()` with no bound at all. When the
+ * emulator died mid-probe the await never settled, so everything AFTER it —
+ * `reportHealth()`, `writeStatus()` — never ran either: the heartbeat froze and the
+ * stalled banner never fired, while `setInterval` kept queuing new ticks that wedged
+ * on the same unresolved probe. This function is the fix at its root: no matter what
+ * `probe()` does (hangs forever, rejects, throws synchronously, resolves late), the
+ * caller ALWAYS gets an answer within `timeoutMs` — `false` (not ready) on timeout or
+ * any failure, indistinguishable from an ordinary "not ready" result so downstream
+ * health/heartbeat logic can't special-case it away.
+ *
+ *   probe: () => Promise<boolean> | boolean   the readiness check to bound
+ *   timeoutMs: number
+ *   scheduleTimeout / clearScheduledTimeout: injectable timer functions (default the
+ *     real ones) purely so tests can spy on clearing without depending on real timers
+ *     for correctness — the bound itself always uses real elapsed time.
+ */
+export function probeReadyWithTimeout(probe, timeoutMs, scheduleTimeout = setTimeout, clearScheduledTimeout = clearTimeout) {
+  return new Promise((resolve) => {
+    let settled = false;
+    // `let` + declared BEFORE scheduleTimeout on purpose. The timer functions are
+    // injectable parameters, so a scheduler that fires its callback SYNCHRONOUSLY is a
+    // legal input (a fake clock, a 0ms shim). With `const timer = scheduleTimeout(...)`
+    // that callback would run finish(false) while `timer` was still in its temporal dead
+    // zone — a ReferenceError thrown out of the Promise executor, rejecting the promise
+    // and breaking the single guarantee this function exists to make: the caller always
+    // gets an answer and never has to catch. Hoisting the binding makes `timer` merely
+    // `undefined` at that instant, and clearing `undefined` is a harmless no-op.
+    let timer;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearScheduledTimeout(timer);
+      resolve(value === true);
+    };
+    timer = scheduleTimeout(() => finish(false), timeoutMs);
+    (async () => {
+      try {
+        return await probe();
+      } catch {
+        return false;
+      }
+    })().then(finish, () => finish(false));
+  });
 }
 
 /**

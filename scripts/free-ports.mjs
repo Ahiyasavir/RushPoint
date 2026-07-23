@@ -8,6 +8,7 @@
 
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
+import { reapOrphanEmulatorProcesses } from './lib/reapEmulatorExec.mjs';
 
 const PORTS = [
   8081,                       // Metro (Expo)
@@ -126,6 +127,14 @@ function freeUnix() {
 }
 
 try {
+  // Guarded reap FIRST (change: emulator-exec-orphan-reap) — collects debris from an
+  // emulators:exec run whose own end-of-run cleanup never executed (closed terminal,
+  // crash). Unlike the blunt STALE_CMDLINE_PATTERNS sweep below, this one only touches
+  // processes positively attributed to a FINISHED exec session of THIS repo; it is
+  // additive, and deliberately does not replace either sweep.
+  const reaped = reapOrphanEmulatorProcesses({ label: 'free-ports' });
+  if (reaped > 0) console.log(`[free-ports] Reaped ${reaped} orphaned emulator-exec process(es).`);
+
   if (isWin) { killStaleHelpersWindows(); freeWindows(); }
   else { killStaleHelpersUnix(); freeUnix(); }
   console.log('[free-ports] Ports clear.');

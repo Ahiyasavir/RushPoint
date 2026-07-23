@@ -16,9 +16,29 @@
 //      can't degrade the emulator (shared ./lib/resolve-java.mjs).
 // Fresh-JVM-per-phase (verify:emulator invoking this wrapper once per heavy
 // phase instead of one long exec) is wired in package.json.
+//
+// ORPHAN REAPING (change: emulator-exec-orphan-reap). A FINISHED exec run could
+// still leave its firebase-tools parent, emulator JVMs and functionsEmulatorRuntime
+// workers alive holding 8080/9099/5001/4000 — wedging the NEXT gate (observed: a
+// rules run blocked for ~an hour). Cleanup used to happen only on the next
+// `dev:all`/`playtest` (free-ports.mjs), which the next *gate* never calls. So this
+// wrapper now records its session while it runs and reaps that session's leftovers
+// when the wrapped command exits — success, failure or signal. The reap is
+// best-effort and NEVER changes the exit code. Which processes are eligible is
+// decided by the pure, fail-closed planEmulatorExecReap (scripts/lib/emulatorReap.mjs):
+// only processes positively attributed to a FINISHED exec session of THIS repo — a
+// live dev/playtest stack, another checkout's emulator, or anything unidentifiable is
+// never selected.
+//   RUSHPOINT_REAP_DISABLE=1  skip it · RUSHPOINT_REAP_DEBUG=1  verdicts only, no kills
+//   RUSHPOINT_REAP_MIN_AGE_MS age floor (default 5000 ms)
 import { spawn } from 'node:child_process';
 import process from 'node:process';
 import { ensureModernJava, MIN_JAVA } from './lib/resolve-java.mjs';
+import {
+  recordExecSessionStart,
+  recordExecSessionEnd,
+  reapOrphanEmulatorProcesses,
+} from './lib/reapEmulatorExec.mjs';
 
 // Bump deliberately after testing a newer CLI — never float on @latest.
 const FIREBASE_TOOLS_VERSION = '15.18.0';
@@ -49,6 +69,18 @@ console.log(`[emulator-exec] Java ${major} · firebase-tools@${FIREBASE_TOOLS_VE
 const cmd = `npx --yes firebase-tools@${FIREBASE_TOOLS_VERSION} emulators:exec --only ${only} --project ${PROJECT_ID} "${script}"`;
 const child = spawn(cmd, { env, shell: true, stdio: 'inherit' });
 
+// The session root is this child's pid: every emulator JVM / functions worker descends
+// from it, and on Windows an orphan keeps naming it as its (now absent) parent — which is
+// exactly how a leftover is attributed to a finished run.
+recordExecSessionStart(child.pid, cmd);
+
 process.on('SIGINT', () => { if (!child.killed) child.kill('SIGINT'); });
 process.on('SIGTERM', () => { if (!child.killed) child.kill('SIGTERM'); });
-child.on('exit', (code) => process.exit(code ?? 1));
+child.on('exit', (code) => {
+  // Order matters: mark the session finished FIRST, so the reaper can tell this run's
+  // leftovers from a still-running session's live processes.
+  recordExecSessionEnd(child.pid);
+  const killed = reapOrphanEmulatorProcesses({ label: 'emulator-exec' });
+  if (killed > 0) console.warn(`[emulator-exec] Reaped ${killed} orphaned emulator process(es) left by this run.`);
+  process.exit(code ?? 1);
+});
