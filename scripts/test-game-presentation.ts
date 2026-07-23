@@ -40,7 +40,10 @@ const fullGame = {
   // Builder field riding the same passthrough — the editor lets a creator override
   // the derived per-interaction default, and an unregistered override would save
   // nothing while looking alive.
-  stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field', pausesTimer: true, expectedDurationMinutes: 4 }] }],
+  // `estimatedMinutes` (visible-time-estimates) is the THIRD TASK-level Builder field on
+  // the same passthrough, and the one that is actually SCORED (the smart_weighted
+  // sigmoid divides by it), so a silently-unsaved override would move real scores.
+  stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field', pausesTimer: true, expectedDurationMinutes: 4, estimatedMinutes: 9 }] }],
   scoringPreset: 'smart_weighted',
   scoringOptions: { wrongAnswerPenalty: 'strict' },
   registrationFields: [{ id: 'name', label: 'Name', type: 'text', required: true, level: 'member' }],
@@ -113,6 +116,8 @@ for (const key of ['scoringOptions', 'coverImage', 'branding', 'approxLocation']
     'a TASK-level builder field (pausesTimer) survives into the save payload via stages');
   ok(taskOf(payload).expectedDurationMinutes === 4,
     'a TASK-level builder field (expectedDurationMinutes) survives into the save payload via stages');
+  ok(taskOf(payload).estimatedMinutes === 9,
+    'a TASK-level builder field (estimatedMinutes) survives into the save payload via stages');
 
   const paused = fullGame;
   const notPaused = {

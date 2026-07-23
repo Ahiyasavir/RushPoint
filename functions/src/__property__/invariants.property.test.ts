@@ -19,6 +19,8 @@ import {
   // task-duration-defaults: the derived per-interaction duration safety envelope.
   defaultExpectedDurationMinutes, effectiveExpectedDurationMinutes,
   TASK_DURATION_MIN_MINUTES, TASK_DURATION_MAX_MINUTES,
+  // visible-time-estimates: the walk-inclusive estimate the smart sigmoid divides by.
+  defaultEstimatedMinutes, TASK_ESTIMATE_MIN_MINUTES, TASK_ESTIMATE_MAX_MINUTES,
 } from '@rushpoint/shared';
 import { buildRankings } from '../runs/index';
 import type { Game, RunTeam, ScoringPreset, WrongAnswerLevel } from '@rushpoint/shared';
@@ -101,6 +103,44 @@ describe('scoringPresets — value invariants', () => {
       expect(eff).toBeGreaterThan(0);
       expect(eff).toBeLessThanOrEqual(TASK_DURATION_MAX_MINUTES);
       if (authored === 7) expect(eff).toBe(7);
+    }
+  });
+
+  // The VISIBLE estimate (change: visible-time-estimates). Unlike the interaction
+  // duration above, `estimatedMinutes` IS a scoring input: taskScoreSmart divides by it
+  // (and returns 0 when it is <= 0) and computeSkillRatio divides by it too. The derived
+  // default is still authoring-only, but anything it can produce may be saved onto a
+  // template, so its safety envelope is a scoring invariant. Garbage coordinates and a
+  // garbage sibling list must never yield NaN, 0, a negative, or a fraction.
+  test('defaultEstimatedMinutes is a whole number within [1, 60] for ANY input', () => {
+    const rng = makeRng(29);
+    const types = ['field', 'smart_station', 'photo', 'self_report', 'quiz', 'numeric',
+      'geofence', 'sequence', 'survey', 'teleport', '', undefined, null, 7];
+    const coords = [
+      undefined, null, {}, { lat: 0, lng: 0 }, { lat: NaN, lng: NaN },
+      { lat: 900, lng: -4000 }, { lat: Infinity, lng: 0 }, { lat: '31', lng: '35' },
+      { lat: 31.7767, lng: 35.2345 }, { lat: -33.9, lng: 151.2 }, { lat: 90, lng: 180 },
+    ];
+    const pickAny = <T>(arr: T[]): T => arr[Math.floor(rng() * arr.length) % arr.length];
+    for (let i = 0; i < N; i++) {
+      const task = {
+        id: `t${i}`, type: pickAny(types), coordinates: pickAny(coords),
+        locationless: rng() < 0.2 ? true : undefined,
+        steps: rng() < 0.3 ? Array.from({ length: Math.floor(rng() * 20) }, () => ({ id: 'a' })) : undefined,
+      };
+      const siblings = rng() < 0.2
+        ? pickAny([undefined, null, 'nope', 5, {}] as unknown[])
+        : Array.from({ length: Math.floor(rng() * 6) }, (_, k) => ({
+          id: `s${k}`, coordinates: pickAny(coords),
+          locationless: rng() < 0.2 ? true : undefined,
+        }));
+      const m = defaultEstimatedMinutes(task as never, siblings as never);
+      expect(Number.isFinite(m)).toBe(true);
+      expect(Number.isInteger(m)).toBe(true);
+      expect(m).toBeGreaterThanOrEqual(TASK_ESTIMATE_MIN_MINUTES);
+      expect(m).toBeLessThanOrEqual(TASK_ESTIMATE_MAX_MINUTES);
+      // The value can therefore never make taskScoreSmart short-circuit to 0.
+      expect(taskScoreSmart(5, m, m)).toBeGreaterThan(0);
     }
   });
 

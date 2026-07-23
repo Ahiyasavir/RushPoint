@@ -19,6 +19,8 @@ import {
   locationLeakWarnings,
   // task-duration-defaults: the per-interaction derived estimate the editor suggests.
   defaultExpectedDurationMinutes, TASK_DURATION_MAX_MINUTES,
+  // visible-time-estimates: the WALK INCLUSIVE estimate the scoring sigmoid reads.
+  defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
 } from '@rushpoint/shared';
 import { Advanced, Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
@@ -152,7 +154,7 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
         {stepKey === 'placement' && <LocationStepBody task={task} mode={mode} located={located} setMode={setMode} set={set} b={b} />}
         {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} siblings={siblings} sections={sections} /></div>}
-        {stepKey === 'interaction' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} sections={sections} revealed={revealed} touch={touch} /></div>}
+        {stepKey === 'interaction' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} sections={sections} revealed={revealed} touch={touch} siblings={siblings} /></div>}
       </div>
 
       {/* Footer. The "this task cannot be completed" line is a response to an
@@ -876,8 +878,11 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
 };
 
 // ── Step 3: Interaction ──
-function InteractionStepBody({ task, set, setSmart, replace, b, sections, revealed, touch }: {
+function InteractionStepBody({ task, set, setSmart, replace, b, sections, revealed, touch, siblings }: {
   task: Task; set: (p: Partial<Task>) => void; setSmart: (p: Record<string, unknown>) => void;
+  // visible-time-estimates: the other tasks of the SAME stage. Only used to measure
+  // the median walking leg behind the suggested estimate.
+  siblings?: Task[];
   // The whole-task setter, so loading a sample changes the type AND the content
   // in ONE onChange (the auto-save debounce then sees one coherent task).
   replace: (t: Task) => void;
@@ -1149,7 +1154,17 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
           </div>
           <div>
             <Label dense>{b.estMin}</Label>
-            <Input dense type="number" value={task.estimatedMinutes} onChange={(e) => set({ estimatedMinutes: parseInt(e.target.value) || 1 })} />
+            {/* visible-time-estimates: this is the OVERRIDE for the derived estimate
+                shown just below. Kept where it has always been so the creator is not
+                asked to learn a new place for the same number. */}
+            <Input dense type="number" min={1} max={TASK_ESTIMATE_MAX_MINUTES}
+              value={task.estimatedMinutes}
+              onChange={(e) => set({
+                estimatedMinutes: Math.min(
+                  TASK_ESTIMATE_MAX_MINUTES,
+                  Math.max(1, parseInt(e.target.value) || 1),
+                ),
+              })} />
           </div>
           <div>
             <div className="flex items-center gap-1 mb-0.5">
@@ -1207,6 +1222,31 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
                   }} />
               </div>
               <p className="text-[11px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
+            </div>
+          );
+        })()}
+
+        {/* The VISIBLE, SCORED estimate (change: visible-time-estimates). Distinct from
+            the per-interaction duration above: the server stamps a task's clock at
+            ASSIGNMENT, so this number is measured against WALK + interaction. It is
+            derived as the interaction default plus a transit allowance taken from the
+            median leg to this task's placed stage siblings. Suggestion only — nothing is
+            written until the creator taps apply, so no stored game and no run in flight
+            moves by a point. */}
+        {(() => {
+          const suggestedEstimate = defaultEstimatedMinutes(task, siblings ?? []);
+          return (
+            <div className="mt-2 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+                <span dir="auto">🚶 {b.estimateSuggested(String(suggestedEstimate))}</span>
+                {task.estimatedMinutes !== suggestedEstimate && (
+                  <button type="button" className="underline text-[--ink-2]"
+                    onClick={() => set({ estimatedMinutes: suggestedEstimate })}>
+                    {b.estimateUseSuggested}
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
             </div>
           );
         })()}

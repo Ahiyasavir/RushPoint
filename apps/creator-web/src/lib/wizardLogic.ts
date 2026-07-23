@@ -8,7 +8,7 @@
 // and never blocks navigation. An unplaced task is reported by the readiness
 // surface (lib/gameReadiness) instead, which also refuses the launch.
 import type { Task, TaskType } from '@rushpoint/shared';
-import { validateOrderItems } from '@rushpoint/shared';
+import { validateOrderItems, defaultEstimatedMinutes } from '@rushpoint/shared';
 
 // Step POSITIONS (1 based) — the wizard holds one of these as its current step.
 export const WIZARD_STEPS = [1, 2, 3] as const;
@@ -37,23 +37,29 @@ const genId = () =>
 // (coordinates 0,0), no title, sensible scoring defaults. NOT locationless —
 // the creator places a pin or switches it to a locationless/instant trigger.
 export function blankTask(id: string = genId()): Task {
-  return {
+  const base = {
     id,
     title: '',
-    type: 'field',
+    type: 'field' as TaskType,
     coordinates: { lat: 0, lng: 0 },
     difficulty: 5,
-    // task-duration-defaults: DELIBERATELY still 15, not the derived per-interaction
-    // default. `estimatedMinutes` is compared against a span the server measures from
-    // RunTaskRecord.startedAt, which is stamped at ASSIGNMENT (functions/src/runs/
-    // index.ts:3022) — so it includes the WALK to the stop, not just the activity there.
-    // Seeding it with an interaction-only number (a `field` check in derives 1 minute)
-    // would make every team look 5x slow under smart_weighted. The derived default fills
-    // `expectedDurationMinutes` instead, and the Builder surfaces it as a suggestion.
-    estimatedMinutes: 15,
     pointValue: 100,
     maxConcurrentTeams: 3,
-    tags: [],
+    tags: [] as string[],
+  };
+  return {
+    ...base,
+    // visible-time-estimates: the derived WALK INCLUSIVE estimate, no longer a flat 15.
+    // `estimatedMinutes` is compared against a span the server measures from
+    // RunTaskRecord.startedAt, which is stamped at ASSIGNMENT (functions/src/runs/
+    // index.ts:3059) — so it includes the WALK to the stop, not just the activity there.
+    // That is why the interaction only default fills `expectedDurationMinutes` instead,
+    // and why this field gets `defaultExpectedDurationMinutes` PLUS a transit allowance.
+    // A brand new task has no stage context yet, so it is derived with no siblings: the
+    // unknown leg constant. The editor recomputes and offers the real number once the
+    // task has a type and a pin. Seeding a task that has never existed cannot move any
+    // stored game, any run in flight, or any finalised run.
+    estimatedMinutes: defaultEstimatedMinutes({ ...base, estimatedMinutes: 0 } as Task, []),
   };
 }
 
