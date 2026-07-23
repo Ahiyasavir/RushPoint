@@ -744,7 +744,8 @@ function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
         <span className="flex items-center gap-2">
           {t.chat.chatTitle}
           {unread && !open && (
-            <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-white">
+            // 11px white on the brand #FF5722 was 3.16:1; ink-fire takes it to 6.08:1.
+            <span className="inline-flex items-center rounded-full bg-ink-fire px-2 py-0.5 text-[11px] font-semibold text-white">
               {t.chat.chatUnread}
             </span>
           )}
@@ -806,12 +807,12 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
               </span>
               {isController && (mine ? (
                 <button disabled={actAction.isBusy(tr.id)} onClick={() => void actAction.run(tr, 'drop')}
-                  className="text-xs font-bold px-3 py-1 rounded-full border border-glass-border text-zinc-200 disabled:opacity-40">
+                  className="inline-flex items-center justify-center min-h-[44px] text-xs font-bold px-4 py-2 rounded-full border border-glass-border text-zinc-200 disabled:opacity-40">
                   {t.trackables.drop}
                 </button>
               ) : !held && (
                 <button disabled={actAction.isBusy(tr.id)} onClick={() => void actAction.run(tr, 'pickup')}
-                  className="text-xs font-bold px-3 py-1 rounded-full bg-accent/15 text-ink-fire border border-accent/30 disabled:opacity-40">
+                  className="inline-flex items-center justify-center min-h-[44px] text-xs font-bold px-4 py-2 rounded-full bg-accent/15 text-ink-fire border border-accent/30 disabled:opacity-40">
                   {t.trackables.pickUp}
                 </button>
               ))}
@@ -867,7 +868,7 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
                    reason is the dead end the audit found. Tapping now explains
                    that GPS has not settled yet, and calls nothing. */
                 <button disabled={captureAction.isBusy(z.id)} onClick={() => void captureAction.run(z)}
-                  className="text-xs font-bold px-3 py-1 rounded-full bg-rp-fire/15 text-ink-fire border border-rp-fire/30 disabled:opacity-40">
+                  className="inline-flex items-center justify-center min-h-[44px] text-xs font-bold px-4 py-2 rounded-full bg-rp-fire/15 text-ink-fire border border-rp-fire/30 disabled:opacity-40">
                   {t.zones.capture}
                 </button>
               )}

@@ -22,6 +22,7 @@ import {
   findPhysicalDirectionClasses,
   findUnlabelledIconButtons,
   findClickableNonInteractive,
+  findLowContrastWhiteOnFill,
   contrastRatio,
   parseColorTokens,
   playWebTsxFiles,
@@ -150,6 +151,49 @@ for (const name of INK) {
   }
 }
 
+// ── D2. White text on a brand fill ────────────────────────────────────────────
+// The mirror of D: D fixed coloured text on a light surface, this catches white
+// text on a saturated fill. Both fixtures directions, because the tint idiom
+// (`bg-accent/15 text-ink-fire`) and the darkened gradient (`from-[#C2410C]`)
+// are everywhere in this app and must never be flagged.
+const MUST_FLAG_FILL = [
+  '<button className="bg-rp-alert text-white font-semibold">go</button>',
+  '<button className="rounded-full bg-accent px-4 py-2 text-white">send</button>',
+  '<span className="bg-rp-amber text-white">x</span>',
+  '<span className="bg-rp-go text-white">x</span>',
+];
+for (const src of MUST_FLAG_FILL) {
+  ok(findLowContrastWhiteOnFill(src, tokens, 'fx.tsx').length > 0,
+    `flags white-on-fill in ${src.slice(0, 52)}`);
+}
+const MUST_NOT_FLAG_FILL = [
+  // The darkened variants this change introduced.
+  '<button className="bg-ink-alert text-white">go</button>',
+  '<button className="bg-ink-fire text-white">go</button>',
+  '<button className="bg-ink-warm text-white">go</button>',
+  // A translucent tint is never a white-text surface.
+  '<span className="bg-accent/15 text-ink-fire border border-accent/30">x</span>',
+  '<span className="bg-rp-alert/10 text-ink-alert">x</span>',
+  // The primary Button: a gradient whose real colours are in from-/to-.
+  '<button className="bg-gradient-to-r from-[#C2410C] to-[#B45309] text-white">go</button>',
+  // No white text at all.
+  '<div className="bg-accent text-zinc-100">x</div>',
+  // An unknown token is skipped, never guessed.
+  '<div className="bg-not-a-token text-white">x</div>',
+  '<div className="text-white">x</div>',
+];
+for (const src of MUST_NOT_FLAG_FILL) {
+  const f = findLowContrastWhiteOnFill(src, tokens, 'fx.tsx');
+  ok(f.length === 0, `does NOT flag ${src.slice(0, 52)}`, f.map((x) => x.detail).join(', '));
+}
+ok(findLowContrastWhiteOnFill('<div className="bg-rp-alert text-white" />', {}, 'fx.tsx').length === 0,
+  'an empty token map yields no findings rather than a guess');
+// The two numbers that motivated this rule.
+ok(contrastRatio('#EF4444', '#FFFFFF').toFixed(2) === '3.76',
+  'regression pin: white on brand alert is 3.76:1 (below AA)', contrastRatio('#EF4444', '#FFFFFF').toFixed(2));
+ok(contrastRatio('#C21414', '#FFFFFF').toFixed(2) === '6.17',
+  'regression pin: white on ink-alert is 6.17:1 (clears AA)', contrastRatio('#C21414', '#FFFFFF').toFixed(2));
+
 // ── E. The guard doing its actual job, over the real app ──────────────────────
 const files = playWebTsxFiles(join(PLAY, 'src'));
 ok(files.length > 20, `found play-web components to scan`, String(files.length));
@@ -162,6 +206,9 @@ ok(btnFindings.length === 0, 'no icon-only buttons without a name in apps/play-w
 const clickFindings = files.flatMap((f) => findClickableNonInteractive(readFileSync(f, 'utf8'), relative(ROOT, f)));
 ok(clickFindings.length === 0, 'no onClick on non-interactive elements in apps/play-web/src',
   clickFindings.map((f) => `${f.file}:${f.line} ${f.detail}`).join(' | '));
+const fillFindings = files.flatMap((f) => findLowContrastWhiteOnFill(readFileSync(f, 'utf8'), tokens, relative(ROOT, f)));
+ok(fillFindings.length === 0, 'no white text on a sub-AA brand fill in apps/play-web/src',
+  fillFindings.map((f) => `${f.file}:${f.line} ${f.detail}`).join(' | '));
 
 // Safe area + zoom: the PWA opts into the display cutout, so it must handle it.
 const css = readFileSync(join(PLAY, 'src', 'index.css'), 'utf8');

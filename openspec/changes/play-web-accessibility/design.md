@@ -152,8 +152,29 @@ Lane: **pure logic** (`scripts/test-play-a11y-scan.ts`, run by `scripts/run-unit
 - regression pins: `#FF5722` on `#FFFFFF` computes to 3.16 and `#FFB300` on `#FFF0E6` to 1.61 — the
   two numbers this change exists because of. If those ever change, the formula changed.
 
+**D2. `findLowContrastWhiteOnFill(source, tokens, file, min)` — the mirror of D**
+
+D fixed *coloured text on a light surface*. Re-reading the primary participant paths surfaced the
+case the guard had no rule for: *white text on a saturated brand fill*. It is decidable for exactly
+the same reason D is: both colours are named in one class string and both resolve through
+`tailwind.config.js`. To stay a guard rather than a nag it is narrow by construction.
+- flags: `"bg-rp-alert text-white"` (3.76:1), `"bg-accent … text-white"` (3.16:1),
+  `"bg-rp-amber text-white"`, `"bg-rp-go text-white"`.
+- must NOT flag: the darkened `"bg-ink-alert text-white"` / `"bg-ink-fire text-white"`; the tint
+  idiom `"bg-accent/15 text-ink-fire"` and `"bg-rp-alert/10 text-ink-alert"` (a translucent tint is
+  never a white-text surface, and its effective colour is not decidable from the token); the primary
+  `Button`'s `"bg-gradient-to-r from-[#C2410C] to-[#B45309] text-white"` (the real colours live in
+  `from-`/`to-`, and both already clear AA at 5.18 / 5.02); `"bg-accent text-zinc-100"` (no white
+  text); an unresolvable token; an empty token map (skip, never guess).
+- regression pins: `#EF4444` on white = 3.76 (below AA), `#C21414` on white = 6.17 (clears).
+
+**D3. `TAP_INLINE`** (`scripts/test-touch-a11y.ts`) — `TAP_PAD`'s `p-2 -m-2` only reaches ~32px
+around a `text-xs` glyph, still under the minimum. `TAP_INLINE` is asserted to be static, to carry
+`min-w-[44px]`/`min-h-[44px]`, to centre its glyph, to keep `-m-2` so the surrounding row does not
+grow, and to contain no physical-direction class.
+
 **E. Whole-app assertions** (the guard doing its actual job)
-- running all three scanners over every `apps/play-web/src/**/*.tsx` yields zero findings;
+- running all four scanners over every `apps/play-web/src/**/*.tsx` yields zero findings;
 - `tailwind.config.js` defines all five `ink-*` tokens;
 - `index.css` contains `env(safe-area-inset-bottom)` and `env(safe-area-inset-top)`;
 - `index.html`'s viewport meta contains `viewport-fit=cover` and **not** `maximum-scale`.

@@ -12,7 +12,9 @@
 //      name (a screen reader announces "button" and nothing else);
 //   3. an onClick on a non-interactive element (mouse/touch only, no keyboard);
 //   4. contrastRatio — WCAG 2.1 relative luminance, used to assert that the theme's
-//      ink colours still clear AA against the app's surfaces.
+//      ink colours still clear AA against the app's surfaces;
+//   5. white text on a brand FILL (`text-white` + `bg-rp-alert`) — the mirror of 4,
+//      and equally decidable: both colours are named in the same class string.
 //
 // Deliberately NOT here: tap-target size and contrast-in-context. Neither can be
 // decided from a class string without a layout engine (a `min-h-[44px]` on a hidden
@@ -168,6 +170,54 @@ export function contrastRatio(a: string, b: string): number {
   const hi = Math.max(la, lb);
   const lo = Math.min(la, lb);
   return (hi + 0.05) / (lo + 0.05);
+}
+
+// ── 5. White text on a brand fill ────────────────────────────────────────────
+// The ink-* tokens fixed COLOURED TEXT ON A SURFACE. The mirror case is the one
+// the theme still got wrong: WHITE text on a saturated brand FILL. `text-white`
+// + `bg-rp-alert` is 3.76:1 and `text-white` + `bg-accent` is 3.16:1 — both below
+// AA, both on controls a participant taps while walking in sun.
+//
+// Unlike tap-target size, this IS decidable from the token text: both colours are
+// named in the same class string and both resolve through the tailwind config. To
+// stay a guard rather than a nag it is deliberately narrow:
+//   • the literal must contain the bare token `text-white`;
+//   • only a BARE, opaque `bg-<token>` counts — `bg-accent/15` (a translucent
+//     tint, never a white-text surface) and `bg-gradient-to-r` (whose real colours
+//     live in from-/to-) are both skipped;
+//   • an unknown token is skipped, never guessed.
+const WHITE = '#FFFFFF';
+const BG_TOKEN_RE = /^bg-([a-z0-9-]+)$/;
+
+export function findLowContrastWhiteOnFill(
+  source: string,
+  tokens: Record<string, string>,
+  file = '',
+  min = 4.5,
+): Finding[] {
+  const out: Finding[] = [];
+  const src = String(source ?? '');
+  const map = tokens ?? {};
+  for (const m of src.matchAll(STRING_LITERAL_RE)) {
+    const literal = m[0];
+    const toks = literal.split(/[\s"'`{}()$,;]+/).filter(Boolean);
+    if (!toks.includes('text-white')) continue;
+    const startLine = src.slice(0, m.index ?? 0).split('\n').length;
+    for (const tok of toks) {
+      const name = BG_TOKEN_RE.exec(tok)?.[1];
+      if (!name) continue;
+      const hex = map[name];
+      if (!hex) continue;
+      const ratio = contrastRatio(hex, WHITE);
+      if (!Number.isFinite(ratio) || ratio >= min) continue;
+      out.push({
+        file,
+        line: startLine,
+        detail: `white text on "${tok}" (${hex}) is ${ratio.toFixed(2)}:1, below AA ${min}`,
+      });
+    }
+  }
+  return out;
 }
 
 /** Pull `'token': '#RRGGBB'` pairs out of a tailwind config's source text. */

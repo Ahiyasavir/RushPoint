@@ -168,6 +168,11 @@ click handler on a non-interactive element.
 The guard SHALL additionally recompute the contrast of the theme's ink colours against the app's
 surfaces and fail if any drops below the AA threshold.
 
+The guard SHALL also resolve, against the participant theme's own colour tokens, any element that
+draws white text on an opaque brand fill, and fail if that pairing falls below the AA threshold. It
+SHALL NOT flag a translucent tint or a gradient, whose effective colour is not decidable from the
+token name alone, and SHALL skip rather than guess at a colour token it cannot resolve.
+
 The guard's detection logic SHALL be pure functions, unit-tested against synthetic fixtures that
 include cases which must NOT be flagged, so that the guard cannot degrade into a source of false
 positives.
@@ -186,6 +191,18 @@ positives.
 
 - **WHEN** an ink colour is changed to one that falls below 4.5:1 against an app surface
 - **THEN** the unit-test lane fails with the computed ratio
+
+#### Scenario: White text is placed on a sub-AA brand fill
+
+- **WHEN** a participant-app control renders white text on an opaque brand-coloured background whose
+  contrast with white is below 4.5:1
+- **THEN** the unit-test lane fails and names the file, line, resolved colour and computed ratio
+
+#### Scenario: A translucent tint is not mistaken for a fill
+
+- **WHEN** a control uses a translucent brand tint as its background with dark ink text
+- **THEN** the guard reports no finding, because the effective colour is not decidable from the class
+  token
 
 #### Scenario: Compliant code is not flagged
 

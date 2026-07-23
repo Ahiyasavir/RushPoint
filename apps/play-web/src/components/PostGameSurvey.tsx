@@ -110,7 +110,8 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
       {/* header: title + progress + dismiss */}
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-bold text-zinc-200">📝 {t.survey.cardTitle}</span>
-        <button onClick={dismiss} className="text-xs text-zinc-500 hover:text-zinc-400">{t.survey.dismiss}</button>
+        {/* Was a bare ~16px line of text: the only way out of this card. */}
+        <button onClick={dismiss} className="inline-flex items-center justify-center min-h-[44px] px-3 -me-3 text-xs text-zinc-500 hover:text-zinc-400">{t.survey.dismiss}</button>
       </div>
       <div className="text-[11px] text-zinc-500 mb-3">
         {t.survey.intro} · {t.survey.progress({ cur: Math.min(stepIdx + 1, total), total })}
@@ -200,7 +201,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
       {/* footer: skip (non-comment) / send (comment) */}
       <div className="flex items-center justify-between mt-4">
         {!isLast ? (
-          <button onClick={advance} className="text-sm text-zinc-500 hover:text-zinc-400">{t.survey.skip}</button>
+          <button onClick={advance} className="inline-flex items-center justify-center min-h-[44px] px-3 -ms-3 text-sm text-zinc-500 hover:text-zinc-400">{t.survey.skip}</button>
         ) : <span />}
         {isLast && (
           <Button disabled={phase === 'sending'} loading={sendAction.busy} onClick={() => void sendAction.run()}>

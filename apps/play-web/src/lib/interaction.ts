@@ -18,6 +18,14 @@ export const TAP_TARGET = 'min-w-[44px] min-h-[44px]';
  *  changing the surrounding layout (the negative margin cancels the padding). */
 export const TAP_PAD = 'p-2 -m-2';
 
+/** TAP_PAD only reaches ~32px around a `text-xs` glyph, which is still under the
+ *  44px minimum. This one gets the real 44x44 box AND keeps the row height it sits
+ *  in: `-m-2` lets the box overflow its slot by 8px on every side, so a 44px
+ *  control contributes only 28px of layout — less than a padded text row already
+ *  is. Use it for a dismiss/close glyph inside a banner (change:
+ *  play-web-accessibility). */
+export const TAP_INLINE = 'inline-flex items-center justify-center min-w-[44px] min-h-[44px] -m-2';
+
 // ── Attempt-limited answers ──────────────────────────────────────────────────
 
 export interface AttemptGuard {

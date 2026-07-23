@@ -24,8 +24,12 @@ export const Button = forwardRef<
       active:bg-glass-hover
       shadow-[0_1px_4px_rgba(26,10,0,0.06)]
     `,
+    // The fill is the darkened ink-alert, not the brand #EF4444: white on the
+    // brand red is 3.76:1, below AA, and this is the CONFIRM control of every
+    // destructive dialog (leave the run, SOS) — read outdoors, in sun, while
+    // walking. #C21414 takes the same pair to 6.17:1.
     danger: `
-      bg-rp-alert text-white font-semibold
+      bg-ink-alert text-white font-semibold
       shadow-[0_4px_14px_rgba(239,68,68,0.35)]
       active:brightness-90 active:scale-[0.98]
     `,

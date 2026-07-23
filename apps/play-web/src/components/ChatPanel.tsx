@@ -111,10 +111,13 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
           placeholder={t.chat.chatPlaceholder}
           className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
         />
+        {/* bg-ink-fire, not bg-accent: white on #FF5722 is 3.16:1 (below AA).
+            min-h-[44px] because this was a ~36px target, tapped one handed while
+            walking, on the team's only channel back to HQ. */}
         <button
           onClick={() => void send()}
           disabled={sending || !text.trim()}
-          className="shrink-0 rounded-full bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          className="shrink-0 inline-flex items-center justify-center min-h-[44px] rounded-full bg-ink-fire px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
         >
           {t.chat.chatSend}
         </button>

@@ -22,7 +22,7 @@
 // a 44px target that renders as nothing is worse than the 32px one it replaced.
 //
 //   npx tsx scripts/test-touch-a11y.ts
-import { quizAttemptGuard, TAP_TARGET, TAP_PAD } from '../apps/play-web/src/lib/interaction';
+import { quizAttemptGuard, TAP_TARGET, TAP_PAD, TAP_INLINE } from '../apps/play-web/src/lib/interaction';
 import { translations as playT } from '../apps/play-web/src/i18n';
 
 let failures = 0;
@@ -82,6 +82,17 @@ check('TAP_TARGET encodes the 44px minimum in both axes',
   TAP_TARGET.includes('min-w-[44px]') && TAP_TARGET.includes('min-h-[44px]'));
 check('TAP_PAD pads without shifting the surrounding layout',
   TAP_PAD.includes('p-2') && TAP_PAD.includes('-m-2'));
+// TAP_INLINE is the one TAP_PAD could not be: a REAL 44px box that still does not
+// grow the row it sits in (change: play-web-accessibility).
+check('TAP_INLINE is static', typeof TAP_INLINE === 'string' && !TAP_INLINE.includes('${'));
+check('TAP_INLINE encodes the 44px minimum in both axes',
+  TAP_INLINE.includes('min-w-[44px]') && TAP_INLINE.includes('min-h-[44px]'));
+check('TAP_INLINE centres its glyph so the box is actually hittable',
+  TAP_INLINE.includes('inline-flex') && TAP_INLINE.includes('items-center') && TAP_INLINE.includes('justify-center'));
+check('TAP_INLINE pulls its overflow back so the surrounding row keeps its height',
+  TAP_INLINE.includes('-m-2'));
+check('TAP_INLINE uses no physical-direction class (Hebrew is the default language)',
+  !/(^|\s)-?(m[lr]|p[lr]|left|right)-/.test(TAP_INLINE));
 
 // ── 5. Dictionary cross-check — every new key, both languages, right script ───
 // PART A of `npm run i18n:check` is a hard gate; this catches the same class of
