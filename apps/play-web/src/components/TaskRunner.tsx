@@ -23,6 +23,7 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
+  canCompleteWithoutLocation,
 } from '../lib/stuckGuards';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
@@ -484,6 +485,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         // accept the check-in from anywhere so the creator can rehearse from their desk.
         // Send NO synthetic coords — the server bypass keys on the run flag, not location.
         if (session.isTestDrive) { void submitCheckIn(); return; }
+        // self_report / locationless tasks need no coordinates: the server enforces
+        // proximity only when the task carries real coords, so submit WITHOUT a fix
+        // (never synthetic coords) rather than stranding a player who declined the
+        // permission prompt. A genuinely located field task still warns and does not
+        // submit blind — the server needs its proximity coords.
+        if (canCompleteWithoutLocation(task)) { void submitCheckIn(); return; }
         showError(t.task.gpsWarning); end();
       },
     );

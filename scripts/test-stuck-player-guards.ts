@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance,
+  canCompleteWithoutLocation,
   GPS_RETRY_BASE_MS, GPS_RETRY_MAX_MS, BLOCKED_HELP_KEY,
 } from '../apps/play-web/src/lib/stuckGuards';
 
@@ -185,12 +186,49 @@ function blockedCases(world: string): void {
   check(`[${world}] help sent while blocked re-arms on a real task`, helpAlreadySent(BLOCKED_HELP_KEY, 'task-a') === false);
 }
 
-// ─── 5. Every case, in three clock worlds ─────────────────────────────────────
+// ─── 5. canCompleteWithoutLocation — self_report / locationless need no fix ────
+// field() is shared by `field` (a located check-in) AND `self_report` (mark
+// complete from anywhere); a `field` task may also be `locationless`. Denying the
+// location prompt must NOT permanently strand a player on a task that needs no
+// coordinates. The predicate opens ONLY for the two intended shapes and is total:
+// a missing type or a garbage input defaults CLOSED (a located field never submits
+// blind by accident — the server needs its proximity coords).
+function noLocationCases(world: string): void {
+  // The two shapes that open: submit without coordinates.
+  check(`[${world}] self_report → may complete without a fix`, canCompleteWithoutLocation({ type: 'self_report' }) === true);
+  check(`[${world}] locationless field → may complete without a fix`, canCompleteWithoutLocation({ type: 'field', locationless: true }) === true);
+  check(`[${world}] locationless of any type → may complete without a fix`, canCompleteWithoutLocation({ type: 'quiz', locationless: true }) === true);
+
+  // A genuinely located field task stays closed: it must still show the warning.
+  check(`[${world}] located field → must NOT submit blind`, canCompleteWithoutLocation({ type: 'field' }) === false);
+  check(`[${world}] located field, locationless:false → must NOT submit blind`, canCompleteWithoutLocation({ type: 'field', locationless: false }) === false);
+
+  // Belt-and-suspenders for types that never reach field() — all default closed.
+  for (const type of ['geofence', 'quiz', 'photo', 'smart_station', 'numeric', 'sequence', 'unknown-type', '']) {
+    check(`[${world}] ${type || '(empty)'} without locationless → closed`, canCompleteWithoutLocation({ type }) === false);
+  }
+
+  // Totality — default CLOSED on missing/garbage input, and never throws.
+  check(`[${world}] missing type and flag → closed`, canCompleteWithoutLocation({}) === false);
+  let threw = false;
+  try {
+    for (const bad of [undefined, null, 42, 'field', { type: 42 }, { locationless: 'yes' }, { type: null, locationless: null }]) {
+      // Deliberately garbage shapes the wire could deliver a version-skewed client.
+      canCompleteWithoutLocation(bad as unknown as { type?: string; locationless?: boolean });
+    }
+  } catch { threw = true; }
+  check(`[${world}] canCompleteWithoutLocation never throws on garbage`, threw === false);
+  // A truthy-but-non-true locationless must not open (default closed).
+  check(`[${world}] locationless:'yes' (not === true) → closed`, canCompleteWithoutLocation({ type: 'field', locationless: 'yes' as unknown as boolean }) === false);
+}
+
+// ─── 6. Every case, in three clock worlds ─────────────────────────────────────
 function runAllCases(world: string): void {
   gpsCases(world);
   offlineCases(world);
   helpCases(world);
   blockedCases(world);
+  noLocationCases(world);
 }
 
 const realNow = Date.now;
@@ -214,6 +252,7 @@ check('TaskRunner imports the guards', /from '\.\.\/lib\/stuckGuards'/.test(runn
 check('the geofence watcher schedules a retry', runner.includes('gpsRetryDelayMs('));
 check('blockedOffline decides via offlineSubmitGate', runner.includes('offlineSubmitGate('));
 check('the help affordance is derived per task', runner.includes('helpAlreadySent('));
+check("field()'s denial path consults canCompleteWithoutLocation", runner.includes('canCompleteWithoutLocation('));
 check('helpSent is no longer a run-wide boolean', !/const \[helpSent, setHelpSent\] = useState\(false\)/.test(runner));
 
 const geofenceSrc = runner.slice(runner.indexOf('function GeofenceAuto'));

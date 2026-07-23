@@ -101,7 +101,32 @@ export function helpAlreadySent(sentForTaskId: string | null, taskId: string | n
   return sentForTaskId === taskId;
 }
 
-// ─── 4. Blocked-player guidance — say WHICH block, and offer a human ──────────
+// ─── 4. Location-optional completion — self_report / locationless need no fix ─
+/**
+ * May this task be completed WITHOUT a location fix?
+ *
+ * `field()` in TaskRunner is shared by `field` (a located check-in the server
+ * scores by proximity) AND `self_report` ("mark complete from anywhere"); a `field`
+ * task can additionally be `locationless`. On GPS denial the located case must warn
+ * and NOT submit blind — but a `self_report` / `locationless` task needs no
+ * coordinates at all (`completeTask` enforces proximity only when the task carries
+ * real coords), so blocking it strands a player who declined the permission prompt
+ * for the rest of the run. This predicate says which case we're in.
+ *
+ * FAIL-OPEN alignment: `true` means "submit without coords, let the server decide";
+ * `false` means only "show the warning" — never a hard block, since the next tap
+ * once GPS is granted still reaches the server. TOTAL and default-CLOSED: it reads
+ * only `type` and `locationless`, opens for exactly the two intended shapes, and any
+ * missing/garbage input yields `false` so a located task never submits blind by
+ * accident. Never throws.
+ */
+export function canCompleteWithoutLocation(
+  task: { type?: string; locationless?: boolean } | null | undefined,
+): boolean {
+  return task?.type === 'self_report' || task?.locationless === true;
+}
+
+// ─── 5. Blocked-player guidance — say WHICH block, and offer a human ──────────
 //
 // The server has always known more than the card said. `evaluateSafeZoneStatus`
 // returns a REASON, and both callables that can block a player forward it
