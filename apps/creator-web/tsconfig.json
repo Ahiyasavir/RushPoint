@@ -13,7 +13,8 @@
     "jsx": "react-jsx",
     "strict": true,
     "paths": {
-      "@rushpoint/shared": ["../../packages/shared/src"]
+      "@rushpoint/shared": ["../../packages/shared/src"],
+      "@rushpoint/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": ["src"]

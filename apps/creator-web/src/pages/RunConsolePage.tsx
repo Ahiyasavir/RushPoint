@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useParams } from 'react-router-dom';
 import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
-import type { Run, HotZone, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, type ChatMessage, type ChatSeenMarker } from '@rushpoint/shared';
+import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, type ChatMessage, type ChatSeenMarker } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -12,7 +12,7 @@ import {
   inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
-  sendTeamChatMessage, reviewStationSubmission,
+  sendTeamChatMessage, reviewStationSubmission, setRunTaskStatus,
   type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult, type SurveyResultRow,
 } from '../services/calls';
 // Photo approval queue (wave-e task 13) — pure queue logic shared with the
@@ -21,23 +21,43 @@ import {
   buildSubmissionQueues, submissionKey, isRenderableMedia,
   type SubmissionRow, type SubmissionTeamDoc, type RawSubmission,
 } from '@rushpoint/shared';
+// Review triage (change: photo-review-throughput): wait time, "who is actually
+// blocked" priority, decision legality and the per-row failure map — all pure.
+import {
+  buildReviewQueueView, decideReview, moveFocus, recordFailure, clearFailure,
+  type ReviewFailures,
+} from '../lib/photoReviewQueue';
 import { useAsyncAction } from '../hooks/useAsyncAction';
-import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
 import RichTooltip from '../components/RichTooltip';
 // Progressive disclosure (change: run-console-progressive-disclosure): the
 // console's layout, action severity, share links and human labels are pure
 // decisions that live in lib/ with tests, so the chrome and the summary badges
 // cannot drift apart.
+// Density + section navigation (change: run-console-density): the accordions are
+// gone. A Builder style rail picks ONE section; the incident controls stay pinned
+// above it; and which panel sits in which lane is decided by the same pure module
+// so no panel can be silently unreachable.
 import {
-  buildRunConsolePlan, planHasPanel, readGroupState, writeGroupState, groupStateKey,
-  DEFAULT_GROUP_OPEN,
-  type PanelId, type RunStatus, type RunConsoleGroup, type GroupOpenState, type CollapsibleGroupId,
+  buildRunConsolePlan, sectionStateKey,
+  buildRunConsoleSections, resolveSection, buildPinnedLayout, assignPanelColumns,
+  consoleColumnCount, sectionColumnCount, gridTemplateClass, columnSpanClass,
+  CONSOLE_MEDIUM_QUERY, CONSOLE_WIDE_QUERY,
+  type PanelId, type RunStatus, type GroupSummary, type SectionId, type RunConsoleSection,
+  type ColumnLayout,
 } from '../lib/runConsoleLayout';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import {
   runActionVariant, parseScoreDelta, FLASH_MISSION_TTL_SECONDS, FLASH_MISSION_TTL_MINUTES,
 } from '../lib/runConsoleActions';
 import { buildShareArtifacts, type ShareArtifactId } from '../lib/runShareArtifacts';
 import { resolveTeamLabel, resolveTaskLabel } from '../lib/runConsoleLabels';
+// "Is anyone in trouble right now?" (change: run-console-attention) — a pure,
+// quiet-by-default verdict over the row data listRunTeams already returns.
+import {
+  buildAttentionContext, classifyTeamAttention,
+  type AttentionReason, type TeamAttention,
+} from '../lib/teamAttention';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { describeCallFailure } from '../lib/callFeedback';
@@ -202,6 +222,9 @@ export default function RunConsolePage() {
     });
   }, [gameId, runId, ownerUid, runLive]);
   const photoQueues = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
+  // A finished team's submission still scores, but nobody is blocked on it, so
+  // the review queue must not let it sit in front of a team still in the street.
+  const finishedTeamIds = useMemo(() => teams.filter((t) => t.finished).map((t) => t.id), [teams]);
 
   const [feedItems, setFeedItems] = useState<FeedItemRow[]>([]);
   useEffect(() => {
@@ -285,25 +308,26 @@ export default function RunConsolePage() {
     return () => { alive = false; };
   }, [gameId]);
 
-  // Which groups this creator left open on this run. A display preference only
-  // (run docs are server write only); malformed or stale storage degrades to the
-  // defaults instead of throwing on a live console.
-  const [openGroups, setOpenGroups] = useState<GroupOpenState>(DEFAULT_GROUP_OPEN);
+  // Which section of the rail this creator was last on for this run. A display
+  // preference only (run docs are server write only); malformed or stale storage
+  // degrades to the default section (resolveSection) instead of throwing, and
+  // never leaves the console showing nothing.
+  const [sectionPref, setSectionPref] = useState<string | null>(null);
   useEffect(() => {
     if (!runId) return;
-    try { setOpenGroups(readGroupState(localStorage.getItem(groupStateKey(runId)), DEFAULT_GROUP_OPEN)); }
-    catch { setOpenGroups(DEFAULT_GROUP_OPEN); }
+    try { setSectionPref(localStorage.getItem(sectionStateKey(runId))); }
+    catch { setSectionPref(null); }
   }, [runId]);
-  const persistGroups = useCallback((next: GroupOpenState) => {
-    try { localStorage.setItem(groupStateKey(runId ?? ''), writeGroupState(next)); } catch { /* storage off */ }
-    return next;
+  const openSection = useCallback((id: SectionId) => {
+    setSectionPref(id);
+    try { localStorage.setItem(sectionStateKey(runId ?? ''), id); } catch { /* storage off */ }
   }, [runId]);
-  const toggleGroup = useCallback((id: CollapsibleGroupId) => {
-    setOpenGroups((cur) => persistGroups({ ...cur, [id]: !cur[id] }));
-  }, [persistGroups]);
-  const openGroupNow = useCallback((id: CollapsibleGroupId) => {
-    setOpenGroups((cur) => (cur[id] ? cur : persistGroups({ ...cur, [id]: true })));
-  }, [persistGroups]);
+
+  // How many lanes this viewport can carry. One mechanism only (useMediaQuery,
+  // from the mobile-responsive pass) and it answers "phone" with no `window`.
+  const mediumViewport = useMediaQuery(CONSOLE_MEDIUM_QUERY);
+  const wideViewport = useMediaQuery(CONSOLE_WIDE_QUERY);
+  const columns = consoleColumnCount({ medium: mediumViewport, wide: wideViewport });
 
 
   const ctx = { ownerUid, gameId: gameId!, runId: runId! };
@@ -320,9 +344,7 @@ export default function RunConsolePage() {
       await loadTeams();
       const heldForConsent = res?.heldForConsent ?? 0;
       if (heldForConsent > 0) {
-        toast.info(t.runConsole.heldForConsent
-          .replace('{held}', String(heldForConsent))
-          .replace('{launched}', String(res?.launched ?? 0)));
+        toast.info(t.runConsole.heldForConsent({ launched: res?.launched ?? 0, held: heldForConsent }));
       } else {
         toast.success(t.runConsole.startedAllTeams);
       }
@@ -345,10 +367,9 @@ export default function RunConsolePage() {
     try {
       const { pin } = await inviteStaff({ ...ctx, name, permissions: ['announce', 'review_photos', 'track_locations'] });
       setStaffPin(pin);
-      // The PIN + staff link render inside the (collapsed by default) share
-      // group, so open it: a host must never have to hunt for what they just
-      // created.
-      openGroupNow('shareAndScreens');
+      // The PIN + staff link render inside the share section, so navigate there:
+      // a host must never have to hunt for what they just created.
+      openSection('shareAndScreens');
     } catch { await dialog.alert(t.runConsole.staffInviteFailed); }
   }
   async function refreshStandings(publish?: boolean) {
@@ -405,6 +426,26 @@ export default function RunConsolePage() {
     (run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]),
   );
 
+  // Who is in trouble RIGHT NOW (change: run-console-attention). The table used
+  // to render a team standing still for 25 minutes exactly like a team deep in a
+  // long task. Recomputed on each render (the rows repoll every 5s) and never
+  // persisted: the verdict is a view of the current projection, not state.
+  const attentionNow = Date.now();
+  const attentionCtx = buildAttentionContext(teams, attentionNow);
+  const attentionById = new Map<string, TeamAttention>(
+    teams.map((tm) => [tm.id, classifyTeamAttention(tm, attentionCtx, attentionNow)]),
+  );
+  const attentionCount = teams.reduce(
+    (n, tm) => n + (attentionById.get(tm.id)?.level !== 'ok' ? 1 : 0), 0,
+  );
+  const attentionReasonLabel: Record<AttentionReason, string> = {
+    outOfBounds: rc.attentionOutOfBounds,
+    answerLockout: rc.attentionAnswerLockout,
+    gpsSilent: rc.attentionGpsSilent,
+    idle: rc.attentionIdle,
+    awaitingReview: rc.attentionAwaitingReview,
+  };
+
   // ONE pass decides which panels render, which group each sits in, and what a
   // folded group reports on its header, so a badge and its panel can never
   // disagree (change: run-console-progressive-disclosure). Panel visibility is
@@ -423,9 +464,15 @@ export default function RunConsolePage() {
     hasStaffPin: !!staffPin,
     surveyResultCount: surveyResults === null ? null : surveyResults.length,
   });
-  const has = (panel: PanelId) => planHasPanel(plan, panel);
+  // The rail's destinations, the one that is showing, and the lane layouts for
+  // the pinned zone and for that section. All decided by the pure module.
+  const sections = buildRunConsoleSections(plan);
+  const activeSection = resolveSection(sections, sectionPref);
+  const pinnedLayout = buildPinnedLayout(plan, columns, { teamCount: teams.length });
+  const sectionPanels = sections.find((s) => s.id === activeSection)?.panels ?? [];
+  const sectionLayout = assignPanelColumns(sectionPanels, sectionColumnCount(columns));
 
-  const groupTitles: Record<CollapsibleGroupId, string> = {
+  const groupTitles: Record<SectionId, string> = {
     teamsAndScores: rc.groupTeams,
     moderation: rc.groupModeration,
     gameMechanics: rc.groupMechanics,
@@ -433,11 +480,10 @@ export default function RunConsolePage() {
     afterTheRun: rc.groupAfter,
   };
 
-  // What a FOLDED group still says about itself. Built from the plan's summary,
-  // which is the same value the expanded panel renders.
-  function groupMeta(group: RunConsoleGroup) {
+  // What a rail entry says about a section the organizer is NOT looking at.
+  // Built from the plan's summary, which is the same value the panel renders.
+  function groupMeta(s: GroupSummary) {
     const chips: { text: string; color: 'zinc' | 'gold' | 'cyan' | 'red' }[] = [];
-    const s = group.summary;
     if (s.teamCount) chips.push({ text: rc.summaryTeams({ n: s.teamCount }), color: 'zinc' });
     if (s.pendingPhotos) chips.push({ text: rc.photoReviewCount({ n: s.pendingPhotos }), color: 'gold' });
     if (s.unreadChats) chips.push({ text: rc.groupUnreadChats({ n: s.unreadChats }), color: 'cyan' });
@@ -491,10 +537,68 @@ export default function RunConsolePage() {
 
   function renderPanel(panel: PanelId) {
     switch (panel) {
+      // ── Pinned zone. Addressed by id like every other panel so the lane
+      //    layout (not a hardcoded span) decides where each one sits.
+      case 'joinShare': return <JoinShare accessCode={activeRun.accessCode} />;
+      case 'stationQr': return <StationQrPrint gameId={gameId!} />;
+      case 'broadcast': return <AnnouncementCard ctx={ctx} teams={teams} />;
+
+      // Live SOS / alerts — the organizer sees these the moment a team raises one.
+      case 'alerts':
+        return (
+          <Card className="p-4 border-neon-red/40">
+            <div className="text-sm font-medium mb-2 text-neon-red">{rc.activeAlerts({ n: alerts.length })}</div>
+            <div className="space-y-2">
+              {alerts.map((a) => (
+                <div key={a.id} className="flex flex-wrap items-center gap-3 text-sm">
+                  <span className="uppercase text-neon-red font-medium">{rc.alertType(a.type)}</span>
+                  {/* A host cannot act on a truncated document id: show the team's name. */}
+                  <span dir="auto" className="text-zinc-400 text-xs">
+                    {resolveTeamLabel(a.teamId, teams, (id) => rc.unknownTeam({ id }))}
+                  </span>
+                  {a.message && <span dir="auto" className="text-zinc-300 flex-1 truncate">{a.message}</span>}
+                  {a.lat != null && a.lng != null && (
+                    <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{rc.map}</a>
+                  )}
+                  <Button variant="subtle" className="min-h-0 px-2.5 py-1 text-xs rounded-lg ms-auto" onClick={() => ack(a.id)}>{rc.acknowledge}</Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        );
+
+      // Routine live-ops actions. Ending the run is NOT here: it sits in its own
+      // separated end-of-run row at the bottom of the console.
+      case 'startTeams':
+        return (
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-3">
+            <Button variant={runActionVariant('startTeams')} disabled={busy} onClick={startAll}>{rc.startAllTeams}</Button>
+            <Button variant="ghost" disabled={busy} onClick={() => refreshStandings()}>{rc.refreshStandings}</Button>
+            <Button variant="ghost" onClick={invite}>{rc.inviteStaffPin}</Button>
+          </div>
+        );
+
+      // Live team map — where every team is right now, fed by GPS pings.
+      case 'liveMap':
+        return (
+          <Card className="p-4">
+            <div className="text-sm font-medium mb-3">{rc.liveTeamMap}</div>
+            <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
+          </Card>
+        );
+
       case 'teams':
         return (
           <Card className="p-4">
-            <div className="text-sm font-medium mb-3">{rc.teamsTitle}</div>
+            {/* The count answers the organizer's actual mid-event question
+                before they read a single row. Absent when nobody is flagged, so
+                a clean run stays visually clean. */}
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <div className="text-sm font-medium">{rc.teamsTitle}</div>
+              {attentionCount > 0 && (
+                <Badge color="gold">{rc.attentionCount({ n: attentionCount })}</Badge>
+              )}
+            </div>
             {teams.length === 0 ? (
               <EmptyState icon="👥" title={rc.noOneJoinedTitle} body={rc.noOneJoinedYet} />
             ) : (
@@ -516,6 +620,34 @@ export default function RunConsolePage() {
                       {team.outOfBounds && (
                         <div className="mt-1 text-[11px] text-amber-400">{rc.outOfBoundsBadge}</div>
                       )}
+                      {/* Held-team visibility (change: held-team-visibility).
+                          `startTeams` reports how MANY teams it held back; a count
+                          with no names is not actionable with a dozen teams milling
+                          around. Its own line rather than an attention reason: this
+                          is not a temporal signal, and it applies to unlaunched
+                          teams, which the attention classifier suppresses by design. */}
+                      {team.heldForConsent && (
+                        <div className="mt-1 text-[11px] text-amber-400">{rc.heldForConsentBadge}</div>
+                      )}
+                      {/* One badge, carrying the REASON: "needs attention" with
+                          no cause is a puzzle, not a signal. Suppressed when the
+                          safe-zone latch is the only reason, because that already
+                          has its own line and its own rescue button on this row. */}
+                      {(() => {
+                        const at = attentionById.get(team.id);
+                        if (!at || at.level === 'ok') return null;
+                        if (at.reasons.length === 1 && at.reasons[0] === 'outOfBounds') return null;
+                        return (
+                          <div className="mt-1">
+                            <Badge color={at.level === 'stuck' ? 'red' : 'gold'}>
+                              {[
+                                at.level === 'stuck' ? rc.attentionStuck : rc.attentionWatch,
+                                ...at.reasons.map((r) => attentionReasonLabel[r]),
+                              ].join(' · ')}
+                            </Badge>
+                          </div>
+                        );
+                      })()}
                     </div>
                     {/* Only rendered for a team the safe-zone latch is actually
                         holding — the run console previously could not even SHOW
@@ -631,6 +763,8 @@ export default function RunConsolePage() {
       case 'flashMission': return <FlashMissionCard ctx={ctx} />;
       case 'trackables': return <TrackablesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} />;
       case 'zones': return <ZonesConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} />;
+      case 'taskAvailability':
+        return <TaskAvailabilityConsole ctx={ctx} overrides={activeRun.taskStatusOverrides} />;
 
       case 'photoReview':
         return (
@@ -641,6 +775,7 @@ export default function RunConsolePage() {
             pendingCount={photoQueues.pendingCount}
             loadError={photoLoadError}
             taskTitles={taskTitles}
+            finishedTeamIds={finishedTeamIds}
           />
         );
       case 'feed': return <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} items={feedItems} />;
@@ -680,7 +815,7 @@ export default function RunConsolePage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -711,78 +846,55 @@ export default function RunConsolePage() {
         </div>
       </div>
 
-      {/* ── PRIMARY ZONE ────────────────────────────────────────────────────────
-          Only what the next five minutes need: the code + QR, the join link, the
-          station QR sheet, Start all teams, live alerts, the broadcast and the
-          live team map. Never collapsible, and nothing else lives here. */}
-      <div className="grid lg:grid-cols-3 gap-5 items-start">
-        <div className="lg:col-span-2 space-y-4">
-          {/* Live SOS / alerts — the organizer sees these the moment a team raises one */}
-          {has('alerts') && (
-            <Card className="p-4 border-neon-red/40">
-              <div className="text-sm font-medium mb-2 text-neon-red">{rc.activeAlerts({ n: alerts.length })}</div>
-              <div className="space-y-2">
-                {alerts.map((a) => (
-                  <div key={a.id} className="flex flex-wrap items-center gap-3 text-sm">
-                    <span className="uppercase text-neon-red font-medium">{rc.alertType(a.type)}</span>
-                    {/* A host cannot act on a truncated document id: show the team's name. */}
-                    <span dir="auto" className="text-zinc-400 text-xs">
-                      {resolveTeamLabel(a.teamId, teams, (id) => rc.unknownTeam({ id }))}
-                    </span>
-                    {a.message && <span dir="auto" className="text-zinc-300 flex-1 truncate">{a.message}</span>}
-                    {a.lat != null && a.lng != null && (
-                      <a className="text-neon-green text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{rc.map}</a>
-                    )}
-                    <Button variant="subtle" className="min-h-0 px-2.5 py-1 text-xs rounded-lg ms-auto" onClick={() => ack(a.id)}>{rc.acknowledge}</Button>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+      {/* ── PINNED ZONE ─────────────────────────────────────────────────────────
+          Always on screen, whatever section the rail is showing: an SOS must
+          never be one navigation away. The lanes come from the layout module, so
+          a run that has just launched no longer leaves two thirds of the widest
+          part of the page empty. */}
+      <PanelLanes layout={pinnedLayout} render={renderPanel} />
 
-          {/* Routine live-ops actions. Ending the run is NOT here: it sits in its
-              own separated end-of-run row at the bottom of the console. */}
-          {has('startTeams') && (
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] p-3">
-              <Button variant={runActionVariant('startTeams')} disabled={busy} onClick={startAll}>{rc.startAllTeams}</Button>
-              <Button variant="ghost" disabled={busy} onClick={() => refreshStandings()}>{rc.refreshStandings}</Button>
-              <Button variant="ghost" onClick={invite}>{rc.inviteStaffPin}</Button>
+      {/* ── SECTIONS ────────────────────────────────────────────────────────────
+          The accordions are gone. A Builder style rail (StageRail's pattern: a
+          vertical rail on a wide screen, a horizontally scrolling strip on a
+          phone) picks ONE section and only that section renders. Every panel is
+          still reachable: buildRunConsoleSections covers the catalogue. */}
+      {activeSection && (
+        <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-start">
+          <aside className="w-full lg:w-52 shrink-0 lg:sticky lg:top-4">
+            <div className="flex items-center justify-between px-1 mb-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.sectionsHeader}</span>
+              <span className="text-[10px] text-[--ink-4]">{sections.length}</span>
             </div>
-          )}
+            <nav
+              aria-label={rc.sectionsHeader}
+              className="flex lg:flex-col items-stretch gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0"
+            >
+              {sections.map((s: RunConsoleSection) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  aria-current={s.id === activeSection ? 'true' : undefined}
+                  onClick={() => openSection(s.id)}
+                  className={`text-start rounded-xl border p-2.5 transition-colors w-44 shrink-0 lg:w-auto lg:shrink ${
+                    s.id === activeSection
+                      ? 'border-rp-fire bg-rp-fire/10'
+                      : 'border-[--rp-border] hover:bg-[--surface-2]'
+                  }`}
+                >
+                  <div className="text-sm font-medium text-[--ink-1]">{groupTitles[s.id]}</div>
+                  <div className="mt-1">{groupMeta(s.summary)}</div>
+                </button>
+              ))}
+            </nav>
+          </aside>
 
-          {/* Live team map — where every team is right now, fed by GPS pings. */}
-          {has('liveMap') && (
-            <Card className="p-4">
-              <div className="text-sm font-medium mb-3">{rc.liveTeamMap}</div>
-              <LiveTeamMap ownerUid={ownerUid} gameId={gameId!} runId={runId!} teams={teams} className="h-80" />
-            </Card>
-          )}
+          <section aria-label={groupTitles[activeSection]} className="flex-1 min-w-0 space-y-3">
+            {/* Named in the pane too: on a phone the rail scrolls out of view. */}
+            <h2 className="text-sm font-semibold text-[--ink-1] px-1">{groupTitles[activeSection]}</h2>
+            <PanelLanes layout={sectionLayout} render={renderPanel} />
+          </section>
         </div>
-
-        <div className="space-y-4">
-          {has('joinShare') && <JoinShare accessCode={run.accessCode} />}
-          {has('stationQr') && <StationQrPrint gameId={gameId!} />}
-          {has('broadcast') && <AnnouncementCard ctx={ctx} teams={teams} />}
-        </div>
-      </div>
-
-      {/* ── Everything else: named groups, collapsed by default, each reporting
-          its live contents while folded. Nothing is more than one labelled click
-          away and nothing was removed. */}
-      {plan.groups.filter((group) => group.collapsible).map((group) => {
-        const id = group.id as CollapsibleGroupId;
-        return (
-          <Advanced
-            key={id}
-            title={groupTitles[id]}
-            meta={groupMeta(group)}
-            open={!!openGroups[id]}
-            onToggle={() => toggleGroup(id)}
-          >
-            {group.panels.map((panel) => <div key={panel}>{renderPanel(panel)}</div>)}
-          </Advanced>
-        );
-      })}
+      )}
 
       {/* ── End of run ─────────────────────────────────────────────────────────
           Deliberately out of the routine control bar: this ends the game for
@@ -800,6 +912,27 @@ export default function RunConsolePage() {
   );
 }
 
+
+// Renders a computed lane layout (change: run-console-density). The component
+// owns NO layout decisions: which panel sits in which lane, how wide each lane
+// is and how many lanes there are all come from `runConsoleLayout`, so a panel
+// cannot be dropped by a rendering accident. Classes are static lookups because
+// Tailwind cannot see an interpolated `grid-cols-${n}`.
+function PanelLanes({ layout, render }: {
+  layout: ColumnLayout;
+  render: (panel: PanelId) => ReactNode;
+}) {
+  if (layout.columns.length === 0) return null;
+  return (
+    <div className={gridTemplateClass(layout.gridColumns)}>
+      {layout.columns.map((lane, i) => (
+        <div key={lane.join('|')} className={`space-y-4 min-w-0 ${columnSpanClass(layout.spans[i])}`}>
+          {lane.map((panel) => <div key={panel}>{render(panel)}</div>)}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // Access code + shareable join link + QR — participants scan to land in the app
 // with the code pre-filled (JoinScreen reads ?code= and auto-looks-up).
@@ -1322,6 +1455,121 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
   );
 }
 
+// Live task availability (change: live-task-pause). `Task.status` was enforced by
+// routing in three places and written by NOTHING, so when a stop died mid event the
+// organizer could only keep routing teams to it or end the run. This is the control.
+//
+// Run scoped: the server writes `run.taskStatusOverrides`, never the game template,
+// so a stop closed today is not closed for tomorrow's run. The current availability
+// is read from the run document THIS PAGE ALREADY SUBSCRIBES TO, so a pause pushed
+// by staff in the field appears here without a reload. A team already holding the
+// task keeps it; the server reports how many that is.
+function TaskAvailabilityConsole({ ctx, overrides }: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  overrides: Record<string, StationStatus> | undefined;
+}) {
+  const rc = useT().runConsole;
+  const [stages, setStages] = useState<{ id: string; title: string; tasks: { id: string; title: string; status?: StationStatus }[] }[] | null>(null);
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const reportFailure = useCallFailureToast();
+
+  useEffect(() => {
+    let alive = true;
+    getGame({ gameId: ctx.gameId })
+      .then(({ game }) => {
+        if (!alive) return;
+        setStages((game.stages ?? []).map((st) => ({
+          id: st.id,
+          title: st.title ?? '',
+          tasks: (st.tasks ?? []).map((tk) => ({ id: tk.id, title: tk.title, status: tk.status })),
+        })));
+      })
+      .catch(() => { if (alive) setStages([]); });
+    return () => { alive = false; };
+  }, [ctx.gameId]);
+
+  async function apply(taskId: string, status: StationStatus, force = false) {
+    setBusyTaskId(taskId);
+    try {
+      const res = await setRunTaskStatus({ ...ctx, taskId, status, ...(force ? { force: true } : {}) });
+      toast.success(
+        res.teamsHolding > 0 && status !== 'active'
+          ? `${rc.taskAvailUpdated}. ${rc.taskAvailHolding({ n: res.teamsHolding })}`
+          : rc.taskAvailUpdated,
+      );
+    } catch (e) {
+      // The server refuses a change that would leave the stage unable to yield the
+      // tasks it requires. Show the numbers it returned and let the organizer decide,
+      // rather than letting them find out through stuck teams.
+      const details = (e as { details?: { code?: string; availableCount?: number; requiredCount?: number; stageTitle?: string } }).details;
+      if (details?.code === 'stageUnwinnable' && !force) {
+        const ok = await dialog.confirm(
+          rc.taskAvailUnwinnable({
+            stage: details.stageTitle ?? '',
+            available: details.availableCount ?? 0,
+            required: details.requiredCount ?? 0,
+          }),
+          rc.taskAvailForce,
+          true,
+        );
+        setBusyTaskId(null);
+        if (ok) await apply(taskId, status, true);
+        return;
+      }
+      reportFailure(e, 'setRunTaskStatus');
+    } finally {
+      setBusyTaskId(null);
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <div className="text-sm font-medium mb-1">⏸️ {rc.taskAvailTitle}</div>
+      <p className="text-xs text-zinc-500 leading-relaxed mb-3">{rc.taskAvailHelp}</p>
+      {stages === null ? (
+        <div className="text-sm text-zinc-500">{rc.taskAvailLoading}</div>
+      ) : stages.every((st) => st.tasks.length === 0) ? (
+        <EmptyState icon="📍" title={rc.taskAvailTitle} body={rc.taskAvailEmpty} />
+      ) : (
+        <div className="space-y-3">
+          {stages.filter((st) => st.tasks.length > 0).map((st) => (
+            <div key={st.id} className="space-y-1.5">
+              <div dir="auto" className="text-[11px] uppercase tracking-widest text-zinc-500">{st.title}</div>
+              {st.tasks.map((tk) => {
+                const status = effectiveTaskStatus(tk, overrides);
+                const label = status === 'paused' ? rc.taskAvailStatusPaused
+                  : status === 'closed' ? rc.taskAvailStatusClosed
+                    : rc.taskAvailStatusActive;
+                const busy = busyTaskId === tk.id;
+                return (
+                  <div key={tk.id} className="flex flex-wrap items-center gap-2 p-2 rounded-lg bg-app-bg">
+                    <span dir="auto" className="flex-1 min-w-[8rem] text-sm text-zinc-200">{tk.title}</span>
+                    <Badge color={status === 'active' ? 'zinc' : 'gold'}>{label}</Badge>
+                    {status === 'active' ? (
+                      <>
+                        <Button variant={runActionVariant('pauseTask')} disabled={busy} onClick={() => apply(tk.id, 'paused')}>
+                          {rc.taskAvailPause}
+                        </Button>
+                        <Button variant={runActionVariant('closeTask')} disabled={busy} onClick={() => apply(tk.id, 'closed')}>
+                          {rc.taskAvailClose}
+                        </Button>
+                      </>
+                    ) : (
+                      <Button variant={runActionVariant('resumeTask')} disabled={busy} onClick={() => apply(tk.id, 'active')}>
+                        {rc.taskAvailResume}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // Photo approval queue (wave-e task 13): the manager's live review panel.
 //
 // Why a `teams` collection listener and not a query: `submitStationPhoto` stores a
@@ -1339,17 +1587,47 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
 // The queue itself is now computed by the page (the disclosure plan needs the
 // pending count for a FOLDED group's badge, and a collapsed group renders no
 // children), so this panel is presentational.
-function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, taskTitles }: {
+function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, taskTitles, finishedTeamIds }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   pending: SubmissionRow[];
   reviewed: SubmissionRow[];
   pendingCount: number;
   loadError: boolean;
   taskTitles: ReadonlyMap<string, string>;
+  /** Teams past the finish line: their submissions still score, but block nobody. */
+  finishedTeamIds: string[];
 }) {
   const rc = useT().runConsole;
 
+  // A per-row failure that OUTLIVES the toast. The row already stayed in the
+  // queue on failure (there is no optimistic removal), but it looked exactly
+  // like a row nobody had touched, so the organizer believed they had handled it
+  // while the team was still standing still.
+  const [failures, setFailures] = useState<ReviewFailures>({});
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+
+  // The wait clock. A minute tick is enough resolution for a queue measured in
+  // minutes, and it keeps the panel from re-rendering the whole grid every second.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const items = useMemo(
+    () => buildReviewQueueView(pending, { nowMs, finishedTeamIds, failures }),
+    [pending, nowMs, finishedTeamIds, failures],
+  );
+
   async function review(row: SubmissionRow, approved: boolean) {
+    const key = submissionKey(row);
+    // Legality first: an approved row has no server-side score clawback, so a
+    // "reject" would flip a status string while the points silently stayed.
+    const decision = decideReview(row.status, approved ? 'approve' : 'reject');
+    if (!decision.send) {
+      toast.error(decision.reason === 'alreadyApproved' ? rc.photoReviewRejectDisabled : rc.photoReviewAlreadyRejected);
+      return;
+    }
     let note = '';
     if (!approved) {
       const answer = await dialog.prompt(rc.photoReviewRejectPrompt);
@@ -1360,9 +1638,11 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
       await reviewStationSubmission({
         ...ctx, teamId: row.teamId, taskId: row.taskId, approved, ...(note ? { note } : {}),
       });
+      setFailures((prev) => clearFailure(prev, key));
       toast.success(approved ? rc.photoReviewApproved : rc.photoReviewRejected);
     } catch {
       toast.error(rc.photoReviewFailed);
+      setFailures((prev) => recordFailure(prev, key, rc.photoReviewRowFailed({ team: row.displayName })));
     }
     // No optimistic removal: the row disappears because the snapshot says the
     // status left 'pending'. Optimism here would hide a failed review.
@@ -1396,6 +1676,37 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
   // task's name belongs (change: run-console-progressive-disclosure).
   const taskLabel = (taskId: string) => resolveTaskLabel(taskId, taskTitles, (id) => rc.unknownTask({ id }));
 
+  // How long this team has been standing still, in words. The panel used to
+  // print a wall-clock time and leave the organizer to subtract, per row, on a
+  // phone, while walking — so in practice nobody knew who had waited longest.
+  function waitLabel(waitMinutes: number | null): string {
+    if (waitMinutes === null) return rc.photoReviewWaitingUnknown;
+    if (waitMinutes < 1) return rc.photoReviewWaitingJustNow;
+    return rc.photoReviewWaiting({ minutes: waitMinutes });
+  }
+  const WAIT_TONE = {
+    fresh: 'text-zinc-500',
+    waiting: 'text-neon-gold',
+    overdue: 'text-neon-red font-medium',
+  } as const;
+
+  // Keyboard, scoped to the queue container and NEVER to `document`: a creator
+  // typing an announcement elsewhere on this page must not be able to approve a
+  // photograph by typing the letter "a".
+  function onQueueKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    const k = e.key.toLowerCase();
+    if (k === 'j' || k === 'k') {
+      const next = moveFocus(items, focusKey, k === 'j' ? 1 : -1);
+      if (next) { e.preventDefault(); setFocusKey(next); }
+      return;
+    }
+    if (k !== 'a' && k !== 'r') return;
+    const item = items.find((i) => i.key === focusKey);
+    if (!item || reviewAction.isBusy(item.key)) return;
+    e.preventDefault();
+    void reviewAction.run(item.row, k === 'a').catch(() => undefined);
+  }
+
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between mb-1">
@@ -1410,45 +1721,73 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
         <p className="text-[11px] text-neon-red mb-3" role="status">{rc.photoReviewLoadError}</p>
       )}
 
-      {pending.length === 0
+      {items.length === 0
         ? <p className="text-zinc-500 text-sm">{rc.photoReviewNone}</p>
         : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {pending.map((row) => {
-              const key = submissionKey(row);
-              return (
-                <div key={key} className="rounded-lg bg-app-bg p-2">
-                  <Media row={row} />
-                  <div dir="auto" className="text-xs text-zinc-200 truncate mt-2">{row.displayName}</div>
-                  <div dir="auto" className="text-[11px] text-zinc-500 truncate">
-                    {rc.photoReviewTaskLabel} {taskLabel(row.taskId)}
-                  </div>
-                  {row.submittedAt && (
-                    <div className="text-[11px] text-zinc-600">
-                      {rc.photoReviewSubmittedAt({ time: clock(row.submittedAt) })}
+          <>
+            <p className="text-[11px] text-zinc-600 mb-2">{rc.photoReviewKeyboardHint}</p>
+            <div
+              role="list"
+              aria-label={rc.photoReviewQueueLabel}
+              className="grid grid-cols-1 sm:grid-cols-2 gap-3"
+              onKeyDown={onQueueKeyDown}
+            >
+              {items.map((item) => {
+                const row = item.row;
+                const key = item.key;
+                const focused = key === focusKey;
+                return (
+                  <div
+                    key={key}
+                    role="listitem"
+                    tabIndex={focused || (focusKey === null && item === items[0]) ? 0 : -1}
+                    onFocus={() => setFocusKey(key)}
+                    className={`rounded-lg bg-app-bg p-2 outline-none ${focused ? 'ring-2 ring-neon-gold' : ''}`}
+                  >
+                    <Media row={row} />
+                    <div dir="auto" className="text-xs text-zinc-200 truncate mt-2">{row.displayName}</div>
+                    <div dir="auto" className="text-[11px] text-zinc-500 truncate">
+                      {rc.photoReviewTaskLabel} {taskLabel(row.taskId)}
                     </div>
-                  )}
-                  <div className="flex items-center gap-2 mt-2">
-                    <Button
-                      className="flex-1"
-                      disabled={reviewAction.isBusy(key)}
-                      onClick={() => { void reviewAction.run(row, true).catch(() => undefined); }}
-                    >
-                      {rc.photoReviewApprove}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      className="flex-1"
-                      disabled={reviewAction.isBusy(key)}
-                      onClick={() => { void reviewAction.run(row, false).catch(() => undefined); }}
-                    >
-                      {rc.photoReviewReject}
-                    </Button>
+                    <div className={`text-[11px] ${WAIT_TONE[item.tier]}`}>
+                      {waitLabel(item.waitMinutes)}
+                    </div>
+                    {item.tier === 'overdue' && !item.teamFinished && (
+                      <div className="text-[11px] text-neon-red">{rc.photoReviewOverdue}</div>
+                    )}
+                    {item.teamFinished && (
+                      <div className="text-[11px] text-zinc-600">{rc.photoReviewTeamFinished}</div>
+                    )}
+                    {row.submittedAt && (
+                      <div className="text-[11px] text-zinc-600">
+                        {rc.photoReviewSubmittedAt({ time: clock(row.submittedAt) })}
+                      </div>
+                    )}
+                    {item.failure && (
+                      <p dir="auto" className="text-[11px] text-neon-red mt-1" role="alert">{item.failure}</p>
+                    )}
+                    <div className="flex items-center gap-2 mt-2">
+                      <Button
+                        className="flex-1"
+                        disabled={reviewAction.isBusy(key)}
+                        onClick={() => { void reviewAction.run(row, true).catch(() => undefined); }}
+                      >
+                        {item.failure ? rc.photoReviewRetry : rc.photoReviewApprove}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        className="flex-1"
+                        disabled={reviewAction.isBusy(key)}
+                        onClick={() => { void reviewAction.run(row, false).catch(() => undefined); }}
+                      >
+                        {rc.photoReviewReject}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
 
       {reviewed.length > 0 && (

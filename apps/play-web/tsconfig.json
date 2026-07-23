@@ -17,7 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@rushpoint/shared": ["../../packages/shared/src"]
+      "@rushpoint/shared": ["../../packages/shared/src"],
+      "@rushpoint/shared/*": ["../../packages/shared/src/*"]
     }
   },
   "include": ["src"]

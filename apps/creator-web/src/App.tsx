@@ -43,6 +43,11 @@ export default function App() {
   // best as a centred column. Widen the main container only on /build/*.
   const pathname = useLocation().pathname;
   const isBuilder = pathname.startsWith('/build/');
+  // The live run console is an OPERATIONS surface, not a reading surface: it is
+  // driven during an event and every row it cannot show is a scroll at the worst
+  // possible moment (change: run-console-density). It gets the Builder's width
+  // while keeping the ordinary scrolling shell, header and footer.
+  const isRunConsole = pathname.startsWith('/run/');
 
   // Mobile nav drawer: below `sm` the inline links collapse behind a hamburger.
   const [menuOpen, setMenuOpen] = useState(false);
@@ -144,7 +149,9 @@ export default function App() {
       </header>
       )}
 
-      <main className={`relative z-10 mx-auto w-full ${isBuilder ? 'max-w-[1680px] px-2 py-1.5 flex-1 min-h-0 overflow-hidden' : 'max-w-6xl px-4 py-8'}`}>
+      <main className={`relative z-10 mx-auto w-full ${isBuilder ? 'max-w-[1680px] px-2 py-1.5 flex-1 min-h-0 overflow-hidden'
+        : isRunConsole ? 'max-w-[1680px] px-4 py-5'
+        : 'max-w-6xl px-4 py-8'}`}>
         <Suspense fallback={<Spinner label="…" />}>
           <Routes>
             <Route path="/"                   element={<DashboardPage />} />

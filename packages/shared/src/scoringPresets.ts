@@ -10,6 +10,7 @@
 // Keep this file free of Firebase/Node imports so it can run in any context.
 
 import type { Game, RunTeam, RunStageRecord, ScoringPreset } from './types';
+import { adjustedElapsedMs } from './pausedClock';
 
 // ─── Preset A — Time Only ────────────────────────────────────────────────────
 // Rank by total race duration. No points at all.
@@ -48,6 +49,13 @@ export function scoreFixedPointsSpeed(
   startedAt: string | undefined,
   finishedAt: string | undefined,
   game: Pick<Game, 'stages'>,
+  // Pause-clock tasks (change: pause-clock-tasks): milliseconds already stamped
+  // as excluded on this team's own task records. Subtracted from the measured
+  // span BEFORE the speed bonus, so a paused task cannot be bought back as
+  // "slowness". Optional and defaulting to 0, so every pre-existing call site
+  // (and every game with no paused task) is byte-for-byte unchanged. Guarded for
+  // finiteness and sign in adjustedElapsedMs — it can only ever subtract.
+  excludedMs = 0,
 ): number {
   let taskPoints = 0;
   for (const stageRec of stages) {
@@ -72,7 +80,8 @@ export function scoreFixedPointsSpeed(
       const m = t.expectedDurationMinutes ?? t.estimatedMinutes;
       return s + (Number.isFinite(m) && m > 0 ? m : 0);
     }, 0), 0);
-  const actualTotal = (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
+  const rawTotalMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  const actualTotal = adjustedElapsedMs(rawTotalMs, excludedMs) / 60_000;
 
   return taskPoints + speedBonus(expectedTotal, actualTotal);
 }

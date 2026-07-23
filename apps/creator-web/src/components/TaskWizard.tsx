@@ -17,6 +17,8 @@ import {
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
   locationLeakWarnings,
+  // task-duration-defaults: the per-interaction derived estimate the editor suggests.
+  defaultExpectedDurationMinutes, TASK_DURATION_MAX_MINUTES,
 } from '@rushpoint/shared';
 import { Advanced, Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
@@ -1014,6 +1016,10 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
                 onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
               {b.autoApprove}
             </label>
+            {/* The checkbox was always here; what it never said was the cost of
+                leaving it OFF. Every submission then waits for a person during
+                the run, and with 15 teams that person is the bottleneck. */}
+            <p className="text-xs text-[--ink-3]">{b.autoApproveHint}</p>
           </div>
         )}
         {task.type === 'quiz' && <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />}
@@ -1062,6 +1068,24 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
           either is already on. */}
       {sectionApplies('rules', task, 1) && (
         <Section k="rules" title={b.sectionRules} task={task} sections={sections} b={b}>
+          {/* Pause-clock tasks (change: pause-clock-tasks): offered on EVERY task
+              type, off by default. Written as `true` / `undefined` and never
+              `false`, so a game that never touched this control stays byte
+              identical. On a located task the excluded span also covers the walk
+              to the spot, so say so instead of hiding the interaction. */}
+          <div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="mt-0.5" checked={!!task.pausesTimer}
+                onChange={(e) => set({ pausesTimer: e.target.checked || undefined })} />
+              <span>
+                <span className="text-[13px] font-medium text-[--ink-1]">{b.pauseClock}</span>
+                <span className="block text-[11px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
+              </span>
+            </label>
+            {task.pausesTimer && located && (
+              <p className="text-[11px] text-rp-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
+            )}
+          </div>
           {isAnswerTask && (
             <label className="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={!!task.requirePresence}
@@ -1147,6 +1171,46 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
             </div>
           )}
         </div>
+        {/* Per-interaction duration (change: task-duration-defaults). Nothing in the
+            product ever set `expectedDurationMinutes`, so a 20 second photo snap and a
+            10 minute puzzle were estimated identically. Show what THIS interaction
+            typically takes at the stop, offer it with one tap, and let the creator
+            override it. Nothing is written on its own: only a creator action persists
+            a number, so no stored game and no run in flight moves by a point. */}
+        {(() => {
+          const suggested = defaultExpectedDurationMinutes(task);
+          const fmt = (n: number) => String(Number(n.toFixed(2)));
+          return (
+            <div className="mt-2 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+                <span dir="auto">⏱ {b.durationSuggested(fmt(suggested))}</span>
+                {task.expectedDurationMinutes !== suggested && (
+                  <button type="button" className="underline text-[--ink-2]"
+                    onClick={() => set({ expectedDurationMinutes: suggested })}>
+                    {b.durationUseSuggested}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+                <InlineLabel>{b.durationOverride}</InlineLabel>
+                <Input dense type="number" min={0} max={TASK_DURATION_MAX_MINUTES} className="w-20"
+                  value={task.expectedDurationMinutes ?? ''}
+                  placeholder={fmt(suggested)} aria-label={b.durationOverride}
+                  title={b.durationOverridePlaceholder(fmt(suggested))}
+                  onChange={(e) => {
+                    const n = parseFloat(e.target.value);
+                    set({
+                      expectedDurationMinutes: Number.isFinite(n) && n > 0
+                        ? Math.min(TASK_DURATION_MAX_MINUTES, n)
+                        : undefined,
+                    });
+                  }} />
+              </div>
+              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
+            </div>
+          );
+        })()}
+
         {/* Task expiry (change: task-expiry): the task closes N minutes after the
             run starts — dropped from routing, refused on completion, auto-skipped
             when in flight. Empty/0 = never expires. */}

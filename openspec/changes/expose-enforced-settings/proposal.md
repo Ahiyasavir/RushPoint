@@ -114,3 +114,79 @@ Recorded here because "we chose not to" is a different statement from "we missed
 - **Risk:** the validators reject input. Both are biased so that ABSENT means "no change" and only a
   present-but-malformed value is refused, which is why every validator case is enumerated in tests
   before it is wired.
+
+---
+
+## Wave 2 — the control itself, and the door that skipped every check
+
+Wave 1 (above) made the consent hold visible and validated the three fields in `updateGame`. It
+deliberately stopped short of giving `safeZone` an author. This wave, re-verified from scratch
+against the working tree, closes that and two holes wave 1 left behind.
+
+### Re-verification
+
+Every wave-1 claim was checked again, independently, before anything was written:
+
+1. **`Game.safeZone` — CONFIRMED, and it is the top item.** Enforced in `updateLocation`
+   (`functions/src/index.ts:344-367`) and in the routing soft-pause
+   (`functions/src/runs/index.ts:3303-3310`). The player already sees a "you are outside the play
+   area" banner (`apps/play-web/src/components/InRunAlerts.tsx:52-55`) and a blocked task screen
+   (`apps/play-web/src/components/TaskRunner.tsx:337-342`); the organizer already sees a badge and a
+   release button (`apps/creator-web/src/pages/RunConsolePage.tsx:516-527`). And a repo-wide grep for
+   `safeZone` returns **zero hits under `apps/`**. An entire enforcement-plus-UX chain with no
+   author: every screen for reacting to the boundary exists, and nothing can draw it. The archived
+   spec (`openspec/specs/safe-zone/spec.md`) even states the control as a requirement.
+2. **`Game.requiresGuardianConsent` / `Game.minAge` — CONFIRMED.** No creator control sets either
+   (zero hits under `apps/` beyond the wave-1 held-count toast), and no play-web surface calls
+   `requestGuardianConsent` / `grantGuardianConsent` (`functions/src/runs/index.ts:652,670`), so
+   nothing can create the consent record `startTeams` waits for. `minAge` is still compared against
+   nothing anywhere in `functions/src`.
+3. **`Task.status` — CONFIRMED.** Typed at `packages/shared/src/types/index.ts:264`, honored at
+   `functions/src/routing/assignNextTask.ts:172,286,334`, written by nothing in either app.
+
+### Two defects found while building the control
+
+- **Clearing a safe zone was a silent no-op.** `updateGame` wrote `updates.safeZone = undefined` for
+  an explicit clear (`functions/src/games/index.ts`), and `db.settings({ ignoreUndefinedProperties:
+  true })` (`functions/src/firebase.ts:10`) drops undefined rather than deleting. "Remove the play
+  area" would have left the boundary in force. Now an explicit `FieldValue.delete()`.
+- **`importGameFile` ran none of wave 1's validators.** It spreads the parsed file wholesale into the
+  new game (`functions/src/games/index.ts`), so the file door was simultaneously the ONLY door these
+  fields could be set through and the only one that checked nothing. Wave 1 hardened `updateGame`
+  and left the actual attack surface open. Both doors now share the validators, which is the house
+  rule the file itself states.
+
+### What Changes (wave 2)
+
+- **The Builder can set the play area.** A new section fits a boundary around the stops the creator
+  already placed, lets them adjust the radius, refit, and remove it. Copy is bilingual through `t.*`.
+- **The derivation is pure and tested first.** `suggestSafeZone(stages)` centres on the extent of the
+  placed stops, pads for walking, floors at a minimum, rounds up so rounding can never shrink the
+  area below its own stops, clamps at the maximum, and reports `coversAllTasks: false` when a game is
+  spread wider than one area can hold.
+- **`safeZone` is registered in `BUILDER_EDITABLE_FIELDS`**, so it is both saved and part of the
+  dirty check, and the payload-completeness guard was strengthened: it now requires the fixture game
+  to actually populate every declared field, because comparing `undefined` with `undefined` had let
+  the guard pass on a field nobody wired.
+- **A clear is a clear**, server-side.
+- **The import door validates on the same terms as the Builder**, and stores a normalized boundary.
+- **A game requiring guardian consent is refused at the import door**, because that door is the only
+  reachable way to arm it and the armed state cannot be satisfied by anyone. Mechanism only, with a
+  message that states the situation. See below.
+
+### Deliberately NOT exposed (wave 2)
+
+- **No guardian-consent flow, and no creator control for the flag.** Unchanged from wave 1, and now
+  load-bearing: the flag is refused rather than offered. Who may consent, what they are told and what
+  is recorded is a policy decision on a child-safety and legal surface. Escalated, not invented.
+- **No `minAge` control.** Still compared against nothing. Wiring an input would manufacture an age
+  gate that does not exist, which is worse than an inert field. Enforce it or delete it: a product
+  decision.
+- **No `Task.status` live-ops control.** Confirmed real and correctly ranked second: it needs a new
+  authorized callable, run-console UI, an authz row and e2e coverage. Doing it shallowly beside the
+  safe zone would produce two half-changes. It is the recommended next change.
+- **No map picker for the safe-zone centre.** The centre is derived and refittable, not draggable. A
+  MapLibre picker is a real improvement and a real bundle cost; the derivation makes the control
+  usable today without one.
+- **No `benchmarkOptOut` / `expectedDurationMinutes` controls.** Their absent values default
+  correctly.

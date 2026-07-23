@@ -7,6 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
+import { hasEnglishWord } from './lib/i18nLeak';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -25,27 +26,12 @@ function keysDeep(obj: unknown, prefix = ''): string[] {
   return out.sort();
 }
 
-// Brand names / units / acronyms that legitimately stay Latin inside Hebrew copy,
-// plus the language-toggle label (a language's own name) and the structural
-// direction values ('rtl'/'ltr', which are not user-facing copy).
-const WHITELIST = ['RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA', '₪', 'English', 'rtl', 'ltr'];
-
-function stripWhitelist(s: string): string {
-  let out = s;
-  for (const w of WHITELIST) out = out.split(w).join('');
-  return out;
-}
-// A "Latin English word" = 2+ consecutive ASCII letters left after whitelisting.
-// Tokens that contain a digit (sample codes / ids like "FOX42", "ABC123") are not
-// English copy — strip them first so an example code in Hebrew copy isn't flagged.
-// (Kept in sync with scripts/check-i18n.ts, the authoritative i18n gate.)
-function hasEnglish(s: string): boolean {
-  // `{placeholder}` tokens are structure, not copy — substituted at runtime, never
-  // shown to a user. Kept in sync with scripts/check-i18n.ts `hasEnglishWord`.
-  const noPlaceholders = s.replace(/\{[A-Za-z0-9_]+\}/g, '');
-  const noCodes = stripWhitelist(noPlaceholders).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
-  return /[A-Za-z]{2,}/.test(noCodes);
-}
+// The English-leak predicate is NOT redefined here. It is the same rule the
+// authoritative gate (scripts/check-i18n.ts) applies, so both import the single
+// definition in scripts/lib/i18nLeak.ts — this file used to hold a near-duplicate
+// copy "kept in sync" by a comment, and the two copies carried (and had to be
+// patched for) the same {placeholder} defect. Unit-tested by test-i18n-leak.ts.
+const hasEnglish = hasEnglishWord;
 
 function leafStrings(obj: unknown, prefix = ''): Array<[string, string]> {
   if (typeof obj === 'string') return [[prefix, obj]];

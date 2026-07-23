@@ -19,6 +19,9 @@ export * from './answerAttempts';
 // What a wrong answer costs (change: wrong-answer-cost) — escalating, capped,
 // preset-aware. Shared by the charge, the participant display and the Builder.
 export * from './wrongAnswerPenalty';
+// Pause-clock tasks (change: pause-clock-tasks) — the single, server-authoritative
+// definition of the excluded duration and the adjusted elapsed time.
+export * from './pausedClock';
 export * from './guardianConsent';
 export * from './safeZone';
 export * from './shareBranding';
@@ -51,6 +54,8 @@ export * from './captureZone';
 export * from './hintEscalation';
 export * from './ordering';
 export * from './survey';
+// Per-interaction default task durations (change: task-duration-defaults).
+export * from './taskDuration';
 export * from './feedReactions';
 export * from './feedReports';
 export * from './feedMute';
@@ -76,3 +81,6 @@ export * from './gameFile';
 // THE one definition of a tag list — split/trim/dedupe/cap (change: game-task-tags).
 // Shared so the client parser and the server guard can never disagree.
 export * from './tags';
+// Live per-run task availability — the pause/close/resume decision both the
+// routing filters and the run console read (change: live-task-pause).
+export * from './liveTaskStatus';

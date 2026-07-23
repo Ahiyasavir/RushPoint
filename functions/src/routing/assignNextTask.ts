@@ -14,9 +14,9 @@ import * as functions from 'firebase-functions';
 import { db } from '../firebase';
 import {
   haversineKm, isValidCoord, isReleased, isExpired, isUnlocked,
-  isHotZoneActive, isWithinHotZoneRadius,
+  isHotZoneActive, isWithinHotZoneRadius, isTaskAssignable,
 } from '@rushpoint/shared';
-import type { Task, GeoPoint, TaskRecommendation, HotZone } from '@rushpoint/shared';
+import type { Task, GeoPoint, TaskRecommendation, HotZone, TaskStatusOverrides } from '@rushpoint/shared';
 
 // Additive routing bonus (change: hot-zone-routing-bias) applied to a candidate
 // task whose location is inside an ACTIVE hot zone, so teams tend to be routed
@@ -111,6 +111,10 @@ type SlotSummary = {
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
+  // Pause-clock tasks (change: pause-clock-tasks): present on a record whose task
+  // was authored `pausesTimer` (stamped even when the span is 0). Its measured
+  // duration is DELIBERATION, not pace, so it must not feed the ratio at all.
+  excludedMs?: number;
 };
 
 export async function computeSkillRatio(
@@ -119,7 +123,15 @@ export async function computeSkillRatio(
 ): Promise<number> {
   const taskMap = new Map(gameTasks.map((t) => [t.id, t]));
   const measurable = completedTasks.filter(
-    (s) => s.taskId && (s.actualMinutes != null || (s.startedAt && s.completedAt)),
+    (s) => s.taskId
+      // pause-clock-tasks: drop a paused record from the pace sample entirely.
+      // Subtracting its excluded time would give actual ≈ 0 and make the team look
+      // superhuman (routed the hardest work left); leaving it in would give
+      // actual >> estimate and make it look slow. Both are wrong, so it simply is
+      // not evidence. An all-paused sample falls through to the neutral 0 below —
+      // the same value a team has before its first task.
+      && s.excludedMs == null
+      && (s.actualMinutes != null || (s.startedAt && s.completedAt)),
   );
   if (measurable.length === 0) return 0;
 
@@ -143,11 +155,28 @@ async function getRunRouting(
   ownerUid: string,
   gameId: string,
   runId: string,
-): Promise<{ taskCounts: Record<string, number>; launchedAt?: string; hotZone?: HotZone | null }> {
+): Promise<{
+  taskCounts: Record<string, number>;
+  launchedAt?: string;
+  hotZone?: HotZone | null;
+  taskStatusOverrides?: TaskStatusOverrides;
+}> {
   const snap = await db.doc(runPath(ownerUid, gameId, runId)).get();
   if (!snap.exists) return { taskCounts: {} };
-  const data = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string; hotZone?: HotZone | null };
-  return { taskCounts: data.taskCounts ?? {}, launchedAt: data.launchedAt, hotZone: data.hotZone ?? null };
+  const data = snap.data() as {
+    taskCounts?: Record<string, number>;
+    launchedAt?: string;
+    hotZone?: HotZone | null;
+    taskStatusOverrides?: TaskStatusOverrides;
+  };
+  return {
+    taskCounts: data.taskCounts ?? {},
+    launchedAt: data.launchedAt,
+    hotZone: data.hotZone ?? null,
+    // Live task availability (change: live-task-pause). Rides along on a read that
+    // already happens, so honouring an operator pause costs no extra Firestore call.
+    taskStatusOverrides: data.taskStatusOverrides,
+  };
 }
 
 
@@ -164,12 +193,14 @@ export async function buildRecommendations(
   limit = 5,
   skillAware = true,
 ): Promise<TaskRecommendation[]> {
-  const { taskCounts, launchedAt, hotZone } = await getRunRouting(ownerUid, gameId, runId);
+  const { taskCounts, launchedAt, hotZone, taskStatusOverrides } = await getRunRouting(ownerUid, gameId, runId);
   const nowMs = Date.now();
 
   const candidates = tasks.filter((t) => {
     if (completedTaskIds.includes(t.id)) return false;
-    if (t.status === 'paused' || t.status === 'closed') return false;
+    // Availability = run override, else the template status, else active
+    // (change: live-task-pause). One shared rule for all three filters below.
+    if (!isTaskAssignable(t, taskStatusOverrides)) return false;
     // Scheduled-release gate: a not-yet-released task is not a candidate.
     if (!isReleased(t, launchedAt, nowMs)) return false;
     // Task expiry gate (change: task-expiry): a closed task is never handed out.
@@ -281,9 +312,12 @@ export function classifyNoAssignment(
   taskCounts: Record<string, number>,
   launchedAt: string | undefined,
   nowMs: number,
+  // Live task availability (change: live-task-pause). Trailing and optional so every
+  // existing call site and unit test keeps its arity; absent = template status only.
+  taskStatusOverrides?: TaskStatusOverrides,
 ): NoAssignmentReason {
   const pool = tasks.filter(
-    (t) => !completedTaskIds.includes(t.id) && t.status !== 'paused' && t.status !== 'closed',
+    (t) => !completedTaskIds.includes(t.id) && isTaskAssignable(t, taskStatusOverrides),
   );
   if (pool.length === 0) return 'none';
   let anyCapBlocked = false;
@@ -323,15 +357,24 @@ export async function assignTask(
   // run-doc lock contention (see withLockRetry).
   return withLockRetry(() => db.runTransaction(async (tx) => {
     const snap = await tx.get(runRef);
-    const runData = snap.data() as { taskCounts?: Record<string, number>; launchedAt?: string; hotZone?: HotZone | null } | undefined;
+    const runData = snap.data() as {
+      taskCounts?: Record<string, number>;
+      launchedAt?: string;
+      hotZone?: HotZone | null;
+      taskStatusOverrides?: TaskStatusOverrides;
+    } | undefined;
     const taskCounts = runData?.taskCounts ?? {};
     const launchedAt = runData?.launchedAt;
     const hotZone = runData?.hotZone ?? null;
+    // Live task availability (change: live-task-pause) — read from the run doc this
+    // transaction already holds, so an operator pause is enforced atomically with the
+    // cap check and costs nothing extra.
+    const taskStatusOverrides = runData?.taskStatusOverrides;
     const nowMs = Date.now();
 
     const candidates = tasks.filter((t) => {
       if (completedTaskIds.includes(t.id)) return false;
-      if (t.status === 'paused' || t.status === 'closed') return false;
+      if (!isTaskAssignable(t, taskStatusOverrides)) return false;
       // Scheduled-release gate: a not-yet-released task can't be assigned.
       if (!isReleased(t, launchedAt, nowMs)) return false;
       // Task expiry gate (change: task-expiry): a closed task can't be assigned.
@@ -344,7 +387,7 @@ export async function assignTask(
     });
 
     if (candidates.length === 0) {
-      const reason = classifyNoAssignment(tasks, completedTaskIds, taskCounts, launchedAt, nowMs);
+      const reason = classifyNoAssignment(tasks, completedTaskIds, taskCounts, launchedAt, nowMs, taskStatusOverrides);
       return { reason: reason === 'expired' ? 'none' : reason };
     }
 

@@ -10,12 +10,20 @@
 // here, before any of it is wired to a callable.
 // Imported from SOURCE, not from `@rushpoint/shared`, matching test-safe-zone.ts
 // and test-guardian-consent.ts: the pure lane must not depend on a built `dist`.
-import { validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '../packages/shared/src/safeZone';
+import {
+  validateSafeZone,
+  SAFE_ZONE_MAX_RADIUS_M,
+  SAFE_ZONE_MIN_SUGGESTED_RADIUS_M,
+  SAFE_ZONE_SUGGESTION_PADDING_M,
+  suggestSafeZone,
+} from '../packages/shared/src/safeZone';
 import {
   validateMinAge,
   validateConsentFlag,
   partitionTeamsByConsent,
 } from '../packages/shared/src/guardianConsent';
+import { haversineKm } from '../packages/shared/src/geo';
+import type { Stage } from '../packages/shared/src/types';
 
 let passed = 0;
 let failed = 0;
@@ -164,6 +172,103 @@ const falsy = [{ id: 'e', guardianConsent: { grantedAt: '' } }, { id: 'f', guard
 r = partitionTeamsByConsent(falsy as T[], req);
 ok(r.held.length === 2, 'an empty grantedAt and a null consent are both held, never ready');
 invariant(falsy as T[], r, 'falsy consent');
+
+// ── suggestSafeZone ──────────────────────────────────────────────────────────
+// The Builder control needs a starting boundary, and "type two decimal degrees"
+// is not a control anyone can use. This derives one from the tasks the creator
+// already placed. It is a DERIVATION, so it is decided here, in a pure function,
+// before it is wired to a button.
+//
+// It deliberately counts hideLocation tasks, unlike publicTaskLocation: the safe
+// zone lives on the PRIVATE game doc and is never copied into publicGames or any
+// participant payload, so a hidden task's position cannot leak through it — and a
+// play area that excluded the hidden stops would fence players out of the game.
+
+const placed = (id: string, lat: number, lng: number) =>
+  ({ id, title: id, type: 'field', coordinates: { lat, lng } });
+const stageOf = (...tasks: unknown[]) =>
+  ({ id: 's', order: 0, title: 'S', tasks } as unknown as Stage);
+
+ok(suggestSafeZone(undefined) === undefined, 'no stages suggests nothing');
+ok(suggestSafeZone([]) === undefined, 'an empty stage list suggests nothing');
+ok(suggestSafeZone('stages' as unknown as Stage[]) === undefined,
+  'a non-array stage list suggests nothing (never throws)');
+ok(suggestSafeZone([stageOf()]) === undefined, 'a stage with no tasks suggests nothing');
+ok(suggestSafeZone([null as unknown as Stage]) === undefined, 'a null stage is skipped');
+
+// Only placed tasks count.
+ok(suggestSafeZone([stageOf({ id: 'a', title: 'a', type: 'quiz' })]) === undefined,
+  'a task with no coordinates contributes nothing');
+ok(suggestSafeZone([stageOf({ ...placed('a', 31.7, 35.2), locationless: true })]) === undefined,
+  'a locationless task contributes nothing');
+ok(suggestSafeZone([stageOf(placed('a', 0, 0))]) === undefined,
+  'null island is not a placed task');
+ok(suggestSafeZone([stageOf(placed('a', Number.NaN, 35.2))]) === undefined,
+  'NaN coordinates contribute nothing');
+ok(suggestSafeZone([stageOf(placed('a', 31.7, Number.POSITIVE_INFINITY))]) === undefined,
+  'infinite coordinates contribute nothing');
+ok(suggestSafeZone([stageOf(placed('a', 91, 35.2))]) === undefined,
+  'an out-of-range latitude contributes nothing');
+
+// A single stop: centred on it, at the documented minimum radius.
+const one = suggestSafeZone([stageOf(placed('a', 31.775, 35.235))]);
+ok(!!one, 'one placed task yields a suggestion');
+ok(!!one && one.center.lat === 31.775 && one.center.lng === 35.235,
+  'one placed task centres the zone on that task');
+ok(!!one && one.radiusMeters === SAFE_ZONE_MIN_SUGGESTED_RADIUS_M,
+  'one placed task uses the minimum suggested radius, never a zero-radius zone');
+ok(!!one && one.coversAllTasks === true, 'a single-task suggestion covers every task');
+
+// Several stops across stages: every one of them must end up inside.
+const spread: Stage[] = [
+  stageOf(placed('a', 31.770, 35.220), placed('b', 31.780, 35.240)),
+  stageOf(placed('c', 31.7755, 35.2305), { id: 'x', title: 'x', type: 'quiz' }),
+];
+const many = suggestSafeZone(spread);
+ok(!!many, 'several placed tasks yield a suggestion');
+if (many) {
+  const points = [
+    { lat: 31.770, lng: 35.220 },
+    { lat: 31.780, lng: 35.240 },
+    { lat: 31.7755, lng: 35.2305 },
+  ];
+  const worst = Math.max(...points.map((p) => haversineKm(p, many.center) * 1000));
+  ok(worst <= many.radiusMeters, 'every placed task is inside the suggested radius');
+  ok(many.radiusMeters >= worst + SAFE_ZONE_SUGGESTION_PADDING_M - 10,
+    'the suggested radius adds walking padding beyond the outermost task');
+  ok(many.coversAllTasks === true, 'a normal spread is reported as covering every task');
+  ok(many.center.lat > 31.769 && many.center.lat < 31.781,
+    'the centre sits within the extent of the tasks');
+}
+
+// Order must not matter — the same stops in any order are the same play area.
+const reversed = suggestSafeZone([
+  stageOf(placed('c', 31.7755, 35.2305)),
+  stageOf(placed('b', 31.780, 35.240), placed('a', 31.770, 35.220)),
+]);
+ok(!!many && !!reversed && same(many, reversed), 'the suggestion does not depend on task order');
+
+// A continent-wide game cannot be covered. Say so rather than emit an invalid zone.
+const absurd = suggestSafeZone([stageOf(placed('a', -33.9, 18.4), placed('b', 60.2, 24.9))]);
+ok(!!absurd, 'an absurdly spread game still yields a suggestion');
+ok(!!absurd && absurd.radiusMeters === SAFE_ZONE_MAX_RADIUS_M,
+  'an absurd spread is clamped to the maximum radius');
+ok(!!absurd && absurd.coversAllTasks === false,
+  'a clamped suggestion reports that it does NOT cover every task');
+
+// The invariant that matters most: a suggestion is always storable.
+for (const [label, s] of [['single', one], ['spread', many], ['clamped', absurd]] as const) {
+  if (!s) continue;
+  const check = validateSafeZone({ center: s.center, radiusMeters: s.radiusMeters });
+  ok(check.ok === true, `the ${label} suggestion is accepted by validateSafeZone`);
+}
+
+// Total for hostile input.
+for (const junk of [42, 'x', {}, [[]], [{ tasks: 'no' }], [{ tasks: [null, undefined] }]]) {
+  let threw = false;
+  try { suggestSafeZone(junk as unknown as Stage[]); } catch { threw = true; }
+  ok(!threw, `suggestSafeZone is total for ${JSON.stringify(junk)}`);
+}
 
 console.log(`enforced-settings: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

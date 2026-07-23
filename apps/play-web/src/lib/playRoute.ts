@@ -47,7 +47,11 @@ export interface SessionRef {
   runFinished?: boolean;
 }
 
+/** The two public legal documents, keyed exactly as `LEGAL_DOCS` keys them. */
+export type LegalDoc = 'terms' | 'privacy';
+
 export type PlayRoute =
+  | { kind: 'legal'; doc: LegalDoc }
   | { kind: 'staff'; ctx: StaffCtx | null }
   | { kind: 'tv'; code: string }
   | { kind: 'recap'; code: string }
@@ -63,6 +67,13 @@ export interface PlayRouteInput {
   search: string;
   session: SessionRef | null;
   hasStaffSession?: boolean;
+  /**
+   * `window.location.pathname`. The ONLY thing read from the path is the two
+   * public legal documents (change: legal-pages-participant-origin); every other
+   * path resolves exactly as it does when this is omitted. Optional so existing
+   * callers and tests are unaffected.
+   */
+  pathname?: string | null;
 }
 
 export interface PlayRouteResult {
@@ -93,6 +104,27 @@ export function parseStaffParam(raw: string | null | undefined): StaffCtx | null
   const [ownerUid, gameId, runId] = parts.map((p) => p.trim());
   if (!ownerUid || !gameId || !runId) return null;
   return { ownerUid, gameId, runId };
+}
+
+/**
+ * The path → legal-document decision, and the whole of play-web's path handling.
+ *
+ * play-web has no router: it is served from the origin root in dev, behind the
+ * playtest tunnel and in production (only creator-web carries a `/creator/`
+ * base), so an exact match on the two documented paths is correct everywhere.
+ *
+ * Tolerant of the shapes a real link takes — a trailing slash, any letter case,
+ * and a query string or fragment still attached — because these URLs are typed
+ * by hand, printed in store listings and pasted into legal references. Anything
+ * else returns null and the participant experience resolves untouched.
+ */
+export function resolveLegalPath(pathname: string | null | undefined): LegalDoc | null {
+  if (!pathname) return null;
+  // Strip anything after the path, then a single trailing slash, then normalize.
+  const path = String(pathname).split('#')[0].split('?')[0].replace(/\/+$/, '').toLowerCase();
+  if (path === '/terms') return 'terms';
+  if (path === '/privacy') return 'privacy';
+  return null;
 }
 
 function params(search: string): URLSearchParams {
@@ -128,6 +160,7 @@ export function stripStaffParams(search: string): string {
  * Resolve the single route this URL + persisted state means.
  *
  * Precedence (first match wins):
+ *   0. legal       — the path `/terms` or `/privacy`, ahead of everything else
  *   1. staff       — `?staff[=o.g.r]`, legacy `?staff&owner&game&run`, or a stored staff session
  *   2. tv          — `?tv=<accessCode>`
  *   3. recap       — `?recap=<accessCode>`
@@ -140,6 +173,13 @@ export function stripStaffParams(search: string): string {
  *  10. join        — everything else
  */
 export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
+  // 0. Legal documents — the path wins over every query param and every stored
+  //    session. A participant is the person who accepts these documents, and they
+  //    must be readable mid-run: `clearSession` is false, so opening the policy
+  //    can never cost a team their progress.
+  const legalDoc = resolveLegalPath(input.pathname);
+  if (legalDoc) return { route: { kind: 'legal', doc: legalDoc }, clearSession: false };
+
   const p = params(input.search);
   const session = input.session;
 

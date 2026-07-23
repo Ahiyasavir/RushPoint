@@ -26,6 +26,11 @@ rushpoint/
 │   │       │   ├── TaskLibrary.tsx     # insert a reusable task from the public library
 │   │       │   ├── dialog.tsx          # confirm/alert/prompt host
 │   │       │   └── ErrorBoundary.tsx
+│   │       ├── lib/
+│   │       │   ├── runConsoleLayout.ts  # console layout as DATA: section rail, pinned panels, columns
+│   │       │   ├── teamAttention.ts     # "who is in trouble right now?" — pure, clock injected, never throws
+│   │       │   ├── photoReviewQueue.ts  # photo-review triage: wait tiers, legal decisions, focus moves
+│   │       │   └── savePayload.ts       # BUILDER_EDITABLE_FIELDS — the save payload IS the dirty check
 │   │       └── services/
 │   │           ├── firebase.ts        # app init + emulator wiring (127.0.0.1)
 │   │           ├── api.ts             # callable() factory (+ ensureAuth) — use this
@@ -40,7 +45,8 @@ rushpoint/
 │   │       │   ├── JoinScreen.tsx      # access code → registration form (+ "I'm staff")
 │   │       │   ├── PlayScreen.tsx      # live state, map, task runner, live-ops, SOS, wake-lock
 │   │       │   ├── FinalScreen.tsx     # finish + final leaderboard
-│   │       │   └── StaffConsole.tsx    # PIN sign-in → photo review, SOS ack, announcements
+│   │       │   ├── StaffConsole.tsx    # PIN sign-in → photo review, SOS ack, announcements
+│   │       │   └── LegalScreen.tsx     # /terms + /privacy on the PARTICIPANT origin (lazy chunk)
 │   │       ├── components/
 │   │       │   ├── ui.tsx              # kit: Button, Card, Input, Progress, Screen
 │   │       │   ├── TaskRunner.tsx      # per-type task UI (field/code/photo/…) + hints
@@ -49,6 +55,11 @@ rushpoint/
 │   │       │   ├── ConnectionBanner.tsx# offline indicator
 │   │       │   ├── MapModeToggle.tsx · dialog.tsx · ErrorBoundary.tsx
 │   │       ├── hooks/useWakeLock.ts    # keep screen awake while racing
+│   │       ├── lib/
+│   │       │   ├── playRoute.ts        # URL → route union (staff/promo/board/legal); resolveLegalPath
+│   │       │   ├── stuckGuards.ts      # fail-OPEN submit gate, retry lockout, GPS watch backoff
+│   │       │   ├── holdNotice.ts       # why a team held back by startTeams is still waiting
+│   │       │   └── joinCode.ts         # join-code normalize + join-error → message key
 │   │       ├── services/{firebase.ts, calls.ts}   # offline cache, Storage upload, typed calls
 │   │       └── store.ts                # session + staff-session persistence
 │   │
@@ -59,10 +70,15 @@ rushpoint/
 │       ├── index.ts                 # re-exports all callables + staff/live-ops/station callables
 │       ├── firebase.ts              # Admin SDK init (ignoreUndefinedProperties)
 │       ├── validation.ts            # shared payload guards
-│       ├── games/index.ts           # game CRUD + publish + gallery duplicate
+│       ├── batchUtil.ts             # chunk() / deleteDocsInChunks() — Firestore's 500-op batch cap
+│       ├── games/index.ts           # game CRUD + soft delete/trash + publish + export/import + duplicate
+│       ├── games/gameArea.ts        # derives a publicGames coarse `approxLocation` from the tasks
 │       ├── runs/index.ts            # run lifecycle, join, routing entry, scoring, hints, leaderboard
-│       ├── gallery/index.ts         # public game/task search
+│       ├── gallery/index.ts         # public game/task search + likes
 │       ├── payments/index.ts        # wallet + Stripe
+│       ├── users/index.ts           # profile, data export, account deletion
+│       ├── maintenance/index.ts     # retention prune, trash purge, publicTasks coordinate backfill
+│       ├── obs/                     # log.ts (loggedCallable wrapper) + audit.ts (auditLogs writer)
 │       ├── routing/assignNextTask.ts# preset-aware smart routing (internal helpers)
 │       └── scoring/                 # taskScore.ts, calculateScore.ts, stationVerification.ts
 │
@@ -71,6 +87,18 @@ rushpoint/
 │   ├── scoringPresets.ts            # the 3 scoring presets
 │   ├── geo.ts                       # haversine, coord validation, route geo
 │   ├── mapStyle.ts                  # resolveMapStyle() — MapTiler + OpenTopoMap fallback
+│   ├── publicTaskLocation.ts        # ⭐ what a WORLD-READABLE task may say about where it is (1 km grid snap)
+│   ├── safeZone.ts                  # isOutsideSafeZone + evaluateSafeZoneStatus (total, fail-open)
+│   ├── pausedClock.ts               # Task.pausesTimer → RunTaskRecord.excludedMs (server-stamped)
+│   ├── liveTaskStatus.ts            # per-RUN task pause/close: effectiveTaskStatus, planTaskStatusChange
+│   ├── mutualExclusion.ts           # exclusive groups + maxCompletableTasks (the stage ceiling)
+│   ├── taskDuration.ts              # per-type default expectedDurationMinutes (authoring time only)
+│   ├── legalContent.ts · legalMarkdown.ts  # ToS/Privacy text + parser, shared by BOTH apps —
+│   │                                # NOT in the barrel; deep-import from a lazy chunk only
+│   ├── chat.ts                      # team↔HQ chat sanitize/append helpers
+│   ├── tags.ts                      # normalizeTags — the one definition of a tag list (client + server)
+│   ├── wrongAnswerPenalty.ts        # wrong-answer cost + retry lockout (server decides, ships a DURATION)
+│   ├── gameFile.ts                  # game export/import file format + import hardening
 │   └── validation.ts
 │
 ├── scripts/
@@ -79,7 +107,17 @@ rushpoint/
 │   ├── seed-local.mjs             # seed-if-empty (demo creator + Old City game + run)
 │   ├── seed-emulator.ts           # comprehensive seed (npm run seed / seed:reset)
 │   ├── e2e-verify.mjs             # ⭐ full-lifecycle e2e vs emulator (npm run e2e)
-│   └── test-*.ts                   # unit tests (tiebreaker, geo, projection, idempotency, …)
+│   ├── check-i18n.ts              # HE/EN dictionary + hardcoded-string gate (npm run i18n:check[:strict])
+│   ├── check-bundle-budget.mjs    # play-web first-load budget + "heavy dep stays lazy" (npm run bundle:budget)
+│   ├── backfill-public-tasks.mjs  # operator sweep for legacy publicTasks coordinates (DEPLOY.md §11)
+│   ├── test-rules.mjs · test-storage-rules.mjs   # emulator-bound Firestore / Storage rules suites
+│   ├── lib/emulatorReap.mjs · lib/reapEmulatorExec.mjs  # reap orphaned emulators:exec processes (fails closed)
+│   ├── lib/{bundleBudget,publicTaskBackfill,callableHardening}.mjs  # pure logic behind the above
+│   ├── lib/playA11yScan.ts        # pure a11y source scan of play-web .tsx (RTL classes, icon buttons)
+│   ├── lib/i18nLeak.ts            # ⭐ the ONE HE/EN leak predicate — imported by check-i18n.ts AND
+│   │                              #   test-i18n-parity.ts; never re-implement it in a checker
+│   └── test-*.ts                   # unit tests — AUTO-DISCOVERED by run-unit-tests.mjs, so a new
+│                                   #   scripts/test-*.ts is in `npm test` with no registration
 │
 ├── firestore.rules · storage.rules · firestore.indexes.json · firebase.json
 ├── turbo.json · package.json (npm workspaces)

@@ -163,6 +163,17 @@ export function gameStructureProblems(stages: Stage[] | undefined): string[] {
       if (typeof task.estimatedMinutes === 'number' && !(task.estimatedMinutes >= 0)) {
         problems.push(`${label}: estimated minutes cannot be negative`);
       }
+      // Expected duration (change: task-duration-defaults). Optional, so only a
+      // PRESENT value is checked — absent means "derive the per-interaction default
+      // in the Builder", which is not an error. NaN/Infinity are refused too: a
+      // non-finite value reaching scoreFixedPointsSpeed's expected route total makes
+      // the whole speed bonus NaN for every team in the run.
+      if (task.expectedDurationMinutes !== undefined
+        && (typeof task.expectedDurationMinutes !== 'number'
+          || !Number.isFinite(task.expectedDurationMinutes)
+          || task.expectedDurationMinutes < 0)) {
+        problems.push(`${label}: expected duration must be a non-negative number`);
+      }
     }
   }
   return problems;

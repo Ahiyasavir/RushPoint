@@ -3,8 +3,13 @@
 // `task-library-map-view` fixed the WRITE (publishGame no longer copies the
 // authored point into the world-readable `publicTasks/{id}`). It did nothing for
 // documents already stored. Those still carry the exact coordinate of every
-// published task — hideLocation tasks included — in a collection whose rule is
-// `allow read: if true`. This sweep is the other half of that change.
+// published task in a collection whose rule is `allow read: if true`. This sweep
+// is the other half of that change.
+//
+// It is ALSO how a hidden-location task gets the coarse area it is now entitled
+// to (change: hidden-location-map-visibility): documents published for those
+// tasks under the previous rule carry no location field at all, so nothing but a
+// re-publish or this sweep will ever put them on the creator's map.
 //
 // The decision rule is pure and lives in @rushpoint/shared (`repairPublicTask`);
 // everything here is I/O: page the collection, resolve each document's authored
@@ -23,7 +28,7 @@ import { chunk, MAX_BATCH_OPS } from '../batchUtil';
 import {
   FIRESTORE_PATHS,
   repairPublicTask,
-  hasLegacyCoordinates,
+  mayNeedPublicTaskRepair,
   type Game,
   type BackfillSourceTask,
 } from '@rushpoint/shared';
@@ -93,8 +98,13 @@ export async function backfillPublicTaskCoordinates(opts: {
       ownerUid?: string;
       sourceGameId?: string;
     };
-    // Cheap pre-check before spending a game read: only legacy docs need work.
-    if (!hasLegacyCoordinates(data)) continue;
+    // Cheap pre-check before spending a game read. It skips documents that are
+    // already conformant — which, since hidden-location tasks began publishing an
+    // area (change: hidden-location-map-visibility), means "no legacy exact point
+    // AND a usable area". A doc that is merely area-less now costs one game read
+    // (cached per game for the whole page), because it may be a hidden-location
+    // task published under the old rule that can finally be given its area.
+    if (!mayNeedPublicTaskRepair(data)) continue;
 
     let source: BackfillSourceTask | null = null;
     if (data.ownerUid && data.sourceGameId) {

@@ -8,10 +8,7 @@ import { unlockAudio } from '../lib/sound';
 import LegalFooter from '../components/LegalFooter';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { TAP_TARGET } from '../lib/interaction';
-
-// Firebase callable codes that mean "transient / connectivity", not a bad code —
-// surfaced to the player as a single "check your connection" message.
-const CONNECTION_CODES = new Set(['unavailable', 'internal', 'deadline-exceeded', 'unauthenticated']);
+import { normalizeJoinCodeInput, joinErrorKey } from '../lib/joinCode';
 
 // The legal footer moved to components/LegalFooter so the Final screen can show
 // the same links (a player who finishes without ever re-reading Join still needs
@@ -29,7 +26,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
 }) {
   const { t, toggleLang, lang, colorblind, setColorblind } = useT();
   // Snapshot at mount, not at module-parse time (P9).
-  const [linkCode] = useState<string>(() => (initialCode ?? '').toUpperCase().trim());
+  const [linkCode] = useState<string>(() => normalizeJoinCodeInput(initialCode));
   const [code, setCode] = useState(linkCode);
   const [info, setInfo] = useState<JoinInfo | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -73,28 +70,31 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
     setMembers([...members, '']);
   }
 
-  // Map a callable failure to a localized, participant-safe message. Full-run
-  // (resource-exhausted) and network blips (unavailable/internal/…) get friendly
-  // copy instead of host-facing billing jargon or raw Firebase codes; a genuinely
-  // unexpected error still falls back to the provided message.
-  function joinError(e: unknown, fallback: string): string {
-    const code = (e && typeof e === 'object' && 'code' in e
-      ? String((e as { code?: unknown }).code ?? '') : '').replace(/^functions\//, '');
-    if (code === 'resource-exhausted') return t.join.gameFull;
-    if (CONNECTION_CODES.has(code)) return t.join.connectionError;
-    if (code === 'not-found' || code === 'invalid-argument') return t.join.invalidCode;
-    return e instanceof Error ? e.message.replace('Firebase: ', '') : fallback;
+  // Map a callable failure to ONE localized, actionable sentence (change:
+  // join-flow-resilience). The decision is the pure `joinErrorKey`; this is only
+  // the copy table. A raw server message must never reach a participant: the
+  // finished-run and revoked-code throws carry English prose written for the
+  // host, and this screen is Hebrew by default.
+  function joinError(e: unknown): string {
+    switch (joinErrorKey(e)) {
+      case 'invalidCode': return t.join.invalidCode;
+      case 'revoked': return t.join.codeRevoked;
+      case 'finished': return t.join.finished;
+      case 'full': return t.join.gameFull;
+      case 'connection': return t.join.connectionError;
+      default: return t.join.joinFailed;
+    }
   }
 
   async function lookup() {
     unlockAudio(); // first user gesture — satisfy the iOS/Safari autoplay policy
     setErr('');
     try {
-      const i = await getJoinInfo({ code: code.trim().toUpperCase() });
+      const i = await getJoinInfo({ code: normalizeJoinCodeInput(code) });
       if (i.runStatus === 'finished') { setErr(t.join.finished); return; }
       setInfo(i);
     } catch (e) {
-      setErr(joinError(e, t.join.invalidCode));
+      setErr(joinError(e));
     }
   }
 
@@ -118,17 +118,18 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
     setFieldErrors(new Set());
     try {
       const displayName = resolveDisplayName(info.mode, values, memberNames);
-      const res = await joinRun({ code: code.trim().toUpperCase(), displayName, registrationData: values, memberNames });
+      const canonicalCode = normalizeJoinCodeInput(code);
+      const res = await joinRun({ code: canonicalCode, displayName, registrationData: values, memberNames });
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
-        code: code.trim().toUpperCase(), displayName,
+        code: canonicalCode, displayName,
         teamId: res.teamId,
         isTestDrive: info.isTestDrive ?? false,
       };
       saveSession(session);
       onJoined(session);
     } catch (e) {
-      setErr(joinError(e, t.join.joinFailed));
+      setErr(joinError(e));
     }
   }
 
@@ -136,22 +137,25 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
   async function attach() {
     if (!info) return;
     setErr('');
+    const canonicalCode = normalizeJoinCodeInput(code);
     try {
       const res = await joinTeamAsDevice({
-        code: code.trim().toUpperCase(),
-        teamCode: teamCode.trim().toUpperCase(),
+        code: canonicalCode,
+        teamCode: normalizeJoinCodeInput(teamCode),
         memberName: memberName.trim() || undefined,
       });
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
-        code: code.trim().toUpperCase(), displayName: memberName.trim(),
+        code: canonicalCode, displayName: memberName.trim(),
         teamId: res.teamId,
         isTestDrive: info.isTestDrive ?? false,
       };
       saveSession(session);
       onJoined(session);
-    } catch {
-      setErr(t.devices.attachFailed);
+    } catch (e) {
+      // A network blip here used to read as a wrong team code. Everything else
+      // keeps the attach-specific copy, which already says what to check.
+      setErr(joinErrorKey(e) === 'connection' ? t.join.connectionError : t.devices.attachFailed);
     }
   }
 
@@ -239,7 +243,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               ref={codeRef}
               value={code}
               dir="ltr"
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onChange={(e) => setCode(normalizeJoinCodeInput(e.target.value))}
               placeholder={t.join.codePlaceholder}
               aria-label={t.join.codePlaceholder}
               autoCapitalize="characters"
@@ -255,7 +259,9 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
                 focus:outline-none focus:border-rp-fire/60 focus:ring-4 focus:ring-rp-fire/15
                 transition-all duration-200
               "
-              maxLength={8}
+              // No maxLength: the browser truncates a PASTE before onChange runs,
+              // so an 8-char cap turned a pasted join link into "HTTPS://". The
+              // cap lives in normalizeJoinCodeInput instead.
               onKeyDown={(e) => { if (e.key === 'Enter') void lookupAction.run(); }}
             />
           </div>

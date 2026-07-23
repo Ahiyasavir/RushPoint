@@ -13,6 +13,7 @@ export type RunActionId =
   | 'inviteStaff' | 'acknowledgeAlert' | 'clearTeamOutOfBounds' | 'printStationQr' | 'copyShareLink'
   | 'broadcastAnnouncement' | 'deactivateAnnouncement' | 'pushFlashMission'
   | 'activateHotZone' | 'deactivateHotZone'
+  | 'pauseTask' | 'closeTask' | 'resumeTask'
   | 'createTrackable' | 'createZone' | 'deleteZone'
   | 'approvePhoto' | 'rejectPhoto' | 'hideFeedPhoto' | 'sendChatReply'
   | 'loadHeatmap' | 'loadAnalytics' | 'exportAnalyticsCsv' | 'refreshSurvey'
@@ -52,6 +53,8 @@ const SEVERITY: Record<RunActionId, ActionSeverity> = {
   loadAnalytics: 'routine',
   exportAnalyticsCsv: 'routine',
   refreshSurvey: 'routine',
+  // Putting a stop back in play only ever ADDS options for teams.
+  resumeTask: 'routine',
 
   // Reversible, but they take something away from a team or an audience.
   deactivateAnnouncement: 'cautionary',
@@ -60,6 +63,10 @@ const SEVERITY: Record<RunActionId, ActionSeverity> = {
   rejectPhoto: 'cautionary',
   hideFeedPhoto: 'cautionary',
   skipStage: 'cautionary',
+  // Reversible, but they take a scoring opportunity away from every team that has
+  // not reached the stop yet (change: live-task-pause).
+  pauseTask: 'cautionary',
+  closeTask: 'cautionary',
 
   // Irreversible for the players: the run ends, or a score is rewritten.
   adjustTeamScore: 'destructive',

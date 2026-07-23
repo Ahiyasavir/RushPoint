@@ -240,6 +240,10 @@ const ALLOWED_TASK_KEYS = new Set([
   'smart', 'triggerMode', 'locationless', 'hideLocation', 'locationClue',
   'locationClueHe', 'hintPenalty', 'choices', 'numericTolerance',
   'geofenceRadiusMeters', 'steps', 'tags', 'media',
+  // pause-clock-tasks: the participant is TOLD the clock is stopped (that is the
+  // whole point — a team that does not know will still hurry), so the flag is
+  // deliberately participant-visible. It reveals no answer and no secret.
+  'pausesTimer',
   'releaseAt', 'releaseAfterMinutes',
   'expiresAfterMinutes', // task-expiry: the countdown UI needs it — no secret
   'unlockAfterTaskIds',  // unlockable-tasks: the locked row names prerequisites — no secret
@@ -293,11 +297,52 @@ function assertTaskPayloadAllowlisted(label, task) {
   }
 }
 
+// ── listRunTeams ROW allowlist (change: run-console-attention) ────────────────
+// The same argument as ALLOWED_TASK_KEYS, one level up: `listRunTeams` is an
+// OWNER/STAFF projection built by hand in functions/src/runs/index.ts, and the
+// team document it projects from carries answer keys, per-task attempt counters,
+// device uids, guardian-consent records and raw submission urls. A future `...t`
+// spread — or one more "just this one field" — would ship all of that to every
+// staff console with nothing failing. Pinning the row shape means a projection
+// ADDITION fails here until it is consciously classified.
+//
+// This list is the exact set of keys the handler returns today; the three
+// attention signals are asserted PRESENT separately below, because an allowlist
+// alone cannot catch a field being silently dropped.
+const ALLOWED_RUN_TEAM_ROW_KEYS = new Set([
+  'id', 'displayName', 'memberNames', 'memberCount', 'status', 'score',
+  'bonusPenalty', 'completedStages', 'pendingReviews', 'activeStageOrder',
+  'finished', 'launched', 'startedAt', 'finishedAt', 'outOfBounds',
+  // run-console-attention: three freshness/attention clocks. None is a position
+  // and none is an answer key — `answerLockoutUntil` is an expiry, not a hint.
+  'updatedAt', 'answerLockoutUntil', 'lastLocationAt',
+  // held-team-visibility: a BOOLEAN, never the guardian's name or contact.
+  'heldForConsent',
+]);
+
+function assertRunTeamRowAllowlisted(label, row) {
+  const bad = Object.keys(row ?? {}).filter((k) => !ALLOWED_RUN_TEAM_ROW_KEYS.has(k));
+  check(`${label}: listRunTeams row keys are allowlisted`, bad.length === 0, bad.join(','));
+  // The attention signals are nullable but never ABSENT — the handler writes
+  // `?? null` for each. A console that reads an absent key gets `undefined` and
+  // renders "no evidence" forever, which is exactly the silent failure the change
+  // exists to remove, so presence is asserted independently of the value.
+  for (const k of ['updatedAt', 'answerLockoutUntil', 'lastLocationAt']) {
+    check(`${label}: listRunTeams row carries '${k}'`, row != null && k in row,
+      JSON.stringify(Object.keys(row ?? {})));
+  }
+}
+
 // ── Leaderboard invariant oracle ──────────────────────────────────────────────
 // Well-formedness that must hold for ANY rankings payload (live or final):
 // every expected team exactly once, contiguous ranks from 1, finite scores,
 // scores non-increasing (non-time presets rank by score).
-function assertLeaderboardInvariants(label, rankings, expectedTeamIds) {
+// `startedAtByTeamId` is OPTIONAL and only a caller that independently holds the
+// teams' server-written `startedAt` (read straight off the team documents, never
+// off the board being checked) passes it — that second, independent source is what
+// makes the wall-clock bound below a real comparison rather than a restatement of
+// the board.
+function assertLeaderboardInvariants(label, rankings, expectedTeamIds, startedAtByTeamId) {
   const ids = (rankings ?? []).map((r) => r.teamId);
   check(`${label}: one ranking entry per team`,
     ids.length === expectedTeamIds.length && new Set(ids).size === ids.length &&
@@ -312,6 +357,48 @@ function assertLeaderboardInvariants(label, rankings, expectedTeamIds) {
   check(`${label}: scores are non-increasing down the board`,
     (rankings ?? []).every((r, i) => i === 0 || rankings[i - 1].score >= r.score),
     (rankings ?? []).map((r) => r.score).join(' ≥ '));
+
+  // ── Duration well-formedness (change: pause-clock-tasks) ────────────────────
+  // `durationSeconds` is now derived (adjustedElapsedSeconds = raw − excluded)
+  // rather than measured, so it is the one leaderboard field a subtraction bug can
+  // reach. Three things must hold for EVERY board the suite ever builds:
+  //
+  //   1. When present it is a finite, non-negative number. A negative would mean a
+  //      team was credited MORE excluded time than it spent (adjustedElapsedSeconds
+  //      lost its `Math.max(0, …)` floor); a NaN would mean a corrupt `excludedMs`
+  //      stamp propagated instead of being ignored by teamExcludedMs. Either one
+  //      also crashes the response at JSON-encode.
+  //   2. A FINISHED entry always carries one. The omission branch exists only to
+  //      keep an unfinished team's Infinity off the wire (the family-playtest
+  //      crash); a finished team losing its duration would silently drop it out of
+  //      the time_only ordering (it sorts on exactly this field) with no error
+  //      anywhere. Deliberately one-directional: an unfinished entry is allowed to
+  //      omit it, which is what assertAllFinite already pins on the other side.
+  //   3. It never EXCEEDS the team's own wall clock (checked below when the caller
+  //      supplies the independently-read startedAt map). Excluded time can only
+  //      subtract; a sign flip anywhere on that path shows up as a duration longer
+  //      than the team was actually racing.
+  check(`${label}: every finished entry carries a finite durationSeconds`,
+    (rankings ?? []).every((r) => !r.finishedAt || Number.isFinite(r.durationSeconds)),
+    JSON.stringify((rankings ?? []).map((r) => ({ f: !!r.finishedAt, d: r.durationSeconds }))));
+  check(`${label}: every present durationSeconds is finite and >= 0`,
+    (rankings ?? []).every((r) => r.durationSeconds === undefined
+      || (Number.isFinite(r.durationSeconds) && r.durationSeconds >= 0)),
+    JSON.stringify((rankings ?? []).map((r) => r.durationSeconds)));
+  if (startedAtByTeamId) {
+    const overrun = (rankings ?? []).filter((r) => {
+      const startedAt = startedAtByTeamId[r.teamId];
+      if (!r.finishedAt || !startedAt || r.durationSeconds === undefined) return false;
+      const wallSec = (new Date(r.finishedAt).getTime() - new Date(startedAt).getTime()) / 1000;
+      return !(r.durationSeconds <= wallSec + 1e-6);
+    });
+    check(`${label}: no finished team's durationSeconds exceeds its wall clock`,
+      overrun.length === 0,
+      JSON.stringify(overrun.map((r) => ({
+        teamId: r.teamId, dur: r.durationSeconds,
+        wall: (new Date(r.finishedAt).getTime() - new Date(startedAtByTeamId[r.teamId]).getTime()) / 1000,
+      }))));
+  }
 }
 
 // Walk an arbitrary callable response and collect the dotted paths of any
@@ -790,6 +877,26 @@ async function main() {
   check('listRunTeams exposes bonusPenalty (+20 after a −20 adjustment)',
     (rowAfterAdj?.bonusPenalty ?? 0) - (rowBeforeAdj?.bonusPenalty ?? 0) === 20,
     JSON.stringify({ before: rowBeforeAdj?.bonusPenalty, after: rowAfterAdj?.bonusPenalty }));
+
+  // ── 8b3. The console row SHAPE is pinned (change: run-console-attention) ────
+  // This team has been playing for several completions by now, so `updatedAt` is
+  // a real server write clock and not the join stamp — asserted against the
+  // independently-read team document below rather than against itself.
+  assertRunTeamRowAllowlisted('console row', rowAfterAdj);
+  const liveTeamDoc = (await creator.getDocAt(
+    `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/teams/${playerCred.user.uid}`,
+  )).data;
+  check('listRunTeams.updatedAt is the team document\'s own server write clock',
+    rowAfterAdj?.updatedAt === (liveTeamDoc?.updatedAt ?? null),
+    JSON.stringify({ row: rowAfterAdj?.updatedAt, doc: liveTeamDoc?.updatedAt }));
+  // No wrong answer has been charged on this team, so the lockout clock is null
+  // (a NUMBER here would mean the reducer folded an unrelated field into it), and
+  // no GPS ping has been sent for this team in this run, so the location clock is
+  // null rather than a stale value borrowed from another team's document.
+  check('listRunTeams.answerLockoutUntil is null with no wrong answers charged',
+    rowAfterAdj?.answerLockoutUntil === null, String(rowAfterAdj?.answerLockoutUntil));
+  check('listRunTeams.lastLocationAt is null before this team has pinged',
+    rowAfterAdj?.lastLocationAt === null, String(rowAfterAdj?.lastLocationAt));
 
   // Single-source-of-truth guardrail (score-consistency sweep): once scoring has
   // begun, EVERY team the console lists must have a ranked leaderboard entry, so
@@ -4232,6 +4339,101 @@ async function main() {
   const start2 = await creator.call('startTeams', { gameId: g6, runId: r6 });
   check('consent: team starts after a guardian approves', start2?.launched === 1, JSON.stringify(start2));
 
+  // ── Held-team VISIBILITY (change: held-team-visibility) ────────────────────
+  // The gate above works; the failure it left behind was that nobody could SEE
+  // it. On the wire a held team was byte-identical to a team whose host simply
+  // had not pressed start — so the minor sat on "waiting for the host" while the
+  // field walked away, and the organizer got a COUNT with no names. Two channels
+  // must now say the same thing, and both must be derived from the same predicate
+  // `startTeams` partitions on, or the explanation can disagree with the behavior.
+  const minorId = minor.auth.currentUser.uid;
+  const heldKid = makeParty('consentHeld');
+  await signInAnonymously(heldKid.auth);
+  await heldKid.call('joinRun', { code: c6, displayName: 'Unapproved' });
+  const heldId = heldKid.auth.currentUser.uid;
+  const start3 = await creator.call('startTeams', { gameId: g6, runId: r6 });
+  check('consent: startTeams REPORTS the hold instead of claiming success over a no-op',
+    start3?.launched === 0 && start3?.heldForConsent === 1, JSON.stringify(start3));
+
+  // (a) The held participant's own state says WHY, and says it is not playing.
+  const heldState = await heldKid.call('getMyTeamState', { code: c6 });
+  check('consent: a held team is told the reason (holdReason === guardian_consent)',
+    heldState?.holdReason === 'guardian_consent', JSON.stringify(heldState?.holdReason));
+  check('consent: a held team is genuinely not launched',
+    heldState?.team?.launched !== true, String(heldState?.team?.launched));
+  // A REASON, never a record: no guardian name/contact/token may ride along.
+  check('consent: the hold explanation leaks no guardian identity',
+    !/A\. Parent/.test(JSON.stringify(heldState ?? {})),
+    'a guardian name reached a participant payload');
+
+  // (b) The approved team, on the SAME run, reports no hold — so the field is a
+  //     per-team verdict and not a run-level constant.
+  const consentedState = await minor.call('getMyTeamState', { code: c6 });
+  check('consent: the approved team on the same run reports no hold',
+    consentedState?.holdReason === null && consentedState?.team?.launched === true,
+    JSON.stringify({ hold: consentedState?.holdReason, launched: consentedState?.team?.launched }));
+
+  // (c) The organizer's console names EXACTLY the held team.
+  const consentRows = (await creator.call('listRunTeams', { gameId: g6, runId: r6 }))?.teams ?? [];
+  const heldRowIds = consentRows.filter((t) => t.heldForConsent === true).map((t) => t.id);
+  check('consent: listRunTeams flags exactly the held team, and only it',
+    JSON.stringify(heldRowIds) === JSON.stringify([heldId]),
+    JSON.stringify(consentRows.map((t) => [t.id, t.heldForConsent])));
+  check('consent: the started team\'s row reports heldForConsent false',
+    consentRows.find((t) => t.id === minorId)?.heldForConsent === false,
+    JSON.stringify(consentRows.find((t) => t.id === minorId)));
+  for (const row of consentRows) assertRunTeamRowAllowlisted('consent row', row);
+
+  // (d) Releasing the hold clears BOTH channels.
+  const { token: token2 } = await heldKid.call('requestGuardianConsent', {
+    ownerUid: creatorCred.user.uid, gameId: g6, runId: r6, teamId: heldId,
+  });
+  await guardian.call('grantGuardianConsent', {
+    ownerUid: creatorCred.user.uid, gameId: g6, runId: r6, token: token2, guardianName: 'B. Parent',
+  });
+  const start4 = await creator.call('startTeams', { gameId: g6, runId: r6 });
+  check('consent: the released team starts and nothing is left held',
+    start4?.launched === 1 && (start4?.heldForConsent ?? 0) === 0, JSON.stringify(start4));
+  const releasedState = await heldKid.call('getMyTeamState', { code: c6 });
+  check('consent: holdReason clears to null once consent is recorded',
+    releasedState?.holdReason === null, JSON.stringify(releasedState?.holdReason));
+  const releasedRows = (await creator.call('listRunTeams', { gameId: g6, runId: r6 }))?.teams ?? [];
+  check('consent: no console row is flagged held once every team has started',
+    releasedRows.length === 2 && releasedRows.every((t) => t.heldForConsent === false),
+    JSON.stringify(releasedRows.map((t) => [t.id, t.heldForConsent])));
+
+  // (e) A run that does NOT require consent must never report a hold — otherwise
+  //     every ordinary participant would be shown a consent notice they cannot act
+  //     on. Its own fixture (this scenario owns every document it reads), and the
+  //     team is asserted BEFORE start too: `holdReason` reports a consent hold, not
+  //     "the host hasn't pressed start", and those two states must stay distinct.
+  const { gameId: gNC } = await creator.call('createGame', { title: 'No Consent Needed', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gNC, scoringPreset: 'time_only', requiresGuardianConsent: false,
+    stages: [{ id: 'nc-s', order: 0, title: 'One', isFinal: true, tasks: [{
+      id: 'nc-t', title: 'Tap in', type: 'self_report', triggerMode: 'locationless',
+      coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 1, estimatedMinutes: 1,
+      pointValue: 10, maxConcurrentTeams: 9,
+    }] }],
+  });
+  const { runId: rNC, accessCode: cNC } = await creator.call('launchRun', { gameId: gNC });
+  const freeAgent = makeParty('consentNotRequired');
+  await signInAnonymously(freeAgent.auth);
+  await freeAgent.call('joinRun', { code: cNC, displayName: 'Grown Up' });
+  const preStart = await freeAgent.call('getMyTeamState', { code: cNC });
+  check('consent: an un-started team on a consent-free run is NOT reported as held',
+    preStart?.holdReason === null && preStart?.team?.launched !== true,
+    JSON.stringify({ hold: preStart?.holdReason, launched: preStart?.team?.launched }));
+  await creator.call('startTeams', { gameId: gNC, runId: rNC });
+  const noConsentState = await freeAgent.call('getMyTeamState', { code: cNC });
+  check('consent: a run without the requirement reports holdReason null after start',
+    noConsentState?.holdReason === null && noConsentState?.team?.launched === true,
+    JSON.stringify({ hold: noConsentState?.holdReason, launched: noConsentState?.team?.launched }));
+  const noConsentRows = (await creator.call('listRunTeams', { gameId: gNC, runId: rNC }))?.teams ?? [];
+  check('consent: every row of a consent-free run reports heldForConsent false',
+    noConsentRows.length === 1 && noConsentRows.every((t) => t.heldForConsent === false),
+    JSON.stringify(noConsentRows.map((t) => [t.id, t.heldForConsent])));
+
   }); // scenario: guardian consent
 
   await scenario('safe-zone boundary (out-of-bounds soft pause)', async () => {
@@ -4312,7 +4514,88 @@ async function main() {
   check('oob: a low-confidence fix is not treated as a breach',
     vague?.outOfBounds === false && vague?.reason === 'low_confidence', JSON.stringify(vague));
 
+  // ── The boundary DOOR (change: expose-enforced-settings) ───────────────────
+  // `safeZone` is a field two safety paths read (`updateLocation` and the routing
+  // soft-pause) and it used to be persisted with a bare assignment: any shape at
+  // all could land there, and — the silent one — "remove the boundary" did
+  // NOTHING. `db.settings({ ignoreUndefinedProperties: true })` turns
+  // `updates.safeZone = undefined` into a no-op, so the organizer pressed Clear,
+  // the UI showed no zone, and the server kept flagging teams out of bounds for
+  // the rest of the event with no error anywhere. The clear has to be an explicit
+  // field DELETE, which is what these two checks pin: the field must be GONE, not
+  // merely falsy — `safeZone: undefined` on the wire is exactly what the bug
+  // produced, so `!game.safeZone` would have passed while the bug was live.
+  const zonedBefore = (await creator.call('getGame', { gameId: g7 }))?.game;
+  check('safeZone: the fixture game really has a stored boundary to clear',
+    zonedBefore?.safeZone?.radiusMeters === 200, JSON.stringify(zonedBefore?.safeZone));
+  await creator.call('updateGame', { gameId: g7, safeZone: null });
+  const zonedAfter = (await creator.call('getGame', { gameId: g7 }))?.game;
+  check('safeZone: an explicit null CLEARS the field (not a silent no-op)',
+    !('safeZone' in (zonedAfter ?? {})), JSON.stringify(zonedAfter?.safeZone));
+
+  // A malformed boundary is refused at the same door rather than persisted into
+  // the enforcement path. `NaN` cannot survive the callable transport (JSON
+  // encodes it as `null`), so this exercises the `typeof !== 'number'` arm of
+  // validateSafeZone — which is the arm a hand-written client actually hits.
+  await expectError('safeZone: a non-finite centre is refused',
+    creator.call('updateGame', { gameId: g7, safeZone: { center: { lat: NaN, lng: 35.2 }, radiusMeters: 300 } }),
+    { codeIn: ['functions/invalid-argument'] });
+  await expectError('safeZone: a zero radius is refused, not stored as "off"',
+    creator.call('updateGame', { gameId: g7, safeZone: { center: { lat: 31.78, lng: 35.21 }, radiusMeters: 0 } }),
+    { codeIn: ['functions/invalid-argument'] });
+  const zonedStill = (await creator.call('getGame', { gameId: g7 }))?.game;
+  check('safeZone: a refused boundary wrote nothing (the field is still absent)',
+    !('safeZone' in (zonedStill ?? {})), JSON.stringify(zonedStill?.safeZone));
+
   }); // scenario: safe-zone
+
+  // ═══ Authored task duration (change: task-duration-defaults) ════════════════
+  //
+  // `expectedDurationMinutes` is read by `scoreFixedPointsSpeed` to build the
+  // expected route total. A negative one shrinks that total (every team looks
+  // slow); a non-finite one makes the speed bonus NaN for EVERY team in the run,
+  // not just the one holding the bad task — a whole-run scoring outage from a
+  // single field. It is authored (Builder, or a hand-written callable call), so
+  // `updateGame` is the door that has to refuse it.
+  await scenario('authored expectedDurationMinutes is validated at the save door', async () => {
+    const { gameId: gDur } = await creator.call('createGame', { title: 'Duration Door', mode: 'individual' });
+    const durStages = (expected) => [{
+      id: 'dd-s', order: 0, title: 'One', isFinal: true, tasks: [{
+        id: 'dd-t', title: 'Timed', type: 'self_report', triggerMode: 'locationless', locationless: true,
+        coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10,
+        maxConcurrentTeams: 9, ...(expected === undefined ? {} : { expectedDurationMinutes: expected }),
+      }],
+    }];
+
+    // A sane authored value is accepted and stored verbatim — the control case,
+    // without which the two refusals below would also pass if the door rejected
+    // the field outright.
+    await creator.call('updateGame', { gameId: gDur, scoringPreset: 'fixed_points_speed', stages: durStages(4) });
+    const { game: durGame } = await creator.call('getGame', { gameId: gDur });
+    check('duration: a valid expectedDurationMinutes is stored as authored',
+      durGame?.stages?.[0]?.tasks?.[0]?.expectedDurationMinutes === 4,
+      String(durGame?.stages?.[0]?.tasks?.[0]?.expectedDurationMinutes));
+
+    await expectError('duration: a negative expectedDurationMinutes is refused',
+      creator.call('updateGame', { gameId: gDur, stages: durStages(-5) }),
+      { codeIn: ['functions/invalid-argument'], match: /expected duration/i });
+    // NaN is encoded as `null` by the callable transport (JSON has no NaN), so the
+    // value that actually reaches the server is `null` — refused by the
+    // `typeof !== 'number'` arm of the same guard. Both spellings of "not a
+    // number" therefore have to be refused, and both are asserted.
+    await expectError('duration: a NaN expectedDurationMinutes is refused (arrives as null)',
+      creator.call('updateGame', { gameId: gDur, stages: durStages(NaN) }),
+      { codeIn: ['functions/invalid-argument'], match: /expected duration/i });
+    await expectError('duration: a string expectedDurationMinutes is refused',
+      creator.call('updateGame', { gameId: gDur, stages: durStages('10') }),
+      { codeIn: ['functions/invalid-argument'], match: /expected duration/i });
+
+    // A refusal must not half-write the stages array: the good value survives.
+    const { game: durAfter } = await creator.call('getGame', { gameId: gDur });
+    check('duration: a refused save left the previous authored value intact',
+      durAfter?.stages?.[0]?.tasks?.[0]?.expectedDurationMinutes === 4,
+      String(durAfter?.stages?.[0]?.tasks?.[0]?.expectedDurationMinutes));
+  });
 
   // ── Run recap (getRunRecap) ─────────────────────────────────────────────────
   await scenario('run recap · replay · analytics', async () => {
@@ -4902,6 +5185,250 @@ async function main() {
       JSON.stringify((live?.rankings ?? []).map((r) => r.teamId)) ===
         JSON.stringify((finL?.rankings ?? []).map((r) => r.teamId)),
       JSON.stringify({ live: (live?.rankings ?? []).map((r) => r.teamName), final: (finL?.rankings ?? []).map((r) => r.teamName) }));
+  });
+
+  // ═══ Pause-clock tasks (change: pause-clock-tasks) ══════════════════════════
+  //
+  // The rule: a task authored `pausesTimer` has its span STAMPED onto the team's
+  // own RunTaskRecord (`excludedMs`) at completion, and `buildRankings` subtracts
+  // the team's summed stamps from every time-derived term. Four properties make it
+  // either correct or silently corrupting, and none of them is observable from a
+  // pure unit test of the arithmetic:
+  //
+  //   A. The subtraction actually reaches the RANKING, not just the number the
+  //      participant is shown. If it did not, "stop the clock" would be a label
+  //      with no effect, and the team that deliberated would lose the race.
+  //   B. The stamp is IMMUTABLE once written. It is read from the team document,
+  //      never re-derived from `task.pausesTimer`, precisely so a creator editing
+  //      the template mid-run cannot retroactively re-time finished work — which
+  //      would make the live board jump and break live/final parity.
+  //   C. It only ever SUBTRACTS. A duration longer than the team's own wall clock,
+  //      a negative, or a NaN all mean the sign or the floor was lost.
+  //   D. Pausing the clock changes NOTHING about station occupancy. A paused task
+  //      is still a stop with a capacity, and a leaked slot closes it for the run.
+  await scenario('pause-clock tasks (excluded time · parity · idempotence · template edit)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Long enough that the excluded span dominates the difference in wall clocks
+    // and cannot be confused with scheduling jitter, short enough not to bloat the
+    // suite. The assertions below use the SERVER's own stamps, never this number.
+    const PAUSE_MS = 2600;
+
+    // ── F1. The excluded span reaches the ranking (A, C) ──────────────────────
+    // One partial stage, two alternatives: `pc-slow` stops the clock, `pc-fast`
+    // does not. The Hare finishes almost immediately; the Tortoise sits on the
+    // paused task for PAUSE_MS and finishes LAST by the wall clock. If the
+    // exclusion works, the Tortoise still wins.
+    const { gameId: pg } = await creator.call('createGame', { title: 'Paused Clock', mode: 'individual' });
+    const pcTask = (id, paused) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: 40,
+      maxConcurrentTeams: 9, ...(paused ? { pausesTimer: true } : {}),
+    });
+    const pcStages = (paused) => [{
+      id: 'pc-s', order: 0, title: 'Pick one', isFinal: true, requiredTaskCount: 1,
+      tasks: [pcTask('pc-slow', paused), pcTask('pc-fast', false)],
+    }];
+    await creator.call('updateGame', { gameId: pg, scoringPreset: 'time_only', stages: pcStages(true) });
+
+    // The flag is participant-visible on purpose (a team that does not know the
+    // clock stopped will still hurry) — but it must ride through the sanitizer as
+    // an allowlisted key, not as an un-classified passthrough.
+    const { game: pausedGame } = await creator.call('getGame', { gameId: pg });
+    check('pause: the authored pausesTimer flag round-trips through updateGame',
+      pausedGame?.stages?.[0]?.tasks?.find((t) => t.id === 'pc-slow')?.pausesTimer === true,
+      JSON.stringify(pausedGame?.stages?.[0]?.tasks?.map((t) => [t.id, t.pausesTimer])));
+
+    const { runId: pr, accessCode: pcCode } = await creator.call('launchRun', { gameId: pg });
+    const tortoise = makeParty('pauseTortoise');
+    await signInAnonymously(tortoise.auth);
+    await tortoise.call('joinRun', { code: pcCode, displayName: 'Tortoise' });
+    const hare = makeParty('pauseHare');
+    await signInAnonymously(hare.auth);
+    await hare.call('joinRun', { code: pcCode, displayName: 'Hare' });
+    const tortoiseId = tortoise.auth.currentUser.uid;
+    const hareId = hare.auth.currentUser.uid;
+    await creator.call('startTeams', { gameId: pg, runId: pr });
+
+    // Nothing new leaks alongside the flag. (The flag's own presence on the wire is
+    // asserted in F5, on a single-task game where the task is guaranteed to be the
+    // assigned one — task-visibility gating omits unassigned tasks, so asserting it
+    // here would be conditional on which of the two alternatives routing picked.)
+    const tortoiseState = await tortoise.call('getMyTeamState', { code: pcCode });
+    for (const t of tortoiseState?.activeStageTasks ?? []) assertTaskPayloadAllowlisted('pause payload', t);
+
+    const teamDocPath = (teamId) => `users/${OWNER}/games/${pg}/runs/${pr}/teams/${teamId}`;
+    const readTeam = async (teamId) => (await creator.getDocAt(teamDocPath(teamId))).data;
+    const stampedExcludedMs = (team, taskId) => (team?.stages ?? [])
+      .flatMap((s) => s.tasks ?? []).find((t) => t.taskId === taskId)?.excludedMs;
+
+    // Hare first, on the UNPAUSED alternative: short wall clock, nothing excluded.
+    await hare.call('completeTask', { taskId: 'pc-fast', code: pcCode });
+    // Tortoise deliberates, then completes the PAUSED alternative.
+    await sleep(PAUSE_MS);
+    await tortoise.call('completeTask', { taskId: 'pc-slow', code: pcCode });
+
+    const tortoiseTeam = await readTeam(tortoiseId);
+    const hareTeam = await readTeam(hareId);
+    const excluded = stampedExcludedMs(tortoiseTeam, 'pc-slow');
+    check('pause: a completed paused task is stamped with a positive excludedMs',
+      Number.isFinite(excluded) && excluded >= PAUSE_MS * 0.5,
+      `excludedMs=${excluded} (waited ${PAUSE_MS}ms)`);
+    check('pause: the UNPAUSED task is stamped with no excludedMs at all',
+      stampedExcludedMs(hareTeam, 'pc-fast') === undefined,
+      String(stampedExcludedMs(hareTeam, 'pc-fast')));
+
+    // Wall clocks come off the team documents — an independent source from the
+    // board being checked. This is the premise of the whole scenario, so it is
+    // ASSERTED rather than assumed: if the Tortoise did not in fact finish later,
+    // the ranking assertion below would prove nothing.
+    const wallSec = (team) =>
+      (new Date(team?.finishedAt).getTime() - new Date(team?.startedAt).getTime()) / 1000;
+    const tortoiseWall = wallSec(tortoiseTeam);
+    const hareWall = wallSec(hareTeam);
+    check('pause: the Tortoise really did take LONGER on the wall clock',
+      tortoiseWall > hareWall, `tortoise=${tortoiseWall}s hare=${hareWall}s`);
+
+    const startedAtById = { [tortoiseId]: tortoiseTeam?.startedAt, [hareId]: hareTeam?.startedAt };
+    const liveP = await creator.call('refreshLeaderboard', { gameId: pg, runId: pr, publish: false });
+    assertLeaderboardInvariants('paused live board', liveP?.rankings ?? [], [tortoiseId, hareId], startedAtById);
+    assertAllFinite('refreshLeaderboard(paused)', liveP);
+
+    const entryOf = (board, teamId) => (board?.rankings ?? []).find((r) => r.teamId === teamId);
+    const tortoiseEntry = entryOf(liveP, tortoiseId);
+    check('pause: durationSeconds == wall clock − excluded span (±1s)',
+      Math.abs((tortoiseEntry?.durationSeconds ?? NaN) - (tortoiseWall - excluded / 1000)) <= 1,
+      JSON.stringify({ duration: tortoiseEntry?.durationSeconds, wall: tortoiseWall, excludedMs: excluded }));
+    check('pause: the paused team outranks the faster wall clock (time_only)',
+      tortoiseEntry?.rank === 1 && entryOf(liveP, hareId)?.rank === 2,
+      JSON.stringify((liveP?.rankings ?? []).map((r) => `${r.teamName}#${r.rank}:${r.durationSeconds}`)));
+
+    // ── F2. Idempotence (B) ───────────────────────────────────────────────────
+    // A double-tapped Complete must not stamp a SECOND excluded span onto the same
+    // record — which would subtract the deliberation twice and hand the team a
+    // duration it never raced.
+    const replay = await tortoise.call('completeTask', { taskId: 'pc-slow', code: pcCode });
+    check('pause: a repeated completion of a paused task is an idempotent replay',
+      replay?.already === true, JSON.stringify(replay));
+    const afterReplay = await readTeam(tortoiseId);
+    check('pause: the replay did NOT change the stamped excludedMs',
+      stampedExcludedMs(afterReplay, 'pc-slow') === excluded,
+      `${stampedExcludedMs(afterReplay, 'pc-slow')} vs ${excluded}`);
+    const boardAfterReplay = await creator.call('refreshLeaderboard', { gameId: pg, runId: pr, publish: false });
+    check('pause: the replay did NOT change the ranked duration',
+      entryOf(boardAfterReplay, tortoiseId)?.durationSeconds === tortoiseEntry?.durationSeconds,
+      `${entryOf(boardAfterReplay, tortoiseId)?.durationSeconds} vs ${tortoiseEntry?.durationSeconds}`);
+
+    // ── F3. Mid-run template edit (B — the live/final drift guard) ────────────
+    // The creator clears `pausesTimer` while the run is live. Because the ranking
+    // reads the STAMP and not the template, the already-completed contribution is
+    // frozen: the board must not move by a single second. Re-deriving from the
+    // template here would silently add PAUSE_MS back to a finished team.
+    await creator.call('updateGame', { gameId: pg, stages: pcStages(false) });
+    const { game: editedGame } = await creator.call('getGame', { gameId: pg });
+    check('pause: the template edit really landed (pausesTimer is gone)',
+      editedGame?.stages?.[0]?.tasks?.find((t) => t.id === 'pc-slow')?.pausesTimer === undefined,
+      JSON.stringify(editedGame?.stages?.[0]?.tasks?.map((t) => [t.id, t.pausesTimer])));
+    const afterEdit = await creator.call('refreshLeaderboard', { gameId: pg, runId: pr, publish: false });
+    check('pause: clearing pausesTimer mid-run does NOT re-time completed work',
+      entryOf(afterEdit, tortoiseId)?.durationSeconds === tortoiseEntry?.durationSeconds
+        && entryOf(afterEdit, hareId)?.durationSeconds === entryOf(liveP, hareId)?.durationSeconds,
+      JSON.stringify({ before: (liveP?.rankings ?? []).map((r) => r.durationSeconds),
+        after: (afterEdit?.rankings ?? []).map((r) => r.durationSeconds) }));
+    check('pause: the stamp itself survives the template edit',
+      stampedExcludedMs(await readTeam(tortoiseId), 'pc-slow') === excluded);
+
+    // ── F4. Live/final parity, entry for entry (A, B) ─────────────────────────
+    // finalizeRun and refreshLeaderboard share buildRankings; with NO activity
+    // between the two calls the boards must be identical field by field, not merely
+    // identically ORDERED (an ordering-only check would pass while every duration
+    // silently drifted).
+    const finP = await creator.call('finalizeRun', { gameId: pg, runId: pr });
+    assertLeaderboardInvariants('paused final board', finP?.rankings ?? [], [tortoiseId, hareId], startedAtById);
+    const parityKey = (board) => JSON.stringify((board?.rankings ?? []).map((r) => ({
+      teamId: r.teamId, rank: r.rank, score: r.score, durationSeconds: r.durationSeconds,
+    })));
+    check('pause: live and final boards agree on rank, score AND durationSeconds',
+      parityKey(afterEdit) === parityKey(finP),
+      `live=${parityKey(afterEdit)} final=${parityKey(finP)}`);
+
+    // ── F5. A run in which EVERY task pauses the clock (C) ────────────────────
+    // The degenerate case: excluded == raw. The floor must hold at exactly 0 — not
+    // a negative, not a NaN, not a crash — and the board must still rank.
+    const { gameId: ag } = await creator.call('createGame', { title: 'All Paused', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: ag, scoringPreset: 'time_only',
+      stages: [{ id: 'ap-s', order: 0, title: 'Only', isFinal: true, tasks: [pcTask('ap-t', true)] }],
+    });
+    const { runId: ar, accessCode: ac } = await creator.call('launchRun', { gameId: ag });
+    const allPaused = [];
+    for (const n of ['Zeno', 'Achilles']) {
+      const p = makeParty(`allPaused${n}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: ac, displayName: n });
+      allPaused.push(p);
+    }
+    await creator.call('startTeams', { gameId: ag, runId: ar });
+
+    // The participant is TOLD the clock is stopped — that is the whole point of the
+    // feature (a team that does not know will still hurry, and the deliberation the
+    // pause is meant to buy never happens). One stage, one task, so the task on the
+    // wire is deterministically the paused one.
+    const zenoState = await allPaused[0].call('getMyTeamState', { code: ac });
+    const wirePaused = (zenoState?.activeStageTasks ?? []).find((t) => t.id === 'ap-t');
+    check('pause: the paused flag reaches the participant payload',
+      wirePaused?.pausesTimer === true,
+      JSON.stringify((zenoState?.activeStageTasks ?? []).map((t) => [t.id, t.pausesTimer])));
+    for (const t of zenoState?.activeStageTasks ?? []) assertTaskPayloadAllowlisted('all-paused payload', t);
+
+    for (const p of allPaused) await p.call('completeTask', { taskId: 'ap-t', code: ac });
+    const allPausedIds = allPaused.map((p) => p.auth.currentUser.uid);
+    const allStartedAt = {};
+    for (const teamId of allPausedIds) {
+      allStartedAt[teamId] = (await creator.getDocAt(
+        `users/${OWNER}/games/${ag}/runs/${ar}/teams/${teamId}`,
+      )).data?.startedAt;
+    }
+    const allBoard = await creator.call('refreshLeaderboard', { gameId: ag, runId: ar, publish: false });
+    assertLeaderboardInvariants('all-paused board', allBoard?.rankings ?? [], allPausedIds, allStartedAt);
+    assertAllFinite('refreshLeaderboard(all-paused)', allBoard);
+    check('pause: a fully paused run floors every duration at exactly 0',
+      (allBoard?.rankings ?? []).length === 2
+        && (allBoard?.rankings ?? []).every((r) => r.durationSeconds === 0),
+      JSON.stringify((allBoard?.rankings ?? []).map((r) => r.durationSeconds)));
+
+    // ── F6. A paused task still releases its station slot (D) ─────────────────
+    // Occupancy is orthogonal to the clock. A cap-1 paused stop that never
+    // decremented would be closed for the rest of the run with no error anywhere —
+    // the exact shape of the slot leaks already fixed in verifyStationCode and
+    // submitStationPhoto.
+    const { gameId: sg } = await creator.call('createGame', { title: 'Paused Station', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'time_only',
+      stages: [{ id: 'ps-s', order: 0, title: 'One stop', isFinal: true, tasks: [
+        { id: 'ps-t', title: 'Think here', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 5,
+          pointValue: 50, maxConcurrentTeams: 1, pausesTimer: true },
+      ] }],
+    });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sg });
+    const thinker = makeParty('pauseStationThinker');
+    await signInAnonymously(thinker.auth);
+    await thinker.call('joinRun', { code: sc, displayName: 'Thinker' });
+    await creator.call('startTeams', { gameId: sg, runId: sr });
+    const stationRunPath = `users/${OWNER}/games/${sg}/runs/${sr}`;
+    const heldCounts = (await creator.getDocAt(stationRunPath)).data?.taskCounts ?? {};
+    check('pause: the assigned paused station reserves its one slot',
+      (heldCounts['ps-t'] ?? 0) === 1, JSON.stringify(heldCounts));
+    await sleep(400);
+    await thinker.call('completeTask', { taskId: 'ps-t', code: sc, lat: 31.78, lng: 35.21 });
+    const releasedCounts = (await creator.getDocAt(stationRunPath)).data?.taskCounts ?? {};
+    check('pause: completing a paused station releases its slot (taskCounts back to 0)',
+      (releasedCounts['ps-t'] ?? 0) === 0, JSON.stringify(releasedCounts));
+    check('pause: the paused station still stamped its excluded span',
+      Number.isFinite(stampedExcludedMs(
+        (await creator.getDocAt(`${stationRunPath}/teams/${thinker.auth.currentUser.uid}`)).data, 'ps-t')),
+      'no excludedMs stamped on the station record');
   });
 
   // ═══ Hot-path leaderboard moved to read-time (WO Fix 4) ═════════════════════
@@ -6062,6 +6589,15 @@ async function main() {
       // feed-ugc-safety: hideFeedItem({ restore: true }) is staff/owner-only,
       // same as a plain hide — a participant must not be able to restore either.
       ['participant', pl, 'hideFeedItem', { ownerUid: OWNER, gameId: ag, runId: ar, itemId: 'fake', restore: true }],
+      // live-task-pause: setRunTaskStatus takes a stop out of play for the WHOLE
+      // run — it changes what every team can score, so it is owner/run-staff only.
+      // The staff row proves the RUN scope specifically: staffB holds a valid staff
+      // token for run `ar2` of the same game and the same owner. The ALLOWED side
+      // (owner + staff scoped to this run) is proven in the 'live task pause'
+      // scenario; only denials belong in this table.
+      ['participant', pl, 'setRunTaskStatus', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', status: 'paused' }],
+      ['stranger', str, 'setRunTaskStatus', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', status: 'paused' }],
+      ['other-run staff', staffB, 'setRunTaskStatus', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', status: 'paused' }],
     ];
     for (const [who, party, fn, payload] of rows) {
       await expectError(`authz: ${who} is denied ${fn}`, party.call(fn, payload), { codeIn: DENY });
@@ -6088,6 +6624,10 @@ async function main() {
     check('authz: run is still live + unpublished after the denial sweep',
       runDoc.data?.status !== 'finished' && (runDoc.data?.leaderboard?.published ?? false) === false,
       JSON.stringify({ status: runDoc.data?.status, published: runDoc.data?.leaderboard?.published }));
+    // live-task-pause: a denied setRunTaskStatus must not have reached the write.
+    // The run has never had an override written, so `undefined` is the whole state.
+    check('authz: the denial sweep never wrote a task-status override',
+      runDoc.data?.taskStatusOverrides === undefined, JSON.stringify(runDoc.data?.taskStatusOverrides));
     const teamDoc = await creator.getDocAt(`users/${OWNER}/games/${ag}/runs/${ar}/teams/${plUid}`);
     check('authz: team score/penalty untouched by the denial sweep',
       (teamDoc.data?.score ?? 0) === 0 && (teamDoc.data?.bonusPenalty ?? 0) === 0,
@@ -6658,6 +7198,127 @@ async function main() {
       JSON.stringify(sub));
   });
 
+  // ═══ Photo review THROUGHPUT (change: photo-review-throughput) ══════════════
+  //
+  // The queue is a client-side flattening of every team's `taskSubmissions` map
+  // (packages/shared/src/photoQueue.ts), and the ONLY server-side write is
+  // `reviewStationSubmission` keyed by (teamId, taskId). Under a real event the
+  // reviewer works a backlog: several teams pending on the SAME task, reviewed out
+  // of order, with double-taps and with stragglers whose team has already finished.
+  // Three failure modes are pinned here, none of which the pure queue tests can see
+  // because they never touch the server:
+  //
+  //   1. CROSS-TALK. A review keyed by task alone (or a `.set({merge})` on the wrong
+  //      document) would resolve somebody ELSE's row — the reviewer clears the
+  //      queue and a team that was never looked at is scored, or vice versa.
+  //   2. DOUBLE SCORING on a re-approval. (The feed scenario proves this on an
+  //      autoApprove task; here it is proved on the MANUAL review path, which is
+  //      the one a reviewer actually double-taps.)
+  //   3. A LATE review of a team that has already finished must resolve, not throw.
+  //      A throw here is what strands a row in the queue forever — the reviewer
+  //      cannot clear it and cannot tell whether the team was scored.
+  await scenario('photo review throughput (out-of-order · re-approval · finished team)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const { gameId: qg } = await creator.call('createGame', { title: 'Review Queue', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: qg, scoringPreset: 'fixed_points_speed',
+      // requiredTaskCount 1 of 2 so a team can finish via the self-report
+      // alternative while its photo is still sitting in the queue (case 3).
+      stages: [{ id: 'rq-s', order: 0, title: 'Snap or say', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'rq-photo', title: 'Photo for review', type: 'photo',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 3,
+          pointValue: 40, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'photo_upload', autoApprove: false } },
+        { id: 'rq-alt', title: 'Say you did it', type: 'self_report', triggerMode: 'locationless',
+          locationless: true, coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1,
+          pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: qr, accessCode: qc } = await creator.call('launchRun', { gameId: qg });
+    const QCTX = { ownerUid: OWNER, gameId: qg, runId: qr };
+    const joinReviewer = async (name) => {
+      const p = makeParty(`review${name}`);
+      await signInAnonymously(p.auth);
+      await p.call('joinRun', { code: qc, displayName: name });
+      return { party: p, uid: p.auth.currentUser.uid };
+    };
+    const early = await joinReviewer('Early');
+    const late = await joinReviewer('Late');
+    const straggler = await joinReviewer('Straggler');
+    await creator.call('startTeams', { gameId: qg, runId: qr });
+
+    const qPhotoUrl = (teamUid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${qr}/teams/${teamUid}/${name}`)}?alt=media`;
+    const qTeamPath = (teamUid) => `users/${OWNER}/games/${qg}/runs/${qr}/teams/${teamUid}`;
+    const qSubmission = async (teamUid) =>
+      (await creator.getDocAt(qTeamPath(teamUid))).data?.taskSubmissions?.['rq-photo'];
+    const qScore = async (teamUid) => (await creator.getDocAt(qTeamPath(teamUid))).data?.score ?? 0;
+    const qFeedCount = async () =>
+      (await creator.getColAt(`users/${OWNER}/games/${qg}/runs/${qr}/feedItems`)).length;
+
+    // ── 1. Two teams pending on the SAME task; the NEWER one is reviewed first ──
+    await early.party.call('submitStationPhoto', { ...QCTX, teamId: early.uid, taskId: 'rq-photo', photoUrl: qPhotoUrl(early.uid, 'early.jpg') });
+    // A real gap between the two submissions: the queue sorts on `submittedAt`, so
+    // identical stamps would make "the older one" meaningless.
+    await sleep(1100);
+    await late.party.call('submitStationPhoto', { ...QCTX, teamId: late.uid, taskId: 'rq-photo', photoUrl: qPhotoUrl(late.uid, 'late.jpg') });
+
+    const earlyBefore = await qSubmission(early.uid);
+    const lateBefore = await qSubmission(late.uid);
+    check('queue: both teams are pending on the same task, oldest first',
+      earlyBefore?.status === 'pending' && lateBefore?.status === 'pending'
+        && new Date(earlyBefore.submittedAt).getTime() < new Date(lateBefore.submittedAt).getTime(),
+      JSON.stringify({ early: earlyBefore?.submittedAt, late: lateBefore?.submittedAt }));
+
+    const earlyScoreBefore = await qScore(early.uid);
+    await creator.call('reviewStationSubmission', { ...QCTX, teamId: late.uid, taskId: 'rq-photo', approved: true });
+    check('queue: reviewing the NEWER submission leaves the older one untouched',
+      (await qSubmission(early.uid))?.status === 'pending',
+      JSON.stringify(await qSubmission(early.uid)));
+    check('queue: the older team was not scored by the other team\'s review',
+      (await qScore(early.uid)) === earlyScoreBefore,
+      `${await qScore(early.uid)} vs ${earlyScoreBefore}`);
+    const lateScored = await qScore(late.uid);
+    check('queue: the reviewed team WAS scored (the review did something)',
+      lateScored > 0, String(lateScored));
+    check('queue: the reviewed submission keeps its OWN photo url',
+      (await qSubmission(late.uid))?.photoUrl === qPhotoUrl(late.uid, 'late.jpg'),
+      JSON.stringify((await qSubmission(late.uid))?.photoUrl));
+
+    // ── 2. Re-approving an ALREADY-approved submission ────────────────────────
+    const feedBeforeReApprove = await qFeedCount();
+    const reApprove = await creator.call('reviewStationSubmission', { ...QCTX, teamId: late.uid, taskId: 'rq-photo', approved: true });
+    check('queue: re-approving an approved submission still resolves ok',
+      reApprove?.ok === true && reApprove?.approved === true, JSON.stringify(reApprove));
+    check('queue: re-approval does not score the team a second time',
+      (await qScore(late.uid)) === lateScored, `${await qScore(late.uid)} vs ${lateScored}`);
+    check('queue: re-approval does not broadcast a second feed item',
+      (await qFeedCount()) === feedBeforeReApprove,
+      `${await qFeedCount()} vs ${feedBeforeReApprove}`);
+
+    // ── 3. A straggler whose team has ALREADY FINISHED ────────────────────────
+    // The photo goes into the queue, then the team finishes by the alternative
+    // route — which auto-skips the still-pending photo task. The reviewer arrives
+    // late and must be able to clear the row.
+    await straggler.party.call('submitStationPhoto', { ...QCTX, teamId: straggler.uid, taskId: 'rq-photo', photoUrl: qPhotoUrl(straggler.uid, 'straggler.jpg') });
+    await straggler.party.call('completeTask', { taskId: 'rq-alt', code: qc });
+    const stragglerDoc = (await creator.getDocAt(qTeamPath(straggler.uid))).data;
+    check('queue: the straggler really did finish before the review',
+      stragglerDoc?.status === 'finished' && !!stragglerDoc?.finishedAt,
+      JSON.stringify({ status: stragglerDoc?.status, finishedAt: stragglerDoc?.finishedAt }));
+    const stragglerScoreBefore = stragglerDoc?.score ?? 0;
+    const lateReview = await creator.call('reviewStationSubmission', { ...QCTX, teamId: straggler.uid, taskId: 'rq-photo', approved: true });
+    check('queue: a submission from an already-finished team still reviews (no throw)',
+      lateReview?.ok === true, JSON.stringify(lateReview));
+    check('queue: the late review resolves the row rather than leaving it pending',
+      (await qSubmission(straggler.uid))?.status === 'approved',
+      JSON.stringify(await qSubmission(straggler.uid)));
+    check('queue: the late review does not re-score a task the stage already closed',
+      (await qScore(straggler.uid)) === stragglerScoreBefore,
+      `${await qScore(straggler.uid)} vs ${stragglerScoreBefore}`);
+  });
+
   // ═══ Wave 1 Fix 5: staffSignIn single-use PIN under concurrency ══════════════
   await scenario('staffSignIn PIN is single-use under concurrency (Fix 5)', async () => {
     const OWNER = creatorCred.user.uid;
@@ -7040,9 +7701,16 @@ async function main() {
       && Math.abs(openDoc.approxLocation.lng - EXACT.lng) <= 0.005 + 1e-9,
       JSON.stringify(openDoc.approxLocation));
 
-    // The headline assertion: a hideLocation task leaks NOTHING, not even fuzzed.
-    check('a hideLocation task publishes NO location at all',
-      hiddenDoc.coordinates === undefined && hiddenDoc.approxLocation === undefined,
+    // The headline assertion (change: hidden-location-map-visibility): a hideLocation
+    // task now publishes the SAME coarse area as any other task, so a creator can see
+    // their own hidden missions on the library map. The puzzle is kept by the
+    // PARTICIPANT sanitizer, not by withholding the area — the exact point still never
+    // reaches publicTasks.
+    check('a hideLocation task publishes a coarse area and never the exact point',
+      hiddenDoc.coordinates === undefined
+      && hiddenDoc.approxLocation
+      && Math.abs(hiddenDoc.approxLocation.lat - EXACT.lat) <= 0.005 + 1e-9
+      && Math.abs(hiddenDoc.approxLocation.lng - EXACT.lng) <= 0.005 + 1e-9,
       JSON.stringify({ coordinates: hiddenDoc.coordinates, approxLocation: hiddenDoc.approxLocation }));
     check('a hideLocation task is still listed in the library',
       hiddenDoc.title === 'Hidden task', JSON.stringify(hiddenDoc.title));
@@ -7128,8 +7796,14 @@ async function main() {
     const swept = await platformAdmin.call('backfillPublicTaskCoordinatesNow', {});
     check('the sweep succeeds and reports at least our two seeded docs repaired',
       swept?.ok === true && swept?.repaired >= 2, JSON.stringify(swept));
-    check('the sweep reports at least one doc cleared to NO location (the hidden task)',
-      swept?.cleared >= 1, JSON.stringify(swept));
+    // `cleared` counts docs the sweep left with NO location at all. Since
+    // hidden-location-map-visibility, a hideLocation task is COARSENED rather than
+    // cleared, so this fixture clears nothing — only a genuinely unplaceable task
+    // (locationless, or coordinates that cannot be used) still clears. Asserting
+    // `>= 0` would be vacuous, so pin the real new contract instead: the sweep must
+    // not clear anything here, because both seeded docs are placeable.
+    check('the sweep clears nothing here (both seeded docs are placeable, so both coarsen)',
+      swept?.cleared === 0, JSON.stringify(swept));
 
     const openAfter = (await creator.getDocAt(`publicTasks/${openId}`)).data;
     const hiddenAfter = (await creator.getDocAt(`publicTasks/${hiddenId}`)).data;
@@ -7153,10 +7827,13 @@ async function main() {
       && Math.abs(openAfter.approxLocation.lng - EXACT_OPEN.lng) <= 0.01 + 1e-9,
       JSON.stringify(openAfter?.approxLocation));
 
-    // 3. THE HEADLINE ASSERTION — a hideLocation task ends up with NO location
-    //    at all, not even a coarsened one. This is the entire point of the change.
-    check('sweep: a hideLocation task ends up with NO approxLocation and NO coordinates',
-      hiddenAfter?.approxLocation === undefined && hiddenAfter?.coordinates === undefined,
+    // 3. THE HEADLINE ASSERTION (change: hidden-location-map-visibility) — a
+    //    hideLocation task ends up with a COARSENED area and no exact point. The
+    //    sweep also repairs "bare" docs (published after the map feature, so never
+    //    carrying a legacy `coordinates` key) which would otherwise stay off the
+    //    map forever.
+    check('sweep: a hideLocation task ends up coarsened, with no exact coordinates',
+      hiddenAfter?.coordinates === undefined && !!hiddenAfter?.approxLocation,
       JSON.stringify({ coordinates: hiddenAfter?.coordinates, approxLocation: hiddenAfter?.approxLocation }));
     check('sweep: the hideLocation task is still listed (title survives)',
       hiddenAfter?.title === 'Hidden task', JSON.stringify(hiddenAfter?.title));
@@ -7346,8 +8023,70 @@ async function main() {
       }),
       { codeIn: ['functions/invalid-argument'] });
 
+    // ── (8c) The file door runs the SAME semantic guards as the save door ─────
+    // (changes: task-duration-defaults · expose-enforced-settings). A game file is
+    // a creator's own bytes but still UNTRUSTED input, and it used to be the only
+    // door that checked none of this — so a hand-edited file could write a NaN
+    // centre onto the field `updateLocation` reads, or a non-finite
+    // `expectedDurationMinutes` that NaNs the speed bonus for every team in the
+    // run. Same helpers, same terms, so the two doors cannot drift.
+    const withGameOverride = (over) => ({ ...file, game: { ...file.game, ...over } });
+
+    await expectError('import: a negative expectedDurationMinutes is refused',
+      creator.call('importGameFile', { file: withTaskOverride({ expectedDurationMinutes: -5 }) }),
+      { codeIn: ['functions/invalid-argument'], match: /expectedDuration|duration/i });
+    // As on the save door: NaN reaches the server as `null` (JSON has no NaN), so
+    // this exercises the TASK_FIELD_TYPES 'number' arm of the same guard.
+    await expectError('import: a NaN expectedDurationMinutes is refused (arrives as null)',
+      creator.call('importGameFile', { file: withTaskOverride({ expectedDurationMinutes: NaN }) }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('import: a safe zone with a non-finite centre is refused',
+      creator.call('importGameFile', {
+        file: withGameOverride({ safeZone: { center: { lat: NaN, lng: 35.21 }, radiusMeters: 500 } }),
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    // A zero radius is refused rather than stored as "off": evaluateSafeZoneStatus
+    // would read it as `no_zone`, silently disabling a boundary the author believed
+    // they had configured.
+    await expectError('import: a safe zone with a zero radius is refused',
+      creator.call('importGameFile', {
+        file: withGameOverride({ safeZone: { center: { lat: 31.78, lng: 35.21 }, radiusMeters: 0 } }),
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+    // Refused, not stripped: `startTeams` holds every team of such a game and no
+    // participant surface can create the consent record, so importing the flag
+    // would hand the creator a run nobody can start and nobody can unblock.
+    await expectError('import: a file requiring guardian consent is refused as unsatisfiable',
+      creator.call('importGameFile', { file: withGameOverride({ requiresGuardianConsent: true }) }),
+      { codeIn: ['functions/failed-precondition'], match: /consent/i });
+
     check('import: no half-game was written by any refusal', (await countGames()) === beforeBad,
       `${beforeBad} → ${await countGames()}`);
+
+    // ── (8d) An ACCEPTED boundary is stored NORMALIZED, never as the file's own
+    //         object — the game doc is spread wholesale below, so without the
+    //         rebuild an extra client-supplied key would ride straight onto the
+    //         field the safety path reads.
+    const { gameId: gZone } = await creator.call('importGameFile', {
+      file: withGameOverride({
+        safeZone: {
+          center: { lat: 31.78, lng: 35.21, label: 'smuggled', accuracy: 5 },
+          radiusMeters: 450,
+          releasedBy: 'somebody-else',
+        },
+      }),
+    });
+    const { game: zoneGame } = await creator.call('getGame', { gameId: gZone });
+    // Key SETS are compared (not a JSON string) so the assertion cannot be broken
+    // or accidentally satisfied by Firestore's map-key ordering.
+    const storedZone = zoneGame?.safeZone;
+    check('import: an accepted safe zone stores exactly center{lat,lng} + radiusMeters',
+      JSON.stringify(Object.keys(storedZone ?? {}).sort()) === JSON.stringify(['center', 'radiusMeters'])
+        && JSON.stringify(Object.keys(storedZone?.center ?? {}).sort()) === JSON.stringify(['lat', 'lng'])
+        && storedZone?.center?.lat === 31.78 && storedZone?.center?.lng === 35.21
+        && storedZone?.radiusMeters === 450,
+      JSON.stringify(storedZone));
 
     // ── (9) A file naming a FOREIGN owner/id is not an account-transfer ───────
     const { gameId: gForeign } = await creator.call('importGameFile', {
@@ -7379,6 +8118,283 @@ async function main() {
       JSON.stringify({ deletedAt: smuggled?.deletedAt, hook: smuggled?.integrationWebhookUrl,
         credits: smuggled?.credits, wallet: smuggled?.wallet }));
   }); // scenario: game file export/import
+
+  // ═══ Live task pause (change: live-task-pause) ══════════════════════════════
+  //
+  // THE INCIDENT this scenario exists for: `Task.status` (StationStatus) was
+  // ENFORCED by routing in three places and WRITTEN by nothing. So when a stop
+  // died mid event (shop closed, street blocked, host gone, weather) the
+  // organizer's only two options were to keep routing teams to a dead stop or to
+  // end the run. `setRunTaskStatus` is the writer, and it is RUN scoped — the
+  // override lives on the run document, never on the game template, which later
+  // runs replay and the Builder rewrites wholesale.
+  //
+  // Four contracts are pinned here, in the order they matter to a live event:
+  //   A. routing honours pause AND resume (and `closed`, incl. recommendations),
+  //   B. a team ALREADY HOLDING the task is never stranded by the pause,
+  //   C. a pause that would dead-end a partial-completion stage is refused with a
+  //      machine-readable reason, writes nothing, and is overridable with `force`,
+  //   D. an unknown status writes nothing, and a repeated same-status call no-ops.
+  // (The denial side of authz lives in the table-driven matrix above; the ALLOWED
+  // side — owner and run-scoped staff — is proven here.)
+  await scenario('live task pause (setRunTaskStatus · routing · holders · unwinnable)', async () => {
+    const OWNER = creatorCred.user.uid;
+    // The whole routing argument rests on transit: NEAR sits exactly on the team,
+    // FAR ~2.2 km away. With `fixed_points_speed` the score is
+    // 0.6·load − 0.4·transit and both stations are equally unloaded, so NEAR wins
+    // every tie-free comparison. That is what makes "FAR was assigned" evidence
+    // that the pause filter ran, rather than evidence of an arbitrary sort order.
+    const TEAM = { lat: 31.7800, lng: 35.2100 };
+    const FAR = { lat: 31.8000, lng: 35.2100 };
+
+    const { gameId: lg } = await creator.call('createGame', { title: 'Live Pause Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: lg, scoringPreset: 'fixed_points_speed',
+      // requiredTaskCount 1 of 2 — so taking ONE task out of play is legal here
+      // (availableAfter 1 ≥ requiredCount 1) and the unwinnable guard, which has
+      // its own fixture below, does not fire and mask the routing assertions.
+      stages: [{ id: 'lp-s', order: 0, title: 'Stations', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'lp-near', title: 'Nearest stop', type: 'field', triggerMode: 'radius',
+          coordinates: { ...TEAM }, geofenceRadiusMeters: 100,
+          difficulty: 2, estimatedMinutes: 3, pointValue: 50, maxConcurrentTeams: 3 },
+        { id: 'lp-far', title: 'Far stop', type: 'field', triggerMode: 'radius',
+          coordinates: { ...FAR }, geofenceRadiusMeters: 100,
+          difficulty: 2, estimatedMinutes: 3, pointValue: 50, maxConcurrentTeams: 3 },
+      ] }],
+    });
+    const { runId: lr, accessCode: lc } = await creator.call('launchRun', { gameId: lg });
+    const L = { ownerUid: OWNER, gameId: lg, runId: lr };
+    const lRunPath = `users/${OWNER}/games/${lg}/runs/${lr}`;
+
+    // ── A. Pause → the nearest stop stops being handed out ────────────────────
+    const pausedNear = await creator.call('setRunTaskStatus', { ...L, taskId: 'lp-near', status: 'paused', reason: 'shop shuttered' });
+    check('pause: the response reports the transition active → paused',
+      pausedNear?.ok === true && pausedNear?.previousStatus === 'active'
+      && pausedNear?.status === 'paused' && pausedNear?.noop === false,
+      JSON.stringify(pausedNear));
+    check('pause: nobody was holding it, and the response says so',
+      pausedNear?.teamsHolding === 0, JSON.stringify(pausedNear?.teamsHolding));
+    const overridesNow = (await creator.getDocAt(lRunPath)).data?.taskStatusOverrides ?? {};
+    check('pause: the override is persisted on the RUN document',
+      overridesNow['lp-near'] === 'paused', JSON.stringify(overridesNow));
+
+    const player = makeParty('pausePlayer');
+    await signInAnonymously(player.auth);
+    await player.call('joinRun', { code: lc, displayName: 'Router' });
+    await creator.call('startTeams', { gameId: lg, runId: lr });
+
+    const heldAtStart = (await player.call('getMyTeamState', { code: lc }))?.team?.activeTaskId ?? null;
+    check('pause: startTeams\' own auto-assignment also honours the pause',
+      heldAtStart === 'lp-far', String(heldAtStart));
+    if (heldAtStart) await player.call('checkOutTask', { code: lc, taskId: heldAtStart });
+
+    // Ask repeatedly, releasing the slot each time, so the filter is proven to
+    // hold across calls rather than once. checkOutTask puts the task back in the
+    // pool (status 'unassigned'), so every iteration re-runs the same decision.
+    const picks = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await player.call('requestNextTask', { ...L, lat: TEAM.lat, lng: TEAM.lng });
+      picks.push(r?.taskId ?? null);
+      if (r?.taskId) await player.call('checkOutTask', { code: lc, taskId: r.taskId });
+    }
+    check('pause: repeated requestNextTask never returns the paused task, though it is the NEAREST one',
+      picks.length === 3 && picks.every((id) => id === 'lp-far'), picks.join(','));
+
+    // ── A. Resume → it becomes assignable again ───────────────────────────────
+    const resumed = await creator.call('setRunTaskStatus', { ...L, taskId: 'lp-near', status: 'active', reason: 'reopened' });
+    check('resume: the response reports the transition paused → active',
+      resumed?.previousStatus === 'paused' && resumed?.status === 'active' && resumed?.noop === false,
+      JSON.stringify(resumed));
+    const afterResume = await player.call('requestNextTask', { ...L, lat: TEAM.lat, lng: TEAM.lng });
+    check('resume: the task is assignable again — and wins on transit, exactly as it would have before the pause',
+      afterResume?.taskId === 'lp-near', JSON.stringify(afterResume));
+    if (afterResume?.taskId) await player.call('checkOutTask', { code: lc, taskId: afterResume.taskId });
+
+    // ── D. An unknown status is rejected and writes nothing ───────────────────
+    const beforeBadStatus = JSON.stringify((await creator.getDocAt(lRunPath)).data?.taskStatusOverrides ?? null);
+    await expectError('invalid: a status outside {active,paused,closed} is rejected',
+      creator.call('setRunTaskStatus', { ...L, taskId: 'lp-far', status: 'disabled' }),
+      { codeIn: ['functions/invalid-argument'] });
+    const afterBadStatus = JSON.stringify((await creator.getDocAt(lRunPath)).data?.taskStatusOverrides ?? null);
+    check('invalid: the rejected call left run.taskStatusOverrides byte-identical',
+      afterBadStatus === beforeBadStatus, `${beforeBadStatus} → ${afterBadStatus}`);
+    check('invalid: no override key was created for the task the bad call named',
+      ((await creator.getDocAt(lRunPath)).data?.taskStatusOverrides ?? {})['lp-far'] === undefined,
+      afterBadStatus);
+
+    // ── D. A repeated same-status call is an idempotent no-op ─────────────────
+    const firstPause = await creator.call('setRunTaskStatus', { ...L, taskId: 'lp-far', status: 'paused' });
+    const secondPause = await creator.call('setRunTaskStatus', { ...L, taskId: 'lp-far', status: 'paused' });
+    check('idempotent: the FIRST pause is a real transition (noop false)',
+      firstPause?.noop === false && firstPause?.previousStatus === 'active', JSON.stringify(firstPause));
+    check('idempotent: the repeated call reports itself as a no-op and does not invent a transition',
+      secondPause?.noop === true && secondPause?.previousStatus === 'paused' && secondPause?.status === 'paused',
+      JSON.stringify(secondPause));
+
+    // ── Authz, ALLOWED side: staff scoped to THIS run may take a task out of play.
+    // (participant / stranger / other-run staff denials are rows in the matrix.)
+    const { pin: pausePin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: lg, runId: lr, name: 'Course Marshal', permissions: ['review_photos'],
+    });
+    const marshal = makeParty('pauseMarshal');
+    await signInAnonymously(marshal.auth);
+    const marshalTok = await marshal.call('staffSignIn', { ownerUid: OWNER, gameId: lg, runId: lr, pin: pausePin });
+    await signInWithCustomToken(marshal.auth, marshalTok.customToken);
+    const byStaff = await marshal.call('setRunTaskStatus', { ...L, taskId: 'lp-far', status: 'closed', reason: 'host left' });
+    check('authz: staff scoped to THIS run may take a task out of play',
+      byStaff?.ok === true && byStaff?.status === 'closed' && byStaff?.previousStatus === 'paused',
+      JSON.stringify(byStaff));
+
+    // ── A. `closed` behaves like `paused` for routing, AND for recommendations ─
+    // A SECOND run of the same game: overrides are per-run, so this one starts
+    // clean — which is also what proves the scoping at the end of the block.
+    const { runId: lr2, accessCode: lc2 } = await creator.call('launchRun', { gameId: lg });
+    const L2 = { ownerUid: OWNER, gameId: lg, runId: lr2 };
+    const closer = makeParty('pauseCloser');
+    await signInAnonymously(closer.auth);
+    await closer.call('joinRun', { code: lc2, displayName: 'Closer' });
+
+    const closedNear = await creator.call('setRunTaskStatus', { ...L2, taskId: 'lp-near', status: 'closed', reason: 'street sealed' });
+    check('closed: the response reports the transition active → closed',
+      closedNear?.previousStatus === 'active' && closedNear?.status === 'closed' && closedNear?.noop === false,
+      JSON.stringify(closedNear));
+
+    await creator.call('startTeams', { gameId: lg, runId: lr2 });
+    const held2 = (await closer.call('getMyTeamState', { code: lc2 }))?.team?.activeTaskId ?? null;
+    if (held2) await closer.call('checkOutTask', { code: lc2, taskId: held2 });
+    const picks2 = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await closer.call('requestNextTask', { ...L2, lat: TEAM.lat, lng: TEAM.lng });
+      picks2.push(r?.taskId ?? null);
+      if (r?.taskId) await closer.call('checkOutTask', { code: lc2, taskId: r.taskId });
+    }
+    check('closed: a closed task is never assigned either, though it is the nearest',
+      picks2.length === 3 && picks2.every((id) => id === 'lp-far'), picks2.join(','));
+
+    const recs = await closer.call('getRecommendedTasks', { code: lc2, lat: TEAM.lat, lng: TEAM.lng });
+    const recIds = (recs?.recommendations ?? []).map((r) => r.taskId);
+    check('closed: getRecommendedTasks omits the closed task but still offers the others',
+      recIds.includes('lp-far') && !recIds.includes('lp-near'), recIds.join(','));
+
+    // RUN scoping, the whole design decision (design D1): closing the task in run
+    // 2 must not reach run 1, where the same task was explicitly resumed above.
+    const run1Overrides = (await creator.getDocAt(lRunPath)).data?.taskStatusOverrides ?? {};
+    check('scope: the override is per-RUN — run 1 still has the same task active',
+      run1Overrides['lp-near'] === 'active', JSON.stringify(run1Overrides));
+    // …and the GAME TEMPLATE — replayed by later runs, duplicated, exported and
+    // published — is never written to at all.
+    const { game: lgTemplate } = await creator.call('getGame', { gameId: lg });
+    const nearTemplate = (lgTemplate?.stages ?? []).flatMap((s) => s.tasks ?? []).find((t) => t.id === 'lp-near');
+    check('scope: the game TEMPLATE task carries no status — the override never touched it',
+      !!nearTemplate && nearTemplate.status === undefined, JSON.stringify(nearTemplate?.status));
+
+    // ── B. A team already HOLDING the task is not stranded by the pause ───────
+    // Both stations sit on the team so one set of coordinates completes either,
+    // and each is cap-1 so run.taskCounts is a meaningful slot ledger.
+    const { gameId: hg } = await creator.call('createGame', { title: 'Paused Holder Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: hg, scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'hp-s', order: 0, title: 'Stations', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'hp-a', title: 'Station A', type: 'field', triggerMode: 'radius',
+          coordinates: { ...TEAM }, geofenceRadiusMeters: 100,
+          difficulty: 2, estimatedMinutes: 3, pointValue: 60, maxConcurrentTeams: 1 },
+        { id: 'hp-b', title: 'Station B', type: 'field', triggerMode: 'radius',
+          coordinates: { ...TEAM }, geofenceRadiusMeters: 100,
+          difficulty: 2, estimatedMinutes: 3, pointValue: 60, maxConcurrentTeams: 1 },
+      ] }],
+    });
+    const { runId: hr, accessCode: hc } = await creator.call('launchRun', { gameId: hg });
+    const H = { ownerUid: OWNER, gameId: hg, runId: hr };
+    const hRunPath = `users/${OWNER}/games/${hg}/runs/${hr}`;
+    const holder = makeParty('pauseHolder');
+    await signInAnonymously(holder.auth);
+    await holder.call('joinRun', { code: hc, displayName: 'Standing There' });
+    const holderUid = holder.auth.currentUser.uid;
+    await creator.call('startTeams', { gameId: hg, runId: hr });
+
+    const held = (await holder.call('getMyTeamState', { code: hc }))?.team?.activeTaskId ?? null;
+    check('holder precondition: the team holds one of the two stations',
+      held === 'hp-a' || held === 'hp-b', String(held));
+    let hCounts = (await creator.getDocAt(hRunPath)).data?.taskCounts ?? {};
+    check('holder precondition: the held station reserved its slot (taskCounts == 1)',
+      (hCounts[held] ?? 0) === 1, JSON.stringify(hCounts));
+
+    const pausedHeld = await creator.call('setRunTaskStatus', { ...H, taskId: held, status: 'paused', reason: 'host stepped away' });
+    check('holder: the pause REPORTS the team standing at the stop instead of revoking it',
+      pausedHeld?.ok === true && pausedHeld?.teamsHolding === 1 && pausedHeld?.status === 'paused',
+      JSON.stringify(pausedHeld));
+
+    // THE STUCK-PLAYER BUG CLASS this asserts against: if the override were read on
+    // the completion path too, this team would be holding a task it can never finish.
+    const doneHeld = await holder.call('completeTask', { ...H, taskId: held, lat: TEAM.lat, lng: TEAM.lng });
+    check('holder: a team already holding a PAUSED task can still complete it',
+      doneHeld?.ok === true && doneHeld?.already !== true, JSON.stringify(doneHeld));
+    const hTeam = await creator.getDocAt(`${hRunPath}/teams/${holderUid}`);
+    check('holder: the completion was SCORED (the pause does not void the points)',
+      (hTeam.data?.score ?? 0) > 0, JSON.stringify(hTeam.data?.score));
+    hCounts = (await creator.getDocAt(hRunPath)).data?.taskCounts ?? {};
+    check('holder: the paused station released its slot (counter back to 0 — no leak)',
+      (hCounts[held] ?? 0) === 0, JSON.stringify(hCounts));
+
+    // ── C. The unwinnable-stage guard ────────────────────────────────────────
+    // requiredTaskCount 2 of 2: pausing EITHER task leaves the stage unable to
+    // yield what it requires. The organizer must learn that here, not through
+    // teams that silently dead-end in the field.
+    const { gameId: ug } = await creator.call('createGame', { title: 'Unwinnable Pause Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: ug, scoringPreset: 'time_only',
+      stages: [{ id: 'uw-s', order: 0, title: 'Both required', isFinal: true, requiredTaskCount: 2, tasks: [
+        { id: 'uw-a', title: 'Left', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        { id: 'uw-b', title: 'Right', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: ur } = await creator.call('launchRun', { gameId: ug });
+    const U = { ownerUid: OWNER, gameId: ug, runId: ur };
+    const uRunPath = `users/${OWNER}/games/${ug}/runs/${ur}`;
+
+    // This run has never had an override written, so `null` here is the full
+    // before-image — the comparison below is the literal "UNCHANGED" contract.
+    const uBefore = JSON.stringify((await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? null);
+    const uwErr = await expectError('unwinnable: pausing a task the stage cannot spare is refused',
+      creator.call('setRunTaskStatus', { ...U, taskId: 'uw-a', status: 'paused' }),
+      { codeIn: ['functions/failed-precondition'] });
+    check('unwinnable: the refusal is machine-readable (details.code === stageUnwinnable)',
+      uwErr?.details?.code === 'stageUnwinnable', JSON.stringify(uwErr?.details));
+    check('unwinnable: the refusal carries the counts the operator needs to decide',
+      uwErr?.details?.availableCount === 1 && uwErr?.details?.requiredCount === 2,
+      JSON.stringify(uwErr?.details));
+    const uAfter = JSON.stringify((await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? null);
+    check('unwinnable: the refused call left run.taskStatusOverrides UNCHANGED (nothing written)',
+      uAfter === uBefore, `${uBefore} → ${uAfter}`);
+
+    // …and the operator can still override the guard deliberately.
+    const uForced = await creator.call('setRunTaskStatus', {
+      ...U, taskId: 'uw-a', status: 'paused', force: true, reason: 'street closed by police',
+    });
+    check('unwinnable: force applies the change and STILL reports the dead end it created',
+      uForced?.ok === true && uForced?.status === 'paused' && uForced?.stageUnwinnable === true
+      && uForced?.availableCount === 1 && uForced?.requiredCount === 2,
+      JSON.stringify(uForced));
+    const uOverrides = (await creator.getDocAt(uRunPath)).data?.taskStatusOverrides ?? {};
+    check('unwinnable: the forced override is persisted on the run document',
+      uOverrides['uw-a'] === 'paused', JSON.stringify(uOverrides));
+
+    // ── The durable trail: taking a task out of play changes what every team in
+    //    the run can score, so it is audited like adjustTeamScore.
+    const pauseLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const statusEntries = (pauseLogs?.logs ?? []).filter((l) => l.actionType === 'task_status_changed');
+    const forcedEntry = statusEntries.find((l) => l.runId === ur && l.taskId === 'uw-a');
+    check('audit: the FORCED change is recorded, and recorded as forced',
+      forcedEntry?.forced === true && forcedEntry?.previousValue === 'active' && forcedEntry?.newValue === 'paused',
+      JSON.stringify(forcedEntry));
+    check('audit: the operator\'s reason rides along on the record',
+      forcedEntry?.reason === 'street closed by police', JSON.stringify(forcedEntry?.reason));
+    const plainEntry = statusEntries.find((l) => l.runId === lr && l.taskId === 'lp-near' && l.newValue === 'paused');
+    check('audit: an ordinary pause is recorded as NOT forced (the flag distinguishes them)',
+      plainEntry?.forced === false, JSON.stringify(plainEntry));
+  });
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════
   // Introspect the callables the emulator actually serves (from the built lib)

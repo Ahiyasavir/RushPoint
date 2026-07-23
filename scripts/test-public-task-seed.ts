@@ -105,6 +105,53 @@ for (const rel of SEED_SOURCES) {
     `${rel}: omits the area entirely when the rule yields none`);
 }
 
+// ─── The publish path itself (change: hidden-location-map-visibility) ─────────
+//
+// `publishGame` is the primary writer of `publicTasks/{id}`, and the change that
+// made hidden-location tasks publish an AREA is exactly the kind of change that
+// invites someone to "simplify" the writer by inlining a location decision back
+// into it. The document shape is assertable without an emulator, so it is
+// asserted here next to the seeders that write the same document.
+//
+// Anchored on the typed literal rather than on a path template — the publish path
+// builds its ref through FIRESTORE_PATHS.publicTask(), so the string
+// `publicTasks/` never appears in the file.
+{
+  const rel = 'functions/src/games/index.ts';
+  console.log(`\n▶ ${rel}`);
+  const src = readFileSync(join(root, rel), 'utf8');
+  const anchor = src.indexOf('const publicTask: PublicTask = {');
+  ok(anchor >= 0, `${rel}: the publicTasks document literal is present and locatable`);
+  if (anchor >= 0) {
+    const open = src.indexOf('{', anchor + 'const publicTask: PublicTask = '.length - 1);
+    let depth = 0, block = '';
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}') {
+        depth--;
+        if (depth === 0) { block = src.slice(open, i + 1); break; }
+      }
+    }
+    ok(block.length > 0, `${rel}: the document literal is brace-balanced and parseable`);
+    // The exact authored point must never reach a world-readable document.
+    ok(!/\bcoordinates\s*:/.test(block),
+      `${rel}: writes NO exact "coordinates" into the public document`);
+    // The area comes from the shared rule…
+    ok(/\bapproxLocation\b/.test(block),
+      `${rel}: writes the coarse "approxLocation" area`);
+    ok(/const\s+approxLocation\s*=\s*publicTaskLocation\s*\(\s*task\s*\)/.test(src),
+      `${rel}: derives the area with the shared publicTaskLocation() rule`);
+    // …and the field is omitted, never nulled, when the rule yields nothing.
+    ok(/\.\.\.\(\s*approxLocation\s*\?/.test(block),
+      `${rel}: omits the area entirely when the rule yields none`);
+    // …and the writer applies NO location policy of its own. A `hideLocation`
+    // test here would be a second copy of the rule, free to drift from the one in
+    // @rushpoint/shared that every other consumer obeys.
+    ok(!/hideLocation/.test(block),
+      `${rel}: applies no hideLocation branch of its own (one rule, not two)`);
+  }
+}
+
 console.log(`\n${failures.length === 0
   ? `✅ ALL ${passed} PUBLIC-TASK SEED-SHAPE ASSERTIONS PASSED`
   : `❌ ${failures.length} failure(s):\n   - ${failures.join('\n   - ')}`}`);

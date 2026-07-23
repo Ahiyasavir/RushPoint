@@ -23,6 +23,7 @@ import type {
   Trackable,
   CaptureZone,
   GameFile,
+  StationStatus,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -129,6 +130,21 @@ export interface RunTeamRow {
   finishedAt: string | null;
   /** Safe-zone latch: the team is soft-paused until it is verifiably back inside. */
   outOfBounds?: boolean;
+  // ── Attention signals (change: run-console-attention) ──
+  // Read-only projections consumed by `lib/teamAttention`. All optional: a row
+  // without them classifies as "no evidence", never as a false alarm.
+  /** `RunTeam.updatedAt` — last server write for this team; the idle clock. */
+  updatedAt?: string | null;
+  /** Latest expiry (epoch ms) across the wrong-answer retry lockouts, or null. */
+  answerLockoutUntil?: number | null;
+  /** `teamLocations/{teamId}.updatedAt` — GPS stream freshness, not a position. */
+  lastLocationAt?: string | null;
+  /**
+   * The team is one `startTeams` would hold back (change: held-team-visibility).
+   * A boolean, never a guardian's identity. Optional: a backend that predates the
+   * projection degrades to "not held" rather than to a false alarm.
+   */
+  heldForConsent?: boolean;
 }
 
 // ── Gallery ──
@@ -188,3 +204,16 @@ export const reviewStationSubmission = callable<{ ownerUid: string; gameId: stri
 export const adjustTeamScore       = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; delta: number; reason?: string }, { ok: boolean; newBonusPenalty: number }>('adjustTeamScore');
 // Live photo feed moderation (change: live-photo-feed): hide an item from the run's feed.
 export const hideFeedItem          = callable<{ ownerUid: string; gameId: string; runId: string; itemId: string }, { ok: boolean }>('hideFeedItem');
+// Live task availability (change: live-task-pause): take one task out of play for
+// THIS run, or put it back. Run scoped — the game template is never touched. A team
+// already holding the task keeps it (`teamsHolding` says how many that is). The
+// server refuses a change that would leave the owning stage unwinnable unless
+// `force` is set, answering with details.code === 'stageUnwinnable'.
+export const setRunTaskStatus      = callable<
+  { ownerUid: string; gameId: string; runId: string; taskId: string; status: StationStatus; reason?: string; force?: boolean },
+  {
+    ok: boolean; taskId: string; status: StationStatus; previousStatus: StationStatus;
+    noop: boolean; teamsHolding: number; availableCount: number; requiredCount: number;
+    stageUnwinnable: boolean;
+  }
+>('setRunTaskStatus');

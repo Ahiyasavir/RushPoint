@@ -335,6 +335,51 @@ describe('computeGameReadiness reports every blocking issue at once', () => {
     expect(codes).toContain('stageUnwinnable');
   });
 
+  // Stage winnability (change: stage-winnability). Exclusive groups shrink what a
+  // stage can yield — six tasks in three groups of two yield THREE — and readiness
+  // consulted only the unlock graph, so a game a product owner could not finish
+  // launched clean. This is the check that makes an ALREADY SAVED broken game
+  // announce itself the next time its Builder is opened.
+  it('reports a stage requiring more than its exclusive groups can yield', () => {
+    const g = game([stage({
+      requiredTaskCount: 6,
+      tasks: ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'].map((id) => readyTask({ id })),
+      exclusiveGroups: [
+        { id: 'g-a', taskIds: ['a1', 'a2'] },
+        { id: 'g-b', taskIds: ['b1', 'b2'] },
+        { id: 'g-c', taskIds: ['c1', 'c2'] },
+      ],
+    })]);
+    const issues = computeGameReadiness(g);
+    expect(issues.map((i) => i.code)).toContain('stageUnwinnable');
+    expect(issues.find((i) => i.code === 'stageUnwinnable')?.stageId).toBe('s1');
+    expect(canLaunchGame(g)).toBe(false);
+    expect(firstLaunchBlocker(g)?.code).toBe('stageUnwinnable');
+  });
+
+  it('accepts a count that fits under the exclusive group ceiling', () => {
+    const g = game([stage({
+      requiredTaskCount: 3,
+      tasks: ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'].map((id) => readyTask({ id })),
+      exclusiveGroups: [
+        { id: 'g-a', taskIds: ['a1', 'a2'] },
+        { id: 'g-b', taskIds: ['b1', 'b2'] },
+        { id: 'g-c', taskIds: ['c1', 'c2'] },
+      ],
+    })]);
+    expect(computeGameReadiness(g)).toEqual([]);
+  });
+
+  it('never blocks a grouped stage that leaves requiredTaskCount unset', () => {
+    // Unset means "every task", which the stage satisfies by ending once no task
+    // remains to do — the normal "pick one of these" shape must stay launchable.
+    const g = game([stage({
+      tasks: ['a1', 'a2'].map((id) => readyTask({ id })),
+      exclusiveGroups: [{ id: 'g-a', taskIds: ['a1', 'a2'] }],
+    })]);
+    expect(computeGameReadiness(g)).toEqual([]);
+  });
+
   it('orders issues by stage order then task order', () => {
     const g = game([
       stage({ id: 's1', order: 0, tasks: [readyTask({ id: 'a', type: 'quiz' }), readyTask({ id: 'b', type: 'numeric' })] }),

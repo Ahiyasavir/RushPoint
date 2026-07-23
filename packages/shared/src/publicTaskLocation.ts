@@ -8,6 +8,11 @@
 // the game-file export). This module is the single place that decides what a public
 // task is allowed to say about where it is.
 //
+// (change: hidden-location-map-visibility) It no longer says anything DIFFERENT
+// about a hideLocation task: the exact point is withheld from every task alike,
+// and the ~1 km area is granted to every task alike. The rationale, and why the
+// participant-facing secrecy is untouched by it, is on `publicTaskLocation` below.
+//
 // WHY A GRID SNAP AND NOT RANDOM JITTER
 // Jitter (`lat + (random - 0.5) * delta`) is not a privacy control against an
 // observer who can make the publisher republish: every republish is an independent
@@ -24,9 +29,8 @@
 // input, so each output axis is within half a cell of its input axis and a reader
 // learns the cell and nothing finer.
 // WHAT IT DOES NOT GUARANTEE: k-anonymity. A task alone in its cell is still
-// narrowed to that cell. That is an acceptable trade for a task whose location is
-// not the puzzle — and for a task whose location IS the puzzle we publish nothing
-// at all (see publicTaskLocation).
+// narrowed to that cell. That is the accepted trade for EVERY published task,
+// hidden-location ones included (see publicTaskLocation).
 
 import type { GeoPoint } from './types';
 import { isValidCoord } from './geo';
@@ -79,12 +83,32 @@ function usableCoord(c: { lat?: unknown; lng?: unknown } | undefined | null): c 
 /**
  * THE WRITER'S RULE — what `publishGame` may write as a public task's location.
  *
- * Returns `undefined` (⇒ omit the field entirely) when the task hides its location,
- * has no location, or is not usably placed. Returns a coarsened area otherwise.
+ * Returns a coarsened ~1 km area for any usably placed task, and `undefined`
+ * (⇒ omit the field entirely) when the task is `locationless` or is not usably
+ * placed. Nothing else is consulted.
  *
- * The `hideLocation` exclusion lives HERE, at the write, and not in the map
- * renderer, because a client-side filter protects only readers who use our
- * renderer — and `publicTasks` is readable by `curl`.
+ * `hideLocation` IS NOT CONSULTED (change: hidden-location-map-visibility).
+ * A hidden-location task gets the same area as any other, so a creator can see
+ * their own treasure hunt on their own mission-library and gallery maps — the
+ * exclusion made a hunt-shaped game invisible to the person who wrote it.
+ *
+ * WHY THE PUZZLE SURVIVES THIS. Two different audiences read two different
+ * payloads, produced by two different code paths:
+ *   - The CREATOR, browsing a world-readable projection, gets this: a grid cell
+ *     of roughly one kilometre. That is a neighbourhood, not a spot, and the
+ *     game's own public gallery entry, title, description and promo page already
+ *     name the neighbourhood. It cannot be sharpened by repeated observation,
+ *     because the snap is a pure function of the input.
+ *   - The PLAYER gets `sanitizeTaskForParticipant` (functions/src/runs/
+ *     sanitizeTask.ts), which SEALS a `hideLocation` task until the server has
+ *     confirmed the team physically arrived, and which strips `coordinates`,
+ *     `geofenceRadiusMeters` and `smart.stationCoords` — coarse or exact, no
+ *     location reaches the device. THAT is the control that makes the location a
+ *     puzzle, and this function is not it. Neither may be relaxed on the grounds
+ *     that the other exists.
+ *
+ * What still never happens: the EXACT authored coordinate is never returned here,
+ * for any task, so it never reaches a world-readable document.
  */
 export function publicTaskLocation(task: {
   hideLocation?: boolean;
@@ -92,9 +116,6 @@ export function publicTaskLocation(task: {
   coordinates?: { lat?: unknown; lng?: unknown };
 }): GeoPoint | undefined {
   if (!task) return undefined;
-  // The location is the puzzle. Publish nothing — not even a fuzzed pin, which
-  // would still name the neighbourhood the player is supposed to deduce.
-  if (task.hideLocation) return undefined;
   // A locationless task has no map presence by definition.
   if (task.locationless) return undefined;
   if (!usableCoord(task.coordinates)) return undefined;

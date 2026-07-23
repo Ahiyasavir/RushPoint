@@ -62,11 +62,18 @@ ok(sectionApplies('rules', { ...fresh, type: 'survey' }, 1) === true, 'survey ta
 const locatedField: Task = { ...fresh, type: 'field', triggerMode: 'radius', coordinates: { lat: 31.7, lng: 35.2 } };
 ok(sectionApplies('rules', locatedField, 1) === true, 'a located task offers rules (hidden location)');
 const anywhere: Task = { ...fresh, type: 'field', triggerMode: 'locationless', locationless: true };
-ok(sectionApplies('rules', anywhere, 1) === false, 'a locationless check in task has no rules to offer');
+// pause-clock-tasks: the rules section is now offered on EVERY task, because the
+// pause-clock toggle lives there and applies to any type. The presence gate and
+// the hidden-location clue inside it still render only where they apply.
+ok(sectionApplies('rules', anywhere, 1) === true, 'a locationless task still offers rules (the pause-clock toggle)');
 ok(defaultOpenSections({ ...locatedField, hideLocation: true }).rules === true, 'rules auto expand when the location is hidden');
 ok(defaultOpenSections({ ...fresh, type: 'quiz', requirePresence: true }).rules === true, 'rules auto expand when presence is required');
+ok(defaultOpenSections({ ...fresh, type: 'survey', pausesTimer: true }).rules === true, 'rules auto expand when the clock is paused');
+ok(defaultOpenSections(fresh).rules === false, 'rules stay collapsed on a fresh task');
 ok(sectionSummary('rules', { ...locatedField, hideLocation: true }) === 1, 'rules summary counts hidden location');
 ok(sectionSummary('rules', { ...locatedField, hideLocation: true, requirePresence: true }) === 2, 'rules summary counts both toggles');
+ok(sectionSummary('rules', { ...fresh, type: 'survey', pausesTimer: true }) === 1, 'rules summary counts the paused clock');
+ok(sectionSummary('rules', fresh) === 0, 'a task with no rules configured shows no badge');
 
 // ── advanced ─────────────────────────────────────────────────────────────────
 ok(sectionApplies('advanced', fresh, 1) === true, 'advanced always applies');

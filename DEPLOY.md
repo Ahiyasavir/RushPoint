@@ -111,12 +111,39 @@ npm run deploy:hosting   # builds creator-web + play-web, deploys both Hosting s
 npm run deploy:all
 ```
 
+> ⚠️ **Deploy indexes FIRST, and let them finish BUILDING, before the functions go out.**
+> `deploy:backend` is a single `firebase deploy --only functions,firestore:rules,firestore:indexes,storage`,
+> which does not wait for an index to leave the *Building* state. The retention sweep
+> (`sweepExpiredRuns`, `functions/src/maintenance/index.ts`) needs the `runs` **COLLECTION_GROUP**
+> composite (`status` ASC, `createdAt` ASC) from `firestore.indexes.json`. That query and the
+> finished-run query live in the **same** function, and the missing-index error throws before either
+> result is used — so if functions ship first, **no run PII is pruned at all**, not even on the
+> finished-run path. Sequence it as:
+>
+> ```bash
+> firebase deploy --only firestore:indexes    # then wait: Firestore console → Indexes → all "Enabled"
+> npm run deploy:backend
+> ```
+
+`firestore.rules` and `storage.rules` both changed in this release (client hard-delete of a game is
+now denied, and the Storage prefixes/content-types were tightened). They ship with
+`deploy:backend` — the privacy fixes are **not** in effect until that deploy lands.
+
 - `deploy:backend` runs the `predeploy` hook in `firebase.json` (builds `@rushpoint/shared` then
   bundles the functions with esbuild — `@rushpoint/shared` is inlined, so Firebase never tries to
   install it from npm).
 - After it finishes you'll have:
   - Creator console: `https://rushpoint-creator.web.app`
   - Participant app: `https://rushpoint-play.web.app`
+
+> ⚠️ **The participant legal pages need a HOSTING deploy — a `git push` is not enough.**
+> `/terms` and `/privacy` on the participant origin are client-side routes inside the play-web
+> bundle (`resolveLegalPath()` in `apps/play-web/src/lib/playRoute.ts` → lazy
+> `screens/LegalScreen.tsx`), served through the `"source": "**" → /index.html` rewrite on the
+> **play** Hosting target in `firebase.json`. Until `npm run deploy:hosting` (or `deploy:all`) ships
+> a fresh `apps/play-web/dist`, those URLs still resolve to the OLD bundle — which had no legal
+> route and fell through to the game. The same applies to `/creator/terms` and `/creator/privacy`
+> on the creator target.
 
 ---
 
@@ -182,8 +209,13 @@ Just run `npm run deploy:all` (or only `:backend` / `:hosting`). Before deployin
 running the gates locally:
 
 ```bash
-npm run typecheck && npm run creator:build && npm run play:build && npm run e2e
+npm run verify            # typecheck · lint · test · creator:build · play:build · bundle:budget · i18n:check:strict
+npm run verify:emulator   # e2e · Firestore rules · 8-team simulate · adversarial simulate (boots its own suite)
 ```
+
+Run the two **sequentially, never concurrently** — both invoke `shared:build`, which rewrites
+`packages/shared/dist` in place. If you touched `storage.rules`, also run the Storage-rules suite
+(`npm run test:rules:storage`) against a running emulator; it is not part of either gauntlet.
 
 ## 10. Self-hosted events — crash-safe emulator backups
 
@@ -201,3 +233,97 @@ on a clean Ctrl+C**. A power loss or hard crash would otherwise lose the whole g
 (one that carries `firebase-export-metadata.json`, skipping an incomplete newest one) into
 `.firebase/emulator-data`; then start the emulator to import it. See
 [PLAYTEST.md](PLAYTEST.md) for the full runbook.
+
+---
+
+## 11. Runbook — publicTasks legacy-coordinate backfill (privacy sweep)
+
+**Symptoms that mean you need this:** the creator task-library map is empty and says no task has a
+published area, and/or `publicTasks` documents still carry an exact `coordinates` field.
+
+**What it is.** Before the `task-library-map-view` change, `publishGame` copied a task's **exact**
+authored `coordinates` into `publicTasks/{gameId}_{taskId}` — a collection whose Firestore rule is
+`allow read: if true`, hidden-location tasks included. The fix changed only what is written *from
+then on*. Documents published earlier still hold the exact point and hold **no** coarse
+`approxLocation` — which is both a location-privacy leak in a world-readable collection and the
+reason those tasks draw no circle on the task-library map.
+
+`backfillPublicTaskCoordinatesNow` (admin-only, in `functions/src/maintenance/index.ts`) is the
+one-time sweep that repairs them: it deletes `coordinates` and writes the coarse `approxLocation`
+today's code would have written — or nothing at all for a `hideLocation` task. The operator entry
+point is `scripts/backfill-public-tasks.mjs`.
+
+**Properties you can rely on:**
+- **Dry-run is the default.** Nothing is written unless you pass `--execute`.
+- **Idempotent.** Each page skips documents that already conform (`hasLegacyCoordinates`), and a
+  repaired document conforms — so a second full run repairs `0`.
+- **Resumable.** Every page prints its cursor; resume with `--start-after=<cursor>`. Re-running from
+  the beginning is equally safe, just slower.
+- **Bounded.** A malformed response, a cursor that stops advancing, or a server that never says
+  "done" aborts with a non-zero exit instead of looping forever.
+- **Non-zero exit on failure**, so it can be used from automation.
+
+### A. Local emulator (rehearse here first)
+
+```bash
+# 1. the emulator must be running (npm run dev:all / npm run playtest)
+npm run backfill:public-tasks                 # DRY-RUN — reports what it WOULD repair
+npm run backfill:public-tasks -- --execute    # actually repair
+npm run backfill:public-tasks -- --execute    # again: must report repaired: 0
+```
+
+### B. Real project
+
+One-time prerequisites:
+
+1. A **service-account JSON** for the project (Firebase Console → Project settings → Service
+   accounts → *Generate new private key*). It is what signs the short-lived admin custom token; no
+   persistent admin claim is granted to anyone.
+2. The project's **web API key** (Project settings → General → Web API Key). The client SDK needs it
+   to exchange that custom token for an ID token.
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+export RUSHPOINT_WEB_API_KEY=AIza...
+
+# 1. DRY-RUN first — read-only, no confirmation flag needed
+npm run backfill:public-tasks -- --project=rushpoint-pwa-7daaa
+
+# 2. Execute. --confirm-project must EXACTLY equal --project (retyping it is the guard);
+#    without it the script refuses and exits 1.
+npm run backfill:public-tasks -- --project=rushpoint-pwa-7daaa \
+    --execute --confirm-project=rushpoint-pwa-7daaa
+```
+
+The script prints a boxed banner naming the target (`LOCAL EMULATOR` vs `REAL PROJECT (PRODUCTION
+DATA)`), the project id and the mode **before** it does anything, then one line per page:
+
+```
+[backfill] page   1  scanned   500  repaired    12  skipped   488  cleared     3  orphaned     0  cursor demo-game_task-7
+```
+
+…and a final summary: pages · scanned · repaired · skipped · cleared · orphaned.
+
+If it dies mid-sweep (network, timeout), re-run with the last printed cursor:
+
+```bash
+npm run backfill:public-tasks -- --project=<id> --execute --confirm-project=<id> \
+    --start-after=<last cursor printed>
+```
+
+### C. Verify success
+
+1. **Re-run the sweep.** `repaired: 0` on a full pass is the primary proof that no legacy document
+   remains (it scans every `publicTasks` doc — there is no "field exists" query in Firestore, so
+   scanning *is* the check).
+2. **Spot-check a document** in the Firestore console (or `--project` dry-run output): a repaired
+   `publicTasks/{id}` has **no** `coordinates` field, and either an `approxLocation` (coarse) or,
+   for a hidden-location task, no location field at all.
+3. **Look at the map.** Open the creator task library — published tasks now draw their coarse
+   circles instead of "no task has a published area".
+
+### D. Tuning
+
+`--limit=N` (1…1000, default 500) documents per page · `--max-pages=N` (default 200) bound per
+invocation · `RUSHPOINT_BACKFILL_PROJECT` as an alternative to `--project` (it still requires
+`--confirm-project`) · `RUSHPOINT_FUNCTIONS_REGION` (default `us-central1`).

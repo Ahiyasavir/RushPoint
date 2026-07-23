@@ -239,8 +239,14 @@ const gstage = (id: string, taskIds: string[], groups?: GroupLike[], requiredTas
     gstage('B', ['u1', 'u2'], [g('gb', 'u1', 'u2')], 2),
   ];
   const after = moveTaskBetweenStages(before, 'A', 't3', 'B');
+  // Stage winnability (change: stage-winnability): the clamp now runs against what
+  // a stage can YIELD, not its raw task count. B ends up [u1,u2,t3] with u1/u2 still
+  // an exclusive pair, so it yields 2 — and a required count that MEETS the ceiling
+  // collapses to `undefined`, the canonical "everything attainable" value (the stage
+  // still ends via applyStageCompletion's allTerminal arm). With no groups the
+  // ceiling equals the task count, so nothing about the old behaviour moves.
   check('both stages are still requiredTaskCount-clamped with groups present',
-    after[0].requiredTaskCount === undefined && after[1].requiredTaskCount === 2,
+    after[0].requiredTaskCount === undefined && after[1].requiredTaskCount === undefined,
     `${after[0].requiredTaskCount} / ${after[1].requiredTaskCount}`);
 }
 {

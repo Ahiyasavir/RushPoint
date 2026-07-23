@@ -7,9 +7,13 @@
 // one pass over one state object, so they can never drift apart.
 import { describe, it, expect } from 'vitest';
 import {
-  ALL_PANEL_IDS, GROUP_ORDER, PANEL_GROUP, DEFAULT_GROUP_OPEN,
-  buildRunConsolePlan, planPanels, planHasPanel, readGroupState, writeGroupState,
-  type RunConsoleState, type PanelId, type GroupId,
+  ALL_PANEL_IDS, GROUP_ORDER, PANEL_GROUP, SECTION_ORDER, DEFAULT_SECTION,
+  PANEL_PRIORITY, panelPriority, panelWeight, panelSpan,
+  buildRunConsolePlan, planPanels, planHasPanel,
+  panelPlacement, buildRunConsoleSections, pinnedPanels, resolveSection, sectionStateKey,
+  assignPanelColumns, buildPinnedLayout, consoleColumnCount, sectionColumnCount,
+  gridTemplateClass, columnSpanClass,
+  type RunConsoleState, type PanelId, type GroupId, type SectionId, type ColumnCount,
 } from '../runConsoleLayout';
 import { RUN_ACTION_IDS, classifyRunAction, runActionVariant, parseScoreDelta } from '../runConsoleActions';
 import { SHARE_ARTIFACT_IDS, buildShareArtifacts, type ShareArtifactId } from '../runShareArtifacts';
@@ -71,9 +75,9 @@ describe('buildRunConsolePlan — catalogue totality', () => {
       'alerts', 'analytics', 'broadcast', 'chat', 'feed', 'feedback', 'finalStandings',
       'flashMission', 'heatmap', 'hotZone', 'joinShare', 'liveMap', 'liveStandings',
       'photoReview', 'runSummary', 'shareScreens', 'staffInvite', 'startTeams',
-      'stationQr', 'survey', 'teams', 'trackables', 'zones',
+      'stationQr', 'survey', 'taskAvailability', 'teams', 'trackables', 'zones',
     ]);
-    expect(ALL_PANEL_IDS.length).toBe(23);
+    expect(ALL_PANEL_IDS.length).toBe(24);
   });
 
   it('renders every catalogued panel somewhere across the three run statuses', () => {
@@ -223,36 +227,264 @@ describe('planPanels', () => {
   });
 });
 
-describe('readGroupState / writeGroupState', () => {
-  it('round trips the open groups', () => {
-    const state = { ...DEFAULT_GROUP_OPEN, moderation: true, gameMechanics: true };
-    expect(readGroupState(writeGroupState(state), DEFAULT_GROUP_OPEN)).toEqual(state);
+// ── Section navigation (change: run-console-density) ────────────────────────
+// The accordions are gone: the console is a Builder style rail plus ONE visible
+// section. The property that replaces "is it expanded?" is REACHABILITY — a
+// panel that lands in no section is not merely collapsed, it is invisible and
+// unreachable, which is strictly worse than the scrolling it replaced.
+describe('panelPlacement — every panel is reachable in exactly one place', () => {
+  it('places every catalogued panel either pinned or in exactly one section', () => {
+    const seen = new Map<PanelId, string>();
+    for (const id of ALL_PANEL_IDS) {
+      const where = panelPlacement(id);
+      expect(where, id).toBeDefined();
+      expect(where === 'pinned' || SECTION_ORDER.includes(where as SectionId), id).toBe(true);
+      expect(seen.has(id)).toBe(false);
+      seen.set(id, where);
+    }
+    expect(seen.size).toBe(ALL_PANEL_IDS.length);
   });
 
-  it('ignores an unknown group id in stored data', () => {
-    const raw = JSON.stringify({ moderation: true, somethingRemoved: true });
-    const parsed = readGroupState(raw, DEFAULT_GROUP_OPEN) as Record<string, boolean>;
-    expect(parsed.moderation).toBe(true);
-    expect(parsed.somethingRemoved).toBeUndefined();
-  });
-
-  it('falls back to the defaults on malformed or missing data without throwing', () => {
-    for (const raw of ['', '{', 'null', '[]', '"nope"', null, undefined]) {
-      expect(readGroupState(raw, DEFAULT_GROUP_OPEN), String(raw)).toEqual(DEFAULT_GROUP_OPEN);
+  it('pins exactly the primary group and sections everything else', () => {
+    for (const id of ALL_PANEL_IDS) {
+      const expected = PANEL_GROUP[id] === 'primary' ? 'pinned' : PANEL_GROUP[id];
+      expect(panelPlacement(id), id).toBe(expected);
     }
   });
 
-  it('keeps a non boolean stored value from corrupting a group', () => {
-    const parsed = readGroupState(JSON.stringify({ moderation: 'yes' }), DEFAULT_GROUP_OPEN);
-    expect(parsed.moderation).toBe(DEFAULT_GROUP_OPEN.moderation);
+  it('derives the section order from the group order with the pinned group removed', () => {
+    expect(SECTION_ORDER).toEqual(GROUP_ORDER.filter((g) => g !== 'primary'));
+    expect(SECTION_ORDER).not.toContain('primary' as GroupId);
+    expect(new Set(SECTION_ORDER).size).toBe(SECTION_ORDER.length);
+  });
+});
+
+describe('buildRunConsoleSections / pinnedPanels', () => {
+  it('covers every visible panel exactly once across the pinned zone and the sections', () => {
+    for (const status of ['draft', 'live', 'finished'] as const) {
+      const plan = buildRunConsolePlan(fullState(status));
+      const visible = plan.groups.flatMap((g) => g.panels);
+      const rendered = [
+        ...pinnedPanels(plan),
+        ...buildRunConsoleSections(plan).flatMap((s) => s.panels),
+      ];
+      expect([...rendered].sort(), status).toEqual([...visible].sort());
+      expect(new Set(rendered).size, status).toBe(rendered.length);
+    }
   });
 
-  it('opens the teams group by default and collapses the rest', () => {
-    expect(DEFAULT_GROUP_OPEN.teamsAndScores).toBe(true);
-    expect(DEFAULT_GROUP_OPEN.gameMechanics).toBe(false);
-    expect(DEFAULT_GROUP_OPEN.moderation).toBe(false);
-    expect(DEFAULT_GROUP_OPEN.shareAndScreens).toBe(false);
-    expect(DEFAULT_GROUP_OPEN.afterTheRun).toBe(false);
+  it('lists the sections in the section order and never an empty one', () => {
+    const sections = buildRunConsoleSections(buildRunConsolePlan(emptyState('live')));
+    const ids = sections.map((s) => s.id);
+    expect(ids).toEqual(SECTION_ORDER.filter((id) => ids.includes(id)));
+    for (const s of sections) expect(s.panels.length, s.id).toBeGreaterThan(0);
+    // Nothing submitted and nothing to report: those sections do not exist yet.
+    expect(ids).not.toContain('moderation');
+    expect(ids).not.toContain('afterTheRun');
+  });
+
+  it('carries the same summary the plan computed, so a rail badge cannot drift', () => {
+    const plan = buildRunConsolePlan(fullState('live'));
+    const moderation = buildRunConsoleSections(plan).find((s) => s.id === 'moderation');
+    expect(moderation?.summary.pendingPhotos).toBe(5);
+    expect(moderation?.summary.unreadChats).toBe(2);
+    expect(moderation?.summary.panelCount).toBe(moderation?.panels.length);
+  });
+
+  it('never puts a pinned panel in a section', () => {
+    const plan = buildRunConsolePlan(fullState('live'));
+    const sectioned = buildRunConsoleSections(plan).flatMap((s) => s.panels);
+    for (const id of PRIMARY_PANELS) expect(sectioned, id).not.toContain(id);
+  });
+});
+
+describe('resolveSection', () => {
+  const live = buildRunConsoleSections(buildRunConsolePlan(fullState('live')));
+
+  it('defaults to the section an organizer needs during an incident', () => {
+    expect(DEFAULT_SECTION).toBe('teamsAndScores');
+    expect(resolveSection(live, null)).toBe('teamsAndScores');
+    expect(resolveSection(live, undefined)).toBe('teamsAndScores');
+  });
+
+  it('honours a valid stored selection', () => {
+    expect(resolveSection(live, 'moderation')).toBe('moderation');
+  });
+
+  it('falls back to the default rather than showing nothing for a stale or junk id', () => {
+    for (const bad of ['', 'primary', 'somethingRemoved', '{']) {
+      expect(resolveSection(live, bad), bad).toBe('teamsAndScores');
+    }
+  });
+
+  it('falls back to the first available section when the default is not rendered', () => {
+    const finished = buildRunConsoleSections(buildRunConsolePlan({
+      ...fullState('finished'), hasLeaderboard: false, teamCount: 0,
+    }));
+    const resolved = resolveSection(finished, 'gameMechanics');
+    expect(finished.map((s) => s.id)).toContain(resolved);
+  });
+
+  it('returns null only when there is no section at all', () => {
+    expect(resolveSection([], 'moderation')).toBeNull();
+  });
+
+  it('namespaces the stored selection per run', () => {
+    expect(sectionStateKey('run1')).not.toBe(sectionStateKey('run2'));
+    expect(sectionStateKey('run1')).toContain('run1');
+  });
+});
+
+// ── Column placement (change: run-console-density) ───────────────────────────
+describe('panel priority / weight / span catalogue', () => {
+  it('ranks exactly the catalogued panels, once each', () => {
+    expect([...PANEL_PRIORITY].sort()).toEqual([...ALL_PANEL_IDS].sort());
+    expect(new Set(PANEL_PRIORITY).size).toBe(PANEL_PRIORITY.length);
+  });
+
+  it('gives every catalogued panel a positive weight and a legal span', () => {
+    for (const id of ALL_PANEL_IDS) {
+      expect(panelWeight(id), id).toBeGreaterThan(0);
+      expect([1, 2], id).toContain(panelSpan(id));
+    }
+  });
+
+  it('ranks an incident control ahead of anything consulted after the run', () => {
+    for (const late of ['runSummary', 'analytics', 'heatmap', 'feedback', 'survey'] as PanelId[]) {
+      expect(panelPriority('alerts'), late).toBeLessThan(panelPriority(late));
+      expect(panelPriority('teams'), late).toBeLessThan(panelPriority(late));
+    }
+  });
+
+  it('is total over an unknown id instead of throwing or dropping it', () => {
+    const unknown = 'panelAddedByALaterLane' as PanelId;
+    expect(panelPriority(unknown)).toBe(PANEL_PRIORITY.length);
+    expect(panelWeight(unknown)).toBeGreaterThan(0);
+    expect(panelSpan(unknown)).toBe(1);
+  });
+});
+
+describe('assignPanelColumns', () => {
+  it('places every catalogued panel exactly once at every column count', () => {
+    for (const columns of [1, 2, 3] as ColumnCount[]) {
+      const flat = assignPanelColumns(ALL_PANEL_IDS, columns).columns.flat();
+      expect([...flat].sort(), String(columns)).toEqual([...ALL_PANEL_IDS].sort());
+      expect(new Set(flat).size, String(columns)).toBe(ALL_PANEL_IDS.length);
+    }
+  });
+
+  it('leaves the phone layout exactly as the plan produced it', () => {
+    const panels = planPanels(buildRunConsolePlan(fullState('live')), 'primary');
+    const layout = assignPanelColumns(panels, 1);
+    expect(layout.columns).toEqual([panels]);
+    expect(layout.gridColumns).toBe(1);
+    expect(assignPanelColumns(ALL_PANEL_IDS, 1).columns).toEqual([ALL_PANEL_IDS]);
+  });
+
+  it('is deterministic and stable', () => {
+    const a = assignPanelColumns(ALL_PANEL_IDS, 3);
+    const b = assignPanelColumns(ALL_PANEL_IDS, 3);
+    expect(a).toEqual(b);
+  });
+
+  it('never makes more lanes than panels or than the requested column count', () => {
+    expect(assignPanelColumns(['teams'], 3).columns.length).toBe(1);
+    expect(assignPanelColumns(['teams', 'alerts'], 3).columns.length).toBe(2);
+    expect(assignPanelColumns(ALL_PANEL_IDS, 2).columns.length).toBe(2);
+    for (const layout of [assignPanelColumns(ALL_PANEL_IDS, 3)]) {
+      for (const lane of layout.columns) expect(lane.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('produces no lane at all for an empty panel list', () => {
+    const layout = assignPanelColumns([], 3);
+    expect(layout.columns).toEqual([]);
+    expect(layout.spans).toEqual([]);
+    expect(layout.gridColumns).toBe(1);
+  });
+
+  it('puts the highest priority panel at the top of the first lane', () => {
+    const layout = assignPanelColumns(['survey', 'alerts', 'analytics'], 3);
+    expect(layout.columns[0][0]).toBe('alerts');
+  });
+
+  it('gives a lane holding the wide live map a span of two and sums the spans', () => {
+    const layout = assignPanelColumns(['liveMap', 'broadcast', 'stationQr'], 3);
+    const mapLane = layout.columns.findIndex((lane) => lane.includes('liveMap'));
+    expect(layout.spans[mapLane]).toBe(2);
+    for (let i = 0; i < layout.spans.length; i++) {
+      if (i !== mapLane) expect(layout.spans[i]).toBe(1);
+    }
+    expect(layout.gridColumns).toBe(layout.spans.reduce((a, b) => a + b, 0));
+  });
+
+  it('places an id it has never heard of exactly once, at the tail', () => {
+    const unknown = 'panelAddedByALaterLane' as PanelId;
+    const layout = assignPanelColumns(['alerts', unknown, 'teams'], 2);
+    const flat = layout.columns.flat();
+    expect(flat.filter((p) => p === unknown).length).toBe(1);
+    expect([...flat].sort()).toEqual(['alerts', 'teams', unknown].sort());
+  });
+});
+
+describe('buildPinnedLayout', () => {
+  it('leads with the join card while nobody has joined and demotes it once teams are in', () => {
+    const plan = buildRunConsolePlan(emptyState('live'));
+    const before = buildPinnedLayout(plan, 3, { teamCount: 0 });
+    expect(before.columns[0][0]).toBe('joinShare');
+
+    const busy = buildRunConsolePlan(fullState('live'));
+    const during = buildPinnedLayout(busy, 3, { teamCount: 6 });
+    expect(during.columns[0][0]).toBe('alerts');
+    // Demoted, never removed: a late joiner can arrive at any moment.
+    expect(during.columns.flat()).toContain('joinShare');
+  });
+
+  it('lays out only the pinned panels', () => {
+    const plan = buildRunConsolePlan(fullState('live'));
+    const flat = buildPinnedLayout(plan, 3, { teamCount: 6 }).columns.flat();
+    expect([...flat].sort()).toEqual([...pinnedPanels(plan)].sort());
+  });
+
+  it('collapses to one lane on a phone, in the plan order', () => {
+    const plan = buildRunConsolePlan(fullState('live'));
+    const layout = buildPinnedLayout(plan, 1, { teamCount: 6 });
+    expect(layout.columns).toEqual([pinnedPanels(plan)]);
+  });
+});
+
+describe('consoleColumnCount / sectionColumnCount', () => {
+  it('is one column on a phone, whatever else is true', () => {
+    expect(consoleColumnCount({ medium: false, wide: false })).toBe(1);
+    // A hook that has not resolved yet reports false for both: still a phone.
+    expect(consoleColumnCount({ medium: false, wide: true })).toBe(1);
+  });
+
+  it('widens with the viewport', () => {
+    expect(consoleColumnCount({ medium: true, wide: false })).toBe(2);
+    expect(consoleColumnCount({ medium: true, wide: true })).toBe(3);
+  });
+
+  it('gives the section pane one lane less than the full width zone, never zero', () => {
+    expect(sectionColumnCount(1)).toBe(1);
+    expect(sectionColumnCount(2)).toBe(1);
+    expect(sectionColumnCount(3)).toBe(2);
+  });
+});
+
+describe('grid class lookup', () => {
+  it('returns a static, interpolation free class for every reachable width', () => {
+    for (const n of [1, 2, 3, 4, 5, 99]) {
+      const cls = gridTemplateClass(n);
+      expect(cls, String(n)).toBeTruthy();
+      expect(cls, String(n)).not.toContain('${');
+      expect(cls).toContain('grid-cols-1');
+    }
+    for (const span of [1, 2, 3]) {
+      expect(columnSpanClass(span), String(span)).not.toContain('${');
+    }
+    expect(columnSpanClass(1)).toBe('');
+    expect(columnSpanClass(2)).toContain('col-span-2');
   });
 });
 
@@ -267,6 +499,15 @@ describe('classifyRunAction', () => {
   it('treats ending the run and rewriting a score as destructive', () => {
     expect(classifyRunAction('finalizeRun')).toBe('destructive');
     expect(classifyRunAction('adjustTeamScore')).toBe('destructive');
+  });
+
+  // Taking a task out of play (change: live-task-pause) is reversible, but it
+  // removes a scoring opportunity from every team not yet at the stop; putting it
+  // back only ever adds one.
+  it('treats taking a task out of play as cautionary and restoring it as routine', () => {
+    expect(classifyRunAction('pauseTask')).toBe('cautionary');
+    expect(classifyRunAction('closeTask')).toBe('cautionary');
+    expect(classifyRunAction('resumeTask')).toBe('routine');
   });
 
   it('treats skipping, hiding and deactivating as cautionary', () => {

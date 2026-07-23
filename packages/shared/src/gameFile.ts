@@ -154,6 +154,9 @@ export const EXPORTED_TASK_KEYS = [
   'orderItems', 'surveyChoices', 'numericAnswer', 'numericTolerance',
   'geofenceRadiusMeters', 'requirePresence', 'steps', 'media', 'releaseAt',
   'releaseAfterMinutes', 'expiresAfterMinutes', 'unlockAfterTaskIds', 'tags',
+  // pause-clock-tasks: pure authorship (the run-side `excludedMs` lives on the
+  // team record, not here), so it round trips like any other authored flag.
+  'pausesTimer',
 ] as const satisfies readonly (keyof Task)[];
 
 /** `currentTeamCount` is, in the type's own words, a "runtime counter maintained
@@ -365,6 +368,9 @@ const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   locationless: 'boolean',
   hideLocation: 'boolean',
   requirePresence: 'boolean',
+  // pause-clock-tasks: a boolean or nothing. A file saying `"yes"` is REFUSED by
+  // name here rather than coerced — the flag decides how a whole run is timed.
+  pausesTimer: 'boolean',
   smart: 'object',
   coordinates: 'object',
 };
@@ -646,6 +652,17 @@ export function parseGameFile(input: unknown): ParsedGameFile {
         if (typeof v !== 'number' || !Number.isFinite(v)) {
           errors.push(`${tLabel}: ${numField} must be a number.`);
         }
+      }
+
+      // Expected duration (change: task-duration-defaults) is OPTIONAL — absent means
+      // the Builder derives the per-interaction default — so it is range-checked here
+      // rather than required above. TASK_FIELD_TYPES already refuses a non-number;
+      // this refuses NaN/Infinity (which would NaN the whole run's speed bonus) and a
+      // negative value (which would shrink the expected route total below zero).
+      if (task.expectedDurationMinutes !== undefined
+        && typeof task.expectedDurationMinutes === 'number'
+        && (!Number.isFinite(task.expectedDurationMinutes) || task.expectedDurationMinutes < 0)) {
+        errors.push(`${tLabel}: expectedDurationMinutes must be a finite, non-negative number.`);
       }
 
       // Optional fields whose TYPE was previously trusted. A `5` where a list of

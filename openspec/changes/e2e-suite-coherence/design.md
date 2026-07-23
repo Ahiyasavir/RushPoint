@@ -136,6 +136,47 @@ is invoked twice by the new safe-zone block (denied as participant, accepted as 
 scenario is required**, and the `EXEMPT` map stays empty, which is the only state that means 100 %
 coverage.
 
+### D6b — coverage restoration: `setRunTaskStatus` (change: live-task-pause)
+
+D6 was true when it was written and is **stale now**: `live-task-pause` merged into
+`functions/src/index.ts` after that arithmetic was done, adding `setRunTaskStatus`. Re-running the
+count against the callables actually re-exported from `functions/src/index.ts` leaves exactly one
+name with no invocation anywhere in the suite — `setRunTaskStatus` — which means the coverage guard
+would have failed the whole run on its own, before any behavior was tested. `clearTeamOutOfBounds`
+was **re-verified rather than assumed**: it is invoked twice by the safe-zone scenario (denied as a
+participant, accepted as the owner) and its `{ ok, overrideUntil }` shape matches the callable.
+`skipStage` remains covered only through an authz-denial row, which registers because `latencySamples`
+is written in a `finally`.
+
+Coverage is restored by a real scenario, not an `EXEMPT` entry — the map stays empty, which is the
+only state that means 100 %. Four design points are worth recording, because each one is where a
+blind author would have written something unfalsifiable:
+
+1. **The routing assertion is built to be falsifiable.** Asserting "the paused task was not returned"
+   over two interchangeable tasks proves nothing: a tie-break could produce the same answer with the
+   pause filter deleted. The fixture therefore makes the paused task the one routing would
+   *certainly* pick — it sits on the team's own coordinates, the alternative is ~2.2 km away, and
+   `fixed_points_speed` scores `0.6·load − 0.4·transit` with both stations equally unloaded. Three
+   consecutive `requestNextTask` calls (releasing the slot with `checkOutTask` between, so each call
+   re-runs the same decision) must all return the far task. Resuming makes the near one win again,
+   which is the same predicate proving itself in the opposite direction.
+2. **`requiredTaskCount` had to be chosen deliberately.** With `requiredTaskCount` absent, the stage
+   requires all N tasks, so `planTaskStatusChange` flags *any* pause as `stageUnwinnable` and refuses
+   it — the routing fixture would have died on the guard instead of testing routing. The routing
+   fixtures use 1-of-2 (a pause is legal); the guard fixture uses 2-of-2 (a pause is refused). One
+   fixture cannot serve both, because the two states are mutually exclusive by arithmetic.
+3. **The "unchanged" assertion is a real before/after comparison.** `taskStatusOverrides` is read
+   into a JSON string *before* the refused call and again after, and the two strings are compared —
+   not the same value against itself, and not a hard-coded `undefined` that would also pass if the
+   field were never implemented. The guard fixture's run has never had an override written, so `null`
+   is the complete before-image and the comparison is the literal contract.
+4. **The ALLOWED side cannot live in the denial matrix.** The matrix is `expectError` over every row
+   by construction, so "owner and run-scoped staff may do this" is asserted inside the new scenario
+   (a staff PIN minted for *this* run, exchanged via `staffSignIn`, then a successful call), while
+   participant / stranger / other-run-staff denials are three new matrix rows. The matrix's existing
+   post-sweep "nothing was written" block gains one more line: no task-status override exists on the
+   run after the sweep.
+
 ### D7 — a tautological shape check is left alone
 
 `Math.ceil(retryAfterMs / 1000) === retryAfterSeconds` is true by construction: both come from one
@@ -230,3 +271,104 @@ not been run.**
 - Should `FORBIDDEN_KEYS` also be enforced after `decode`, given that a `__proto__` in ANY callable
   payload re-points the decoded object's prototype? Inert for `importGameFile` today. Raised for the
   owner of `functions/**`; deliberately not acted on here.
+
+## Addendum â€” second wave: the assertions six lanes owed but could not write
+
+### Context (second wave)
+
+Sections 1â€“4 repaired what other lanes had already written. This addendum covers the opposite
+problem: six lanes finished, each REPORTED in its own handoff the e2e coverage it owed, and none
+could write it, because ownership of `scripts/e2e-verify.mjs` is exclusive. Left alone, `npm run e2e`
+would have gone green over six changes it never exercised â€” the same "reports safety it does not
+provide" failure the original proposal is about, arrived at from the other direction.
+
+| Lane (change) | Where the coverage went | Why there |
+|---|---|---|
+| `pause-clock-tasks` | NEW scenario + an extension to the leaderboard invariant ORACLE | six independent properties, and one of them (duration well-formedness) belongs on every board the suite builds, not on one |
+| `task-duration-defaults` | NEW scenario (save door) + `withTaskOverride` block in export/import (file door) | the two doors run the same validator and must be proven not to drift |
+| `held-team-visibility` | extension of `guardian consent gate` | its fixtures already carry a consent-required run and an approved team; only a second, un-consented team was missing |
+| `photo-review-throughput` | NEW scenario | the existing feed scenario counts feed items exactly; adding teams to it would have invalidated those counts |
+| `expose-enforced-settings` | extension of `safe-zone boundary` + export/import | the zoned game and the import helper already exist |
+| `run-console-attention` | NEW row allowlist + core lifecycle + consent scenario | there was no `listRunTeams` row allowlist to extend, so one was created |
+
+### Decisions (second wave)
+
+**D5 â€” the duration invariant belongs in the oracle, not in one scenario.** `durationSeconds` stopped
+being a measurement and became a derivation (`raw âˆ’ excluded`) the moment `pause-clock-tasks`
+shipped. That makes it the one leaderboard field a subtraction bug can reach, on EVERY board, so the
+three properties (finite, non-negative, never longer than the team's own wall clock) went into
+`assertLeaderboardInvariants` where all existing call sites inherit them. The wall-clock bound needs
+a second, independent source for `startedAt` â€” the team documents â€” so it is an OPTIONAL fourth
+parameter: a caller that does not hold that data omits it and every existing call site is unchanged.
+Comparing the board's own `finishedAt` against the board's own `durationSeconds` would have been a
+tautology; comparing it against the team document is a real comparison.
+
+**D6 â€” assert the PREMISE, or the conclusion proves nothing.** Four of the new checks rest on a
+precondition that could quietly fail to hold, and each precondition is asserted separately rather
+than assumed: the Tortoise really did take longer on the wall clock (otherwise "the paused team
+outranks the faster wall clock" is satisfied by it simply being faster); the cap-1 station really was
+reserved before it was released (otherwise "counter returns to 0" passes on a counter that was never
+1); a valid `expectedDurationMinutes` really is stored (otherwise the three refusals would also pass
+against a door that rejected the field outright); and the safe-zone fixture really did have a stored
+boundary before the clear. This is the same class of defect section 2 repaired â€” a check that passes
+for a reason unrelated to the thing under test.
+
+**D7 â€” key ABSENCE, not falsiness, is the safe-zone clear's contract.** The bug being defended
+against is `db.settings({ ignoreUndefinedProperties: true })` turning `updates.safeZone = undefined`
+into a no-op, which is why the implementation writes an explicit `FieldValue.delete()`. A check of
+the form "the zone is falsy" would have passed while that bug was live, because the field the buggy
+path left behind was the OLD boundary â€” and, on the wire, an absent field and an undefined one are
+indistinguishable to a falsiness test. The assertion is therefore `!('safeZone' in game)`, and the
+accepted-import assertion compares KEY SETS rather than a JSON string so Firestore's map-key ordering
+can neither break it nor accidentally satisfy it.
+
+**D8 â€” one owed assertion was narrowed, and the reason is a real product boundary, not a weakening.**
+The `photo-review-throughput` handoff asked for "a submission from an already-finalised team still
+reviews without throwing". Read against the implementation there are two distinct states, and they
+behave differently on purpose:
+
+- an already-finished TEAM on a live run â€” `completeTaskForTeam` short-circuits on the terminal task
+  record and returns `completed: false`, so the review resolves `ok` and scores nothing. This is what
+  the scenario asserts, and it is the state a reviewer working a backlog actually meets.
+- an already-finalised RUN â€” `completeTaskForTeam` throws `failed-precondition` at both the pre-txn
+  and in-txn status checks (WO Fix 3 / wave-G #2), deliberately, so a straggler completion cannot
+  rewrite a published final board. Asserting "reviews without throwing" there would have contradicted
+  an existing, intentional guard that the `post-finalize grading is rejected` scenario already pins.
+
+Reported rather than silently reinterpreted, per the lane's own rule.
+
+**D9 â€” the `listRunTeams` row allowlist is new surface, and that is deliberate.** The handoff said
+"add the three keys to the allowlist if one exists". None did. Rather than skip it, the allowlist was
+created, because the argument for it is the same one that justifies `ALLOWED_TASK_KEYS` one level
+down: the row is projected BY HAND from a team document that carries answer-attempt counters, device
+uids, guardian-consent records and raw submission urls, and a future `...t` spread would ship all of
+that to every staff console with nothing failing anywhere. The three attention keys are additionally
+asserted PRESENT, because an allowlist is blind to a field being DROPPED â€” and a console that reads
+an absent key renders "no evidence" forever, which is precisely the silent failure
+`run-console-attention` exists to remove.
+
+**D10 â€” the NaN transport fact, written down once and referenced.** `NaN` cannot cross a callable:
+JSON has no NaN, so the client encodes it as `null`. Every "refuses NaN" assertion therefore
+exercises the `typeof !== 'number'` arm of the validator, not the `Number.isFinite` arm. That is
+still a real arm â€” it is the one a hand-written client or a hand-edited game file actually hits â€” but
+the distinction is recorded inline at each site so a later author does not "fix" the assertion by
+reaching for a spelling that cannot survive the wire. Same category as D1's `__proto__` finding.
+
+### What this addendum still cannot prove
+
+Identical to the first wave, plus two timing dependencies introduced here, disclosed rather than
+hidden:
+
+- The pause scenario sleeps ~2.6 s so the excluded span dominates scheduling jitter, and asserts
+  `durationSeconds == wall âˆ’ excluded` within Â±1 s. Both terms are read from server-written stamps,
+  so emulator load cannot break the equality â€” only the Â±1 s bound, and only if the two round trips
+  around the read straddle a second boundary by more than a second, which the bound already absorbs.
+- The all-paused case asserts `durationSeconds === 0` EXACTLY. That is exact by construction â€”
+  `startTeams` writes the team's `startedAt` and the task record's `startedAt` from the same `now`,
+  and `completeTaskForTeam` writes the record's `completedAt` and the team's `finishedAt` from the
+  same `now`, so raw and excluded are the same subtraction. If it ever comes back non-zero, that is a
+  finding about the stamp sites, not a tolerance to loosen.
+
+**The suite remains UNRUN.** These assertions are written and statically checked
+(`node --check`) only.
+

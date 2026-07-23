@@ -92,15 +92,72 @@ export function blockedTaskIds(stage: ExclusionStage, completedTaskIds: string[]
   return stageTaskIds(stage).filter((id) => blocked.has(id));
 }
 
+/** Optional runtime narrowing for `maxCompletableTasks`. */
+export interface MaxCompletableOptions {
+  /**
+   * Whether a task can still be handed out right now. Used ONLY by the live
+   * pause guard (planTaskStatusChange), never at authoring time: run-scoped
+   * availability is deliberately kept off the template, so a Builder-time
+   * ceiling that moved because someone paused a stop yesterday would be a number
+   * the creator cannot reproduce from what they see. Absent = everything counts.
+   */
+  isAvailable?: (taskId: string) => boolean;
+}
+
 /**
- * The ceiling on how many of this stage's tasks ONE team can ever complete:
- * ungrouped tasks + one per effective group. This is the number
- * `requiredTaskCount` has to fit under (see validateExclusiveGroups).
+ * The ceiling on how many of this stage's tasks ONE team can ever complete
+ * (change: stage-winnability). THE single definition — the Builder's completion
+ * control, the Builder's launch readiness, the server's save/import validation
+ * and the live pause guard all read THIS. Re-deriving it locally is what let the
+ * Builder offer "6 of 6" on a stage of three alternative pairs.
+ *
+ * Static form: ungrouped tasks + one per effective group. Every awkward shape is
+ * already normalized by effectiveExclusiveGroups — an inert (<2 member) group
+ * claims nothing so its task counts as ungrouped, ids from other stages are
+ * ignored, and a task named by two groups counts once (first group wins).
+ *
+ * With `opts.isAvailable`, a group contributes 1 only when at least ONE of its
+ * alternatives is still available, and an ungrouped task contributes 1 only when
+ * it is itself available.
+ */
+export function maxCompletableTasks(stage: ExclusionStage, opts?: MaxCompletableOptions): number {
+  const groups = effectiveExclusiveGroups(stage);
+  const grouped = new Set<string>();
+  for (const g of groups) for (const id of g) grouped.add(id);
+
+  const available = opts?.isAvailable;
+  const ok = (id: string): boolean => (typeof available === 'function' ? available(id) === true : true);
+
+  const ungrouped = stageTaskIds(stage).filter((id) => !grouped.has(id) && ok(id)).length;
+  const usableGroups = groups.filter((g) => g.some((id) => ok(id))).length;
+  return ungrouped + usableGroups;
+}
+
+/**
+ * Historical name for the static form of `maxCompletableTasks`. Kept as an exact
+ * alias so existing call sites and tests do not move.
  */
 export function maxAttainableCompletions(stage: ExclusionStage): number {
-  const groups = effectiveExclusiveGroups(stage);
-  const grouped = groups.reduce((n, g) => n + g.length, 0);
-  return stageTaskIds(stage).length - grouped + groups.length;
+  return maxCompletableTasks(stage);
+}
+
+/**
+ * The save-blocking problem with a stage's `requiredTaskCount`, or null when it
+ * is fine. Shared verbatim by the server's `stagesProblems` (which serves BOTH
+ * updateGame and importGameFile) and by the Builder's launch readiness, so the
+ * client and the server cannot disagree on what is launchable.
+ *
+ * An UNSET count means "every task" and is never a problem: the stage still ends
+ * once no task remains to do (applyStageCompletion's allTerminal arm), which is
+ * the normal "pick one of these" shape.
+ */
+export function requiredTaskCountProblem(stage: ExclusionStage, label?: string): string | null {
+  const required = stage?.requiredTaskCount;
+  if (typeof required !== 'number' || !Number.isFinite(required)) return null;
+  const ceiling = maxCompletableTasks(stage);
+  if (required <= ceiling) return null;
+  const where = label ? `${label}: ` : '';
+  return `${where}requires ${required} task(s) but a team can complete at most ${ceiling} — its alternative (exclusive) groups yield one completion each`;
 }
 
 export interface ExclusiveGroupReport {

@@ -1,5 +1,6 @@
 import { expect, test, describe } from 'vitest';
 import type { Task } from '@rushpoint/shared';
+import { publicTaskLocation } from '@rushpoint/shared';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 
 // A minimal located task factory — only the fields the sanitizer reads.
@@ -166,6 +167,50 @@ describe('sanitizeTaskForParticipant — ordering quiz (orderItems)', () => {
     expect(out.answers).toBeUndefined();
     expect(out.numericAnswer).toBeUndefined();
     expect(out.hasHint).toBe(true);
+  });
+});
+
+// ─── The publish/participant boundary (change: hidden-location-map-visibility) ─
+//
+// A hidden-location task is now PUBLISHED with a coarse ~1 km area so the creator
+// can see their own hunt on their own library map. That is a creator-facing
+// projection and it must never become a participant-facing one. Both halves are
+// asserted here together, on the SAME task, so a future edit that "helpfully"
+// forwards the published area into the player's payload fails in one place with
+// the reason written next to it.
+describe('sanitizeTaskForParticipant — publishing an area does not unseal the puzzle', () => {
+  const hiddenTask = () => baseTask({
+    hideLocation: true,
+    locationClue: 'Where the lions guard the gate',
+  });
+
+  test('the same hidden task publishes an area AND still hides everything from the player', () => {
+    const task = hiddenTask();
+
+    // Creator-facing: a real, coarsened area is published.
+    const area = publicTaskLocation(task);
+    expect(area).toBeDefined();
+    expect(area).not.toEqual(task.coordinates);
+
+    // Participant-facing, before arrival: nothing locational at all.
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    expect(sealed.coordinates).toBeUndefined();
+    expect(sealed.geofenceRadiusMeters).toBeUndefined();
+    expect(sealed.approxLocation).toBeUndefined();
+    expect(sealed.arrivalPending).toBe(true);
+    // No value anywhere in the payload equals the published area.
+    expect(JSON.stringify(sealed)).not.toContain(String(area!.lat));
+    expect(JSON.stringify(sealed)).not.toContain(String(area!.lng));
+  });
+
+  test('the published area is never smuggled in after arrival either', () => {
+    const task = hiddenTask();
+    const revealed = sanitizeTaskForParticipant(task, { revealed: true }) as Record<string, unknown>;
+    // After arrival the player legitimately gets the EXACT spot back (so they can
+    // navigate if they wander off) — but never a second, coarse copy of it under
+    // a public-projection key.
+    expect(revealed.approxLocation).toBeUndefined();
+    expect(revealed.coordinates).toEqual(task.coordinates);
   });
 });
 

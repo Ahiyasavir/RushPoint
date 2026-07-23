@@ -60,6 +60,14 @@ const HE = {
     legalTerms: 'תנאי שימוש',
     legalPrivacy: 'מדיניות פרטיות',
   },
+  // Chrome of the legal documents themselves, served at /terms and /privacy on
+  // the participant origin (change: legal-pages-participant-origin). The document
+  // titles and dates come from the shared document data, already bilingual.
+  legal: {
+    back: 'חזרה',
+    backAria: 'חזרה למשחק',
+    langAria: 'שפת המסמך',
+  },
   promo: {
     badge: 'משחק שדה מבית RushPoint',
     notFound: 'המשחק לא נמצא',
@@ -152,6 +160,7 @@ const HE = {
     hiddenBadge: 'מיקום מוסתר',
     hiddenCheckIn: 'בדקו אם הגעתם',
     hiddenHelp: 'אין סיכה במפה. מצאו את המקום לפי הרמז.',
+    clockPaused: 'השעון עצור במשימה הזו. קחו את הזמן, הדקות כאן לא נספרות בדירוג.',
     sealedTitle: 'יעד מסתורי',
     sealedHelp: 'המשימה עצמה תיפתח רק כשתגיעו למקום. בינתיים יש לכם רק את הרמז.',
     checkArrival: 'הגענו לכאן',
@@ -355,6 +364,14 @@ const HE = {
     sosFailed: 'שליחת המצוקה נכשלה. נסו שוב, או צרו קשר ישיר עם המארגן.',
     youreIn: ({ name }: { name: string }) => `נכנסתם, ${name}!`,
     waitingStart: 'ממתינים שהמארגן יתחיל את המירוץ…',
+    // Held-team notice (change: held-team-visibility). A team the server held back
+    // is NOT waiting for the start, so it must not be told that it is. The copy
+    // says what is happening, says it is not their fault, and sends them to the
+    // only person who can release them.
+    heldTitle: 'עוד לא יצאתם לדרך',
+    heldConsent: 'המשחק הזה מחכה לאישור של הורה או אפוטרופוס עבורכם. לא עשיתם שום דבר לא בסדר.',
+    heldGeneric: 'המארגן צריך לסדר משהו לפניכם לפני שתוכלו להתחיל. לא עשיתם שום דבר לא בסדר.',
+    heldAskHost: 'גשו למארגן המשחק ותגידו לו שאתם מחכים. רק הוא יכול לשחרר אתכם ולהתחיל.',
     shareProgress: '📸 שתפו את ההתקדמות',
     creating: 'יוצר…',
     testRunBanner: 'ריצת בדיקה, שום דבר כאן לא נספר',
@@ -599,6 +616,11 @@ const EN: typeof HE = {
     legalTerms: 'Terms of Use',
     legalPrivacy: 'Privacy Policy',
   },
+  legal: {
+    back: 'Back',
+    backAria: 'Back to the game',
+    langAria: 'Document language',
+  },
   promo: {
     badge: 'RushPoint field game',
     notFound: 'Game not found',
@@ -691,6 +713,7 @@ const EN: typeof HE = {
     hiddenBadge: 'Hidden location',
     hiddenCheckIn: "Check if I've arrived",
     hiddenHelp: 'No pin on the map. Find the spot from the clue.',
+    clockPaused: 'The clock is stopped on this task. Take your time, the minutes here do not count toward the standings.',
     sealedTitle: 'Mystery destination',
     sealedHelp: 'The task itself opens only once you reach the spot. For now you just have the clue.',
     checkArrival: 'We got here',
@@ -892,6 +915,11 @@ const EN: typeof HE = {
     sosFailed: 'SOS failed to send. Try again, or contact the host directly.',
     youreIn: ({ name }: { name: string }) => `You're in, ${name}!`,
     waitingStart: 'Waiting for the host to start the race…',
+    // Held-team notice (change: held-team-visibility). See the Hebrew block above.
+    heldTitle: 'You have not been started yet',
+    heldConsent: 'This game is waiting on a parent or guardian approval for you. You did nothing wrong.',
+    heldGeneric: 'The host has something to sort out for you before you can start. You did nothing wrong.',
+    heldAskHost: 'Find the host and tell them you are waiting. Only they can release you and start you off.',
     shareProgress: '📸 Share our progress',
     creating: 'Creating…',
     testRunBanner: 'Test run, nothing here counts',

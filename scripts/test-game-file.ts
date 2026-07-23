@@ -171,6 +171,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
         numericTolerance: type === 'numeric' ? maybe(2) : undefined,
         geofenceRadiusMeters: maybe(10 + Math.floor(rng() * 200)),
         requirePresence: maybe(rng() < 0.5),
+        // pause-clock-tasks: exercised by the random round trip like any other flag.
+        pausesTimer: maybe(rng() < 0.5),
         steps: type === 'sequence'
           ? [{ id: 'st1', prompt: text(), answer: maybe('שלום') }, { id: 'st2', prompt: text() }]
           : undefined,
@@ -431,6 +433,8 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     answers: true, orderItems: true, surveyChoices: true, numericAnswer: true, numericTolerance: true,
     geofenceRadiusMeters: true, requirePresence: true, steps: true, media: true, releaseAt: true,
     releaseAfterMinutes: true, expiresAfterMinutes: true, unlockAfterTaskIds: true, tags: true,
+    // pause-clock-tasks: authored on the template, so it must round trip.
+    pausesTimer: true,
   };
   const fullStage: Record<keyof Required<Stage>, true> = {
     id: true, order: true, title: true, tasks: true, isFinal: true, narrative: true,
@@ -540,6 +544,21 @@ ok(parseGameFile({ ...goodDoc(), schemaVersion: CURRENT_GAME_FILE_VERSION }).err
   const d = goodDoc();
   d.game.stages[0].tasks.push({ ...d.game.stages[0].tasks[0] });
   refused(d, /duplicate|unique|id/i, 'two tasks sharing an id in one stage');
+}
+
+// pause-clock-tasks: the flag decides how a whole run is TIMED, so a file that
+// says "yes" instead of true is refused by name rather than coerced to truthy.
+{
+  const d = goodDoc();
+  (d.game.stages[0].tasks[0] as Record<string, unknown>).pausesTimer = 'yes';
+  refused(d, /pausesTimer/i, 'a task whose pausesTimer is not a boolean');
+}
+{
+  const d = goodDoc();
+  (d.game.stages[0].tasks[0] as Record<string, unknown>).pausesTimer = true;
+  const res = parseGameFile(d);
+  ok(res.errors.length === 0 && res.game?.stages[0].tasks[0].pausesTimer === true,
+    'a boolean pausesTimer imports and survives the round trip');
 }
 
 // A cyclic unlock graph — a stage where no task is ever routable.

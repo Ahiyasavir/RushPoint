@@ -4,7 +4,10 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
+import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks } from '@rushpoint/shared';
+// Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
+// server applies, plus the pure derivation that seeds the boundary from the stops.
+import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, MeasuringStrategy,
   useSensor, useSensors,
@@ -658,6 +661,8 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
 
       <WebhookField game={game} patch={patch} />
 
+      <SafeZoneField game={game} patch={patch} />
+
       <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
         <input type="checkbox" checked={!!game.allowInstantPlay}
           onChange={(e) => patch({ allowInstantPlay: e.target.checked })} />
@@ -926,6 +931,99 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
         ? <p className="text-neon-red text-xs mt-1">{err}</p>
         : <p className="text-xs text-zinc-500 mt-1">{b.webhookHelp}</p>}
     </div>
+  );
+}
+
+// Safe-zone boundary (change: expose-enforced-settings). The server ENFORCED this
+// field in two places — `updateLocation` flags a team outside it and routing stops
+// assigning tasks — while nothing in either app could set it, so the whole chain was
+// dead unless a creator hand-edited a game file. This is the missing author.
+//
+// The radius is the only number typed. The centre comes from `suggestSafeZone`, the
+// pure derivation over the stops already placed, so the creator turns the boundary on
+// rather than inventing coordinates. Clearing sends `null` (an explicit clear) and
+// never `undefined`, which `updateGame` would read as "field not sent".
+function SafeZoneField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
+  const [open, setOpen] = useState(false);
+  const zone = game.safeZone ?? null;
+  const [radius, setRadius] = useState(String(zone?.radiusMeters ?? ''));
+  const [err, setErr] = useState('');
+  useEffect(() => { setRadius(String(game.safeZone?.radiusMeters ?? '')); }, [game.safeZone?.radiusMeters]);
+
+  const suggestion = suggestSafeZone(game.stages);
+
+  function enable() {
+    if (!suggestion) return;
+    setErr('');
+    setRadius(String(suggestion.radiusMeters));
+    patch({ safeZone: { center: suggestion.center, radiusMeters: suggestion.radiusMeters } });
+  }
+
+  function commitRadius() {
+    if (!zone) return;
+    const next = Number(radius);
+    // The same rule the server applies, asked of the same validator, so the Builder
+    // can never offer a boundary `updateGame` would refuse.
+    const check = validateSafeZone({ center: zone.center, radiusMeters: next });
+    if (!check.ok) {
+      setErr(b.safeZoneRadiusInvalid(SAFE_ZONE_MAX_RADIUS_M));
+      setRadius(String(zone.radiusMeters));
+      return;
+    }
+    setErr('');
+    patch({ safeZone: check.value });
+  }
+
+  return (
+    <Advanced title={b.safeZoneSectionTitle} open={open} onToggle={() => setOpen(!open)}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">{b.safeZoneHint}</p>
+        {!zone ? (
+          <>
+            <Button variant="ghost" onClick={enable} disabled={!suggestion}>
+              {b.safeZoneEnable}
+            </Button>
+            <p className="text-xs text-zinc-500">
+              {suggestion ? b.safeZoneEnableHint : b.safeZoneNeedsTasks}
+            </p>
+          </>
+        ) : (
+          <>
+            <div>
+              <Label>{b.safeZoneRadiusLabel}</Label>
+              <Input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={SAFE_ZONE_MAX_RADIUS_M}
+                value={radius}
+                onChange={(e) => setRadius(e.target.value)}
+                onBlur={commitRadius}
+                dir="ltr"
+              />
+              {err
+                ? <p className="text-neon-red text-xs mt-1">{err}</p>
+                : <p className="text-xs text-zinc-500 mt-1">{b.safeZoneRadiusHint}</p>}
+            </div>
+            <p className="text-xs text-zinc-400" dir="ltr">
+              {zone.center.lat.toFixed(5)}, {zone.center.lng.toFixed(5)}
+            </p>
+            {suggestion && suggestion.coversAllTasks === false && (
+              <p className="text-xs text-amber-400">{b.safeZoneTooSpread}</p>
+            )}
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={enable} disabled={!suggestion}>
+                {b.safeZoneRecenter}
+              </Button>
+              <Button variant="subtle" onClick={() => { setErr(''); setRadius(''); patch({ safeZone: null }); }}>
+                {b.safeZoneClear}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Advanced>
   );
 }
 
@@ -1434,7 +1532,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 the groups leave attainable ends the stage early (see
                 docs/wave-b/mutually-exclusive-tasks.md §2.2). Non-blocking. */}
             {typeof activeStage.requiredTaskCount === 'number'
-              && activeStage.requiredTaskCount > maxAttainableCompletions(activeStage) && (
+              && activeStage.requiredTaskCount > maxCompletableTasks(activeStage) && (
               <p className="text-xs text-amber-400">⚠ {b.exclusiveUnwinnableWarn}</p>
             )}
 
@@ -1443,6 +1541,20 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             {validateUnlockGraph(activeStage).warnings.length > 0 && (
               <p className="text-xs text-amber-400">⚠ {b.unlockRequiredCountWarn}</p>
             )}
+
+            {/* Unreachable branch (change: unreachable-task-strand): a task gated
+                on a member of an exclusive group dies for every team that picks a
+                different alternative. Advisory ONLY — the shape is legitimate
+                branching content and the server now retires the dead branch, so
+                this never blocks a save or a launch. */}
+            {exclusiveUnlockRisks(activeStage).slice(0, 1).map((risk) => (
+              <p key={risk.taskId} className="text-xs text-amber-400">
+                ⚠ {b.exclusiveUnlockRiskWarn(
+                  activeStage.tasks.find((t) => t.id === risk.taskId)?.title || risk.taskId,
+                  activeStage.tasks.find((t) => t.id === risk.prerequisiteId)?.title || risk.prerequisiteId,
+                )}
+              </p>
+            ))}
 
             {/* Partial-stage starvation (WO-6): a partial stage that mixes
                 locationless + located tasks routes locationless first, so a
@@ -1522,12 +1634,18 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 // Drop the removed id from any exclusive group too (wave-b task 5).
                 // A dangling id is inert by contract, but leaving it would silently
                 // shrink a group to one member (= no exclusivity) with no UI trace.
+                const nextGroups = editingStage.exclusiveGroups
+                  ? removeTaskFromGroups(editingStage.exclusiveGroups, editingTask.id)
+                  : undefined;
                 const patch: Partial<Stage> = {
                   tasks: nextTasks,
-                  requiredTaskCount: clampRequiredTaskCount(editingStage.requiredTaskCount, nextTasks.length),
-                  ...(editingStage.exclusiveGroups
-                    ? { exclusiveGroups: removeTaskFromGroups(editingStage.exclusiveGroups, editingTask.id) }
-                    : {}),
+                  // Clamped against what the stage can YIELD, not its raw task count
+                  // (change: stage-winnability) — and against the POST-delete groups.
+                  requiredTaskCount: clampRequiredTaskCount(
+                    editingStage.requiredTaskCount,
+                    maxCompletableTasks({ tasks: nextTasks, exclusiveGroups: nextGroups }),
+                  ),
+                  ...(editingStage.exclusiveGroups ? { exclusiveGroups: nextGroups } : {}),
                 };
                 updateStage(editingStage.id, patch);
                 setEditing(null);
@@ -1667,6 +1785,10 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 }) {
   const b = useT().builder;
   const m = stage.tasks.length;
+  // What the stage can actually YIELD (change: stage-winnability). Exclusive groups
+  // are alternatives, so three pairs yield three completions, never six — the
+  // control must not offer a value the game can never satisfy.
+  const ceiling = maxCompletableTasks(stage);
   const req = stage.requiredTaskCount ?? m;
   const [shown, setShown] = useState(false);
 
@@ -1712,15 +1834,34 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
                   aria-label={b.settingCompletionTitle}
                   onChange={(e) => {
                     const n = parseInt(e.target.value);
-                    onUpdateStage({ requiredTaskCount: n >= m ? undefined : n });
+                    onUpdateStage({ requiredTaskCount: n >= ceiling ? undefined : n });
                   }}
                 >
-                  {Array.from({ length: m }, (_, i) => i + 1).map((n) => (
+                  {Array.from({ length: ceiling }, (_, i) => i + 1).map((n) => (
                     <option key={n} value={n}>{n}</option>
                   ))}
+                  {/* A value saved BEFORE the cap existed stays visible rather than
+                      the control silently jumping to a number nobody chose. It is
+                      disabled, and the warning below offers the correction. */}
+                  {req > ceiling && <option value={req} disabled>{req}</option>}
                 </Select>
                 <span>{b.completionOf(m)}{req < m ? b.completionRouted : b.completionAll}</span>
               </div>
+              {/* Stage winnability (change: stage-winnability): say WHY the choices
+                  stop below the task count, so the cap reads as a rule and not a bug. */}
+              {ceiling < m && (
+                <p className="mt-1 text-xs text-[--ink-3]">{b.completionCappedByGroups(ceiling, m)}</p>
+              )}
+              {req > ceiling && (
+                <p className="mt-1 text-xs text-amber-400">
+                  ⚠ {b.completionStoredUnreachable(req, ceiling)}{' '}
+                  <button
+                    type="button"
+                    className="underline hover:text-[--ink-1]"
+                    onClick={() => onUpdateStage({ requiredTaskCount: ceiling >= m ? undefined : ceiling })}
+                  >{b.completionFixToCeiling(ceiling)}</button>
+                </p>
+              )}
             </SettingRow>
           )}
 

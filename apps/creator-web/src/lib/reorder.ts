@@ -2,6 +2,12 @@
 // (changes: v2.1-builder-shell-redesign, wave-a builder task DnD).
 // DOM-free so the whole surface is covered by the fast test lane
 // (scripts/test-builder-redesign.ts + scripts/test-builder-dnd.ts).
+//
+// The one shared import is the winnability RULE (change: stage-winnability) —
+// how many completions a stage can yield is decided in exactly one place and this
+// file must not re-derive it, which is how the Builder came to offer "6 of 6" on a
+// stage of three alternative pairs.
+import { maxCompletableTasks } from '@rushpoint/shared';
 
 /** Moves the item at `from` to index `to`, returning a new array. Out-of-range or
  *  no-op moves return the original array unchanged. */
@@ -127,15 +133,19 @@ export function groupIndexOfTask(effectiveGroups: string[][], taskId: string): n
  *
  * `undefined` is the canonical "every task is required" value, so anything that
  * is not a usable partial count collapses to it: a count that meets or exceeds
- * the task count (which would otherwise render an option the select doesn't
- * offer), a count below 1, and non-finite values. A stage whose required count
- * exceeds its task count is UNWINNABLE, so this must run after every mutation
- * that changes a stage's task list (delete, drag-out, drag-in).
+ * the ceiling (which would otherwise render an option the select doesn't offer),
+ * a count below 1, and non-finite values. A stage whose required count exceeds
+ * its ceiling is UNWINNABLE, so this must run after every mutation that changes a
+ * stage's task list (delete, drag-out, drag-in).
+ *
+ * `ceiling` is the number of completions the stage can actually YIELD, not its
+ * raw task count (change: stage-winnability) — exclusive groups yield one
+ * completion each, so callers pass `maxCompletableTasks(stage)`.
  */
-export function clampRequiredTaskCount(req: number | undefined, taskCount: number): number | undefined {
+export function clampRequiredTaskCount(req: number | undefined, ceiling: number): number | undefined {
   if (typeof req !== 'number' || !Number.isFinite(req)) return undefined;
   const n = Math.floor(req);
-  if (n < 1 || n >= taskCount) return undefined;
+  if (n < 1 || n >= ceiling) return undefined;
   return n;
 }
 
@@ -186,24 +196,38 @@ export function moveTaskBetweenStages<S extends ReorderStage>(
   const destTasks = dest.tasks.slice();
   destTasks.splice(clampIndex(toIndex ?? destTasks.length, destTasks.length), 0, moved);
 
+  // The source stage LOSES a task and (below) that task's group membership, so its
+  // ceiling has to be recomputed from the post-move shape, not the pre-move one
+  // (change: stage-winnability).
+  const sourceGroups = source.exclusiveGroups
+    ? removeTaskFromGroups(source.exclusiveGroups, taskId)
+    : undefined;
+
   const next = stages.slice();
   next[fromIdx] = {
     ...source,
     tasks: sourceTasks,
-    requiredTaskCount: clampRequiredTaskCount(source.requiredTaskCount, sourceTasks.length),
+    requiredTaskCount: clampRequiredTaskCount(
+      source.requiredTaskCount,
+      maxCompletableTasks({ tasks: sourceTasks, exclusiveGroups: sourceGroups }),
+    ),
     // Exclusive groups are STAGE SCOPED: a task that leaves must leave the source
     // stage's groups too, or the id dangles (inert by contract) and silently
     // shrinks a real group to one member with no trace in the UI. The destination
     // is never touched — the task always arrives ungrouped. Only written when the
     // source actually had groups, so a group-free stage never sprouts the key.
-    ...(source.exclusiveGroups
-      ? { exclusiveGroups: removeTaskFromGroups(source.exclusiveGroups, taskId) }
+    ...(sourceGroups !== undefined || source.exclusiveGroups
+      ? { exclusiveGroups: sourceGroups }
       : {}),
   } as S;
   next[toStageIdx] = {
     ...dest,
     tasks: destTasks,
-    requiredTaskCount: clampRequiredTaskCount(dest.requiredTaskCount, destTasks.length),
+    // The task always arrives UNGROUPED, so the destination's groups are unchanged.
+    requiredTaskCount: clampRequiredTaskCount(
+      dest.requiredTaskCount,
+      maxCompletableTasks({ tasks: destTasks, exclusiveGroups: dest.exclusiveGroups }),
+    ),
   } as S;
   return next;
 }

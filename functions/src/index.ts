@@ -3,12 +3,12 @@
 // re-exports them so Firebase can discover them at the top level.
 
 import * as functions from 'firebase-functions';
-import { loggedCallable } from './obs/log';
+import { loggedCallable, logBestEffort } from './obs/log';
 import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -1406,6 +1406,140 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   await maybeRefreshLeaderboardSnapshot(ownerUid, gameId, runId, { force: true });
 
   return { ok: true, newBonusPenalty: newPenalty };
+});
+
+
+// ─── setRunTaskStatus (change: live-task-pause) ───────────────────────────────
+// Take ONE task out of play for ONE live run, or put it back. `Task.status`
+// (StationStatus) was already enforced by routing in three places and written by
+// nothing, so when a stop died mid event (shop closed, street blocked, host gone,
+// weather) the organizer could only keep routing teams to it or end the run.
+//
+// RUN scoped on purpose: the override lives on the run document, never on the game
+// template, because the template is replayed by later runs, duplicated, exported and
+// published to the gallery, and is rewritten wholesale by the Builder. See
+// openspec/changes/live-task-pause/design.md D1.
+//
+// A team already HOLDING the task keeps it: the override is read by the assignment
+// filters only, never by the completion path, so a team standing at the station
+// finishes and scores it (D2). The response reports how many teams that is.
+export const setRunTaskStatus = loggedCallable('setRunTaskStatus', async (data, context) => {
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  const { ownerUid, gameId, runId, taskId, status, reason, force } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    taskId: string;
+    status: StationStatus;
+    reason?: string;
+    force?: boolean;
+  };
+
+  const ids = validate(() => ({
+    gameId: requireString(gameId, 'gameId', 200),
+    runId: requireString(runId, 'runId', 200),
+    taskId: requireString(taskId, 'taskId', 200),
+  }));
+  if (!isStationStatus(status)) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      `status must be one of ${LIVE_TASK_STATUSES.join(', ')}`,
+    );
+  }
+  const cleanReason = validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '';
+
+  const runRef = db.doc(`users/${ownerUid}/games/${ids.gameId}/runs/${ids.runId}`);
+  const [gameSnap, runSnap] = await Promise.all([
+    db.doc(`users/${ownerUid}/games/${ids.gameId}`).get(),
+    runRef.get(),
+  ]);
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const game = gameSnap.data() as { stages?: { id: string; title?: string; requiredTaskCount?: number; tasks?: Task[] }[] };
+  const run = runSnap.data() as { taskStatusOverrides?: TaskStatusOverrides };
+
+  const stage = (game.stages ?? []).find((s) => (s.tasks ?? []).some((t) => t?.id === ids.taskId));
+  if (!stage) throw new functions.https.HttpsError('not-found', 'Task not found in this game');
+  const task = (stage.tasks ?? []).find((t) => t?.id === ids.taskId)!;
+
+  // How many teams are on it RIGHT NOW. Reported, never acted on: this call must
+  // not revoke a task from a team that already walked to the stop.
+  let teamsHolding = 0;
+  try {
+    const holders = await db
+      .collection(`users/${ownerUid}/games/${ids.gameId}/runs/${ids.runId}/teams`)
+      .where('activeTaskId', '==', ids.taskId)
+      .select()
+      .get();
+    teamsHolding = holders.size;
+  } catch (e) {
+    // A count is informational; never fail the operator's action over it.
+    logBestEffort('setRunTaskStatus.holders', { gameId: ids.gameId, runId: ids.runId, taskId: ids.taskId }, e);
+  }
+
+  const plan = planTaskStatusChange({
+    taskId: ids.taskId,
+    stage: { tasks: stage.tasks ?? [], requiredTaskCount: stage.requiredTaskCount },
+    overrides: run.taskStatusOverrides,
+    next: status,
+    teamsHolding,
+  });
+  if (!plan.ok) {
+    // emptyStage / taskNotInStage are structural; unknownStatus was screened above.
+    throw new functions.https.HttpsError('failed-precondition', `Cannot change this task: ${plan.reason}`);
+  }
+
+  // The organizer learns about a dead-ended stage HERE, not through stuck teams.
+  // Same rule and the same quantity the Builder reports as `stageUnwinnable`.
+  if (plan.stageUnwinnable && force !== true) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'Pausing this task would leave the stage with fewer available tasks than it requires',
+      {
+        code: 'stageUnwinnable',
+        availableCount: plan.availableAfter,
+        requiredCount: plan.requiredCount,
+        stageTitle: stage.title ?? '',
+        taskTitle: task.title ?? '',
+      },
+    );
+  }
+
+  // Whole-map write inside a transaction. Deliberately NOT a dotted path: task ids
+  // are opaque strings and this repo has been bitten by dotted-key writes twice.
+  await db.runTransaction(async (tx) => {
+    const cur = await tx.get(runRef);
+    if (!cur.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+    const overrides = { ...((cur.data() as { taskStatusOverrides?: TaskStatusOverrides }).taskStatusOverrides ?? {}) };
+    overrides[ids.taskId] = status;
+    tx.update(runRef, { taskStatusOverrides: overrides, updatedAt: new Date().toISOString() });
+  });
+
+  // Durable, like adjustTeamScore: taking a task out of play changes what every
+  // team in the run can score.
+  await writeAuditLog({
+    ownerUid, gameId: ids.gameId, runId: ids.runId,
+    operatorId: context.auth!.uid,
+    actionType: 'task_status_changed',
+    previousValue: plan.from,
+    newValue: plan.to,
+    reason: cleanReason,
+    taskId: ids.taskId,
+    taskTitle: task.title ?? '',
+    forced: plan.stageUnwinnable === true,
+  });
+
+  return {
+    ok: true,
+    taskId: ids.taskId,
+    status: plan.to,
+    previousStatus: plan.from,
+    noop: plan.noop,
+    teamsHolding: plan.teamsHolding,
+    availableCount: plan.availableAfter,
+    requiredCount: plan.requiredCount,
+    stageUnwinnable: plan.stageUnwinnable,
+  };
 });
 
 

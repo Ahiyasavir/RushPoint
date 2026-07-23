@@ -42,7 +42,11 @@ function isAnswerTask(task: Task): boolean {
 export function sectionApplies(key: SectionKey, task: Task, siblingCount: number): boolean {
   switch (key) {
     case 'unlock': return siblingCount > 1;
-    case 'rules': return isAnswerTask(task) || isLocated(task);
+    // pause-clock-tasks widened this to every type: the pause-clock toggle lives
+    // in `rules` and applies to any task, so the section is always offered. The
+    // presence gate and the hidden-location clue inside it still render only
+    // where they apply (answer tasks / located tasks respectively).
+    case 'rules': return true;
     case 'hint':
     case 'media':
     case 'advanced':
@@ -61,7 +65,7 @@ export function defaultOpenSections(task: Task): Record<SectionKey, boolean> {
     hint: filled(task.hint),
     unlock: (task.unlockAfterTaskIds?.length ?? 0) > 0,
     media: (task.media?.length ?? 0) > 0,
-    rules: !!task.requirePresence || !!task.hideLocation,
+    rules: !!task.requirePresence || !!task.hideLocation || !!task.pausesTimer,
     // ONE rule, two consumers (change: builder-first-task-flow): the section
     // opens exactly when its badge would show a count, so a configured expiry or
     // a carried release instant can never be invisible at rest.
@@ -92,7 +96,8 @@ export function sectionSummary(key: SectionKey, task: Task): number {
     case 'hint': return filled(task.hint) ? 1 : 0;
     case 'unlock': return task.unlockAfterTaskIds?.length ?? 0;
     case 'media': return task.media?.length ?? 0;
-    case 'rules': return (task.requirePresence ? 1 : 0) + (task.hideLocation ? 1 : 0);
+    case 'rules': return (task.requirePresence ? 1 : 0) + (task.hideLocation ? 1 : 0)
+      + (task.pausesTimer ? 1 : 0);
     case 'advanced': return advancedSettingCount(task);
     default:
       return 0;

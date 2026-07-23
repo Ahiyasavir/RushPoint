@@ -287,8 +287,9 @@ const HE = {
     // מפת ספריית המשימות (change: task-library-map-view)
     noLocatedTasks: 'לאף משימה בתוצאות אין אזור מפורסם.',
     // מפה ריקה חייבת להסביר את עצמה (change: public-task-area-visibility)
-    noLocatedTasksHelp: 'אזור מפורסם נוצר כשמפרסמים את המשחק. משימות שפורסמו לפני העדכון הזה, ומשימות עם מיקום מוסתר, לא יופיעו במפה עד שהמשחק שלהן יפורסם מחדש.',
-    approxPinsNote: 'הסיכות מראות אזור משוער בלבד, לא מיקום מדויק. משימות עם מיקום מוסתר אינן מופיעות במפה.',
+    noLocatedTasksHelp: 'אזור מפורסם נוצר כשמפרסמים את המשחק. משימות שפורסמו לפני העדכון הזה לא יופיעו במפה עד שהמשחק שלהן יפורסם מחדש.',
+    // גם משימות עם מיקום מוסתר מקבלות אזור (change: hidden-location-map-visibility)
+    approxPinsNote: 'הסיכות מראות אזור משוער בלבד, לא מיקום מדויק. גם משימות עם מיקום מוסתר מופיעות כאזור, והשחקנים עצמם עדיין לא רואים אותו.',
     metaDiff:  (n: number) => `קושי ${n}`,
     metaPts:   (n: number) => `${n} נק׳`,
     metaCopies:(n: number) => `${n} העתקים`,
@@ -522,6 +523,16 @@ const HE = {
     photoReviewAlreadyRejected: 'כבר נדחה',
     photoReviewLoadError: 'טעינת ההגשות נכשלה, מנסים שוב',
     photoReviewSubmittedAt: ({ time }: { time: string }) => `הוגש בשעה ${time}`,
+    // ── Triage (change: photo review throughput) ──
+    photoReviewWaiting: ({ minutes }: { minutes: number }) => `ממתין ${minutes} דקות`,
+    photoReviewWaitingJustNow: 'הוגש עכשיו',
+    photoReviewWaitingUnknown: 'זמן ההגשה לא ידוע',
+    photoReviewOverdue: 'הקבוצה תקועה וממתינה לכם',
+    photoReviewTeamFinished: 'הקבוצה כבר סיימה, אף אחד לא ממתין',
+    photoReviewRowFailed: ({ team }: { team: string }) => `הבדיקה של ${team} לא נשמרה. הקבוצה עדיין ממתינה.`,
+    photoReviewRetry: 'לנסות שוב',
+    photoReviewKeyboardHint: 'מקלדת: J או K למעבר בין הגשות, A לאישור, R לדחייה',
+    photoReviewQueueLabel: 'הגשות שממתינות לבדיקה',
     chatTitle: 'צ׳אט עם הקבוצות',
     chatHq: 'המטה',
     chatSend: 'שליחה',
@@ -618,7 +629,8 @@ const HE = {
     staffLinkNote: 'הקישור ממלא מראש את פרטי הריצה. איש הצוות רק מקליד את הקוד למעלה.',
     staffLinkQrAlt: 'קוד QR לכניסת צוות',
     startedAllTeams: 'כל הקבוצות התחילו.',
-    heldForConsent: '{launched} קבוצות התחילו. {held} קבוצות ממתינות לאישור אפוטרופוס ולא יוכלו להתחיל בלעדיו.',
+    heldForConsent: ({ launched, held }: { launched: number; held: number }) =>
+      `${launched} קבוצות התחילו. ${held} קבוצות ממתינות לאישור אפוטרופוס ולא יוכלו להתחיל בלעדיו.`,
     startFailed: 'התחלת הקבוצות נכשלה. בדקו את החיבור ונסו שוב.',
     finalizedRun: 'הריצה הסתיימה. הדירוג הסופי חושב.',
     finalizeFailed: 'סיום הריצה נכשל. בדקו את החיבור ונסו שוב.',
@@ -662,6 +674,7 @@ const HE = {
     waitingForTeams: 'ממתינים שהקבוצות ידווחו מיקום…',
 
     // ── חלוקה לקבוצות תצוגה (change: run-console-progressive-disclosure) ──
+    sectionsHeader: 'מדורים',
     groupTeams: 'קבוצות ודירוג',
     groupModeration: 'תמונות והודעות מהשטח',
     groupMechanics: 'מערכות משחק',
@@ -669,6 +682,24 @@ const HE = {
     groupAfter: 'אחרי הריצה',
     groupUnreadChats: ({ n }: { n: number }) => `${n} שיחות חדשות`,
     groupHotZoneOn: 'אזור חם פעיל',
+
+    // ── זמינות משימות בזמן ריצה (change: live-task-pause) ──
+    taskAvailTitle: 'זמינות משימות',
+    taskAvailHelp: 'חנות נסגרה? רחוב חסום? מפעיל התחנה הלך? השהו את המשימה והמערכת תפסיק לשלוח אליה קבוצות. השינוי חל על הריצה הזו בלבד, המשחק השמור לא משתנה.',
+    taskAvailEmpty: 'אין עדיין משימות במשחק הזה.',
+    taskAvailLoading: 'טוען משימות…',
+    taskAvailStatusActive: 'פעילה',
+    taskAvailStatusPaused: 'מושהית',
+    taskAvailStatusClosed: 'סגורה',
+    taskAvailPause: 'השהיה',
+    taskAvailClose: 'סגירה',
+    taskAvailResume: 'החזרה למשחק',
+    taskAvailHolding: ({ n }: { n: number }) =>
+      n === 1 ? 'קבוצה אחת נמצאת עליה עכשיו ותוכל לסיים אותה' : `${n} קבוצות נמצאות עליה עכשיו ויוכלו לסיים אותה`,
+    taskAvailUpdated: 'הזמינות עודכנה',
+    taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
+      `בשלב "${stage}" יישארו ${available} משימות זמינות מתוך ${required} שנדרשות להשלמת השלב, כך שקבוצות שעדיין לא סיימו אותו ייתקעו. להשהות בכל זאת?`,
+    taskAvailForce: 'להשהות בכל זאת',
 
     // ── משטח השיתוף המאוחד ──
     shareTitle: 'שיתוף ומסכים',
@@ -706,9 +737,23 @@ const HE = {
     skipAria: ({ team }: { team: string }) => `דילוג על השלב הנוכחי של ${team}`,
     // ── שחרור קבוצה שנתקעה מחוץ לאזור המשחק ──
     outOfBoundsBadge: 'מחוץ לאזור המשחק, לא מקבלים משימות',
+    // Held-team visibility: which team the start held back, not just how many.
+    heldForConsentBadge: 'מעוכבים עד לאישור הורה, לא יצאו לדרך',
     letBackIn: 'החזרה למשחק',
     letBackInAria: ({ team }: { team: string }) => `החזרת ${team} למשחק`,
     letBackInFailed: 'לא הצלחנו להחזיר את הקבוצה למשחק. נסו שוב.',
+    // ── מי צריך עזרה עכשיו (change: run-console-attention) ──
+    // הקונסולה ידעה להראות ניקוד, אבל לא ידעה להראות מי תקוע בשטח. הכיתוב כאן
+    // אמור להופיע לעיתים רחוקות: אם כל הקבוצות מסומנות, הסימון מאבד את הערך שלו.
+    attentionCount: ({ n }: { n: number }) =>
+      n === 1 ? 'קבוצה אחת צריכה תשומת לב' : `${n} קבוצות צריכות תשומת לב`,
+    attentionStuck: 'תקועים',
+    attentionWatch: 'שווה לבדוק',
+    attentionOutOfBounds: 'מחוץ לאזור המשחק',
+    attentionAnswerLockout: 'ממתינים לסיום נעילה אחרי תשובות שגויות',
+    attentionGpsSilent: 'אין איתות מיקום',
+    attentionIdle: 'לא התקדמו הרבה זמן',
+    attentionAwaitingReview: 'ממתינים לאישור תמונה מכם',
     endOfRunTitle: 'סיום הריצה',
     endOfRunHelp: 'מסיים את המשחק לכל הקבוצות ומחשב את הדירוג הסופי. אי אפשר לחזור אחורה.',
 
@@ -778,6 +823,12 @@ const HE = {
     completionOf: (m: number) => `מתוך ${m} משימות`,
     completionRouted: ', המתאימות ביותר נבחרות',
     completionAll: ' (כולן)',
+    // תקינות שלב (change: stage-winnability): קבוצת חלופות מניבה השלמה אחת בלבד
+    completionCappedByGroups: (max: number, total: number) =>
+      `אפשר לבחור עד ${max} מתוך ${total}, כי חלק מהמשימות בשלב הזה הן חלופות וכל קבוצת חלופות נחשבת השלמה אחת.`,
+    completionStoredUnreachable: (req: number, max: number) =>
+      `השלב שמור כך שצריך להשלים ${req} משימות, אבל קבוצה יכולה להשלים לכל היותר ${max}, ולכן אי אפשר לסיים אותו.`,
+    completionFixToCeiling: (max: number) => `שנו ל${max}`,
     releaseLead: 'שחרור השלב',
     releaseAfterUnit: 'דקות אחרי תחילת המשחק (0 = מיד)',
     releaseUnitShort: 'דקות',
@@ -794,6 +845,10 @@ const HE = {
     exclusiveHint: 'קבוצה שמשלימה משימה אחת בקבוצה כזו, שאר המשימות בה ננעלות עבורה',
     exclusiveRemoveGroup: 'מחיקת הקבוצה',
     exclusiveUnwinnableWarn: 'שימו לב: מספר המשימות הנדרש להשלמה גבוה ממספר המשימות שאפשר להשלים אחרי שהקבוצות נועלות את החלופות, והשלב יסתיים מוקדם',
+    // unreachable-task-strand: אזהרה בלבד. זו הצעה לגיטימית של מסלול מתפצל,
+    // והשרת כבר מדלג על המשימה אוטומטית כדי שאף קבוצה לא תיתקע.
+    exclusiveUnlockRiskWarn: (task: string, prereq: string) =>
+      `שימו לב: המשימה "${task}" נפתחת רק אחרי "${prereq}", ו"${prereq}" היא אחת מכמה חלופות. קבוצה שתבחר חלופה אחרת לא תוכל להגיע ל"${task}", והמשימה תסומן עבורה כמדולגת`,
     exclusiveGroupLetter: (i: number) => 'אבגדהוזחטיכלמנסעפצקרשת'[i] ?? String(i + 1),
     exclusiveOpenEditor: 'קיבוץ משימות',
     exclusiveModalTitle: 'קיבוץ משימות חלופיות',
@@ -867,6 +922,9 @@ const HE = {
     hideLocationDesc: 'השחקנים לא יראו את הסיכה, הם יגיעו למקום לפי הרמז בלבד.',
     requirePresence: 'חייבים להיות במיקום כדי לענות',
     requirePresenceDesc: 'השחקנים חייבים להימצא ליד המקום (בערך 150 מטר) כדי לשלוח תשובה.',
+    pauseClock: 'עצור את השעון במשימה הזו',
+    pauseClockDesc: 'הזמן שהקבוצה מבלה כאן לא נספר בדירוג. מתאים לשאלון או למשימה שדורשת מחשבה, כדי שלא ימהרו.',
+    pauseClockLocatedWarn: 'שימו לב: במשימה עם מיקום, גם ההליכה אל הנקודה לא תיספר.',
     locationClueField: 'רמז למיקום',
     locationCluePlaceholder: 'תארו את המקום כחידה (למשל: במקום שבו המים לא נחים)',
     hideLocationNeedsCoords: 'משימה מוסתרת עדיין צריכה מיקום אמיתי על המפה.',
@@ -927,6 +985,7 @@ const HE = {
     secretCode: 'קוד סודי (המשתתפים מקלידים אותו)',
     secretCodePlaceholder: 'לדוגמה: 4821',
     autoApprove: 'אישור אוטומטי (ללא בדיקת צוות)',
+    autoApproveHint: 'בלי אישור אוטומטי, כל הגשה ממתינה לאישור שלכם במהלך המשחק, והקבוצה עומדת במקום עד שתאשרו. עם 15 קבוצות זה הרבה בדיקות תוך כדי ריצה.',
     captureKindLabel: 'סוג ההגשה',
     captureKindPhoto: 'תמונה',
     captureKindAudio: 'הקלטת קול',
@@ -949,6 +1008,12 @@ const HE = {
     sectionSetCount: (n: number) => `${n} מוגדר`,
     points: 'נקודות',
     estMin: 'זמן משוער (דקות)',
+    // task-duration-defaults
+    durationSuggested: (m: string) => `אופייני לסוג הזה: כ־${m} דקות`,
+    durationUseSuggested: 'השתמשו בזמן המוצע',
+    durationOverride: 'זמן צפוי למשימה (דקות)',
+    durationOverridePlaceholder: (m: string) => `ברירת מחדל: ${m}`,
+    durationHelp: 'הזמן הזה מתייחס רק לפעולה עצמה בנקודה, בלי זמן ההליכה אליה. ההליכה מחושבת בנפרד.',
     maxTeams: 'מקס׳ קבוצות',
     noConfigNote: (desc: string) => `${desc} אין צורך בהגדרת תשובה נוספת.`,
     typeStation: 'תחנה',
@@ -1007,6 +1072,19 @@ const HE = {
     webhookLabel: 'התראות לצ׳אט (סלאק / טימס)',
     webhookHelp: 'הדביקו קישור נכנס מסלאק או טימס כדי לשקף הודעות ומשימות בזק לערוץ שלכם.',
     webhookInvalid: 'הקישור חייב להיות קישור נכנס תקין של סלאק או טימס.',
+    // אזור משחק (שינוי: expose-enforced-settings) — השדה שהשרת אוכף ואף אחד לא יכול היה להגדיר.
+    safeZoneSectionTitle: 'אזור המשחק',
+    safeZoneHint: 'עיגול שבתוכו מתנהל המשחק. קבוצה שיוצאת ממנו מקבלת התראה ומפסיקה לקבל משימות חדשות עד שהיא חוזרת.',
+    safeZoneEnable: 'הגדירו אזור סביב התחנות',
+    safeZoneEnableHint: 'נגדיר עיגול שמכיל את כל התחנות שסימנתם, ותוכלו לשנות את הרדיוס.',
+    safeZoneNeedsTasks: 'אין עדיין תחנות עם מיקום על המפה, לכן אי אפשר לחשב אזור משחק.',
+    safeZoneRadiusLabel: 'רדיוס במטרים',
+    safeZoneRadiusHint: 'המרחק המרבי ממרכז האזור. כדאי להשאיר מרווח הליכה מעבר לתחנה הרחוקה ביותר.',
+    safeZoneRadiusInvalid: (max: number) =>
+      `הרדיוס חייב להיות מספר גדול מאפס ולכל היותר ${max} מטר.`,
+    safeZoneRecenter: 'מרכזו מחדש לפי התחנות',
+    safeZoneClear: 'בטלו את האזור',
+    safeZoneTooSpread: 'התחנות מפוזרות רחב מדי לאזור אחד, ולכן חלק מהן נמצאות מחוץ לעיגול.',
     instantPlayLabel: 'אפשר משחק מיידי מהגלריה',
     instantPlayHelp: 'שחקנים יוכלו להתחיל ריצה עצמאית חינם של המשחק הזה מתי שירצו, בלי קוד ובלי מארגן.',
     photoFeedLabel: 'פיד תמונות חי',
@@ -1404,8 +1482,9 @@ const EN: typeof HE = {
     // Mission library map (change: task-library-map-view)
     noLocatedTasks: 'None of these missions has a published area.',
     // An empty map must explain itself (change: public-task-area-visibility)
-    noLocatedTasksHelp: 'A published area is created when a game is published. Missions published before this update, and missions with a hidden location, stay off the map until their game is published again.',
-    approxPinsNote: 'Pins show an approximate area, not an exact spot. Missions with a hidden location are not on the map.',
+    noLocatedTasksHelp: 'A published area is created when a game is published. Missions published before this update stay off the map until their game is published again.',
+    // Hidden-location missions get an area too (change: hidden-location-map-visibility)
+    approxPinsNote: 'Pins show an approximate area, not an exact spot. Missions with a hidden location appear as an area too, and players themselves still do not see it.',
     metaDiff:  (n: number) => `diff ${n}`,
     metaPts:   (n: number) => `${n} pts`,
     metaCopies:(n: number) => `${n} copies`,
@@ -1633,6 +1712,16 @@ const EN: typeof HE = {
     photoReviewAlreadyRejected: 'Already rejected',
     photoReviewLoadError: 'Could not load submissions, retrying',
     photoReviewSubmittedAt: ({ time }: { time: string }) => `submitted at ${time}`,
+    // ── Triage (change: photo review throughput) ──
+    photoReviewWaiting: ({ minutes }: { minutes: number }) => `waiting ${minutes} min`,
+    photoReviewWaitingJustNow: 'just submitted',
+    photoReviewWaitingUnknown: 'submission time unknown',
+    photoReviewOverdue: 'this team is stuck waiting for you',
+    photoReviewTeamFinished: 'team already finished, nobody is waiting',
+    photoReviewRowFailed: ({ team }: { team: string }) => `The review for ${team} was not saved. That team is still waiting.`,
+    photoReviewRetry: 'Try again',
+    photoReviewKeyboardHint: 'Keyboard: J or K to move between submissions, A to approve, R to reject',
+    photoReviewQueueLabel: 'Submissions waiting for review',
     chatTitle: 'Team chat',
     chatHq: 'HQ',
     chatSend: 'Send',
@@ -1729,7 +1818,8 @@ const EN: typeof HE = {
     staffLinkNote: 'The link fills in the run details. Staff just type the PIN above.',
     staffLinkQrAlt: 'Staff sign in QR code',
     startedAllTeams: 'All teams started.',
-    heldForConsent: '{launched} teams started. {held} teams are waiting for guardian approval and cannot start without it.',
+    heldForConsent: ({ launched, held }: { launched: number; held: number }) =>
+      `${launched} teams started. ${held} teams are waiting for guardian approval and cannot start without it.`,
     startFailed: 'Could not start teams. Check your connection and try again.',
     finalizedRun: 'Run finalized. The final leaderboard is computed.',
     finalizeFailed: 'Could not finalize the run. Check your connection and try again.',
@@ -1773,6 +1863,7 @@ const EN: typeof HE = {
     waitingForTeams: 'Waiting for teams to report their location…',
 
     // ── Disclosure groups (change: run-console-progressive-disclosure) ──
+    sectionsHeader: 'Sections',
     groupTeams: 'Teams and standings',
     groupModeration: 'Photos and messages from the field',
     groupMechanics: 'Game systems',
@@ -1780,6 +1871,24 @@ const EN: typeof HE = {
     groupAfter: 'After the run',
     groupUnreadChats: ({ n }: { n: number }) => `${n} new chats`,
     groupHotZoneOn: 'Hot zone running',
+
+    // ── Live task availability (change: live-task-pause) ──
+    taskAvailTitle: 'Task availability',
+    taskAvailHelp: 'Shop closed? Street blocked? Station host gone? Pause the task and the system stops routing teams to it. This applies to this run only, your saved game is untouched.',
+    taskAvailEmpty: 'This game has no tasks yet.',
+    taskAvailLoading: 'Loading tasks…',
+    taskAvailStatusActive: 'In play',
+    taskAvailStatusPaused: 'Paused',
+    taskAvailStatusClosed: 'Closed',
+    taskAvailPause: 'Pause',
+    taskAvailClose: 'Close',
+    taskAvailResume: 'Put back in play',
+    taskAvailHolding: ({ n }: { n: number }) =>
+      n === 1 ? 'One team is on it now and can still finish it' : `${n} teams are on it now and can still finish it`,
+    taskAvailUpdated: 'Availability updated',
+    taskAvailUnwinnable: ({ stage, available, required }: { stage: string; available: number; required: number }) =>
+      `Stage "${stage}" would be left with ${available} available tasks out of the ${required} it needs to complete, so teams still in it would be stuck. Pause it anyway?`,
+    taskAvailForce: 'Pause anyway',
 
     // ── One consolidated share surface ──
     shareTitle: 'Share and screens',
@@ -1815,9 +1924,23 @@ const EN: typeof HE = {
     skipAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
     // ── Releasing a team stuck outside the play area ──
     outOfBoundsBadge: 'Outside the play area, not receiving tasks',
+    // Held-team visibility: which team the start held back, not just how many.
+    heldForConsentBadge: 'Held for guardian approval, not started',
     letBackIn: 'Let back in',
     letBackInAria: ({ team }: { team: string }) => `Let ${team} back into the game`,
     letBackInFailed: 'We could not let this team back in. Please try again.',
+    // ── Who needs help right now (change: run-console-attention) ──
+    // The console could show a score but not who was stranded. This copy is meant
+    // to appear rarely: if every team is flagged, the flag stops meaning anything.
+    attentionCount: ({ n }: { n: number }) =>
+      n === 1 ? '1 team needs attention' : `${n} teams need attention`,
+    attentionStuck: 'Stuck',
+    attentionWatch: 'Worth a check',
+    attentionOutOfBounds: 'Outside the play area',
+    attentionAnswerLockout: 'Waiting out an answer lockout',
+    attentionGpsSilent: 'No location signal',
+    attentionIdle: 'No progress for a long time',
+    attentionAwaitingReview: 'Waiting for you to approve a photo',
     endOfRunTitle: 'End of run',
     endOfRunHelp: 'Ends the game for every team and computes the final standings. There is no way back.',
 
@@ -1886,6 +2009,12 @@ const EN: typeof HE = {
     completionLead: 'Each team completes',
     completionOf: (m: number) => `of ${m} tasks`,
     completionRouted: ', routed to best suited ones',
+    // Stage winnability (change: stage-winnability): a group of alternatives yields one completion
+    completionCappedByGroups: (max: number, total: number) =>
+      `You can pick up to ${max} of ${total}, because some tasks in this stage are alternatives and each group of alternatives counts as one completion.`,
+    completionStoredUnreachable: (req: number, max: number) =>
+      `This stage is saved as needing ${req} tasks, but a team can complete at most ${max}, so it can never be finished.`,
+    completionFixToCeiling: (max: number) => `Set it to ${max}`,
     releaseLead: 'Release this stage',
     releaseAfterUnit: 'minutes after the game starts (0 = right away)',
     releaseUnitShort: 'minutes',
@@ -1902,6 +2031,10 @@ const EN: typeof HE = {
     exclusiveHint: 'Once a team completes one task in such a group, the others lock for that team',
     exclusiveRemoveGroup: 'Remove this group',
     exclusiveUnwinnableWarn: 'Heads up: the required completion count is higher than the number of tasks a team can complete once the groups lock their alternatives, so the stage would end early',
+    // unreachable-task-strand: advisory only. The shape is a legitimate branch,
+    // and the server now retires the dead branch so no team can be stranded.
+    exclusiveUnlockRiskWarn: (task: string, prereq: string) =>
+      `Heads up: task "${task}" unlocks only after "${prereq}", and "${prereq}" is one of several alternatives. A team that picks a different alternative can never reach "${task}", so it will be marked skipped for them`,
     exclusiveGroupLetter: (i: number) => (i <= 25 ? String.fromCharCode(65 + i) : String(i + 1)),
     exclusiveOpenEditor: 'Group tasks',
     exclusiveModalTitle: 'Group alternative tasks',
@@ -1976,6 +2109,9 @@ const EN: typeof HE = {
     hideLocationDesc: 'Players won’t see the pin. They reach the spot from the clue alone.',
     requirePresence: 'Require players to be at the location',
     requirePresenceDesc: 'Players must be near the spot (about 150m) to submit an answer.',
+    pauseClock: 'Stop the clock on this task',
+    pauseClockDesc: 'Time spent here does not count toward the standings. Good for a survey or anything that needs thought, so nobody rushes.',
+    pauseClockLocatedWarn: 'Heads up: on a task with a location, the walk to the spot will not be counted either.',
     locationClueField: 'Location clue',
     locationCluePlaceholder: 'Describe the spot as a riddle (e.g. Where water never stops)',
     hideLocationNeedsCoords: 'A hidden task still needs a real spot on the map.',
@@ -2036,6 +2172,7 @@ const EN: typeof HE = {
     secretCode: 'Secret code (participants enter this)',
     secretCodePlaceholder: 'e.g. FOX42',
     autoApprove: 'Auto approve (no staff review needed)',
+    autoApproveHint: 'Without auto approve, every submission waits for you to approve it during the game, and the team stands still until you do. With 15 teams that is a lot of reviewing while you are on the move.',
     captureKindLabel: 'Submission type',
     captureKindPhoto: 'Photo',
     captureKindAudio: 'Audio',
@@ -2058,6 +2195,12 @@ const EN: typeof HE = {
     sectionSetCount: (n: number) => `${n} set`,
     points: 'Points',
     estMin: 'Estimated minutes',
+    // task-duration-defaults
+    durationSuggested: (m: string) => `Typical for this type: about ${m} minutes`,
+    durationUseSuggested: 'Use the suggested time',
+    durationOverride: 'Expected task time (minutes)',
+    durationOverridePlaceholder: (m: string) => `Default: ${m}`,
+    durationHelp: 'This time covers only the activity at the spot, not the walk to it. Walking time is counted separately.',
     maxTeams: 'Max teams',
     noConfigNote: (desc: string) => `${desc} No extra answer config needed.`,
     typeStation: 'Station',
@@ -2117,6 +2260,20 @@ const EN: typeof HE = {
     webhookLabel: 'Chat alerts (Slack / Teams)',
     webhookHelp: 'Paste a Slack or Teams incoming webhook URL to mirror announcements and flash missions to your channel.',
     webhookInvalid: 'Must be a valid Slack or Microsoft Teams incoming webhook URL.',
+    // Play area (change: expose-enforced-settings) — the field the server enforced
+    // and nothing could set.
+    safeZoneSectionTitle: 'Play area',
+    safeZoneHint: 'A circle the game stays inside. A team that leaves it is flagged and stops receiving new tasks until it comes back.',
+    safeZoneEnable: 'Set an area around my stops',
+    safeZoneEnableHint: 'We fit a circle around every stop you placed on the map, and you can adjust the radius.',
+    safeZoneNeedsTasks: 'No stop has a location on the map yet, so there is nothing to fit an area around.',
+    safeZoneRadiusLabel: 'Radius in metres',
+    safeZoneRadiusHint: 'How far the area reaches from its centre. Leave walking room beyond the furthest stop.',
+    safeZoneRadiusInvalid: (max: number) =>
+      `The radius must be a number above zero and at most ${max} metres.`,
+    safeZoneRecenter: 'Refit to my stops',
+    safeZoneClear: 'Remove the area',
+    safeZoneTooSpread: 'Your stops are spread too wide for a single area, so some of them fall outside the circle.',
     instantPlayLabel: 'Allow instant play from the gallery',
     instantPlayHelp: 'Players can start a free self guided run of this game anytime, with no code and no organizer.',
     photoFeedLabel: 'Live photo feed',

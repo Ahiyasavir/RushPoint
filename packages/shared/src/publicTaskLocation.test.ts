@@ -116,18 +116,52 @@ describe('approximatePublicPoint — coarsening', () => {
 });
 
 describe('publicTaskLocation — the writer\'s rule', () => {
-  test('a hideLocation task publishes NO location, even with perfect coordinates', () => {
-    // The headline requirement. For these tasks the location IS the puzzle.
-    expect(publicTaskLocation(task({ hideLocation: true }))).toBeUndefined();
+  // ── hideLocation (change: hidden-location-map-visibility) ───────────────────
+  // A hidden-location task now publishes the SAME ~1 km cell as any other task,
+  // so a creator can see their own hunt on their own library map. What is
+  // published is a neighbourhood, not a spot, and the secrecy that makes the
+  // puzzle a puzzle lives in a different code path entirely — the participant
+  // sanitizer, which seals the task until the server confirms arrival and never
+  // sends any coordinate, coarse or exact. See sanitizeTask.test.ts for the pair
+  // of assertions that hold both halves of that boundary at once.
+  test('a hideLocation task publishes the same coarse area as any other task', () => {
+    const hidden = publicTaskLocation(task({ hideLocation: true }));
+    expect(hidden).toBeDefined();
+    expect(hidden).toEqual(approximatePublicPoint(AUTHORED));
+    // …and it is an AREA, never the authored point.
+    expect(hidden!.lat).not.toBe(AUTHORED.lat);
+    expect(hidden!.lng).not.toBe(AUTHORED.lng);
+    expect(hidden).toEqual(publicTaskLocation(task()));
   });
 
-  test('a hideLocation task publishes no location regardless of its other config', () => {
+  test('a hideLocation task publishes an area regardless of its other config', () => {
     expect(publicTaskLocation(task({
       hideLocation: true,
       triggerMode: 'radius',
       locationClue: 'Where the lions guard the gate',
       geofenceRadiusMeters: 40,
-    }))).toBeUndefined();
+    }))).toEqual(approximatePublicPoint(AUTHORED));
+  });
+
+  test('a hideLocation area is deterministic — repeated publishes cannot be averaged', () => {
+    const first = publicTaskLocation(task({ hideLocation: true }));
+    for (let i = 0; i < 25; i++) {
+      expect(publicTaskLocation(task({ hideLocation: true }))).toEqual(first);
+    }
+  });
+
+  test('a hideLocation task that is locationless still publishes nothing', () => {
+    expect(publicTaskLocation(task({ hideLocation: true, locationless: true }))).toBeUndefined();
+  });
+
+  test('a hideLocation task with unusable coordinates still publishes nothing', () => {
+    expect(publicTaskLocation(task({ hideLocation: true, coordinates: undefined }))).toBeUndefined();
+    expect(publicTaskLocation(task({ hideLocation: true, coordinates: { lat: NaN, lng: 35 } }))).toBeUndefined();
+    expect(publicTaskLocation(task({ hideLocation: true, coordinates: { lat: 31, lng: Infinity } }))).toBeUndefined();
+    expect(publicTaskLocation(task({ hideLocation: true, coordinates: { lat: 91, lng: 35 } }))).toBeUndefined();
+    expect(publicTaskLocation(task({ hideLocation: true, coordinates: { lat: '31', lng: '35' } }))).toBeUndefined();
+    // null island is the "not placed yet" placeholder, hidden or not.
+    expect(publicTaskLocation(task({ hideLocation: true, coordinates: { lat: 0, lng: 0 } }))).toBeUndefined();
   });
 
   test('an ordinary located task publishes a coarsened point, never the authored one', () => {
@@ -190,8 +224,14 @@ describe('publicTaskMapCoverage — the map-state classifier', () => {
   const withArea = () => pub({ approxLocation: { ...AREA } });
   /** A document written before the privacy change: exact point, no area. */
   const legacy = () => pub({ coordinates: { ...AUTHORED } });
-  /** A hideLocation task — the writer emitted no location field at all. */
-  const hidden = () => pub();
+  /** A task the writer emitted no location field for at all (locationless / unplaced). */
+  const unplaced = () => pub();
+  /**
+   * A hideLocation task published under the current rule: it carries an ordinary
+   * area, so as far as the map is concerned it is an ordinary plottable result
+   * (change: hidden-location-map-visibility).
+   */
+  const hiddenWithArea = () => pub({ approxLocation: { ...AREA }, hideLocation: true });
 
   test('an empty result set is "no-results"', () => {
     expect(publicTaskMapCoverage([])).toBe('no-results');
@@ -207,9 +247,17 @@ describe('publicTaskMapCoverage — the map-state classifier', () => {
     expect(publicTaskMapCoverage([legacy(), legacy()])).toBe('none-plottable');
   });
 
-  test('hidden-location and no-location results are "none-plottable"', () => {
-    expect(publicTaskMapCoverage([hidden()])).toBe('none-plottable');
+  test('no-location results are "none-plottable"', () => {
+    expect(publicTaskMapCoverage([unplaced()])).toBe('none-plottable');
     expect(publicTaskMapCoverage([pub({ approxLocation: undefined })])).toBe('none-plottable');
+  });
+
+  test('a hidden-location result that carries an area IS plottable', () => {
+    // The change: a hidden-location mission is on the creator's map like any
+    // other, so a library full of them is "all-plottable", not an empty map.
+    expect(isPlottablePublicTask(hiddenWithArea())).toBe(true);
+    expect(publicTaskMapCoverage([hiddenWithArea(), hiddenWithArea()])).toBe('all-plottable');
+    expect(publicTaskMapCoverage([hiddenWithArea(), unplaced()])).toBe('partial');
   });
 
   test('malformed areas are "none-plottable" and do not throw', () => {
@@ -224,7 +272,7 @@ describe('publicTaskMapCoverage — the map-state classifier', () => {
   test('A MIXED set is "partial" — the empty state must NOT apply', () => {
     // The regression this guards: one located mission among many unlocated ones
     // must put a pin on the map and suppress the "nothing here" message entirely.
-    expect(publicTaskMapCoverage([legacy(), withArea(), hidden()])).toBe('partial');
+    expect(publicTaskMapCoverage([legacy(), withArea(), unplaced()])).toBe('partial');
     expect(publicTaskMapCoverage([withArea(), legacy()])).toBe('partial');
   });
 
@@ -239,7 +287,7 @@ describe('publicTaskMapCoverage — the map-state classifier', () => {
   });
 
   test('the classifier agrees with isPlottablePublicTask item by item', () => {
-    const items = [withArea(), legacy(), hidden(), pub({ approxLocation: { lat: 0, lng: 0 } })];
+    const items = [withArea(), legacy(), unplaced(), pub({ approxLocation: { lat: 0, lng: 0 } })];
     const plottable = items.filter(isPlottablePublicTask).length;
     expect(plottable).toBe(1);
     expect(publicTaskMapCoverage(items)).toBe('partial');

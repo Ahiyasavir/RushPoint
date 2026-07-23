@@ -307,6 +307,17 @@ export interface Task {
   // answer is — so it is a sanitizer passthrough and the participant is TOLD the
   // rule before they answer.
   wrongAnswerPenalty?: WrongAnswerLevel;
+  // Pause-clock tasks (change: pause-clock-tasks): while a team is on this task
+  // its race clock STOPS, so hurrying buys nothing. The server measures the span
+  // from its OWN stamps (RunTaskRecord.startedAt → completedAt) and subtracts it
+  // from every time-derived scoring term (ranked duration, speed bonus, Z-Score);
+  // under smart_weighted the task is scored on-estimate so its sigmoid multiplier
+  // is time-independent. Offered on ANY task type; absent/false = today's
+  // behaviour exactly, so no existing game or in-flight run changes. On a LOCATED
+  // task the excluded span also covers the walk to the spot (the Builder says so).
+  // Carries no secret — the player MUST be told the clock stopped, or they hurry
+  // anyway — so it is a sanitizer passthrough.
+  pausesTimer?: boolean;
   // ── Verification config by type. Answer keys (answers/numericAnswer/
   //    steps[].answer) are SERVER-SECRET — stripped from the participant payload. ──
   // quiz: render `choices` as buttons (if present) else a text box; correct
@@ -509,8 +520,11 @@ export interface Game {
   requiresGuardianConsent?: boolean;
   minAge?: number;
   // Safe-zone boundary (change: safe-zone-boundary): a circular play area; a team
-  // outside it triggers a server-side alert + soft-pause.
-  safeZone?: import('./../safeZone').SafeZone;
+  // outside it triggers a server-side alert + soft-pause. Nullable because the
+  // Builder must be able to send an explicit CLEAR (change:
+  // expose-enforced-settings): `undefined` already means "field not sent" on the
+  // save payload, so removing a boundary needs a value of its own.
+  safeZone?: import('./../safeZone').SafeZone | null;
   // Platform benchmark (change: platform-benchmark): opt this game's finished runs
   // out of the anonymized cross-platform aggregate contribution.
   benchmarkOptOut?: boolean;
@@ -710,6 +724,13 @@ export interface Run {
   // Marketplace instant play (change: marketplace-instant-play): a free self-guided solo
   // run started on demand from a public game, not launched by an organizer.
   selfGuided?: boolean;
+  // Live task availability (change: live-task-pause): per RUN operator overrides of
+  // a task's `status`, keyed by task id. Server written only (setRunTaskStatus).
+  // Deliberately NOT on the game template: a stop that closed today must not stay
+  // closed for tomorrow's run, for a duplicate, for an export, or in the gallery.
+  // Routing resolves it via effectiveTaskStatus(); the completion path never reads
+  // it, so a team already holding a paused task still finishes and scores it.
+  taskStatusOverrides?: Record<string, StationStatus>;
   createdAt: string;
   updatedAt: string;
 }
@@ -775,6 +796,19 @@ export interface RunTaskRecord {
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
+  // Pause-clock tasks (change: pause-clock-tasks): milliseconds of THIS team's
+  // clock excluded because the game task carries `pausesTimer`. Stamped ONCE, at
+  // completion, from the server's own startedAt → completedAt span (never from
+  // anything a client reports), as part of the whole-object stage rewrite the
+  // record already receives. Absent on every pre-existing record and read as 0.
+  //
+  // Two jobs, one field: buildRankings SUMS it (so live and final standings read
+  // the same immutable number even if the creator edits `pausesTimer` mid-run),
+  // and routing's computeSkillRatio drops any record that CARRIES it from the
+  // team's measured pace — which is why it is stamped even when the span is 0.
+  // `actualMinutes` above deliberately keeps the REAL measured span, because
+  // benchmarks, per-type analytics and the staff over-duration warning read it.
+  excludedMs?: number;
   earnedScore?: number;
   scoreBreakdown?: TaskScoreBreakdown;
   // Smart station

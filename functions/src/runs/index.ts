@@ -60,8 +60,13 @@ import {
   type BenchmarkAggregate,
   // One partition drives both the launch set and the reported hold count
   // (change: expose-enforced-settings). It delegates per team to
-  // `isConsentSatisfied`, which is why that predicate is no longer imported here.
+  // `isConsentSatisfied`.
   partitionTeamsByConsent,
+  // The same predicate the partition delegates to, used by the two READ paths
+  // that report a hold to the people it affects (change: held-team-visibility):
+  // getMyTeamState's `holdReason` and listRunTeams' `heldForConsent`. Reusing it
+  // is what keeps "held" one definition instead of three that can drift.
+  isConsentSatisfied,
   haversineKm,
   isValidCoord,
   isReleased,
@@ -69,6 +74,7 @@ import {
   isExpired,
   isUnlocked,
   lockedTaskIds,
+  unreachableTaskIds,
   resolveExclusions,
   isHintFree,
   // Wrong-answer cost (change: wrong-answer-cost): escalating, capped, preset-aware.
@@ -94,6 +100,7 @@ import {
   cleanGameInstructions,
   evaluateSafeZoneStatus,
   type SafeZone,
+  COLLECTIONS,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -107,6 +114,8 @@ import {
   taskScoreSmart,
   COMPLETION_BONUS,
 } from '@rushpoint/shared';
+// Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
+import { taskExcludedMs, teamExcludedMs, adjustedElapsedSeconds } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 // Gallery ranking signals (change: gallery-popularity-ranking).
@@ -120,7 +129,7 @@ import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
   attachedDeviceUids, controllerUidOf, canAddRunDevice, MAX_RUN_DEVICES,
 } from './teamDevices';
-import type { RunFeedback } from '@rushpoint/shared';
+import type { RunFeedback, TaskProgressStatus } from '@rushpoint/shared';
 import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
 import { sendRunSummaryEmail } from './runSummaryEmail';
 import { validate, parseStored } from '../validation';
@@ -900,7 +909,18 @@ export async function completeTaskForTeam(
           earnedScore = taskScoreFixed(gameTask);
           break;
         case 'smart_weighted':
-          earnedScore = taskScoreSmart(gameTask.difficulty, actualMinutes, gameTask.estimatedMinutes);
+          // pause-clock-tasks: a paused task is scored ON ESTIMATE (x = 1), so its
+          // sigmoid multiplier is time-INDEPENDENT: no reward for rushing, no
+          // penalty for thinking. Feeding 0 instead would pay the maximum
+          // multiplier and turn "stop the clock" into "free points"; feeding the
+          // real span would keep punishing deliberation, which is the bug. This
+          // matches skipAward('smart_weighted'), which already awards the
+          // on-estimate score, so a skipped paused task and a completed one agree.
+          earnedScore = taskScoreSmart(
+            gameTask.difficulty,
+            gameTask.pausesTimer ? gameTask.estimatedMinutes : actualMinutes,
+            gameTask.estimatedMinutes,
+          );
           break;
       }
     }
@@ -916,6 +936,21 @@ export async function completeTaskForTeam(
     taskRec.status = 'completed';
     taskRec.completedAt = now;
     taskRec.actualMinutes = actualMinutes;
+    // pause-clock-tasks: stamp how much of THIS team's clock this task excludes,
+    // measured from the SERVER's own stamps (the task's startedAt and `now`) —
+    // never from anything the caller sent, which is what stops a client faking a
+    // fast finish. Written here, once, on the same whole-object stage rewrite the
+    // record already gets (never a dotted array path); the already-completed guard
+    // above makes a duplicate submission a no-op, so the first stamp is final.
+    // `actualMinutes` above keeps the REAL span on purpose — benchmarks, per-type
+    // analytics and the staff over-duration warning read it.
+    //
+    // Stamped even when the span rounds to 0: routing's computeSkillRatio drops a
+    // record by the PRESENCE of this field, so an instantly completed paused task
+    // must still be recognisable as paused.
+    if (gameTask?.pausesTimer) {
+      taskRec.excludedMs = taskExcludedMs({ startedAt, completedAt: now }, true);
+    }
     // survey-tasks: stamp the team's own response on its task record via the same
     // whole-object stage rewrite the record already gets (never a dotted array
     // path). The already-completed guard above makes duplicate submissions a
@@ -1182,6 +1217,18 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
   const scored: ScoredTeam[] = teams.map((team) => {
     let rawScore = 0;
 
+    // Pause-clock tasks (change: pause-clock-tasks): ONE excluded amount per team,
+    // summed from the values the server STAMPED on each completed paused task, and
+    // fed to EVERY time-derived term below (speed bonus, emitted duration, the
+    // time_only ordering, and the Z-Score's durationMin). Summing the stamps rather
+    // than re-reading `task.pausesTimer` off the template is deliberate: a creator
+    // may edit the template mid-run, and re-deriving would retroactively re-time
+    // finished work and make the live board jump. Because this is a pure function
+    // of the stored team document — not of `now`, not of the template, not of any
+    // client input — finalizeRun and refreshLeaderboard compute the same value, so
+    // live and final standings cannot drift.
+    const excludedMs = teamExcludedMs(team.stages);
+
     switch (game.scoringPreset) {
       case 'time_only':
         rawScore = 0;
@@ -1198,6 +1245,7 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
           team.startedAt,
           team.status === 'finished' ? team.finishedAt : undefined,
           game,
+          excludedMs,
         );
         break;
       case 'smart_weighted':
@@ -1219,7 +1267,17 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     // later `now`). Only a genuinely finished team feeds a finishedAt into the
     // duration; otherwise durationSeconds() returns Infinity → the field is omitted
     // below, keeping an unfinished team's entry a pure function of stored state.
-    const durSec = durationSeconds(team.startedAt, team.status === 'finished' ? team.finishedAt : undefined);
+    //
+    // pause-clock-tasks: the excluded amount comes off HERE, once, so the emitted
+    // durationSeconds/totalMinutes, the time_only ordering (which sorts on that
+    // same field) and the Z-Score's durationMin all read one adjusted value. The
+    // floor is zero — a game whose every task pauses the clock reaches exactly 0,
+    // never a negative — and an Infinity (unfinished team) passes through so the
+    // field is still omitted below.
+    const durSec = adjustedElapsedSeconds(
+      durationSeconds(team.startedAt, team.status === 'finished' ? team.finishedAt : undefined),
+      excludedMs,
+    );
     // A joined-but-not-started team has no startedAt → durationSeconds returns
     // Infinity. Never let a non-finite duration reach the (serialized) leaderboard
     // — it would crash getMyTeamState/refreshLeaderboard at JSON-encode. Both sort
@@ -2394,6 +2452,34 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
 
+  // Attention signals (change: run-console-attention). Location FRESHNESS — not
+  // any position — is what tells a dead GPS watch apart from a team that is just
+  // taking its time. Read-only, behind the owner gate above, and best-effort: a
+  // failed read degrades to "no evidence" (which the classifier treats as
+  // silence) rather than failing the organizer's only view of the field.
+  // Held-team visibility (change: held-team-visibility). `startTeams` reports a
+  // COUNT of the teams it held back; with a dozen teams milling around, a count
+  // with no names is not actionable. Deciding it per row needs the game's consent
+  // setting, which this handler did not read. Best-effort on the same bias as the
+  // location read below: if the game doc cannot be read, every row reports "not
+  // held" (silence) rather than failing the organizer's only view of the field.
+  let consentConfig: { requiresGuardianConsent?: boolean } = {};
+  try {
+    const gs = await db.doc(gamePath(uid, gameId)).get();
+    consentConfig = { requiresGuardianConsent: (gs.data() as Game | undefined)?.requiresGuardianConsent };
+  } catch { /* best-effort: every row degrades to heldForConsent: false */ }
+
+  const locationUpdatedAt = new Map<string, string>();
+  try {
+    const locSnap = await db
+      .collection(`${runPath(uid, gameId, runId)}/${COLLECTIONS.TEAM_LOCATIONS}`)
+      .get();
+    for (const d of locSnap.docs) {
+      const at = (d.data() as { updatedAt?: unknown }).updatedAt;
+      if (typeof at === 'string' && at) locationUpdatedAt.set(d.id, at);
+    }
+  } catch { /* best-effort: the row simply carries lastLocationAt: null */ }
+
   const snap = await db.collection(teamsCol(uid, gameId, runId)).get();
   const teams = snap.docs.map((d) => {
     const t = d.data() as RunTeam & {
@@ -2426,6 +2512,35 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       // alone clear it — a team paused by the safe-zone latch looked identical to a
       // team that was simply slow. Projected so staff can spot it and release them.
       outOfBounds: t.outOfBounds === true,
+      // ── Attention signals (change: run-console-attention) ──
+      // All three are read-only projections of state this handler already holds.
+      // The console derives "is anyone stuck?" from them; nothing is written and
+      // no new document shape exists. Each is optional/nullable on the wire, so a
+      // client that predates them, or a team document that lacks them, degrades to
+      // "no evidence" instead of to a false alarm.
+      //
+      // Last server write for this team: the only "when did anything happen"
+      // clock that exists (every scoring/answer/hint/assignment path bumps it).
+      updatedAt: t.updatedAt ?? null,
+      // Latest expiry across the wrong-answer retry lockouts. A clock value, not
+      // an answer key, so this does not touch the participant sanitizer contract.
+      answerLockoutUntil: Object.values(t.answerPenalties ?? {}).reduce<number | null>(
+        (max, p) => {
+          const until = p?.cooldownUntil;
+          return typeof until === 'number' && Number.isFinite(until) && until > (max ?? 0)
+            ? until
+            : max;
+        },
+        null,
+      ),
+      // Freshness of the team's GPS stream. Deliberately NOT the position: the
+      // console needs to know the watch died, not where the team is.
+      lastLocationAt: locationUpdatedAt.get(t.id) ?? null,
+      // Whether `startTeams` would hold this team back — the same predicate it
+      // partitions on. A BOOLEAN: the organizer needs to know which team to walk
+      // over to, not who the guardian is. False for every team of every run that
+      // does not require consent, and for every row if the game read above failed.
+      heldForConsent: !t.launched && !isConsentSatisfied(t, consentConfig),
     };
   });
 
@@ -2832,6 +2947,42 @@ export async function assignNextInActiveStage(
     }
   }
 
+  // Unreachable-task heal (change: unreachable-task-strand). A team can be sitting
+  // on a stage whose only remaining tasks are gated behind a task it can never
+  // complete (the losing member of an exclusive group, an expiry-swept task).
+  // Nothing else will ever fire for it: routing filters those tasks out as locked,
+  // so no completion happens, so applyStageCompletion is never reached from
+  // completeTaskForTeam. This poll is the one thing the stranded team still does,
+  // so the retirement runs here too — otherwise the fix would only ever help teams
+  // that were about to complete something anyway, which is precisely not the
+  // stranded ones. Guarded by the pure check, so a healthy team performs no extra
+  // read and no write, and self clearing (once retired the tasks are no longer
+  // unassigned). Skipped entirely while a task is in flight: that team is playing,
+  // not stranded, and completeTaskForTeam will apply the same rule when it grades.
+  {
+    const idx = team.stages.findIndex((s) => s.status === 'active');
+    const gs = idx >= 0 ? game.stages.find((s) => s.id === team.stages[idx].stageId) : undefined;
+    const busy = idx >= 0 && team.stages[idx].tasks.some((t) => t.status === 'assigned');
+    if (idx >= 0 && !busy && Array.isArray(gs?.tasks) && gs.tasks.length > 0) {
+      const statusByTaskId: Record<string, TaskProgressStatus> = {};
+      for (const t of team.stages[idx].tasks) statusByTaskId[t.taskId] = t.status;
+      if (unreachableTaskIds(gs.tasks, statusByTaskId).length > 0) {
+        const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+        const launchedAt = (runSnap.data() as Run | undefined)?.launchedAt;
+        const stages = team.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+        const { heldAssignedTaskIds } = applyStageCompletion(stages, idx, game, launchedAt, now);
+        const allDone = stages.every((s) => s.status === 'completed');
+        await teamRef.update({
+          stages,
+          ...(allDone ? { status: 'finished', finishedAt: now } : {}),
+          updatedAt: now,
+        });
+        for (const id of heldAssignedTaskIds) await releaseTask(id, ownerUid, gameId, runId);
+        team.stages = stages;
+      }
+    }
+  }
+
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeStageIdx < 0) return {};
   const stageRec = team.stages[activeStageIdx];
@@ -2865,6 +3016,9 @@ export async function assignNextInActiveStage(
   const skillRatio = await computeSkillRatio(
     team.stages.flatMap((s) => s.tasks).filter((t) => t.status === 'completed').map((t) => ({
       taskId: t.taskId, actualMinutes: t.actualMinutes, completedAt: t.completedAt, startedAt: t.startedAt,
+      // pause-clock-tasks: carried so computeSkillRatio can drop a paused record
+      // from the pace sample (its duration is deliberation, not pace).
+      excludedMs: t.excludedMs,
     })),
     game.stages.flatMap((s) => s.tasks),
   );
@@ -3049,7 +3203,12 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
     // is a fresh, confident, out-of-zone reading. Still on the ABNORMAL path only — the
     // happy path adds zero reads, exactly like the test-drive bypass above.
     const verdict = await evaluateTeamOutOfBounds(ctx, teamId, team);
-    if (verdict.outOfBounds) return { taskId: null, outOfBounds: true, reason: verdict.reason };
+    if (verdict.outOfBounds) {
+      // `metersOutside` rides along so the participant card can say how far back the
+      // boundary is (change: blocked-player-guidance). Additive; the client treats a
+      // missing value as "no distance to show".
+      return { taskId: null, outOfBounds: true, reason: verdict.reason, metersOutside: verdict.metersOutside };
+    }
     await db.doc(`${teamsCol(ctx.ownerUid, ctx.gameId, ctx.runId)}/${teamId}`)
       .set({ outOfBounds: false }, { merge: true })
       .catch(() => undefined); // releasing is best-effort; never block assignment on it
@@ -3294,7 +3453,7 @@ async function evaluateTeamOutOfBounds(
   ctx: { ownerUid: string; gameId: string; runId: string },
   teamId: string,
   team: { outOfBoundsOverrideUntil?: string },
-): Promise<{ outOfBounds: boolean; reason: string }> {
+): Promise<{ outOfBounds: boolean; reason: string; metersOutside: number | null }> {
   try {
     const [gameSnap, locSnap] = await Promise.all([
       db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get(),
@@ -3311,9 +3470,20 @@ async function evaluateTeamOutOfBounds(
       nowMs: Date.now(),
       overrideUntilMs: team.outOfBoundsOverrideUntil ? Date.parse(team.outOfBoundsOverrideUntil) : null,
     });
-    return { outOfBounds: status.outOfBounds, reason: status.reason };
+    // The one number a stranded player can act on (change: blocked-player-guidance):
+    // metres BEYOND the boundary, not the distance to the centre — it says how far
+    // back to walk without disclosing the zone's centre, radius or shape. Emitted
+    // only on a CONFIRMED breach, so a distance derived from a fix the evaluator
+    // itself refused to trust never reaches the card.
+    const radius = safeZone?.radiusMeters;
+    const metersOutside = status.outOfBounds
+      && typeof status.distanceMeters === 'number' && Number.isFinite(status.distanceMeters)
+      && typeof radius === 'number' && Number.isFinite(radius)
+      ? Math.max(0, Math.round(status.distanceMeters - radius))
+      : null;
+    return { outOfBounds: status.outOfBounds, reason: status.reason, metersOutside };
   } catch {
-    return { outOfBounds: false, reason: 'unverifiable' };
+    return { outOfBounds: false, reason: 'unverifiable', metersOutside: null };
   }
 }
 
@@ -3696,6 +3866,9 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
   const skillRatio = await computeSkillRatio(
     team.stages.flatMap((s) => s.tasks).filter((t) => t.status === 'completed').map((t) => ({
       taskId: t.taskId, actualMinutes: t.actualMinutes, completedAt: t.completedAt, startedAt: t.startedAt,
+      // pause-clock-tasks: carried so computeSkillRatio can drop a paused record
+      // from the pace sample (its duration is deliberation, not pace).
+      excludedMs: t.excludedMs,
     })),
     game.stages.flatMap((s) => s.tasks),
   );
@@ -3906,8 +4079,24 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
     orderedStages.flatMap((s) => s.tasks),
   );
 
+  // ── Why this team is not playing yet (change: held-team-visibility) ─────────
+  // startTeams holds back any team that is not cleared to start, and never writes
+  // to it — so a held team is indistinguishable, on the wire, from a team whose
+  // run has simply not started. It sat on "waiting for the host to start" while
+  // the rest of the field walked away.
+  //
+  // A REASON, not a record: `null` unless this team is actually being held, and
+  // never a guardian's name, contact, token or age. Derived from the SAME
+  // predicate startTeams partitions on, so the explanation cannot disagree with
+  // the behaviour. Response-level (not a task payload), so the participant
+  // sanitizer contract is untouched. Read-only: nothing here releases anybody.
+  const holdReason: 'guardian_consent' | null =
+    !team.launched && !isConsentSatisfied(team, game) ? 'guardian_consent' : null;
+
   return {
     team,
+    // Why the team is held back from starting, or null when it is not.
+    holdReason,
     stageNarratives,
     completedTaskPins,
     run: {

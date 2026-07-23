@@ -21,6 +21,10 @@ const TvLeaderboard = lazyWithRetry('tv', () => import('./screens/TvLeaderboard'
 const RunRecap = lazyWithRetry('recap', () => import('./screens/RunRecap'));
 
 const StaffConsole = lazyWithRetry('staff', () => import('./screens/StaffConsole'));
+// The legal documents (/terms, /privacy on this origin). Lazy for the same reason
+// as every other route AND for weight: the policy text must never sit in the
+// participant entry chunk (change: legal-pages-participant-origin).
+const LegalScreen = lazyWithRetry('legal', () => import('./screens/LegalScreen'));
 
 export default function App() {
   return (
@@ -65,6 +69,7 @@ function AppInner() {
         // for the SAME run is a no-op resume and keeps every bit of progress.
         const { clearSession: stale } = resolvePlayRoute({
           search: window.location.search,
+          pathname: window.location.pathname,
           session: stored,
           hasStaffSession: !!loadStaffSession(),
         });
@@ -119,7 +124,27 @@ function AppInner() {
     );
   }
 
-  const { route } = resolvePlayRoute({ search, session, hasStaffSession: staffMode });
+  const { route } = resolvePlayRoute({
+    search,
+    // The path is read for exactly two values, /terms and /privacy. Every other
+    // path resolves precisely as it did before, so no player route can shift.
+    pathname: window.location.pathname,
+    session,
+    hasStaffSession: staffMode,
+  });
+
+  // Legal documents come first: they must be readable with a session, with a
+  // staff session, and with any query param attached.
+  if (route.kind === 'legal') {
+    return (
+      <>
+        <Suspense fallback={routeFallback}>
+          <LegalScreen doc={route.doc} />
+        </Suspense>
+        <DialogHost />
+      </>
+    );
+  }
 
   if (route.kind === 'staff') {
     return (

@@ -41,6 +41,11 @@ export const BUILDER_EDITABLE_FIELDS = [
   // Chat integration (change: chat-integrations). Undefined when unset (skipped
   // server-side); '' clears it. Only ever patched with an empty or valid URL.
   'integrationWebhookUrl',
+  // Safe-zone boundary (change: expose-enforced-settings). The SERVER enforces this
+  // one — updateLocation flags a team outside it and routing stops handing out tasks
+  // — and until now nothing in either app could author it. `null` is an explicit
+  // clear; `undefined` means "not sent" and would leave a stale boundary in place.
+  'safeZone',
   // Marketplace instant play (change: marketplace-instant-play).
   'allowInstantPlay',
   // Live photo feed (change: live-photo-feed). Undefined means on (default).

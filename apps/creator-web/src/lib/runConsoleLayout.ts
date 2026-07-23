@@ -13,7 +13,7 @@
 export type PanelId =
   | 'joinShare' | 'stationQr' | 'startTeams' | 'alerts' | 'broadcast' | 'liveMap'
   | 'teams' | 'liveStandings' | 'finalStandings'
-  | 'hotZone' | 'flashMission' | 'trackables' | 'zones'
+  | 'hotZone' | 'flashMission' | 'trackables' | 'zones' | 'taskAvailability'
   | 'photoReview' | 'feed' | 'chat'
   | 'shareScreens' | 'staffInvite'
   | 'runSummary' | 'analytics' | 'heatmap' | 'feedback' | 'survey';
@@ -87,6 +87,9 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
   flashMission: 'gameMechanics',
   trackables: 'gameMechanics',
   zones: 'gameMechanics',
+  // Live task availability (change: live-task-pause): pause / close / restore one
+  // task for THIS run when a stop dies mid event.
+  taskAvailability: 'gameMechanics',
 
   photoReview: 'moderation',
   feed: 'moderation',
@@ -104,22 +107,17 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
 
 export const ALL_PANEL_IDS = Object.keys(PANEL_GROUP) as PanelId[];
 
-export type CollapsibleGroupId = Exclude<GroupId, 'primary'>;
-export type GroupOpenState = Record<CollapsibleGroupId, boolean>;
-
 /**
- * Collapsed by default, except the teams and standings a host scans constantly.
- * Folding never hides state: a folded header still reports its contents.
+ * A section is a destination in the console's rail: exactly one is shown at a
+ * time. Derived from GROUP_ORDER minus the pinned group, so the two orders can
+ * never drift.
  */
-export const DEFAULT_GROUP_OPEN: GroupOpenState = {
-  teamsAndScores: true,
-  gameMechanics: false,
-  moderation: false,
-  shareAndScreens: false,
-  afterTheRun: false,
-};
+export type SectionId = Exclude<GroupId, 'primary'>;
+export const SECTION_ORDER: SectionId[] =
+  GROUP_ORDER.filter((g): g is SectionId => g !== 'primary');
 
-const COLLAPSIBLE_GROUPS = Object.keys(DEFAULT_GROUP_OPEN) as (keyof GroupOpenState)[];
+/** Kept as the page's spelling for a section id. */
+export type CollapsibleGroupId = SectionId;
 
 /** Is this panel worth rendering at all, given the run's current state? */
 function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
@@ -144,6 +142,8 @@ function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
     case 'flashMission':
     case 'trackables':
     case 'zones': return live;
+    // Nothing to take out of play once the run has ended.
+    case 'taskAvailability': return live;
 
     // Human in the loop queues, which already hide themselves when empty.
     case 'photoReview': return s.photoQueueCount > 0;
@@ -197,31 +197,229 @@ export function planHasPanel(plan: RunConsolePlan, panel: PanelId): boolean {
   return plan.groups.some((g) => g.panels.includes(panel));
 }
 
-/** localStorage key for one run's group open/closed preference. */
-export function groupStateKey(runId: string): string {
-  return `rp.runConsole.groups.${runId}`;
+// ── Section navigation (change: run-console-density) ─────────────────────────
+//
+// The console used to stack every group as an accordion, so reaching a control
+// meant scrolling to find a header and then scrolling again through whatever it
+// unfolded. It is now a Builder style rail: a persistent list of sections, ONE
+// of which is rendered. The pinned zone (alerts, the control bar, the join card,
+// the broadcast, the live map) is outside the rail and always on screen, because
+// an SOS must never be one navigation away.
+//
+// The property that replaces "is it expanded?" is REACHABILITY: every catalogued
+// panel is either pinned or belongs to exactly one section. A panel in neither is
+// not collapsed, it is gone.
+
+export type PanelPlacement = 'pinned' | SectionId;
+
+/** Where a panel is reachable. Total over the catalogue by construction. */
+export function panelPlacement(id: PanelId): PanelPlacement {
+  const group = PANEL_GROUP[id];
+  return group === 'primary' ? 'pinned' : group;
+}
+
+export type RunConsoleSection = {
+  id: SectionId;
+  panels: PanelId[];
+  /** The same summary the plan computed, so a rail badge cannot drift. */
+  summary: GroupSummary;
+};
+
+/** The always on screen panels for this plan, in plan order. */
+export function pinnedPanels(plan: RunConsolePlan): PanelId[] {
+  return planPanels(plan, 'primary');
+}
+
+/** The rail's destinations: every non empty section, in section order. */
+export function buildRunConsoleSections(plan: RunConsolePlan): RunConsoleSection[] {
+  const sections: RunConsoleSection[] = [];
+  for (const id of SECTION_ORDER) {
+    const group = plan.groups.find((g) => g.id === id);
+    if (!group || group.panels.length === 0) continue;
+    sections.push({ id, panels: group.panels, summary: group.summary });
+  }
+  return sections;
 }
 
 /**
- * Merge stored open state over the defaults. Stale ids, non booleans, malformed
- * JSON and a missing value all degrade to the defaults instead of throwing: this
- * is a display preference, never a reason to white screen a live console.
+ * What an organizer needs while something is going wrong: who is stuck, who is
+ * out of bounds, who is held for consent, and where everyone stands.
  */
-export function readGroupState(raw: string | null | undefined, defaults: GroupOpenState): GroupOpenState {
-  const merged: GroupOpenState = { ...defaults };
-  if (typeof raw !== 'string' || raw.trim() === '') return merged;
-  let parsed: unknown;
-  try { parsed = JSON.parse(raw); } catch { return merged; }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return merged;
-  const record = parsed as Record<string, unknown>;
-  for (const id of COLLAPSIBLE_GROUPS) {
-    if (typeof record[id] === 'boolean') merged[id] = record[id] as boolean;
+export const DEFAULT_SECTION: SectionId = 'teamsAndScores';
+
+/**
+ * Which section to show. A stale, unknown or malformed stored value degrades to
+ * the default rather than leaving the console showing nothing; if even the
+ * default is not rendered (a run with no teams section yet) the first available
+ * section wins. `null` only when there is genuinely nothing to show.
+ */
+export function resolveSection(
+  sections: RunConsoleSection[],
+  requested: string | null | undefined,
+): SectionId | null {
+  if (sections.length === 0) return null;
+  if (typeof requested === 'string' && sections.some((s) => s.id === requested)) {
+    return requested as SectionId;
   }
-  return merged;
+  if (sections.some((s) => s.id === DEFAULT_SECTION)) return DEFAULT_SECTION;
+  return sections[0].id;
 }
 
-export function writeGroupState(state: GroupOpenState): string {
-  const clean: Partial<GroupOpenState> = {};
-  for (const id of COLLAPSIBLE_GROUPS) clean[id] = !!state[id];
-  return JSON.stringify(clean);
+/** localStorage key for one run's selected section. */
+export function sectionStateKey(runId: string): string {
+  return `rp.runConsole.section.${runId}`;
+}
+
+// ── Column placement (change: run-console-density) ───────────────────────────
+//
+// `buildRunConsolePlan` decides what EXISTS; this decides where it SITS. The
+// console used to hardcode a two thirds / one third split whose wide lane held
+// three conditional panels, so a run that had just launched showed one row of
+// buttons and then two thirds of empty page (in RTL: the whole right side).
+
+export type ColumnCount = 1 | 2 | 3;
+
+/**
+ * Total ordering, ranked by what an organizer reaches for while something is
+ * going wrong, which is the only moment this layout matters. See the change's
+ * design.md for the justification of each band.
+ */
+export const PANEL_PRIORITY: PanelId[] = [
+  // Incident response.
+  'alerts', 'startTeams', 'teams', 'liveStandings', 'broadcast', 'liveMap',
+  // Work queues with a human in the loop.
+  'photoReview', 'chat',
+  // Operator overrides and optional game systems.
+  'taskAvailability', 'hotZone', 'flashMission', 'zones', 'trackables', 'feed',
+  // Setup artifacts: needed intensely for five minutes, then reference material.
+  'joinShare', 'stationQr', 'shareScreens', 'staffInvite',
+  // Post run reading. By definition nothing is going wrong any more.
+  'finalStandings', 'runSummary', 'analytics', 'heatmap', 'feedback', 'survey',
+];
+
+/** Rough vertical size, used only to balance the lanes. Default below. */
+const PANEL_WEIGHT: Partial<Record<PanelId, number>> = {
+  startTeams: 1,
+  liveMap: 4, teams: 4,
+  liveStandings: 3, finalStandings: 3, joinShare: 3, photoReview: 3, chat: 3,
+  feed: 3, analytics: 3, heatmap: 3,
+};
+const DEFAULT_PANEL_WEIGHT = 2;
+
+/** The panels that read badly in a narrow lane and are given a double span. */
+const WIDE_PANELS: PanelId[] = ['liveMap'];
+
+/**
+ * Rank of a panel. An id the ordering has never heard of sorts to the TAIL
+ * instead of throwing or vanishing: a future lane that adds a panel without
+ * ranking it still gets a rendered, reachable panel.
+ */
+export function panelPriority(id: string): number {
+  const at = (PANEL_PRIORITY as string[]).indexOf(id);
+  return at === -1 ? PANEL_PRIORITY.length : at;
+}
+
+export function panelWeight(id: string): number {
+  return PANEL_WEIGHT[id as PanelId] ?? DEFAULT_PANEL_WEIGHT;
+}
+
+export function panelSpan(id: string): 1 | 2 {
+  return (WIDE_PANELS as string[]).includes(id) ? 2 : 1;
+}
+
+export type ColumnLayout = {
+  columns: PanelId[][];
+  /** Grid span of each lane; a lane spans as wide as its widest panel. */
+  spans: number[];
+  /** Sum of the spans: the grid template width to render. */
+  gridColumns: number;
+};
+
+/**
+ * Distribute panels over lanes. One column returns the input UNTOUCHED, so the
+ * phone layout is by construction whatever the plan produced. More than one
+ * column walks the panels in priority order and drops each into the least loaded
+ * lane (ties go to the lowest lane index), which is deterministic, stable and
+ * puts the most urgent panel at the top of the inline start lane.
+ */
+export function assignPanelColumns(panels: PanelId[], columns: ColumnCount): ColumnLayout {
+  return assignWithPriority(panels, columns, panelPriority);
+}
+
+function assignWithPriority(
+  panels: PanelId[],
+  columns: ColumnCount,
+  priority: (id: string) => number,
+): ColumnLayout {
+  if (panels.length === 0) return { columns: [], spans: [], gridColumns: 1 };
+  if (columns === 1) return { columns: [[...panels]], spans: [1], gridColumns: 1 };
+
+  const laneCount = Math.min(columns, panels.length);
+  const lanes: PanelId[][] = Array.from({ length: laneCount }, () => []);
+  const load = new Array<number>(laneCount).fill(0);
+
+  const ordered = panels
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => priority(a.id) - priority(b.id) || a.index - b.index);
+
+  for (const { id } of ordered) {
+    let best = 0;
+    for (let i = 1; i < laneCount; i++) if (load[i] < load[best]) best = i;
+    lanes[best].push(id);
+    load[best] += panelWeight(id);
+  }
+
+  const spans = lanes.map((lane) => lane.reduce((w, id) => Math.max(w, panelSpan(id)), 1));
+  return { columns: lanes, spans, gridColumns: spans.reduce((a, b) => a + b, 0) };
+}
+
+/**
+ * The always on screen zone. The join/QR card is the one state dependent rank:
+ * while nobody has joined it is the ONLY thing the organizer is doing, and once
+ * teams are in it becomes reference material. It is re-ranked, never hidden, so
+ * a late joiner is always servable.
+ */
+export function buildPinnedLayout(
+  plan: RunConsolePlan,
+  columns: ColumnCount,
+  opts: { teamCount: number },
+): ColumnLayout {
+  const panels = pinnedPanels(plan);
+  if (columns === 1 || opts.teamCount > 0) return assignPanelColumns(panels, columns);
+  // Nobody has joined: reading the code out IS the job right now.
+  return assignWithPriority(panels, columns, (id) => (id === 'joinShare' ? -1 : panelPriority(id)));
+}
+
+/** How many lanes the viewport can carry. No window ⇒ both false ⇒ a phone. */
+// Deliberately the SAME boundaries the emitted classes use (`lg:` = 1024px), so
+// the JS answer and the CSS answer can never disagree at a viewport width.
+export const CONSOLE_MEDIUM_QUERY = '(min-width: 1024px)';
+export const CONSOLE_WIDE_QUERY = '(min-width: 1536px)';
+
+export function consoleColumnCount(o: { medium: boolean; wide: boolean }): ColumnCount {
+  if (!o.medium) return 1;
+  return o.wide ? 3 : 2;
+}
+
+/** The section pane sits beside the rail, so it carries one lane less. */
+export function sectionColumnCount(columns: ColumnCount): ColumnCount {
+  return Math.max(1, columns - 1) as ColumnCount;
+}
+
+// Static class strings only: Tailwind cannot see `grid-cols-${n}`. Every lookup
+// keeps `grid-cols-1` as the base so a phone stays single column even if the
+// media query hook has not resolved yet.
+const GRID_TEMPLATE_CLASS: Record<number, string> = {
+  1: 'grid grid-cols-1 gap-4 items-start',
+  2: 'grid grid-cols-1 lg:grid-cols-2 gap-4 items-start',
+  3: 'grid grid-cols-1 lg:grid-cols-3 gap-4 items-start',
+  4: 'grid grid-cols-1 lg:grid-cols-4 gap-4 items-start',
+};
+
+export function gridTemplateClass(gridColumns: number): string {
+  return GRID_TEMPLATE_CLASS[gridColumns] ?? GRID_TEMPLATE_CLASS[1];
+}
+
+export function columnSpanClass(span: number): string {
+  return span >= 2 ? 'lg:col-span-2' : '';
 }

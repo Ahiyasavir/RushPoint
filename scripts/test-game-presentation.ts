@@ -34,7 +34,13 @@ const fullGame = {
   title: 'Old City Hunt',
   description: 'A walk through the alleys',
   mode: 'team',
-  stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field' }] }],
+  // The task carries a Builder-editable TASK-level field (pause-clock-tasks) so the
+  // guard below proves the `stages` passthrough really carries per-task authorship.
+  // `expectedDurationMinutes` (task-duration-defaults) is the second TASK-level
+  // Builder field riding the same passthrough — the editor lets a creator override
+  // the derived per-interaction default, and an unregistered override would save
+  // nothing while looking alive.
+  stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field', pausesTimer: true, expectedDurationMinutes: 4 }] }],
   scoringPreset: 'smart_weighted',
   scoringOptions: { wrongAnswerPenalty: 'strict' },
   registrationFields: [{ id: 'name', label: 'Name', type: 'text', required: true, level: 'member' }],
@@ -45,6 +51,7 @@ const fullGame = {
   approxLocation: { lat: 31.775, lng: 35.235, label: 'Old City' },
   playCount: 7,
   integrationWebhookUrl: 'https://hooks.slack.com/services/A/B/C',
+  safeZone: { center: { lat: 31.775, lng: 35.235 }, radiusMeters: 600 },
   allowInstantPlay: true,
   photoFeedEnabled: false,
   powerUpsEnabled: true,
@@ -62,15 +69,58 @@ ok(payload.gameId === 'g1', 'buildSavePayload sets gameId from game.id');
 
 for (const key of BUILDER_EDITABLE_FIELDS) {
   const expected = (fullGame as unknown as Record<string, unknown>)[key];
+  // The fixture must actually EXERCISE every declared field. Without this, adding a
+  // field to BUILDER_EDITABLE_FIELDS and forgetting it here compared undefined with
+  // undefined and passed — the guard would have gone quiet exactly when a new control
+  // was added, which is the one moment it exists for (change: expose-enforced-settings).
+  ok(expected !== undefined, `the fixture game populates the builder-editable field "${key}"`);
   ok(key in payload, `payload carries the builder-editable field "${key}"`);
   ok(same(payload[key], expected), `payload."${key}" deep-equals the game's value`);
 }
+
+// The safe zone is the field the SERVER enforces (updateLocation + the routing
+// soft-pause) and that nothing in either app could set (change:
+// expose-enforced-settings). It reaches the payload, and clearing it must be a
+// distinguishable change rather than a silent no-op.
+ok(BUILDER_EDITABLE_FIELDS.includes('safeZone' as never),
+  '"safeZone" is declared builder-editable (the server enforces it)');
+ok('safeZone' in payload, '"safeZone" reaches the save payload');
+const zoned   = { ...fullGame, safeZone: { center: { lat: 31.775, lng: 35.235 }, radiusMeters: 800 } } as unknown as Game;
+const cleared = { ...fullGame, safeZone: null } as unknown as Game;
+ok(JSON.stringify(buildSavePayload(zoned)) !== JSON.stringify(buildSavePayload(cleared)),
+  'clearing the safe zone changes the serialized payload (marks the game dirty)');
+ok((buildSavePayload(cleared) as Record<string, unknown>).safeZone === null,
+  'a cleared safe zone is sent as null (an explicit clear), never as undefined');
 
 // The four that were silently dropped — named explicitly so a regression reads clearly.
 for (const key of ['scoringOptions', 'coverImage', 'branding', 'approxLocation']) {
   ok(BUILDER_EDITABLE_FIELDS.includes(key as never),
     `"${key}" is declared builder-editable (it is rendered downstream)`);
   ok(key in payload, `"${key}" reaches the save payload`);
+}
+
+// ── TASK-level authorship rides `stages` ─────────────────────────────────────
+// BUILDER_EDITABLE_FIELDS is a GAME-level allow-list, so a field the task editor
+// owns (pause-clock-tasks' `pausesTimer`, the hidden-location clue, the paid hint…)
+// reaches updateGame only through `stages`. That indirection is exactly where a
+// per-task control can go silently dead, so it gets its own guard: the value must
+// survive the payload AND changing it must change the serialization, which is what
+// marks the game dirty.
+{
+  const taskOf = (p: Record<string, unknown>) =>
+    ((p.stages as { tasks: Record<string, unknown>[] }[])[0].tasks[0]);
+  ok(taskOf(payload).pausesTimer === true,
+    'a TASK-level builder field (pausesTimer) survives into the save payload via stages');
+  ok(taskOf(payload).expectedDurationMinutes === 4,
+    'a TASK-level builder field (expectedDurationMinutes) survives into the save payload via stages');
+
+  const paused = fullGame;
+  const notPaused = {
+    ...fullGame,
+    stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field' }] }],
+  } as unknown as Game;
+  ok(JSON.stringify(buildSavePayload(paused)) !== JSON.stringify(buildSavePayload(notPaused)),
+    'toggling a TASK-level field changes the serialized payload (marks the game dirty)');
 }
 
 // ── server-owned fields are never echoed back ────────────────────────────────

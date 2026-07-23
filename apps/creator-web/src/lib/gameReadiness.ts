@@ -16,7 +16,7 @@
 // Splitting readiness into blocking issues and non blocking advisories would
 // change what can launch, and is deliberately left to a follow up.
 import type { Game, Stage, Task } from '@rushpoint/shared';
-import { validateUnlockGraph } from '@rushpoint/shared';
+import { validateUnlockGraph, requiredTaskCountProblem } from '@rushpoint/shared';
 import { isTaskInteractionValid, isTaskLocationValid } from './wizardLogic';
 
 export type ReadinessCode =
@@ -73,8 +73,17 @@ export function computeGameReadiness(game: ReadableGame): ReadinessIssue[] {
       }
     }
 
+    // Stage winnability (change: stage-winnability). Two INDEPENDENT ways a stage
+    // can require more than it can yield, reported under one code because the fix
+    // is the same (lower the count or change the shape):
+    //   • an unreachable prerequisite chain (validateUnlockGraph, as before);
+    //   • exclusive groups — a group of alternatives yields ONE completion however
+    //     many members it has, so six tasks in three pairs yield three. This arm is
+    //     what makes an ALREADY SAVED broken game announce itself the next time its
+    //     Builder is opened, and blocks its launch from the Dashboard too.
     const graph = validateUnlockGraph(stage);
-    if (graph.warnings.length > 0 || graph.errors.length > 0) {
+    const groupProblem = requiredTaskCountProblem(stage);
+    if (graph.warnings.length > 0 || graph.errors.length > 0 || groupProblem !== null) {
       issues.push({ code: 'stageUnwinnable', stageId, stageTitle });
     }
   }

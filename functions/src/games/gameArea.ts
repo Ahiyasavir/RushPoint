@@ -6,17 +6,23 @@
 //
 // It writes into a WORLD-READABLE document, so it inherits the location contract of
 // packages/shared/src/publicTaskLocation.ts rather than restating it:
-//   - eligibility is decided by `publicTaskLocation` itself, so hideLocation tasks
-//     (whose location is the puzzle), locationless tasks and unplaced null-island
-//     tasks contribute NOTHING — one predicate, not two that can drift apart;
+//   - eligibility is decided by `publicTaskLocation` itself, so locationless tasks
+//     and unplaced null-island tasks contribute NOTHING, while hideLocation tasks
+//     contribute exactly like any other (change: hidden-location-map-visibility)
+//     — one predicate, not two that can drift apart;
 //   - the inputs are therefore already cell centres, and their mean is snapped back
 //     onto the same grid, so the game pin is a ~1 km cell like every published task
 //     pin and averaging can never sharpen it past one cell;
 //   - it is a pure function of the tasks, so republishing the same game writes the
 //     identical value and N observations carry as much information as one.
 //
-// A game whose every task hides its location derives nothing at all. That is the
-// intended outcome, not a gap: such a game has no public location to state.
+// A treasure hunt built entirely of hidden-location tasks therefore DOES derive an
+// area, and should: every one of its inputs is itself a published `approxLocation`
+// on a world-readable publicTasks document, and a mean of published cell centres,
+// re-snapped to the same grid, cannot narrow anything past one cell. Excluding them
+// only made the hunt invisible on the gallery map to the creator who wrote it.
+// A game whose every task is locationless or unplaced still derives nothing at all.
+// That is the intended outcome, not a gap: such a game has no location to state.
 import type { GeoPoint, Stage } from '@rushpoint/shared';
 import { approximatePublicPoint, isValidCoord, publicTaskLocation } from '@rushpoint/shared';
 

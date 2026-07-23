@@ -53,3 +53,28 @@ The consent flag SHALL be accepted only as a boolean, so a non-boolean value can
 
 - **WHEN** a game update omits both fields
 - **THEN** the stored values are left exactly as they were
+
+### Requirement: A consent requirement cannot be armed while it cannot be satisfied
+
+While no participant surface can record a guardian's approval, the system SHALL NOT accept a new game
+that requires guardian consent. The requirement SHALL be refused at the door with a message that
+states why, rather than accepted into a game whose teams can never be started.
+
+This is a guard on an unsatisfiable state, not a definition of consent. When a participant path to
+record approval exists, this guard is what must be lifted.
+
+#### Scenario: An imported game requiring consent is refused
+
+- **WHEN** a game file is imported that requires guardian consent
+- **THEN** the import is refused with a message stating that consent cannot currently be collected and
+  that teams on such a game could never be started
+
+#### Scenario: A game not requiring consent imports normally
+
+- **WHEN** a game file is imported that does not require guardian consent
+- **THEN** the import proceeds unchanged
+
+#### Scenario: Consent configuration in a file is validated
+
+- **WHEN** a game file supplies a non-boolean consent flag or a malformed minimum age
+- **THEN** the import is refused on the same terms a game update would be refused

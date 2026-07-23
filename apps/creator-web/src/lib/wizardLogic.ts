@@ -43,6 +43,13 @@ export function blankTask(id: string = genId()): Task {
     type: 'field',
     coordinates: { lat: 0, lng: 0 },
     difficulty: 5,
+    // task-duration-defaults: DELIBERATELY still 15, not the derived per-interaction
+    // default. `estimatedMinutes` is compared against a span the server measures from
+    // RunTaskRecord.startedAt, which is stamped at ASSIGNMENT (functions/src/runs/
+    // index.ts:3022) — so it includes the WALK to the stop, not just the activity there.
+    // Seeding it with an interaction-only number (a `field` check in derives 1 minute)
+    // would make every team look 5x slow under smart_weighted. The derived default fills
+    // `expectedDurationMinutes` instead, and the Builder surfaces it as a suggestion.
     estimatedMinutes: 15,
     pointValue: 100,
     maxConcurrentTeams: 3,

@@ -800,6 +800,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         </>
       )}
 
+      {/* Pause-clock tasks (change: pause-clock-tasks): the clock only stops for
+          a team that KNOWS it stopped, so say it on the card. Rendered only when
+          the creator authored the flag, so a task from before this change shows
+          nothing new. */}
+      {task.pausesTimer && (
+        <p role="status" aria-live="polite" dir="auto" data-testid="clock-paused-notice"
+          className="mt-3 text-xs text-zinc-400 bg-app-raised border border-glass-border rounded-lg px-3 py-2">
+          {`⏸ ${t.task.clockPaused}`}
+        </p>
+      )}
+
       {/* Wrong-answer cost (change: wrong-answer-cost): state the rule BEFORE the
           player answers, then count the retry lockout down. Rendered only when the
           creator set a cost level, so a game authored before this change shows

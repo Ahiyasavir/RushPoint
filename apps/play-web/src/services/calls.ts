@@ -137,6 +137,11 @@ export interface StageNarrative {
 
 export interface MyTeamState {
   team: RunTeam;
+  // Why this team has not been started, or null when nothing is holding it
+  // (change: held-team-visibility). A REASON only: no guardian name, contact or
+  // token. Optional on the wire so a console/app talking to a backend that
+  // predates it degrades to "nothing known", never to a fabricated hold.
+  holdReason?: 'guardian_consent' | null;
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
   activeStageTasks: SafeTask[];

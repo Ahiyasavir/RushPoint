@@ -42,19 +42,41 @@ describe('deriveGameArea', () => {
     expect(got.lat).toBeLessThan(31.8);
   });
 
-  it('excludes hideLocation tasks — the location is the puzzle', () => {
+  // change: hidden-location-map-visibility. A hidden-location task now publishes a
+  // ~1 km area like any other, so it contributes to the game pin like any other. A
+  // treasure hunt made entirely of hidden missions is no longer invisible on the
+  // gallery map. Eligibility is still decided by publicTaskLocation alone — one
+  // predicate, so the task map and the game map cannot drift apart.
+  it('includes hideLocation tasks — a hunt is not an unplaceable game', () => {
+    const hiddenPt = { lat: 32.1, lng: 34.8 };
     expect(deriveGameArea([stage([
-      task({ id: 'a', hideLocation: true }),
-      task({ id: 'b', hideLocation: true, coordinates: { lat: 32.1, lng: 34.8 } }),
-    ])] as never)).toBeUndefined();
+      task({ id: 'b', hideLocation: true, coordinates: hiddenPt }),
+    ])] as never)).toEqual(approximatePublicPoint(hiddenPt));
   });
 
-  it('derives a mixed game from its visible task alone', () => {
-    const visible = { lat: 31.7767, lng: 35.2345 };
-    expect(deriveGameArea([stage([
+  it('derives a mixed game from BOTH its visible and its hidden tasks', () => {
+    const visible = { lat: 31.70, lng: 35.20 };
+    const hidden = { lat: 31.80, lng: 35.30 };
+    const got = deriveGameArea([stage([
       task({ id: 'a', coordinates: visible }),
-      task({ id: 'b', hideLocation: true, coordinates: { lat: 29.55, lng: 34.95 } }),
-    ])] as never)).toEqual(approximatePublicPoint(visible));
+      task({ id: 'b', hideLocation: true, coordinates: hidden }),
+    ])] as never)!;
+    expect(got).toBeDefined();
+    // Between the two, not equal to either one alone, and still on the grid.
+    expect(got).not.toEqual(approximatePublicPoint(visible));
+    expect(got).not.toEqual(approximatePublicPoint(hidden));
+    expect(approximatePublicPoint(got)).toEqual(got);
+    // …and never an authored point.
+    expect(got).not.toEqual(hidden);
+    expect(got).not.toEqual(visible);
+  });
+
+  it('still derives nothing from a hidden task that has no usable location', () => {
+    expect(deriveGameArea([stage([
+      task({ id: 'a', hideLocation: true, locationless: true }),
+      task({ id: 'b', hideLocation: true, coordinates: { lat: 0, lng: 0 } }),
+      task({ id: 'c', hideLocation: true, coordinates: { lat: Number.NaN, lng: 35 } }),
+    ])] as never)).toBeUndefined();
   });
 
   it('excludes locationless, unplaced and invalid tasks', () => {
@@ -103,6 +125,6 @@ describe('resolveGameArea', () => {
   });
 
   it('returns undefined when nothing is authored and nothing can be derived', () => {
-    expect(resolveGameArea(undefined, [stage([task({ hideLocation: true })])] as never)).toBeUndefined();
+    expect(resolveGameArea(undefined, [stage([task({ locationless: true })])] as never)).toBeUndefined();
   });
 });

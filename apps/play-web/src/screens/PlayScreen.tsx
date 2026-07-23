@@ -7,6 +7,8 @@ import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { isFatalSyncError } from '../lib/syncError';
+// Why a not-yet-started team is not started (change: held-team-visibility).
+import { heldNotice } from '../lib/holdNotice';
 import { Button, Collapsible, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
@@ -371,6 +373,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }
 
   if (!team.launched) {
+    // Held-team visibility (change: held-team-visibility). The server holds back
+    // any team it will not start (today: guardian consent) WITHOUT writing to it,
+    // so this branch used to tell a held team the host had not started yet, which
+    // for them is false and never resolves. `heldNotice` is total: an unknown
+    // reason still produces a card, and a missing one claims no hold at all.
+    //
+    // Read-only. The only affordance is the SOS/host route already on this screen
+    // — nothing here can grant, request or bypass the hold. The server releases
+    // teams, via the organizer's start path, or nothing does.
+    const hold = heldNotice({ launched: team.launched, holdReason: state.holdReason });
     return (
       <Screen>
         <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
@@ -378,9 +390,19 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
         <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
-          <div className="text-5xl">⏳</div>
+          <div className="text-5xl">{hold.held ? '🙋' : '⏳'}</div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
-          <p className="text-zinc-500">{t.play.waitingStart}</p>
+          {hold.held ? (
+            <div className="w-full max-w-sm rounded-xl bg-app-raised border border-rp-amber/40 px-4 py-3 text-start space-y-1.5">
+              <p className="text-sm font-bold text-ink-amber">{t.play.heldTitle}</p>
+              <p className="text-sm text-zinc-400">
+                {hold.kind === 'guardian_consent' ? t.play.heldConsent : t.play.heldGeneric}
+              </p>
+              <p className="text-sm text-zinc-400">{t.play.heldAskHost}</p>
+            </div>
+          ) : (
+            <p className="text-zinc-500">{t.play.waitingStart}</p>
+          )}
           <HowToPlayCard instructions={game.instructions} lang={lang} />
         </div>
         {hasTeammateDevices && myUid && (

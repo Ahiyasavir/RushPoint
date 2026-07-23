@@ -27,6 +27,7 @@ import {
   isAllowedWebhookUrl,
   detectPlatform,
   validateUnlockGraph,
+  requiredTaskCountProblem,
   validateAvailabilityWindow,
   validateOrderItems,
   validateSurveyChoices,
@@ -145,13 +146,25 @@ function sanitizeStagesText(stages: Stage[] | undefined): Stage[] | undefined {
  * unlock prerequisite graph (no self-reference, no cross-stage/unknown ids, no
  * cycles), availability windows (an expiry at or before its release can never be
  * played), ordering-quiz rules (quiz-only, one grading mode per task, 3–10 valid
- * items) and survey-choice rules (2–8 non-empty options).
+ * items), survey-choice rules (2–8 non-empty options) and stage winnability (a
+ * `requiredTaskCount` above what the stage's exclusive groups can ever yield).
  */
 function stagesProblems(stages: Stage[] | undefined): string[] {
   const problems: string[] = [];
   problems.push(...gameStructureProblems(stages));
   for (const stage of stages ?? []) {
     problems.push(...validateUnlockGraph(stage).errors);
+    // Stage winnability (change: stage-winnability). Exclusive groups yield ONE
+    // completion each, so a stage of three alternative pairs can never yield six.
+    // REJECTED, never clamped: silently lowering the count would change the design
+    // of the event and leave the creator looking at a number the server does not
+    // hold. The Builder can no longer produce such a value, so this only ever fires
+    // against a stale tab, a hand edited game file or a direct callable call.
+    const winnability = requiredTaskCountProblem(
+      stage as unknown as Parameters<typeof requiredTaskCountProblem>[0],
+      `Stage "${stage.title || stage.id}"`,
+    );
+    if (winnability) problems.push(winnability);
     for (const task of stage.tasks ?? []) {
       const windowError = validateAvailabilityWindow(task);
       if (windowError) problems.push(`Task "${task.title || task.id}": ${windowError}`);
@@ -291,8 +304,16 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
 
   if (requiresGuardianConsent !== undefined) updates.requiresGuardianConsent = requiresGuardianConsent;
   if (minAge !== undefined)             updates.minAge = minAge;
-  // `safeZone: null` is an explicit clear and validates to `undefined`.
-  if (safeZone !== undefined)           updates.safeZone = safeZoneCheck.value;
+  // `safeZone: null` is an explicit clear and validates to `undefined`. It has to be
+  // written as an explicit field DELETE: `db.settings({ ignoreUndefinedProperties:
+  // true })` (functions/src/firebase.ts:10) makes `updates.safeZone = undefined` a
+  // silent no-op, so "remove the play-area boundary" would leave the boundary in
+  // place and the enforcement path would keep flagging teams (change:
+  // expose-enforced-settings). Mirrors how `instructions` clears, below.
+  if (safeZone !== undefined) {
+    updates.safeZone = safeZoneCheck.value
+      ?? (admin.firestore.FieldValue.delete() as unknown as undefined);
+  }
   if (benchmarkOptOut !== undefined)    updates.benchmarkOptOut = benchmarkOptOut;
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
@@ -759,8 +780,11 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
       const prior = priorTasks.get(publicTaskId) ?? {};
       // Location contract (change: task-library-map-view): publicTasks is
       // world-readable, so it gets a coarse ~1 km AREA and never the authored
-      // point — and a hideLocation / locationless / unplaced task gets NOTHING.
-      // The exclusion is applied here, at the write, because a renderer-side
+      // point — and a locationless / unplaced task gets NOTHING. A hidden-location
+      // task gets the same area as any other (change: hidden-location-map-
+      // visibility); the player-facing secrecy is enforced by the participant
+      // sanitizer, not by this projection.
+      // The rule is applied here, at the write, because a renderer-side
       // filter protects only readers who use our renderer. The deprecated
       // `coordinates` key is deliberately not written at all, so re-publishing
       // also erases it from a document written by the old code.
@@ -1013,6 +1037,33 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     throw new functions.https.HttpsError('invalid-argument', problems.join(' · '));
   }
 
+  // Layer 3b — the SAME enforced-settings validators updateGame runs (change:
+  // expose-enforced-settings). Without this, the file door was the ONLY way these
+  // fields were ever set and the only door that checked nothing: `parsed` is spread
+  // wholesale into the new game below, so a hand-edited file could write a NaN centre
+  // or a negative radius straight onto the field `updateLocation` and the routing
+  // soft-pause read. Same helper, same terms, no drift between the two doors.
+  const importedZone = validateSafeZone(parsed.safeZone);
+  if (!importedZone.ok) throw new functions.https.HttpsError('invalid-argument', importedZone.error);
+  const importedFlag = validateConsentFlag(parsed.requiresGuardianConsent);
+  if (!importedFlag.ok) throw new functions.https.HttpsError('invalid-argument', importedFlag.error);
+  const importedAge = validateMinAge(parsed.minAge);
+  if (!importedAge.ok) throw new functions.https.HttpsError('invalid-argument', importedAge.error);
+  // A guardian-consent requirement is REFUSED at this door, not stripped, because
+  // arming it produces a game nobody can play: `startTeams` holds every team until a
+  // consent record exists, `startInstantPlay` refuses outright, and no participant
+  // surface calls `requestGuardianConsent`/`grantGuardianConsent`, so there is no way
+  // to create that record. Importing the flag would hand a creator a run that cannot
+  // start, with no action available to anyone. This is a MECHANISM guard on an
+  // unsatisfiable state, not a decision about what consent should mean or require —
+  // that is a product decision, and this message is what escalates it.
+  if (parsed.requiresGuardianConsent === true) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      'This file requires guardian consent, which cannot be collected yet: teams on such a game can never be started. Remove requiresGuardianConsent from the file to import it.',
+    );
+  }
+
   // Layer 4 — the same normalizers/trust boundaries: display-char stripping on
   // authored titles/descriptions, and the task-media origin gate (a media
   // reference whose Storage object is gone is dropped here rather than persisted
@@ -1045,6 +1096,10 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     updatedAt: now,
   };
   if (instructions) game.instructions = instructions; else delete game.instructions;
+  // Store the NORMALIZED boundary (centre + radius only), never the file's object —
+  // the spread above would otherwise carry any extra key straight onto a field the
+  // safety path reads.
+  if (importedZone.value) game.safeZone = importedZone.value; else delete game.safeZone;
 
   // ONE write. Deliberately not createGame + updateGame (two writes, which can
   // strand an empty game if the second fails) — and deliberately a fresh document

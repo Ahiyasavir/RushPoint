@@ -43,6 +43,45 @@ describe('computeSkillRatio — finiteness invariant', () => {
   });
 });
 
+// ─── Pause-clock tasks (change: pause-clock-tasks) ───────────────────────────
+// A paused task's duration is DELIBERATION (and, on a located task, transit) —
+// not pace. It must make the team look neither faster nor slower than it is, so
+// the record is dropped from the sample rather than adjusted.
+describe('computeSkillRatio — a paused-clock task is not evidence of pace', () => {
+  test('a long paused task does not make the team look slow', async () => {
+    const gameTasks = [task('a', 10)];
+    // 40 minutes on a 10-minute estimate would clamp to +1 ("much slower").
+    const completed = [{ taskId: 'a', actualMinutes: 40, excludedMs: 40 * 60_000 }];
+    expect(await computeSkillRatio(completed, gameTasks)).toBe(0);
+  });
+
+  test('an instantly completed paused task is still ignored (excludedMs: 0)', async () => {
+    const gameTasks = [task('a', 10)];
+    // Presence of the stamp is the marker, not its value — otherwise a paused task
+    // finished in under a second would read as "-1", i.e. superhuman.
+    const completed = [{ taskId: 'a', actualMinutes: 0, excludedMs: 0 }];
+    expect(await computeSkillRatio(completed, gameTasks)).toBe(0);
+  });
+
+  test('only the unpaused rows contribute to the average', async () => {
+    const gameTasks = [task('a', 10), task('b', 10)];
+    const completed = [
+      { taskId: 'a', actualMinutes: 5 },                              // (5-10)/10 = -0.5
+      { taskId: 'b', actualMinutes: 60, excludedMs: 60 * 60_000 },    // paused → ignored
+    ];
+    expect(await computeSkillRatio(completed, gameTasks)).toBeCloseTo(-0.5, 5);
+  });
+
+  test('an all-paused history falls back to the neutral ratio', async () => {
+    const gameTasks = [task('a', 10), task('b', 10)];
+    const completed = [
+      { taskId: 'a', actualMinutes: 40, excludedMs: 2_400_000 },
+      { taskId: 'b', actualMinutes: 1, excludedMs: 60_000 },
+    ];
+    expect(await computeSkillRatio(completed, gameTasks)).toBe(0);
+  });
+});
+
 // ─── Hot-zone routing bias (change: hot-zone-routing-bias) ────────────────────
 describe('priorityScore — hot-zone routing bias', () => {
   const center: GeoPoint = { lat: 31.79, lng: 35.16 };
