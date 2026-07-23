@@ -381,14 +381,18 @@ function assertLeaderboardInvariants(label, rankings, expectedTeamIds, startedAt
   check(`${label}: every finished entry carries a finite durationSeconds`,
     (rankings ?? []).every((r) => !r.finishedAt || Number.isFinite(r.durationSeconds)),
     JSON.stringify((rankings ?? []).map((r) => ({ f: !!r.finishedAt, d: r.durationSeconds }))));
+  // `== null` on purpose, not `=== undefined`: these rankings arrive over a
+  // callable, i.e. through JSON, where `undefined` cannot survive. An unfinished
+  // team's absent duration is therefore ALWAYS `null` on the wire, so an
+  // undefined-only check can never pass for a run that has anyone still playing.
   check(`${label}: every present durationSeconds is finite and >= 0`,
-    (rankings ?? []).every((r) => r.durationSeconds === undefined
+    (rankings ?? []).every((r) => r.durationSeconds == null
       || (Number.isFinite(r.durationSeconds) && r.durationSeconds >= 0)),
     JSON.stringify((rankings ?? []).map((r) => r.durationSeconds)));
   if (startedAtByTeamId) {
     const overrun = (rankings ?? []).filter((r) => {
       const startedAt = startedAtByTeamId[r.teamId];
-      if (!r.finishedAt || !startedAt || r.durationSeconds === undefined) return false;
+      if (!r.finishedAt || !startedAt || r.durationSeconds == null) return false;
       const wallSec = (new Date(r.finishedAt).getTime() - new Date(startedAt).getTime()) / 1000;
       return !(r.durationSeconds <= wallSec + 1e-6);
     });
@@ -4537,8 +4541,8 @@ async function main() {
   // the enforcement path. `NaN` cannot survive the callable transport (JSON
   // encodes it as `null`), so this exercises the `typeof !== 'number'` arm of
   // validateSafeZone — which is the arm a hand-written client actually hits.
-  await expectError('safeZone: a non-finite centre is refused',
-    creator.call('updateGame', { gameId: g7, safeZone: { center: { lat: NaN, lng: 35.2 }, radiusMeters: 300 } }),
+  await expectError('safeZone: a null centre is refused (NaN cannot cross the wire)',
+    creator.call('updateGame', { gameId: g7, safeZone: { center: { lat: null, lng: 35.2 }, radiusMeters: 300 } }),
     { codeIn: ['functions/invalid-argument'] });
   await expectError('safeZone: a zero radius is refused, not stored as "off"',
     creator.call('updateGame', { gameId: g7, safeZone: { center: { lat: 31.78, lng: 35.21 }, radiusMeters: 0 } }),
@@ -4583,8 +4587,8 @@ async function main() {
     // value that actually reaches the server is `null` — refused by the
     // `typeof !== 'number'` arm of the same guard. Both spellings of "not a
     // number" therefore have to be refused, and both are asserted.
-    await expectError('duration: a NaN expectedDurationMinutes is refused (arrives as null)',
-      creator.call('updateGame', { gameId: gDur, stages: durStages(NaN) }),
+    await expectError('duration: a null expectedDurationMinutes is refused (NaN cannot cross the wire)',
+      creator.call('updateGame', { gameId: gDur, stages: durStages(null) }),
       { codeIn: ['functions/invalid-argument'], match: /expected duration/i });
     await expectError('duration: a string expectedDurationMinutes is refused',
       creator.call('updateGame', { gameId: gDur, stages: durStages('10') }),
@@ -6860,8 +6864,15 @@ async function main() {
       entries.some((l) => l.actionType === 'game_restored' && l.gameId === trashGame));
     check('a permanent destruction is recorded in auditLogs',
       entries.some((l) => l.actionType === 'game_purged' && l.gameId === nukeGame));
-    check('the scheduled sweep is attributed to the system operator',
-      entries.some((l) => l.actionType === 'game_purged' && l.operatorId === 'system:purge-sweep'));
+    // A HUMAN-invoked purge must name the human (change: callable-hardening-consistency).
+    // This assertion used to demand `system:purge-sweep` for every purge, which was the
+    // very defect that change fixed: an admin forcing a sweep with `graceDays: 0`
+    // produced records claiming the scheduled job did it. A trail that answers "who
+    // destroyed this" incorrectly is worse than one that does not answer at all.
+    // `AUDIT_SYSTEM_OPERATOR` is now reserved for the actual scheduled job, which this
+    // callable-driven scenario never exercises.
+    check('a purge invoked by a person is attributed to that person, not to the system',
+      entries.some((l) => l.actionType === 'game_purged' && l.operatorId && l.operatorId !== 'system:purge-sweep'));
   });
 
   // ═══ Long-tail coverage: exercise the callables the lifecycle skips ══════════
@@ -8035,15 +8046,17 @@ async function main() {
     await expectError('import: a negative expectedDurationMinutes is refused',
       creator.call('importGameFile', { file: withTaskOverride({ expectedDurationMinutes: -5 }) }),
       { codeIn: ['functions/invalid-argument'], match: /expectedDuration|duration/i });
-    // As on the save door: NaN reaches the server as `null` (JSON has no NaN), so
+    // NaN cannot cross a callable at all: the client SDK refuses to ENCODE it and
+    // throws locally, so the server guard is never reached. `null` is the spelling
+    // that actually arrives, and it exercises
     // this exercises the TASK_FIELD_TYPES 'number' arm of the same guard.
-    await expectError('import: a NaN expectedDurationMinutes is refused (arrives as null)',
-      creator.call('importGameFile', { file: withTaskOverride({ expectedDurationMinutes: NaN }) }),
+    await expectError('import: a null expectedDurationMinutes is refused (NaN cannot cross the wire)',
+      creator.call('importGameFile', { file: withTaskOverride({ expectedDurationMinutes: null }) }),
       { codeIn: ['functions/invalid-argument'] });
 
-    await expectError('import: a safe zone with a non-finite centre is refused',
+    await expectError('import: a safe zone with a null centre is refused (NaN cannot cross the wire)',
       creator.call('importGameFile', {
-        file: withGameOverride({ safeZone: { center: { lat: NaN, lng: 35.21 }, radiusMeters: 500 } }),
+        file: withGameOverride({ safeZone: { center: { lat: null, lng: 35.21 }, radiusMeters: 500 } }),
       }),
       { codeIn: ['functions/invalid-argument'] });
     // A zero radius is refused rather than stored as "off": evaluateSafeZoneStatus
