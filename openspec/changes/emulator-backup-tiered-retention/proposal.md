@@ -82,6 +82,13 @@ a 20-minute window in which the evidence is shredded — with no signal when the
   machine-readable through a status command that **exits non-zero** when the net is down.
 - A hung export can no longer freeze the loop: exports are bounded by a timeout and overlapping
   ticks are refused, so "process alive, no snapshots" becomes self-reporting instead of invisible.
+- **Post-incident hardening:** this exact failure mode recurred on this machine — the readiness
+  probe `tick()` awaits before its health/heartbeat logic had no bound at all, so when the emulator
+  died mid-probe the tick hung forever and the heartbeat froze silently for ~3 hours. The probe is
+  now raced against a hard timeout (a hung/rejecting/throwing probe resolves "not ready" instead of
+  hanging its caller), and a separate watchdog re-asserts the heartbeat + health on its own cadence
+  independent of whether a tick is in flight — so neither a wedged probe nor a slow export can ever
+  again suppress the heartbeat an external `--status` check relies on.
 
 **Disk footprint is explicitly bounded.**
 - Deeper history keeps more states, so the total is capped; when the cap is hit the oldest snapshots
@@ -137,7 +144,8 @@ a 20-minute window in which the evidence is shredded — with no signal when the
   `scripts/dev-emulator.mjs` (backups on by default, guarded import), and a new
   `scripts/test-emulator-retention.ts` picked up by the `npm test` aggregator.
 - **New env vars (all optional, defaulted):** `EMU_BACKUP_KEEP_HOURLY`, `EMU_BACKUP_KEEP_DAILY`,
-  `EMU_BACKUP_MAX_BYTES`, `EMU_BACKUP_EXPORT_TIMEOUT_MS`, `RUSHPOINT_ALLOW_SHRINK`.
+  `EMU_BACKUP_MAX_BYTES`, `EMU_BACKUP_EXPORT_TIMEOUT_MS`, `RUSHPOINT_ALLOW_SHRINK`,
+  `EMU_BACKUP_READY_PROBE_TIMEOUT_MS` (bounds the readiness probe; see D10).
   `RUSHPOINT_BACKUP` inverts meaning: it is now an opt-**out** (`0`/`false`), and
   `EMU_BACKUP_KEEP` / `EMU_BACKUP_INTERVAL_MS` keep their current meaning (the recent tier).
 - **Backwards compatibility:** snapshot folder naming (`backup-<iso>`) is unchanged, so snapshots

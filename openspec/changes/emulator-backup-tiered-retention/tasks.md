@@ -82,3 +82,59 @@
 - [x] 5.4 Explicitly record that emulator-dependent gates (`npm run e2e`, `verify:emulator`) and the
       loop's runtime behavior are UNVERIFIED because a live playtest stack is serving from this tree
       and no emulator/backup/tunnel process may be started or restarted.
+
+## 6. RED→GREEN — post-incident hardening (D10: hung probe + probe-independent heartbeat)
+
+Triggered by a real, observed recurrence: the loop's last snapshot was 21:38, the emulator was then
+stopped, and the loop stayed alive but SILENT for ~3 hours (frozen heartbeat, no banner) while
+`--status` would have reported healthy.
+
+- [x] 6.1 RED: add failing cases to `scripts/test-emulator-backup.ts` for a new
+      `probeReadyWithTimeout(probe, timeoutMs, scheduleTimeout?, clearScheduledTimeout?)`: a
+      never-resolving probe, a rejecting probe, a synchronously-throwing probe, a promptly
+      resolved-true probe, a promptly resolved-false probe, and timer-cleanup (the timeout handle is
+      cleared once the probe settles first). Confirm it fails because the export does not exist yet.
+- [x] 6.2 GREEN: implement `probeReadyWithTimeout` in `scripts/lib/emulatorBackup.mjs` — races the
+      probe against a hard timeout; timeout, rejection, or a synchronous throw all resolve to `false`,
+      indistinguishable from an ordinary not-ready result. Re-run 6.1 to green.
+- [x] 6.3 Wire it into `scripts/emulator-backup.mjs`: the single `isReadyNow()` definition is wrapped
+      once with `probeReadyWithTimeout` (new `EMU_BACKUP_READY_PROBE_TIMEOUT_MS`, default 5000 ms), so
+      every existing call site (boot-wait loop, `tick()`, `snapshotNow`) is bounded without per-site
+      changes.
+- [x] 6.4 Add a `watchdogTick()` + its own `setInterval` (`WATCHDOG_MS`, independent of `tick`'s
+      interval), started before the boot-wait loop, that calls `reportHealth()` + `writeStatus()` on a
+      wall-clock cadence regardless of whether a tick (export or probe) is currently in flight.
+- [x] 6.5 Document `EMU_BACKUP_READY_PROBE_TIMEOUT_MS` in the header comment of
+      `scripts/emulator-backup.mjs`, alongside the existing env var list.
+- [x] 6.6 Re-run `npm test` (the full pure-logic aggregator) and `npx openspec validate
+      emulator-backup-tiered-retention --strict`; both must pass. Runtime behavior of the watchdog
+      against a real emulator remains UNVERIFIED here — no emulator was started for this task, per
+      constraint.
+
+Follow-up defect introduced by 6.4: the watchdog calls `reportHealth()` every ~5 s and
+`reportHealth()` shouted its 6-line red banner unconditionally — ~720 banners an hour, burying the
+emulator/dev-stack output needed to diagnose the very failure being announced (design D11).
+
+- [x] 6.7 RED: add failing cases to `scripts/test-emulator-backup.ts` for a new
+      `shouldShoutHealth({ health, lastShoutMs, lastShoutHealth, nowMs, minGapMs })`: `ok`/`starting`
+      never shout; first-ever banner shouts; null/undefined/NaN `lastShoutMs` shouts; same level under
+      / exactly at / past the gap; every level CHANGE shouts immediately despite the gap; a backwards
+      `nowMs` shouts (and throttles normally after the caller re-stamps); gap `0` = always, negative /
+      `NaN` = default; empty/undefined argument returns `false`. Confirm it fails because the export
+      does not exist yet.
+- [x] 6.8 GREEN: implement `shouldShoutHealth` + `DEFAULT_HEALTH_SHOUT_GAP_MS` (60 s floor) in
+      `scripts/lib/emulatorBackup.mjs`. Re-run 6.7 to green.
+- [x] 6.9 Wire it into `reportHealth()` in `scripts/emulator-backup.mjs`: `assessLoopHealth` and
+      `writeStatus()` keep running on every watchdog tick unchanged; only `shout()` is gated, on
+      module-local `lastShoutMs`/`lastShoutHealth` (deliberately NOT persisted into `STATUS.json` —
+      banner cadence is not published health). Gap = `EMU_BACKUP_SHOUT_MIN_GAP_MS`, default
+      `max(60000, EMU_BACKUP_INTERVAL_MS)`.
+- [x] 6.10 Document `EMU_BACKUP_SHOUT_MIN_GAP_MS` in the header comment of
+      `scripts/emulator-backup.mjs`, alongside the existing env var list.
+- [x] 6.11 Harden `probeReadyWithTimeout` against a synchronously-firing injected scheduler: the
+      timer handle was captured in a `const` that `finish()` closed over, so a synchronous callback
+      hit its temporal dead zone and rejected the promise instead of resolving `false`. RED with a
+      fake synchronous scheduler, then declare `let timer` before the `scheduleTimeout` call.
+- [x] 6.12 Re-run `npm run typecheck`, `npm run lint`, `npm test` and `npx openspec validate
+      emulator-backup-tiered-retention --strict`; all must pass. Record output verbatim. Emulator-
+      dependent gates remain UNVERIFIED (live stack serving from this tree).

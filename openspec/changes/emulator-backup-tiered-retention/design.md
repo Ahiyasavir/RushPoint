@@ -222,6 +222,103 @@ mechanism of this very incident. It is deliberately not wired because those scri
 executed to verify while the live stack is up, and a half-verified change to a destructive script is
 worse than none.
 
+### D10 — A hung readiness probe cannot freeze the tick, and the heartbeat no longer depends on any single tick (post-incident hardening)
+
+**Observed on this machine, not hypothetical:** the loop wrote its last snapshot at 21:38, the
+emulator was then stopped, and the loop stayed alive but SILENT for ~3 hours — no banner, frozen
+heartbeat — while its own supervisor reported healthy. Ten snapshots all dated 21:20–21:38 (a flat
+20-minute window), matching the tiered-retention math exactly: the loop really did stop advancing.
+
+**Root cause confirmed by reading `tick()`:** it begins with `const ready = await isReadyNow();`
+before `reportHealth()`/`writeStatus()` ever run. `isReadyNow()`'s own `fetch` carries a 1.5 s
+`AbortSignal.timeout`, but nothing bounds the *outer* await from `tick`'s perspective — if the probe
+implementation ever hangs (a future refactor, an environment where `AbortSignal.timeout` doesn't
+cleanly cancel a wedged socket, etc.), `tick` blocks forever, `setInterval` keeps queuing new ticks
+that wedge on the same call, and the health/heartbeat logic that comes *after* the await never runs.
+The self-monitor was architecturally coupled to the very thing it monitors.
+
+**Fix — two independent layers, both pure-logic-driven:**
+
+1. **`probeReadyWithTimeout(probe, timeoutMs, scheduleTimeout, clearScheduledTimeout)`**
+   (`scripts/lib/emulatorBackup.mjs`) races an arbitrary probe against a hard timeout. A hung,
+   rejecting, or synchronously-throwing probe resolves to `false` — indistinguishable from an
+   ordinary "not ready" result, so no downstream logic can special-case it away. `emulator-backup.mjs`
+   wraps its single `isReadyNow()` definition with this once, so every call site (the boot-wait loop,
+   `tick()`, `snapshotNow`) is bounded with no per-call-site changes. Default bound:
+   `EMU_BACKUP_READY_PROBE_TIMEOUT_MS` (5000 ms) — generous next to the probe's own 1.5 s fetch
+   timeout, tight next to the incident's multi-hour freeze.
+2. **A watchdog timer, separate from `tick`'s own `setInterval`.** `watchdogTick()` calls
+   `reportHealth()` + `writeStatus()` on its own cadence (`WATCHDOG_MS`, capped at 5000 ms),
+   independent of whether a tick is currently in flight (a slow export, or, before (1), a hung probe).
+   This is deliberately redundant with the fix in (1): `assessLoopHealth` is already pure and
+   time-based, so re-running it needs nothing from the in-flight tick. It is what makes the durable
+   external signal (the on-disk heartbeat going stale, checkable via `--status`) survive even a class
+   of freeze this change didn't anticipate — the mission's own framing: self-shouting to stderr is
+   invisible in an unwatched `concurrently` process; the heartbeat going stale for an external checker
+   to observe is the channel that actually works unattended.
+
+*Why not just fix the fetch's timeout and stop there:* the incident was diagnosed against a specific
+line (`await isReadyNow()`), but the deeper defect is that `tick`'s health reporting had **no
+independence** from the probe at all — it happened to work only because the current probe
+implementation bounds itself. Layer 2 removes that coupling structurally: even a completely different
+future cause of a wedged tick (not just this probe) still leaves the heartbeat advancing.
+
+*Scope discipline:* both additions are wiring around already-pure, already-tested functions
+(`assessLoopHealth`, `reportHealth`, `writeStatus`); no existing behavior (banner content, retention,
+re-entrancy guard, backups-on-by-default) changes.
+
+### D11 — The watchdog cadence must not become the banner's cadence (`shouldShoutHealth`)
+
+D10's watchdog introduced a defect in the layer above it. `reportHealth()` shouted a 6-line
+bright-red banner **unconditionally** whenever health was `degraded`/`stalled`. That was written when
+the only caller was `tick()`, i.e. once per snapshot interval — minutes apart. The watchdog now calls
+`reportHealth()` every `WATCHDOG_MS` (~5 s), so an unhealthy loop prints **~720 banners an hour** into
+a multiplexed `concurrently` terminal it shares with the emulator, both Vite servers and the tunnel.
+That does not merely annoy: it **destroys the diagnostic context** — the emulator's own error output,
+the stack trace, the last good log line — by scrolling it out of the buffer. A warning that shreds the
+evidence for the incident it is warning about is a net-negative signal, and it is exactly the failure
+mode D7 was written to avoid ("noisy thresholds train people to ignore the banner"), re-introduced
+through a different door.
+
+**Decision: split "assess + persist" from "shout".** The two have different correct frequencies:
+
+- **Assess + persist** stays at the full watchdog cadence, unchanged. `assessLoopHealth` is pure, and
+  `STATUS.json` is the machine-readable channel an external checker polls — making *that* coarser
+  would undo D10 and re-open the incident.
+- **Shout** is gated by a new pure `shouldShoutHealth({ health, lastShoutMs, lastShoutHealth, nowMs,
+  minGapMs })`, suppressing only the one case where repetition carries zero information: *the identical
+  level, already announced, moments ago.*
+
+Everything that carries news is exempt from the gap, because the cost of a delayed banner is
+categorically worse than the cost of an extra one:
+
+- `ok`/`starting` → never shouts (unchanged).
+- No banner yet → shout now. A suppressed *first* banner is indistinguishable from a silent net.
+- **Level changed** → shout now. `degraded → stalled` is the single most important sentence this
+  loop can say; making it wait out a throttle would be a regression of the original incident.
+- **Clock moved backwards** → shout now. Naively comparing `nowMs - lastShoutMs >= gap` mutes the
+  banner for the whole duration of any backward jump (NTP correction, VM resume, DST-adjacent host
+  clock edits) — potentially forever. Treating a negative elapsed as "emit" costs one banner; the
+  caller re-stamps `lastShoutMs`, so it self-corrects after exactly one.
+- Null/undefined/NaN `lastShoutMs` → "never emitted", not "just emitted". Same asymmetry.
+
+**Default gap: `max(60_000, EMU_BACKUP_INTERVAL_MS)`** (2 min at defaults), overridable via
+`EMU_BACKUP_SHOUT_MIN_GAP_MS`. Rationale: one banner per *missed snapshot opportunity* is the natural
+unit — the banner's whole content is "a snapshot didn't happen", so repeating it faster than snapshots
+are attempted adds nothing new. The 60 s floor keeps a deliberately short interval (a test, a
+demo) from re-creating the firehose. `0` explicitly disables throttling; a negative or non-finite
+value falls back to the default rather than to "always" or "never" — a typo'd env var must not be able
+to silence the safety net.
+
+*Also hardened here:* `probeReadyWithTimeout` captured its timer in `const timer` while `finish()`
+closed over it. Its timer functions are **injectable parameters**, so a synchronously-firing scheduler
+is a legal input — and would run `finish(false)` with `timer` still in its temporal dead zone,
+throwing a `ReferenceError` out of the Promise executor and **rejecting** the promise. That inverts
+the function's one guarantee (the caller always gets an answer, never a throw). Real `setTimeout`
+never fires synchronously, so this is latent rather than live — but the guarantee is the entire
+reason the function exists, a `let` declared before the call costs nothing, and a fake-clock test
+would otherwise hit it. Fixed, with a test.
+
 ## Test Strategy
 
 **Lane:** pure logic only — a new `scripts/test-emulator-retention.ts`, auto-discovered by
@@ -260,6 +357,22 @@ failures alone force `stalled` despite a fresh success; monotonicity sweep; `can
 while `inFlight` even when ready and due; loop start suppressed only by a recent heartbeat with a
 live pid, never by a stale one or a dead pid, and always suppressed by the explicit opt-out.
 
+`probeReadyWithTimeout` (D10): resolved-true probe → true, fast; resolved-false probe → false;
+never-resolving probe → false, bounded near the timeout (not hanging); rejecting probe → false, not
+thrown; synchronously-throwing probe → false, not thrown; timeout handle is cleared once the probe
+settles first (no leaked timer) — all added to `scripts/test-emulator-backup.ts` (the file already
+covering this module's other pure functions), RED-first against the un-extended lib. Plus (D11) a
+synchronously-firing injected scheduler → still resolves `false`, never throws (the TDZ regression
+test).
+
+`shouldShoutHealth` (D11), also in `scripts/test-emulator-backup.ts`, RED-first: `ok`/`starting`
+never shout (including a recovery from `stalled` after a long gap); first-ever banner shouts
+immediately; `null`/`undefined`/`NaN` last-shout time shouts immediately; same level just under / exactly
+at / past the gap (the off-by-one); `degraded → stalled` and `stalled → degraded` and `ok → degraded`
+all shout immediately despite being inside the gap; `nowMs` far behind and 1 ms behind `lastShoutMs`
+both shout, and the post-re-stamp tick throttles normally again; gap `0` = always, gap `NaN`/negative =
+default; no-argument and `undefined` calls return `false` without throwing.
+
 **Gates:** `npm run typecheck`, `npm run lint`, `npm test`. `npm run e2e` and every other
 emulator-touching gate are **not run** — they require starting or restarting the emulator, forbidden
 while the live stack serves. No UI is touched, so `npm run i18n:check` does not apply.
@@ -286,6 +399,10 @@ while the live stack serves. No UI is touched, so `npm run i18n:check` does not 
 - **[More retained data grows disk usage]** → tier ceiling ~44 MB, absolute cap 512 MiB (D5).
 - **[Noisy thresholds train people to ignore the banner]** → `degraded` needs > 2 intervals (> 4 min
   at defaults), `stalled` > 5 (> 10 min); a single slow export never trips them.
+- **[Throttling the banner could hide a real escalation]** → the gap applies ONLY to a verbatim
+  repeat of an already-announced level. First banner, any level change, and a backwards clock all
+  bypass it (D11), and the health assessment + `STATUS.json` heartbeat — the channel `--status` and
+  any external checker read — are not throttled at all, so nothing detectable is delayed.
 - **[Changing loop internals could regress the readiness gate]** → the hub probe, `isEmulatorReady`,
   `didExportSucceed` and `selectFreshestImport` are untouched and their existing tests in
   `scripts/test-emulator-backup.ts` must stay green.
