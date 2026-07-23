@@ -170,7 +170,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
                 key={issue}
                 onClick={() => toggleIssue(issue)}
                 className={`rounded-full border px-3 py-1.5 text-sm ${issues.includes(issue)
-                  ? 'bg-accent/15 border-accent/50 text-accent font-semibold'
+                  ? 'bg-accent/15 border-accent/50 text-ink-fire font-semibold'
                   : 'bg-app-raised border-glass-border text-zinc-300'}`}
               >
                 {issueLabels[issue]}
@@ -254,7 +254,7 @@ function Chips3({ prompt, options, selected, onPick }: {
             key={value}
             onClick={() => onPick(value)}
             className={`rounded-xl border px-4 py-3 text-sm font-medium transition-transform active:scale-95 ${selected === value
-              ? 'bg-accent/15 border-accent text-accent font-semibold'
+              ? 'bg-accent/15 border-accent text-ink-fire font-semibold'
               : 'bg-app-raised border-glass-border text-zinc-200'}`}
           >
             {label}

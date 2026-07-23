@@ -43,7 +43,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                 {c.tryAgain}
               </button>
               <button onClick={() => window.location.reload()}
-                className="border border-glass-border text-zinc-600 rounded-lg px-4 py-2 text-sm">
+                className="border border-glass-border text-zinc-500 rounded-lg px-4 py-2 text-sm">
                 {c.reload}
               </button>
             </div>

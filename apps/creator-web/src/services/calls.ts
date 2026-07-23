@@ -52,7 +52,10 @@ export const purgeGameNow     = callable<{ gameId: string }, { ok: boolean }>('p
 
 // ── Runs ──
 export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, { runId: string; accessCode: string }>('launchRun');
-export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number }>('startTeams');
+// `heldForConsent` counts teams the server refused to start because the game
+// requires guardian consent and none is recorded (change: expose-enforced-settings).
+// Optional so an older backend simply reports nothing rather than breaking.
+export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number; heldForConsent?: number }>('startTeams');
 export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
 export const refreshLeaderboard = callable<
@@ -124,6 +127,8 @@ export interface RunTeamRow {
   launched: boolean;
   startedAt: string | null;
   finishedAt: string | null;
+  /** Safe-zone latch: the team is soft-paused until it is verifiably back inside. */
+  outOfBounds?: boolean;
 }
 
 // ── Gallery ──
@@ -176,6 +181,9 @@ export const pushAnnouncement      = callable<{ ownerUid: string; gameId: string
 export const sendTeamChatMessage   = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; text: string; senderName?: string }, { messageId: string }>('sendTeamChatMessage');
 export const pushFlashMission      = callable<{ ownerUid: string; gameId: string; runId: string; title: string; description?: string; bonusPoints: number; ttlSeconds: number }, { id: string; expiresAt: string }>('pushFlashMission');
 export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string; runId: string; alertId: string }, { ok: boolean }>('acknowledgeAlert');
+// Out-of-bounds recovery: release a team the safe-zone latch is holding. The server
+// keeps a short grace window so a broken phone's next bad fix can't re-latch them.
+export const clearTeamOutOfBounds  = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; reason?: string }, { ok: boolean; overrideUntil: string }>('clearTeamOutOfBounds');
 export const reviewStationSubmission = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; taskId: string; approved: boolean; note?: string }, { ok: boolean; approved: boolean }>('reviewStationSubmission');
 export const adjustTeamScore       = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; delta: number; reason?: string }, { ok: boolean; newBonusPenalty: number }>('adjustTeamScore');
 // Live photo feed moderation (change: live-photo-feed): hide an item from the run's feed.

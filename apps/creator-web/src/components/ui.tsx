@@ -157,6 +157,41 @@ export function Badge({
   );
 }
 
+// ── TagChips ──────────────────────────────────────────────────────────────────
+// Creator-authored tags, one chip per tag (change: game-task-tags). Before this
+// existed `tags` was a WRITE-ONLY field: persisted, denormalized into publicGames
+// /publicTasks and returned by searchGallery — and rendered by nothing at all,
+// which is exactly what "I don't see the tags anywhere" was.
+//
+// Contract:
+//  • Renders NOTHING (not an empty box) for an empty/absent list.
+//  • `dir="auto"` on each chip — the text is creator-authored, so a Hebrew tag
+//    must lay out RTL while an English one beside it stays LTR.
+//  • Overflow is bounded so a 20-tag game cannot blow out a card; the "+N" text
+//    comes from the caller's dictionary (`more`), never from string concatenation
+//    here, so ui.tsx stays free of user-facing copy.
+export function TagChips({ tags, max = 6, more, className = '' }: {
+  tags?: string[]; max?: number; more?: (n: number) => string; className?: string;
+}) {
+  const list = (tags ?? []).filter((t) => typeof t === 'string' && t.trim().length > 0);
+  if (list.length === 0) return null;
+  const shown = list.slice(0, max);
+  const hidden = list.length - shown.length;
+  return (
+    <div className={`flex flex-wrap items-center gap-1 ${className}`}>
+      {shown.map((tag) => (
+        <span key={tag} dir="auto"
+          className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border bg-[--surface-2] text-[--ink-2] border-[--rp-border]">
+          {tag}
+        </span>
+      ))}
+      {hidden > 0 && more && (
+        <span className="text-[11px] font-medium text-[--ink-3]">{more(hidden)}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Advanced (collapsible) ────────────────────────────────────────────────────
 // `dense` is the Task Builder variant: tighter chrome so a stack of collapsed
 // sections reads as a compact list rather than a wall of boxes. `meta` renders

@@ -43,7 +43,7 @@ export default function InRunAlerts({ hotZone, outOfBounds }: { hotZone: HotZone
   return (
     <div className="space-y-2 mb-2">
       {active && hotZone && (
-        <div className="flex items-center gap-2 rounded-xl border border-rp-fire/40 bg-rp-fire/15 px-3 py-2 text-sm font-semibold text-rp-fire animate-fade-up motion-reduce:animate-none">
+        <div className="flex items-center gap-2 rounded-xl border border-rp-fire/40 bg-rp-fire/15 px-3 py-2 text-sm font-semibold text-ink-fire animate-fade-up motion-reduce:animate-none">
           <span className="text-base leading-none">🔥</span>
           <span className="flex-1">{t.play.hotZoneActive({ mult: hotZone.multiplier })}</span>
           <span className="font-mono tabular-nums">{fmtCountdown(remainMs)}</span>

@@ -21,6 +21,7 @@ import { quizAttemptGuard } from '../lib/interaction';
 import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
+import { gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent } from '../lib/stuckGuards';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
 // lazyWithRetry so a stale-shell chunk 404 self-heals instead of hanging the
@@ -104,7 +105,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Transient "every station is full" state — distinct from routingError so the
   // team sees a friendly waiting card + auto-retry instead of a dead-end.
   const [stationBusy, setStationBusy] = useState(false);
-  const [helpSent, setHelpSent] = useState(false);
+  // Stuck-player guard (change: stuck-player-guards): the host-help affordance is
+  // remembered PER TASK. As a run-wide boolean nothing ever reset it, so a team
+  // that raised the alarm once saw "sent" on every later task and could never call
+  // for help again — on the only escape hatch a stuck geofence player has.
+  const [helpSentFor, setHelpSentFor] = useState<string | null>(null);
   // Single in-flight guard: a slow requestNextTask must not be re-fired on every
   // poll/re-render while the team is unassigned (thundering herd).
   const routingInFlight = useRef(false);
@@ -208,14 +213,30 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     // live lockout; a different task replaces it outright.
     setCooldown((c) => (c.taskId === taskId ? { taskId, until: Math.max(c.until, until) } : { taskId, until }));
   };
-  // Wrong-answer retry lockout (change: wrong-answer-cost). The server ships the
-  // authoritative expiry on the task (`answerCost.cooldownUntil`) and again on
-  // every wrong submission; adopt whichever is later so a reload mid-lockout
-  // still counts down instead of silently unlocking the submit button.
-  const serverCooldown = task?.answerCost?.cooldownUntil ?? 0;
+  // Wrong-answer retry lockout (changes: wrong-answer-cost, retry-lockout-clock-skew).
+  // The server decides the lockout against its OWN clock and ships a REMAINING
+  // DURATION (`answerCost.cooldownRemainingMs`, and `retryAfterMs` on every wrong
+  // submission). We immediately turn that duration into a deadline on the LOCAL
+  // clock — the same clock the tick below reads — so both sides of the countdown
+  // subtraction come from one clock and device clock skew cancels exactly. Before
+  // this, an absolute server instant was compared to the device clock, so a phone
+  // running hours behind froze its own answer controls for hours.
+  // The absolute `cooldownUntil` is used ONLY as a fallback for a server that has
+  // not shipped the duration yet, and it is still the server's authority that
+  // decides: this state merely stops the player spending a call it will refuse.
+  const applyServerLockout = (remainingMs: number | undefined, legacyUntil: number | undefined) => {
+    if (typeof remainingMs === 'number' && Number.isFinite(remainingMs) && remainingMs > 0) {
+      setCooldownUntil(Date.now() + remainingMs);
+    } else if (remainingMs === undefined && typeof legacyUntil === 'number' && legacyUntil > 0) {
+      setCooldownUntil(legacyUntil);
+    }
+  };
+  const serverCooldownMs = task?.answerCost?.cooldownRemainingMs;
+  const serverCooldownUntil = task?.answerCost?.cooldownUntil;
   useEffect(() => {
-    if (serverCooldown > 0) setCooldownUntil(serverCooldown);
-  }, [serverCooldown, assignedRec?.taskId]);
+    applyServerLockout(serverCooldownMs, serverCooldownUntil);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverCooldownMs, serverCooldownUntil, assignedRec?.taskId]);
   const [cooldownNow, setCooldownNow] = useState(() => Date.now());
   useEffect(() => {
     if (cooldownUntil <= Date.now()) return;
@@ -267,9 +288,23 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // M4: don't fire a submit while offline — the callable would fail with a raw
   // network error on tap. Short-circuit with a localized nudge instead (the
   // ConnectionBanner already shows the offline state). Returns true when blocked.
+  //
+  // Stuck-player guard (change: stuck-player-guards): `navigator.onLine` is a
+  // browser heuristic that reads false on some WORKING connections, and when it is
+  // wrong it is cleared only by an `online` event that never fires. Blocking on it
+  // unconditionally was a live button that did nothing, forever. The gate now
+  // nudges ONCE per task and then defers to the network — the server is the
+  // authority and will reject if the submission truly cannot be made.
+  const offlineNudgedFor = useRef<string | null>(null);
   function blockedOffline(offlineMsg: string = t.task.offlineSubmit): boolean {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      showError(offlineMsg);
+    const gate = offlineSubmitGate({
+      online: typeof navigator === 'undefined' ? undefined : navigator.onLine,
+      nudgedForTaskId: offlineNudgedFor.current,
+      taskId: assignedRec?.taskId ?? '',
+    });
+    offlineNudgedFor.current = gate.nudgedForTaskId;
+    if (gate.blocked) {
+      showError(`${offlineMsg} ${t.task.offlineTapAgain}`);
       return true;
     }
     return false;
@@ -290,7 +325,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (routingError) {
       return (
         <Card className="p-6 text-center space-y-3">
-          <p className="text-sm text-rp-alert">{t.task.routingError}</p>
+          <p className="text-sm text-ink-alert">{t.task.routingError}</p>
           <Button onClick={() => { setRoutingError(false); setRoutingAttempt((n) => n + 1); }}>
             {t.task.retryRouting}
           </Button>
@@ -358,7 +393,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     });
     try {
       await triggerSOS({ ...ctx, ...coords });
-      setHelpSent(true);
+      // Scoped to the task it was raised for — a later task re-arms the button.
+      setHelpSentFor(task!.id);
     } catch { /* let the player tap again; nothing persisted */ }
   }
 
@@ -508,8 +544,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Turn a wrong-answer response into the local message + lockout. A `replay`
   // (a network retry of the identical answer) charged nothing, so it must not
   // inflate the local attempt count either.
-  function applyAnswerCost(res: { penalty?: number; cooldownUntil?: number; replay?: boolean }, fallback: string) {
-    if (res.cooldownUntil) setCooldownUntil(res.cooldownUntil);
+  function applyAnswerCost(
+    res: { penalty?: number; retryAfterMs?: number; cooldownUntil?: number; replay?: boolean },
+    fallback: string,
+  ) {
+    applyServerLockout(res.retryAfterMs, res.cooldownUntil);
     if (res.replay) { showError(fallback); return; }
     const id = task!.id;
     setWrongAttempts((w) => ({ ...w, [id]: (w[id] ?? 0) + 1 }));
@@ -623,10 +662,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   if (task.arrivalPending) {
     return (
       <Card className="p-5" data-testid="task-card" data-task-sealed="true" data-task-id={task.id}>
-        <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
+        <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
         <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
         <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-warm mb-1">
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-warm mb-1">
             {t.task.hiddenBadge}
           </div>
           {(task.locationClueHe || task.locationClue) && (
@@ -650,7 +689,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <div className="mt-3">
             <button onClick={revealHint} disabled={frozen}
               aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
-              className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-accent-warm hover:underline disabled:opacity-40">
+              className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-ink-warm hover:underline disabled:opacity-40">
               💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
             </button>
           </div>
@@ -667,7 +706,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   return (
     <Card className="p-5" data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
-      <div className="text-xs text-accent uppercase tracking-widest mb-1">{headerLabel}</div>
+      <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
       {/* Legibility (change: fix-play-screen-hierarchy): the primary task text was
           too small/low-contrast. Bigger title + higher-contrast body (play-web's
           reversed zinc scale ⇒ zinc-300 is darker on the light theme). */}
@@ -681,7 +720,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       {task.locationHidden ? (
         // Treasure-hunt task: no pin, no distance — only the clue guides the player.
         <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-warm mb-1">
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-warm mb-1">
             🧭 {t.task.hiddenBadge}
           </div>
           {(task.locationClueHe || task.locationClue) && (
@@ -732,7 +771,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <NumericEntry busy={answerFrozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
-            <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp} helpSent={helpSent} />
+            <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp}
+              helpSent={helpAlreadySent(helpSentFor, task.id)} />
             {session.isTestDrive && (
               <div className="mt-3">
                 <Button disabled={frozen} onClick={geofenceTestCheckIn} data-testid="task-geofence-testdrive-checkin">
@@ -766,11 +806,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
               // Hint auto escalation: the server says this hint is free right now —
               // highlight it so a stuck team actually takes the help.
               ? <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintFreeNow}
-                  className="inline-flex items-center min-h-[44px] text-xs font-semibold text-accent bg-accent/10 border border-accent/30 rounded-full px-4 py-2 hover:bg-accent/20 disabled:opacity-40">
+                  className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-fire bg-accent/10 border border-accent/30 rounded-full px-4 py-2 hover:bg-accent/20 disabled:opacity-40">
                   🎁 {t.task.hintFreeNow}
                 </button>
               : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
-                  className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-accent-warm hover:underline disabled:opacity-40">
+                  className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-ink-warm hover:underline disabled:opacity-40">
                   💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
                 </button>}
         </div>
@@ -820,13 +860,13 @@ function ExpiryCountdown({ task, launchedAt, onExpired }: {
   const remaining = closesAt - now;
   if (remaining >= 10 * 60_000) return null; // countdown only inside the last 10 min
   if (remaining <= 0) {
-    return <p className="mt-2 text-sm text-rp-alert font-medium">⌛ {t.task.taskExpiredNotice}</p>;
+    return <p className="mt-2 text-sm text-ink-alert font-medium">⌛ {t.task.taskExpiredNotice}</p>;
   }
   const totalS = Math.ceil(remaining / 1000);
   const mm = String(Math.floor(totalS / 60)).padStart(2, '0');
   const ss = String(totalS % 60).padStart(2, '0');
   return (
-    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-rp-alert tabular-nums">
+    <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-rp-alert/10 border border-rp-alert/30 px-3 py-1 text-xs font-bold text-ink-alert tabular-nums">
       ⏳ {t.task.expiresInLabel({ time: `${mm}:${ss}` })}
     </div>
   );
@@ -879,7 +919,7 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
         target="_blank"
         rel="noreferrer"
         data-testid="task-navigate-waze"
-        className="inline-flex items-center gap-1 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold text-accent hover:underline"
+        className="inline-flex items-center gap-1 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold text-ink-fire hover:underline"
       >
         🧭 {t.task.navigateHere}
       </a>
@@ -914,7 +954,15 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
   }
   return (
     <div className="space-y-3">
+      {/* Enter submits, like every other answer field (change:
+          play-web-accessibility) — with the on-screen keyboard up, the verify
+          button is exactly the part of the page most likely to be covered. The
+          keyboard hints stop a phone auto-correcting or half-capitalising a
+          station code typed one handed while walking. */}
       <Input value={code} dir="ltr" onChange={(e) => setCode(e.target.value)} placeholder={label}
+        aria-label={label} autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+        enterKeyHint="go"
+        onKeyDown={(e) => { if (e.key === 'Enter' && !busy && code) onSubmit(code); }}
         className="text-center font-mono tracking-widest" data-testid="task-code-input" />
       <Button disabled={busy || !code} onClick={() => onSubmit(code)} data-testid="task-code-submit">{t.task.verify}</Button>
       {canScan && (
@@ -957,7 +1005,7 @@ function QuizEntry({ task, busy, wrongSoFar, onSubmit }: {
   }
   return (
     <div className="space-y-3">
-      <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer}
+      <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer} aria-label={t.task.yourAnswer}
         onKeyDown={(e) => e.key === 'Enter' && !busy && val.trim() && onSubmit(val.trim())} data-testid="quiz-text-input" />
       <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())} data-testid="quiz-text-submit">{t.task.submitAnswer}</Button>
     </div>
@@ -988,8 +1036,8 @@ function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; 
     <div className="space-y-3">
       <p className="text-xs text-zinc-500">{t.task.surveyTextPrompt}</p>
       <textarea value={val} dir="auto" rows={3} maxLength={500} data-testid="survey-text"
-        onChange={(e) => setVal(e.target.value)} placeholder={t.task.surveyPlaceholder}
-        className="w-full px-4 py-3 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 placeholder:text-zinc-600 shadow-[0_1px_4px_rgba(26,10,0,0.06)] focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40 transition-all duration-150 resize-none" />
+        onChange={(e) => setVal(e.target.value)} placeholder={t.task.surveyPlaceholder} aria-label={t.task.surveyPlaceholder}
+        className="w-full px-4 py-3 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 placeholder:text-zinc-500 shadow-[0_1px_4px_rgba(26,10,0,0.06)] focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40 transition-all duration-150 resize-none" />
       <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())} data-testid="survey-submit">{t.task.surveySubmit}</Button>
     </div>
   );
@@ -1017,7 +1065,7 @@ function OrderingEntry({ items, busy, onSubmit }: {
       <ol className="space-y-1.5">
         {arranged.map((item, i) => (
           <li key={item} className="flex items-center gap-2 rounded-lg bg-app-raised border border-glass-border px-3 py-2">
-            <span className="text-xs font-bold text-accent w-5 shrink-0 tabular-nums">{i + 1}</span>
+            <span className="text-xs font-bold text-ink-fire w-5 shrink-0 tabular-nums">{i + 1}</span>
             <span dir="auto" className="flex-1 min-w-0 text-sm text-zinc-100">{item}</span>
             <button onClick={() => move(i, -1)} disabled={busy || i === 0}
               aria-label={`${t.task.orderingMoveUp} ${i + 1}`} data-testid="ordering-up" data-item={item}
@@ -1039,7 +1087,7 @@ function NumericEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (a: string)
   const [val, setVal] = useState('');
   return (
     <div className="space-y-3">
-      <Input type="number" value={val} onChange={(e) => setVal(e.target.value)} placeholder={t.task.enterNumber}
+      <Input type="number" value={val} onChange={(e) => setVal(e.target.value)} placeholder={t.task.enterNumber} aria-label={t.task.enterNumber} inputMode="decimal"
         className="text-center text-xl font-mono" data-testid="numeric-input"
         onKeyDown={(e) => e.key === 'Enter' && !busy && val !== '' && onSubmit(val)} />
       <Button disabled={busy || val === ''} onClick={() => onSubmit(val)} data-testid="numeric-submit">{t.task.submit}</Button>
@@ -1072,6 +1120,14 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
     const id = setTimeout(() => setStuckTooLong(true), 40_000);
     return () => clearTimeout(id);
   }, [coords?.lat, coords?.lng, radius]);
+  // Stuck-player guard (change: stuck-player-guards): a geolocation error is
+  // TRANSIENT until proven otherwise. This watcher used to clearWatch on any error
+  // and never restart — so one routine POSITION_UNAVAILABLE (indoors, a courtyard,
+  // a tunnel) permanently killed auto check-in for a task type with no manual
+  // submit, and the player could not finish that task for the rest of the run.
+  // Now it retries on a bounded backoff and a successful fix clears the error, so
+  // walking out of the dead spot (or granting permission later) just resumes.
+  const errorCount = useRef(0);
   useEffect(() => {
     if (!navigator.geolocation || !coords) { setGpsError(true); return; }
     // Reset per task: if this component instance is reused for a different
@@ -1079,22 +1135,47 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
     // the new one (otherwise a transferred/next geofence never auto-checks-in).
     fired.current = false;
     setGpsError(false);
-    const id = navigator.geolocation.watchPosition(
-      (p) => {
-        const d = haversineKm({ lat: p.coords.latitude, lng: p.coords.longitude }, coords) * 1000;
-        setDist(d);
-        if (d <= radius && !fired.current) {
-          fired.current = true;
-          // Un-latch on a failed arrival so the watcher retries as the player
-          // stays in range, instead of freezing after one transient failure.
-          Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude))
-            .then((ok) => { if (ok === false) fired.current = false; });
-        }
-      },
-      () => { setGpsError(true); navigator.geolocation.clearWatch(id); },
-      { enableHighAccuracy: true, maximumAge: 5000 },
-    );
-    return () => navigator.geolocation.clearWatch(id);
+    errorCount.current = 0;
+    let cancelled = false;
+    let watchId: number | null = null;
+    let retryTimer: number | null = null;
+
+    const startWatch = () => {
+      if (cancelled) return;
+      watchId = navigator.geolocation.watchPosition(
+        (p) => {
+          // A fix arrived: whatever went wrong is over.
+          errorCount.current = 0;
+          setGpsError(false);
+          const d = haversineKm({ lat: p.coords.latitude, lng: p.coords.longitude }, coords) * 1000;
+          setDist(d);
+          if (d <= radius && !fired.current) {
+            fired.current = true;
+            // Un-latch on a failed arrival so the watcher retries as the player
+            // stays in range, instead of freezing after one transient failure.
+            Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude))
+              .then((ok) => { if (ok === false) fired.current = false; });
+          }
+        },
+        () => {
+          if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+          if (cancelled) return;
+          errorCount.current += 1;
+          setGpsError(true);
+          // Always a finite, bounded delay — there is no state in which we stop
+          // looking for the player.
+          retryTimer = window.setTimeout(startWatch, gpsRetryDelayMs(errorCount.current));
+        },
+        { enableHighAccuracy: true, maximumAge: 5000 },
+      );
+    };
+    startWatch();
+
+    return () => {
+      cancelled = true;
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coords?.lat, coords?.lng, radius]);
   // Escape hatch shown on a hard GPS error, or once the player has been stuck
@@ -1102,11 +1183,11 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
   const helpBlock = onRequestHelp ? (
     <div className="mt-2">
       {helpSent
-        ? <p className="text-xs text-accent font-medium" data-testid="geofence-help-sent">{t.task.helpSent}</p>
+        ? <p className="text-xs text-ink-fire font-medium" data-testid="geofence-help-sent">{t.task.helpSent}</p>
         : <button
             onClick={onRequestHelp}
             data-testid="geofence-help"
-            className="text-xs font-semibold text-rp-alert bg-rp-alert/10 border border-rp-alert/30 rounded-full px-3 py-1.5 hover:bg-rp-alert/20">
+            className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-alert bg-rp-alert/10 border border-rp-alert/30 rounded-full px-4 py-2 hover:bg-rp-alert/20">
             {t.task.requestHelp}
           </button>}
     </div>
@@ -1116,7 +1197,10 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
     return (
       <div className="text-center py-2 space-y-2" data-testid="geofence-status" data-gps-error="true">
         <div className="text-3xl">📡</div>
-        <p className="text-sm text-rp-alert font-medium">{t.task.gpsUnavailable}</p>
+        <p className="text-sm text-ink-alert font-medium">{t.task.gpsUnavailable}</p>
+        {/* Say that we are still trying — the watcher retries on a backoff, so a
+            dead spot or a permission granted afterwards recovers on its own. */}
+        <p className="text-xs text-zinc-400">{t.task.gpsRetrying}</p>
         <p className="text-xs text-zinc-500">{t.task.gpsContactHost}</p>
         {helpBlock}
       </div>
@@ -1129,7 +1213,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
       {dist == null
         ? <p className="text-sm text-zinc-500">{t.task.findingLocation}</p>
         : dist <= radius
-          ? <p className="text-sm text-accent font-medium">{t.task.youreHere}</p>
+          ? <p className="text-sm text-ink-fire font-medium">{t.task.youreHere}</p>
           : <p className="text-sm text-zinc-500">{t.task.walkCloser({ dist: Math.round(dist), radius })}</p>}
       {stuckOutside && (
         <>
@@ -1228,7 +1312,7 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
       <Button variant="ghost" disabled={busy} onClick={() => inputRef.current?.click()} data-testid="photo-take">
         {file ? t.task.retakePhoto : t.task.takePhoto}
       </Button>
-      {fileErr && <p className="text-rp-alert text-sm">{fileErr}</p>}
+      {fileErr && <p className="text-ink-alert text-sm">{fileErr}</p>}
       {!fileErr && warn && <p className="text-sm text-zinc-400" data-testid="photo-warn">{warn}</p>}
       {preview && <img src={preview} alt={t.task.photoPreview} className="w-full rounded-lg max-h-56 object-cover" />}
       {/* Determinate progress: a slow upload must never look like a frozen app. */}
@@ -1359,12 +1443,12 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
   }
 
   if (unsupported) {
-    return <p className="text-rp-alert text-sm">{t.task.audioUnsupported}</p>;
+    return <p className="text-ink-alert text-sm">{t.task.audioUnsupported}</p>;
   }
 
   return (
     <div className="space-y-3">
-      {err && <p className="text-rp-alert text-sm">{err}</p>}
+      {err && <p className="text-ink-alert text-sm">{err}</p>}
       {recording ? (
         <div className="space-y-2">
           <p className="text-sm text-zinc-300">{t.task.recording({ sec: remaining })}</p>

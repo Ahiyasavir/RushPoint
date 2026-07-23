@@ -195,7 +195,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           </Button>
           {firstPhotoUrl && (
             <button disabled={busy} onClick={sharePhotoFn}
-              className="mt-2 w-full text-sm text-accent/90 hover:text-accent disabled:opacity-50">
+              className="mt-2 w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
               {t.final.sharePhoto}
             </button>
           )}
@@ -222,13 +222,13 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     className="flex-1 flex flex-col items-center justify-end animate-fade-up motion-reduce:animate-none"
                     style={{ animationDelay: `${place * 80}ms` }}>
                     <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
-                    <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-accent' : 'text-zinc-200'}`}>{e.teamName}</div>
+                    <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-ink-fire' : 'text-zinc-200'}`}>{e.teamName}</div>
                     <div className="text-[11px] text-zinc-400 mb-1">
                       {isTimeOnly
                         ? (() => { const d = board?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
                         : e.score}
                     </div>
-                    <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-accent' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
+                    <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-ink-fire' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
                   </div>
                 );
               })}
@@ -369,7 +369,7 @@ function BadgesCard({ finalized }: { finalized: boolean }) {
             key={b}
             className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-sm ${
               fresh.has(b)
-                ? 'border-accent bg-accent/10 text-accent animate-score-pop motion-reduce:animate-none'
+                ? 'border-accent bg-accent/10 text-ink-fire animate-score-pop motion-reduce:animate-none'
                 : 'border-glass-border text-zinc-300'
             }`}
           >

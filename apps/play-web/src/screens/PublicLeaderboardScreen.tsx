@@ -123,7 +123,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
               onClick={() => void load()}
               disabled={refreshing}
               aria-label={t.board.refresh}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:text-rp-fire disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:text-ink-fire disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
             >
               <span aria-hidden="true" className={refreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
               {t.board.refresh}
@@ -196,7 +196,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                             className={
                               final
                                 ? 'text-[11px] text-zinc-500 font-mono tabular-nums'
-                                : 'text-[11px] text-zinc-600 italic font-mono tabular-nums opacity-80'
+                                : 'text-[11px] text-zinc-500 italic font-mono tabular-nums opacity-80'
                             }
                           >
                             {final ? '' : '⏱ '}{formatDuration(sec)}

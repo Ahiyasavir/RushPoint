@@ -115,7 +115,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
 
         <Button disabled={busy} onClick={share}>{busy ? t.recap.creating : t.recap.shareBtn}</Button>
         <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-          className="block text-center text-sm font-semibold text-rp-fire hover:text-rp-amber">
+          className="block text-center text-sm font-semibold text-ink-fire hover:text-ink-amber">
           {t.recap.buildOwn}
         </a>
       </div>

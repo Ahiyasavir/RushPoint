@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
@@ -13,12 +13,17 @@ import {
   adjustTeamScore,
   sendTeamChatMessage,
 } from '../services/calls';
-import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, type ChatMessage } from '@rushpoint/shared';
+import {
+  FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, chatSeenMarker, countUnreadChatMessages,
+  type ChatMessage, type ChatSeenMarker,
+} from '@rushpoint/shared';
 import type { StaffCtx } from '../lib/playRoute';
 import {
   loadStaffSession,
   saveStaffSession,
   clearStaffSession,
+  loadChatSeen,
+  saveChatSeen,
   type StaffSession,
 } from '../store';
 import { Button, Card, Collapsible, Input, Screen } from '../components/ui';
@@ -136,7 +141,7 @@ function StaffSignIn({
   return (
     <Screen>
       <div className="flex-1 flex flex-col justify-center">
-        <h1 className="font-brand text-2xl font-extrabold text-accent text-center mb-1">{t.staff.consoleTitle}</h1>
+        <h1 className="font-brand text-2xl font-extrabold text-ink-fire text-center mb-1">{t.staff.consoleTitle}</h1>
         <p className="text-zinc-500 text-center mb-8 text-sm">{t.staff.signInSub}</p>
         <div className="space-y-3">
           {/* Only shown when the link did NOT carry the run address. */}
@@ -321,7 +326,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
     <div className="min-h-screen max-w-md mx-auto w-full px-5 py-6 flex flex-col">
       <header className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="font-brand text-xl font-extrabold text-accent">{t.staff.title}</h1>
+          <h1 className="font-brand text-xl font-extrabold text-ink-fire">{t.staff.title}</h1>
           <p className="text-zinc-500 text-xs">{staff.name}</p>
         </div>
         <button
@@ -334,7 +339,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         <div role="status" aria-live="polite" className="mb-3">
           <p className="text-danger text-xs">⚠ {t.staff[readErr.key]}</p>
           {readErr.sessionExpired && (
-            <button className="mt-1 text-xs font-semibold text-accent underline" onClick={onSignOut}>
+            <button className="mt-1 text-xs font-semibold text-ink-fire underline" onClick={onSignOut}>
               {t.staff.backToSignIn}
             </button>
           )}
@@ -347,7 +352,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           🆘 {t.staff.alerts} {alerts.length > 0 && <span className="text-danger">({alerts.length})</span>}
         </h2>
         {alerts.length === 0
-          ? <p className="text-zinc-600 text-sm">{t.staff.noAlerts}</p>
+          ? <p className="text-zinc-500 text-sm">{t.staff.noAlerts}</p>
           : alerts.map((a) => (
             <Card key={a.id} className="p-3 mb-2 border-danger/40">
               <div className="flex items-start justify-between gap-3">
@@ -357,7 +362,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
                   {a.lat != null && a.lng != null && (
                     <a
-                      className="text-accent text-xs underline"
+                      className="text-ink-fire text-xs underline"
                       href={`https://www.google.com/maps?q=${a.lat},${a.lng}`}
                       target="_blank" rel="noreferrer"
                     >
@@ -380,10 +385,10 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       {/* ── Photo review ── */}
       <section className="mb-6 flex-1">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
-          📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-accent">({pending.length})</span>}
+          📷 {t.staff.photoReview} {pending.length > 0 && <span className="text-ink-fire">({pending.length})</span>}
         </h2>
         {pending.length === 0
-          ? <p className="text-zinc-600 text-sm">{t.staff.noSubmissions}</p>
+          ? <p className="text-zinc-500 text-sm">{t.staff.noSubmissions}</p>
           : pending.map((s) => {
             const key = `${s.teamId}:${s.taskId}`;
             const hasUrl = /^https?:\/\//.test(s.photoUrl);
@@ -398,7 +403,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
                   : hasUrl
                   ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-cover" />
-                  : <div className="text-xs text-zinc-600 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
+                  : <div className="text-xs text-zinc-500 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
                 <div className="flex gap-2">
                   <button
                     className="flex-1 min-h-[44px] py-2 rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
@@ -426,7 +431,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           ⚖️ {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
         </h2>
         {teams.length === 0
-          ? <p className="text-zinc-600 text-sm">{t.staff.noTeams}</p>
+          ? <p className="text-zinc-500 text-sm">{t.staff.noTeams}</p>
           : teams.map((tm) => (
             <Card key={tm.id} className="p-3 mb-2">
               <div className="flex items-center justify-between gap-2">
@@ -434,7 +439,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                   <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{tm.displayName}</div>
                   <div className="text-xs text-zinc-500">{t.staff.scoreLabel} {tm.score}</div>
                   {adjustAck[tm.id] && (
-                    <div role="status" aria-live="polite" className="text-xs font-semibold text-accent">
+                    <div role="status" aria-live="polite" className="text-xs font-semibold text-ink-fire">
                       ✓ {adjustAck[tm.id]}
                     </div>
                   )}
@@ -449,7 +454,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                         <button
                           key={d}
                           className={`w-11 h-11 rounded-lg text-sm font-bold border disabled:opacity-40 ${
-                            d > 0 ? 'bg-accent/15 text-accent border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
+                            d > 0 ? 'bg-accent/15 text-ink-fire border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
                           }`}
                           disabled={adjustAction.isBusy(tm.id)}
                           aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
@@ -492,9 +497,22 @@ function StaffChatSection({
   const [open, setOpen] = useState(false);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [openTeam, setOpenTeam] = useState<string | null>(null);
-  const [seen, setSeen] = useState<Record<string, number>>({});
+  // Seen markers, PERSISTED per run+team (change: team-chat-unread-accuracy).
+  // They used to be React state only, so a console reload re-flagged every
+  // non-empty thread — including threads whose only messages were HQ's own
+  // replies. Seeded lazily per thread as the collection snapshot arrives.
+  const [seen, setSeen] = useState<Record<string, ChatSeenMarker>>({});
   const [draft, setDraft] = useState('');
   const myUid = uid(); // this staffer's uid — drives own-vs-other-HQ attribution
+  const markerFor = useCallback(
+    (teamId: string): ChatSeenMarker => seen[teamId] ?? loadChatSeen(ctx.runId, teamId),
+    [seen, ctx.runId],
+  );
+  const markRead = useCallback((teamId: string, messages: ChatMessage[]) => {
+    const marker = chatSeenMarker(messages);
+    saveChatSeen(ctx.runId, teamId, marker);
+    setSeen((s) => ({ ...s, [teamId]: marker }));
+  }, [ctx.runId]);
 
   useEffect(() => {
     const ref = collection(db, FIRESTORE_PATHS.runChatCol(ctx.ownerUid, ctx.gameId, ctx.runId));
@@ -515,17 +533,17 @@ function StaffChatSection({
   useEffect(() => {
     if (!openTeam) return;
     const th = threads.find((x) => x.teamId === openTeam);
-    if (th && th.messages.length > (seen[openTeam] ?? 0)) {
-      setSeen((s) => ({ ...s, [openTeam]: th.messages.length }));
+    if (th && countUnreadChatMessages(th.messages, markerFor(openTeam), myUid) > 0) {
+      markRead(openTeam, th.messages);
     }
-  }, [openTeam, threads, seen]);
+  }, [openTeam, threads, markerFor, markRead, myUid]);
 
   const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
 
-  function expand(teamId: string, count: number) {
+  function expand(teamId: string, messages: ChatMessage[]) {
     setOpenTeam((cur) => {
       const next = cur === teamId ? null : teamId;
-      if (next) setSeen((s) => ({ ...s, [teamId]: count }));
+      if (next) markRead(teamId, messages);
       return next;
     });
     setDraft('');
@@ -544,7 +562,8 @@ function StaffChatSection({
   const replyAction = useAsyncAction(reply);
   const busy = replyAction.busy;
 
-  const totalUnread = threads.reduce((n, th) => n + (th.messages.length > (seen[th.teamId] ?? 0) ? 1 : 0), 0);
+  const totalUnread = threads.reduce(
+    (n, th) => n + (countUnreadChatMessages(th.messages, markerFor(th.teamId), myUid) > 0 ? 1 : 0), 0);
 
   return (
     <section className="mb-6">
@@ -562,14 +581,14 @@ function StaffChatSection({
       >
         {(
         threads.length === 0
-          ? <p className="text-zinc-600 text-sm">{t.chat.chatEmpty}</p>
+          ? <p className="text-zinc-500 text-sm">{t.chat.chatEmpty}</p>
           : threads.map((th) => {
             const last = th.messages[th.messages.length - 1];
-            const unread = th.messages.length > (seen[th.teamId] ?? 0);
+            const unread = countUnreadChatMessages(th.messages, markerFor(th.teamId), myUid) > 0;
             const expanded = openTeam === th.teamId;
             return (
               <Card key={th.teamId} className="p-3 mb-2">
-                <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages.length)}>
+                <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages)}>
                   <div className="flex items-center justify-between gap-2">
                     <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{nameFor(th.teamId)}</div>
                     {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{t.chat.chatUnread}</span>}

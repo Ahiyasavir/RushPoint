@@ -3,11 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import type { PublicGame, PublicTask } from '@rushpoint/shared';
 import { searchGallery, searchTaskLibrary, duplicateGame, setPublicLike } from '../services/calls';
 import { deriveLikeView, applyOptimisticLike, reconcileLike, type LikeView } from '../lib/likeState';
-import { Badge, Button, Card, EmptyState, Input, Skeleton } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, Skeleton, TagChips } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import GalleryMap, { type MapPoint } from '../components/GalleryMap';
-import { isValidCoord, isPlottablePublicTask } from '@rushpoint/shared';
+import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useT } from '../components/LanguageContext';
 
@@ -68,6 +68,15 @@ export default function GalleryPage() {
       title: tk.title,
       subtitle: `${TASK_TYPE_LABEL[tk.type] ?? tk.type} · ${gl.metaPts(tk.pointValue)}`,
     }));
+
+  // WHICH empty state applies is a classification, not a length check
+  // (change: public-task-area-visibility). A creator hit the case where every
+  // result was a document published before the area rule existed: an empty map
+  // zoomed to the whole region, under a list full of located missions, saying only
+  // "none of these has a published area" — true, unexplained, and unactionable.
+  // The classifier shares `isPlottablePublicTask` with the marker filter above, so
+  // "none plottable" can never be claimed while a pin is on the map.
+  const taskCoverage = publicTaskMapCoverage(tasks ?? []);
 
   // Show the loading skeleton whenever a query is in flight (search-as-you-type).
   const [searching, setSearching] = useState(false);
@@ -199,7 +208,9 @@ export default function GalleryPage() {
       {tab === 'tasks' && view === 'map' && tasks && tasks.length > 0 && (
         <div className="mb-4">
           <GalleryMap points={taskPoints} onSelect={(id) => focusCard('task', id)}
-            emptyLabel={gl.noLocatedTasks} notice={gl.approxPinsNote}
+            emptyLabel={gl.noLocatedTasks}
+            emptyDetail={taskCoverage === 'none-plottable' ? gl.noLocatedTasksHelp : undefined}
+            notice={gl.approxPinsNote}
             markerColor="#f59e0b" className="h-72" />
         </div>
       )}
@@ -225,6 +236,9 @@ export default function GalleryPage() {
                 <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                 <span>{gl.plays(pg.playCount)}</span>
               </div>
+              {/* Tags (change: game-task-tags) — publicGames has carried them since
+                  the gallery existed; nothing had ever rendered them. */}
+              <TagChips tags={pg.tags} more={gl.moreTags} />
               <div><LikeButton {...likeProps('game', pg.id)} /></div>
               {pg.approxLocation?.label && <span className="text-[11px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
               <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={() => void copyAction.run(pg)}>{gl.copyBtn}</Button>
@@ -251,6 +265,9 @@ export default function GalleryPage() {
                 <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                 <span>{gl.metaCopies(tk.copyCount)}</span>
               </div>
+              {/* Tags (change: game-task-tags) — searchTaskLibrary already returns
+                  them; TaskLibrary only ever copied them into the new task. */}
+              <TagChips tags={tk.tags} more={gl.moreTags} />
               <div className="flex items-center justify-between gap-2 mt-auto">
                 <span className="text-[11px] text-[--ink-3]">{gl.from(tk.sourceGameTitle ?? '')}</span>
                 <LikeButton {...likeProps('task', tk.id)} />

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
 import { saveSession, loadSound, saveSound, type Session } from '../store';
@@ -205,7 +205,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               aria-label={sound ? t.common.soundOn : t.common.soundOff}
               title={sound ? t.common.soundOn : t.common.soundOff}
               className={`text-xs font-semibold border rounded-full w-11 h-11 flex items-center justify-center transition-colors ${
-                sound ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
+                sound ? 'border-accent text-ink-fire' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
               }`}
             >
               {sound ? '🔊' : '🔇'}
@@ -217,7 +217,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               aria-label={t.common.colorblindMode}
               title={t.common.colorblindMode}
               className={`text-xs font-semibold border rounded-full w-11 h-11 flex items-center justify-center transition-colors ${
-                colorblind ? 'border-accent text-accent' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
+                colorblind ? 'border-accent text-ink-fire' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
               }`}
             >
               ◐
@@ -225,7 +225,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
             <button
               onClick={toggleLang}
               aria-label={t.join.langToggleAria}
-              className="text-zinc-400 text-xs font-semibold border border-glass-border rounded-full px-3 py-1 hover:text-zinc-200 transition-colors"
+              className="text-zinc-400 text-xs font-semibold border border-glass-border rounded-full inline-flex items-center justify-center min-h-[44px] px-3 hover:text-zinc-200 transition-colors"
             >
               {lang === 'he' ? 'English' : 'עברית'} {/* i18n-ignore — language switcher shows the target language in its own script */}
             </button>
@@ -233,7 +233,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
         </div>
 
         {/* Code input section */}
-        <div className="flex-1 flex flex-col px-5 pb-8">
+        <div className="flex-1 flex flex-col px-5 rp-safe-b">
           <div className="relative mb-4">
             <input
               ref={codeRef}
@@ -241,11 +241,16 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               dir="ltr"
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               placeholder={t.join.codePlaceholder}
+              aria-label={t.join.codePlaceholder}
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              enterKeyHint="go"
               className="
                 w-full px-6 py-5 rounded-2xl
                 text-center text-3xl font-mono font-bold tracking-[0.5em]
                 bg-white border-2 border-glass-border
-                text-zinc-100 placeholder:text-zinc-700/40
+                text-zinc-100 placeholder:text-zinc-500
                 shadow-[0_2px_16px_rgba(26,10,0,0.08)]
                 focus:outline-none focus:border-rp-fire/60 focus:ring-4 focus:ring-rp-fire/15
                 transition-all duration-200
@@ -256,7 +261,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
           </div>
 
           {err && (
-            <p className="text-rp-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
+            <p className="text-ink-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
           )}
 
           <Button
@@ -270,7 +275,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
 
           {onStaff && (
             <button
-              className="text-zinc-400 text-sm mt-5 mx-auto block font-medium hover:text-zinc-300 transition-colors"
+              className="text-zinc-400 text-sm mt-5 mx-auto inline-flex items-center justify-center min-h-[44px] px-3 font-medium hover:text-zinc-300 transition-colors"
               onClick={onStaff}
             >
               {t.join.staff}
@@ -297,7 +302,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               ))}
             </div>
             <p className="text-center text-[11px] text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
-              <span className="text-rp-go">●</span> {t.join.noAccountNeeded}
+              <span className="text-ink-go">●</span> {t.join.noAccountNeeded}
             </p>
             <LegalFooter />
           </div>
@@ -347,7 +352,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
             <button
               key={m}
               onClick={() => { setJoinMode(m); setErr(''); }}
-              className={`flex-1 rounded-lg py-2 transition-colors ${joinMode === m ? 'bg-white text-zinc-100 shadow-sm' : 'text-zinc-500'}`}
+              className={`flex-1 rounded-lg min-h-[44px] transition-colors ${joinMode === m ? 'bg-white text-zinc-100 shadow-sm' : 'text-zinc-500'}`}
             >
               {label}
             </button>
@@ -376,7 +381,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               />
             </Card>
           </div>
-          {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+          {err && <p className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
           <Button
             disabled={busy || teamCode.trim().length < 6}
             loading={attachAction.busy}
@@ -432,11 +437,11 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
                     data-testid="join-member"
                     onChange={(e) => setMembers(members.map((x, j) => (j === i ? e.target.value : x)))} />
                   {members.length > 1 && (
-                    <button aria-label={t.join.removeMember(m)} className={`${TAP_TARGET} shrink-0 flex items-center justify-center text-rp-alert font-bold`} onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
+                    <button aria-label={t.join.removeMember(m)} className={`${TAP_TARGET} shrink-0 flex items-center justify-center text-ink-alert font-bold`} onClick={() => setMembers(members.filter((_, j) => j !== i))}>✕</button>
                   )}
                 </div>
               ))}
-              <button className="text-rp-fire text-sm mt-1 font-bold flex items-center gap-1" onClick={addMember}>
+              <button className="text-ink-fire text-sm mt-1 font-bold inline-flex items-center gap-1 min-h-[44px] px-2 -ms-2" onClick={addMember}>
                 ＋ {t.join.addMember}
               </button>
             </>
@@ -449,7 +454,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
         </Card>
       </div>
 
-      {err && <p className="text-rp-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+      {err && <p className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
 
       <Button
         disabled={busy || !members.some((m) => m.trim()) || (!isSolo && !(values.teamName ?? '').trim())}
@@ -471,6 +476,11 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
 
 function FieldInput({ field, value, onChange, hasError }: { field: RegistrationField; value: string; onChange: (v: string) => void; hasError?: boolean }) {
   const errRing = hasError ? ' border-rp-alert' : '';
+  // The visible <label> was never associated with its control (change:
+  // play-web-accessibility): a screen reader fell back to the placeholder, and
+  // tapping the label did nothing, throwing away a free second tap target on a
+  // form filled one handed outdoors.
+  const id = useId();
   if (field.type === 'checkbox') {
     return (
       <label className={`flex items-center gap-3 text-sm text-zinc-300 bg-white border border-glass-border rounded-xl px-4 py-3${errRing}`}>
@@ -482,8 +492,8 @@ function FieldInput({ field, value, onChange, hasError }: { field: RegistrationF
   if (field.type === 'select') {
     return (
       <div>
-        <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
-        <select value={value} onChange={(e) => onChange(e.target.value)}
+        <label htmlFor={id} className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
+        <select id={id} value={value} onChange={(e) => onChange(e.target.value)}
           className={`w-full px-4 py-4 rounded-2xl bg-white border border-glass-border text-zinc-100 focus:outline-none focus:border-rp-fire/40${errRing}`}>
           <option value="">…</option>
           {(field.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
@@ -493,8 +503,9 @@ function FieldInput({ field, value, onChange, hasError }: { field: RegistrationF
   }
   return (
     <div>
-      <label className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
+      <label htmlFor={id} className="block text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">{field.label}{field.required && ' *'}</label>
       <Input
+        id={id}
         type={field.type === 'number' ? 'number' : field.type === 'phone' ? 'tel' : 'text'}
         value={value}
         onChange={(e) => onChange(e.target.value)}

@@ -108,7 +108,7 @@ export default function ChallengeTeaser({
     <Screen>
       <div className="flex-1 flex flex-col animate-race-in gap-4">
         <div className="text-center">
-          <div className="inline-block text-[11px] font-semibold uppercase tracking-widest text-rp-fire bg-rp-fire/10 rounded-full px-3 py-1">
+          <div className="inline-block text-[11px] font-semibold uppercase tracking-widest text-ink-fire bg-rp-fire/10 rounded-full px-3 py-1">
             {t.challenge.badge}
           </div>
           <p className="text-zinc-500 text-sm mt-2">{t.challenge.tagline}</p>
@@ -117,7 +117,7 @@ export default function ChallengeTeaser({
         {/* Timer ring */}
         {!result && (
           <div className="flex items-center justify-center">
-            <div className={`text-3xl font-brand font-extrabold ${left <= 5 ? 'text-rp-fire' : 'text-zinc-300'}`}>
+            <div className={`text-3xl font-brand font-extrabold ${left <= 5 ? 'text-ink-fire' : 'text-zinc-300'}`}>
               {timesUp ? t.challenge.timesUp : t.challenge.timeLeft({ sec: left })}
             </div>
           </div>
@@ -164,7 +164,7 @@ export default function ChallengeTeaser({
           <p className="text-sm text-zinc-300 mb-3">{t.challenge.ctaTitle}</p>
           <Button className="w-full" onClick={onJoin}>{t.challenge.ctaJoin}</Button>
           <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-            className="block mt-2 text-sm font-semibold text-rp-fire hover:text-rp-amber">
+            className="block mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
             {t.challenge.ctaBuild}
           </a>
           <button onClick={share}

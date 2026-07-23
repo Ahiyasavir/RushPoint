@@ -10,7 +10,7 @@
 
 export type RunActionId =
   | 'startTeams' | 'refreshStandings' | 'publishStandings' | 'revealStandings'
-  | 'inviteStaff' | 'acknowledgeAlert' | 'printStationQr' | 'copyShareLink'
+  | 'inviteStaff' | 'acknowledgeAlert' | 'clearTeamOutOfBounds' | 'printStationQr' | 'copyShareLink'
   | 'broadcastAnnouncement' | 'deactivateAnnouncement' | 'pushFlashMission'
   | 'activateHotZone' | 'deactivateHotZone'
   | 'createTrackable' | 'createZone' | 'deleteZone'
@@ -36,6 +36,9 @@ const SEVERITY: Record<RunActionId, ActionSeverity> = {
   revealStandings: 'routine',
   inviteStaff: 'routine',
   acknowledgeAlert: 'routine',
+  // Releasing a player the safe-zone latch is holding is a SAFETY action: it must
+  // not be buried behind a red destructive confirm (change: out-of-bounds-recovery).
+  clearTeamOutOfBounds: 'routine',
   printStationQr: 'routine',
   copyShareLink: 'routine',
   broadcastAnnouncement: 'routine',

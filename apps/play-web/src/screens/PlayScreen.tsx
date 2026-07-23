@@ -1,6 +1,6 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
@@ -171,7 +171,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         const now = Date.now();
         if (activeRef.current && controllerRef.current && now - lastPing.current >= 20_000) {
           lastPing.current = now;
-          updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng })
+          // Send the fix's own error radius (change: out-of-bounds-recovery) so the
+          // server's safe-zone verdict can tell "50 m outside, ±5 m" from "50 m
+          // outside, ±300 m". Purely a report — the decision stays server-side.
+          const accuracyMeters = Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : undefined;
+          updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng, accuracyMeters })
             .catch(() => undefined);
         }
         // play-task-gating: while the assigned task is a still-sealed hidden
@@ -451,7 +455,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
       <HowToPlayButton instructions={game.instructions} lang={lang} />
       {session.isTestDrive && (
-        <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-rp-amber flex items-center gap-2">
+        <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-ink-amber flex items-center gap-2">
           🧪 {t.play.testRunBanner}
         </div>
       )}
@@ -460,13 +464,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       {streak >= 2 && (
         <div
           key={milestone ?? streak}
-          className={`self-start mb-2 inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-3 py-1 text-sm font-bold text-rp-fire ${milestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
+          className={`self-start mb-2 inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-3 py-1 text-sm font-bold text-ink-fire ${milestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
         >
           {t.play.streak({ n: streak })}
         </div>
       )}
       <button onClick={() => void shareAction.run()} disabled={sharing}
-        className="self-end inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-accent/90 hover:text-accent disabled:opacity-50 mb-2">
+        className="self-end inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-ink-fire hover:text-ink-fire disabled:opacity-50 mb-2">
         {sharing ? t.play.creating : t.play.shareProgress}
       </button>
 
@@ -536,7 +540,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 function ReconnectingPill({ show, text }: { show: boolean; text: string }) {
   if (!show) return null;
   return (
-    <div className="fixed top-8 inset-x-0 z-40 flex justify-center pointer-events-none" role="status" aria-live="polite">
+    <div className="fixed rp-safe-top-8 inset-x-0 z-40 flex justify-center pointer-events-none" role="status" aria-live="polite">
       <div className="flex items-center gap-2 rounded-full bg-zinc-800/90 text-zinc-100 text-xs px-3 py-1.5 shadow">
         <span className="w-3 h-3 rounded-full border-2 border-zinc-400/40 border-t-zinc-100 animate-spin" />
         {text}
@@ -581,7 +585,7 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
           <img src={pick.beat.imageUrl} alt="" className="w-full max-h-48 object-cover" />
         )}
         <div className="p-5 space-y-3">
-          <div className="text-xs font-bold text-accent uppercase tracking-wide">
+          <div className="text-xs font-bold text-ink-fire uppercase tracking-wide">
             {t.play.chapterLabel({ n: pick.order + 1 })}
           </div>
           <h2 className="text-lg font-bold text-zinc-100" dir="auto">{pick.beat.title ?? pick.stageTitle}</h2>
@@ -646,7 +650,7 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
     <>
       <button
         onClick={() => setOpen(true)}
-        className="self-start mt-2 inline-flex items-center gap-1 rounded-full bg-app-card border border-glass-border px-3 py-1 text-xs font-semibold text-zinc-300 hover:text-zinc-100"
+        className="self-start mt-2 inline-flex items-center min-h-[44px] gap-1 rounded-full bg-app-card border border-glass-border px-4 py-2 text-xs font-semibold text-zinc-300 hover:text-zinc-100"
       >
         📖 {t.play.howToPlay}
       </button>
@@ -688,41 +692,44 @@ function FeedSection({ ctx, myUid }: { ctx: Session; myUid: string }) {
 }
 
 // Team ↔ HQ chat (change: team-hq-chat): a collapsible section with an unread dot.
-// A cheap single-doc listener tracks the message count even while collapsed so the
-// dot can appear; the full ChatPanel (list + send box) only mounts on first open.
+// A cheap single-doc listener tracks the thread even while collapsed so the dot
+// can appear; the full ChatPanel (list + send box) only mounts on first open.
+// The unread decision itself is the shared, unit-tested countUnreadChatMessages
+// (change: team-chat-unread-accuracy) — ID-anchored, own messages excluded.
 function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
-  const [count, setCount] = useState(0);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [seen, setSeen] = useState(() => loadChatSeen(ctx.runId, teamId));
+  const myUid = uid();
 
   useEffect(() => {
     const ref = doc(db, FIRESTORE_PATHS.runChat(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
     return onSnapshot(ref, (snap) => {
-      const n = (snap.data() as { messages?: unknown[] } | undefined)?.messages?.length ?? 0;
-      setCount(n);
-    }, () => setCount(0));
+      setMessages((snap.data() as { messages?: ChatMessage[] } | undefined)?.messages ?? []);
+    }, () => setMessages([]));
   }, [ctx.ownerUid, ctx.gameId, ctx.runId, teamId]);
 
-  // While the panel is open, arriving messages are being read — keep `seen` in
-  // step with the live count so they don't resurface as an "unread" dot the
-  // moment the panel is collapsed again.
-  useEffect(() => {
-    if (open && count > seen) {
-      saveChatSeen(ctx.runId, teamId, count);
-      setSeen(count);
-    }
-  }, [open, count, seen, ctx.runId, teamId]);
+  const unread = countUnreadChatMessages(messages, seen, myUid) > 0;
 
-  const unread = count > seen;
+  // While the panel is open, arriving messages are being read — keep the marker
+  // in step so they don't resurface as an "unread" dot the moment the panel is
+  // collapsed again.
+  useEffect(() => {
+    if (!open || !unread) return;
+    const marker = chatSeenMarker(messages);
+    saveChatSeen(ctx.runId, teamId, marker);
+    setSeen(marker);
+  }, [open, unread, messages, ctx.runId, teamId]);
 
   function toggle() {
     setOpen((o) => {
       const next = !o;
       if (next) {
         // Opening marks everything currently in the thread as seen.
-        saveChatSeen(ctx.runId, teamId, count);
-        setSeen(count);
+        const marker = chatSeenMarker(messages);
+        saveChatSeen(ctx.runId, teamId, marker);
+        setSeen(marker);
       }
       return next;
     });
@@ -804,13 +811,13 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
                 </button>
               ) : !held && (
                 <button disabled={actAction.isBusy(tr.id)} onClick={() => void actAction.run(tr, 'pickup')}
-                  className="text-xs font-bold px-3 py-1 rounded-full bg-accent/15 text-accent border border-accent/30 disabled:opacity-40">
+                  className="text-xs font-bold px-3 py-1 rounded-full bg-accent/15 text-ink-fire border border-accent/30 disabled:opacity-40">
                   {t.trackables.pickUp}
                 </button>
               ))}
             </div>
             {errors[tr.id] && (
-              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-rp-alert">⚠ {errors[tr.id]}</p>
+              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-ink-alert">⚠ {errors[tr.id]}</p>
             )}
             </div>
           );
@@ -860,13 +867,13 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
                    reason is the dead end the audit found. Tapping now explains
                    that GPS has not settled yet, and calls nothing. */
                 <button disabled={captureAction.isBusy(z.id)} onClick={() => void captureAction.run(z)}
-                  className="text-xs font-bold px-3 py-1 rounded-full bg-rp-fire/15 text-rp-fire border border-rp-fire/30 disabled:opacity-40">
+                  className="text-xs font-bold px-3 py-1 rounded-full bg-rp-fire/15 text-ink-fire border border-rp-fire/30 disabled:opacity-40">
                   {t.zones.capture}
                 </button>
               )}
             </div>
             {errors[z.id] && (
-              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-rp-alert">⚠ {errors[z.id]}</p>
+              <p role="status" aria-live="polite" className="mt-1 text-xs font-medium text-ink-alert">⚠ {errors[z.id]}</p>
             )}
             </div>
           );
@@ -945,7 +952,7 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
     <div dir="auto" className="mt-8 mx-auto max-w-xs text-center rounded-2xl bg-app-card border border-glass-border px-6 py-8 shadow-task-card">
       <div className="text-4xl mb-3">⏳</div>
       <p className="text-sm text-zinc-400 mb-2">{t.play.nextDropTitle}</p>
-      <p className="text-3xl font-bold tabular-nums text-accent">{clock}</p>
+      <p className="text-3xl font-bold tabular-nums text-ink-fire">{clock}</p>
       <p className="mt-3 text-xs text-zinc-500">{t.play.nextDropHint}</p>
     </div>
   );
@@ -968,9 +975,9 @@ function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedA
         <div className="text-xs text-zinc-500 flex items-center gap-2">
           {timeOnly
             ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
-            : <span>{t.play.score}: <span className="text-accent font-mono">{score}</span></span>}
+            : <span>{t.play.score}: <span className="text-ink-fire font-mono">{score}</span></span>}
           {powerUpArmed && (
-            <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-accent">
+            <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
               {t.play.powerUpArmedChip}
             </span>
           )}
@@ -992,7 +999,7 @@ function ElapsedClock({ startedAt }: { startedAt?: string }) {
     return () => window.clearInterval(id);
   }, []);
   const sec = startedAt ? Math.max(0, (now - new Date(startedAt).getTime()) / 1000) : 0;
-  return <span className="text-accent font-mono">{formatDuration(sec)}</span>;
+  return <span className="text-ink-fire font-mono">{formatDuration(sec)}</span>;
 }
 
 // Power-ups (change: power-ups): a transient award toast at the top of the screen.
@@ -1001,8 +1008,8 @@ function PowerUpToast({ type }: { type: 'double_points' | 'bonus_points' | null 
   if (!type) return null;
   const text = type === 'double_points' ? t.play.powerUpDoubleToast : t.play.powerUpBonusToast;
   return (
-    <div className="fixed inset-x-0 top-3 z-50 flex justify-center px-4 pointer-events-none">
-      <div className="rounded-full bg-accent text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
+    <div className="fixed inset-x-0 rp-safe-top-3 z-50 flex justify-center px-4 pointer-events-none">
+      <div className="rounded-full bg-ink-fire text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
         {text}
       </div>
     </div>

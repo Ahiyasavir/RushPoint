@@ -4,7 +4,7 @@ import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, loc
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
-import { Button, Card, Screen, Skeleton } from '../components/ui';
+import { Button, Card, Screen, Skeleton, TagChips } from '../components/ui';
 import { useT } from '../i18nContext';
 
 const CREATOR_URL = import.meta.env.DEV
@@ -128,7 +128,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             play" preview so a player deciding whether to join can see how it plays. */}
         {gameInstructionsHasContent(game.instructions) && (
           <Card className="p-3 mb-3 text-start">
-            <div className="text-xs font-bold text-accent uppercase tracking-wide mb-1">
+            <div className="text-xs font-bold text-ink-fire uppercase tracking-wide mb-1">
               {game.instructions!.title ?? t.play.howToPlayTitle}
             </div>
             {localizedInstructionsBody(game.instructions, lang) && (
@@ -138,6 +138,10 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             )}
           </Card>
         )}
+
+        {/* Tags (change: game-task-tags) — carried on PublicGame since the
+            gallery existed, never rendered until now. */}
+        <TagChips tags={game.tags} more={t.promo.moreTags} className="mb-4" />
 
         {/* Accurate GPS requirement derived server-side, when available. */}
         {game.requirement && (
@@ -155,7 +159,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           ].map((s) => (
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
               <div className="text-base mb-0.5">{s.emoji}</div>
-              <div className="text-lg font-brand font-bold text-rp-fire">{s.value}</div>
+              <div className="text-lg font-brand font-bold text-ink-fire">{s.value}</div>
               <div className="text-[10px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
             </div>
           ))}
@@ -181,7 +185,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             </Button>
           )}
           {startErr && (
-            <p role="status" aria-live="polite" className="mb-2 text-xs font-medium text-rp-alert">
+            <p role="status" aria-live="polite" className="mb-2 text-xs font-medium text-ink-alert">
               ⚠ {t.promo.startFailed}
             </p>
           )}
@@ -189,7 +193,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           <button
             type="button"
             onClick={shareGame}
-            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-rp-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
+            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
           >
             {copied ? t.promo.linkCopied : `🔗 ${t.promo.shareGame}`}
           </button>

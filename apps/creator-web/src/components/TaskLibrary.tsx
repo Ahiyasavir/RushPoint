@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import type { PublicTask, Task } from '@rushpoint/shared';
 import { searchTaskLibrary, incrementTaskCopyCount } from '../services/calls';
-import { Button, Card, Input, Spinner } from './ui';
+import { Button, Card, Input, Spinner, TagChips } from './ui';
 import { dialog } from './dialog';
 import { useT } from './LanguageContext';
 
@@ -96,6 +96,10 @@ export default function TaskLibrary({ onInsert, onClose }: {
                   <span>{TASK_TYPE_LABEL[t.type] ?? t.type}</span>·<span>{gl.metaDiff(t.difficulty)}</span>·<span>{gl.metaPts(t.pointValue)}</span>·<span>{gl.metaCopies(t.copyCount)}</span>
                   {t.sourceGameTitle && <span className="truncate">{b.libraryFrom(t.sourceGameTitle)}</span>}
                 </div>
+                {/* Tags (change: game-task-tags): this component already read
+                    `pt.tags` — but only to COPY it into the new task at toTask()
+                    above. Nothing ever showed them to the creator choosing. */}
+                <TagChips tags={t.tags} max={4} more={gl.moreTags} className="mt-1" />
               </div>
               <Button variant="subtle" onClick={() => pick(t)}>{b.libraryInsert}</Button>
             </div>

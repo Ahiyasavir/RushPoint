@@ -212,9 +212,16 @@ export const submitTaskAnswer = callable<
     // Wrong-answer cost (change: wrong-answer-cost). Present on the wrong path
     // only, and only when the creator set a cost level. `penalty` is the points
     // just charged (always 0 under the time_only preset, which has no points),
-    // `retryAfterSeconds` / `cooldownUntil` drive the retry countdown, and
-    // `replay` marks a duplicate submission that was deliberately NOT charged.
+    // `retryAfterMs` drives the retry countdown, and `replay` marks a duplicate
+    // submission that was deliberately NOT charged.
     penalty?: number;
+    // retry-lockout-clock-skew: milliseconds LEFT, computed server-side against
+    // the server clock. The client turns it into a deadline on its OWN clock, so
+    // a device with a wrong clock still counts down the right number of seconds.
+    retryAfterMs?: number;
+    // Deprecated: an ABSOLUTE server instant. Comparing it to the device clock is
+    // the bug retry-lockout-clock-skew removed. Kept only as a fallback for a
+    // server that has not been redeployed yet.
     cooldownUntil?: number;
     retryAfterSeconds?: number;
     attemptsUsed?: number;
@@ -246,7 +253,10 @@ export const triggerSOS = callable<
   { alertId: string }
 >('triggerSOS', { retry: false });
 
-export const updateLocation = callable<Ctx & { lat: number; lng: number }, { ok: boolean }>('updateLocation');
+// `accuracyMeters` is the fix's own error radius (change: out-of-bounds-recovery). It
+// is REPORTING, not authority: the server still decides whether a team is out of
+// bounds — it just stops treating a 500 m-accuracy fix as proof of a 5 m violation.
+export const updateLocation = callable<Ctx & { lat: number; lng: number; accuracyMeters?: number }, { ok: boolean }>('updateLocation');
 
 // ── Team ↔ HQ chat (change: team-hq-chat) ──
 // Participants (any attached device, no controller gating like SOS) send with just

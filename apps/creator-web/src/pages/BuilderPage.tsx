@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
-  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions,
+  Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
 import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxAttainableCompletions, effectiveExclusiveGroups } from '@rushpoint/shared';
 import {
@@ -16,9 +16,12 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
-import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, Textarea } from '../components/ui';
+import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, TagChips, Textarea } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
+// One mapping from a rejection to copy a creator can act on
+// (change: creator-no-silent-failures).
+import { describeCallFailure, type CallFailure } from '../lib/callFeedback';
 import TaskLibrary from '../components/TaskLibrary';
 import StageRail, { STAGE_DROP_PREFIX, railAwareCollisionDetection } from '../components/StageRail';
 import TaskCanvas from '../components/TaskCanvas';
@@ -39,6 +42,8 @@ import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
 import { parseTagsInput } from '../lib/tags';
+import { buildSavePayload } from '../lib/savePayload';
+import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
@@ -107,38 +112,19 @@ function blankStage(order: number, title: string): Stage {
   return { id: uuid(), order, title, tasks: [blankTask()] };
 }
 
-// The exact fields persisted by updateGame — kept in one place so the auto-save
-// payload and the dirty-check serialization can never drift apart.
-function buildSavePayload(g: Game) {
-  return {
-    gameId: g.id,
-    title: g.title,
-    description: g.description,
-    mode: g.mode,
-    stages: g.stages,
-    scoringPreset: g.scoringPreset,
-    registrationFields: g.registrationFields,
-    tags: g.tags,
-    // Chat integration (change: chat-integrations). Undefined when unset (skipped
-    // server-side); '' clears it. Only ever patched with an empty or valid URL.
-    integrationWebhookUrl: g.integrationWebhookUrl,
-    // Marketplace instant play (change: marketplace-instant-play).
-    allowInstantPlay: g.allowInstantPlay,
-    // Live photo feed (change: live-photo-feed). Undefined means on (default).
-    photoFeedEnabled: g.photoFeedEnabled,
-    // Power-ups (change: power-ups). Undefined means off (default).
-    powerUpsEnabled: g.powerUpsEnabled,
-    // Staged leaderboard reveal (change: manual-leaderboard-reveal). Undefined
-    // means off (default) = finalizeRun auto publishes, the prior behaviour.
-    manualLeaderboardReveal: g.manualLeaderboardReveal,
-    // Game intro primer (change: game-intro-instructions). Undefined when unset
-    // (skipped server-side); an empty/whitespace-only primer clears it on save.
-    instructions: g.instructions,
-  };
-}
+// The exact fields persisted by updateGame live in ../lib/savePayload, React-free, so
+// a pure test can assert that every builder-editable field actually reaches the wire
+// (change: surface-invisible-fields — the wrong-answer-cost selector patched local
+// state and was never sent, because the literal that used to live here omitted
+// `scoringOptions`). The dirty check stays defined in terms of that same payload, so
+// the two can never drift apart.
 const serializeGame = (g: Game) => JSON.stringify(buildSavePayload(g));
 
-type SaveStatus = 'saved' | 'saving' | 'unsaved';
+// 'unsaved' = a save is PENDING (the debounce has not fired yet). 'failed' = a
+// save was attempted and rejected. Those two used to be the same value, which is
+// how a lost evening looked exactly like a normal one-second pause
+// (change: creator-no-silent-failures).
+type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'failed';
 const AUTOSAVE_DELAY = 1500;
 
 // The persistent shell's top-level views (change: v2.1-builder-shell-redesign).
@@ -194,7 +180,8 @@ function markGamePreviewed(gameId: string) {
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
-  const b = useT().builder;
+  const t = useT();
+  const b = t.builder;
   const TAB_LABEL: Record<BuilderTab, string> = {
     build: b.tabBuild, preview: b.tabPreview, analytics: b.tabAnalytics, settings: b.tabSettings,
   };
@@ -215,6 +202,9 @@ export default function BuilderPage() {
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [focusIssue, setFocusIssue] = useState<{ stageId: string; taskId: string; nonce: number } | null>(null);
   const [status, setStatus] = useState<SaveStatus>('saved');
+  // Why the last save failed. Persistent (never a toast): the whole failure mode
+  // of this bug class is a creator who looks up ten minutes later.
+  const [saveError, setSaveError] = useState<CallFailure | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadKey, setLoadKey] = useState(0);
 
@@ -254,12 +244,18 @@ export default function BuilderPage() {
     try {
       await updateGame(buildSavePayload(g));
       savedSnapshot.current = snap;
+      setSaveError(null);
       // If the user kept editing during the round-trip, stay 'unsaved'.
       const latest = gameRef.current;
       setStatus(latest && serializeGame(latest) !== snap ? 'unsaved' : 'saved');
       return true;
-    } catch {
-      setStatus('unsaved');
+    } catch (e) {
+      // This used to be `catch { setStatus('unsaved') }` — indistinguishable
+      // from a save that simply had not fired yet. Say it failed, say why, and
+      // keep saying it until a save succeeds.
+      console.error('[builder] updateGame failed:', e);
+      setSaveError(describeCallFailure(e, { online: navigator.onLine }));
+      setStatus('failed');
       return false;
     }
   }, []);
@@ -268,7 +264,10 @@ export default function BuilderPage() {
   useEffect(() => {
     if (!game) return;
     if (serializeGame(game) === savedSnapshot.current) return;
-    setStatus('unsaved');
+    // Editing on does NOT clear a failure: until a save actually succeeds the
+    // work is still only in this tab. Downgrading 'failed' → 'unsaved' here
+    // would quietly re-hide the very thing the creator needs to see.
+    setStatus((s) => (s === 'failed' ? s : 'unsaved'));
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => { void save(); }, AUTOSAVE_DELAY);
     return () => window.clearTimeout(saveTimer.current);
@@ -408,12 +407,18 @@ export default function BuilderPage() {
         </button>
         <span className="text-[--ink-4] shrink-0">/</span>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
-        <span className="text-xs flex items-center gap-1.5 text-[--ink-3] shrink-0">
+        {/* A FAILED save gets its own colour and its own word — it can never be
+            read as an ordinary pending save (change: creator-no-silent-failures). */}
+        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${status === 'failed' ? 'text-rp-alert font-semibold' : 'text-[--ink-3]'}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${
-            status === 'saving' ? 'bg-rp-amber animate-pulse'
+            status === 'failed' ? 'bg-rp-alert'
+              : status === 'saving' ? 'bg-rp-amber animate-pulse'
               : status === 'unsaved' ? 'bg-rp-amber'
               : 'bg-rp-go'}`} />
-          {status === 'saving' ? b.saving : status === 'unsaved' ? b.unsaved : b.saved}
+          {status === 'failed' ? b.saveFailedShort
+            : status === 'saving' ? b.saving
+            : status === 'unsaved' ? b.unsaved
+            : b.saved}
         </span>
 
         {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z */}
@@ -506,6 +511,31 @@ export default function BuilderPage() {
         <Button variant="ghost" onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
         <Button onClick={() => saveAndLaunch(false)} className="shrink-0">{b.launchRun}</Button>
       </header>
+
+      {/* ── Persistent failed-save banner ──────────────────────────────────
+          Deliberately NOT a toast: a toast auto-dismisses in ~3 seconds, and
+          the entire failure mode here is a creator who notices ten minutes
+          later. It stays until a save succeeds. Retry is offered only when
+          retrying could plausibly work — on a lost session it would just fail
+          again and hide the real fix. */}
+      {saveError && (
+        <div
+          role="status"
+          className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-alert/40 bg-rp-alert/10 px-4 py-2 text-xs text-[--ink-1]"
+        >
+          <span className="font-semibold text-rp-alert">{b.saveFailedBanner}</span>
+          <span className="text-[--ink-2] text-start">{t.callFailure[saveError.key]}</span>
+          {saveError.retryable && (
+            <Button
+              variant="ghost"
+              className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg ms-auto"
+              onClick={() => { void save(); }}
+            >
+              {b.saveFailedRetry}
+            </Button>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
@@ -624,6 +654,8 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
 
       <InstructionsField game={game} patch={patch} />
 
+      <PresentationField game={game} patch={patch} />
+
       <WebhookField game={game} patch={patch} />
 
       <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
@@ -704,6 +736,87 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
 }
 
 // Game intro primer (change: game-intro-instructions): an optional collapsible
+// Presentation (change: surface-invisible-fields): the cover image is the hero of the
+// public game page and the brand name/colour drive the name and accent of five
+// participant screens — all of it rendered, none of it authorable until now. The URL
+// and the colour are normalized on commit by the same pure helpers the unit tests
+// drive, so a half-typed value never reaches updateGame.
+function PresentationField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+  const b = useT().builder;
+  const [open, setOpen] = useState(false);
+  // The cover URL keeps the RAW typed string while the field has focus — normalizing
+  // on every keystroke would delete the value the moment it stops parsing ("https:/").
+  const [rawCover, setRawCover] = useState(game.coverImage ?? '');
+  const brand = game.branding ?? {};
+  const color = normalizeBrandColor(brand.primaryColor);
+
+  // An emptied brand section must persist as undefined: the player screens resolve
+  // `branding?.name ?? title`, so `{ name: '' }` would render an empty game name.
+  function setBrand(p: Partial<GameBranding>) {
+    const next = { ...brand, ...p };
+    patch({ branding: hasBrandingValue(next) ? next : undefined });
+  }
+
+  return (
+    <Advanced title={b.presentationSectionTitle} open={open} onToggle={() => setOpen(!open)}>
+      <div className="space-y-3">
+        <p className="text-xs text-zinc-500">{b.presentationHint}</p>
+        <div>
+          <Label>{b.coverImageLabel}</Label>
+          <Input
+            type="url"
+            value={rawCover}
+            onChange={(e) => setRawCover(e.target.value)}
+            onBlur={() => {
+              const clean = normalizeHttpsUrl(rawCover);
+              setRawCover(clean ?? '');
+              patch({ coverImage: clean });
+            }}
+            placeholder="https://…" // i18n-ignore — canonical sample https URL, not translatable copy
+            dir="ltr"
+          />
+          <p className="text-xs text-zinc-500 mt-1">{b.coverImageHint}</p>
+        </div>
+        <div>
+          <Label>{b.brandNameLabel}</Label>
+          <Input
+            value={brand.name ?? ''}
+            onChange={(e) => setBrand({ name: e.target.value })}
+            placeholder={game.title}
+            dir="auto"
+          />
+          <p className="text-xs text-zinc-500 mt-1">{b.brandNameHint}</p>
+        </div>
+        <div>
+          <Label>{b.brandColorLabel}</Label>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={color ?? '#ff5722'}
+              onChange={(e) => setBrand({ primaryColor: normalizeBrandColor(e.target.value) })}
+              className="h-9 w-14 rounded-lg border border-glass-border bg-transparent"
+              aria-label={b.brandColorLabel}
+            />
+            {color && (
+              <>
+                <span className="text-xs text-zinc-400" dir="ltr">{color}</span>
+                <button
+                  type="button"
+                  onClick={() => setBrand({ primaryColor: undefined })}
+                  className="ms-auto text-xs text-zinc-400 underline"
+                >
+                  {b.brandColorClear}
+                </button>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-zinc-500 mt-1">{b.brandColorHint}</p>
+        </div>
+      </div>
+    </Advanced>
+  );
+}
+
 // "How to play" section (title + bilingual body + optional https image). Shown to
 // players before the run starts and behind a "How to play" button in-game. Rides
 // the existing updateGame wrapper; the server cleans/https-guards on save.
@@ -774,6 +887,12 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
         placeholder={b.tagsPlaceholder}
         dir="auto"
       />
+      {/* The comma rule was already stated in the label and the creator STILL
+          reported that commas do nothing — the missing thing was feedback, not
+          copy (change: game-task-tags). Typing a comma now visibly splits one
+          chip into two. */}
+      <TagChips tags={game.tags} className="mt-1.5" more={b.moreTags} max={20} />
+      <p className="text-xs text-zinc-500 mt-1">{b.tagsHelp}</p>
     </div>
   );
 }

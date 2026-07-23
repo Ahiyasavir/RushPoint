@@ -1,22 +1,18 @@
-// Pure parser for the Builder's game-tags input (change: tags-input-separators).
+// Builder tags input parser (changes: tags-input-separators → game-task-tags).
 //
 // The tags field is comma-separated, but the input must let the creator type a
 // space and a comma freely (so "chutz, park, night" can actually be entered).
-// The visible input therefore keeps the RAW string the user typed; Game.tags is
-// derived from it via this helper: split on comma, trim each, drop empties and
-// duplicates. DOM-free so it can be unit-tested in the pure-logic lane.
+// The visible input therefore keeps the RAW string the user typed; Game.tags /
+// Task.tags are derived from it via this helper.
+//
+// The rules themselves now live in @rushpoint/shared (`normalizeTags`) so the
+// SERVER applies exactly the same ones — a parser only creator-web could reach is
+// precisely why `updateGame` had no tag guard at all. This wrapper is kept so
+// BuilderPage's import and scripts/test-tags-input.ts stay unchanged.
+import { normalizeTags } from '@rushpoint/shared';
 
-const MAX_TAGS = 20;
-const MAX_TAG_LEN = 40;
+export { MAX_TAGS, MAX_TAG_LEN } from '@rushpoint/shared';
 
 export function parseTagsInput(raw: string): string[] {
-  const out: string[] = [];
-  for (const part of raw.split(',')) {
-    const tag = part.trim().slice(0, MAX_TAG_LEN);
-    if (!tag) continue;
-    if (out.includes(tag)) continue;
-    out.push(tag);
-    if (out.length >= MAX_TAGS) break;
-  }
-  return out;
+  return normalizeTags(raw);
 }

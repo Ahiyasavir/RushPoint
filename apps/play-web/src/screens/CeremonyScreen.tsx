@@ -118,9 +118,20 @@ export default function CeremonyScreen({ code }: { code: string }) {
   // public / finish boards).
   const isTimeOnly = data!.scoringPreset === 'time_only';
 
-  // Tap/click anywhere advances early (operator escape hatch).
+  // Tap/click anywhere advances early (operator escape hatch). It is also a real
+  // keyboard control (change: play-web-accessibility): a ceremony is usually
+  // driven from a laptop wired to a projector, where Enter/Space is the natural
+  // "next" and a mouse may not be within reach.
   return (
-    <div className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col cursor-pointer select-none" onClick={advance}>
+    <div
+      className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col cursor-pointer select-none"
+      role="button"
+      tabIndex={0}
+      onClick={advance}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); advance(); }
+      }}
+    >
       <style>{CEREMONY_CSS}</style>
 
       <div className="text-center mb-6">
@@ -253,6 +264,9 @@ function ConfettiCanvas({ accent }: { accent: string }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
+    // Reduced motion: no particle storm at all (change: play-web-accessibility).
+    // lib/confetti.ts already does this; this canvas was the one that did not.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     const canvas = ref.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');

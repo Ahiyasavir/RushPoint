@@ -125,7 +125,7 @@ export default function LiveOps({
               <span className="text-sm">💯</span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-zinc-400">{label}</p>
-                <p dir="auto" className="text-sm font-mono text-accent">{notice}</p>
+                <p dir="auto" className="text-sm font-mono text-ink-fire">{notice}</p>
               </div>
               <button aria-label={translations[lang].liveOps.dismiss} className={`text-zinc-500 text-xs shrink-0 ${TAP_PAD}`} onClick={() => dismiss(a.id)}>✕</button>
             </div>
@@ -151,7 +151,7 @@ export default function LiveOps({
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-sm font-semibold text-purple-200">
                   {lang === 'he' && f.titleHe ? f.titleHe : f.title}
-                  {f.bonusPoints ? <span className="ms-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
+                  {f.bonusPoints ? <span className="ms-2 text-ink-fire font-mono">+{f.bonusPoints}</span> : null}
                 </div>
                 {(f.description || f.descriptionHe) && (
                   <p dir="auto" className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
@@ -185,14 +185,14 @@ function LeaderboardPeek({
       header={
         <span className="truncate">🏆 {translations[lang].liveOps.leaderboardHeading}
           {leaderboard.frozen && <span className="ms-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
-          {mine && <span className="ms-2 text-accent font-mono">#{mine.rank}</span>}
+          {mine && <span className="ms-2 text-ink-fire font-mono">#{mine.rank}</span>}
         </span>
       }
     >
           {top.map((r) => (
             <div
               key={r.teamId}
-              className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-accent font-semibold' : 'text-zinc-400'}`}
+              className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-ink-fire font-semibold' : 'text-zinc-400'}`}
             >
               <span dir="auto" className="truncate min-w-0"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
               <span className="font-mono shrink-0">

@@ -147,7 +147,7 @@ export default function FeedPanel({
       <span dir="auto" className="flex-1 min-w-0">{t.feed.feedMutedNote({ n: mutedCount })}</span>
       <button
         onClick={() => persistMute(EMPTY_FEED_MUTE)}
-        className="shrink-0 font-semibold text-rp-fire hover:underline"
+        className="shrink-0 font-semibold text-ink-fire hover:underline"
       >
         {t.feed.feedMuteUndo}
       </button>
@@ -193,7 +193,7 @@ export default function FeedPanel({
                   isHidden ? (
                     <button
                       onClick={() => void restore(item)}
-                      className="shrink-0 text-xs font-semibold text-rp-fire hover:underline"
+                      className="shrink-0 text-xs font-semibold text-ink-fire hover:underline"
                     >
                       {t.feed.feedRestore}
                     </button>
@@ -257,7 +257,7 @@ export default function FeedPanel({
                       aria-pressed={selected}
                       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm transition-colors ${
                         selected
-                          ? 'bg-accent/15 border-accent/40 text-accent'
+                          ? 'bg-accent/15 border-accent/40 text-ink-fire'
                           : 'bg-app-raised border-glass-border text-zinc-400'
                       }`}
                     >

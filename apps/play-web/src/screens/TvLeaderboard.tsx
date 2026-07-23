@@ -98,7 +98,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
                 {isLeaderFlash && (
-                  <div className="text-sm font-semibold text-rp-fire">{t.tv.nowLeading}</div>
+                  <div className="text-sm font-semibold text-ink-fire">{t.tv.nowLeading}</div>
                 )}
               </div>
               <div className="text-end">
@@ -133,7 +133,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
                         <div
                           title={final ? t.board.finalTime : t.board.elapsed}
                           aria-label={final ? t.board.finalTime : t.board.elapsed}
-                          className={final ? 'text-sm text-zinc-500 font-mono' : 'text-sm text-zinc-600 italic font-mono'}
+                          className={final ? 'text-sm text-zinc-500 font-mono' : 'text-sm text-zinc-500 italic font-mono'}
                         >
                           {final ? '' : '⏱ '}{formatDuration(sec)}
                         </div>

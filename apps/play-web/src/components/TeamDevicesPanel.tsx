@@ -73,7 +73,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                 <div className="text-[11px] text-zinc-500">{t.devices.inviteHint}</div>
                 <div className="font-mono font-bold text-lg tracking-[0.3em] text-zinc-100">{team.deviceJoinCode}</div>
               </div>
-              <button onClick={copyCode} className="text-xs font-semibold text-accent hover:underline shrink-0">
+              <button onClick={copyCode} className="text-xs font-semibold text-ink-fire hover:underline shrink-0">
                 {copied ? t.devices.copied : t.devices.copy}
               </button>
             </div>
@@ -87,14 +87,14 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                   {d.uid === myUid && <span className="text-zinc-500 text-xs ms-1">{t.devices.youTag}</span>}
                 </span>
                 {d.uid === controllerUid ? (
-                  <span className="shrink-0 text-[11px] font-bold text-rp-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
+                  <span className="shrink-0 text-[11px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
                     ✏️ {t.devices.controllerBadge}
                   </span>
                 ) : isController ? (
                   <button
                     disabled={busy}
                     onClick={() => void transferAction.run(d.uid, d.name || t.devices.deviceFallbackName)}
-                    className="shrink-0 text-xs text-accent hover:underline disabled:opacity-40"
+                    className="shrink-0 text-xs text-ink-fire hover:underline disabled:opacity-40"
                   >
                     {t.devices.transferBtn}
                   </button>
@@ -107,13 +107,13 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
             <button
               disabled={busy}
               onClick={() => void takeControlAction.run()}
-              className="w-full text-sm font-semibold text-accent border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
+              className="w-full text-sm font-semibold text-ink-fire border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
             >
               ✏️ {t.devices.takeControl}
             </button>
           )}
 
-          {err && <p className="text-rp-alert text-xs text-center">{err}</p>}
+          {err && <p className="text-ink-alert text-xs text-center">{err}</p>}
         </div>
       )}
     </div>

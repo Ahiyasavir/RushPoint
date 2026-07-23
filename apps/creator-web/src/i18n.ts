@@ -59,6 +59,17 @@ const HE = {
     privacyLink: 'מדיניות פרטיות',
     termsLink:   'תנאי שימוש',
   },
+  // What a creator is told when a server action fails (change:
+  // creator-no-silent-failures). One entry per outcome of describeCallFailure;
+  // every message says what happened AND what to do next. Never a code, never a
+  // message from the server.
+  callFailure: {
+    offline:     'אין כרגע חיבור לשרת. שום דבר לא אבד, העבודה שלכם עדיין כאן על המסך. נסו שוב כשהחיבור חוזר.',
+    notAllowed:  'החיבור לחשבון פג, או שאין לכם הרשאה לפעולה הזו. היכנסו שוב לחשבון ונסו מחדש.',
+    rateLimited: 'יותר מדי פעולות בזמן קצר. המתינו כמה שניות ונסו שוב.',
+    rejected:    'השרת דחה את הפעולה. בדקו את הפרטים, משהו בהם לא תקין כרגע.',
+    generic:     'הפעולה לא עברה, ושום דבר לא השתנה. נסו שוב, ואם זה חוזר רעננו את העמוד.',
+  },
   landing: {
     badge:      'משחקי שדה בעולם האמיתי',
     heroLine1:  'בנה את',
@@ -275,6 +286,8 @@ const HE = {
     noLocatedGames: 'לאף משחק ציבורי עדיין אין מיקום.',
     // מפת ספריית המשימות (change: task-library-map-view)
     noLocatedTasks: 'לאף משימה בתוצאות אין אזור מפורסם.',
+    // מפה ריקה חייבת להסביר את עצמה (change: public-task-area-visibility)
+    noLocatedTasksHelp: 'אזור מפורסם נוצר כשמפרסמים את המשחק. משימות שפורסמו לפני העדכון הזה, ומשימות עם מיקום מוסתר, לא יופיעו במפה עד שהמשחק שלהן יפורסם מחדש.',
     approxPinsNote: 'הסיכות מראות אזור משוער בלבד, לא מיקום מדויק. משימות עם מיקום מוסתר אינן מופיעות במפה.',
     metaDiff:  (n: number) => `קושי ${n}`,
     metaPts:   (n: number) => `${n} נק׳`,
@@ -285,6 +298,8 @@ const HE = {
     likeRemove: 'ביטול הסימון',
     likes:      (n: number) => `${n} אהבו`,
     likeFailed: 'לא הצלחנו לשמור. נסו שוב.',
+    // תגיות (change: game-task-tags)
+    moreTags:   (n: number) => `+${n} תגיות`,
   },
   wallet: {
     title:          'חיוב וקרדיטים',
@@ -591,6 +606,7 @@ const HE = {
     acknowledge: 'אישור קבלה',
     startAllTeams: 'התחל את כל הקבוצות',
     refreshStandings: 'רענון דירוג',
+    standingsRefreshed: 'הדירוג עודכן.',
     inviteStaffPin: 'הזמנת צוות (קוד)',
     finalizeConfirmTitle: 'סיום הריצה',
     finalizeConfirmMessage: 'לסיים את הריצה עכשיו? המשחק נגמר לכל הקבוצות, והדירוג הסופי מחושב.',
@@ -602,6 +618,7 @@ const HE = {
     staffLinkNote: 'הקישור ממלא מראש את פרטי הריצה. איש הצוות רק מקליד את הקוד למעלה.',
     staffLinkQrAlt: 'קוד QR לכניסת צוות',
     startedAllTeams: 'כל הקבוצות התחילו.',
+    heldForConsent: '{launched} קבוצות התחילו. {held} קבוצות ממתינות לאישור אפוטרופוס ולא יוכלו להתחיל בלעדיו.',
     startFailed: 'התחלת הקבוצות נכשלה. בדקו את החיבור ונסו שוב.',
     finalizedRun: 'הריצה הסתיימה. הדירוג הסופי חושב.',
     finalizeFailed: 'סיום הריצה נכשל. בדקו את החיבור ונסו שוב.',
@@ -683,7 +700,15 @@ const HE = {
     adjustScoreAria: ({ team }: { team: string }) => `עדכון הניקוד של ${team}`,
     adjustScoreConfirmTitle: 'עדכון ניקוד',
     adjustScoreConfirm: ({ team, delta }: { team: string; delta: string }) => `לעדכן את הניקוד של ${team}? השינוי שיירשם: ${delta} נקודות.`,
+    // Confirmations for actions that used to succeed or fail in total silence
+    // (change: creator-no-silent-failures).
+    adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `הניקוד של ${team} עודכן. השינוי שנרשם: ${delta} נקודות.`,
     skipAria: ({ team }: { team: string }) => `דילוג על השלב הנוכחי של ${team}`,
+    // ── שחרור קבוצה שנתקעה מחוץ לאזור המשחק ──
+    outOfBoundsBadge: 'מחוץ לאזור המשחק, לא מקבלים משימות',
+    letBackIn: 'החזרה למשחק',
+    letBackInAria: ({ team }: { team: string }) => `החזרת ${team} למשחק`,
+    letBackInFailed: 'לא הצלחנו להחזיר את הקבוצה למשחק. נסו שוב.',
     endOfRunTitle: 'סיום הריצה',
     endOfRunHelp: 'מסיים את המשחק לכל הקבוצות ומחשב את הדירוג הסופי. אי אפשר לחזור אחורה.',
 
@@ -974,6 +999,11 @@ const HE = {
     shortDescriptionPlaceholder: 'משפט אחד שמוכר את המשחק',
     tagsLabel: 'תגיות (מופרדות בפסיק)',
     tagsPlaceholder: 'חוץ, חידה, משפחה',
+    // תגיות (change: game-task-tags): הפסיק הוא המפריד, והתגיות מוצגות מיד מתחת לשדה
+    tagsHelp: 'פסיק פותח תגית חדשה. התגיות מופיעות מתחת לשדה מיד עם ההקלדה.',
+    taskTagsLabel: 'תגיות למשימה (מופרדות בפסיק)',
+    taskTagsPlaceholder: 'חוץ, חידה, צילום',
+    moreTags: (n: number) => `+${n} תגיות`,
     webhookLabel: 'התראות לצ׳אט (סלאק / טימס)',
     webhookHelp: 'הדביקו קישור נכנס מסלאק או טימס כדי לשקף הודעות ומשימות בזק לערוץ שלכם.',
     webhookInvalid: 'הקישור חייב להיות קישור נכנס תקין של סלאק או טימס.',
@@ -992,6 +1022,17 @@ const HE = {
     instructionsBodyLabel: 'הסבר (אנגלית)',
     instructionsBodyHeLabel: 'הסבר (עברית)',
     instructionsImageLabel: 'תמונה (קישור מאובטח בלבד)',
+    // Presentation (change: surface-invisible-fields): תמונת נושא ומיתוג היו מוצגים
+    // לשחקנים אבל לא היה שום מקום להזין אותם.
+    presentationSectionTitle: 'מראה ומיתוג',
+    presentationHint: 'כך המשחק ייראה לשחקנים ובגלריה הציבורית. לא חובה.',
+    coverImageLabel: 'תמונת נושא (קישור מאובטח בלבד)',
+    coverImageHint: 'מוצגת בראש עמוד המשחק הציבורי. קישור מאובטח בלבד.',
+    brandNameLabel: 'שם תצוגה של המשחק',
+    brandNameHint: 'מחליף את שם המשחק במסכי השחקנים. אם ריק, יוצג שם המשחק.',
+    brandColorLabel: 'צבע ראשי',
+    brandColorHint: 'צבע ההדגשה במסכי השחקנים: הצטרפות, משחק, סיום ולוח התוצאות.',
+    brandColorClear: 'איפוס צבע',
     storyTitle: 'סיפור הפרק',
     storyHint: 'טקסט פתיחה שמוצג כשהפרק נפתח, וטקסט סיום כשהוא מסתיים. לא חובה.',
     storyIntroTitle: 'כותרת פתיחה',
@@ -1052,6 +1093,10 @@ const HE = {
     taskNeedsLocation: (title: string) => `למשימה "${title}" לא נקבע מיקום על המפה. סמנו נקודה, או הפכו אותה למשימה ללא מיקום, לפני ההשקה.`,
     stageUnwinnable: (title: string) => `השלב "${title}" דורש להשלים יותר משימות ממה שאפשר להשלים בו. תקנו את מספר המשימות הנדרש לפני ההשקה.`,
     saveFailed: 'שמירת המשחק נכשלה. בדקו את החיבור ונסו שוב.',
+    // The failed-save banner + its indicator word (change: creator-no-silent-failures).
+    saveFailedShort:  'השמירה נכשלה',
+    saveFailedBanner: 'השינויים האחרונים לא נשמרו',
+    saveFailedRetry:  'נסו לשמור שוב',
     noRouteYet: 'אין עדיין משימות עם מיקום. הוסיפו מיקום במפה כדי לראות את המסלול.',
     pacingAriaLabel: (n: number) => `קצב קושי לאורך ${n} ${n === 1 ? 'משימה' : 'משימות'}`,
     pacingTitle: (title: string, difficulty: number) => `${title}, רמת קושי ${difficulty}`,
@@ -1140,6 +1185,13 @@ const EN: typeof HE = {
     referralBonusApplied: "Referral bonus applied! You got an extra free run.",
     privacyLink: 'Privacy Policy',
     termsLink:   'Terms of Service',
+  },
+  callFailure: {
+    offline:     'No connection to the server right now. Nothing was lost: your work is still here on screen. Try again once you are back online.',
+    notAllowed:  'Your session has expired, or your account is not allowed to do this. Sign in again and retry.',
+    rateLimited: 'Too many actions in a short time. Wait a few seconds and try again.',
+    rejected:    'The server turned this action down. Check the details, something in them is not valid right now.',
+    generic:     'That did not go through, and nothing was changed. Try again, and if it keeps happening reload the page.',
   },
   landing: {
     badge:      'Real world team field games',
@@ -1351,6 +1403,8 @@ const EN: typeof HE = {
     noLocatedGames: 'No public games have a location yet.',
     // Mission library map (change: task-library-map-view)
     noLocatedTasks: 'None of these missions has a published area.',
+    // An empty map must explain itself (change: public-task-area-visibility)
+    noLocatedTasksHelp: 'A published area is created when a game is published. Missions published before this update, and missions with a hidden location, stay off the map until their game is published again.',
     approxPinsNote: 'Pins show an approximate area, not an exact spot. Missions with a hidden location are not on the map.',
     metaDiff:  (n: number) => `diff ${n}`,
     metaPts:   (n: number) => `${n} pts`,
@@ -1361,6 +1415,8 @@ const EN: typeof HE = {
     likeRemove: 'Remove your like',
     likes:      (n: number) => `${n} liked`,
     likeFailed: 'Could not save that. Try again.',
+    // Tags (change: game-task-tags)
+    moreTags:   (n: number) => `+${n} tags`,
   },
   wallet: {
     title:          'Billing & credits',
@@ -1661,6 +1717,7 @@ const EN: typeof HE = {
     acknowledge: 'Acknowledge',
     startAllTeams: 'Start all teams',
     refreshStandings: 'Refresh standings',
+    standingsRefreshed: 'Standings updated.',
     inviteStaffPin: 'Invite staff (PIN)',
     finalizeConfirmTitle: 'End the run',
     finalizeConfirmMessage: 'End the run now? The game ends for every team, and the final standings are computed.',
@@ -1672,6 +1729,7 @@ const EN: typeof HE = {
     staffLinkNote: 'The link fills in the run details. Staff just type the PIN above.',
     staffLinkQrAlt: 'Staff sign in QR code',
     startedAllTeams: 'All teams started.',
+    heldForConsent: '{launched} teams started. {held} teams are waiting for guardian approval and cannot start without it.',
     startFailed: 'Could not start teams. Check your connection and try again.',
     finalizedRun: 'Run finalized. The final leaderboard is computed.',
     finalizeFailed: 'Could not finalize the run. Check your connection and try again.',
@@ -1753,7 +1811,13 @@ const EN: typeof HE = {
     adjustScoreAria: ({ team }: { team: string }) => `Adjust the score of ${team}`,
     adjustScoreConfirmTitle: 'Adjust score',
     adjustScoreConfirm: ({ team, delta }: { team: string; delta: string }) => `Adjust the score of ${team}? The change recorded: ${delta} points.`,
+    adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `Score of ${team} updated by ${delta} points.`,
     skipAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
+    // ── Releasing a team stuck outside the play area ──
+    outOfBoundsBadge: 'Outside the play area, not receiving tasks',
+    letBackIn: 'Let back in',
+    letBackInAria: ({ team }: { team: string }) => `Let ${team} back into the game`,
+    letBackInFailed: 'We could not let this team back in. Please try again.',
     endOfRunTitle: 'End of run',
     endOfRunHelp: 'Ends the game for every team and computes the final standings. There is no way back.',
 
@@ -2044,6 +2108,12 @@ const EN: typeof HE = {
     shortDescriptionPlaceholder: 'One line that sells the game',
     tagsLabel: 'Tags (comma separated)',
     tagsPlaceholder: 'outdoor, puzzle, family',
+    // Tags (change: game-task-tags): a comma starts a new tag, and the chips below
+    // the field make that visible as you type.
+    tagsHelp: 'A comma starts a new tag. Your tags appear below the field as you type.',
+    taskTagsLabel: 'Mission tags (comma separated)',
+    taskTagsPlaceholder: 'outdoor, puzzle, photo',
+    moreTags: (n: number) => `+${n} tags`,
     webhookLabel: 'Chat alerts (Slack / Teams)',
     webhookHelp: 'Paste a Slack or Teams incoming webhook URL to mirror announcements and flash missions to your channel.',
     webhookInvalid: 'Must be a valid Slack or Microsoft Teams incoming webhook URL.',
@@ -2062,6 +2132,17 @@ const EN: typeof HE = {
     instructionsBodyLabel: 'Body (English)',
     instructionsBodyHeLabel: 'Body (Hebrew)',
     instructionsImageLabel: 'Image (https link only)',
+    // Presentation (change: surface-invisible-fields): the cover image and the brand
+    // were rendered to players and had nowhere to be entered.
+    presentationSectionTitle: 'Look and branding',
+    presentationHint: 'How this game looks to players and in the public gallery. Optional.',
+    coverImageLabel: 'Cover image (https link only)',
+    coverImageHint: 'Shown at the top of the public game page. https links only.',
+    brandNameLabel: 'Display name',
+    brandNameHint: 'Replaces the game name on the player screens. Leave empty to use the game name.',
+    brandColorLabel: 'Accent colour',
+    brandColorHint: 'The accent colour of the player screens: join, play, finish and the leaderboard.',
+    brandColorClear: 'Reset colour',
     storyTitle: 'Chapter story',
     storyHint: 'Intro text shown when the chapter opens, and outro text when it ends. Optional.',
     storyIntroTitle: 'Intro heading',
@@ -2120,6 +2201,9 @@ const EN: typeof HE = {
     taskNeedsLocation: (title: string) => `Task "${title}" has no map location set. Drop a pin, or make it a locationless task, before launching.`,
     stageUnwinnable: (title: string) => `Stage "${title}" requires completing more tasks than teams can finish. Fix the required task count before launching.`,
     saveFailed: 'Saving the game failed. Check your connection and try again.',
+    saveFailedShort:  'Save failed',
+    saveFailedBanner: 'Your latest changes were not saved',
+    saveFailedRetry:  'Try saving again',
     noRouteYet: 'No located tasks yet. Add a map location to see the route.',
     pacingAriaLabel: (n: number) => `Difficulty pacing across ${n} task${n === 1 ? '' : 's'}`,
     pacingTitle: (title: string, difficulty: number) => `${title}, difficulty ${difficulty}`,

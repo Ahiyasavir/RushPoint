@@ -32,12 +32,19 @@ export interface MapPoint {
 }
 
 export default function GalleryMap({
-  points, onSelect, emptyLabel, notice, markerColor = '#22c55e', className = '',
+  points, onSelect, emptyLabel, emptyDetail, notice, markerColor = '#22c55e', className = '',
 }: {
   points: MapPoint[];
   onSelect: (id: string) => void;
   /** Shown over the map when there is nothing to plot. Already localized. */
   emptyLabel: string;
+  /**
+   * Optional second line under `emptyLabel` explaining WHY nothing is plotted and
+   * what would change it. Already localized. The component stays domain-free: the
+   * caller decides whether an explanation applies (see `publicTaskMapCoverage`) —
+   * an empty map that only states the fact is a dead end for the creator.
+   */
+  emptyDetail?: string;
   /** Optional standing caption (e.g. "pins are approximate"). Already localized. */
   notice?: string;
   markerColor?: string;
@@ -110,10 +117,15 @@ export default function GalleryMap({
       <div ref={ref} className={`rounded-xl overflow-hidden border border-glass-border ${className}`} />
       <MapModeToggle mode={mode} onChange={setMode} />
       {points.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 p-4 pointer-events-none">
           <span className="bg-app-bg/80 text-zinc-400 text-xs px-3 py-1.5 rounded-full">
             {emptyLabel}
           </span>
+          {emptyDetail && (
+            <span className="bg-app-bg/80 text-zinc-400 text-[11px] leading-relaxed px-3 py-1.5 rounded-xl max-w-md text-center">
+              {emptyDetail}
+            </span>
+          )}
         </div>
       )}
       {/* A pin a creator can see is a pin a creator will believe. Say out loud

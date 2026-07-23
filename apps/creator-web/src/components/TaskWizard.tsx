@@ -18,7 +18,8 @@ import {
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
   locationLeakWarnings,
 } from '@rushpoint/shared';
-import { Advanced, Button, Input, Label, Textarea } from './ui';
+import { Advanced, Button, Input, Label, TagChips, Textarea } from './ui';
+import { parseTagsInput } from '../lib/tags';
 import { dialog } from './dialog';
 import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
@@ -1178,8 +1179,39 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
             <p className="text-[11px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
           )}
         </div>
+        {/* Task tags (change: game-task-tags). `Task.tags` existed and was already
+            denormalized into publicTasks and returned by searchTaskLibrary — but the
+            ONLY code path that ever wrote it was copying a task OUT of the library,
+            so a creator could never tag their own mission. */}
+        <TaskTagsField task={task} set={set} b={b} />
       </Section>
     </>
+  );
+}
+
+// A mission's library tags (change: game-task-tags). Same raw-string-in-state
+// pattern as the game-level TagsField in BuilderPage: the visible input keeps
+// exactly what the creator typed so a comma and the space after it survive
+// mid-typing, while `Task.tags` is the parsed array. The chips below are the
+// feedback that makes the comma rule visible — the reported bug was not a missing
+// label, it was that nothing ever showed the tags back.
+function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
+  const [raw, setRaw] = useState((task.tags ?? []).join(', '));
+  // Resync only when the persisted tags diverge from what the raw string would
+  // produce (task switch / undo), never on the creator's own keystrokes.
+  useEffect(() => {
+    const derived = parseTagsInput(raw);
+    if (JSON.stringify(derived) !== JSON.stringify(task.tags ?? [])) setRaw((task.tags ?? []).join(', '));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [task.id, task.tags]);
+  return (
+    <div>
+      <Label dense>{b.taskTagsLabel}</Label>
+      <Input dense value={raw} placeholder={b.taskTagsPlaceholder} dir="auto"
+        onChange={(e) => { setRaw(e.target.value); set({ tags: parseTagsInput(e.target.value) }); }} />
+      <TagChips tags={task.tags} className="mt-1.5" more={b.moreTags} max={20} />
+      <p className="text-[11px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
+    </div>
   );
 }
 

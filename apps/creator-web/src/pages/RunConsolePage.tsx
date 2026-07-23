@@ -4,12 +4,12 @@ import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/fir
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, type ChatMessage } from '@rushpoint/shared';
+import { hotZoneMultiplier, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, type ChatMessage, type ChatSeenMarker } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
   listRunTeams, startTeams, finalizeRun, refreshLeaderboard, pushAnnouncement, pushFlashMission,
-  inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, activateHotZone, deactivateHotZone,
+  inviteStaff, skipStage, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
   sendTeamChatMessage, reviewStationSubmission,
@@ -40,6 +40,7 @@ import { buildShareArtifacts, type ShareArtifactId } from '../lib/runShareArtifa
 import { resolveTeamLabel, resolveTaskLabel } from '../lib/runConsoleLabels';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
+import { describeCallFailure } from '../lib/callFeedback';
 import { playAlert, unlockAudio } from '../lib/sound';
 import { useT } from '../components/LanguageContext';
 import LiveTeamMap from '../components/LiveTeamMap';
@@ -52,10 +53,26 @@ const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
 
+// One way for this console to say "that did not work"
+// (change: creator-no-silent-failures). Several live-ops handlers here used to
+// have an empty catch, a `.catch(() => undefined)`, or a `finally` with no
+// `catch` at all — so a rejected score adjustment, a rejected feed hide and a
+// rejected standings publish all looked exactly like success. A toast (not a
+// dialog) on purpose: these fire mid-event, and a host must not have to dismiss
+// a modal to keep running the game. The original error is logged, never shown.
+function useCallFailureToast() {
+  const t = useT();
+  return useCallback((e: unknown, where: string) => {
+    console.error(`[runConsole] ${where} failed:`, e);
+    toast.error(t.callFailure[describeCallFailure(e, { online: navigator.onLine }).key]);
+  }, [t]);
+}
+
 export default function RunConsolePage() {
   const { gameId, runId } = useParams();
   const { user } = useAuth();
   const t = useT();
+  const reportFailure = useCallFailureToast();
   const ownerUid = user!.uid;
   const [run, setRun] = useState<Run | null>(null);
   const [teams, setTeams] = useState<RunTeamRow[]>([]);
@@ -201,7 +218,12 @@ export default function RunConsolePage() {
   }, [gameId, runId, ownerUid, runLive]);
 
   const [chatThreads, setChatThreads] = useState<ChatThreadRow[]>([]);
-  const [chatSeen, setChatSeen] = useState<Record<string, number>>({});
+  // Seen markers, PERSISTED per run+team (change: team-chat-unread-accuracy).
+  // They used to live in React state alone, so reloading the console (or simply
+  // remounting this page) reset them to {} and re-flagged EVERY non-empty
+  // thread as unread — including threads whose only new message was HQ's own
+  // reply. Read lazily per thread; written when a thread is opened/read.
+  const [chatSeen, setChatSeen] = useState<Record<string, ChatSeenMarker>>({});
   useEffect(() => {
     if (!gameId || !runId) return;
     const ref = collection(db, FIRESTORE_PATHS.runChatCol(ownerUid, gameId, runId));
@@ -214,8 +236,21 @@ export default function RunConsolePage() {
       setChatThreads(rows);
     }, () => undefined);
   }, [gameId, runId, ownerUid, runLive]);
+  // Storage access stays best-effort (private mode / storage off ⇒ "nothing
+  // seen", the safe direction: a spurious badge beats a missed message).
+  const chatMarkerFor = useCallback((teamId: string): ChatSeenMarker => {
+    if (chatSeen[teamId]) return chatSeen[teamId];
+    try { return parseChatSeen(localStorage.getItem(chatSeenStorageKey(runId ?? '', teamId))); }
+    catch { return {}; }
+  }, [chatSeen, runId]);
+  const markChatRead = useCallback((teamId: string, messages: ChatMessage[]) => {
+    const marker = chatSeenMarker(messages);
+    try { localStorage.setItem(chatSeenStorageKey(runId ?? '', teamId), serializeChatSeen(marker)); }
+    catch { /* storage off */ }
+    setChatSeen((s) => (s[teamId]?.lastSeenId === marker.lastSeenId ? s : { ...s, [teamId]: marker }));
+  }, [runId]);
   const unreadChatThreads = chatThreads.reduce(
-    (n, th) => n + (th.messages.length > (chatSeen[th.teamId] ?? 0) ? 1 : 0), 0);
+    (n, th) => n + (countUnreadChatMessages(th.messages, chatMarkerFor(th.teamId), ownerUid) > 0 ? 1 : 0), 0);
 
   // Survey results, loaded here for the same reason (a folded group's panel
   // cannot load them and then say how many there are).
@@ -277,7 +312,21 @@ export default function RunConsolePage() {
     // Unlock audio on this user gesture so the SOS cue can play later (autoplay).
     unlockAudio();
     setBusy(true);
-    try { await startTeams({ gameId: gameId!, runId: runId! }); await loadTeams(); toast.success(t.runConsole.startedAllTeams); }
+    // A team held for guardian consent used to be subtracted from `launched` with
+    // nothing said, so this toasted unqualified success over a no-op (change:
+    // expose-enforced-settings). The server now reports the hold; say so.
+    try {
+      const res = await startTeams({ gameId: gameId!, runId: runId! });
+      await loadTeams();
+      const heldForConsent = res?.heldForConsent ?? 0;
+      if (heldForConsent > 0) {
+        toast.info(t.runConsole.heldForConsent
+          .replace('{held}', String(heldForConsent))
+          .replace('{launched}', String(res?.launched ?? 0)));
+      } else {
+        toast.success(t.runConsole.startedAllTeams);
+      }
+    }
     catch { await dialog.alert(t.runConsole.startFailed); }
     finally { setBusy(false); }
   }
@@ -304,11 +353,22 @@ export default function RunConsolePage() {
   }
   async function refreshStandings(publish?: boolean) {
     setBusy(true);
-    try { await refreshLeaderboard({ ...ctx, ...(publish === undefined ? {} : { publish }) }); }
+    // Was a `finally` with no `catch`, called un-awaited from two buttons — so a
+    // failed publish to the teams/TV screen was an unhandled rejection and the
+    // creator saw nothing. It also had no success signal, which made a working
+    // refresh indistinguishable from a dead button.
+    try {
+      await refreshLeaderboard({ ...ctx, ...(publish === undefined ? {} : { publish }) });
+      toast.success(t.runConsole.standingsRefreshed);
+    }
+    catch (e) { reportFailure(e, 'refreshLeaderboard'); }
     finally { setBusy(false); }
   }
   async function ack(alertId: string) {
-    try { await acknowledgeAlert({ ...ctx, alertId }); } catch { /* listener will reflect state */ }
+    // An SOS acknowledgement is not a place for an unexplained non-event: the
+    // alert simply staying on screen is a hint, not a message.
+    try { await acknowledgeAlert({ ...ctx, alertId }); }
+    catch (e) { reportFailure(e, 'acknowledgeAlert'); }
   }
   // Sharing a board/TV link implies the audience should see standings — publish
   // on share so the projection screen never sits on "not yet available".
@@ -401,8 +461,26 @@ export default function RunConsolePage() {
       rc.adjustScoreConfirm({ team: team.displayName, delta: signed }),
       rc.adjustScoreConfirmTitle, true,
     ))) return;
-    await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'manual' });
-    await loadTeams();
+    // This had NO try/catch and was invoked as `void adjustScore(team)`: a
+    // rejection was an unhandled promise rejection, `loadTeams()` never ran, the
+    // table kept the old number — and the creator believed the correction landed.
+    // At a live event that is a wrong winner.
+    try {
+      await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'manual' });
+      await loadTeams();
+      toast.success(rc.adjustScoreApplied({ team: team.displayName, delta: signed }));
+    } catch (e) {
+      reportFailure(e, 'adjustTeamScore');
+    }
+  }
+
+  // Out-of-bounds recovery: the ONLY human escape hatch from the safe-zone latch.
+  // Before this existed, a team whose phone could not produce a good fix inside the
+  // zone was blocked from receiving tasks for the rest of the run and nobody —
+  // staff or creator — could do anything about it.
+  async function letTeamBackIn(team: RunTeamRow) {
+    try { await clearTeamOutOfBounds({ ...ctx, teamId: team.id, reason: 'staff release' }); await loadTeams(); }
+    catch { await dialog.alert(rc.letBackInFailed); }
   }
 
   async function skipTeamStage(team: RunTeamRow) {
@@ -435,7 +513,23 @@ export default function RunConsolePage() {
                               : rc.teamStatusBetween}
                         {' · '}{rc.stageDone({ n: team.completedStages })}
                       </div>
+                      {team.outOfBounds && (
+                        <div className="mt-1 text-[11px] text-amber-400">{rc.outOfBoundsBadge}</div>
+                      )}
                     </div>
+                    {/* Only rendered for a team the safe-zone latch is actually
+                        holding — the run console previously could not even SHOW
+                        this state, so a stuck team looked merely slow. */}
+                    {team.outOfBounds && (
+                      <Button
+                        variant={runActionVariant('clearTeamOutOfBounds')}
+                        className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg"
+                        aria-label={rc.letBackInAria({ team: team.displayName })}
+                        onClick={() => void letTeamBackIn(team)}
+                      >
+                        {rc.letBackIn}
+                      </Button>
+                    )}
                     {/* Ranked score from the leaderboard snapshot — identical to
                         the live-standings panel + TV. Falls back to the raw earned
                         tally only until the first snapshot exists for this activeRun. */}
@@ -556,8 +650,9 @@ export default function RunConsolePage() {
             ctx={ctx}
             teams={teams}
             threads={chatThreads}
-            seen={chatSeen}
-            onSeen={(teamId, count) => setChatSeen((s) => (s[teamId] === count ? s : { ...s, [teamId]: count }))}
+            selfUid={ownerUid}
+            markerFor={chatMarkerFor}
+            onRead={markChatRead}
           />
         );
 
@@ -953,6 +1048,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
   const [mult, setMult] = useState(2);
   const [minutes, setMinutes] = useState(10);
   const [busy, setBusy] = useState(false);
+  const reportFailure = useCallFailureToast();
 
   const active = !!hotZone && hotZoneMultiplier(hotZone, hotZone.center, Date.now()) > 1;
 
@@ -960,13 +1056,19 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
     // A hot zone is inherently geographic — require a real point (0,0 = unset).
     if (!isValidCoord(lat, lng) || (lat === 0 && lng === 0)) { void dialog.alert(t.runConsole.hotZoneNeedsCenter); return; }
     setBusy(true);
+    // Both of these were a `finally` with no `catch`: a hot zone that failed to
+    // start (or to stop) said nothing, and the panel just kept its old state.
     try {
       await activateHotZone({ gameId: ctx.gameId, runId: ctx.runId, center: { lat, lng }, radiusMeters: radius, multiplier: mult, durationMinutes: minutes });
-    } finally { setBusy(false); }
+    }
+    catch (e) { reportFailure(e, 'activateHotZone'); }
+    finally { setBusy(false); }
   }
   async function deactivate() {
     setBusy(true);
-    try { await deactivateHotZone({ gameId: ctx.gameId, runId: ctx.runId }); } finally { setBusy(false); }
+    try { await deactivateHotZone({ gameId: ctx.gameId, runId: ctx.runId }); }
+    catch (e) { reportFailure(e, 'deactivateHotZone'); }
+    finally { setBusy(false); }
   }
 
   return (
@@ -1106,6 +1208,7 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const reportFailure = useCallFailureToast();
   const nameOf = (id?: string | null) => teams.find((x) => x.id === id)?.displayName ?? id ?? '';
 
   useEffect(() => {
@@ -1119,7 +1222,10 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
   async function create() {
     if (!name.trim()) return;
     setBusy(true);
+    // The input is cleared only on success, so a failed create never looks like
+    // one — and now it also says so out loud.
     try { await createTrackable({ gameId, runId, name: name.trim() }); setName(''); setTick((x) => x + 1); }
+    catch (e) { reportFailure(e, 'createTrackable'); }
     finally { setBusy(false); }
   }
 
@@ -1161,6 +1267,7 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
   const [lng, setLng] = useState(0);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const reportFailure = useCallFailureToast();
 
   useEffect(() => {
     let alive = true;
@@ -1175,11 +1282,15 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
     if (!title.trim() || !isValidCoord(lat, lng)) return;
     setBusy(true);
     try { await createZone({ gameId, runId, title: title.trim(), lat, lng }); setTitle(''); setLat(0); setLng(0); setTick((x) => x + 1); }
+    catch (e) { reportFailure(e, 'createZone'); }
     finally { setBusy(false); }
   }
   async function remove(zoneId: string) {
     if (!(await dialog.confirm(rc.zonesDeleteConfirm, undefined, true))) return;
-    await deleteZone({ gameId, runId, zoneId }).catch(() => undefined);
+    // The refetch below made a failed delete look like an unexplained
+    // reappearance. Now the reappearance has a reason attached.
+    try { await deleteZone({ gameId, runId, zoneId }); }
+    catch (e) { reportFailure(e, 'deleteZone'); }
     setTick((x) => x + 1);
   }
 
@@ -1386,10 +1497,15 @@ type FeedItemRow = { id: string; taskTitle: string; teamName: string; photoUrl: 
 
 function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gameId: string; runId: string; items: FeedItemRow[] }) {
   const rc = useT().runConsole;
+  const reportFailure = useCallFailureToast();
 
   async function hide(itemId: string) {
     if (!(await dialog.confirm(rc.feedHideConfirm, undefined, true))) return;
-    await hideFeedItem({ ownerUid, gameId, runId, itemId }).catch(() => undefined);
+    // A creator hiding a photo from a PROJECTED feed and being told nothing when
+    // it fails is the worst shape this bug takes: they walk away believing the
+    // picture is gone while it is still on the wall.
+    try { await hideFeedItem({ ownerUid, gameId, runId, itemId }); }
+    catch (e) { reportFailure(e, 'hideFeedItem'); }
   }
 
   return (
@@ -1432,17 +1548,19 @@ interface ChatThreadRow { teamId: string; messages: ChatMessage[]; updatedAt: st
 
 // The thread listener and the read/unread bookkeeping moved to the page, which
 // needs the unread count for the folded moderation badge.
-function ChatConsole({ ctx, teams, threads, seen, onSeen }: {
+function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
   ctx: { ownerUid: string; gameId: string; runId: string };
   teams: RunTeamRow[];
   threads: ChatThreadRow[];
-  seen: Record<string, number>;
-  onSeen: (teamId: string, count: number) => void;
+  selfUid: string;
+  markerFor: (teamId: string) => ChatSeenMarker;
+  onRead: (teamId: string, messages: ChatMessage[]) => void;
 }) {
   const rc = useT().runConsole;
   const [openTeam, setOpenTeam] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  const reportFailure = useCallFailureToast();
 
   // Keep the currently-open thread marked read as its message count grows — an HQ
   // reply (or a message that arrives while HQ is watching) must not re-badge the
@@ -1451,16 +1569,16 @@ function ChatConsole({ ctx, teams, threads, seen, onSeen }: {
     if (!openTeam) return;
     const th = threads.find((x) => x.teamId === openTeam);
     if (!th) return;
-    onSeen(openTeam, th.messages.length);
-  }, [openTeam, threads, onSeen]);
+    onRead(openTeam, th.messages);
+  }, [openTeam, threads, onRead]);
 
   // A team's NAME, never a truncated document id.
   const nameFor = (teamId: string) => resolveTeamLabel(teamId, teams, (id) => rc.unknownTeam({ id }));
 
-  function expand(teamId: string, count: number) {
+  function expand(teamId: string, messages: ChatMessage[]) {
     setOpenTeam((cur) => {
       const next = cur === teamId ? null : teamId;
-      if (next) onSeen(teamId, count);
+      if (next) onRead(teamId, messages);
       return next;
     });
     setDraft('');
@@ -1473,11 +1591,15 @@ function ChatConsole({ ctx, teams, threads, seen, onSeen }: {
     try {
       await sendTeamChatMessage({ ...ctx, teamId, text: clean });
       setDraft('');
-    } catch { /* the listener reconciles; keep the draft for a retry */ }
+    }
+    // Keeping the draft for a retry was right; saying nothing about why it is
+    // still sitting there was not.
+    catch (e) { reportFailure(e, 'sendTeamChatMessage'); }
     finally { setBusy(false); }
   }
 
-  const totalUnread = threads.reduce((n, th) => n + (th.messages.length > (seen[th.teamId] ?? 0) ? 1 : 0), 0);
+  const totalUnread = threads.reduce(
+    (n, th) => n + (countUnreadChatMessages(th.messages, markerFor(th.teamId), selfUid) > 0 ? 1 : 0), 0);
 
   return (
     <Card className="p-4">
@@ -1490,11 +1612,11 @@ function ChatConsole({ ctx, teams, threads, seen, onSeen }: {
       <div className="space-y-2">
         {threads.map((th) => {
           const last = th.messages[th.messages.length - 1];
-          const unread = th.messages.length > (seen[th.teamId] ?? 0);
+          const unread = countUnreadChatMessages(th.messages, markerFor(th.teamId), selfUid) > 0;
           const expanded = openTeam === th.teamId;
           return (
             <div key={th.teamId} className="rounded-lg bg-app-bg p-3">
-              <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages.length)}>
+              <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages)}>
                 <div className="flex items-center justify-between gap-2">
                   <span dir="auto" className="text-sm font-medium text-zinc-200 truncate">{nameFor(th.teamId)}</span>
                   {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-neon-blue/20 text-neon-blue px-2 py-0.5 text-[11px] font-semibold">{rc.chatUnread}</span>}

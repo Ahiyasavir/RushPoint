@@ -282,6 +282,15 @@ describe('classifyRunAction', () => {
     }
   });
 
+  // Releasing a team the safe-zone latch is holding is the ONLY way a human can
+  // unstick a player whose phone cannot produce the fix the latch demands
+  // (change: out-of-bounds-recovery). A red destructive confirm would make staff
+  // hesitate over a safety action.
+  it('keeps releasing a stuck out-of-bounds team a routine, unscary action', () => {
+    expect(classifyRunAction('clearTeamOutOfBounds')).toBe('routine');
+    expect(runActionVariant('clearTeamOutOfBounds')).not.toBe('danger');
+  });
+
   it('drives the button variant from the classification', () => {
     expect(runActionVariant('finalizeRun')).toBe('danger');
     expect(runActionVariant('adjustTeamScore')).toBe('danger');

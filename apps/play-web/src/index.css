@@ -37,6 +37,17 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(90,70,45,0.2); border-radius: 2px; }
 
+/* Safe area (change: play-web-accessibility).
+   index.html sets `viewport-fit=cover`, so on an installed PWA the page draws
+   UNDER the notch and the home indicator. These fold the platform insets into the
+   page shell and into the three overlays pinned to the top of the viewport.
+   Declared after @tailwind utilities so they win at equal specificity; env()
+   resolves to 0px on a device with no cutout, so nothing else changes. */
+.rp-safe-b     { padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px)); }
+.rp-safe-top-0 { top: env(safe-area-inset-top, 0px); }
+.rp-safe-top-3 { top: calc(0.75rem + env(safe-area-inset-top, 0px)); }
+.rp-safe-top-8 { top: calc(2rem + env(safe-area-inset-top, 0px)); }
+
 /* Glass task card */
 .task-card-glass {
   background: rgba(255,255,255,0.92);

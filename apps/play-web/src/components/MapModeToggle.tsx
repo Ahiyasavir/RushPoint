@@ -10,7 +10,7 @@ export default function MapModeToggle({ mode, onChange }: {
   const { t } = useT();
   const label = (m: MapMode) => (m === 'topo' ? t.play.mapView : t.play.satelliteView);
   return (
-    <div className="absolute top-2 left-2 z-10 flex bg-app-card/90 backdrop-blur rounded-lg p-0.5 shadow-soft border border-glass-border">
+    <div className="absolute top-2 start-2 z-10 flex bg-app-card/90 backdrop-blur rounded-lg p-0.5 shadow-soft border border-glass-border">
       {(['topo', 'satellite'] as MapMode[]).map((m) => (
         <button
           key={m}
@@ -18,8 +18,8 @@ export default function MapModeToggle({ mode, onChange }: {
           role="switch"
           aria-checked={mode === m}
           aria-label={label(m)}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${
-            mode === m ? 'bg-accent text-white' : 'text-zinc-500'
+          className={`inline-flex items-center justify-center min-h-[44px] px-3 rounded-md text-[11px] font-medium transition ${
+            mode === m ? 'bg-ink-fire text-white' : 'text-zinc-500'
           }`}
         >
           {label(m)}

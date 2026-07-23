@@ -54,7 +54,7 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
         className={`
           w-full px-4 py-4 rounded-2xl text-base
           bg-white border border-glass-border
-          text-zinc-100 placeholder:text-zinc-600
+          text-zinc-100 placeholder:text-zinc-500
           shadow-[0_1px_4px_rgba(26,10,0,0.06)]
           focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40
           transition-all duration-150
@@ -110,13 +110,41 @@ export function Progress({ done, total }: { done: number; total: number }) {
 }
 
 export function Screen({ children }: { children: ReactNode }) {
-  return <div className="min-h-screen flex flex-col px-5 py-6 max-w-md mx-auto w-full">{children}</div>;
+  return <div className="min-h-screen flex flex-col px-5 pt-6 rp-safe-b max-w-md mx-auto w-full">{children}</div>;
 }
 
 // Content-shaped loading placeholder. Size via `className` (e.g. "h-4 w-24").
 // Shimmer + reduced-motion handling live in index.css (.rp-skeleton).
 export function Skeleton({ className = '' }: { className?: string }) {
   return <div aria-hidden="true" className={`rp-skeleton rounded-xl ${className}`} />;
+}
+
+// ── TagChips ──────────────────────────────────────────────────────────────────
+// Creator-authored tags on a public game (change: game-task-tags). `PublicGame`
+// has always carried `tags` and the promo screen never drew them.
+//  • Renders NOTHING (not an empty box) for an empty/absent list.
+//  • `dir="auto"` per chip — a Hebrew tag lays out RTL beside an English one.
+//  • Bounded, with a "+N" from the caller's dictionary so this file holds no
+//    user-facing copy.
+// play-web reverses the zinc scale, so `text-zinc-400` here reads dark-on-light.
+export function TagChips({ tags, max = 8, more, className = '' }: {
+  tags?: string[]; max?: number; more?: (n: number) => string; className?: string;
+}) {
+  const list = (tags ?? []).filter((t) => typeof t === 'string' && t.trim().length > 0);
+  if (list.length === 0) return null;
+  const shown = list.slice(0, max);
+  const hidden = list.length - shown.length;
+  return (
+    <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
+      {shown.map((tag) => (
+        <span key={tag} dir="auto"
+          className="inline-flex items-center max-w-full truncate rounded-full border border-glass-border bg-app-card px-2.5 py-1 text-[11px] font-medium text-zinc-400">
+          {tag}
+        </span>
+      ))}
+      {hidden > 0 && more && <span className="text-[11px] font-medium text-zinc-500">{more(hidden)}</span>}
+    </div>
+  );
 }
 
 // Collapsible section — the one shared shell for every expandable panel in the

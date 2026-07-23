@@ -4,7 +4,7 @@
 // and this bundle only mount when the team opens chat. Any attached device may send.
 import { useEffect, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, type ChatMessage } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, chatSeenMarker, type ChatMessage } from '@rushpoint/shared';
 import { db, uid } from '../services/firebase';
 import { sendTeamChatMessage } from '../services/calls';
 import { saveChatSeen } from '../store';
@@ -29,7 +29,8 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
       const msgs = (snap.data() as { messages?: ChatMessage[] } | undefined)?.messages ?? [];
       setMessages(msgs);
       // The panel is open while mounted, so anything arriving now is seen.
-      saveChatSeen(runId, teamId, msgs.length);
+      // Marker, not a count (change: team-chat-unread-accuracy).
+      saveChatSeen(runId, teamId, chatSeenMarker(msgs));
     }, () => setMessages([]));
   }, [ownerUid, gameId, runId, teamId]);
 
@@ -95,7 +96,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
         )}
       </div>
       {sendFailed && (
-        <p role="status" aria-live="polite" className="text-xs font-medium text-rp-alert">
+        <p role="status" aria-live="polite" className="text-xs font-medium text-ink-alert">
           ⚠ {t.chat.sendFailedRetry}
         </p>
       )}

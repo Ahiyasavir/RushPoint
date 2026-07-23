@@ -1,3 +1,7 @@
+import {
+  chatSeenStorageKey, parseChatSeen, serializeChatSeen, type ChatSeenMarker,
+} from '@rushpoint/shared';
+
 // Lightweight session persistence: which run this device joined.
 export interface Session {
   ownerUid: string;
@@ -106,22 +110,23 @@ export function clearStaffSession() {
   try { localStorage.removeItem(STAFF_KEY); } catch { /* ignore */ }
 }
 
-// ── Team ↔ HQ chat: last-seen message count (change: team-hq-chat) ──
-// Unread is a purely client-local comparison: messages.length vs the count last
-// seen when this device opened the chat panel. Keyed per run+team so multiple
-// runs / teams on one device don't clobber each other. Best-effort like the rest.
-const CHAT_SEEN_PREFIX = 'rushpoint.chatSeen.';
-
-export function loadChatSeen(runId: string, teamId: string): number {
+// ── Team ↔ HQ chat: last-seen marker (change: team-chat-unread-accuracy) ──
+// Unread stays purely client-local, but the marker is now the ID of the last
+// message this device saw (see countUnreadChatMessages) rather than a bare
+// count — a count is meaningless once the 100-message cap starts evicting, and
+// it can't tell the viewer's own lines apart from everyone else's. Keyed per
+// run+team via the shared key builder so HQ and participant surfaces agree.
+// Legacy bare-number values still parse, so an upgrade doesn't re-flag a thread.
+export function loadChatSeen(runId: string, teamId: string): ChatSeenMarker {
   try {
-    const raw = localStorage.getItem(`${CHAT_SEEN_PREFIX}${runId}.${teamId}`);
-    const n = raw ? Number.parseInt(raw, 10) : 0;
-    return Number.isFinite(n) && n >= 0 ? n : 0;
+    return parseChatSeen(localStorage.getItem(chatSeenStorageKey(runId, teamId)));
   } catch {
-    return 0;
+    return {};   // storage blocked ⇒ "nothing seen" ⇒ badge shows; the safe direction
   }
 }
 
-export function saveChatSeen(runId: string, teamId: string, n: number) {
-  try { localStorage.setItem(`${CHAT_SEEN_PREFIX}${runId}.${teamId}`, String(n)); } catch { /* best-effort */ }
+export function saveChatSeen(runId: string, teamId: string, marker: ChatSeenMarker) {
+  try {
+    localStorage.setItem(chatSeenStorageKey(runId, teamId), serializeChatSeen(marker));
+  } catch { /* best-effort */ }
 }

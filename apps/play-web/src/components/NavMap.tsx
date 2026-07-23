@@ -247,7 +247,7 @@ export default function NavMap({
 
   if (valid.length === 0 && !hasOverlay && !hasMe) {
     return (
-      <div className={`rounded-2xl bg-app-card border border-glass-border flex items-center justify-center text-zinc-600 text-sm ${className}`}>
+      <div className={`rounded-2xl bg-app-card border border-glass-border flex items-center justify-center text-zinc-500 text-sm ${className}`}>
         {t.task.mapAppears}
       </div>
     );
