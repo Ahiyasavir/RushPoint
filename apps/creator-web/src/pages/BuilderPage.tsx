@@ -1,4 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
@@ -52,7 +53,7 @@ import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
 // the same way here so it stays out of the main builder bundle.
-const RoutePreviewMap = lazy(() => import('../components/RoutePreviewMap'));
+const RoutePreviewMap = lazyWithRetry('routePreviewMap', () => import('../components/RoutePreviewMap'));
 
 // Lightweight placeholder while a map chunk + engine load.
 function MapSkeleton({ className = 'h-44' }: { className?: string }) {
@@ -112,7 +113,12 @@ const arrowKeyCoordinates: KeyboardCoordinateGetter = (event, { context, current
 };
 
 function blankStage(order: number, title: string): Stage {
-  return { id: uuid(), order, title, tasks: [blankTask()] };
+  // requiredTaskCount defaults to 1 (change: adaptive-difficulty-routing): a creator
+  // who drops several tasks into one level almost always means "each team does ONE
+  // of these" (a branching level routed per team), not "do them all". Undefined
+  // still means "all tasks" for already-saved games — only NEW stages default to 1.
+  // The "complete N of M" control (rendered once m > 1) is where it is raised.
+  return { id: uuid(), order, title, tasks: [blankTask()], requiredTaskCount: 1 };
 }
 
 // The exact fields persisted by updateGame live in ../lib/savePayload, React-free, so
@@ -479,7 +485,7 @@ export default function BuilderPage() {
         </div>
 
         {/* Centered tab strip */}
-        <nav role="tablist" className="flex-1 flex items-center justify-center gap-1">
+        <nav role="tablist" data-tour="builder-tabs" className="flex-1 flex items-center justify-center gap-1">
           {BUILDER_TAB_IDS.map((id) => (
             <button
               key={id}
@@ -512,7 +518,7 @@ export default function BuilderPage() {
         />
 
         <Button variant="ghost" onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
-        <Button onClick={() => saveAndLaunch(false)} className="shrink-0">{b.launchRun}</Button>
+        <Button onClick={() => saveAndLaunch(false)} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
       </header>
 
       {/* ── Persistent failed-save banner ──────────────────────────────────
@@ -1432,7 +1438,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           contains it; the task cards provide the structure. A flex column: the
           stage header is fixed, the task canvas flexes and owns the ONLY scroll
           (no more nested double-scrollbar), the add-tiles stay pinned below. ── */}
-      <div className="flex-1 min-w-0 min-h-0 sm:h-full flex flex-col gap-3 pe-1 pt-0.5">
+      <div data-tour="builder-canvas" className="flex-1 min-w-0 min-h-0 sm:h-full flex flex-col gap-3 pe-1 pt-0.5">
         {activeStage && (
           <>
             <div className="shrink-0 space-y-2">

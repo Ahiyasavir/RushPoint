@@ -58,6 +58,18 @@ export const launchRun     = callable<{ gameId: string; testDrive?: boolean }, {
 // Optional so an older backend simply reports nothing rather than breaking.
 export const startTeams    = callable<{ gameId: string; runId: string; teamIds?: string[] }, { launched: number; heldForConsent?: number }>('startTeams');
 export const skipStage     = callable<{ gameId: string; runId: string; teamId: string }, { ok: boolean }>('skipStage');
+// Skip ONE mission for ONE team, keeping them inside the same stage
+// (change: skip-single-task). `taskId` omitted means "the mission this team is on
+// right now", resolved server-side. `requiredTaskCount` comes back so the console
+// can say when the skip lowered what that team must complete in the stage.
+export const skipTaskForTeam = callable<
+  { ownerUid?: string; gameId: string; runId: string; teamId: string; taskId?: string; reason?: string },
+  {
+    ok: boolean; taskId: string; stageCompleted: boolean;
+    requiredTaskCount: number; requirementLowered: boolean;
+    nextTaskId: string | null; nextReason: string | null;
+  }
+>('skipTaskForTeam');
 export const finalizeRun   = callable<{ gameId: string; runId: string }, { rankings: LeaderboardEntry[] }>('finalizeRun');
 export const refreshLeaderboard = callable<
   { ownerUid: string; gameId: string; runId: string; publish?: boolean; frozen?: boolean },

@@ -130,7 +130,7 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
   return (
     // Phone: a full-width, horizontally-scrolling strip that sits above the
     // canvas. Desktop (≥sm): the classic vertical side rail.
-    <aside className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto pe-0.5">
+    <aside data-tour="builder-stages" className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto pe-0.5">
       <div className="flex items-center justify-between px-1 mb-1 sm:mb-0">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
         <span className="text-[10px] text-[--ink-4]">{stages.length}</span>

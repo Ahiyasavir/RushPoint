@@ -23,6 +23,7 @@ import {
   type ProviderRef,
 } from '../lib/signInMethods';
 import { updateMyProfile, exportMyData, deleteMyAccount } from '../services/calls';
+import { restartCreatorTour } from '../components/CreatorTour';
 
 type Status = { kind: 'ok' | 'err'; msg: string } | null;
 
@@ -64,6 +65,7 @@ export default function SettingsPage() {
       <h1 className="font-brand text-3xl font-extrabold text-[--ink-1] mb-2">{s.title}</h1>
 
       <LanguageCard lang={lang} setLang={setLang} s={s} />
+      <TourCard t={t} />
       <ProfileCard
         s={s}
         initialName={user?.displayName ?? ''}
@@ -110,6 +112,20 @@ function LanguageCard({ lang, setLang, s }: { lang: 'he' | 'en'; setLang: (l: 'h
         ))}
       </div>
       {saved && <p className="text-rp-go text-sm mt-3 text-center font-medium animate-fade-up">{s.savedMsg}</p>}
+    </Card>
+  );
+}
+
+// ── Guided tour (change: creator-guided-tour) ────────────────────────────────
+// The tour auto-starts once for a brand new creator and is then remembered as
+// seen; this is the only always-available way back into it besides the header
+// help button, and it works whether it was skipped, finished, or never shown.
+function TourCard({ t }: { t: T }) {
+  return (
+    <Card className="p-6">
+      <div className="text-sm font-semibold text-[--ink-1] mb-1">{t.tour.settingsTitle}</div>
+      <p className="text-xs text-[--ink-3] mb-4">{t.tour.settingsDesc}</p>
+      <Button variant="ghost" onClick={() => restartCreatorTour()}>{t.tour.settingsBtn}</Button>
     </Card>
   );
 }

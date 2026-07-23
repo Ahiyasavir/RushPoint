@@ -7,11 +7,12 @@
 //
 // `fill` makes the map grow to fill the available height (the wizard's step 1 is a
 // flex column), so it is as large as the panel allows and never forces a scroll.
-import { Suspense, lazy } from 'react';
+import { Suspense } from 'react';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { Input, Label } from './ui';
 import { useT } from './LanguageContext';
 
-const LocationPicker = lazy(() => import('./LocationPicker'));
+const LocationPicker = lazyWithRetry('locationPicker', () => import('./LocationPicker'));
 
 function MapSkeleton({ label, className }: { label: string; className: string }) {
   return (

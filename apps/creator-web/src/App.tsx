@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './components/AuthGate';
@@ -9,17 +9,24 @@ import { ToastHost } from './components/toast';
 import ActiveRunBar from './components/ActiveRunBar';
 import { buildNavDestinations } from './lib/creatorNav';
 import AppFooter from './components/AppFooter';
+// First-run guided tour (change: creator-guided-tour). Mounted once, renders
+// nothing unless it is running, and is replayable from here and from Settings.
+import CreatorTour, { restartCreatorTour } from './components/CreatorTour';
+import { lazyWithRetry } from './lib/lazyWithRetry';
 
-const DashboardPage  = lazy(() => import('./pages/DashboardPage'));
-const BuilderPage    = lazy(() => import('./pages/BuilderPage'));
-const GalleryPage    = lazy(() => import('./pages/GalleryPage'));
-const WalletPage     = lazy(() => import('./pages/WalletPage'));
-const RunConsolePage = lazy(() => import('./pages/RunConsolePage'));
-const RunsOverviewPage = lazy(() => import('./pages/RunsOverviewPage'));
-const SettingsPage   = lazy(() => import('./pages/SettingsPage'));
+// Every route goes through lazyWithRetry, never bare `lazy`: a rebuild or deploy
+// renames every hashed chunk, so an open tab's entry bundle asks for a filename
+// that no longer exists and the creator gets a crash screen on a healthy app.
+const DashboardPage  = lazyWithRetry('dashboard', () => import('./pages/DashboardPage'));
+const BuilderPage    = lazyWithRetry('builder', () => import('./pages/BuilderPage'));
+const GalleryPage    = lazyWithRetry('gallery', () => import('./pages/GalleryPage'));
+const WalletPage     = lazyWithRetry('wallet', () => import('./pages/WalletPage'));
+const RunConsolePage = lazyWithRetry('runConsole', () => import('./pages/RunConsolePage'));
+const RunsOverviewPage = lazyWithRetry('runsOverview', () => import('./pages/RunsOverviewPage'));
+const SettingsPage   = lazyWithRetry('settings', () => import('./pages/SettingsPage'));
 // Recently deleted games (change: recoverable-game-deletion).
-const TrashPage      = lazy(() => import('./pages/TrashPage'));
-const LegalPage      = lazy(() => import('./pages/LegalPage'));
+const TrashPage      = lazyWithRetry('trash', () => import('./pages/TrashPage'));
+const LegalPage      = lazyWithRetry('legal', () => import('./pages/LegalPage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -97,6 +104,7 @@ export default function App() {
                 key={n.to}
                 to={n.to}
                 end={n.end}
+                data-tour={`nav-${n.id}`}
                 className={({ isActive }) =>
                   `px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isActive
@@ -112,6 +120,16 @@ export default function App() {
           {/* On mobile the inline nav is gone; this spacer keeps the controls end-aligned. */}
           <div className="flex-1 sm:hidden" aria-hidden="true" />
           <span className="text-xs text-[--ink-3] hidden sm:block truncate max-w-[160px]">{user?.displayName ?? user?.email}</span>
+          {/* The help affordance: replays the guided tour from step one, for a
+              creator who skipped it or wants it again. */}
+          <button
+            onClick={() => restartCreatorTour()}
+            className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+            aria-label={t.tour.helpLabel}
+            title={t.tour.helpLabel}
+          >
+            ?
+          </button>
           <button
             onClick={() => setDark((d) => !d)}
             className="w-10 h-10 rounded-lg flex items-center justify-center text-sm hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
@@ -177,6 +195,7 @@ export default function App() {
 
       {/* Sibling of the hosts (outside <main>) so it survives every route change. */}
       <ActiveRunBar />
+      <CreatorTour />
       <DialogHost />
       <ToastHost />
     </div>

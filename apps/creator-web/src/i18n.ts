@@ -301,6 +301,41 @@ const HE = {
     likeFailed: 'לא הצלחנו לשמור. נסו שוב.',
     // תגיות (change: game-task-tags)
     moreTags:   (n: number) => `+${n} תגיות`,
+    // תצוגת פרטי משימה (change: gallery-mission-detail)
+    detailTitle:         'פרטי המשימה',
+    detailAboutTitle:    'איך המשימה עובדת',
+    detailClose:         'סגירה',
+    detailOpen:          'הצגת פרטים',
+    detailUse:           'שימוש במשימה הזו',
+    detailUseHint:       'כדי להוסיף את המשימה למשחק שלכם, פתחו את ספריית המשימות בתוך הבונה.',
+    detailNoDescription: 'היוצר לא כתב תיאור למשימה הזו.',
+    detailAreaTitle:     'אזור משוער',
+    detailNoArea:        'למשימה הזו אין אזור מפורסם. אפשר למקם אותה על המפה אחרי ההעתקה.',
+    detailSecretNote:    'תשובות, קודים ורמזים נשארים אצל היוצר ולא מוצגים כאן אף פעם.',
+    rowType:             'סוג משימה',
+    // The VALUE of the type row when the stored type is one this build does not
+    // know. Without it the row printed its own label back ("סוג משימה: סוג משימה").
+    rowTypeUnknown:      'סוג לא מוכר',
+    rowDifficulty:       'קושי',
+    rowMinutes:          'זמן משוער',
+    rowPoints:           'ניקוד',
+    rowCopies:           'העתקים',
+    rowLikes:            'אהבו',
+    rowSource:           'מתוך המשחק',
+    rowAuthor:           'יוצר',
+    rowPublished:        'תאריך פרסום',
+    valDiff:    (n: number) => `${n} מתוך 10`,
+    valMinutes: (n: number) => `${n} דקות`,
+    typeAboutField:      'השחקנים מגיעים לנקודה ומאשרים הגעה בלחיצה.',
+    typeAboutSelfReport: 'הקבוצה מדווחת בעצמה שסיימה את המשימה.',
+    typeAboutStation:    'בעמדה עצמה מחכה קוד סודי, והשחקנים מקלידים אותו.',
+    typeAboutPhoto:      'השחקנים מצלמים תמונה או מקליטים קטע קול ושולחים לאישור.',
+    typeAboutQuiz:       'שאלה עם תשובה נכונה, בבחירה מתוך אפשרויות או בהקלדה.',
+    typeAboutNumeric:    'השחקנים מזינים מספר, והוא נבדק מול טווח סטייה מותר.',
+    typeAboutGeofence:   'אישור הגעה אוטומטי לפי מיקום, בלי שום לחיצה.',
+    typeAboutSequence:   'כמה שלבים בסדר קבוע, כולם באותה נקודה.',
+    typeAboutSurvey:     'שאלה בלי תשובה נכונה, לאיסוף דעות.',
+    typeAboutUnknown:    'סוג משימה שגרסת הקונסולה הזו עדיין לא מכירה.',
   },
   wallet: {
     title:          'חיוב וקרדיטים',
@@ -465,14 +500,12 @@ const HE = {
     hotZoneActive: ({ mult }: { mult: number }) => `פעיל · ×${mult} נקודות`,
     hotZoneExpires: ({ time }: { time: string }) => `מסתיים בשעה ${time}`,
     hotZoneCenter: 'מרכז (קו רוחב, קו אורך)',
-    hotZoneUseLocation: '📍 השתמש במיקום שלי',
     hotZoneRadius: 'רדיוס (מ׳)',
     hotZoneMultiplier: 'מכפיל',
     hotZoneDuration: 'משך (דק׳)',
     hotZoneNeedsCenter: 'בחרו מרכז לאזור החם תחילה',
     activate: 'הפעלת אזור חם',
     deactivate: 'כיבוי',
-    viewAnalytics: '📈 ניתוח נתונים',
     linkCopied: 'הקישור הועתק!',
     analyticsTitle: '📈 ניתוח לפי משימה',
     analyticsLoad: 'טעינת ניתוח',
@@ -491,14 +524,14 @@ const HE = {
     zonesTitle: 'שטחים לכיבוש',
     zonesHelp: 'שטחים על המפה שהקבוצות מתחרות לכבוש. קבוצה כובשת שטח כשהיא מגיעה אליו פיזית (נבדק לפי המיקום), והשליטה עוברת כשקבוצה יריבה מגיעה. כאן רואים מי מחזיק בכל שטח כרגע. בחרו מיקום על המפה; אם לא תבחרו, השטח יהיה ללא מפה וניתן לכיבוש מכל מקום.',
     zonesTitlePlaceholder: 'שם השטח',
-    zonesLat: 'קו רוחב',
-    zonesLng: 'קו אורך',
     zonesAdd: 'הוספה',
     zonesEmpty: 'עדיין אין שטחים.',
     zonesHeldBy: ({ name }: { name: string }) => `בידי ${name}`,
     zonesOpen: 'פנוי',
+    zonesDelete: 'מחיקה',
+    zonesDeleteAria: ({ name }: { name: string }) => `מחיקת השטח ${name}`,
     zonesDeleteConfirm: 'למחוק את השטח הזה?',
-    feedTitle: ({ n }: { n: number }) => `פיד התמונות (${n})`,
+    feedCount: ({ n }: { n: number }) => `${n} תמונות`,
     feedHideAction: 'הסתרה',
     feedHideConfirm: 'להסתיר את התמונה הזו מהפיד של כל המשתתפים?',
     // ── תור אישור התמונות (wave-e task 13) ──
@@ -506,7 +539,8 @@ const HE = {
     photoReviewCount: ({ n }: { n: number }) => `${n} ממתינות`,
     photoReviewHelp: 'הגשות של קבוצות שממתינות לאישור. אישור מזכה את הקבוצה בנקודות ומשחרר אותה להמשך.',
     photoReviewNone: 'אין הגשות ממתינות.',
-    photoReviewTaskLabel: 'משימה',
+    // מחרוזת אחת, לא תחילית מודבקת לשם: הצירוף הישן ייצר "משימה השוק העתיק".
+    photoReviewTaskLine: ({ name }: { name: string }) => `משימה: ${name}`,
     photoReviewNoPhoto: 'אין תמונה',
     photoReviewAlt: 'הגשה',
     photoReviewAudio: 'הגשת שמע',
@@ -540,8 +574,11 @@ const HE = {
     chatReplyPlaceholder: 'כתבו תשובה לקבוצה',
     copyJoinLink: 'העתקת קישור הצטרפות',
     deviceCapNote: ({ max }: { max: number }) => `כרגע יכולים להצטרף עד ${max} טלפונים לריצה אחת (סך כל המכשירים בכל הקבוצות). טלפונים נוספים יקבלו הודעה שהריצה מלאה.`,
-    standingsVisibleToTeams: 'גלוי לקבוצות ✓',
+    standingsVisibleToTeams: 'גלוי לקבוצות',
     standingsHiddenFromTeams: 'מוסתר מהקבוצות',
+    // הכפתור נושא פועל, לא את המצב הנוכחי (change: run-console-clarity).
+    standingsPublishAction: 'פרסום הדירוג לשחקנים',
+    standingsHideAction: 'הסתרת הדירוג מהשחקנים',
     revealStandings: 'חשיפת הדירוג למשתתפים',
     standingsHiddenUntilReveal: 'הדירוג הסופי מוסתר מהמשתתפים. אתם רואים אותו כאן, והם יראו אותו רק אחרי החשיפה.',
     standingsRevealed: 'הדירוג נחשף למשתתפים',
@@ -565,9 +602,10 @@ const HE = {
     summaryPhotos: ({ n }: { n: number }) => `${n} תמונות`,
     summaryNoData: 'אין עדיין נתונים.',
     surveyTitle: '🗳️ תוצאות סקרים',
-    surveyRefresh: 'רענן',
+    surveyRefresh: 'רענון',
     surveyRefreshing: 'טוען…',
     surveyLoading: 'טוען תוצאות…',
+    surveyError: 'טעינת תוצאות הסקרים נכשלה. נסו שוב.',
     surveyChoiceCounts: 'תשובות לפי אפשרות',
     surveyResponseCount: ({ n }: { n: number }) => `${n} תגובות`,
     surveyNoResponses: 'עדיין אין תגובות למשימה הזו.',
@@ -596,7 +634,6 @@ const HE = {
     feedbackIssueOther: 'אחר',
     feedbackCommentsTitle: ({ n }: { n: number }) => `הערות חופשיות (${n})`,
     feedbackNoComments: 'אין הערות חופשיות.',
-    feedbackAnon: 'משתתף',
     feedbackViewResponse: 'צפייה בתשובה המלאה',
     feedbackResponseTitle: 'תשובת המשתתף',
     feedbackNoAnswer: 'לא ענה',
@@ -611,11 +648,17 @@ const HE = {
     statusLive: 'פעילה',
     statusFinished: 'הסתיימה',
     participants: ({ n, max }: { n: number; max: string }) => `${n} / ${max} משתתפים`,
-    activeAlerts: ({ n }: { n: number }) => `🆘 התראות פעילות (${n})`,
-    alertType: (type: string) => (type === 'sos' ? 'מצוקה' : type === 'technical' ? 'תקלה' : type === 'stationary' ? 'תקוע במקום' : type),
+    activeAlerts: ({ n }: { n: number }) => `${n} ממתינות לאישור`,
+    // סוגי התראה הם ערכים שמורים. סוג חדש לא ייכתב למארגן כמו שהוא נשמר בבסיס הנתונים.
+    alertTypeSos: 'מצוקה',
+    alertTypeTechnical: 'תקלה',
+    alertTypeStationary: 'תקועים במקום',
+    unknownAlertType: ({ id }: { id: string }) => `התראה לא מזוהה ${id}`,
+    unknownTaskType: ({ id }: { id: string }) => `סוג משימה לא מזוהה ${id}`,
+    unknownIssue: ({ id }: { id: string }) => `תקלה לא מזוהה ${id}`,
     map: 'מפה',
     acknowledge: 'אישור קבלה',
-    startAllTeams: 'התחל את כל הקבוצות',
+    startAllTeams: 'התחילו את כל הקבוצות',
     refreshStandings: 'רענון דירוג',
     standingsRefreshed: 'הדירוג עודכן.',
     inviteStaffPin: 'הזמנת צוות (קוד)',
@@ -624,7 +667,6 @@ const HE = {
     staffNamePrompt: 'שם איש הצוות?',
     staffInviteFailed: 'יצירת קוד הצוות נכשלה. בדקו את החיבור ונסו שוב.',
     staffPinLabel: 'קוד צוות:',
-    staffPinShareNote: '· שתפו עם הצוות שלכם להתחברות באפליקציית המשתתפים.',
     staffLinkCopy: 'העתקת קישור לצוות',
     staffLinkNote: 'הקישור ממלא מראש את פרטי הריצה. איש הצוות רק מקליד את הקוד למעלה.',
     staffLinkQrAlt: 'קוד QR לכניסת צוות',
@@ -636,19 +678,24 @@ const HE = {
     finalizeFailed: 'סיום הריצה נכשל. בדקו את החיבור ונסו שוב.',
     announcementSent: 'ההודעה נשלחה.',
     flashSent: 'משימת הבזק נשלחה.',
-    skipConfirm: 'לדלג על השלב הנוכחי של הקבוצה הזו?',
     skipFailed: 'הדילוג נכשל. בדקו את החיבור ונסו שוב.',
+    // דילוג על משימה בודדת (change: skip-single-task)
+    skipTaskFailed: 'הדילוג על המשימה נכשל. בדקו את החיבור ונסו שוב.',
+    skipTaskDone: ({ team }: { team: string }) => `המשימה הנוכחית של ${team} דולגה.`,
     newAlertTitleFlash: ({ n }: { n: number }) => `🆘 (${n}) התראה חדשה`,
     teamsTitle: 'קבוצות',
     noOneJoinedTitle: 'עדיין אין קבוצות',
     noOneJoinedYet: 'אף אחד עוד לא הצטרף. שתפו את קוד הכניסה.',
     stageDone: ({ n }: { n: number }) => `${n} הושלמו`,
-    teamStatusFinished: 'סיום',
-    teamStatusWaiting: 'ממתין',
+    // מצבים, לא שמות עצם: השורה אמורה לקרוא כמו משפט על הקבוצה.
+    teamStatusFinished: 'סיימו את המשחק',
+    teamStatusWaiting: 'ממתינות לזינוק',
     teamStatusBetween: 'בין שלבים',
-    teamStageLabel: ({ n }: { n: number }) => `שלב ${n}`,
-    skip: 'דילוג',
-    scoreAdjustmentPrompt: 'התאמת ניקוד (+בונוס / −קנס):',
+    teamStageLabel: ({ n }: { n: number }) => `בשלב ${n}`,
+    // היקף הדילוג כתוב על הכפתור, לא רק בדיאלוג (change: run-console-clarity).
+    skipStage: 'דילוג על השלב',
+    skipTask: 'דילוג על המשימה',
+    scoreAdjustmentPrompt: 'עדכון ניקוד, בונוס בפלוס או קנס במינוס:',
     scoreAdjustmentInvalid: 'הכניסו מספר נקודות שלם: 50 לבונוס, או מינוס 25 לקנס.',
     liveTeamMap: '📍 מפת קבוצות חיה',
     liveStandings: '📊 דירוג חי',
@@ -674,14 +721,13 @@ const HE = {
     waitingForTeams: 'ממתינים שהקבוצות ידווחו מיקום…',
 
     // ── חלוקה לקבוצות תצוגה (change: run-console-progressive-disclosure) ──
-    sectionsHeader: 'מדורים',
-    groupTeams: 'קבוצות ודירוג',
-    groupModeration: 'תמונות והודעות מהשטח',
-    groupMechanics: 'מערכות משחק',
-    groupShare: 'שיתוף ומסכים',
-    groupAfter: 'אחרי הריצה',
-    groupUnreadChats: ({ n }: { n: number }) => `${n} שיחות חדשות`,
-    groupHotZoneOn: 'אזור חם פעיל',
+    // שמות שאפשר לדמיין, לא שמות של מבנה נתונים (change: run-console-clarity).
+    sectionsHeader: 'מה מציגים',
+    groupTeams: 'קבוצות וניקוד',
+    groupModeration: 'מה מגיע מהשטח',
+    groupMechanics: 'הפתעות ושליטה במשחק',
+    groupShare: 'קישורים ומסכים',
+    groupAfter: 'דוחות וניתוח',
 
     // ── זמינות משימות בזמן ריצה (change: live-task-pause) ──
     taskAvailTitle: 'זמינות משימות',
@@ -734,7 +780,8 @@ const HE = {
     // Confirmations for actions that used to succeed or fail in total silence
     // (change: creator-no-silent-failures).
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `הניקוד של ${team} עודכן. השינוי שנרשם: ${delta} נקודות.`,
-    skipAria: ({ team }: { team: string }) => `דילוג על השלב הנוכחי של ${team}`,
+    skipStageAria: ({ team }: { team: string }) => `דילוג על השלב הנוכחי של ${team}`,
+    skipTaskAria: ({ team }: { team: string }) => `דילוג על המשימה הנוכחית של ${team}`,
     // ── שחרור קבוצה שנתקעה מחוץ לאזור המשחק ──
     outOfBoundsBadge: 'מחוץ לאזור המשחק, לא מקבלים משימות',
     // Held-team visibility: which team the start held back, not just how many.
@@ -760,6 +807,189 @@ const HE = {
     // ── שמות במקום מזהים ──
     unknownTeam: ({ id }: { id: string }) => `קבוצה לא מזוהה ${id}`,
     unknownTask: ({ id }: { id: string }) => `משימה לא מזוהה ${id}`,
+
+    // ── מה צריך אתכם עכשיו (change: run-console-clarity) ──
+    // הרצועה הזו אמורה להיות ריקה ברוב הזמן. אם היא תמיד מלאה, מפסיקים לקרוא אותה.
+    signalsTitle: 'צריך אתכם עכשיו',
+    signal: {
+      sos: ({ n }: { n: number }) => `${n} קריאות מצוקה פתוחות`,
+      outOfBounds: ({ n }: { n: number }) => `${n} קבוצות מחוץ לאזור המשחק`,
+      photoOverdue: ({ n }: { n: number }) => `${n} הגשות שממתינות לכם יותר מדי זמן`,
+      teamsStuck: ({ n }: { n: number }) => `${n} קבוצות תקועות`,
+      heldForConsent: ({ n }: { n: number }) => `${n} קבוצות מעוכבות עד אישור הורה`,
+      photoPending: ({ n }: { n: number }) => `${n} הגשות ממתינות לבדיקה`,
+      unreadChat: ({ n }: { n: number }) => `${n} שיחות שלא נקראו`,
+      tasksPaused: ({ n }: { n: number }) => `${n} משימות מושהות`,
+      nobodyJoined: () => 'עדיין אף אחד לא הצטרף',
+      notStarted: ({ n }: { n: number }) => `${n} קבוצות עוד לא יצאו לדרך`,
+    },
+
+    // ── מה כתוב על כפתור במדור שלא פתוח (change: run-console-clarity) ──
+    chip: {
+      attention: ({ n }: { n: number }) => `${n} צריכות תשומת לב`,
+      pendingPhotos: ({ n }: { n: number }) => `${n} ממתינות לבדיקה`,
+      unreadChats: ({ n }: { n: number }) => `${n} שיחות חדשות`,
+      hotZone: () => 'אזור חם פעיל',
+      pausedTasks: ({ n }: { n: number }) => `${n} משימות מושהות`,
+      teams: ({ n }: { n: number }) => `${n} קבוצות`,
+      shareLinks: ({ n }: { n: number }) => `${n} קישורים`,
+      reports: ({ n }: { n: number }) => `${n} דוחות`,
+      panels: ({ n }: { n: number }) => `${n} כרטיסים`,
+    },
+    sectionEmptiedNotice: ({ section }: { section: string }) =>
+      `המדור שהייתם בו התרוקן, אז עברנו למדור "${section}".`,
+
+    // ── מה הכפתור הזה באמת עושה (change: run-console-clarity) ──
+    confirmTitle: 'רגע לפני שממשיכים',
+    consequence: {
+      startTeams: 'מפעיל את השעון של כל הקבוצות שהצטרפו, והמשחק מתחיל להן. אי אפשר לעצור את השעון אחורה.',
+      publishStandings: 'הופך את הדירוג לגלוי לכל המשתתפים ולכל מי שיש לו את הקישור הפומבי.',
+      revealStandings: 'חושף את הדירוג הסופי לכל המשתתפים. זה רגע השיא, ואי אפשר להחזיר אותו למצב מוסתר.',
+      broadcastAnnouncement: 'שולח הודעה שנשארת על המסך של הקבוצות עד שתשלחו אחרת.',
+      deactivateAnnouncement: 'מוריד את ההודעה מהמסך של כל הקבוצות.',
+      pushFlashMission: 'שולח משימת בונוס לכל הקבוצות יחד. היא נעלמת מעצמה אחרי הזמן שהוגדר.',
+      activateHotZone: 'מכפיל את הניקוד של כל משימה בתוך האזור שבחרתם, לזמן מוגבל.',
+      deactivateHotZone: 'מכבה את האזור החם. משימות בתוכו חוזרות לניקוד הרגיל.',
+      pauseTask: 'מפסיק לשלוח קבוצות למשימה הזו. קבוצה שכבר נמצאת עליה תוכל לסיים אותה.',
+      closeTask: 'מוציא את המשימה מהמשחק לריצה הזו. קבוצה שכבר נמצאת עליה תוכל לסיים אותה.',
+      resumeTask: 'מחזיר את המשימה למשחק, והמערכת תתחיל לשלוח אליה קבוצות שוב.',
+      createZone: 'מוסיף שטח שהקבוצות יכולות לכבוש מעכשיו.',
+      deleteZone: 'מוחק את השטח מהמשחק. כיבושים שכבר נרשמו נשארים.',
+      createTrackable: 'מוסיף פריט שהקבוצות יכולות לאסוף ולהעביר ביניהן.',
+      hideFeedPhoto: 'מסתיר את התמונה מהפיד של כל המשתתפים ומכל מסך שמקרין אותו.',
+      finalizeRun: 'מסיים את המשחק לכל הקבוצות ומחשב את הדירוג הסופי. אי אפשר לחזור אחורה.',
+      acknowledgeAlert: 'מסמן את ההתראה כטופלה והיא יורדת מהרשימה. היא לא תחזור.',
+      clearTeamOutOfBounds: 'מחזיר לקבוצה את היכולת לקבל משימות, גם אם המיקום שלה עדיין לא מדויק.',
+      skipStage: 'מדלג על כל השלב הנוכחי של הקבוצה. שאר המשימות בשלב הזה נסגרות לה.',
+      skipTask: 'מדלג על המשימה הנוכחית של הקבוצה. היא נשארת בשלב וממשיכה לשאר המשימות בו.',
+      adjustTeamScore: 'רושם שינוי ניקוד ידני לקבוצה. השינוי נשמר ביומן הפעולות.',
+      approvePhoto: 'מזכה את הקבוצה בנקודות ומשחרר אותה להמשך.',
+      rejectPhoto: 'מחזיר את ההגשה לקבוצה בלי נקודות.',
+      sendChatReply: 'שולח הודעה לקבוצה הזו בלבד.',
+      refreshStandings: 'מחשב מחדש את הדירוג. לא משנה מי רואה אותו.',
+      inviteStaff: 'יוצר קוד חד פעמי לאיש צוות. אתם מוסרים לו אותו בעצמכם.',
+      printStationQr: 'פותח דף להדפסה עם קוד לכל תחנה חכמה במשחק.',
+      copyShareLink: 'מעתיק את הקישור ללוח. שום דבר לא נשלח לאף אחד.',
+      loadHeatmap: 'טוען את נתוני התנועה של הריצה. יכול לקחת כמה שניות.',
+      loadAnalytics: 'טוען את נתוני ההשלמה לפי משימה.',
+      exportAnalyticsCsv: 'מוריד את הטבלה כקובץ למחשב שלכם.',
+      refreshSurvey: 'טוען מחדש את תוצאות הסקרים.',
+    },
+    sharePublishesNote: 'שיתוף הקישור הזה יפרסם את הדירוג לכל המשתתפים.',
+    moreActions: 'עוד פעולות',
+    moreActionsAria: ({ team }: { team: string }) => `עוד פעולות לקבוצה ${team}`,
+
+    // ── שם, הסבר ומצב ריק לכל כרטיס (change: run-console-clarity) ──
+    panel: {
+      joinShare: {
+        title: 'קוד כניסה',
+        help: 'הקוד והקישור שהמשתתפים צריכים כדי להצטרף לריצה הזו.',
+      },
+      startTeams: {
+        title: 'שליטה בריצה',
+        help: 'הפעולות היומיומיות: זינוק הקבוצות, רענון הדירוג והזמנת אנשי צוות.',
+      },
+      alerts: {
+        title: 'התראות פתוחות',
+        help: 'קריאות מצוקה ותקלות ששלחו קבוצות מהשטח וטרם אישרתם.',
+      },
+      broadcast: {
+        title: 'הודעה לשחקנים',
+        help: 'הודעה שנשארת על המסך של הקבוצות עד שתשלחו אחרת.',
+      },
+      liveMap: {
+        title: 'מפת קבוצות חיה',
+        help: 'איפה כל קבוצה נמצאת עכשיו, לפי דיווחי המיקום מהטלפונים.',
+      },
+      teams: {
+        title: 'קבוצות',
+        help: 'כל הקבוצות בריצה, הניקוד שלהן ומי צריכה תשומת לב עכשיו.',
+        empty: 'אף אחד עוד לא הצטרף. שתפו את קוד הכניסה.',
+      },
+      liveStandings: {
+        title: 'דירוג חי',
+        help: 'הדירוג המחושב ברגע זה. גלוי לכם בלבד עד שתפרסמו אותו.',
+      },
+      finalStandings: {
+        title: 'דירוג סופי',
+        help: 'התוצאות הסופיות של הריצה, כפי שחושבו בסיום.',
+      },
+      hotZone: {
+        title: 'אזור חם',
+        help: 'אזור על המפה שבו כל משימה שווה יותר נקודות לזמן מוגבל.',
+      },
+      flashMission: {
+        title: 'משימת בזק',
+        help: 'בונוס הפתעה שנשלח לכל הקבוצות יחד ונעלם מעצמו.',
+      },
+      trackables: {
+        title: 'פריטים ניתנים למעקב',
+        help: 'פריטים וירטואליים שהקבוצות אוספות ומעבירות ביניהן. כאן רואים אצל מי כל פריט.',
+        empty: 'עדיין אין פריטים.',
+      },
+      zones: {
+        title: 'שטחים לכיבוש',
+        help: 'שטחים על המפה שהקבוצות מתחרות לכבוש. כאן רואים מי מחזיק בכל אחד.',
+        empty: 'עדיין אין שטחים.',
+      },
+      taskAvailability: {
+        title: 'זמינות משימות',
+        help: 'השהו או סגרו משימה שאי אפשר לבצע היום. חל על הריצה הזו בלבד.',
+        empty: 'אין עדיין משימות במשחק הזה.',
+      },
+      photoReview: {
+        title: 'בדיקת הגשות',
+        help: 'הגשות שממתינות לאישור שלכם. כל עוד לא אישרתם, הקבוצה ממתינה בשטח.',
+        empty: 'אין הגשות שממתינות לכם.',
+      },
+      feed: {
+        title: 'פיד התמונות',
+        help: 'התמונות שהקבוצות שיתפו במהלך המשחק, כפי שכולם רואים אותן.',
+        empty: 'עדיין לא שותפו תמונות.',
+      },
+      chat: {
+        title: 'צ׳אט עם הקבוצות',
+        help: 'שיחות בין הקבוצות לביניכם. כאן עונים לשאלות מהשטח.',
+        empty: 'אף קבוצה לא כתבה לכם עדיין.',
+      },
+      shareScreens: {
+        title: 'קישורים ומסכים',
+        help: 'כל הקישורים של הריצה במקום אחד, לכל אחד כתוב למי הוא מיועד.',
+      },
+      stationQr: {
+        title: 'קודי QR לתחנות',
+        help: 'דף להדפסה עם קוד לכל תחנה חכמה במשחק. תולים בשטח לפני האירוע.',
+      },
+      staffInvite: {
+        title: 'כניסת צוות',
+        help: 'הקוד והקישור שאיש הצוות צריך כדי להתחבר לריצה הזו.',
+      },
+      runSummary: {
+        title: 'סיכום המשחק',
+        help: 'דוח אחד שמקפל את הדירוג, ההשלמה והמשוב. נשלח גם למייל של המארגן.',
+        empty: 'אין עדיין נתונים.',
+      },
+      analytics: {
+        title: 'ניתוח לפי משימה',
+        help: 'כמה קבוצות סיימו כל משימה, כמה זמן זה לקח וכמה רמזים נלקחו. שימושי גם באמצע הריצה.',
+        empty: 'אין עדיין נתונים.',
+      },
+      heatmap: {
+        title: 'מפת חום של תנועה',
+        help: 'איפה הקבוצות הסתובבו הכי הרבה במהלך הריצה.',
+        empty: 'אין נתוני מיקום לריצה זו.',
+      },
+      feedback: {
+        title: 'משוב מהשחקנים',
+        help: 'התשובות לשאלון שהשחקנים ממלאים במסך הסיום.',
+        empty: 'עדיין אין תשובות.',
+      },
+      survey: {
+        title: 'תוצאות סקרים',
+        help: 'התשובות למשימות הסקר שכתבתם בתוך המשחק.',
+        empty: 'עדיין אין תגובות לסקרים.',
+      },
+    },
 
     // ── הסברים על מונחים ──
     tipFlashMissionTitle: 'משימת בזק',
@@ -1206,6 +1436,84 @@ const HE = {
     newFieldLabel: 'שדה חדש',
     loadingMapShort: 'טוען מפה…',
   },
+  // ── סיור מודרך לפתיחה (change: creator-guided-tour) ──
+  // סדר השלבים והמעברים נמצאים ב-lib/creatorOnboarding.ts; כאן רק הטקסט.
+  tour: {
+    dialogLabel: 'סיור מודרך',
+    helpLabel: 'פתיחת הסיור המודרך',
+    next: 'הבא',
+    back: 'הקודם',
+    skip: 'דילוג על הסיור',
+    finish: 'סיימתי',
+    restart: 'הפעלת הסיור מחדש',
+    progress: ({ step, total }: { step: number; total: number }) => `שלב ${step} מתוך ${total}`,
+    takeMeThere: 'קחו אותי לשם',
+    settingsTitle: 'סיור מודרך',
+    settingsDesc: 'הסבר קצר על כל המסכים: בניית משחק, השקה וניהול ריצה חיה. אפשר להפעיל אותו שוב מתי שרוצים.',
+    settingsBtn: 'הפעלת הסיור',
+    steps: {
+      welcome: {
+        title: 'ברוכים הבאים',
+        body: 'סיור קצר שעובר על כל מה שיש כאן: בניית משחק, מפה ומשימות, השקה וניהול ריצה חיה. אפשר לדלג בכל רגע ולהחזיר אותו מההגדרות.',
+      },
+      newGame: {
+        title: 'התחלת משחק חדש',
+        body: 'כל משחק מתחיל כאן. בוחרים תבנית מוכנה או דף ריק, ורואים מראש איך משחקים בו ואיך הוא ינוקד.',
+      },
+      gameList: {
+        title: 'המשחקים שלכם',
+        body: 'כל כרטיס מציג שלבים, משימות ומספר ריצות, ומוביל לעריכה, לריצת בדיקה, לשיתוף או לריצה חיה שמתרחשת עכשיו.',
+      },
+      builderStages: {
+        title: 'שלבים קובעים את הסדר',
+        body: 'משחק בנוי מרשימת שלבים. קבוצה נכנסת לשלב הבא רק אחרי שסיימה את הנוכחי, והשלב האחרון מסיים את המשחק.',
+      },
+      builderTasks: {
+        title: 'משימות הן מה שעושים בשטח',
+        body: 'מוסיפים משימות לשלב הפתוח, גוררים כדי לשנות סדר, וגוררים משימה אל שלב אחר ברשימת השלבים.',
+      },
+      builderTaskTypes: {
+        title: 'תשעה סוגי משימה',
+        body: 'צ׳ק אין במקום, דיווח עצמי, קוד בעמדה, צילום, חידון, מספר, הגעה אוטומטית, רצף שלבים בעצירה אחת וסקר. בוחרים את הסוג שמתאים למה שרוצים שיעשו.',
+      },
+      builderLocation: {
+        title: 'מיקום על המפה',
+        body: 'לכל משימה שקורית במקום מסוים יש נעיצה במפה ורדיוס הגעה. משימה שאפשר לבצע מכל מקום מסומנת ככזו ולא תופסת מקום במפה.',
+      },
+      builderScoring: {
+        title: 'ניקוד וכללי שלב',
+        body: 'אפשר לדרג לפי זמן בלבד, לפי נקודות קבועות עם בונוס מהירות, או לפי קושי ומהירות יחד. בהגדרות השלב נמצאים גם רמזים, הגבלות זמן וכמה משימות נדרשות לסיום.',
+      },
+      builderPreview: {
+        title: 'תצוגה מקדימה לפני שמישהו משחק',
+        body: 'לשונית התצוגה המקדימה מראה את כל המסלול על מפה, ואת המשחק בדיוק כפי שמשתתף רואה אותו.',
+      },
+      builderLaunch: {
+        title: 'מוכנות ואז השקה',
+        body: 'רשימת המוכנות מרכזת כל דבר שימנע השקה. ריצת בדיקה היא חזרה גנרלית חינם עד שני משתתפים, והשקה אמיתית פותחת קוד הצטרפות לכולם.',
+      },
+      runConsole: {
+        title: 'ניהול ריצה חיה',
+        body: 'בזמן ריצה מקבלים דירוג חי, מפת קבוצות, צ׳אט, אישור תמונות, הודעות והתראות מצוקה במסך אחד. נכנסים אליו מכרטיס המשחק או מסרגל הריצה.',
+      },
+      gallery: {
+        title: 'השראה מהגלריה',
+        body: 'משחקים ציבוריים וספריית משימות לחיפוש. אפשר להעתיק משימה מוכנה אל המשחק שלכם במקום לכתוב אותה מהתחלה.',
+      },
+      wallet: {
+        title: 'קרדיטים וריצות',
+        body: 'כאן נמצאים היתרה, המחיר של כל ריצה ובונוסי ההפניה שקיבלתם.',
+      },
+      settings: {
+        title: 'שפה, חשבון והסיור הזה',
+        body: 'בהגדרות נמצאים שפת הממשק, דרכי הכניסה לחשבון, ייצוא הנתונים שלכם והכפתור שמפעיל את הסיור הזה שוב.',
+      },
+      finish: {
+        title: 'זהו, סיימנו',
+        body: 'בנו משחק, עשו ריצת בדיקה ואז השיקו באמת. סימן השאלה בראש המסך מחזיר את הסיור בכל רגע.',
+      },
+    },
+  },
 };
 
 // ── English ────────────────────────────────────────────────────────────────
@@ -1499,6 +1807,40 @@ const EN: typeof HE = {
     likeFailed: 'Could not save that. Try again.',
     // Tags (change: game-task-tags)
     moreTags:   (n: number) => `+${n} tags`,
+    // Mission detail view (change: gallery-mission-detail)
+    detailTitle:         'Mission details',
+    detailAboutTitle:    'How this mission plays',
+    detailClose:         'Close',
+    detailOpen:          'View details',
+    detailUse:           'Use this mission',
+    detailUseHint:       'To add this mission to your game, open the mission library inside the builder.',
+    detailNoDescription: 'The author wrote no description for this mission.',
+    detailAreaTitle:     'Approximate area',
+    detailNoArea:        'This mission has no published area. You can place it on the map after copying it.',
+    detailSecretNote:    'Answers, codes and hints stay with the author and are never shown here.',
+    rowType:             'Mission type',
+    // See the Hebrew note: the VALUE for a mission type this build does not know.
+    rowTypeUnknown:      'Unknown type',
+    rowDifficulty:       'Difficulty',
+    rowMinutes:          'Estimated time',
+    rowPoints:           'Points',
+    rowCopies:           'Copies',
+    rowLikes:            'Liked by',
+    rowSource:           'From the game',
+    rowAuthor:           'Author',
+    rowPublished:        'Published',
+    valDiff:    (n: number) => `${n} of 10`,
+    valMinutes: (n: number) => `${n} min`,
+    typeAboutField:      'Players reach the spot and tap to check in.',
+    typeAboutSelfReport: 'The team reports on its own that it finished the mission.',
+    typeAboutStation:    'A secret code waits at the station itself, and players type it in.',
+    typeAboutPhoto:      'Players capture a photo or an audio clip and send it for approval.',
+    typeAboutQuiz:       'A question with a right answer, either from choices or typed.',
+    typeAboutNumeric:    'Players enter a number, checked against an allowed tolerance.',
+    typeAboutGeofence:   'Automatic check in by location, with no tap at all.',
+    typeAboutSequence:   'Several steps in a fixed order, all at the same spot.',
+    typeAboutSurvey:     'A question with no right answer, for collecting opinions.',
+    typeAboutUnknown:    'A mission type this console version does not know yet.',
   },
   wallet: {
     title:          'Billing & credits',
@@ -1657,14 +1999,12 @@ const EN: typeof HE = {
     hotZoneActive: ({ mult }: { mult: number }) => `Active · ${mult}× points`,
     hotZoneExpires: ({ time }: { time: string }) => `ends at ${time}`,
     hotZoneCenter: 'Center (lat, lng)',
-    hotZoneUseLocation: '📍 Use my location',
     hotZoneRadius: 'Radius (m)',
     hotZoneMultiplier: 'Multiplier',
     hotZoneDuration: 'Duration (min)',
     hotZoneNeedsCenter: 'Pick a hot zone center first',
     activate: 'Activate Hot Zone',
     deactivate: 'Deactivate',
-    viewAnalytics: '📈 Analytics',
     linkCopied: 'Link copied!',
     analyticsTitle: '📈 Per task analytics',
     analyticsLoad: 'Load analytics',
@@ -1683,14 +2023,14 @@ const EN: typeof HE = {
     zonesTitle: 'Capturable territory',
     zonesHelp: 'Areas on the map that teams compete to capture. A team captures a zone by physically reaching it (validated against their GPS); control flips when a rival arrives. See who holds each zone right now. Pick a spot on the map; leave it unset to make a zone with no map location, capturable from anywhere.',
     zonesTitlePlaceholder: 'Zone name',
-    zonesLat: 'lat',
-    zonesLng: 'lng',
     zonesAdd: 'Add',
     zonesEmpty: 'No zones yet.',
     zonesHeldBy: ({ name }: { name: string }) => `Held by ${name}`,
     zonesOpen: 'Open',
+    zonesDelete: 'Delete',
+    zonesDeleteAria: ({ name }: { name: string }) => `Delete the zone ${name}`,
     zonesDeleteConfirm: 'Delete this zone?',
-    feedTitle: ({ n }: { n: number }) => `Photo feed (${n})`,
+    feedCount: ({ n }: { n: number }) => `${n} photos`,
     feedHideAction: 'Hide',
     feedHideConfirm: 'Hide this photo from every participant\'s feed?',
     // ── Photo approval queue (wave-e task 13) ──
@@ -1698,7 +2038,8 @@ const EN: typeof HE = {
     photoReviewCount: ({ n }: { n: number }) => `${n} waiting`,
     photoReviewHelp: 'Team submissions waiting for approval. Approving awards the points and releases the team to continue.',
     photoReviewNone: 'No submissions waiting.',
-    photoReviewTaskLabel: 'task',
+    // One string, not a prefix glued to a name: the old join read "task Old Market".
+    photoReviewTaskLine: ({ name }: { name: string }) => `Task: ${name}`,
     photoReviewNoPhoto: 'no photo',
     photoReviewAlt: 'submission',
     photoReviewAudio: 'audio submission',
@@ -1732,8 +2073,11 @@ const EN: typeof HE = {
     chatReplyPlaceholder: 'Reply to the team',
     copyJoinLink: 'Copy join link',
     deviceCapNote: ({ max }: { max: number }) => `For now, up to ${max} phones can join one run (total devices across all teams). Extra phones will be told the run is full.`,
-    standingsVisibleToTeams: 'Visible to teams ✓',
+    standingsVisibleToTeams: 'Visible to teams',
     standingsHiddenFromTeams: 'Hidden from teams',
+    // The button carries a verb, not the current state (change: run-console-clarity).
+    standingsPublishAction: 'Publish standings to players',
+    standingsHideAction: 'Hide standings from players',
     revealStandings: 'Reveal standings to players',
     standingsHiddenUntilReveal: 'The final standings are hidden from players. You can see them here; they will see them only after you reveal.',
     standingsRevealed: 'Standings revealed to players',
@@ -1760,6 +2104,7 @@ const EN: typeof HE = {
     surveyRefresh: 'Refresh',
     surveyRefreshing: 'Loading…',
     surveyLoading: 'Loading results…',
+    surveyError: "Couldn't load the survey results. Try again.",
     surveyChoiceCounts: 'Responses per option',
     surveyResponseCount: ({ n }: { n: number }) => `${n} responses`,
     surveyNoResponses: 'No responses to this task yet.',
@@ -1788,7 +2133,6 @@ const EN: typeof HE = {
     feedbackIssueOther: 'Other',
     feedbackCommentsTitle: ({ n }: { n: number }) => `Free comments (${n})`,
     feedbackNoComments: 'No free comments.',
-    feedbackAnon: 'Participant',
     feedbackViewResponse: 'View full response',
     feedbackResponseTitle: 'Participant response',
     feedbackNoAnswer: 'Not answered',
@@ -1803,8 +2147,15 @@ const EN: typeof HE = {
     statusLive: 'Live',
     statusFinished: 'Finished',
     participants: ({ n, max }: { n: number; max: string }) => `${n} / ${max} participants`,
-    activeAlerts: ({ n }: { n: number }) => `🆘 Active alerts (${n})`,
-    alertType: (type: string) => (type === 'sos' ? 'SOS' : type === 'technical' ? 'Technical' : type === 'stationary' ? 'Not moving' : type),
+    activeAlerts: ({ n }: { n: number }) => `${n} awaiting acknowledgement`,
+    // Alert types are STORED values. A new one must never reach the organizer
+    // exactly as the database holds it.
+    alertTypeSos: 'SOS',
+    alertTypeTechnical: 'Technical fault',
+    alertTypeStationary: 'Not moving',
+    unknownAlertType: ({ id }: { id: string }) => `unidentified alert ${id}`,
+    unknownTaskType: ({ id }: { id: string }) => `unidentified task type ${id}`,
+    unknownIssue: ({ id }: { id: string }) => `unidentified issue ${id}`,
     map: 'map',
     acknowledge: 'Acknowledge',
     startAllTeams: 'Start all teams',
@@ -1816,7 +2167,6 @@ const EN: typeof HE = {
     staffNamePrompt: 'Staff member name?',
     staffInviteFailed: 'Could not create the staff PIN. Check your connection and try again.',
     staffPinLabel: 'Staff PIN:',
-    staffPinShareNote: '· share with your staff to sign in on the play app.',
     staffLinkCopy: 'Copy staff link',
     staffLinkNote: 'The link fills in the run details. Staff just type the PIN above.',
     staffLinkQrAlt: 'Staff sign in QR code',
@@ -1828,19 +2178,25 @@ const EN: typeof HE = {
     finalizeFailed: 'Could not finalize the run. Check your connection and try again.',
     announcementSent: 'Announcement sent.',
     flashSent: 'Flash mission sent.',
-    skipConfirm: "Skip this team's current stage?",
     skipFailed: 'Could not skip. Check your connection and try again.',
+    // Single mission skip (change: skip-single-task)
+    skipTaskFailed: 'Could not skip the mission. Check your connection and try again.',
+    skipTaskDone: ({ team }: { team: string }) => `The current mission of ${team} was skipped.`,
     newAlertTitleFlash: ({ n }: { n: number }) => `🆘 (${n}) new alert`,
     teamsTitle: 'Teams',
     noOneJoinedTitle: 'No teams yet',
     noOneJoinedYet: 'No one has joined yet. Share the access code.',
     stageDone: ({ n }: { n: number }) => `${n} done`,
-    teamStatusFinished: 'finished',
-    teamStatusWaiting: 'waiting',
+    // Statuses, not nouns: the line should read as a sentence about the team.
+    teamStatusFinished: 'has finished',
+    teamStatusWaiting: 'waiting to start',
     teamStatusBetween: 'between stages',
-    teamStageLabel: ({ n }: { n: number }) => `stage ${n}`,
-    skip: 'skip',
-    scoreAdjustmentPrompt: 'Score adjustment (+bonus / −fine):',
+    teamStageLabel: ({ n }: { n: number }) => `on stage ${n}`,
+    // The scope of the skip is on the button, not only in the dialog
+    // (change: run-console-clarity).
+    skipStage: 'Skip the stage',
+    skipTask: 'Skip the mission',
+    scoreAdjustmentPrompt: 'Adjust score, plus for a bonus or minus for a fine:',
     scoreAdjustmentInvalid: 'Enter a whole number of points: 50 for a bonus, or minus 25 for a fine.',
     liveTeamMap: '📍 Live team map',
     liveStandings: '📊 Live standings',
@@ -1866,14 +2222,14 @@ const EN: typeof HE = {
     waitingForTeams: 'Waiting for teams to report their location…',
 
     // ── Disclosure groups (change: run-console-progressive-disclosure) ──
-    sectionsHeader: 'Sections',
-    groupTeams: 'Teams and standings',
-    groupModeration: 'Photos and messages from the field',
-    groupMechanics: 'Game systems',
-    groupShare: 'Share and screens',
-    groupAfter: 'After the run',
-    groupUnreadChats: ({ n }: { n: number }) => `${n} new chats`,
-    groupHotZoneOn: 'Hot zone running',
+    // Names a creator can picture, not names of a data structure
+    // (change: run-console-clarity).
+    sectionsHeader: 'What to show',
+    groupTeams: 'Teams and scores',
+    groupModeration: 'Coming in from the field',
+    groupMechanics: 'Surprises and game control',
+    groupShare: 'Links and screens',
+    groupAfter: 'Reports and analytics',
 
     // ── Live task availability (change: live-task-pause) ──
     taskAvailTitle: 'Task availability',
@@ -1924,7 +2280,8 @@ const EN: typeof HE = {
     adjustScoreConfirmTitle: 'Adjust score',
     adjustScoreConfirm: ({ team, delta }: { team: string; delta: string }) => `Adjust the score of ${team}? The change recorded: ${delta} points.`,
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `Score of ${team} updated by ${delta} points.`,
-    skipAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
+    skipStageAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
+    skipTaskAria: ({ team }: { team: string }) => `Skip the current mission of ${team}`,
     // ── Releasing a team stuck outside the play area ──
     outOfBoundsBadge: 'Outside the play area, not receiving tasks',
     // Held-team visibility: which team the start held back, not just how many.
@@ -1950,6 +2307,190 @@ const EN: typeof HE = {
     // ── Names instead of identifiers ──
     unknownTeam: ({ id }: { id: string }) => `unidentified team ${id}`,
     unknownTask: ({ id }: { id: string }) => `unidentified task ${id}`,
+
+    // ── What needs you right now (change: run-console-clarity) ──
+    // This strip is meant to be empty most of the time. A strip that is always
+    // full is a strip nobody reads.
+    signalsTitle: 'Needs you now',
+    signal: {
+      sos: ({ n }: { n: number }) => `${n} open distress calls`,
+      outOfBounds: ({ n }: { n: number }) => `${n} teams outside the play area`,
+      photoOverdue: ({ n }: { n: number }) => `${n} submissions have waited too long`,
+      teamsStuck: ({ n }: { n: number }) => `${n} teams are stuck`,
+      heldForConsent: ({ n }: { n: number }) => `${n} teams held for guardian approval`,
+      photoPending: ({ n }: { n: number }) => `${n} submissions waiting for review`,
+      unreadChat: ({ n }: { n: number }) => `${n} unread conversations`,
+      tasksPaused: ({ n }: { n: number }) => `${n} tasks are paused`,
+      nobodyJoined: () => 'Nobody has joined yet',
+      notStarted: ({ n }: { n: number }) => `${n} teams have not started`,
+    },
+
+    // ── What a closed section says about itself (change: run-console-clarity) ──
+    chip: {
+      attention: ({ n }: { n: number }) => `${n} need attention`,
+      pendingPhotos: ({ n }: { n: number }) => `${n} waiting for review`,
+      unreadChats: ({ n }: { n: number }) => `${n} new chats`,
+      hotZone: () => 'Hot zone running',
+      pausedTasks: ({ n }: { n: number }) => `${n} tasks paused`,
+      teams: ({ n }: { n: number }) => `${n} teams`,
+      shareLinks: ({ n }: { n: number }) => `${n} links`,
+      reports: ({ n }: { n: number }) => `${n} reports`,
+      panels: ({ n }: { n: number }) => `${n} cards`,
+    },
+    sectionEmptiedNotice: ({ section }: { section: string }) =>
+      `The section you were on is empty now, so we moved you to "${section}".`,
+
+    // ── What this control actually does (change: run-console-clarity) ──
+    confirmTitle: 'Before you go ahead',
+    consequence: {
+      startTeams: 'Starts the clock for every team that has joined, and the game begins for them. The clock cannot be wound back.',
+      publishStandings: 'Makes the standings visible to every player and to anyone holding the public link.',
+      revealStandings: 'Reveals the final standings to every player. This is the big moment, and it cannot be hidden again.',
+      broadcastAnnouncement: 'Sends a message that stays on every team\'s screen until you send another one.',
+      deactivateAnnouncement: 'Takes the message off every team\'s screen.',
+      pushFlashMission: 'Sends a bonus mission to every team at once. It disappears on its own after the set time.',
+      activateHotZone: 'Multiplies the points of every task inside the area you picked, for a limited time.',
+      deactivateHotZone: 'Switches the hot zone off. Tasks inside it go back to their normal points.',
+      pauseTask: 'Stops routing teams to this task. A team already on it can still finish it.',
+      closeTask: 'Takes the task out of play for this run. A team already on it can still finish it.',
+      resumeTask: 'Puts the task back in play, and teams start being routed to it again.',
+      createZone: 'Adds a territory teams can capture from now on.',
+      deleteZone: 'Removes the territory from the game. Captures already recorded are kept.',
+      createTrackable: 'Adds an item teams can pick up and hand to each other.',
+      hideFeedPhoto: 'Hides the photo from every participant\'s feed and from any screen projecting it.',
+      finalizeRun: 'Ends the game for every team and computes the final standings. There is no way back.',
+      acknowledgeAlert: 'Marks the alert as handled and takes it off the list. It will not come back.',
+      clearTeamOutOfBounds: 'Lets the team receive tasks again, even if its location is still not accurate.',
+      skipStage: 'Skips the team\'s whole current stage. The rest of its tasks in that stage are closed for them.',
+      skipTask: 'Skips the team\'s current mission. The team stays in the stage and moves on to the rest of it.',
+      adjustTeamScore: 'Records a manual score change for the team. The change is kept in the audit log.',
+      approvePhoto: 'Awards the points and releases the team to continue.',
+      rejectPhoto: 'Sends the submission back to the team with no points.',
+      sendChatReply: 'Sends a message to this team only.',
+      refreshStandings: 'Recomputes the standings. It does not change who can see them.',
+      inviteStaff: 'Creates a one time code for a staff member. You hand it over yourself.',
+      printStationQr: 'Opens a printable sheet with a code for every smart station in the game.',
+      copyShareLink: 'Copies the link to your clipboard. Nothing is sent to anyone.',
+      loadHeatmap: 'Loads the movement data for this run. It can take a few seconds.',
+      loadAnalytics: 'Loads the per task completion figures.',
+      exportAnalyticsCsv: 'Downloads the table as a file on your computer.',
+      refreshSurvey: 'Reloads the survey results.',
+    },
+    sharePublishesNote: 'Sharing this link publishes the standings to every player.',
+    moreActions: 'More actions',
+    moreActionsAria: ({ team }: { team: string }) => `More actions for ${team}`,
+
+    // ── A name, an explanation and an empty state per card (change: run-console-clarity) ──
+    panel: {
+      joinShare: {
+        title: 'Access code',
+        help: 'The code and link participants need in order to join this run.',
+      },
+      startTeams: {
+        title: 'Run controls',
+        help: 'The everyday actions: start the teams, refresh the standings, invite staff.',
+      },
+      alerts: {
+        title: 'Open alerts',
+        help: 'Distress calls and faults teams raised from the field that you have not acknowledged.',
+      },
+      broadcast: {
+        title: 'Announcement to players',
+        help: 'A message that stays on every team\'s screen until you send another one.',
+      },
+      liveMap: {
+        title: 'Live team map',
+        help: 'Where each team is right now, from the location their phones report.',
+      },
+      teams: {
+        title: 'Teams',
+        help: 'Every team in the run, their score, and who needs attention right now.',
+        empty: 'No one has joined yet. Share the access code.',
+      },
+      liveStandings: {
+        title: 'Live standings',
+        help: 'The standings as computed right now. Only you can see them until you publish.',
+      },
+      finalStandings: {
+        title: 'Final standings',
+        help: 'The final results of the run, as computed when it ended.',
+      },
+      hotZone: {
+        title: 'Hot zone',
+        help: 'An area on the map where every task is worth more points for a limited time.',
+      },
+      flashMission: {
+        title: 'Flash mission',
+        help: 'A surprise bonus pushed to every team at once that then disappears on its own.',
+      },
+      trackables: {
+        title: 'Trackable collectibles',
+        help: 'Virtual items teams carry and hand off. See which team is holding each one.',
+        empty: 'No items yet.',
+      },
+      zones: {
+        title: 'Capturable territory',
+        help: 'Areas on the map teams compete to capture. See who holds each one.',
+        empty: 'No zones yet.',
+      },
+      taskAvailability: {
+        title: 'Task availability',
+        help: 'Pause or close a task that cannot be done today. This applies to this run only.',
+        empty: 'This game has no tasks yet.',
+      },
+      photoReview: {
+        title: 'Submission review',
+        help: 'Submissions waiting for your approval. Until you approve, that team is waiting in the street.',
+        empty: 'Nothing is waiting for you.',
+      },
+      feed: {
+        title: 'Photo feed',
+        help: 'The photos teams shared during the game, exactly as everyone else sees them.',
+        empty: 'No photos have been shared yet.',
+      },
+      chat: {
+        title: 'Team chat',
+        help: 'Conversations between the teams and you. Answer questions from the field here.',
+        empty: 'No team has written to you yet.',
+      },
+      shareScreens: {
+        title: 'Links and screens',
+        help: 'Every link for this run in one place, each one saying who it is for.',
+      },
+      stationQr: {
+        title: 'Station QR codes',
+        help: 'A printable sheet with a code for every smart station. Put them up before the event.',
+      },
+      staffInvite: {
+        title: 'Staff sign in',
+        help: 'The code and link a staff member needs in order to sign into this run.',
+      },
+      runSummary: {
+        title: 'Run summary',
+        help: 'One report folding the standings, the completion figures and the feedback. Also emailed to the organizer.',
+        empty: 'No data yet.',
+      },
+      analytics: {
+        title: 'Per task analytics',
+        help: 'How many teams finished each task, how long it took and how many hints were taken. Useful mid run too.',
+        empty: 'No data yet.',
+      },
+      heatmap: {
+        title: 'Movement heatmap',
+        help: 'Where teams spent the most time moving around during the run.',
+        empty: 'No location data for this run.',
+      },
+      feedback: {
+        title: 'Player feedback',
+        help: 'The answers to the survey players fill in on the finish screen.',
+        empty: 'No responses yet.',
+      },
+      survey: {
+        title: 'Survey results',
+        help: 'The answers to the survey tasks you wrote into the game.',
+        empty: 'No survey responses yet.',
+      },
+    },
 
     // ── In place explanations ──
     tipFlashMissionTitle: 'Flash mission',
@@ -2394,6 +2935,85 @@ const EN: typeof HE = {
     launchFailed: 'Launch failed',
     newFieldLabel: 'New field',
     loadingMapShort: 'Loading map…',
+  },
+  // ── First-run guided tour (change: creator-guided-tour) ──
+  // The step order and every transition live in lib/creatorOnboarding.ts; this is
+  // only the copy.
+  tour: {
+    dialogLabel: 'Guided tour',
+    helpLabel: 'Open the guided tour',
+    next: 'Next',
+    back: 'Back',
+    skip: 'Skip the tour',
+    finish: 'Done',
+    restart: 'Play the tour again',
+    progress: ({ step, total }: { step: number; total: number }) => `Step ${step} of ${total}`,
+    takeMeThere: 'Take me there',
+    settingsTitle: 'Guided tour',
+    settingsDesc: 'A short walk through every screen: building a game, launching it, and running it live. You can play it again whenever you like.',
+    settingsBtn: 'Start the tour',
+    steps: {
+      welcome: {
+        title: 'Welcome',
+        body: 'A short tour of everything here: building a game, the map and its tasks, launching, and running it live. You can skip it at any moment and bring it back from settings.',
+      },
+      newGame: {
+        title: 'Start a new game',
+        body: 'Every game starts here. Pick a ready made template or a blank page, and see how it is played and how it is scored before it is created.',
+      },
+      gameList: {
+        title: 'Your games',
+        body: 'Each card shows stages, tasks and how many times it was played, and leads to the editor, a rehearsal run, sharing, or a run happening right now.',
+      },
+      builderStages: {
+        title: 'Stages set the order',
+        body: 'A game is a list of stages. A team reaches the next stage only after finishing the current one, and the last stage ends the game.',
+      },
+      builderTasks: {
+        title: 'Tasks are what people do out there',
+        body: 'Add tasks to the open stage, drag them to reorder, and drag one onto another stage in the stage list to move it.',
+      },
+      builderTaskTypes: {
+        title: 'Nine kinds of task',
+        body: 'A check in, a self report, a code at a staffed stop, a photo, a quiz, a number, an automatic arrival, a multi step puzzle at one stop, and a survey. Pick the one that matches what you want people to do.',
+      },
+      builderLocation: {
+        title: 'Put it on the map',
+        body: 'Every task that happens somewhere gets a pin and an arrival radius. A task that can be done from anywhere is marked as one and takes no room on the map.',
+      },
+      builderScoring: {
+        title: 'Scoring and stage rules',
+        body: 'Rank by finishing time alone, by fixed points with a speed bonus, or by difficulty and speed together. Stage settings also hold hints, time limits, and how many tasks a stage needs.',
+      },
+      builderPreview: {
+        title: 'Preview before anyone plays',
+        body: 'The preview tab shows the whole route on a map, and the game exactly as a player receives it.',
+      },
+      builderLaunch: {
+        title: 'Readiness, then launch',
+        body: 'The readiness list gathers everything that would refuse a launch. A test run is a free rehearsal for up to two players, and a real launch opens a join code for everyone.',
+      },
+      runConsole: {
+        title: 'Running it live',
+        body: 'While a run is on you get a live board, a team map, chat, photo review, announcements and distress alerts on one screen. You reach it from the game card or the run bar.',
+      },
+      gallery: {
+        title: 'Borrow from the gallery',
+        body: 'Public games and a searchable task library. Copy a ready made task into your own game instead of writing it from scratch.',
+      },
+      wallet: {
+        title: 'Credits and runs',
+        body: 'Your balance, what each run costs, and the referral bonuses you have earned.',
+      },
+      settings: {
+        title: 'Language, account, and this tour',
+        body: 'Settings holds the interface language, how you sign in, an export of your data, and the button that plays this tour again.',
+      },
+      finish: {
+        title: 'That is everything',
+        body: 'Build a game, do a test run, then launch it for real. The question mark at the top of the screen brings this tour back whenever you want it.',
+      },
+    },
   },
 };
 

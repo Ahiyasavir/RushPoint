@@ -7,6 +7,7 @@ import { searchTaskLibrary, incrementTaskCopyCount } from '../services/calls';
 import { Button, Card, Input, Spinner, TagChips } from './ui';
 import { dialog } from './dialog';
 import { useT } from './LanguageContext';
+import GalleryTaskDetailModal from './GalleryTaskDetailModal';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -50,6 +51,10 @@ export default function TaskLibrary({ onInsert, onClose }: {
   };
   const [q, setQ] = useState('');
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
+  // The mission a creator pressed to READ before committing it to a stage
+  // (change: gallery-mission-detail). No fetch: searchTaskLibrary already returned
+  // the whole sanitized document, so this is the row's own payload.
+  const [detail, setDetail] = useState<PublicTask | null>(null);
 
   async function run() {
     setTasks(null);
@@ -88,7 +93,20 @@ export default function TaskLibrary({ onInsert, onClose }: {
           {!tasks ? <Spinner label={b.libraryLoading} /> : tasks.length === 0 ? (
             <p className="text-center text-zinc-500 py-10 text-sm">{b.libraryEmpty}</p>
           ) : tasks.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 border border-glass-border rounded-lg p-3">
+            // A row is a role="button" div, not a <button>: it contains the insert
+            // control, and nested interactive content inside a <button> is invalid
+            // HTML and unreachable by keyboard in Safari. Enter/Space are wired by
+            // hand to keep button semantics.
+            <div key={t.id} role="button" tabIndex={0}
+              aria-label={t.title}
+              onClick={() => setDetail(t)}
+              onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetail(t); }
+              }}
+              className="flex items-center gap-3 border border-glass-border rounded-lg p-3 cursor-pointer
+                transition-colors hover:bg-[--surface-2]
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-zinc-200 truncate">{t.title}</div>
                 <div className="text-xs text-zinc-500 truncate">{t.description}</div>
@@ -101,11 +119,21 @@ export default function TaskLibrary({ onInsert, onClose }: {
                     above. Nothing ever showed them to the creator choosing. */}
                 <TagChips tags={t.tags} max={4} more={gl.moreTags} className="mt-1" />
               </div>
-              <Button variant="subtle" onClick={() => pick(t)}>{b.libraryInsert}</Button>
+              {/* The one-tap insert path is preserved for creators who already
+                  know the mission, so pressing it must not also open the detail. */}
+              <Button variant="subtle" onClick={(e) => { e.stopPropagation(); pick(t); }}>{b.libraryInsert}</Button>
             </div>
           ))}
         </div>
       </Card>
+
+      {detail && (
+        <GalleryTaskDetailModal
+          task={detail}
+          onClose={() => setDetail(null)}
+          onUse={() => pick(detail)}
+        />
+      )}
     </div>
   );
 }

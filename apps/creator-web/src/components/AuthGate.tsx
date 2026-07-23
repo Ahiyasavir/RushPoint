@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, lazy, Suspense, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, Suspense, type ReactNode } from 'react';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { User } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import {
@@ -18,7 +19,7 @@ import { ToastHost } from './toast';
 import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 
-const LegalPage = lazy(() => import('../pages/LegalPage'));
+const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
 
 const LEGAL_PATHS = ['/privacy', '/terms'];
 

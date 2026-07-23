@@ -7,6 +7,7 @@ import { Badge, Button, Card, EmptyState, Input, Skeleton, TagChips } from '../c
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import GalleryMap, { type MapPoint } from '../components/GalleryMap';
+import GalleryTaskDetailModal from '../components/GalleryTaskDetailModal';
 import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useT } from '../components/LanguageContext';
@@ -30,6 +31,10 @@ export default function GalleryPage() {
   const [games, setGames] = useState<PublicGame[] | null>(null);
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  // The mission whose full detail is open (change: gallery-mission-detail). The
+  // whole sanitized document is already in `tasks`, so pressing a card opens the
+  // detail from memory and fetches nothing.
+  const [detailTask, setDetailTask] = useState<PublicTask | null>(null);
   // Like state per item id, seeded from the search response's `likedIds` so the
   // heart renders correctly on first paint. All arithmetic lives in lib/likeState.
   const [likes, setLikes] = useState<Record<string, LikeView>>({});
@@ -253,29 +258,51 @@ export default function GalleryPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {tasks.map((tk) => (
-            <Card key={tk.id} className={`p-4 flex flex-col gap-2.5 scroll-mt-20 transition ${focusId === tk.id ? 'ring-2 ring-rp-fire' : ''}`}>
-              <h3 id={`task-${tk.id}`} className="font-brand font-bold text-sm text-[--ink-1] leading-snug">{tk.title}</h3>
-              <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{tk.description}</p>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
-                <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>
-                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                <span>{gl.metaDiff(tk.difficulty)}</span>
-                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                <span>{gl.metaPts(tk.pointValue)}</span>
-                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                <span>{gl.metaCopies(tk.copyCount)}</span>
-              </div>
-              {/* Tags (change: game-task-tags) — searchTaskLibrary already returns
-                  them; TaskLibrary only ever copied them into the new task. */}
-              <TagChips tags={tk.tags} more={gl.moreTags} />
-              <div className="flex items-center justify-between gap-2 mt-auto">
-                <span className="text-[11px] text-[--ink-3]">{gl.from(tk.sourceGameTitle ?? '')}</span>
-                <LikeButton {...likeProps('task', tk.id)} />
+            <Card key={tk.id} className={`scroll-mt-20 transition ${focusId === tk.id ? 'ring-2 ring-rp-fire' : ''}`}>
+              {/* Pressing a mission opens its full detail (change:
+                  gallery-mission-detail). A role="button" div, not a <button>: the
+                  card contains the interactive like control, and nested
+                  interactive content inside a <button> is invalid HTML and
+                  unreachable by keyboard in Safari. */}
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={tk.title}
+                onClick={() => setDetailTask(tk)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailTask(tk); }
+                }}
+                className="p-4 flex flex-col gap-2.5 h-full cursor-pointer rounded-2xl
+                  focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+              >
+                <h3 id={`task-${tk.id}`} className="font-brand font-bold text-sm text-[--ink-1] leading-snug">{tk.title}</h3>
+                <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{tk.description}</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                  <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>
+                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                  <span>{gl.metaDiff(tk.difficulty)}</span>
+                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                  <span>{gl.metaPts(tk.pointValue)}</span>
+                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                  <span>{gl.metaCopies(tk.copyCount)}</span>
+                </div>
+                {/* Tags (change: game-task-tags) — searchTaskLibrary already returns
+                    them; TaskLibrary only ever copied them into the new task. */}
+                <TagChips tags={tk.tags} more={gl.moreTags} />
+                <div className="flex items-center justify-between gap-2 mt-auto">
+                  <span className="text-[11px] text-[--ink-3]">{gl.from(tk.sourceGameTitle ?? '')}</span>
+                  <LikeButton {...likeProps('task', tk.id)} />
+                </div>
               </div>
             </Card>
           ))}
         </div>
       ))}
+
+      {detailTask && (
+        <GalleryTaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} />
+      )}
     </div>
   );
 }
@@ -297,7 +324,11 @@ function LikeButton({ view, busy, gl, onToggle }: {
   return (
     <button
       type="button"
-      onClick={onToggle}
+      // The mission card around this button is itself pressable (it opens the
+      // detail), so a like must stop here or every heart tap would also open a
+      // modal on top of the card the creator was scanning.
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      onKeyDown={(e) => e.stopPropagation()}
       disabled={busy}
       aria-pressed={view.liked}
       aria-label={label}

@@ -19,7 +19,10 @@ function task(over: Partial<Task>): Task {
   };
 }
 function stage(title: string, tasks: Task[], over: Partial<Stage> = {}): Stage {
-  return { id: uuid(), order: 0, title, tasks, ...over };
+  // requiredTaskCount defaults to 1 (change: adaptive-difficulty-routing) — same
+  // authoring default as the Builder's blankStage: a multi-task level means "do the
+  // best-suited ONE" unless the template says otherwise via `over`.
+  return { id: uuid(), order: 0, title, requiredTaskCount: 1, tasks, ...over };
 }
 
 // Shorthands for common task kinds (keeps the templates readable).

@@ -41,6 +41,13 @@ export type RunConsoleState = {
   hasStaffPin: boolean;
   /** null = not loaded yet (the panel must mount so it can load). */
   surveyResultCount: number | null;
+  /** Teams the attention classifier flags. Rendered ONLY inside the teams panel
+   *  before this change, so the rail said "6 teams" while three were stuck. */
+  attentionTeamCount: number;
+  /** Stops taken out of play for THIS run (`Run.taskStatusOverrides`). */
+  pausedTaskCount: number;
+  /** How many shareable artifacts the share surface is offering. */
+  shareLinkCount: number;
 };
 
 /** The at rest summary a folded group shows on its header. */
@@ -50,6 +57,10 @@ export type GroupSummary = {
   unreadChats?: number;
   hotZoneActive?: boolean;
   teamCount?: number;
+  attentionTeams?: number;
+  pausedTasks?: number;
+  shareLinks?: number;
+  reportCount?: number;
 };
 
 export type RunConsoleGroup = {
@@ -73,7 +84,6 @@ export const GROUP_ORDER: GroupId[] = [
  */
 export const PANEL_GROUP: Record<PanelId, GroupId> = {
   joinShare: 'primary',
-  stationQr: 'primary',
   startTeams: 'primary',
   alerts: 'primary',
   broadcast: 'primary',
@@ -97,6 +107,11 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
 
   shareScreens: 'shareAndScreens',
   staffInvite: 'shareAndScreens',
+  // The printable station QR sheet IS a share artifact (change:
+  // run-console-clarity). It used to be pinned unconditionally, so a sheet the
+  // host prints once, before the event, held the widest pixels on the page for
+  // the whole run and pushed the teams table and the photo queue below the fold.
+  stationQr: 'shareAndScreens',
 
   runSummary: 'afterTheRun',
   analytics: 'afterTheRun',
@@ -145,10 +160,16 @@ function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
     // Nothing to take out of play once the run has ended.
     case 'taskAvailability': return live;
 
-    // Human in the loop queues, which already hide themselves when empty.
-    case 'photoReview': return s.photoQueueCount > 0;
+    // Human in the loop queues. These used to hide themselves when empty, which
+    // made the RAIL change shape mid run: approving the last photo deleted the
+    // destination the organizer was standing on and the console teleported them
+    // somewhere else with no explanation (change: run-console-clarity). Both are
+    // present for the whole live run and say "nothing waiting" out loud instead.
+    case 'photoReview': return live || s.photoQueueCount > 0;
+    case 'chat': return live;
+    // The feed stays count gated on purpose: it is a wall of photographs, not a
+    // work queue, and an empty one is not a state anybody has to act on.
     case 'feed': return s.feedItemCount > 0;
-    case 'chat': return live && s.chatThreadCount > 0;
 
     // Share surface. The access code always exists; the staff card only after
     // a PIN has been minted.
@@ -157,22 +178,87 @@ function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
 
     // Reports. Survey results are also useful mid run (a live poll), and the
     // panel has to mount to load them, so `null` (not loaded) keeps it visible.
+    // These three read POST RUN artifacts (the emailed summary, the whole GPS
+    // track, the finish screen survey) and are empty or misleading mid run.
     case 'runSummary':
-    case 'analytics':
     case 'heatmap':
     case 'feedback': return !live;
+    // Per task analytics are NOT post run: `getRunAnalytics` is not finished
+    // gated server side, and the decision they inform (take a failing stop out
+    // of play) can only be made while the run is still going
+    // (change: run-console-clarity).
+    case 'analytics': return true;
     case 'survey': return s.surveyResultCount === null || s.surveyResultCount > 0;
   }
 }
 
+/**
+ * What a rail entry says about a section nobody is looking at.
+ *
+ * An EXHAUSTIVE switch with no `default:` on purpose: the old version fell
+ * through to a bare `panelCount` for `shareAndScreens` and `afterTheRun`, and
+ * the page rendered nothing for a bare panel count, so two rail buttons were
+ * permanently mute — including the one holding every post run report. A new
+ * GroupId now fails typecheck instead of shipping silent.
+ */
 function summaryFor(group: GroupId, panels: PanelId[], s: RunConsoleState): GroupSummary {
   const base: GroupSummary = { panelCount: panels.length };
   switch (group) {
-    case 'teamsAndScores': return { ...base, teamCount: s.teamCount };
-    case 'moderation': return { ...base, pendingPhotos: s.pendingPhotoCount, unreadChats: s.unreadChatThreads };
-    case 'gameMechanics': return { ...base, hotZoneActive: s.hotZoneActive };
-    default: return base;
+    // The pinned zone has no rail entry, so it has nothing to report.
+    case 'primary': return base;
+    case 'teamsAndScores':
+      return { ...base, teamCount: s.teamCount, attentionTeams: s.attentionTeamCount };
+    case 'moderation':
+      return { ...base, pendingPhotos: s.pendingPhotoCount, unreadChats: s.unreadChatThreads };
+    case 'gameMechanics':
+      return { ...base, hotZoneActive: s.hotZoneActive, pausedTasks: s.pausedTaskCount };
+    case 'shareAndScreens':
+      return { ...base, shareLinks: s.shareLinkCount };
+    case 'afterTheRun':
+      return { ...base, reportCount: panels.length };
   }
+}
+
+// ── Rail chips (change: run-console-clarity) ─────────────────────────────────
+//
+// The page must not decide what a rail entry says either, or "the badge and the
+// panel cannot disagree" stops being true one refactor later. This turns a
+// summary into an ordered list of chip descriptors; the page maps a key to
+// translated copy and a colour, and nothing else.
+
+export type SummaryChipKey =
+  | 'attention' | 'pendingPhotos' | 'unreadChats' | 'hotZone'
+  | 'pausedTasks' | 'teams' | 'shareLinks' | 'reports' | 'panels';
+
+export type SummaryChip = {
+  key: SummaryChipKey;
+  value: number;
+  tone: 'neutral' | 'warn' | 'alert';
+};
+
+/**
+ * Never empty. A section with nothing else to say reports how many panels it
+ * holds, which is the fallback that makes "a permanently blank rail button"
+ * unreachable rather than merely unlikely.
+ */
+export function summaryChips(summary: GroupSummary): SummaryChip[] {
+  const s = summary ?? { panelCount: 0 };
+  const chips: SummaryChip[] = [];
+  const positive = (n: number | undefined): boolean => typeof n === 'number' && Number.isFinite(n) && n > 0;
+
+  if (positive(s.attentionTeams)) chips.push({ key: 'attention', value: s.attentionTeams!, tone: 'warn' });
+  if (positive(s.pendingPhotos)) chips.push({ key: 'pendingPhotos', value: s.pendingPhotos!, tone: 'warn' });
+  if (positive(s.unreadChats)) chips.push({ key: 'unreadChats', value: s.unreadChats!, tone: 'warn' });
+  if (s.hotZoneActive) chips.push({ key: 'hotZone', value: 1, tone: 'alert' });
+  if (positive(s.pausedTasks)) chips.push({ key: 'pausedTasks', value: s.pausedTasks!, tone: 'warn' });
+  if (positive(s.teamCount)) chips.push({ key: 'teams', value: s.teamCount!, tone: 'neutral' });
+  if (positive(s.shareLinks)) chips.push({ key: 'shareLinks', value: s.shareLinks!, tone: 'neutral' });
+  if (positive(s.reportCount)) chips.push({ key: 'reports', value: s.reportCount!, tone: 'neutral' });
+
+  if (chips.length === 0) {
+    return [{ key: 'panels', value: Number.isFinite(s.panelCount) ? s.panelCount : 0, tone: 'neutral' }];
+  }
+  return chips;
 }
 
 /**
@@ -243,9 +329,48 @@ export function buildRunConsoleSections(plan: RunConsolePlan): RunConsoleSection
 
 /**
  * What an organizer needs while something is going wrong: who is stuck, who is
- * out of bounds, who is held for consent, and where everyone stands.
+ * out of bounds, who is held for consent, and where everyone stands. Kept as an
+ * alias for the LIVE default so no existing caller changes meaning.
  */
 export const DEFAULT_SECTION: SectionId = 'teamsAndScores';
+
+/**
+ * Where the console opens. This used to be a constant, so a FINISHED run opened
+ * on a live teams table while every report the host came for sat one navigation
+ * away (change: run-console-clarity).
+ */
+export function defaultSection(status: RunStatus): SectionId {
+  return status === 'finished' ? 'afterTheRun' : DEFAULT_SECTION;
+}
+
+/** Why the console is showing the section it is showing. */
+export type SectionReason = 'requested' | 'sectionEmptied' | 'default' | 'firstAvailable' | 'none';
+
+export type SectionResolution = { id: SectionId | null; reason: SectionReason };
+
+/**
+ * Which section to show, AND why. The console used to teleport: a section that
+ * emptied under the organizer's feet was replaced silently, which reads as the
+ * app losing their place. `sectionEmptied` is reported only for a value that is
+ * a REAL section id and simply is not present right now, so a junk or absent
+ * stored value never earns a sentence.
+ */
+export function resolveSectionWithReason(
+  sections: RunConsoleSection[],
+  requested: string | null | undefined,
+  status: RunStatus = 'live',
+): SectionResolution {
+  if (!Array.isArray(sections) || sections.length === 0) return { id: null, reason: 'none' };
+  if (typeof requested === 'string' && sections.some((s) => s.id === requested)) {
+    return { id: requested as SectionId, reason: 'requested' };
+  }
+  const wasReal = typeof requested === 'string'
+    && (SECTION_ORDER as string[]).includes(requested);
+  const fallback = defaultSection(status);
+  const id = sections.some((s) => s.id === fallback) ? fallback : sections[0].id;
+  if (wasReal) return { id, reason: 'sectionEmptied' };
+  return { id, reason: id === fallback ? 'default' : 'firstAvailable' };
+}
 
 /**
  * Which section to show. A stale, unknown or malformed stored value degrades to
@@ -256,13 +381,9 @@ export const DEFAULT_SECTION: SectionId = 'teamsAndScores';
 export function resolveSection(
   sections: RunConsoleSection[],
   requested: string | null | undefined,
+  status: RunStatus = 'live',
 ): SectionId | null {
-  if (sections.length === 0) return null;
-  if (typeof requested === 'string' && sections.some((s) => s.id === requested)) {
-    return requested as SectionId;
-  }
-  if (sections.some((s) => s.id === DEFAULT_SECTION)) return DEFAULT_SECTION;
-  return sections[0].id;
+  return resolveSectionWithReason(sections, requested, status).id;
 }
 
 /** localStorage key for one run's selected section. */
@@ -374,20 +495,33 @@ function assignWithPriority(
 }
 
 /**
- * The always on screen zone. The join/QR card is the one state dependent rank:
- * while nobody has joined it is the ONLY thing the organizer is doing, and once
- * teams are in it becomes reference material. It is re-ranked, never hidden, so
- * a late joiner is always servable.
+ * The panels the always on screen zone actually keeps, in the order it wants
+ * them. The join card is the one state dependent rank: while nobody has joined
+ * it is the ONLY thing the organizer is doing, and once teams are in it becomes
+ * reference material. It is re-ranked, never hidden, so a late joiner is always
+ * servable. (The printable station QR sheet used to be pinned beside it for the
+ * whole event; it now lives on the share surface, see PANEL_GROUP.)
  */
+export function pinnedPanelIds(plan: RunConsolePlan, opts: { teamCount: number }): PanelId[] {
+  const panels = pinnedPanels(plan);
+  const rank = opts && opts.teamCount === 0
+    ? (id: string) => (id === 'joinShare' ? -1 : panelPriority(id))
+    : panelPriority;
+  return [...panels]
+    .map((id, index) => ({ id, index }))
+    .sort((a, b) => rank(a.id) - rank(b.id) || a.index - b.index)
+    .map((e) => e.id);
+}
+
+/** The always on screen zone, laid out over the viewport's lanes. */
 export function buildPinnedLayout(
   plan: RunConsolePlan,
   columns: ColumnCount,
   opts: { teamCount: number },
 ): ColumnLayout {
-  const panels = pinnedPanels(plan);
-  if (columns === 1 || opts.teamCount > 0) return assignPanelColumns(panels, columns);
-  // Nobody has joined: reading the code out IS the job right now.
-  return assignWithPriority(panels, columns, (id) => (id === 'joinShare' ? -1 : panelPriority(id)));
+  const panels = pinnedPanelIds(plan, opts);
+  if (columns === 1) return { columns: [panels], spans: [1], gridColumns: 1 };
+  return assignWithPriority(panels, columns, (id) => panels.indexOf(id as PanelId));
 }
 
 /** How many lanes the viewport can carry. No window ⇒ both false ⇒ a phone. */

@@ -27,6 +27,23 @@ export type ShareArtifact = {
   available: boolean;
   /** Copying or opening this should publish the standings first (audience facing). */
   requiresPublish: boolean;
+  /**
+   * Acting on this RIGHT NOW would actually publish the standings, so the card
+   * must warn BEFORE the click (change: run-console-clarity). Copying the TV
+   * link to preview it used to reveal live standings to every player silently.
+   *
+   * False once the run is finished: after the finish the published flag IS the
+   * host's staged reveal decision (change: manual-leaderboard-reveal) and the
+   * console deliberately does not auto publish, so there is nothing to warn
+   * about. The two conditions are kept in one place so the warning and the
+   * behaviour cannot drift.
+   *
+   * Also false once the standings are ALREADY published: sharing then publishes
+   * nothing, and a card that warns for the rest of the run about something that
+   * happened an hour ago is a warning nobody reads by the time it is true
+   * (change: post-review-fixes B).
+   */
+  publishesOnShare: boolean;
   /** Marked as "after the run" instead of vanishing from the surface. */
   unavailableUntilFinished: boolean;
   /** Marked as "while the run is open" instead of vanishing from the surface. */
@@ -41,11 +58,19 @@ export type ShareArtifactInput = {
   runId: string;
   hasStaffPin: boolean;
   status: RunStatus;
+  /**
+   * Are the standings published to the audience already? Optional, and absence
+   * means "not published" on purpose: a caller that does not know gets the
+   * warning, because a MISSING warning silently reveals live standings to every
+   * player while a spurious one only costs noise.
+   */
+  published?: boolean;
 };
 
 export function buildShareArtifacts(input: ShareArtifactInput): ShareArtifact[] {
   const { playUrl, accessCode, ownerUid, gameId, runId, hasStaffPin, status } = input;
   const finished = status === 'finished';
+  const published = input.published === true;
 
   // Verbatim from the old JoinShare / PostRunLinks / StaffInviteCard components.
   const joinLink = `${playUrl}/?code=${accessCode}`;
@@ -59,16 +84,20 @@ export function buildShareArtifacts(input: ShareArtifactInput): ShareArtifact[] 
     id: ShareArtifactId,
     url: string | null,
     copyValue: string,
-    opts: Partial<Omit<ShareArtifact, 'id' | 'url' | 'copyValue'>> = {},
-  ): ShareArtifact => ({
-    id,
-    url,
-    copyValue,
-    available: opts.available ?? true,
-    requiresPublish: opts.requiresPublish ?? false,
-    unavailableUntilFinished: opts.unavailableUntilFinished ?? false,
-    unavailableAfterFinish: opts.unavailableAfterFinish ?? false,
-  });
+    opts: Partial<Omit<ShareArtifact, 'id' | 'url' | 'copyValue' | 'publishesOnShare'>> = {},
+  ): ShareArtifact => {
+    const requiresPublish = opts.requiresPublish ?? false;
+    return {
+      id,
+      url,
+      copyValue,
+      available: opts.available ?? true,
+      requiresPublish,
+      publishesOnShare: requiresPublish && !finished && !published,
+      unavailableUntilFinished: opts.unavailableUntilFinished ?? false,
+      unavailableAfterFinish: opts.unavailableAfterFinish ?? false,
+    };
+  };
 
   return [
     entry('accessCode', null, accessCode),

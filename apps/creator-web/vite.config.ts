@@ -9,9 +9,20 @@ const TUNNEL_HOSTS = ['.trycloudflare.com', '.ngrok-free.app', '.ngrok-free.dev'
 // origin can host both apps: every asset URL is prefixed `/creator/…` and the
 // reverse proxy (scripts/proxy.mjs) routes that prefix to creator-web. Normal
 // `dev:all` keeps base `/` (creator at http://localhost:5180/) unchanged.
+//
+// ⚠ The two modes MUST write different directories (change: playtest-build-isolation).
+// The always-on playtest serves a PRE-BUILT bundle through `vite preview`. If the
+// gate build (`npm run creator:build`, inside `npm run verify`) wrote the same
+// directory, it would replace the live artifact with a base-`/` build: the proxy
+// then hands every `/assets/*` request to play-web, which answers 200 with its own
+// HTML, and the live creator console is a BLANK PAGE with no error anywhere. So the
+// playtest build lands in `dist-playtest` and the gate keeps `dist`. See PLAYTEST.md.
 export default defineConfig(({ mode }) => ({
   base: mode === 'playtest' ? '/creator/' : '/',
   plugins: [react()],
+  build: {
+    outDir: mode === 'playtest' ? 'dist-playtest' : 'dist',
+  },
   resolve: {
     alias: {
       '@rushpoint/shared': path.resolve(__dirname, '../../packages/shared/src'),

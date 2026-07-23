@@ -17,8 +17,9 @@ import { useT } from '../components/LanguageContext';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { liveRunForGame } from '../lib/creatorNav';
 import {
-  KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY,
-  buildOnboardingChecklist, readKnownGameCount, readPreviewedGames, skeletonCardCount,
+  KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY, TOUR_FIRST_GAME_KEY,
+  buildOnboardingChecklist, knownGameCountKey, readKnownGameCount, readPreviewedGames,
+  skeletonCardCount,
   type OnboardingStepId,
 } from '../lib/creatorOnboarding';
 import {
@@ -166,7 +167,20 @@ export default function DashboardPage() {
       if (user?.uid) _gamesCache = { uid: user.uid, data: games, ts: Date.now() };
       // Remember the count so the NEXT first paint draws a placeholder that
       // matches what this creator actually has (never six cards for zero games).
-      try { localStorage.setItem(KNOWN_GAME_COUNT_KEY, String(games.length)); } catch { /* storage unavailable */ }
+      // Keyed per uid: a browser can hold several accounts, and the guided tour
+      // reads this same signal to decide whether the creator in front of it is a
+      // first-timer (change: post-review-fixes A). The legacy GLOBAL entry is
+      // dropped on the way past so a stale cross-account count cannot outlive it.
+      try {
+        localStorage.setItem(knownGameCountKey(user?.uid), String(games.length));
+        localStorage.removeItem(KNOWN_GAME_COUNT_KEY);
+      } catch { /* storage unavailable */ }
+      // Remember one game id so the guided tour's Builder step can offer a real
+      // destination without holding a data subscription of its own.
+      try {
+        if (games[0]?.id) localStorage.setItem(TOUR_FIRST_GAME_KEY, games[0].id);
+        else localStorage.removeItem(TOUR_FIRST_GAME_KEY);
+      } catch { /* storage unavailable */ }
       setGames(games);
     } catch (e) {
       // Escape the spinner on a first-load failure, but never blank an already-
@@ -302,7 +316,7 @@ export default function DashboardPage() {
     }
   }
 
-  if (!games) return <DashboardSkeleton />;
+  if (!games) return <DashboardSkeleton uid={user?.uid} />;
 
   const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
   // Derived from the creator's REAL games and runs. Nothing here reads a stored
@@ -341,6 +355,7 @@ export default function DashboardPage() {
             <Button
               disabled={busy}
               onClick={() => setPicking(true)}
+              data-tour="new-game"
               className="!px-6 !py-2.5 !text-sm flex items-center gap-2"
             >
               {d.newGame}
@@ -403,7 +418,7 @@ export default function DashboardPage() {
 
       ) : (
         /* ── Game cards ──────────────────────────────────────────────────── */
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5" data-tour="game-list">
           {games.map((g, idx) => {
             const taskCount = g.stages.reduce((s, st) => s + st.tasks.length, 0);
             const allTaskTypes = [...new Set(g.stages.flatMap(st => st.tasks.map(tsk => tsk.type)))].slice(0, 4);
@@ -732,11 +747,12 @@ function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
 
 // Content-shaped loading placeholder mirroring the hero + stats + card grid, so
 // the first paint has the same footprint as the loaded dashboard (no layout jump).
-function DashboardSkeleton() {
+function DashboardSkeleton({ uid }: { uid?: string }) {
   // A creator with no games used to watch six game-card placeholders resolve
-  // into an empty state. Draw only what this account is known to have.
+  // into an empty state. Draw only what THIS account is known to have — the
+  // count is per uid, so a colleague's six games cannot size this grid.
   let known: number | null = null;
-  try { known = readKnownGameCount(localStorage.getItem(KNOWN_GAME_COUNT_KEY)); } catch { /* storage unavailable */ }
+  try { known = readKnownGameCount(localStorage.getItem(knownGameCountKey(uid))); } catch { /* storage unavailable */ }
   const cards = skeletonCardCount(known);
   return (
     <div className="animate-fade-up">

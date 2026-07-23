@@ -27,6 +27,32 @@ export function resolveTeamLabel(
   return fallbackFmt(shortId(teamId));
 }
 
+/**
+ * A stored enumeration value's human label, or a MARKED fallback.
+ *
+ * The console kept re-inventing `LABELS[v] ?? v` (the alert type, the analytics
+ * task type, the feedback issue), and every one of them printed the raw stored
+ * value to a human the moment a new enum member shipped, in whatever language
+ * the database happened to be written in (change: run-console-clarity). This
+ * NEVER returns the raw input: an unmapped value comes back through the
+ * translated fallback, so a fallback can never be mistaken for a name.
+ *
+ * `Object.prototype` keys ('toString', 'constructor') and blank labels are not
+ * names either, so a stored value cannot borrow one.
+ */
+export function resolveEnumLabel(
+  value: unknown,
+  labels: Readonly<Record<string, string>>,
+  fallbackFmt: (raw: string) => string,
+): string {
+  const raw = typeof value === 'string' ? value : '';
+  const label = raw !== '' && Object.prototype.hasOwnProperty.call(labels ?? {}, raw)
+    ? labels[raw]
+    : undefined;
+  if (typeof label === 'string' && label.trim() !== '') return label;
+  return fallbackFmt(raw);
+}
+
 /** A task's title, or a marked short id when it cannot be resolved. */
 export function resolveTaskLabel(
   taskId: string,
