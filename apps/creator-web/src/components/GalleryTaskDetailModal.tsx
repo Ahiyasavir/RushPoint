@@ -10,7 +10,8 @@
 //
 // Nothing is fetched on open: `searchTaskLibrary` already returned the whole
 // sanitized document, so the detail is built from data the caller is holding.
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { Button, TagChips } from './ui';
 import { useT } from './LanguageContext';
@@ -39,13 +40,25 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
   const gl = t.gallery;
   const b = t.builder;
   const detail = buildGalleryTaskDetail(task);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<Element | null>(null);
 
   // Escape closes, alongside the backdrop and the ✕ button. A modal that traps a
   // creator behind a mis-click is the thing that makes them stop opening details.
+  // On open we also lock body scroll, pull focus into the panel, and restore focus
+  // to the opener on close — the house modal pattern (ExclusiveGroupsModal).
   useEffect(() => {
+    openerRef.current = document.activeElement;
+    panelRef.current?.focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+      (openerRef.current as HTMLElement | null)?.focus?.();
+    };
   }, [onClose]);
 
   const ROW_LABEL: Record<GalleryDetailRowKey, string> = {
@@ -84,7 +97,13 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
 
   const titleId = 'mission-detail-title';
 
-  return (
+  // Rendered through a portal to document.body: `fixed inset-0` must resolve
+  // against the viewport, but the Gallery mounts this modal under an
+  // `animate-fade-up` ancestor whose PERMANENT `transform: translateY(0)` becomes
+  // the containing block for `position: fixed`, cutting the panel off at the
+  // bottom. document.body carries no transform/filter/contain, so the portal fixes
+  // the anchoring without touching layout.
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-3 sm:p-6"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -95,10 +114,12 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
           shrink — hence `flex-1 min-h-0` on the dialog and on the body. Without
           that the body grows to its content and the panel spills off-screen. */}
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="w-full max-w-2xl max-h-[88dvh] flex flex-col overflow-hidden
+        tabIndex={-1}
+        className="w-full max-w-2xl max-h-[88dvh] flex flex-col overflow-hidden focus:outline-none
           rounded-2xl border border-[--rp-border] bg-[--surface-0] dark:bg-[--surface-1]
           shadow-[0_24px_64px_-12px_rgba(10,12,26,0.45)]"
       >
@@ -146,14 +167,21 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
             {detail.tags.length > 0 && <TagChips tags={detail.tags} max={12} more={gl.moreTags} />}
 
             <section>
-              <h4 className="text-xs font-semibold text-[--ink-3] mb-1.5">{gl.detailAreaTitle}</h4>
+              {/* An ordinary task now publishes its EXACT authored point, so the
+                  heading is a plain "location on the map" and there is NO
+                  approximate disclaimer. Only a hidden-location (coarse) pin keeps
+                  the "approximate area" heading and note (change:
+                  gallery-precise-task-location). */}
+              <h4 className="text-xs font-semibold text-[--ink-3] mb-1.5">
+                {detail.areaApproximate ? gl.detailAreaTitle : gl.detailAreaTitlePrecise}
+              </h4>
               {detail.area ? (
                 <Suspense fallback={<div className="h-40 rounded-xl border border-[--rp-border] bg-[--surface-1]" />}>
                   <GalleryMap
                     points={[{ id: detail.id, lat: detail.area.lat, lng: detail.area.lng, title: detail.title }]}
                     onSelect={() => undefined}
                     emptyLabel={gl.noLocatedTasks}
-                    notice={gl.approxPinsNote}
+                    notice={detail.areaApproximate ? gl.detailAreaApproxNote : undefined}
                     markerColor="#f59e0b"
                     className="h-40"
                   />
@@ -179,6 +207,7 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

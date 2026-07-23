@@ -8,7 +8,7 @@ import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import GalleryMap, { type MapPoint } from '../components/GalleryMap';
 import GalleryTaskDetailModal from '../components/GalleryTaskDetailModal';
-import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage } from '@rushpoint/shared';
+import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage, isCoarsePublicPoint } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useT } from '../components/LanguageContext';
 
@@ -72,7 +72,14 @@ export default function GalleryPage() {
       lng: tk.approxLocation!.lng,
       title: tk.title,
       subtitle: `${TASK_TYPE_LABEL[tk.type] ?? tk.type} · ${gl.metaPts(tk.pointValue)}`,
+      // An ordinary task pin is now the EXACT authored point; only a hidden-location
+      // pin sits on the coarse ~1 km grid (change: gallery-precise-task-location).
+      approximate: isCoarsePublicPoint(tk.approxLocation),
     }));
+  // The "approximate area" caption belongs on the tasks map only when at least one
+  // pin really is coarse (a hidden-location mission); otherwise every pin is exact
+  // and the disclaimer would misdescribe them.
+  const anyCoarseTaskPin = taskPoints.some((p) => p.approximate);
 
   // WHICH empty state applies is a classification, not a length check
   // (change: public-task-area-visibility). A creator hit the case where every
@@ -215,7 +222,7 @@ export default function GalleryPage() {
           <GalleryMap points={taskPoints} onSelect={(id) => focusCard('task', id)}
             emptyLabel={gl.noLocatedTasks}
             emptyDetail={taskCoverage === 'none-plottable' ? gl.noLocatedTasksHelp : undefined}
-            notice={gl.approxPinsNote}
+            notice={anyCoarseTaskPin ? gl.approxPinsNote : undefined}
             markerColor="#f59e0b" className="h-72" />
         </div>
       )}

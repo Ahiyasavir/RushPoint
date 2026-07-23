@@ -288,8 +288,8 @@ const HE = {
     noLocatedTasks: 'לאף משימה בתוצאות אין אזור מפורסם.',
     // מפה ריקה חייבת להסביר את עצמה (change: public-task-area-visibility)
     noLocatedTasksHelp: 'אזור מפורסם נוצר כשמפרסמים את המשחק. משימות שפורסמו לפני העדכון הזה לא יופיעו במפה עד שהמשחק שלהן יפורסם מחדש.',
-    // גם משימות עם מיקום מוסתר מקבלות אזור (change: hidden-location-map-visibility)
-    approxPinsNote: 'הסיכות מראות אזור משוער בלבד, לא מיקום מדויק. גם משימות עם מיקום מוסתר מופיעות כאזור, והשחקנים עצמם עדיין לא רואים אותו.',
+    // סיכות רגילות מדויקות, רק מיקום מוסתר נשאר אזור (change: gallery-precise-task-location)
+    approxPinsNote: 'רוב הסיכות מראות את הנקודה המדויקת שבה היוצר מיקם את המשימה. משימה עם מיקום מוסתר מופיעה כאזור משוער בלבד, והשחקנים עצמם עדיין לא רואים אותו.',
     metaDiff:  (n: number) => `קושי ${n}`,
     metaPts:   (n: number) => `${n} נק׳`,
     metaCopies:(n: number) => `${n} העתקים`,
@@ -309,7 +309,10 @@ const HE = {
     detailUse:           'שימוש במשימה הזו',
     detailUseHint:       'כדי להוסיף את המשימה למשחק שלכם, פתחו את ספריית המשימות בתוך הבונה.',
     detailNoDescription: 'היוצר לא כתב תיאור למשימה הזו.',
+    // כותרת מפורטת: מיקום מדויק לרוב המשימות, אזור משוער רק למיקום מוסתר (change: gallery-precise-task-location)
     detailAreaTitle:     'אזור משוער',
+    detailAreaTitlePrecise: 'המיקום על המפה',
+    detailAreaApproxNote: 'המיקום של המשימה מוסתר, לכן מוצג אזור משוער בלבד ולא הנקודה המדויקת. גם השחקנים לא רואים אותו.',
     detailNoArea:        'למשימה הזו אין אזור מפורסם. אפשר למקם אותה על המפה אחרי ההעתקה.',
     detailSecretNote:    'תשובות, קודים ורמזים נשארים אצל היוצר ולא מוצגים כאן אף פעם.',
     rowType:             'סוג משימה',
@@ -1794,8 +1797,8 @@ const EN: typeof HE = {
     noLocatedTasks: 'None of these missions has a published area.',
     // An empty map must explain itself (change: public-task-area-visibility)
     noLocatedTasksHelp: 'A published area is created when a game is published. Missions published before this update stay off the map until their game is published again.',
-    // Hidden-location missions get an area too (change: hidden-location-map-visibility)
-    approxPinsNote: 'Pins show an approximate area, not an exact spot. Missions with a hidden location appear as an area too, and players themselves still do not see it.',
+    // Ordinary pins are precise; only a hidden location stays an area (change: gallery-precise-task-location)
+    approxPinsNote: 'Most pins show the exact spot where the creator placed the task. A mission with a hidden location appears as an approximate area only, and players themselves still do not see it.',
     metaDiff:  (n: number) => `diff ${n}`,
     metaPts:   (n: number) => `${n} pts`,
     metaCopies:(n: number) => `${n} copies`,
@@ -1815,7 +1818,10 @@ const EN: typeof HE = {
     detailUse:           'Use this mission',
     detailUseHint:       'To add this mission to your game, open the mission library inside the builder.',
     detailNoDescription: 'The author wrote no description for this mission.',
+    // Detail heading: precise location for ordinary tasks, approximate area only for a hidden location (change: gallery-precise-task-location)
     detailAreaTitle:     'Approximate area',
+    detailAreaTitlePrecise: 'Location on the map',
+    detailAreaApproxNote: 'This mission has a hidden location, so only an approximate area is shown, not the exact spot. Players do not see it either.',
     detailNoArea:        'This mission has no published area. You can place it on the map after copying it.',
     detailSecretNote:    'Answers, codes and hints stay with the author and are never shown here.',
     rowType:             'Mission type',

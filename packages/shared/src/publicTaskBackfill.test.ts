@@ -4,6 +4,10 @@ import { approximatePublicPoint } from './publicTaskLocation';
 
 const PT = { lat: 31.7767, lng: 35.2345 };
 const AREA = approximatePublicPoint(PT);
+// change: gallery-precise-task-location. An ordinary task now backfills to its
+// EXACT authored point; only a hideLocation task is coarsened to AREA. PT is
+// off-grid, so PRECISE (== PT) and AREA are distinct values here.
+const PRECISE = { lat: 31.7767, lng: 35.2345 };
 
 describe('repairPublicTask — which stored docs need fixing', () => {
   it('skips a conformant doc (area present, no legacy coordinates)', () => {
@@ -19,7 +23,8 @@ describe('repairPublicTask — which stored docs need fixing', () => {
       { coordinates: { lat: 'x', lng: null } },
       { coordinates: PT },
     );
-    expect(r).toEqual({ approxLocation: approximatePublicPoint(PT) });
+    // Ordinary task ⇒ the replacement is now the EXACT authored point, not a cell.
+    expect(r).toEqual({ approxLocation: PRECISE });
   });
 
   // ── change: hidden-location-map-visibility ──────────────────────────────────
@@ -27,18 +32,19 @@ describe('repairPublicTask — which stored docs need fixing', () => {
   // legacy `coordinates` key nor an area, so the old trigger never fired and the
   // document stayed off the map forever. "Bare" is now a repairable state.
   it('repairs a BARE doc (no coordinates, no area) whose task can supply one', () => {
-    expect(repairPublicTask({}, { coordinates: PT })).toEqual({ approxLocation: AREA });
+    // Ordinary task ⇒ exact point; hideLocation task ⇒ coarse cell.
+    expect(repairPublicTask({}, { coordinates: PT })).toEqual({ approxLocation: PRECISE });
     expect(repairPublicTask({}, { hideLocation: true, coordinates: PT }))
       .toEqual({ approxLocation: AREA });
   });
 
   it('repairs a doc whose stored area is unusable', () => {
     expect(repairPublicTask({ approxLocation: { lat: 0, lng: 0 } }, { coordinates: PT }))
-      .toEqual({ approxLocation: AREA });
+      .toEqual({ approxLocation: PRECISE });
     expect(repairPublicTask({ approxLocation: { lat: NaN, lng: 35 } }, { coordinates: PT }))
-      .toEqual({ approxLocation: AREA });
+      .toEqual({ approxLocation: PRECISE });
     expect(repairPublicTask({ approxLocation: { lat: 200, lng: 35 } }, { coordinates: PT }))
-      .toEqual({ approxLocation: AREA });
+      .toEqual({ approxLocation: PRECISE });
   });
 
   it('leaves a bare doc alone when its task legitimately has no location', () => {
@@ -92,9 +98,12 @@ describe('mayNeedPublicTaskRepair — the sweep\'s cheap pre-check', () => {
 });
 
 describe('repairPublicTask — what replaces the exact point', () => {
-  it('coarsens a plain placed task to its ~1 km cell centre', () => {
+  it('backfills a plain placed task to its EXACT authored point', () => {
+    // change: gallery-precise-task-location. The gallery shows WHERE a creator put
+    // a task, an authored point of interest — so an ordinary task publishes the
+    // exact spot, no longer coarsened.
     expect(repairPublicTask({ coordinates: PT }, { coordinates: PT }))
-      .toEqual({ approxLocation: approximatePublicPoint(PT) });
+      .toEqual({ approxLocation: PRECISE });
   });
 
   it('coarsens a hideLocation task too, and still strips its exact point', () => {
@@ -131,8 +140,11 @@ describe('repairPublicTask — what replaces the exact point', () => {
     expect(r && 'approxLocation' in r && r.approxLocation).toBeFalsy();
   });
 
-  it('never returns the exact authored point', () => {
-    const r = repairPublicTask({ coordinates: PT }, { coordinates: PT });
-    expect(r?.approxLocation).not.toEqual(PT);
+  it('returns the exact authored point for an ordinary task, but never for a hidden one', () => {
+    // change: gallery-precise-task-location. Ordinary ⇒ exact; hideLocation ⇒ the
+    // exact point is still erased and replaced by a coarse cell.
+    expect(repairPublicTask({ coordinates: PT }, { coordinates: PT })?.approxLocation).toEqual(PT);
+    expect(repairPublicTask({ coordinates: PT }, { hideLocation: true, coordinates: PT })?.approxLocation)
+      .not.toEqual(PT);
   });
 });

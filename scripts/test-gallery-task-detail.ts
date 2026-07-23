@@ -143,6 +143,31 @@ const POLLUTED = {
   check('a mission with a published area reports area', withArea.areaState === 'area');
 }
 
+// ─── 2b. Precise vs coarse pins (change: gallery-precise-task-location) ────────
+// An ordinary task now publishes its EXACT authored point, so `approxLocation` is
+// OFF the ~1 km grid and the detail must report it as NOT approximate. A
+// hideLocation task publishes a cell centre, which IS on the grid, so the detail
+// reports it approximate and the view draws the coarse-area disclosure.
+{
+  // Exact off-grid point ⇒ precise pin.
+  const precise = buildGalleryTaskDetail({ ...FULL, approxLocation: { lat: 31.7767123, lng: 35.2345678 } });
+  check('an exact off-grid pin is reported as an area', precise.areaState === 'area');
+  check('an exact off-grid pin is NOT approximate', precise.areaApproximate === false,
+    JSON.stringify(precise.area));
+}
+{
+  // Cell centre (what publicTaskLocation writes for a hideLocation task) ⇒ coarse.
+  const coarse = buildGalleryTaskDetail({ ...FULL, approxLocation: { lat: 31.775, lng: 35.235 } });
+  check('a ~1 km cell-centre pin is reported as an area', coarse.areaState === 'area');
+  check('a ~1 km cell-centre pin IS approximate', coarse.areaApproximate === true,
+    JSON.stringify(coarse.area));
+}
+{
+  // No area ⇒ never approximate (a caller can treat the flag as "draw a square").
+  const none = buildGalleryTaskDetail({ ...FULL, approxLocation: undefined });
+  check('a mission with no area is never approximate', none.areaApproximate === false);
+}
+
 // The detail and the library map must never disagree about what is locatable.
 const AREA_MATRIX: Array<{ label: string; approxLocation: unknown }> = [
   { label: 'absent', approxLocation: undefined },
@@ -306,6 +331,7 @@ for (const junk of [null, undefined, 42, 'x', [], {}, true, NaN, () => 0]) {
   check(`  ...and yields a well-formed detail`,
     !!detail && typeof detail.title === 'string' && typeof detail.typeKey === 'string' &&
     Array.isArray(detail.rows) && Array.isArray(detail.tags) &&
+    typeof detail.areaApproximate === 'boolean' &&
     (detail.areaState === 'area' || detail.areaState === 'no-area'));
 }
 

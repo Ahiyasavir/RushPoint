@@ -29,6 +29,13 @@ export interface MapPoint {
   title: string;
   /** Small dimmed line under the title in the popup. Already localized. */
   subtitle?: string;
+  /**
+   * True when this point is a COARSE ~1 km cell rather than an exact spot (a
+   * hidden-location task; change: gallery-precise-task-location). The map draws no
+   * per-point overlay, so it does not consume this — the CALLER reads it to decide
+   * whether the map-wide "approximate area" caption applies.
+   */
+  approximate?: boolean;
 }
 
 export default function GalleryMap({

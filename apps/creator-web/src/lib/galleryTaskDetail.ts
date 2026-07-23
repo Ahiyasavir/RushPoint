@@ -20,7 +20,7 @@
 //
 // `SECRET_TASK_FIELD_NAMES` is therefore documentation for the test sweep, not the
 // mechanism. Do not turn it into a filter.
-import { isPlottablePublicTask } from '@rushpoint/shared';
+import { isPlottablePublicTask, isCoarsePublicPoint } from '@rushpoint/shared';
 
 /** Server-secret names the detail must never carry. Swept by the test suite. */
 export const SECRET_TASK_FIELD_NAMES = [
@@ -76,9 +76,23 @@ export interface GalleryTaskDetail {
   typeKey: GalleryTaskTypeKey;
   rows: GalleryDetailRow[];
   tags: string[];
-  /** COARSE published area only. Never the exact authored point. */
+  /**
+   * The published `approxLocation`. For an ordinary task this is now the EXACT
+   * authored point (change: gallery-precise-task-location) — the gallery shows
+   * WHERE A CREATOR PUT A TASK, an authored point of interest, not a person's
+   * location. A `hideLocation` task is the one exception: its point is coarsened to
+   * a ~1 km cell because the doc is world-readable and the exact spot is a puzzle.
+   */
   area: { lat: number; lng: number } | null;
   areaState: 'area' | 'no-area';
+  /**
+   * True when `area` is a COARSE ~1 km cell rather than an exact point — i.e. a
+   * hidden-location (or legacy pre-backfill) pin. The view draws the "approximate
+   * area" disclosure and cell square only when this is set; an exact pin gets a
+   * plain precise marker and no approximate copy. Derived structurally from the
+   * stored coordinate via `isCoarsePublicPoint`, never from a separate flag.
+   */
+  areaApproximate: boolean;
 }
 
 // ─── Normalizers ──────────────────────────────────────────────────────────────
@@ -168,11 +182,17 @@ export function buildGalleryTaskDetail(input: unknown): GalleryTaskDetail {
 
   // LOCATION. Routed through the shared reader's predicate, the SAME one the
   // library map filters its markers with, so the detail can never claim an area
-  // the map refuses to plot (or vice versa). There is deliberately NO fallback to
-  // the deprecated exact `coordinates`.
+  // the map refuses to plot (or vice versa). We read ONLY `approxLocation`: for an
+  // ordinary task it is now the exact authored point, and for a hideLocation task
+  // the coarse ~1 km cell — both published by `publicTaskLocation`. There is
+  // deliberately NO fallback to the deprecated exact `coordinates`.
   const plottable = isPlottablePublicTask(t as { approxLocation?: { lat?: unknown; lng?: unknown } });
   const approx = asRecord(t.approxLocation);
   const area = plottable ? { lat: approx.lat as number, lng: approx.lng as number } : null;
+  // A point is "approximate" exactly when it already sits on the public grid — a
+  // hidden-location (or legacy pre-backfill) pin. An exact authored point is
+  // off-grid, so the view can draw the honest affordance without a stored flag.
+  const areaApproximate = area !== null && isCoarsePublicPoint(area);
 
   return {
     id: text(t.id) ?? '',
@@ -185,5 +205,6 @@ export function buildGalleryTaskDetail(input: unknown): GalleryTaskDetail {
       : [],
     area,
     areaState: area ? 'area' : 'no-area',
+    areaApproximate,
   };
 }

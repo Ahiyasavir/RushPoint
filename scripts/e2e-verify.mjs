@@ -7695,7 +7695,7 @@ async function main() {
   // (change: task-library-map-view) Authored blind — no emulator was available in
   // the change that added it. Executed green on 2026-07-23 (7 checks) together
   // with the legacy-coordinate backfill sweep below.
-  await scenario('public task library publishes an AREA, and nothing for hidden tasks', async () => {
+  await scenario('public task library publishes an EXACT point for ordinary tasks, a coarse area for hidden ones', async () => {
     // THE EXPOSURE this scenario defends: publicTasks is `allow read: if true`,
     // and publishGame used to copy the creator's EXACT `task.coordinates` into it
     // — for every task, including hideLocation tasks, whose coordinates are
@@ -7724,17 +7724,15 @@ async function main() {
     const openDoc = (await creator.getDocAt(`publicTasks/${gLoc}_al-open`)).data ?? {};
     const hiddenDoc = (await creator.getDocAt(`publicTasks/${gLoc}_al-hidden`)).data ?? {};
 
-    check('an ordinary public task publishes no exact coordinates',
+    check('an ordinary public task publishes no deprecated coordinates field',
       openDoc.coordinates === undefined, JSON.stringify(openDoc.coordinates));
-    check('an ordinary public task publishes a coarsened area, not the authored point',
+    // change: gallery-precise-task-location. The gallery shows WHERE a creator PUT
+    // a task — an authored point of interest, not a person's location — so an
+    // ordinary task now publishes its EXACT authored point, no longer coarsened.
+    check('an ordinary public task publishes its EXACT authored point',
       !!openDoc.approxLocation
-      && openDoc.approxLocation.lat !== EXACT.lat
-      && openDoc.approxLocation.lng !== EXACT.lng,
-      JSON.stringify(openDoc.approxLocation));
-    check('the published area is within ~1km of the authored point',
-      !!openDoc.approxLocation
-      && Math.abs(openDoc.approxLocation.lat - EXACT.lat) <= 0.005 + 1e-9
-      && Math.abs(openDoc.approxLocation.lng - EXACT.lng) <= 0.005 + 1e-9,
+      && openDoc.approxLocation.lat === EXACT.lat
+      && openDoc.approxLocation.lng === EXACT.lng,
       JSON.stringify(openDoc.approxLocation));
 
     // The headline assertion (change: hidden-location-map-visibility): a hideLocation
@@ -7850,17 +7848,15 @@ async function main() {
     check('sweep: the hidden task\'s legacy coordinates field is deleted',
       hiddenAfter?.coordinates === undefined, JSON.stringify(hiddenAfter?.coordinates));
 
-    // 2. The ordinary task ends up with a coarsened area, NOT the authored point.
+    // 2. The ordinary task ends up with its EXACT authored point (change:
+    //    gallery-precise-task-location) — the legacy coordinates field is stripped
+    //    and replaced by the precise point, not a coarse cell.
     check('sweep: the ordinary task gets an approxLocation',
       !!openAfter?.approxLocation, JSON.stringify(openAfter?.approxLocation));
-    check('sweep: the published area is not the exact authored point',
+    check('sweep: the ordinary task ends up with its EXACT authored point',
       !!openAfter?.approxLocation
-      && (openAfter.approxLocation.lat !== EXACT_OPEN.lat || openAfter.approxLocation.lng !== EXACT_OPEN.lng),
-      JSON.stringify(openAfter?.approxLocation));
-    check('sweep: the published area is within ~1km (0.01°) of the authored point',
-      !!openAfter?.approxLocation
-      && Math.abs(openAfter.approxLocation.lat - EXACT_OPEN.lat) <= 0.01 + 1e-9
-      && Math.abs(openAfter.approxLocation.lng - EXACT_OPEN.lng) <= 0.01 + 1e-9,
+      && openAfter.approxLocation.lat === EXACT_OPEN.lat
+      && openAfter.approxLocation.lng === EXACT_OPEN.lng,
       JSON.stringify(openAfter?.approxLocation));
 
     // 3. THE HEADLINE ASSERTION (change: hidden-location-map-visibility) — a

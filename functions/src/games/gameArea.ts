@@ -10,9 +10,11 @@
 //     and unplaced null-island tasks contribute NOTHING, while hideLocation tasks
 //     contribute exactly like any other (change: hidden-location-map-visibility)
 //     — one predicate, not two that can drift apart;
-//   - the inputs are therefore already cell centres, and their mean is snapped back
-//     onto the same grid, so the game pin is a ~1 km cell like every published task
-//     pin and averaging can never sharpen it past one cell;
+//   - the inputs are now the EXACT authored points for ordinary tasks and coarse
+//     cell centres only for hideLocation tasks (change: gallery-precise-task-
+//     location), but their mean is snapped back onto the grid, so the OUTPUT game
+//     pin is a ~1 km cell regardless — the snap, not the inputs, keeps the derived
+//     area coarse, and averaging can never sharpen it past one cell;
 //   - it is a pure function of the tasks, so republishing the same game writes the
 //     identical value and N observations carry as much information as one.
 //

@@ -1,19 +1,21 @@
 // ─── Public task library — location contract (change: task-library-map-view) ──
 //
 // `publicTasks/{id}` is world-readable (`firestore.rules`: `allow read: if true`).
-// Before this module, `publishGame` copied the creator's EXACT authored
-// `task.coordinates` into that document — for every task, including `hideLocation`
-// tasks, whose coordinates this codebase treats as server-secret everywhere else
-// (sanitizeTaskForParticipant, the routing payload, the photo feed, the run recap,
-// the game-file export). This module is the single place that decides what a public
-// task is allowed to say about where it is.
+// This module is the single place that decides what a public task is allowed to
+// say about where it is.
 //
-// (change: hidden-location-map-visibility) It no longer says anything DIFFERENT
-// about a hideLocation task: the exact point is withheld from every task alike,
-// and the ~1 km area is granted to every task alike. The rationale, and why the
-// participant-facing secrecy is untouched by it, is on `publicTaskLocation` below.
+// (change: gallery-precise-task-location) An ordinary task now publishes its
+// EXACT authored point. The gallery and mission-library maps exist so a creator
+// can see and copy WHERE ANOTHER CREATOR PUT A TASK — that coordinate is an
+// authored point of interest (a landmark, a shop), not a person's location, and
+// coarsening it made every mission look misplaced while hiding the one thing the
+// maps are for. Only a `hideLocation` task — whose spot is a puzzle deliberately
+// withheld from players — is still coarsened, because this document is
+// world-readable and its exact point would otherwise leak the answer. The full
+// rationale, and why the participant-facing secrecy is a separate untouched
+// control, is on `publicTaskLocation` below.
 //
-// WHY A GRID SNAP AND NOT RANDOM JITTER
+// WHY THE hideLocation COARSENING IS A GRID SNAP AND NOT RANDOM JITTER
 // Jitter (`lat + (random - 0.5) * delta`) is not a privacy control against an
 // observer who can make the publisher republish: every republish is an independent
 // sample centred on the truth, so the mean of N observations converges on the exact
@@ -25,12 +27,12 @@
 // The grid is anchored at (0, 0), never at the task — a per-task anchor would leak
 // the true point through the cell boundaries themselves.
 //
-// WHAT THIS GUARANTEES: the output is the centre of the ~1 km cell containing the
-// input, so each output axis is within half a cell of its input axis and a reader
-// learns the cell and nothing finer.
-// WHAT IT DOES NOT GUARANTEE: k-anonymity. A task alone in its cell is still
-// narrowed to that cell. That is the accepted trade for EVERY published task,
-// hidden-location ones included (see publicTaskLocation).
+// WHAT THE SNAP GUARANTEES for a hidden task: the output is the centre of the
+// ~1 km cell containing the input, so each output axis is within half a cell of
+// its input axis and a reader learns the cell and nothing finer.
+// WHAT IT DOES NOT GUARANTEE: k-anonymity. A hidden task alone in its cell is
+// still narrowed to that cell — the accepted trade for keeping a hunt visible to
+// its own author without handing out the solution.
 
 import type { GeoPoint } from './types';
 import { isValidCoord } from './geo';
@@ -68,6 +70,35 @@ export function approximatePublicPoint(point: { lat: number; lng: number }): Geo
 }
 
 /**
+ * Is a published point a COARSE ~1 km cell, or an EXACT authored point?
+ * (change: gallery-precise-task-location)
+ *
+ * A point is coarse exactly when it already sits on the public grid — i.e.
+ * `approximatePublicPoint` is a no-op on it. This is a PURE STRUCTURAL test on the
+ * stored coordinate, so a reader can draw the honest affordance (a ~1 km cell
+ * square vs. a precise pin) without the document having to carry a separate flag:
+ *
+ *   - a `hideLocation` task always publishes a cell centre  ⇒ always coarse (true);
+ *   - a legacy pre-backfill doc still carrying its old coarse area is a cell centre
+ *     ⇒ coarse (true), which is correct — that pin really is coarse until the
+ *     backfill writes the exact point;
+ *   - a derived game area (a re-snapped mean) is a cell centre ⇒ coarse (true);
+ *   - an ordinary EXACT task point is off-grid ⇒ precise (false), save the
+ *     measure-zero case of a task authored exactly on the grid, where drawing a
+ *     square around an already-public exact point discloses nothing new.
+ *
+ * Returns `false` for anything unusable, so a caller can treat "not coarse" as
+ * "draw no area square" safely.
+ */
+export function isCoarsePublicPoint(
+  point: { lat?: unknown; lng?: unknown } | null | undefined,
+): boolean {
+  if (!usableCoord(point)) return false;
+  const cell = approximatePublicPoint(point);
+  return cell.lat === round5(point.lat) && cell.lng === round5(point.lng);
+}
+
+/**
  * Is this coordinate usable as a published location?
  *
  * `isValidCoord` is a pure range check and accepts (0, 0) — but `blankTask()` ships
@@ -83,32 +114,32 @@ function usableCoord(c: { lat?: unknown; lng?: unknown } | undefined | null): c 
 /**
  * THE WRITER'S RULE — what `publishGame` may write as a public task's location.
  *
- * Returns a coarsened ~1 km area for any usably placed task, and `undefined`
- * (⇒ omit the field entirely) when the task is `locationless` or is not usably
- * placed. Nothing else is consulted.
+ * Returns the EXACT authored point for an ordinary usably-placed task, a
+ * coarsened ~1 km area for a `hideLocation` task, and `undefined` (⇒ omit the
+ * field entirely) when the task is `locationless` or is not usably placed.
  *
- * `hideLocation` IS NOT CONSULTED (change: hidden-location-map-visibility).
- * A hidden-location task gets the same area as any other, so a creator can see
- * their own treasure hunt on their own mission-library and gallery maps — the
- * exclusion made a hunt-shaped game invisible to the person who wrote it.
+ * WHY ORDINARY TASKS ARE NOW PRECISE (change: gallery-precise-task-location).
+ * The gallery and mission-library maps exist so a creator can see, and copy,
+ * WHERE ANOTHER CREATOR PUT A TASK. That coordinate is an authored point of
+ * interest — a landmark, a shop, a viewpoint — not a person's location, so
+ * coarsening it to a kilometre was hiding the one thing these maps are for and
+ * making every mission look misplaced. The exact point is published.
  *
- * WHY THE PUZZLE SURVIVES THIS. Two different audiences read two different
- * payloads, produced by two different code paths:
- *   - The CREATOR, browsing a world-readable projection, gets this: a grid cell
- *     of roughly one kilometre. That is a neighbourhood, not a spot, and the
- *     game's own public gallery entry, title, description and promo page already
- *     name the neighbourhood. It cannot be sharpened by repeated observation,
- *     because the snap is a pure function of the input.
- *   - The PLAYER gets `sanitizeTaskForParticipant` (functions/src/runs/
- *     sanitizeTask.ts), which SEALS a `hideLocation` task until the server has
- *     confirmed the team physically arrived, and which strips `coordinates`,
- *     `geofenceRadiusMeters` and `smart.stationCoords` — coarse or exact, no
- *     location reaches the device. THAT is the control that makes the location a
- *     puzzle, and this function is not it. Neither may be relaxed on the grounds
- *     that the other exists.
+ * WHY `hideLocation` IS THE ONE EXCEPTION. A hidden-location task's spot is a
+ * deliberate puzzle the creator withholds from players. `publicTasks` is
+ * world-readable (`firestore.rules`: `allow read: if true`), so publishing its
+ * exact point here would hand the answer to anyone, including a player who opens
+ * the gallery. It stays coarsened to the ~1 km cell: enough for the author to
+ * see roughly where it sits, never enough to solve it. The snap is a pure
+ * function of the input, so repeated publishes cannot be averaged back to truth.
  *
- * What still never happens: the EXACT authored coordinate is never returned here,
- * for any task, so it never reaches a world-readable document.
+ * THE PLAYER-FACING PUZZLE IS A DIFFERENT CONTROL, UNTOUCHED BY EITHER BRANCH.
+ * The PLAYER gets `sanitizeTaskForParticipant` (functions/src/runs/
+ * sanitizeTask.ts), which SEALS a `hideLocation` task until the server confirms
+ * the team physically arrived, and strips `coordinates`, `geofenceRadiusMeters`
+ * and `smart.stationCoords` — no location reaches the device, coarse or exact.
+ * That is what makes the location a puzzle in play; this function is not it, and
+ * neither may be relaxed on the grounds that the other exists.
  */
 export function publicTaskLocation(task: {
   hideLocation?: boolean;
@@ -119,7 +150,14 @@ export function publicTaskLocation(task: {
   // A locationless task has no map presence by definition.
   if (task.locationless) return undefined;
   if (!usableCoord(task.coordinates)) return undefined;
-  return approximatePublicPoint(task.coordinates);
+  // A hideLocation task's spot is a deliberate puzzle, secret from players, and
+  // this document is world-readable — so it, and only it, is still coarsened to
+  // the ~1 km cell (a creator sees roughly where it is; the answer never leaks).
+  if (task.hideLocation) return approximatePublicPoint(task.coordinates);
+  // Every other task publishes its EXACT authored placement. The gallery shows
+  // WHERE A CREATOR PUT A TASK — a point of interest they authored, not any
+  // person's location — so a precise pin is the honest, useful thing to draw.
+  return { lat: round5(task.coordinates.lat), lng: round5(task.coordinates.lng) };
 }
 
 /**
