@@ -7,11 +7,16 @@
 
 import * as functions from 'firebase-functions';
 import { storage } from './firebase';
+// Prefixes come from pure, unit-tested derivation (change: storage-rules-hardening).
+// They are built INSIDE the try so a refused (blank / slash-bearing) id is logged
+// and skipped instead of issuing a widened `deleteFiles` — a `runs/` prefix would
+// erase every run's photos in the bucket.
+import { runPhotoPrefix, gameMediaPrefix } from './storagePaths';
 
 // Remove every uploaded object for one run.
 export async function deleteRunPhotos(runId: string): Promise<void> {
   try {
-    await storage.bucket().deleteFiles({ prefix: `runs/${runId}/` });
+    await storage.bucket().deleteFiles({ prefix: runPhotoPrefix(runId) });
   } catch (e) {
     functions.logger.warn(`deleteRunPhotos: failed for run ${runId}`, e);
   }
@@ -26,10 +31,12 @@ export async function deleteRunsPhotos(runIds: string[]): Promise<void> {
 // live under `gameMedia/{ownerUid}/games/{gameId}/…`; omit gameId to purge the
 // creator's entire media tree (account deletion / right to erasure).
 export async function deleteGameMedia(ownerUid: string, gameId?: string): Promise<void> {
-  const prefix = gameId ? `gameMedia/${ownerUid}/games/${gameId}/` : `gameMedia/${ownerUid}/`;
   try {
+    // `gameId ?? undefined` keeps the whole-tree form EXPLICIT: an accidental
+    // empty-string gameId is refused rather than silently purging every game.
+    const prefix = gameMediaPrefix(ownerUid, gameId ?? undefined);
     await storage.bucket().deleteFiles({ prefix });
   } catch (e) {
-    functions.logger.warn(`deleteGameMedia: failed for ${prefix}`, e);
+    functions.logger.warn(`deleteGameMedia: failed for ${ownerUid}/${gameId ?? '*'}`, e);
   }
 }

@@ -73,3 +73,6 @@ export * from './playStore';
 export * from './gameLifecycle';
 // Creator-owned portable game file (change: game-file-export-import).
 export * from './gameFile';
+// THE one definition of a tag list — split/trim/dedupe/cap (change: game-task-tags).
+// Shared so the client parser and the server guard can never disagree.
+export * from './tags';

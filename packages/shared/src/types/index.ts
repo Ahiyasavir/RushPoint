@@ -842,6 +842,13 @@ export interface RunTeam {
   // Safe-zone (change: safe-zone-boundary): set true while the team's last known
   // location is outside the play area; soft-pauses new task assignment.
   outOfBounds?: boolean;
+  // Out-of-bounds recovery (change: out-of-bounds-recovery): when the latch was set
+  // (ISO), and until when a staff release keeps it suppressed. Both optional — a team
+  // document written before this change evaluates as "unknown", which fails OPEN.
+  outOfBoundsAt?: string;
+  outOfBoundsOverrideUntil?: string;
+  /** Cooldown marker so an active override can't mint a breach alert every ping. */
+  lastBreachAlertAt?: string;
   // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.
   discoveryState?: import('./../discoveryPoi').TeamDiscoveryState;
   activeTaskId?: string | null;  // mirror for getStationTeams query
@@ -866,7 +873,21 @@ export interface RunTeam {
   //   charged       points already taken off this team for this task (enforces the cap)
   //   lastHash      hash of the last wrong answer (the duplicate-submission replay guard)
   //   cooldownUntil epoch ms the retry lockout expires; 0 when not cooling down
-  answerPenalties?: Record<string, { charged: number; lastHash: string; cooldownUntil: number }>;
+  // retry-lockout-clock-skew: the lockout is ALSO recorded as (server instant +
+  // duration), which is what lets the server ship a remaining duration and bound
+  // the wait by the level's own ceiling. All three are OPTIONAL — rows written
+  // before that change carry only the fields above and keep working unchanged.
+  //   lastFailureAt server instant of the wrong answer that started the lockout
+  //   lockoutMs     the lockout duration that failure earned, in ms
+  //   failureCount  charged-attempt index; diagnostic only, never trusted
+  answerPenalties?: Record<string, {
+    charged: number;
+    lastHash: string;
+    cooldownUntil: number;
+    lastFailureAt?: number;
+    lockoutMs?: number;
+    failureCount?: number;
+  }>;
   // Per-sequence-task progress: taskId → number of steps completed so far.
   taskStepProgress?: Record<string, number>;
   // Shared team devices (change: shared-team-devices). Absent on legacy docs —

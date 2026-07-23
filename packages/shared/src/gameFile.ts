@@ -70,6 +70,36 @@ export const MAX_FILE_STAGES = 100;
 export const MAX_FILE_TASKS = 1000;
 export const MAX_FILE_STRING_LEN = 20_000;
 
+// ─── Graph bounds (change: game-import-hardening) ─────────────────────────────
+// The allow-listed `pick()` below guards KEY NAMES at four fixed levels (game ·
+// stage · task · smart). It does not look INSIDE a value, so everything nested in
+// an allow-listed field — `branding`, `scoringOptions`, `safeZone`, `media`,
+// `steps[]`, `answers[]` — used to be cloned straight through to the write. These
+// bounds are what the scan below enforces at EVERY depth, on the server, not only
+// in the Builder.
+
+/** A legitimate game is game → stages[] → tasks[] → smart/media/steps[] → object
+ *  ≈ 7 levels. 32 is generous for authored content and far below the JS stack. */
+export const MAX_FILE_DEPTH = 32;
+
+/** The longest legitimate list is `unlockAfterTaskIds`, itself bounded by
+ *  MAX_FILE_TASKS. Applies to EVERY array in the document. */
+export const MAX_FILE_ARRAY_LEN = 1000;
+
+/**
+ * Key names refused wherever they appear, at any depth. REFUSED, not stripped:
+ * a document produced by `serializeGameToFile` can never contain one, so its
+ * presence means the file was hand-built or tampered with, and this module's
+ * rule is REFUSE, NEVER GUESS. (Contrast an unknown ORDINARY field, which is
+ * dropped by `pick` — a file written by a newer build may legitimately carry
+ * fields this build does not know, and the `schemaVersion` gate is what makes
+ * that safe.)
+ */
+export const FORBIDDEN_KEYS: readonly string[] = ['__proto__', 'constructor', 'prototype'];
+
+/** A hostile file must not be able to make us build a megabyte of error text. */
+export const MAX_FILE_PROBLEMS = 25;
+
 // ─── The exported key sets ────────────────────────────────────────────────────
 // Explicit, never a spread. Every key of Game / Stage / Task / SmartStationConfig
 // must appear in exactly one of these two lists at its level — enforced by the
@@ -209,23 +239,176 @@ function utf8Bytes(s: string): number {
   return unescape(encodeURIComponent(s)).length;
 }
 
-/** The first string leaf longer than the cap, as `path`, or null. */
-function overlongString(value: unknown, path: string): string | null {
-  if (typeof value === 'string') return value.length > MAX_FILE_STRING_LEN ? path : null;
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      const hit = overlongString(value[i], `${path}[${i}]`);
-      if (hit) return hit;
+/**
+ * Every graph-level problem in a candidate game, as path-qualified messages
+ * (change: game-import-hardening).
+ *
+ * ITERATIVE BY CONSTRUCTION — an explicit stack, never recursion. A hostile file
+ * can nest 40 000 levels deep; the recursive walk this replaced blew the JS stack
+ * on exactly that input and threw `RangeError` out of `parseGameFile`, whose
+ * contract (and whose Builder-side pre-check) says it never throws.
+ *
+ * Must run on the RAW candidate, BEFORE `clone()`: clone is a JSON round trip,
+ * and JSON turns `NaN` / `±Infinity` into `null` — so cloning first is what
+ * silently converted numeric poison (`1e999` in a hand-edited file) into an
+ * accepted `null` instead of a refusal.
+ *
+ * Checks, at every depth: forbidden key name · nesting depth · array length ·
+ * finite numbers · string length (the pre-existing cap, message unchanged).
+ */
+export function scanCandidateGraph(root: unknown): string[] {
+  const problems: string[] = [];
+  const stack: { value: unknown; path: string; depth: number }[] = [
+    { value: root, path: '', depth: 0 },
+  ];
+
+  while (stack.length > 0 && problems.length < MAX_FILE_PROBLEMS) {
+    const { value, path, depth } = stack.pop()!;
+    const label = path || 'the game';
+
+    if (typeof value === 'string') {
+      if (value.length > MAX_FILE_STRING_LEN) {
+        problems.push(`The field "${path}" is too long. The limit is ${MAX_FILE_STRING_LEN} characters.`);
+      }
+      continue;
     }
-    return null;
-  }
-  if (isBag(value)) {
-    for (const [k, v] of Object.entries(value)) {
-      const hit = overlongString(v, path === '' ? k : `${path}.${k}`);
-      if (hit) return hit;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        problems.push(`The field "${label}" must be a finite number.`);
+      }
+      continue;
+    }
+    if (value === null || typeof value !== 'object') continue;
+
+    if (depth >= MAX_FILE_DEPTH) {
+      problems.push(`The file is nested too deeply at "${label}". The limit is ${MAX_FILE_DEPTH} levels.`);
+      continue; // do NOT descend — depth is the bound, not a suggestion
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length > MAX_FILE_ARRAY_LEN) {
+        problems.push(`The list "${label}" has ${value.length} items. The limit is ${MAX_FILE_ARRAY_LEN}.`);
+        continue;
+      }
+      for (let i = value.length - 1; i >= 0; i--) {
+        stack.push({ value: value[i], path: `${path}[${i}]`, depth: depth + 1 });
+      }
+      continue;
+    }
+
+    // Own keys only — `Object.keys` on a JSON.parse result surfaces a literal
+    // "__proto__" data property, which is exactly the key we must catch.
+    for (const key of Object.keys(value as Bag)) {
+      const childPath = path === '' ? key : `${path}.${key}`;
+      if (FORBIDDEN_KEYS.includes(key)) {
+        problems.push(`The field "${childPath}" is not allowed.`);
+        continue;
+      }
+      stack.push({
+        value: (value as Bag)[key],
+        path: childPath,
+        depth: depth + 1,
+      });
     }
   }
-  return null;
+
+  if (problems.length >= MAX_FILE_PROBLEMS) {
+    problems.push('…and more problems. Fix these first.');
+  }
+  return problems;
+}
+
+// ─── Field-type tables (change: game-import-hardening) ────────────────────────
+// Declarative, so adding an authored field is an obvious one-line edit. Each entry
+// says what a value MUST be when present; a wrong type is a named refusal instead
+// of a value that survives the parse and crashes something downstream.
+
+type FieldKind = 'stringList' | 'objectList' | 'object' | 'text' | 'number' | 'boolean';
+
+const KIND_LABEL: Record<FieldKind, string> = {
+  stringList: 'must be a list of text values',
+  objectList: 'must be a list',
+  object: 'has the wrong shape',
+  text: 'must be text',
+  number: 'must be a number',
+  boolean: 'must be true or false',
+};
+
+/**
+ * `answers` / `choices` / `unlockAfterTaskIds` — a non-list here reached
+ * `taskCompletabilityError` (`.some is not a function`) and a non-string element
+ * reached `a.trim()`; both surfaced to the creator as an opaque `internal`.
+ * `steps` / `media` — walked element-by-element by the run-time task renderer and
+ * by `normalizeStagesMedia`. The numbers are graded / compared at run time, so a
+ * string there is a task nobody can complete.
+ */
+const TASK_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
+  answers: 'stringList',
+  choices: 'stringList',
+  unlockAfterTaskIds: 'stringList',
+  steps: 'objectList',
+  media: 'objectList',
+  description: 'text',
+  hint: 'text',
+  locationClue: 'text',
+  locationClueHe: 'text',
+  numericAnswer: 'number',
+  numericTolerance: 'number',
+  geofenceRadiusMeters: 'number',
+  hintPenalty: 'number',
+  maxDurationMinutes: 'number',
+  expectedDurationMinutes: 'number',
+  hintAutoRevealMinutes: 'number',
+  hintAutoRevealAttempts: 'number',
+  releaseAfterMinutes: 'number',
+  expiresAfterMinutes: 'number',
+  locationless: 'boolean',
+  hideLocation: 'boolean',
+  requirePresence: 'boolean',
+  smart: 'object',
+  coordinates: 'object',
+};
+
+const STAGE_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
+  requiredTaskCount: 'number',
+  releaseAfterMinutes: 'number',
+  narrative: 'object',
+  exclusiveGroups: 'objectList',
+  isFinal: 'boolean',
+};
+
+const GAME_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
+  description: 'text',
+  instructions: 'object',
+  minAge: 'number',
+  requiresGuardianConsent: 'boolean',
+  benchmarkOptOut: 'boolean',
+  allowInstantPlay: 'boolean',
+  photoFeedEnabled: 'boolean',
+  powerUpsEnabled: 'boolean',
+  manualLeaderboardReveal: 'boolean',
+};
+
+/** Every wrongly-typed PRESENT field of `bag`, as `label: field must be …`. */
+function fieldTypeProblems(
+  bag: Bag,
+  label: string,
+  table: Readonly<Record<string, FieldKind>>,
+): string[] {
+  const problems: string[] = [];
+  for (const [field, kind] of Object.entries(table)) {
+    const v = bag[field];
+    if (v === undefined || v === null) continue;
+    const ok =
+      kind === 'stringList' ? Array.isArray(v) && v.every((e) => typeof e === 'string')
+      : kind === 'objectList' ? Array.isArray(v) && v.every((e) => isBag(e))
+      : kind === 'object' ? isBag(v)
+      : kind === 'text' ? typeof v === 'string'
+      : kind === 'number' ? typeof v === 'number' && Number.isFinite(v)
+      : typeof v === 'boolean';
+    if (!ok) problems.push(`${label}: ${field} ${KIND_LABEL[kind]}.`);
+  }
+  return problems;
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -381,10 +564,12 @@ export function parseGameFile(input: unknown): ParsedGameFile {
     return reject();
   }
 
-  // ── Per-field string cap (on the ALLOW-LISTED content only) ──
-  const overlong = overlongString(rawGame, '');
-  if (overlong) {
-    errors.push(`The field "${overlong}" is too long. The limit is ${MAX_FILE_STRING_LEN} characters.`);
+  // ── Graph scan: forbidden keys · depth · array length · finite numbers ·
+  //    string length. On the RAW game, before any clone (change:
+  //    game-import-hardening — see scanCandidateGraph for why the order matters).
+  const graphProblems = scanCandidateGraph(rawGame);
+  if (graphProblems.length > 0) {
+    errors.push(...graphProblems);
     return reject();
   }
 
@@ -394,6 +579,7 @@ export function parseGameFile(input: unknown): ParsedGameFile {
   const title = typeof game.title === 'string' ? stripUnsafeDisplayChars(game.title).trim() : '';
   if (!title) errors.push('The game has no title.');
   game.title = title;
+  errors.push(...fieldTypeProblems(game, 'The game', GAME_FIELD_TYPES));
 
   const stages: Bag[] = [];
   const seenStageIds = new Set<string>();
@@ -415,6 +601,12 @@ export function parseGameFile(input: unknown): ParsedGameFile {
     stage.order = typeof stage.order === 'number' && Number.isFinite(stage.order) ? stage.order : si;
 
     const label = `Stage "${stage.title || stageId || si + 1}"`;
+    // A wrongly-typed stage field used to be carried through (or silently turned
+    // into an empty task list, which strands the whole stage at run time).
+    errors.push(...fieldTypeProblems(stage, label, STAGE_FIELD_TYPES));
+    if (rawStage.tasks !== undefined && !Array.isArray(rawStage.tasks)) {
+      errors.push(`${label}: tasks must be a list.`);
+    }
     const rawTasks = Array.isArray(rawStage.tasks) ? rawStage.tasks : [];
     const tasks: Bag[] = [];
     const seenTaskIds = new Set<string>();
@@ -456,6 +648,12 @@ export function parseGameFile(input: unknown): ParsedGameFile {
         }
       }
 
+      // Optional fields whose TYPE was previously trusted. A `5` where a list of
+      // `answers` belongs used to parse clean and then throw
+      // `TypeError: task.answers.some is not a function` inside the callable's
+      // completability guard — an opaque 500 instead of a field-level refusal.
+      errors.push(...fieldTypeProblems(task, tLabel, TASK_FIELD_TYPES));
+
       // Pure structural rules — the same functions the Builder save path runs.
       const windowError = validateAvailabilityWindow(task as { releaseAfterMinutes?: number; expiresAfterMinutes?: number });
       if (windowError) errors.push(`${tLabel}: ${windowError}`);
@@ -476,8 +674,11 @@ export function parseGameFile(input: unknown): ParsedGameFile {
         const choiceError = validateSurveyChoices(task.surveyChoices);
         if (choiceError) errors.push(`${tLabel}: ${choiceError}`);
       }
-      if (task.unlockAfterTaskIds !== undefined && !Array.isArray(task.unlockAfterTaskIds)) {
-        errors.push(`${tLabel}: unlockAfterTaskIds must be a list of task ids.`);
+      // `unlockAfterTaskIds` is type-checked by TASK_FIELD_TYPES above; drop it
+      // here so the unlock-graph walk below is never handed a non-list.
+      if (task.unlockAfterTaskIds !== undefined
+        && !(Array.isArray(task.unlockAfterTaskIds)
+          && task.unlockAfterTaskIds.every((v) => typeof v === 'string'))) {
         delete task.unlockAfterTaskIds;
       }
 

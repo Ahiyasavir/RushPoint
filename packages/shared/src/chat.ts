@@ -86,3 +86,117 @@ export function sanitizeChatText(raw: unknown): string | null {
 export function appendCapped(messages: ChatMessage[], msg: ChatMessage): ChatMessage[] {
   return [...messages, msg].slice(-CHAT_MAX_MESSAGES);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unread bookkeeping (change: team-chat-unread-accuracy)
+//
+// Unread stays purely client-local (no server read state), but the DECISION is
+// shared so the participant section, the staff console and the creator run
+// console can never drift apart — they all used to re-implement
+// `messages.length > seenCount`, which is wrong three ways:
+//   1. a count says nothing about WHO wrote the new lines, so a viewer's own
+//      message counted as unread the moment the marker fell out of step;
+//   2. a count is meaningless once appendCapped starts evicting — past the cap
+//      `messages.length` is pinned at CHAT_MAX_MESSAGES forever, so a stored
+//      count of 100 can never be exceeded and the badge silently dies;
+//   3. HQ never persisted the count at all, so a reload re-flagged every thread.
+//
+// The marker therefore anchors on the last-seen message ID. Timestamps are
+// deliberately NOT used: `at` is a server-clock string that can tie (two sends
+// in the same millisecond) or move backwards (transaction retry, clock
+// adjustment), so a `>`/`>=` comparison would double-count or swallow a message
+// at the boundary. The array is already in append order, so an ID anchor gives
+// an exact cut with no comparison at all.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What a viewer has already read in one thread. `count` is only the legacy
+ *  (pre-upgrade) fallback for devices that stored a bare message count. */
+export interface ChatSeenMarker {
+  lastSeenId?: string | null;
+  count?: number | null;
+}
+
+/** The marker to persist once `messages` has been shown to the viewer. */
+export function chatSeenMarker(messages: readonly ChatMessage[] | null | undefined): ChatSeenMarker {
+  const list = Array.isArray(messages) ? messages : [];
+  const last = list[list.length - 1];
+  return { lastSeenId: last?.id ?? null, count: list.length };
+}
+
+/** True when `msg` was written by this viewer. Mirrors chatMessageSide's rule:
+ *  the server-stamped `senderId` wins over `from` (an owner playing their own
+ *  game is stamped from:'hq' yet must still read as themselves). */
+function isOwnChatMessage(msg: ChatMessage, selfUid: string | null | undefined): boolean {
+  return !!selfUid && msg.senderId === selfUid;
+}
+
+/**
+ * How many messages in `messages` this viewer has not read yet: everything after
+ * the marker's anchor, minus the viewer's own lines.
+ *
+ * - no anchor (fresh join, or a legacy count-only marker) → fall back to `count`,
+ *   clamped into range; absent ⇒ 0 ⇒ the whole thread is unread.
+ * - anchor present but NOT found in `messages` → the cap has evicted it, and
+ *   appendCapped only ever drops from the front, so every retained message is
+ *   newer than the anchor: cut at 0.
+ */
+export function countUnreadChatMessages(
+  messages: readonly ChatMessage[] | null | undefined,
+  marker: ChatSeenMarker | null | undefined,
+  selfUid: string | null | undefined,
+): number {
+  if (!Array.isArray(messages) || messages.length === 0) return 0;
+
+  const anchor = marker?.lastSeenId;
+  let cut: number;
+  if (typeof anchor === 'string' && anchor) {
+    const idx = messages.findIndex((m) => m?.id === anchor);
+    cut = idx >= 0 ? idx + 1 : 0;         // evicted anchor ⇒ everything is newer
+  } else {
+    const count = marker?.count;
+    cut = typeof count === 'number' && Number.isFinite(count)
+      ? Math.min(Math.max(Math.floor(count), 0), messages.length)
+      : 0;
+  }
+
+  let unread = 0;
+  for (let i = cut; i < messages.length; i++) {
+    if (!isOwnChatMessage(messages[i], selfUid)) unread++;
+  }
+  return unread;
+}
+
+/** Serialize a marker for device-local storage. */
+export function serializeChatSeen(marker: ChatSeenMarker): string {
+  return JSON.stringify({ lastSeenId: marker.lastSeenId ?? null, count: marker.count ?? 0 });
+}
+
+/**
+ * Parse a stored marker. Tolerates (a) a bare number — the legacy format written
+ * by the first team-hq-chat release, so upgrading does not light up an
+ * already-read thread — and (b) any garbage, which degrades to "nothing seen"
+ * (the safe direction: a spurious badge beats a silently missed message).
+ */
+export function parseChatSeen(raw: string | null | undefined): ChatSeenMarker {
+  if (typeof raw !== 'string' || !raw) return {};
+  const legacy = Number.parseInt(raw, 10);
+  if (raw.trim() === String(legacy) && Number.isFinite(legacy) && legacy >= 0) return { count: legacy };
+  try {
+    const parsed = JSON.parse(raw) as { lastSeenId?: unknown; count?: unknown };
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: ChatSeenMarker = {};
+    if (typeof parsed.lastSeenId === 'string' && parsed.lastSeenId) out.lastSeenId = parsed.lastSeenId;
+    if (typeof parsed.count === 'number' && Number.isFinite(parsed.count) && parsed.count >= 0) {
+      out.count = Math.floor(parsed.count);
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** One storage namespace for every surface, scoped per run + team so several
+ *  runs / teams on one device cannot clobber each other. */
+export function chatSeenStorageKey(runId: string, teamId: string): string {
+  return `rushpoint.chatSeen.${runId}.${teamId}`;
+}

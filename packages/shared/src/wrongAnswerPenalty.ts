@@ -8,7 +8,7 @@
 //
 // Shared by THREE consumers so the charge, the participant display and the
 // creator preview can never drift:
-//   1. submitTaskAnswer  — the real charge (bonusPenalty + retry cooldown).
+//   1. submitTaskAnswer  — the real charge (bonusPenalty + retry lockout).
 //   2. getMyTeamState    — the display-only `answerCost` object on the active task.
 //   3. creator-web       — the Builder's level selector copy.
 //
@@ -144,15 +144,147 @@ export function wrongAnswerCost(
 }
 
 /**
- * Seconds left on a retry lockout, rounded UP so the UI never shows 0 while the
- * server would still refuse. Missing / non-finite / past values are 0 — the gate
- * fails OPEN, because a bug here must never lock a team out of their own game.
+ * Seconds left until a deadline **on the caller's own clock**, rounded UP so the
+ * UI never shows 0 while the server would still refuse. Missing / non-finite /
+ * past values are 0 — it fails OPEN, because a bug here must never lock a team
+ * out of their own game.
+ *
+ * ⚠ Both arguments MUST come from the SAME clock. Passing a server instant with a
+ * client `now` is the clock-skew bug `retry-lockout-clock-skew` removed. For the
+ * "is this team locked out?" decision use `evaluateRetryLockout` below; this is
+ * the low-level primitive it and the client countdown are built on.
  */
 export function cooldownRemainingSeconds(cooldownUntilMs: number | undefined | null, nowMs: number): number {
   const until = finite(cooldownUntilMs, 0);
   const now = finite(nowMs, 0);
   if (until <= now) return 0;
   return Math.ceil((until - now) / 1000);
+}
+
+// ── Retry lockout (change: retry-lockout-clock-skew) ─────────────────────────
+//
+// `cooldownRemainingSeconds` above is a primitive: "seconds until a deadline on
+// THIS clock". It is correct on the server (server instant vs server clock) and
+// correct on the client (local deadline vs local clock) — and catastrophic when
+// the two are MIXED, which is exactly what shipping an absolute `cooldownUntil`
+// to a phone used to do. A phone whose clock ran hours behind froze its own
+// answer controls for hours in a game the server would happily have let it play.
+//
+// `evaluateRetryLockout` is the single decision point that replaces the mixing.
+// It answers "is this team locked out, and for how much longer?" from the SERVER
+// clock alone, and what travels to the participant is the resulting DURATION.
+//
+// Three properties are load-bearing:
+//   TOTAL      — every stored state, including absent / negative / NaN / Infinity
+//                / wrongly-typed, maps to an explicit verdict.
+//   FAIL OPEN  — anything undecidable resolves to NOT locked. The cost of failing
+//                open is one uncharged retry; the cost of failing closed is a
+//                player locked out of a live field game with no recovery.
+//   BOUNDED    — the remainder can never exceed the ceiling of the level that
+//                created it, and the bound is applied on READ, so a lockout
+//                already written with an out-of-range value self-heals.
+
+/** The lockout slice of one `team.answerPenalties[taskId]` row. */
+export interface RetryLockoutRecord {
+  /** Legacy absolute expiry (server clock). Still written; deprecated for display. */
+  cooldownUntil?: number | null;
+  /** Server instant of the wrong answer that started the lockout. */
+  lastFailureAt?: number | null;
+  /** The lockout duration that failure earned, in ms. */
+  lockoutMs?: number | null;
+  /** Charged-attempt index. Carried for diagnosis; never trusted for the decision. */
+  failureCount?: number | null;
+  /** Present on the real ledger row; ignored here. */
+  charged?: number;
+  lastHash?: string;
+}
+
+/** The ceiling a lockout may not exceed — owned by the strictness level. */
+export interface RetryLockoutPolicy {
+  maxCooldownSeconds: number;
+}
+
+export interface RetryLockoutVerdict {
+  /** True only when time genuinely remains. `remaining === 0` is UNLOCKED. */
+  locked: boolean;
+  /** Always finite, always ≥ 0, always ≤ the policy ceiling. This is what ships. */
+  remainingMs: number;
+  /** `ceil(remainingMs / 1000)` — never 0 while the server would still refuse. */
+  remainingSeconds: number;
+  /** The stored state implied a longer wait than the policy allows and was cut down. */
+  clamped: boolean;
+  /** Which stored form decided it — makes the migration path assertable. */
+  source: 'duration' | 'legacy' | 'none';
+}
+
+const NO_LOCKOUT: RetryLockoutVerdict = {
+  locked: false, remainingMs: 0, remainingSeconds: 0, clamped: false, source: 'none',
+};
+
+/**
+ * The lockout ceiling for a strictness level. A garbage level falls back to
+ * `off`, whose ceiling is 0 — so a mis-resolved level can never lock anyone.
+ */
+export function retryLockoutPolicyFor(level: WrongAnswerLevel): RetryLockoutPolicy {
+  const tuning = WRONG_ANSWER_LEVELS[isLevel(level) ? level : 'off'];
+  return { maxCooldownSeconds: tuning.maxCooldownSeconds };
+}
+
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Is this team still inside a retry lockout, and for how much longer?
+ *
+ * @param nowMs   the SERVER clock. Never a client-supplied value.
+ * @param record  the stored lockout state (either shape; see D2 of the design).
+ * @param policy  the ceiling of the level that created the lockout.
+ *
+ * Resolution order: the duration form (`lastFailureAt` + `lockoutMs`) wins,
+ * because it carries its own bound; otherwise the legacy absolute `cooldownUntil`
+ * written before this change; otherwise there is no lockout.
+ */
+export function evaluateRetryLockout(
+  nowMs: number,
+  record: RetryLockoutRecord | null | undefined,
+  policy: RetryLockoutPolicy,
+): RetryLockoutVerdict {
+  const now = finiteOrNull(nowMs);
+  if (now === null || !record) return NO_LOCKOUT;
+
+  const ceilingMs = Math.max(0, finite(policy?.maxCooldownSeconds, 0)) * 1000;
+  if (ceilingMs <= 0) return NO_LOCKOUT; // level `off`: nothing can lock.
+
+  const lastFailureAt = finiteOrNull(record.lastFailureAt);
+  const lockoutMs = finiteOrNull(record.lockoutMs);
+  const cooldownUntil = finiteOrNull(record.cooldownUntil);
+
+  let end: number;
+  let source: RetryLockoutVerdict['source'];
+  if (lastFailureAt !== null && lockoutMs !== null && lockoutMs > 0) {
+    end = lastFailureAt + lockoutMs;
+    source = 'duration';
+  } else if (cooldownUntil !== null && cooldownUntil > 0) {
+    end = cooldownUntil;
+    source = 'legacy';
+  } else {
+    return NO_LOCKOUT;
+  }
+
+  const raw = end - now;
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return { locked: false, remainingMs: 0, remainingSeconds: 0, clamped: false, source };
+  }
+  const clamped = raw > ceilingMs;
+  const remainingMs = clamped ? ceilingMs : raw;
+  return {
+    locked: remainingMs > 0,
+    remainingMs,
+    remainingSeconds: Math.ceil(remainingMs / 1000),
+    clamped,
+    source,
+  };
 }
 
 /**
@@ -193,8 +325,20 @@ export interface AnswerCostDisplay {
   nextPoints: number;
   /** What the NEXT wrong answer would cost in seconds of lockout. */
   nextCooldownSeconds: number;
-  /** Epoch ms the current lockout expires; 0 when the team may answer now. */
+  /**
+   * DEPRECATED for display (change: retry-lockout-clock-skew). An ABSOLUTE server
+   * instant; a client that compares it to its own clock counts down wrongly by
+   * exactly its clock skew. Kept on the wire only so a play-web PWA still running
+   * a bundle cached before this change keeps working. Read `cooldownRemainingMs`.
+   */
   cooldownUntil: number;
+  /**
+   * Milliseconds left on the retry lockout, computed SERVER-side against the
+   * server clock at the moment this object was built. 0 when the team may answer
+   * now. This is the value the countdown must be seeded from: the client turns it
+   * into a deadline on its OWN clock, so skew cancels instead of accumulating.
+   */
+  cooldownRemainingMs: number;
   /** Points already taken off this team for this task. */
   charged: number;
 }
@@ -212,13 +356,23 @@ export function answerCostDisplay(
   preset: ScoringPreset,
   attemptsUsed: number,
   charged: number,
-  cooldownUntil: number,
+  /**
+   * The stored lockout row (either shape), or a bare legacy expiry instant.
+   * `nowMs` MUST be the server clock — the remaining duration is computed here so
+   * the participant never has to interpret a server instant (retry-lockout-clock-skew).
+   */
+  lockout: RetryLockoutRecord | number | null | undefined,
+  nowMs: number,
 ): AnswerCostDisplay {
   const lv = isLevel(level) ? level : 'off';
   const tuning = WRONG_ANSWER_LEVELS[lv];
   const used = Math.max(0, Math.floor(finite(attemptsUsed, 0)));
   const chargedSoFar = Math.max(0, finite(charged, 0));
   const next = wrongAnswerCost(lv, preset, used + 1, chargedSoFar);
+  const record: RetryLockoutRecord | null =
+    typeof lockout === 'number' ? { cooldownUntil: lockout } : (lockout ?? null);
+  const verdict = evaluateRetryLockout(nowMs, record, retryLockoutPolicyFor(lv));
+  const cooldownUntil = Math.max(0, finite(record?.cooldownUntil, 0));
   return {
     level: lv,
     freeAttemptsLeft: Number.isFinite(tuning.freeAttempts)
@@ -226,7 +380,8 @@ export function answerCostDisplay(
       : 0,
     nextPoints: next.points,
     nextCooldownSeconds: next.cooldownSeconds,
-    cooldownUntil: Math.max(0, finite(cooldownUntil, 0)),
+    cooldownUntil,
+    cooldownRemainingMs: verdict.remainingMs,
     charged: chargedSoFar,
   };
 }

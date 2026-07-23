@@ -35,6 +35,11 @@ import {
   // What a PUBLIC task may say about where it is (change: task-library-map-view).
   publicTaskLocation,
   stripUnsafeDisplayChars,
+  // THE one definition of a tag list (change: game-task-tags). The client parses
+  // with the same function, so what the creator sees and what we store cannot
+  // diverge — and a client that skips it (or is hostile) still cannot store an
+  // unbounded list, because every write path below runs it server-side.
+  normalizeTags,
   cleanGameInstructions,
   FIRESTORE_PATHS,
   // Game trash / tombstone lifecycle (change: recoverable-game-deletion).
@@ -48,8 +53,17 @@ import {
   // Creator-owned portable game file (change: game-file-export-import).
   serializeGameToFile,
   parseGameFile,
+  // Server-enforced settings validated at the door (change: expose-enforced-settings).
+  validateSafeZone,
+  validateMinAge,
+  validateConsentFlag,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
+// What a PUBLIC GAME may say about where it is (change: surface-invisible-fields).
+// The gallery map plots publicGames by approxLocation and nothing ever wrote one, so
+// the map was permanently blank; this derives a coarse area from the game's own
+// publicly-locatable tasks when the creator authored none.
+import { resolveGameArea } from './gameArea';
 import {
   auditBestEffort, AUDIT_GAME_DELETED, AUDIT_GAME_RESTORED, AUDIT_GAME_PURGED,
 } from '../obs/audit';
@@ -112,6 +126,10 @@ function sanitizeStagesText(stages: Stage[] | undefined): Stage[] | undefined {
       ...task,
       title: clean(task.title) ?? task.title,
       ...(task.description !== undefined ? { description: clean(task.description) } : {}),
+      // Task tags (change: game-task-tags) — bounded here rather than trusted, and
+      // done inside this pass on purpose: it rebuilds a NEW stages array, and this
+      // repo's hard rule is never to dotted-update an element of a stored array.
+      ...(task.tags !== undefined ? { tags: normalizeTags(task.tags) } : {}),
     })),
   }));
 }
@@ -183,7 +201,8 @@ export const createGame = loggedCallable('createGame', async (data, context) => 
     scoringPreset: DEFAULT_SCORING_PRESET,
     registrationFields: DEFAULT_REGISTRATION_FIELDS,
     visibility: 'private',
-    tags,
+    // Bounded, never trusted (change: game-task-tags).
+    tags: normalizeTags(tags),
     playCount: 0,
     createdAt: now,
     updatedAt: now,
@@ -251,12 +270,29 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (scoringOptions !== undefined)     updates.scoringOptions = scoringOptions;
   if (registrationFields !== undefined) updates.registrationFields = registrationFields;
   if (branding !== undefined)           updates.branding = branding;
-  if (tags !== undefined)               updates.tags = tags;
+  // Never trusted (change: game-task-tags). This line used to be a bare
+  // `updates.tags = tags`, so a client could store 10 000 tags — or one a megabyte
+  // long — which then rode into world-readable publicGames below.
+  if (tags !== undefined)               updates.tags = normalizeTags(tags);
   if (coverImage !== undefined)         updates.coverImage = coverImage;
   if (approxLocation !== undefined)     updates.approxLocation = approxLocation;
+  // Enforced settings are validated, never trusted (change: expose-enforced-settings).
+  // All three used to be bare assignments onto fields the SERVER gates behavior on:
+  // `safeZone` is read by updateLocation and by the routing soft-pause, and
+  // `requiresGuardianConsent` decides whether a team may start at all. `undefined`
+  // still means "not sent"; a present-but-malformed value is now refused loudly
+  // rather than persisted into a safety path.
+  const consentFlagCheck = validateConsentFlag(requiresGuardianConsent);
+  if (!consentFlagCheck.ok) throw new functions.https.HttpsError('invalid-argument', consentFlagCheck.error);
+  const minAgeCheck = validateMinAge(minAge);
+  if (!minAgeCheck.ok) throw new functions.https.HttpsError('invalid-argument', minAgeCheck.error);
+  const safeZoneCheck = validateSafeZone(safeZone);
+  if (!safeZoneCheck.ok) throw new functions.https.HttpsError('invalid-argument', safeZoneCheck.error);
+
   if (requiresGuardianConsent !== undefined) updates.requiresGuardianConsent = requiresGuardianConsent;
   if (minAge !== undefined)             updates.minAge = minAge;
-  if (safeZone !== undefined)           updates.safeZone = safeZone ?? undefined;
+  // `safeZone: null` is an explicit clear and validates to `undefined`.
+  if (safeZone !== undefined)           updates.safeZone = safeZoneCheck.value;
   if (benchmarkOptOut !== undefined)    updates.benchmarkOptOut = benchmarkOptOut;
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
@@ -304,9 +340,14 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
       description: merged.description,
       mode: merged.mode,
       scoringPreset: merged.scoringPreset,
+      // Already normalized by the `updates.tags` line above (or already stored
+      // normalized) — normalizeTags is idempotent, so no second call is needed here.
       tags: merged.tags,
       coverImage: merged.coverImage,
-      approxLocation: merged.approxLocation,
+      // Recomputed from the tasks as just saved (change: surface-invisible-fields), so
+      // a published game's map pin can never describe a layout that no longer exists.
+      // An authored area still wins; undefined leaves the stored value untouched.
+      approxLocation: resolveGameArea(merged.approxLocation, merged.stages),
       stageCount: merged.stages.length,
       taskCount: allTasks.length,
       estimatedTotalMinutes: sumEstimatedMinutes(allTasks),
@@ -680,9 +721,16 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
       description: game.description,
       mode: game.mode,
       scoringPreset: game.scoringPreset,
-      tags: game.tags,
+      // Normalized on the way into the WORLD-READABLE collection (change:
+      // game-task-tags), so a game whose tags were stored before the server guard
+      // existed is cleaned by its next publish instead of serving forever.
+      tags: normalizeTags(game.tags),
       coverImage: game.coverImage,
-      approxLocation: game.approxLocation,
+      // An authored area wins verbatim; otherwise derive one from this game's own
+      // publicly-locatable tasks so the gallery map is not blank for every game
+      // nobody hand-placed (change: surface-invisible-fields). Undefined is dropped
+      // by ignoreUndefinedProperties, so a game with nothing to say says nothing.
+      approxLocation: resolveGameArea(game.approxLocation, game.stages),
       playCount: game.playCount,
       stageCount: game.stages.length,
       taskCount: allTasks.length,
@@ -730,7 +778,7 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
         difficulty: task.difficulty,
         estimatedMinutes: task.estimatedMinutes,
         pointValue: task.pointValue,
-        tags: task.tags,
+        tags: normalizeTags(task.tags),
         // Preserved across a re-publish, along with createdAt — the newness term
         // of the score must date from FIRST publication, otherwise re-publishing
         // would be a way to permanently refresh your own ranking.
@@ -989,7 +1037,8 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     scoringPreset: parsed.scoringPreset ?? DEFAULT_SCORING_PRESET,
     registrationFields: parsed.registrationFields ?? DEFAULT_REGISTRATION_FIELDS,
     mode: parsed.mode ?? 'individual',
-    tags: parsed.tags ?? [],
+    // A creator's own game file is still client-supplied bytes (change: game-task-tags).
+    tags: normalizeTags(parsed.tags),
     visibility: 'private',
     playCount: 0,
     createdAt: now,

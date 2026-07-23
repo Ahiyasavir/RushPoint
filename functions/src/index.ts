@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -98,7 +98,7 @@ function assertStaffOrOwner(
 // ─── Audit trail ──────────────────────────────────────────────────────────────
 // The writer now lives in obs/audit.ts so the games domain can record destructive
 // actions too (change: recoverable-game-deletion). Behaviour is unchanged.
-import { writeAuditLog } from './obs/audit';
+import { writeAuditLog, auditBestEffort } from './obs/audit';
 
 
 // ─── Chat integrations (change: chat-integrations) ─────────────────────────────
@@ -299,9 +299,13 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
   requireAuth(context);
   const uid = context.auth!.uid;
   await enforceRateLimit(uid, 'updateLocation');
-  const { lat, lng, ownerUid, gameId, runId } = data as {
+  const { lat, lng, accuracyMeters, ownerUid, gameId, runId } = data as {
     lat: number;
     lng: number;
+    // Out-of-bounds recovery: the fix's own error radius. Optional and never fatal —
+    // an older client that cannot supply it must keep working (it then simply gets no
+    // confidence tolerance). Never trusted to *widen* anything beyond the ceiling.
+    accuracyMeters?: number;
     ownerUid: string;
     gameId: string;
     runId: string;
@@ -322,7 +326,10 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
   const locationRef = db.doc(
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
   );
-  await locationRef.set({ teamId, lat, lng, updatedAt: now }, { merge: true });
+  const accuracy = typeof accuracyMeters === 'number' && Number.isFinite(accuracyMeters) && accuracyMeters >= 0
+    ? accuracyMeters
+    : null;
+  await locationRef.set({ teamId, lat, lng, accuracyMeters: accuracy, updatedAt: now }, { merge: true });
 
   // Movement heatmap (change: movement-heatmap): retain an append-only GPS track so the
   // creator can see foot-traffic density after the run. teamLocations keeps only the
@@ -337,22 +344,49 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
   const safeZone = (gameSnap.data() as { safeZone?: SafeZone } | undefined)?.safeZone;
   if (!safeZone) return { ok: true, outOfBounds: false };
 
-  const outside = isOutsideSafeZone({ lat, lng }, safeZone);
   const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
-  const wasOut = ((await teamRef.get()).data() as { outOfBounds?: boolean } | undefined)?.outOfBounds === true;
+  const teamData = (await teamRef.get()).data() as
+    { outOfBounds?: boolean; outOfBoundsOverrideUntil?: string; lastBreachAlertAt?: string } | undefined;
+  const wasOut = teamData?.outOfBounds === true;
+  const overrideUntilMs = teamData?.outOfBoundsOverrideUntil
+    ? Date.parse(teamData.outOfBoundsOverrideUntil)
+    : null;
+  const nowMs = Date.parse(now);
 
-  if (outside && !wasOut) {
+  // Out-of-bounds recovery: the flag is now decided by the fail-open evaluator, so a
+  // low-confidence fix, a malformed one, or a team a human already released can never
+  // latch. `outside` (the raw geometry) is kept separately because the ORGANIZER's
+  // breach alert must still fire on a genuine crossing during a staff override — the
+  // override releases the player, it does not blind the run console.
+  const status = evaluateSafeZoneStatus({
+    fix: { lat, lng, accuracyMeters: accuracy, atMs: nowMs },
+    safeZone,
+    nowMs,
+    overrideUntilMs,
+  });
+  const outside = status.reason === 'outside' || (status.reason === 'override' && isOutsideSafeZone({ lat, lng }, safeZone));
+
+  // Alert dedup: while the flag latches, `wasOut` already suppresses repeats. Under an
+  // ACTIVE OVERRIDE the flag never latches, so without a cooldown every 20 s ping from a
+  // genuinely-outside team would mint a fresh alert. 10 minutes keeps the organizer
+  // informed without burying the alerts panel.
+  const lastAlertMs = teamData?.lastBreachAlertAt ? Date.parse(teamData.lastBreachAlertAt) : NaN;
+  const alertCooledDown = !Number.isFinite(lastAlertMs) || nowMs - lastAlertMs > 10 * 60 * 1000;
+  if (outside && !wasOut && alertCooledDown) {
     const alertRef = db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`).doc();
     await alertRef.set({
       id: alertRef.id, teamId, type: 'safe_zone_breach',
       lat, lng, message: 'Left the play area', acknowledged: false, createdAt: now,
     });
-    await teamRef.set({ outOfBounds: true }, { merge: true });
-  } else if (!outside && wasOut) {
+    await teamRef.set({ lastBreachAlertAt: now }, { merge: true });
+  }
+  if (status.outOfBounds && !wasOut) {
+    await teamRef.set({ outOfBounds: true, outOfBoundsAt: now }, { merge: true });
+  } else if (!status.outOfBounds && wasOut) {
     await teamRef.set({ outOfBounds: false }, { merge: true });
   }
 
-  return { ok: true, outOfBounds: outside };
+  return { ok: true, outOfBounds: status.outOfBounds, reason: status.reason };
 });
 
 
@@ -525,6 +559,57 @@ export const acknowledgeAlert = loggedCallable('acknowledgeAlert', async (data, 
     });
 
   return { ok: true };
+});
+
+
+// ─── clearTeamOutOfBounds ─────────────────────────────────────────────────────
+//
+// The human escape hatch (change: out-of-bounds-recovery). `team.outOfBounds` used to
+// be openable by exactly one thing — a later GPS fix proving the team came back — so a
+// phone with denied/dead/wildly-inaccurate location left its team behind a blocking
+// card for the rest of the run, and NO staff or creator action could free them.
+//
+// The grace stamp is the point: without it the very next bad fix from the same broken
+// phone re-latches the team seconds after the rescue and staff are in a loop they
+// cannot win. It is short by design — a rescue, not a permanent exemption — and
+// updateLocation keeps raising breach alerts throughout, so the organizer never loses
+// the safety signal.
+
+export const clearTeamOutOfBounds = loggedCallable('clearTeamOutOfBounds', async (data, context) => {
+  assertStaffOrOwner(context, (data as { ownerUid: string }).ownerUid, (data as { runId?: string }).runId);
+  const { ownerUid, gameId, runId, teamId, reason } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    teamId: string;
+    reason?: string;
+  };
+  if (!ownerUid || !gameId || !runId || !teamId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId, teamId required');
+  }
+
+  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
+  if (!(await teamRef.get()).exists) {
+    throw new functions.https.HttpsError('not-found', 'Team not found');
+  }
+
+  const nowMs = Date.now();
+  const overrideUntil = new Date(nowMs + DEFAULT_OUT_OF_BOUNDS_GRACE_MS).toISOString();
+  await teamRef.set(
+    { outOfBounds: false, outOfBoundsOverrideUntil: overrideUntil },
+    { merge: true },
+  );
+
+  await auditBestEffort({
+    ownerUid, gameId, runId, teamId,
+    operatorId: context.auth!.uid,
+    actionType: 'out_of_bounds_cleared',
+    previousValue: 'out_of_bounds',
+    newValue: 'released',
+    reason: validate(() => optionalString(reason, 'reason', MAX_MESSAGE_LEN)) ?? '',
+  });
+
+  return { ok: true, overrideUntil };
 });
 
 

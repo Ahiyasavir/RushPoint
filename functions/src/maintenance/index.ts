@@ -21,20 +21,31 @@ import {
   GAME_TRASH_RETENTION_DAYS, isPurgeDue, type Game,
 } from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
+import { runPhotoPrefix } from '../storagePaths';
+// Pure, total, fail-closed prune eligibility (change: run-retention-completeness).
+import {
+  evaluateRunPrune, parseRunPath, ABANDONABLE_RUN_STATUSES, type RunRetentionFacts,
+} from './runRetention';
 // Game trash purge (change: recoverable-game-deletion). purgeGameTree is the ONE
 // destruction implementation, shared with the owner-triggered purgeGameNow.
 import { purgeGameTree } from '../games/index';
-import { AUDIT_SYSTEM_OPERATOR } from '../obs/audit';
+import {
+  auditBestEffort, AUDIT_SYSTEM_OPERATOR,
+  AUDIT_RUN_PII_PRUNED, AUDIT_RUN_PII_SWEEP, AUDIT_GAME_PURGE_SWEEP, AUDIT_PUBLIC_TASK_BACKFILL,
+} from '../obs/audit';
 import { backfillPublicTaskCoordinates } from './publicTaskBackfill';
 
 // Admin only (platform maintenance). No emulator bypass — the e2e suite mints
 // a real `admin` custom-token claim against the Auth emulator, so tests hit
 // the same gate production runs.
-function assertAdmin(context: functions.https.CallableContext): void {
+// Returns the admin's uid (matching the root module's assertAdmin) so the callables
+// below can attribute their audit records to the person who actually invoked them.
+function assertAdmin(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   if (!context.auth.token.admin) {
     throw new functions.https.HttpsError('permission-denied', 'Admin access required');
   }
+  return context.auth.uid;
 }
 
 interface RunRef {
@@ -134,7 +145,9 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   // 3) Delete uploaded photo objects under this run's Storage prefix.
   let storagePurged = false;
   try {
-    await storage.bucket().deleteFiles({ prefix: `runs/${runId}/` });
+    // Pure, unit-tested prefix derivation (change: storage-rules-hardening): a
+    // blank runId here would widen to `runs/` and purge every run in the bucket.
+    await storage.bucket().deleteFiles({ prefix: runPhotoPrefix(runId) });
     storagePurged = true;
   } catch (e) {
     functions.logger.warn(`pruneRunPII: storage purge failed for run ${runId}`, e);
@@ -146,27 +159,75 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   return { runId, locationsDeleted, photoUrlsCleared, consentCleared, storagePurged };
 }
 
-// Finds finished runs older than the retention window that have not yet been
-// pruned, and prunes each. Uses a collection-group query over `runs`.
-export async function sweepExpiredRuns(now = new Date()): Promise<PruneResult[]> {
+// Finds runs past the retention window that have not yet been pruned, and prunes
+// each. Collection-group queries over `runs`.
+//
+// TWO doors, not one (change: run-retention-completeness). This sweep used to
+// select on `status == 'finished'` alone — and that status is written in exactly
+// one place, `finalizeRun`, i.e. it records a CREATOR CLICKING A BUTTON, not the
+// fact that a game ended. An ABANDONED run (group goes home, tab gets closed,
+// nobody finalizes) matched nothing and was therefore retained FOREVER: GPS
+// pings, photos, audio, chat, SOS coordinates, guardian names — against a Privacy
+// Policy that promises 90-day auto-deletion. So there is now a second query for
+// non-finished runs.
+//
+// THE QUERIES ARE A FILTER; `evaluateRunPrune` IS THE AUTHORITY. Nothing is
+// destroyed because a query returned it — the pure predicate re-decides from the
+// document's own fields, biases every ambiguity toward keep, and anchors an
+// unfinalized run on the MAXIMUM of all its timestamps so one recent write vetoes
+// the prune. `createdAt < cutoff` is a strict necessary condition of that anchor
+// (the max includes createdAt), so query B cannot hide a run the predicate would
+// have pruned.
+//
+// ⚠ Query B needs the `runs` COLLECTION_GROUP composite index (status, createdAt)
+// in firestore.indexes.json — deploy indexes BEFORE functions.
+export const RUN_SWEEP_MAX_RUNS = 100;
+
+export async function sweepExpiredRuns(
+  now = new Date(),
+  maxRuns: number = RUN_SWEEP_MAX_RUNS,
+): Promise<PruneResult[]> {
   const cutoff = new Date(now.getTime() - RUN_DATA_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  const snap = await db
+  // A: finalized runs — unchanged rule, unchanged index.
+  const finishedSnap = await db
     .collectionGroup('runs')
     .where('status', '==', 'finished')
     .where('finishedAt', '<', cutoff)
     .get();
 
+  // B: abandoned/stale runs — oldest first, so a capped sweep drains the backlog
+  // deterministically instead of revisiting the same head every day.
+  const abandonedSnap = await db
+    .collectionGroup('runs')
+    .where('status', 'in', [...ABANDONABLE_RUN_STATUSES])
+    .where('createdAt', '<', cutoff)
+    .orderBy('createdAt', 'asc')
+    .get();
+
   const results: PruneResult[] = [];
-  for (const runDoc of snap.docs) {
-    const data = runDoc.data() as { piiPrunedAt?: string };
-    if (data.piiPrunedAt) continue; // already pruned
-    // path: users/{ownerUid}/games/{gameId}/runs/{runId}
-    const parts = runDoc.ref.path.split('/');
-    const ownerUid = parts[1];
-    const gameId = parts[3];
-    const runId = parts[5];
-    results.push(await pruneRunPII({ ownerUid, gameId, runId }));
+  const seen = new Set<string>();
+  for (const runDoc of [...finishedSnap.docs, ...abandonedSnap.docs]) {
+    if (seen.has(runDoc.ref.path)) continue;
+    seen.add(runDoc.ref.path);
+
+    const decision = evaluateRunPrune(runDoc.data() as RunRetentionFacts, now);
+    if (!decision.prune) continue;
+
+    // Never derive an id from a path we do not recognise: a blank runId would
+    // widen the Storage prefix to `runs/` (every run in the bucket).
+    const ref = parseRunPath(runDoc.ref.path);
+    if (!ref) {
+      functions.logger.warn('sweepExpiredRuns: skipping unrecognised run path', { path: runDoc.ref.path });
+      continue;
+    }
+    if (results.length >= maxRuns) {
+      functions.logger.warn(
+        `sweepExpiredRuns: stopped early at the ${maxRuns}-run cap; the rest resume next sweep`,
+      );
+      break;
+    }
+    results.push(await pruneRunPII(ref));
   }
   return results;
 }
@@ -187,9 +248,18 @@ export async function sweepExpiredRuns(now = new Date()): Promise<PruneResult[]>
 // firestore.indexes.json. `isPurgeDue` (shared, pure) makes the final call, so a
 // corrupt/unparseable tombstone is never destroyed.
 
+// `operatorId` DEFAULTS to the system identity so the scheduled job's call site is
+// unchanged and keeps attributing to the system — it genuinely is the system.
+// Only the on-demand admin callable overrides it (change:
+// callable-hardening-consistency). Before this, both callers hard-coded
+// AUDIT_SYSTEM_OPERATOR, so an admin forcing a purge with `graceDays: 0` produced
+// `game_purged` records claiming `system:purge-sweep` did it. That is worse than a
+// missing record: the audit trail answered the one question it exists for — "the
+// nightly job, or a person?" — incorrectly.
 export async function sweepPurgeableGames(
   now = new Date(),
   days: number = GAME_TRASH_RETENTION_DAYS,
+  operatorId: string = AUDIT_SYSTEM_OPERATOR,
 ): Promise<Array<{ ownerUid: string; gameId: string }>> {
   const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
   const snap = await db
@@ -207,7 +277,7 @@ export async function sweepPurgeableGames(
     const parts = gameDoc.ref.path.split('/');
     const ownerUid = parts[1];
     const gameId = parts[3];
-    await purgeGameTree(ownerUid, gameId, AUDIT_SYSTEM_OPERATOR);
+    await purgeGameTree(ownerUid, gameId, operatorId);
     purged.push({ ownerUid, gameId });
   }
   return purged;
@@ -220,7 +290,10 @@ export const pruneExpiredRunData = functions.pubsub
   .timeZone('Asia/Jerusalem')
   .onRun(async () => {
     const results = await sweepExpiredRuns();
-    functions.logger.info(`pruneExpiredRunData: pruned ${results.length} run(s)`, { results });
+    functions.logger.info(
+      `pruneExpiredRunData: pruned ${results.length} run(s)`,
+      { results, stoppedEarly: results.length >= RUN_SWEEP_MAX_RUNS },
+    );
     // Same daily job destroys games whose 30-day trash window has elapsed.
     const purgedGames = await sweepPurgeableGames();
     functions.logger.info(`pruneExpiredRunData: purged ${purgedGames.length} deleted game(s)`, { purgedGames });
@@ -230,9 +303,26 @@ export const pruneExpiredRunData = functions.pubsub
 
 // ─── On-demand admin callables (testable) ─────────────────────────────────────
 export const pruneExpiredRunDataNow = loggedCallable('pruneExpiredRunDataNow', async (_data, context) => {
-  assertAdmin(context);
+  const operatorId = assertAdmin(context);
   const results = await sweepExpiredRuns();
-  return { ok: true, prunedCount: results.length, results };
+  // ONE record per invocation, not per run: this can prune 100 runs in a call, and
+  // a row each would bury the actual event in the collection listAuditLogs reads.
+  // After the sweep, and best-effort — a failed audit write must never turn the
+  // accountability fix into an outage (obs/audit.ts).
+  await auditBestEffort({
+    operatorId, actionType: AUDIT_RUN_PII_SWEEP,
+    newValue: results.length,
+    reason: `on-demand retention sweep; ${results.length} run(s) pruned`,
+    runs: results.map((r) => r.runId),
+    stoppedEarly: results.length >= RUN_SWEEP_MAX_RUNS,
+  });
+  // stoppedEarly tells an operator draining a historical backlog to call again.
+  return {
+    ok: true,
+    prunedCount: results.length,
+    stoppedEarly: results.length >= RUN_SWEEP_MAX_RUNS,
+    results,
+  };
 });
 
 // Game trash purge, on demand (change: recoverable-game-deletion). Mirrors
@@ -244,12 +334,24 @@ export const pruneExpiredRunDataNow = loggedCallable('pruneExpiredRunDataNow', a
 // 0 ⇒ purged). Same gate and same trust level as pruneRunNow — assertAdmin has no
 // emulator bypass, and it can only ever destroy games that are ALREADY tombstoned.
 export const purgeDeletedGamesNow = loggedCallable('purgeDeletedGamesNow', async (data, context) => {
-  assertAdmin(context);
+  const operatorId = assertAdmin(context);
   const { graceDays } = (data ?? {}) as { graceDays?: number };
   const days = typeof graceDays === 'number' && Number.isFinite(graceDays) && graceDays >= 0
     ? graceDays
     : GAME_TRASH_RETENTION_DAYS;
-  const purged = await sweepPurgeableGames(new Date(), days);
+  // Passing operatorId is the fix for the misattribution described on
+  // sweepPurgeableGames: each per-game `game_purged` record now names the admin.
+  const purged = await sweepPurgeableGames(new Date(), days, operatorId);
+  // Plus one summary record at the call site, because the per-game records cannot
+  // show the thing that makes this callable dangerous — the graceDays override
+  // that decided how much of the trash was in scope.
+  await auditBestEffort({
+    operatorId, actionType: AUDIT_GAME_PURGE_SWEEP,
+    previousValue: GAME_TRASH_RETENTION_DAYS,
+    newValue: days,
+    reason: `on-demand game trash purge with graceDays=${days}; ${purged.length} game(s) destroyed`,
+    games: purged.map((p) => p.gameId),
+  });
   return { ok: true, purgedCount: purged.length, graceDays: days, purged };
 });
 
@@ -260,21 +362,49 @@ export const purgeDeletedGamesNow = loggedCallable('purgeDeletedGamesNow', async
 export const backfillPublicTaskCoordinatesNow = loggedCallable(
   'backfillPublicTaskCoordinatesNow',
   async (data, context) => {
-    assertAdmin(context);
+    const operatorId = assertAdmin(context);
     const { limit, startAfter, dryRun } = (data ?? {}) as {
       limit?: number; startAfter?: string | null; dryRun?: boolean;
     };
     const result = await backfillPublicTaskCoordinates({ limit, startAfter, dryRun });
+    // One record per PAGE, not per document (a page is up to 500 docs). A dry run
+    // is recorded as a dry run rather than skipped: "an admin swept the public
+    // library and it reported N pending repairs" is itself a fact worth keeping.
+    await auditBestEffort({
+      operatorId, actionType: AUDIT_PUBLIC_TASK_BACKFILL,
+      newValue: result.repaired,
+      reason: `${dryRun ? 'dry-run' : 'applied'} publicTasks coordinate backfill page`,
+      dryRun: !!dryRun,
+      scanned: result.scanned,
+      repaired: result.repaired,
+      cleared: result.cleared,
+      orphaned: result.orphaned,
+      cursor: result.cursor,
+      done: result.done,
+    });
     return { ok: true, ...result };
   },
 );
 
 export const pruneRunNow = loggedCallable('pruneRunNow', async (data, context) => {
-  assertAdmin(context);
+  const operatorId = assertAdmin(context);
   const { ownerUid, gameId, runId } = data as RunRef;
   if (!ownerUid || !gameId || !runId) {
     throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
   }
   const result = await pruneRunPII({ ownerUid, gameId, runId });
+  // Nothing pruneRunPII destroys is recoverable — subcollections, Storage objects,
+  // guardian-consent PII. Without this the only trace of who ran it was a console
+  // line that ages out of Cloud Logging retention.
+  await auditBestEffort({
+    operatorId, actionType: AUDIT_RUN_PII_PRUNED,
+    ownerUid, gameId, runId,
+    newValue: result.locationsDeleted,
+    reason: `on-demand PII prune: ${result.locationsDeleted} doc(s), `
+      + `${result.photoUrlsCleared} photo url(s), storagePurged=${result.storagePurged}`,
+    photoUrlsCleared: result.photoUrlsCleared,
+    consentCleared: result.consentCleared,
+    storagePurged: result.storagePurged,
+  });
   return { ok: true, ...result };
 });

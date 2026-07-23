@@ -1,18 +1,8 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Team photos: authenticated teams can upload to their own folder.
-    // READ is scoped to the owning team — any-authed read let any player list
-    // every other team's checkin photos (faces, locations) by path. Legitimate
-    // display goes through tokenized getDownloadURL() links, which bypass rules.
-    match /checkins/{teamId}/{allPaths=**} {
-      allow read: if request.auth != null && request.auth.uid == teamId;
-      allow write: if request.auth != null && request.auth.uid == teamId
-        && request.resource.size < 10 * 1024 * 1024  // 10MB max
-        && request.resource.contentType.matches('image/.*');
-    }
-    // v2 platform — photo-mission uploads under a run. A participant (uid ==
-    // teamId) may write only into their own team folder.
+    // ── v2 platform — participant submissions under a run ────────────────────
+    // A participant (uid == teamId) may write only into their own team folder.
     //
     // READ is restricted: a participant may read only their OWN team's photos,
     // and staff scoped to THIS run may read them for review. The owner + the
@@ -25,27 +15,77 @@ service firebase.storage {
         request.auth.uid == teamId
         || (request.auth.token.staff == true && request.auth.token.runId == runId)
       );
+      // CONTENT TYPE IS AN EXPLICIT ALLOWLIST, not `image/.*` (change:
+      // storage-rules-hardening). `image/.*` admitted `image/svg+xml` — active
+      // content (script) stored under a participant-controlled path and later
+      // opened by a reviewing staff member. RE2 here has no negative lookahead,
+      // so the safe types are listed positively.
+      //
+      // Non-breaking by construction: the play-web uploaders are the ONLY
+      // writers of this prefix and they pass a hardcoded content type —
+      // uploadTaskPhoto() always sends 'image/jpeg' (camera captures are
+      // re-encoded to JPEG before upload) and uploadTaskAudio() sends the
+      // normalized audio type from the same four-item allowlist below.
       // audio-tasks: a photo task may capture an audio clip instead (same path,
       // same 10MB cap). The client normalizes the blob type (strips codec params)
       // before upload, so the allowed audio types stay exact-match.
       allow write: if request.auth != null && request.auth.uid == teamId
         && request.resource.size < 10 * 1024 * 1024  // 10MB max
-        && request.resource.contentType.matches('image/.*|audio/(webm|mp4|mpeg|ogg)');
+        && request.resource.contentType.matches(
+             'image/(jpeg|jpg|png|webp|heic|heif|gif)|audio/(webm|mp4|mpeg|ogg)'
+           );
     }
-    // Creator-authored task media (change: task-media-attachments): images/videos a
-    // creator attaches to a task in the Builder. Only the owning creator may write
-    // under their own uid prefix; read is PUBLIC because participants (anonymous /
-    // signed-out marketing viewers) render the media directly via the download URL.
+
+    // ── Creator-authored task media (change: task-media-attachments) ──────────
+    // Images/videos a creator attaches to a task in the Builder. Only the owning
+    // creator may write under their own uid prefix.
+    //
+    // READ is split into `get` and `list` (change: storage-rules-hardening):
+    //   • get  — stays public. Participants and signed-out marketing viewers
+    //            render the media from the stored download URL. (Those URLs carry
+    //            a token and bypass rules anyway, so this is belt-and-braces: it
+    //            cannot regress rendering.)
+    //   • list — OWNER ONLY. `allow read: if true` also grants LIST, which made
+    //            the whole tree enumerable: `publicGames` is world-readable and
+    //            carries `ownerUid`, so anyone could harvest real creator uids and
+    //            then list every object under `gameMedia/{uid}/` — including media
+    //            attached to PRIVATE, unpublished or trashed-but-not-yet-purged
+    //            games. Object names are otherwise unguessable (taskId + ms
+    //            timestamp), so removing list is what closes the hole.
+    // No product code calls listAll() on this prefix (verified repo-wide), so
+    // owner-only list breaks nothing.
     match /gameMedia/{ownerUid}/{allPaths=**} {
-      allow read: if true;
+      allow get:  if true;
+      allow list: if request.auth != null && request.auth.uid == ownerUid;
+      // SVG is excluded for the same stored-active-content reason as above; it is
+      // the one image type a creator cannot upload as task media.
       allow write: if request.auth != null && request.auth.uid == ownerUid
         && request.resource.size < 50 * 1024 * 1024  // 50MB max (short clips)
-        && request.resource.contentType.matches('(image|video)/.*');
+        && request.resource.contentType.matches('(image|video)/.*')
+        // `image/svg.*` (not an exact 'image/svg+xml') so a parameterized
+        // variant like `image/svg+xml; charset=utf-8` cannot slip past.
+        && !request.resource.contentType.matches('image/svg.*');
     }
-    // Public photo stream: readable by all authenticated users
-    match /stream/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if false; // written only by Cloud Functions
+
+    // ── Everything else is denied ────────────────────────────────────────────
+    // Two legacy branches were REMOVED here (change: storage-rules-hardening);
+    // do not reintroduce them without a code path that uses them:
+    //   • `checkins/{teamId}/**` — the v1 single-event path. No code in this repo
+    //     reads or writes it (the archived apps/mobile uses `stationPhotos/`,
+    //     which these rules never matched). It let ANY authenticated user — and
+    //     play-web signs every participant in anonymously — upload unlimited
+    //     10 MB images under their own uid, and NOTHING deleted them: not
+    //     deleteRunPhotos (prefix `runs/`), not deleteGameMedia (prefix
+    //     `gameMedia/`), not the 90-day retention prune, not deleteMyAccount.
+    //     Unbounded free storage plus objects no erasure path could ever reach.
+    //   • `stream/**` — a "public photo stream" no Cloud Function ever wrote. Its
+    //     `read: if request.auth != null` was a trap: the day something did write
+    //     participant photos there, every anonymous participant on the platform
+    //     could list and download them.
+    // Storage denies unmatched paths by default; this is documentation, and it
+    // grants nothing.
+    match /{allPaths=**} {
+      allow read, write: if false;
     }
   }
 }

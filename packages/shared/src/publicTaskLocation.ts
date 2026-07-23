@@ -114,3 +114,39 @@ export function isPlottablePublicTask(pt: {
 } | null | undefined): boolean {
   return !!pt && usableCoord(pt.approxLocation);
 }
+
+/**
+ * Which map state a mission-library result set is in.
+ *
+ * - `no-results`     — nothing was returned; the map is not the story.
+ * - `none-plottable` — there ARE results, but not one of them carries a published
+ *                      area. This is the state a creator hit and could not explain:
+ *                      an empty world-zoomed map over a list full of missions. It
+ *                      is what the UI must ANNOTATE, not merely report.
+ * - `partial`        — some are plottable. The "nothing to show" state must NOT
+ *                      apply; the located ones get pins.
+ * - `all-plottable`  — every result has an area.
+ */
+export type PublicTaskMapCoverage = 'no-results' | 'none-plottable' | 'partial' | 'all-plottable';
+
+/**
+ * Classify a result set for the mission-library map.
+ *
+ * Goes through `isPlottablePublicTask` per item — deliberately the SAME predicate
+ * the marker list filters on — so the map can never say "none of these has an
+ * area" while simultaneously drawing a pin, or vice versa. A single shared
+ * predicate is the only structural guarantee of that; two parallel conditions are
+ * exactly how the two got to disagree in the first place.
+ *
+ * Tolerates a nullish array and nullish entries: this runs on a callable's
+ * response, and a classifier that throws would black out the whole tab.
+ */
+export function publicTaskMapCoverage(
+  tasks: ReadonlyArray<{ approxLocation?: { lat?: unknown; lng?: unknown } } | null | undefined>
+    | null | undefined,
+): PublicTaskMapCoverage {
+  if (!Array.isArray(tasks) || tasks.length === 0) return 'no-results';
+  const plottable = tasks.reduce((n, t) => n + (isPlottablePublicTask(t) ? 1 : 0), 0);
+  if (plottable === 0) return 'none-plottable';
+  return plottable === tasks.length ? 'all-plottable' : 'partial';
+}

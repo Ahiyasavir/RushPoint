@@ -43,11 +43,21 @@ service cloud.firestore {
       //    (undeleting past the grace period, or un-queueing a pending purge).
       //    Direct owner writes to the rest of the doc stay allowed as before; no
       //    client code writes a game document today, so this narrows nothing in use.
+      //    DELETE IS DENIED (change: firestore-rules-coverage). Destroying a game is
+      //    a FIVE-system act — the game subtree, the publicGames/publicTasks gallery
+      //    index, the accessCodes pointers, Storage photos + authored media, and the
+      //    audit record — and only purgeGameTree does all five. A raw client delete
+      //    does exactly one of them: the world-readable gallery row would keep
+      //    serving a "deleted" game with no owner doc left to unpublish it, the join
+      //    codes would dangle, and the run subtree would be orphaned AND unpurgeable
+      //    (purgeGameNow requires a tombstone that no longer exists anywhere). It
+      //    would also bypass the trash and the audit trail entirely. The client path
+      //    is the deleteGame callable, which tombstones.
       match /games/{gameId} {
         allow read:   if isOwner(uid);
         allow create: if isOwner(uid) && !hasTombstone(request.resource.data);
         allow update: if isOwner(uid) && tombstoneUnchanged();
-        allow delete: if isOwner(uid);
+        allow delete: if false;
 
         // ── RUNS ─────────────────────────────────────────────────────────────
         //    Live instances. Owner reads everything; all writes are CF-only
@@ -183,6 +193,15 @@ service cloud.firestore {
       allow read:  if true;
       allow write: if false;
     }
+    // Location privacy on publicTasks is NOT — and structurally CANNOT BE — a rules
+    // guarantee (audit: firestore-rules-coverage). Rules gate DOCUMENTS, not fields,
+    // on read, and every write here is Admin SDK, for which rules are never
+    // evaluated at all. The coarse-area contract (change: task-library-map-view) is
+    // therefore enforced at the WRITE PATH: publishGame writes only
+    // publicTaskLocation(task) and uses batch.set() (full overwrite, so a legacy
+    // exact `coordinates` key is erased on re-publish), searchTaskLibrary strips it
+    // from responses, and backfillPublicTaskCoordinatesNow repairs documents that
+    // are never re-published. Do not re-open this as a rules finding.
     match /publicTasks/{taskId} {
       allow read:  if true;
       allow write: if false;
@@ -269,10 +288,18 @@ service cloud.firestore {
     function hasTombstone(d) {
       return d.keys().hasAny(['deletedAt', 'deletedBy']);
     }
+    // EVERY field of the deletion record is compared, not just the timestamp
+    // (change: firestore-rules-coverage) — `deletedBy` is as server-written as
+    // `deletedAt`, so a client may neither re-attribute nor erase it while the
+    // tombstone stands. `get(field, null)` keeps the check TOTAL: absence becomes a
+    // first-class value, so a doc carrying only one of the two fields still yields a
+    // definite allow/deny instead of an evaluation error whose deny is incidental.
+    // Ordinary fields of a trashed game stay writable — this guards the record only.
     function tombstoneUnchanged() {
       return hasTombstone(request.resource.data) == hasTombstone(resource.data)
           && (!hasTombstone(resource.data)
-              || request.resource.data.deletedAt == resource.data.deletedAt);
+              || (request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)
+                  && request.resource.data.get('deletedBy', null) == resource.data.get('deletedBy', null)));
     }
     // Shared team devices: an attached phone (its uid listed in the team doc's
     // deviceUids) may read that team doc. Checked against resource.data — free,

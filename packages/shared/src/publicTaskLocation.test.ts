@@ -13,6 +13,7 @@ import {
   approximatePublicPoint,
   publicTaskLocation,
   isPlottablePublicTask,
+  publicTaskMapCoverage,
 } from './publicTaskLocation';
 
 const CELL = PUBLIC_LOCATION_CELL_DEG;
@@ -174,5 +175,73 @@ describe('isPlottablePublicTask — the reader\'s rule', () => {
     // The whole point of the change: the map must never fall back onto the field
     // this change exists to stop publishing.
     expect(isPlottablePublicTask(pub({ coordinates: AUTHORED }))).toBe(false);
+  });
+});
+
+// ─── publicTaskMapCoverage — which map state a result set is in ───────────────
+//
+// The reported bug was a MISCLASSIFICATION, not a bad pin: a creator saw "none of
+// these missions has a published area" over a result list that visibly had located
+// missions in it. The classifier exists so that outcome is individually assertable,
+// and so it can never disagree with the marker filter — both go through
+// isPlottablePublicTask.
+describe('publicTaskMapCoverage — the map-state classifier', () => {
+  const AREA = { lat: 31.775, lng: 35.235 };
+  const withArea = () => pub({ approxLocation: { ...AREA } });
+  /** A document written before the privacy change: exact point, no area. */
+  const legacy = () => pub({ coordinates: { ...AUTHORED } });
+  /** A hideLocation task — the writer emitted no location field at all. */
+  const hidden = () => pub();
+
+  test('an empty result set is "no-results"', () => {
+    expect(publicTaskMapCoverage([])).toBe('no-results');
+  });
+
+  test('every result located is "all-plottable"', () => {
+    expect(publicTaskMapCoverage([withArea(), withArea(), withArea()])).toBe('all-plottable');
+  });
+
+  test('a set of LEGACY documents is "none-plottable" — the reported bug', () => {
+    // Exact coordinates present, approxLocation absent: the map is empty and the
+    // creator must be told why, not just that.
+    expect(publicTaskMapCoverage([legacy(), legacy()])).toBe('none-plottable');
+  });
+
+  test('hidden-location and no-location results are "none-plottable"', () => {
+    expect(publicTaskMapCoverage([hidden()])).toBe('none-plottable');
+    expect(publicTaskMapCoverage([pub({ approxLocation: undefined })])).toBe('none-plottable');
+  });
+
+  test('malformed areas are "none-plottable" and do not throw', () => {
+    expect(publicTaskMapCoverage([
+      pub({ approxLocation: { lat: NaN, lng: 35 } }),
+      pub({ approxLocation: { lat: 200, lng: 35 } }),
+      pub({ approxLocation: { lat: 0, lng: 0 } }),
+      pub({ approxLocation: { lat: '31.7', lng: '35.2' } }),
+    ])).toBe('none-plottable');
+  });
+
+  test('A MIXED set is "partial" — the empty state must NOT apply', () => {
+    // The regression this guards: one located mission among many unlocated ones
+    // must put a pin on the map and suppress the "nothing here" message entirely.
+    expect(publicTaskMapCoverage([legacy(), withArea(), hidden()])).toBe('partial');
+    expect(publicTaskMapCoverage([withArea(), legacy()])).toBe('partial');
+  });
+
+  test('missing entries are tolerated and counted as not plottable', () => {
+    expect(publicTaskMapCoverage([null, undefined] as never)).toBe('none-plottable');
+    expect(publicTaskMapCoverage([null, withArea()] as never)).toBe('partial');
+  });
+
+  test('a nullish result set is "no-results"', () => {
+    expect(publicTaskMapCoverage(undefined as never)).toBe('no-results');
+    expect(publicTaskMapCoverage(null as never)).toBe('no-results');
+  });
+
+  test('the classifier agrees with isPlottablePublicTask item by item', () => {
+    const items = [withArea(), legacy(), hidden(), pub({ approxLocation: { lat: 0, lng: 0 } })];
+    const plottable = items.filter(isPlottablePublicTask).length;
+    expect(plottable).toBe(1);
+    expect(publicTaskMapCoverage(items)).toBe('partial');
   });
 });

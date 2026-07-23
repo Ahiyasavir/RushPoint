@@ -59,3 +59,15 @@ export const AUDIT_GAME_RESTORED = 'game_restored';
 export const AUDIT_GAME_PURGED   = 'game_purged';
 /** operatorId used when the scheduled purge sweep, not a person, acted. */
 export const AUDIT_SYSTEM_OPERATOR = 'system:purge-sweep';
+
+// ── Admin maintenance action types (change: callable-hardening-consistency) ────
+//
+// The on-demand admin callables in maintenance/ destroy participant data
+// irreversibly (six subcollections, uploaded Storage objects, guardian-consent
+// PII) or bulk-rewrite a world-readable collection, and left NO durable trace of
+// who ran them — only a console line that ages out of Cloud Logging. Same rule as
+// the game-lifecycle types above: destructive gets a record.
+export const AUDIT_RUN_PII_PRUNED      = 'run_pii_pruned';
+export const AUDIT_RUN_PII_SWEEP       = 'run_pii_sweep';
+export const AUDIT_GAME_PURGE_SWEEP    = 'game_purge_sweep';
+export const AUDIT_PUBLIC_TASK_BACKFILL = 'public_task_backfill';

@@ -58,7 +58,10 @@ import {
   mergeBenchmark,
   median,
   type BenchmarkAggregate,
-  isConsentSatisfied,
+  // One partition drives both the launch set and the reported hold count
+  // (change: expose-enforced-settings). It delegates per team to
+  // `isConsentSatisfied`, which is why that predicate is no longer imported here.
+  partitionTeamsByConsent,
   haversineKm,
   isValidCoord,
   isReleased,
@@ -71,7 +74,10 @@ import {
   // Wrong-answer cost (change: wrong-answer-cost): escalating, capped, preset-aware.
   resolveWrongAnswerLevel,
   wrongAnswerCost,
-  cooldownRemainingSeconds,
+  // retry-lockout-clock-skew: the single lockout decision point (server clock in,
+  // bounded remaining duration out).
+  evaluateRetryLockout,
+  retryLockoutPolicyFor,
   hashAnswerForReplay,
   answerCostDisplay,
   isOrderingTask,
@@ -86,6 +92,8 @@ import {
   type PowerUpLogEntry,
   taskCompletabilityError,
   cleanGameInstructions,
+  evaluateSafeZoneStatus,
+  type SafeZone,
 } from '@rushpoint/shared';
 import {
   scoreFixedPointsSpeed,
@@ -590,14 +598,21 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
   const now = new Date().toISOString();
   const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
 
-  const targets = teamsSnap.docs.filter((d) => {
+  const selected = teamsSnap.docs.filter((d) => {
     const t = d.data() as RunTeam;
-    if (t.launched || (teamIds && !teamIds.includes(t.id))) return false;
-    // Guardian-consent gate (guardian-consent-qr): a minor's team is held in
-    // pending-consent and cannot start until a guardian has approved.
-    if (!isConsentSatisfied(t, game)) return false;
-    return true;
+    return !(t.launched || (teamIds && !teamIds.includes(t.id)));
   });
+  // Guardian-consent gate (guardian-consent-qr): a minor's team is held in
+  // pending-consent and cannot start until a guardian has approved.
+  //
+  // The hold used to be a `return false` inside this filter, so a held team was
+  // the difference between two numbers the caller never saw and the console
+  // reported unqualified success over a no-op (change: expose-enforced-settings).
+  // The launch set and the reported count now come from ONE partition, so they
+  // cannot drift.
+  const wrapped = selected.map((doc) => ({ doc, ...(doc.data() as RunTeam) }));
+  const { ready, held } = partitionTeamsByConsent(wrapped, game);
+  const targets = ready.map((w) => w.doc);
 
   const batch = db.batch();
   for (const doc of targets) {
@@ -622,7 +637,10 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
     }
   }
 
-  return { launched: targets.length };
+  // `heldForConsent` is ADDITIVE — `launched` keeps its exact prior meaning, so
+  // every existing caller is unaffected. A caller that reads it can tell a cohort
+  // that had nothing to start from a cohort that was blocked.
+  return { launched: targets.length, heldForConsent: held.length };
 }, { timeoutSeconds: 180, memory: '512MB' });
 
 
@@ -2404,6 +2422,10 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
       launched: t.launched,
       startedAt: t.startedAt ?? null,
       finishedAt: t.finishedAt ?? null,
+      // Out-of-bounds recovery: the run console could not SEE this condition, let
+      // alone clear it — a team paused by the safe-zone latch looked identical to a
+      // team that was simply slow. Projected so staff can spot it and release them.
+      outOfBounds: t.outOfBounds === true,
     };
   });
 
@@ -3020,7 +3042,17 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
   // latch. The run-doc read happens ONLY when already flagged out of bounds (an
   // abnormal path), so the normal happy path adds zero reads and stays byte-identical.
   if (team.outOfBounds === true && !(await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
-    return { taskId: null, outOfBounds: true };
+    // Out-of-bounds recovery: the latch may NOT outlive the evidence that set it.
+    // `outOfBounds` used to be openable only by a later good fix, so a phone whose GPS
+    // was denied/unavailable/inaccurate stranded its team behind an actionless card for
+    // the rest of the run. Re-evaluate against the last known fix and release unless it
+    // is a fresh, confident, out-of-zone reading. Still on the ABNORMAL path only — the
+    // happy path adds zero reads, exactly like the test-drive bypass above.
+    const verdict = await evaluateTeamOutOfBounds(ctx, teamId, team);
+    if (verdict.outOfBounds) return { taskId: null, outOfBounds: true, reason: verdict.reason };
+    await db.doc(`${teamsCol(ctx.ownerUid, ctx.gameId, ctx.runId)}/${teamId}`)
+      .set({ outOfBounds: false }, { merge: true })
+      .catch(() => undefined); // releasing is best-effort; never block assignment on it
   }
   const now = new Date().toISOString();
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
@@ -3251,6 +3283,40 @@ async function runIsTestDrive(ownerUid: string, gameId: string, runId: string): 
   return (snap.data() as Run | undefined)?.isTestDrive === true;
 }
 
+// Out-of-bounds latch re-evaluation (change: out-of-bounds-recovery). LAZY, used
+// only when `team.outOfBounds` is already set — the abnormal path — so an ordinary
+// assignment adds no reads. Re-runs the fail-open evaluator over the team's LAST
+// KNOWN fix: stale (the device stopped reporting), absent, malformed, low-confidence,
+// released by staff, or back inside all mean "we cannot verify a breach right now",
+// and an unverifiable condition must never keep a player stranded. Only a fresh,
+// confident, out-of-zone fix keeps the pause. A read failure also fails open.
+async function evaluateTeamOutOfBounds(
+  ctx: { ownerUid: string; gameId: string; runId: string },
+  teamId: string,
+  team: { outOfBoundsOverrideUntil?: string },
+): Promise<{ outOfBounds: boolean; reason: string }> {
+  try {
+    const [gameSnap, locSnap] = await Promise.all([
+      db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get(),
+      db.doc(`${runPath(ctx.ownerUid, ctx.gameId, ctx.runId)}/teamLocations/${teamId}`).get(),
+    ]);
+    const safeZone = (gameSnap.data() as { safeZone?: SafeZone } | undefined)?.safeZone;
+    const loc = locSnap.data() as
+      { lat?: number; lng?: number; accuracyMeters?: number | null; updatedAt?: string } | undefined;
+    const status = evaluateSafeZoneStatus({
+      fix: loc
+        ? { lat: loc.lat, lng: loc.lng, accuracyMeters: loc.accuracyMeters, atMs: Date.parse(loc.updatedAt ?? '') }
+        : null,
+      safeZone,
+      nowMs: Date.now(),
+      overrideUntilMs: team.outOfBoundsOverrideUntil ? Date.parse(team.outOfBoundsOverrideUntil) : null,
+    });
+    return { outOfBounds: status.outOfBounds, reason: status.reason };
+  } catch {
+    return { outOfBounds: false, reason: 'unverifiable' };
+  }
+}
+
 // Task expiry guard shared by the answer callables (change: task-expiry). Reads
 // the run doc for `launchedAt` only when the task actually carries an expiry —
 // zero extra reads on the common (no-expiry) path.
@@ -3374,7 +3440,11 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // no hint escalation and no cost level performs exactly as many reads as before.
   const needsTeamRead = (attemptLimit != null && attemptLimit > 0) || costActive;
   let attempts = 0;
-  let penaltyRec: { charged: number; lastHash: string; cooldownUntil: number } | undefined;
+  let penaltyRec: NonNullable<RunTeam['answerPenalties']>[string] | undefined;
+  // retry-lockout-clock-skew: the lockout ceiling belongs to the level that
+  // created it, and the verdict below is the ONLY place the "still locked?"
+  // question is answered — for the gate, the replay reply and the charge reply.
+  const lockoutPolicy = retryLockoutPolicyFor(costLevel);
   if (needsTeamRead) {
     const teamSnap = await teamRef.get();
     const teamData = teamSnap.data() as Pick<RunTeam, 'taskAttempts' | 'answerPenalties'> | undefined;
@@ -3403,13 +3473,18 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // during a lockout gets a clean replay rather than an error. A brute-forcer
   // submits DIFFERENT answers by definition, so this cannot be abused.
   if (costActive && penaltyRec && submissionHash && penaltyRec.lastHash === submissionHash) {
+    const verdict = evaluateRetryLockout(Date.now(), penaltyRec, lockoutPolicy);
     return {
       correct: false,
       replay: true,
       penalty: 0,
       attemptsUsed: attempts,
+      // `cooldownUntil` / `retryAfterSeconds` are kept for a play-web bundle
+      // cached before retry-lockout-clock-skew; `retryAfterMs` is what the
+      // current client counts down (a duration, never an instant to re-interpret).
       cooldownUntil: penaltyRec.cooldownUntil ?? 0,
-      retryAfterSeconds: cooldownRemainingSeconds(penaltyRec.cooldownUntil, Date.now()),
+      retryAfterSeconds: verdict.remainingSeconds,
+      retryAfterMs: verdict.remainingMs,
     };
   }
 
@@ -3421,7 +3496,10 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // rehearsal skips the wait — the run-doc read happens ONLY on the would-block
   // path, mirroring the presence gate above, so a real run is byte-identical.
   if (costActive && penaltyRec) {
-    const waitSeconds = cooldownRemainingSeconds(penaltyRec.cooldownUntil, Date.now());
+    // Server instant vs SERVER clock — a participant's clock plays no part, and a
+    // stored expiry that somehow exceeds the level's ceiling decays to it instead
+    // of locking the team out of the task for the rest of the run.
+    const waitSeconds = evaluateRetryLockout(Date.now(), penaltyRec, lockoutPolicy).remainingSeconds;
     if (waitSeconds > 0 && !(await runIsTestDrive(ctx.ownerUid, ctx.gameId, ctx.runId))) {
       throw new functions.https.HttpsError(
         'failed-precondition',
@@ -3471,6 +3549,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
         return {
           points: 0,
           cooldownUntil: prior.cooldownUntil ?? 0,
+          lockout: { ...prior },
           attemptsUsed: t.taskAttempts?.[taskId] ?? attempts,
           replay: true,
         };
@@ -3478,7 +3557,13 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       const priorAttempts = t.taskAttempts?.[taskId] ?? 0;
       const priorCharged = prior?.charged ?? 0;
       const cost = wrongAnswerCost(costLevel, game.scoringPreset, priorAttempts + 1, priorCharged);
-      const cooldownUntil = cost.cooldownSeconds > 0 ? nowMs + cost.cooldownSeconds * 1000 : 0;
+      const lockoutMs = cost.cooldownSeconds > 0 ? cost.cooldownSeconds * 1000 : 0;
+      const cooldownUntil = lockoutMs > 0 ? nowMs + lockoutMs : 0;
+      // retry-lockout-clock-skew: record the lockout as (server instant + the
+      // duration it earned) as well as the legacy absolute expiry. The duration
+      // is what lets the read path bound the wait by the level's own ceiling and
+      // ship the participant a remaining duration instead of an instant.
+      const lockout = { lastFailureAt: nowMs, lockoutMs, failureCount: cost.chargedIndex };
       // Real nested objects only. `bonusPenalty` is the same channel paid hints
       // and manual adjustments use, so buildRankings is untouched and the live
       // and final boards cannot drift. applyPenalties already floors the score
@@ -3491,19 +3576,30 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
             charged: priorCharged + cost.points,
             lastHash: submissionHash,
             cooldownUntil,
+            ...lockout,
           },
         },
         ...(cost.points > 0 ? { bonusPenalty: (t.bonusPenalty ?? 0) + cost.points } : {}),
         updatedAt: new Date().toISOString(),
       });
-      return { points: cost.points, cooldownUntil, attemptsUsed: priorAttempts + 1, replay: false };
+      return {
+        points: cost.points,
+        cooldownUntil,
+        lockout: { cooldownUntil, ...lockout },
+        attemptsUsed: priorAttempts + 1,
+        replay: false,
+      };
     });
 
+    const verdict = evaluateRetryLockout(Date.now(), charged.lockout, lockoutPolicy);
     return {
       correct: false,
       penalty: charged.points,
+      // Deprecated-but-kept for a cached older bundle; `retryAfterMs` is the
+      // clock-skew-proof value the current client counts down.
       cooldownUntil: charged.cooldownUntil,
-      retryAfterSeconds: cooldownRemainingSeconds(charged.cooldownUntil, Date.now()),
+      retryAfterSeconds: verdict.remainingSeconds,
+      retryAfterMs: verdict.remainingMs,
       attemptsUsed: charged.attemptsUsed,
       replay: charged.replay,
     };
@@ -3722,7 +3818,11 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
                 game.scoringPreset,
                 team.taskAttempts?.[t.id] ?? 0,
                 penRec?.charged ?? 0,
-                penRec?.cooldownUntil ?? 0,
+                // retry-lockout-clock-skew: hand the whole lockout row + the
+                // SERVER clock, so what ships is a remaining duration the phone
+                // can count down without interpreting a server instant.
+                penRec,
+                Date.now(),
               );
             }
           }
