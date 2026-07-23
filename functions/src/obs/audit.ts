@@ -67,6 +67,12 @@ export const AUDIT_SYSTEM_OPERATOR = 'system:purge-sweep';
 // PII) or bulk-rewrite a world-readable collection, and left NO durable trace of
 // who ran them — only a console line that ages out of Cloud Logging. Same rule as
 // the game-lifecycle types above: destructive gets a record.
+// ── Live-ops overrides (change: skip-single-task) ─────────────────────────────
+// Skipping ONE mission for ONE team removes a scoring opportunity from an
+// identified team, so "who skipped this, for whom, and why" must stay answerable
+// after the event — the same rule as adjustTeamScore.
+export const AUDIT_TASK_SKIPPED = 'task_skipped';
+
 export const AUDIT_RUN_PII_PRUNED      = 'run_pii_pruned';
 export const AUDIT_RUN_PII_SWEEP       = 'run_pii_sweep';
 export const AUDIT_GAME_PURGE_SWEEP    = 'game_purge_sweep';

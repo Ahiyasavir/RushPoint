@@ -14,7 +14,7 @@
 //   - task.smart.secretCode + task.smart.adminNotes (and any field NOT in the
 //     explicit allow-list below)
 import type { Task } from '@rushpoint/shared';
-import { seededShuffle } from '@rushpoint/shared';
+import { seededShuffle, hiddenSearchArea } from '@rushpoint/shared';
 
 export function sanitizeTaskForParticipant(
   task: Task,
@@ -34,16 +34,33 @@ export function sanitizeTaskForParticipant(
   // ── Sealed stub (hidden-location, not yet arrived) ──────────────────────────
   // Built by CONSTRUCTION, never by deleting from `...rest`: a field added to
   // `Task` tomorrow must default to WITHHELD, exactly like an answer key. The
-  // player gets the clue and nothing else — not the title, not the type, not the
-  // inputs. `type` is withheld rather than faked; the client keys off
-  // `arrivalPending` and renders a sealed card.
+  // player gets the clue and a coarse SEARCH AREA and nothing else — not the
+  // title, not the type, not the inputs, not the exact spot. `type` is withheld
+  // rather than faked; the client keys off `arrivalPending` and renders a sealed
+  // card.
+  //
+  // change: hidden-mission-search-area. `searchArea` is the ONE locational value a
+  // sealed task ships, and it is NOT a relaxation of the seal: it is a grid-snapped
+  // ~445 m circle, derived by a pure function of the coordinate (so polling this
+  // callable cannot sharpen it), guaranteed to CONTAIN the spot but never to be
+  // it, and it says nothing about distance, bearing, radius or the task itself.
+  // It exists because a hunt whose map showed literally nothing was a dead end
+  // rather than a puzzle. Arrival is still decided ONLY by the server's GPS
+  // verdict — standing inside the circle unseals nothing. See
+  // packages/shared/src/hiddenSearchArea.ts for the containment arithmetic.
   if (task.hideLocation && !opts?.revealed) {
+    // Mirrors the participant map's own pin source, so a hidden STATION's circle
+    // sits over the station rather than a stale template coordinate.
+    const area = hiddenSearchArea(task);
     return {
       id: task.id,
       locationHidden: true as const,
       arrivalPending: true as const,
       ...(task.locationClue != null ? { locationClue: task.locationClue } : {}),
       ...(task.locationClueHe != null ? { locationClueHe: task.locationClueHe } : {}),
+      // Coarse search circle — omitted entirely for a locationless or unplaced
+      // task, so such a mission's map is byte-identical to before this change.
+      ...(area ? { searchArea: area } : {}),
       // The paid-hint affordance survives pre-arrival on purpose: a hint that
       // helps you FIND the spot is exactly what a treasure-hunt hint is for.
       hasHint: !!task.hint && task.hint.trim().length > 0,

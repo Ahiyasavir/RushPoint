@@ -7,7 +7,7 @@
 // Priority(team, task) = 0.5·Φ − 0.3·TransitNorm + 0.2·Ω
 //   Φ            = station availability  (1=empty, 0=full)
 //   TransitNorm  = walking distance, normalised to 30-min cap
-//   Ω            = skill-difficulty match
+//   Ω            = adaptive difficulty match (team strength ↔ task difficulty)
 
 import { FieldValue } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions';
@@ -58,9 +58,17 @@ function transitMinutes(teamLocation: GeoPoint, task: Task): number {
   return haversineKm(teamLocation, task.coordinates) * 12; // 5 km/h walking
 }
 
-function skillMatch(skillRatio: number, difficulty: number): number {
-  const normalizedDifficulty = (difficulty - 5) / 5;
-  return 1 - Math.abs(skillRatio - normalizedDifficulty);
+// Adaptive difficulty (change: adaptive-difficulty-routing): route a team toward
+// tasks whose difficulty matches its MEASURED STRENGTH, which is `−skillRatio`
+// (skillRatio is negative when the team is faster than estimate). So a strong
+// team targets a positive normalizedDifficulty (the hard tasks) and a slow team a
+// negative one (the easy tasks) — the direction creators expect. A team with no
+// history (skillRatio 0) targets 0, which makes the term a per-task constant that
+// cancels between candidates of the same difficulty: no preference before there
+// is any evidence.
+function adaptiveDifficultyMatch(skillRatio: number, difficulty: number): number {
+  const normalizedDifficulty = (difficulty - 5) / 5; // 1→-0.8 … 5→0 … 10→+1
+  return 1 - Math.abs(-skillRatio - normalizedDifficulty);
 }
 
 // The hot-zone bonus for a single candidate: HOT_ZONE_ROUTING_BONUS when the
@@ -73,30 +81,28 @@ function hotZoneBonus(task: Task, hotZone: HotZone | null | undefined, nowMs: nu
   return isWithinHotZoneRadius(hotZone, task.coordinates) ? HOT_ZONE_ROUTING_BONUS : 0;
 }
 
-// When `skillAware` (the smart_weighted preset) the routing balances station
-// load, walking distance AND skill-difficulty fit + the team's pace history.
-// Otherwise (fixed-points / time presets) there's no per-team difficulty target,
-// so we route purely to the nearest available station — distance + load only.
-// Either way, an active hot zone adds an additive bonus for in-zone tasks
+// ONE formula for every scoring preset (change: adaptive-difficulty-routing):
+// station load, walking distance AND the adaptive difficulty fit against the
+// team's measured pace. There is deliberately no `skillAware` gate any more —
+// adaptation is always on, so a fixed_points_speed / time_only run adapts too.
+// Keeping the former smart_weighted 0.5/0.3/0.2 weights everywhere also keeps the
+// additive HOT_ZONE_ROUTING_BONUS (0.35) at the exact scale it was tuned against.
+// An active hot zone adds that bonus for in-zone tasks
 // (change: hot-zone-routing-bias) so teams tend to be routed into it.
 export function priorityScore(
   task: Task,
   teamLocation: GeoPoint,
   skillRatio: number,
   taskCounts: Record<string, number>,
-  skillAware: boolean,
   hotZone?: HotZone | null,
   nowMs: number = Date.now(),
 ): number {
   const transitNorm = Math.min(transitMinutes(teamLocation, task), 30) / 30;
   const zoneBonus = hotZoneBonus(task, hotZone, nowMs);
-  if (!skillAware) {
-    return 0.6 * loadFactor(task, taskCounts) - 0.4 * transitNorm + zoneBonus;
-  }
   return (
     0.5 * loadFactor(task, taskCounts) -
     0.3 * transitNorm +
-    0.2 * skillMatch(skillRatio, task.difficulty ?? 5) +
+    0.2 * adaptiveDifficultyMatch(skillRatio, task.difficulty ?? 5) +
     zoneBonus
   );
 }
@@ -191,7 +197,6 @@ export async function buildRecommendations(
   gameId: string,
   runId: string,
   limit = 5,
-  skillAware = true,
 ): Promise<TaskRecommendation[]> {
   const { taskCounts, launchedAt, hotZone, taskStatusOverrides } = await getRunRouting(ownerUid, gameId, runId);
   const nowMs = Date.now();
@@ -215,7 +220,7 @@ export async function buildRecommendations(
   return candidates
     .map((task) => ({
       task,
-      priority: priorityScore(task, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs),
+      priority: priorityScore(task, teamLocation, skillRatio, taskCounts, hotZone, nowMs),
       distanceKm:
         // WO-3: a hidden-location task reports distance 0 so getRecommendedTasks
         // never leaks how close the secret spot is. WO-5: a bad `teamLocation`
@@ -347,7 +352,6 @@ export async function assignTask(
   ownerUid: string,
   gameId: string,
   runId: string,
-  skillAware = true,
 ): Promise<{ taskId?: string; taskIndex?: number; reason?: NoAssignmentReason }> {
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
 
@@ -393,8 +397,8 @@ export async function assignTask(
 
     const chosen = candidates.sort(
       (a, b) =>
-        priorityScore(b, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs) -
-        priorityScore(a, teamLocation, skillRatio, taskCounts, skillAware, hotZone, nowMs),
+        priorityScore(b, teamLocation, skillRatio, taskCounts, hotZone, nowMs) -
+        priorityScore(a, teamLocation, skillRatio, taskCounts, hotZone, nowMs),
     )[0];
 
     tx.update(runRef, {

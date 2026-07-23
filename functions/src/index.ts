@@ -32,8 +32,10 @@ export {
 } from './payments/index';
 // Explicit callable re-exports from runs (completeTaskForTeam is an internal
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
+// skipStage ends the whole stage; skipTaskForTeam removes ONE mission from ONE
+// team and keeps them in the same stage (change: skip-single-task).
 export {
-  launchRun, joinRun, getJoinInfo, startTeams, skipStage, finalizeRun,
+  launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
@@ -58,7 +60,7 @@ export { onRunFinalized } from './runs/index';
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────
 
-import { requireAuth } from './auth';
+import { requireAuth, assertStaffOrOwner } from './auth';
 
 function assertAdmin(context: functions.https.CallableContext): string {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
@@ -75,24 +77,10 @@ function assertAdmin(context: functions.https.CallableContext): string {
 // invited to that run. A staff custom token carries `ownerUid` AND `runId`
 // claims — both must match the payload: a PIN minted for run A must not grant
 // live-ops power over the owner's OTHER runs (caught by the e2e authz matrix).
-function assertStaffOrOwner(
-  context: functions.https.CallableContext,
-  ownerUid: string,
-  runId?: string,
-): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  // No emulator bypass — a bypass here made every staff/owner authz check
-  // untestable (and the e2e proved a participant could adjust scores, mint
-  // staff PINs, and push announcements in dev). Owner + staff tokens work the
-  // same in the emulator, so the real gate runs everywhere.
-  const t = context.auth.token;
-  if (context.auth.uid === ownerUid) return context.auth.uid;        // the game owner
-  if (t.admin) return context.auth.uid;                              // platform admin
-  if (t.staff && t.ownerUid === ownerUid && (!runId || t.runId === runId)) {
-    return context.auth.uid;                                         // staff scoped to THIS run
-  }
-  throw new functions.https.HttpsError('permission-denied', 'Staff or owner access required');
-}
+//
+// The definition itself now lives in ./auth (change: skip-single-task) so the runs
+// domain can use the SAME gate without importing this module (which would be an
+// import cycle). Imported above; behaviour unchanged.
 
 
 // ─── Audit trail ──────────────────────────────────────────────────────────────

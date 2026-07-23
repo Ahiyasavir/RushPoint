@@ -9,6 +9,9 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { isFatalSyncError } from '../lib/syncError';
 // Why a not-yet-started team is not started (change: held-team-visibility).
 import { heldNotice } from '../lib/holdNotice';
+// Which sealed hidden missions may be drawn as a search circle
+// (change: hidden-mission-search-area).
+import { selectSearchAreas } from '../lib/searchAreas';
 import { Button, Collapsible, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
@@ -466,6 +469,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     : [];
   const mapTargets = [...targets, ...completedPins];
 
+  // Sealed hidden missions now also get a coarse SEARCH CIRCLE (change:
+  // hidden-mission-search-area) — the server-derived `searchArea`, which contains
+  // the real spot but is never it. The pin filter above is unchanged: a sealed
+  // mission still gets no pin, only an area. Total selector, so a malformed
+  // payload costs a circle and never the screen.
+  const searchAreas = selectSearchAreas(state.activeStageTasks);
+
   const powerUpArmed = team.powerUps?.active === 'double_points';
 
   return (
@@ -501,7 +511,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           under status panels and the screen scrolled to find it. */}
       {(activeStage || zones.length > 0) && (
         <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
-          <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} className="h-52 mb-4" />
+          <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} className="h-52 mb-4" />
         </Suspense>
       )}
 

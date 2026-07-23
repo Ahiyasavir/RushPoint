@@ -24,17 +24,17 @@ const far: GeoPoint = { lat: 32.60, lng: 35.90 };       // ~110km
 describe('WO-3 — hidden task priority carries no distance signal', () => {
   test('a hideLocation task has invariant priority across three team locations', () => {
     const t = located('secret', true);
-    const p1 = priorityScore(t, near, 0, {}, true);
-    const p2 = priorityScore(t, mid, 0, {}, true);
-    const p3 = priorityScore(t, far, 0, {}, true);
+    const p1 = priorityScore(t, near, 0, {});
+    const p2 = priorityScore(t, mid, 0, {});
+    const p3 = priorityScore(t, far, 0, {});
     expect(p2).toBeCloseTo(p1, 9);
     expect(p3).toBeCloseTo(p1, 9);
   });
 
   test('positive control — a VISIBLE located task has location-varying priority', () => {
     const t = located('open', false);
-    const p1 = priorityScore(t, near, 0, {}, true);
-    const p3 = priorityScore(t, far, 0, {}, true);
+    const p1 = priorityScore(t, near, 0, {});
+    const p3 = priorityScore(t, far, 0, {});
     // The far team pays a much larger transit penalty → strictly lower priority.
     expect(p1).toBeGreaterThan(p3);
   });
@@ -50,7 +50,7 @@ describe('WO-5 layer 1 — a malformed teamLocation never throws', () => {
   test('priorityScore returns a finite number for a visible located task', () => {
     const t = located('open', false);
     for (const loc of badLocations) {
-      const p = priorityScore(t, loc, 0, {}, true);
+      const p = priorityScore(t, loc, 0, {});
       expect(Number.isFinite(p)).toBe(true);
     }
   });
@@ -58,7 +58,7 @@ describe('WO-5 layer 1 — a malformed teamLocation never throws', () => {
   test('priorityScore returns a finite number for a hidden task too', () => {
     const t = located('secret', true);
     for (const loc of badLocations) {
-      const p = priorityScore(t, loc, 0, {}, false);
+      const p = priorityScore(t, loc, 0, {});
       expect(Number.isFinite(p)).toBe(true);
     }
   });

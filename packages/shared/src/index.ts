@@ -12,6 +12,10 @@ export * from './rateLimit';
 export * from './popularity';
 // What a PUBLIC task may say about where it is (change: task-library-map-view).
 export * from './publicTaskLocation';
+// What a SEALED hidden mission may say about where it is, to the PLAYER — a
+// separate, finer coarsening for a separate audience (change:
+// hidden-mission-search-area). Deliberately independent of publicTaskLocation.
+export * from './hiddenSearchArea';
 // One-off repair of documents published before that contract existed
 // (change: public-task-coordinates-backfill).
 export * from './publicTaskBackfill';
@@ -74,6 +78,9 @@ export * from './locationLeak';
 export * from './runCapacity';
 export * from './taskCompletability';
 export * from './mutualExclusion';
+// Skipping ONE mission for ONE team (change: skip-single-task) — the decision that
+// keeps the skip inside the stage and keeps the stage winnable afterwards.
+export * from './taskSkip';
 export * from './playStore';
 // Game trash / tombstone lifecycle (change: recoverable-game-deletion).
 export * from './gameLifecycle';

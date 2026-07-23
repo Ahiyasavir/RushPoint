@@ -170,47 +170,152 @@ describe('sanitizeTaskForParticipant — ordering quiz (orderItems)', () => {
   });
 });
 
-// ─── The publish/participant boundary (change: hidden-location-map-visibility) ─
+// ─── The three-way location boundary (change: hidden-mission-search-area) ─────
 //
-// A hidden-location task is now PUBLISHED with a coarse ~1 km area so the creator
-// can see their own hunt on their own library map. That is a creator-facing
-// projection and it must never become a participant-facing one. Both halves are
-// asserted here together, on the SAME task, so a future edit that "helpfully"
-// forwards the published area into the player's payload fails in one place with
-// the reason written next to it.
-describe('sanitizeTaskForParticipant — publishing an area does not unseal the puzzle', () => {
+// ONE hidden task now has THREE distinct locational projections, for three
+// audiences, produced by three code paths. Getting them confused is the whole bug
+// class, so they are asserted together, on the SAME task, in one place:
+//
+//   1. the CREATOR, reading a world-readable publicTasks document, gets
+//      publicTaskLocation() — a ~1.11 km grid cell (change:
+//      hidden-location-map-visibility);
+//   2. the PLAYER, before the server has confirmed arrival, gets `searchArea` —
+//      a ~445 m grid cell plus a containing radius, and NOTHING else locational
+//      (change: hidden-mission-search-area). It exists because a hunt whose map
+//      showed nothing at all was not a hunt, it was a dead end;
+//   3. the PLAYER, after arrival, gets the EXACT coordinates back so they can
+//      navigate to the spot again if they wander off.
+//
+// The two coarsenings are deliberately DIFFERENT sizes and neither is derived
+// from the other, so an edit that forwards one where the other belongs fails here
+// with the reason written next to it.
+describe('sanitizeTaskForParticipant — the three location projections stay separate', () => {
+  // Coordinates deliberately NOT on a grid-cell centre. A grid snap is allowed to
+  // return the truth for a point that happens to sit exactly on a centre (the
+  // public projection has the same property), so a "centre !== spot" assertion is
+  // only meaningful on a coordinate that is off-centre. Containment is the
+  // property that holds for EVERY input, and it is asserted separately.
+  const SPOT = { lat: 31.7767, lng: 35.2345 };
   const hiddenTask = () => baseTask({
     hideLocation: true,
+    coordinates: { ...SPOT },
     locationClue: 'Where the lions guard the gate',
+    hint: 'behind the third arch',
   });
 
-  test('the same hidden task publishes an area AND still hides everything from the player', () => {
+  /** Metres between two points — local so the test never depends on the impl. */
+  function metresApart(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+    const R = 6371000;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(h));
+  }
+
+  test('a sealed hidden task ships a search area that CONTAINS the spot but is not the spot', () => {
     const task = hiddenTask();
-
-    // Creator-facing: a real, coarsened area is published.
-    const area = publicTaskLocation(task);
-    expect(area).toBeDefined();
-    expect(area).not.toEqual(task.coordinates);
-
-    // Participant-facing, before arrival: nothing locational at all.
     const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    const area = sealed.searchArea as { lat: number; lng: number; radiusMeters: number } | undefined;
+
+    expect(sealed.arrivalPending).toBe(true);
+    expect(area).toBeDefined();
+    expect(Number.isFinite(area!.lat)).toBe(true);
+    expect(Number.isFinite(area!.lng)).toBe(true);
+    expect(area!.radiusMeters).toBeGreaterThan(0);
+    // Not the spot, on either axis.
+    expect(area!.lat).not.toBe(task.coordinates!.lat);
+    expect(area!.lng).not.toBe(task.coordinates!.lng);
+    // But guaranteed to contain it — a circle that excludes the answer would send
+    // the player away from it, which is worse than no circle at all.
+    expect(metresApart(area!, task.coordinates!)).toBeLessThanOrEqual(area!.radiusMeters);
+  });
+
+  test('the sealed payload still withholds everything else', () => {
+    const task = hiddenTask();
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    // The exact spot and everything that could reconstruct it.
     expect(sealed.coordinates).toBeUndefined();
     expect(sealed.geofenceRadiusMeters).toBeUndefined();
-    expect(sealed.approxLocation).toBeUndefined();
-    expect(sealed.arrivalPending).toBe(true);
-    // No value anywhere in the payload equals the published area.
-    expect(JSON.stringify(sealed)).not.toContain(String(area!.lat));
-    expect(JSON.stringify(sealed)).not.toContain(String(area!.lng));
+    expect(sealed.smart).toBeUndefined();
+    // The task itself is still sealed: no title, no type, no inputs.
+    expect(sealed.title).toBeUndefined();
+    expect(sealed.type).toBeUndefined();
+    expect(sealed.answers).toBeUndefined();
+    expect(sealed.numericAnswer).toBeUndefined();
+    expect(sealed.steps).toBeUndefined();
+    // The paid hint TEXT never rides along, only the affordance.
+    expect(sealed.hint).toBeUndefined();
+    expect(sealed.hasHint).toBe(true);
+    // The clue is the whole point of the sealed card.
+    expect(sealed.locationClue).toBe('Where the lions guard the gate');
+    // Built by CONSTRUCTION: the sealed payload's key set is exactly the allowlist.
+    expect(Object.keys(sealed).sort()).toEqual([
+      'arrivalPending', 'difficulty', 'estimatedMinutes', 'hasHint', 'hintPenalty',
+      'id', 'locationClue', 'locationHidden', 'pointValue', 'searchArea',
+    ]);
   });
 
-  test('the published area is never smuggled in after arrival either', () => {
+  test('the participant area and the public area are independent projections', () => {
+    const task = hiddenTask();
+    const publicArea = publicTaskLocation(task);
+    expect(publicArea).toBeDefined();
+    expect(publicArea).not.toEqual(task.coordinates);
+
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    // The public projection's own key never appears in a participant payload…
+    expect(sealed.approxLocation).toBeUndefined();
+    // …and the participant's circle is a strictly finer, separately-derived cell,
+    // so it is not simply the public one forwarded under a new name.
+    const area = sealed.searchArea as { lat: number; lng: number };
+    expect(area.lat === publicArea!.lat && area.lng === publicArea!.lng).toBe(false);
+  });
+
+  test('an unsealed hidden task gets the exact spot back and NO search area', () => {
     const task = hiddenTask();
     const revealed = sanitizeTaskForParticipant(task, { revealed: true }) as Record<string, unknown>;
-    // After arrival the player legitimately gets the EXACT spot back (so they can
-    // navigate if they wander off) — but never a second, coarse copy of it under
-    // a public-projection key.
+    // One mission must never carry two contradictory answers on one map.
+    expect(revealed.searchArea).toBeUndefined();
     expect(revealed.approxLocation).toBeUndefined();
     expect(revealed.coordinates).toEqual(task.coordinates);
+    expect(revealed.locationHidden).toBe(true);
+  });
+
+  test('a task that is not hidden never carries a search area', () => {
+    const out = sanitizeTaskForParticipant(baseTask()) as Record<string, unknown>;
+    expect(out.searchArea).toBeUndefined();
+    expect(out.coordinates).toEqual({ lat: 31.78, lng: 35.21 });
+  });
+
+  test('a sealed hidden task with no usable location carries no search area', () => {
+    for (const coords of [undefined, { lat: 0, lng: 0 }, { lat: Number.NaN, lng: 35.2 }]) {
+      const sealed = sanitizeTaskForParticipant(
+        baseTask({ hideLocation: true, coordinates: coords as never }),
+      ) as Record<string, unknown>;
+      expect(sealed.arrivalPending).toBe(true);
+      expect(sealed.searchArea).toBeUndefined();
+    }
+  });
+
+  test('a sealed hidden STATION derives its area from the injected station coordinates', () => {
+    const task = baseTask({
+      hideLocation: true,
+      type: 'smart_station',
+      coordinates: { lat: 31.78, lng: 35.21 },
+      smart: {
+        enabled: true,
+        verificationType: 'code_verification',
+        secretCode: 'XYZ',
+        stationCoords: { lat: 32.0853, lng: 34.7818 },
+      } as never,
+    });
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    const area = sealed.searchArea as { lat: number; lng: number; radiusMeters: number };
+    expect(area).toBeDefined();
+    expect(metresApart(area, { lat: 32.0853, lng: 34.7818 })).toBeLessThanOrEqual(area.radiusMeters);
+    // …and the station's secret code and coordinates still never ship.
+    expect(sealed.smart).toBeUndefined();
+    expect(JSON.stringify(sealed)).not.toContain('XYZ');
   });
 });
 
@@ -284,6 +389,10 @@ describe('sanitizeTaskForParticipant — hidden location: sealed until arrival',
   const SEALED_KEYS = [
     'arrivalPending', 'difficulty', 'estimatedMinutes', 'hasHint', 'hintPenalty',
     'id', 'locationClue', 'locationClueHe', 'locationHidden', 'pointValue',
+    // change: hidden-mission-search-area — the coarse, containing search circle.
+    // It is the ONLY locational key a sealed payload may carry; the exact spot
+    // and everything that could reconstruct it are still absent from this list.
+    'searchArea',
   ];
   const treasure = (extra: Partial<Task> = {}) =>
     baseTask({

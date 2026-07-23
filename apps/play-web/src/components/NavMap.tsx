@@ -7,6 +7,8 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, type MapMode, type HotZone, type CaptureZone } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
+import type { MapSearchArea } from '../lib/searchAreas';
+import { recenterVerdict } from '../lib/recenter';
 
 export interface NavTarget {
   id: string;
@@ -19,6 +21,12 @@ export interface NavTarget {
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 const HOT_ZONE_SOURCE = 'hot-zone';
 const ZONES_SOURCE = 'capture-zones';
+// Sealed hidden-mission search circles (change: hidden-mission-search-area).
+// Violet + DASHED on purpose: a solid pin says "the spot is here", a dashed area
+// says "it is somewhere in here". A player must never confuse the two, so the
+// search area deliberately does NOT use the game's accent colour.
+const SEARCH_SOURCE = 'search-areas';
+const SEARCH_COLOR = '#8B5CF6';
 
 // Capturable-territory circle color by holder (change: fix-territory-map-visibility):
 // mine = green, a rival's = red, unclaimed = slate. Static hex (painted by the map,
@@ -29,12 +37,16 @@ function zoneColor(z: CaptureZone, myTeamId?: string): string {
 }
 
 export default function NavMap({
-  targets, me, hotZone = null, zones = [], myTeamId, accent = '#F97316', className = '', keepMapWithMe = false,
+  targets, me, hotZone = null, zones = [], searchAreas = [], myTeamId, accent = '#F97316', className = '', keepMapWithMe = false,
 }: {
   targets: NavTarget[];
   me?: { lat: number; lng: number } | null;
   hotZone?: HotZone | null;
   zones?: CaptureZone[];
+  // Sealed hidden-mission search circles (change: hidden-mission-search-area).
+  // Already validated + clamped by `selectSearchAreas`; this component draws what
+  // it is given and makes no second judgement about it.
+  searchAreas?: MapSearchArea[];
   myTeamId?: string;
   accent?: string;
   className?: string;
@@ -64,6 +76,10 @@ export default function NavMap({
   const overlayPts = [
     ...(zones ?? []).filter((z) => z.center && isValidCoord(z.center.lat, z.center.lng)).map((z) => ({ lat: z.center.lat, lng: z.center.lng })),
     ...(isHotZoneActive(hotZone, Date.now()) && hotZone ? [{ lat: hotZone.center.lat, lng: hotZone.center.lng }] : []),
+    // A sealed hidden mission's search circle is a real overlay, so it keeps the
+    // map alive and frames the initial fit on its own — the map no longer has to
+    // be propped up by `keepMapWithMe` when there is an area to draw.
+    ...(searchAreas ?? []).map((s) => ({ lat: s.lat, lng: s.lng })),
   ];
   const hasOverlay = overlayPts.length > 0;
 
@@ -82,6 +98,40 @@ export default function NavMap({
   zonesRef.current = zones;
   const myTeamIdRef = useRef<string | undefined>(myTeamId);
   myTeamIdRef.current = myTeamId;
+
+  // Latest search circles, read inside styledata for the same reason as the two
+  // overlays above: a tile-style switch wipes every GeoJSON source and layer.
+  const searchRef = useRef<MapSearchArea[]>(searchAreas);
+  searchRef.current = searchAreas;
+
+  // Draw / update / remove the sealed hidden-mission search circles. Metres-
+  // accurate (a fixed-pixel marker would not scale with zoom), dashed, and with
+  // NO centre marker on purpose: a dot in the middle would read as the answer,
+  // and the centre is precisely the thing that is not the answer.
+  function applySearchAreas(m: maplibregl.Map) {
+    if (!m.isStyleLoaded()) return;
+    const areas = searchRef.current ?? [];
+    const src = m.getSource(SEARCH_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    if (areas.length > 0) {
+      const data: GeoJSON.FeatureCollection = {
+        type: 'FeatureCollection',
+        features: areas.map((a) => circlePolygonGeoJSON({ lat: a.lat, lng: a.lng }, a.radiusMeters) as GeoJSON.Feature),
+      };
+      if (src) {
+        src.setData(data);
+      } else {
+        m.addSource(SEARCH_SOURCE, { type: 'geojson', data });
+        m.addLayer({ id: `${SEARCH_SOURCE}-fill`, type: 'fill', source: SEARCH_SOURCE,
+          paint: { 'fill-color': SEARCH_COLOR, 'fill-opacity': 0.14 } });
+        m.addLayer({ id: `${SEARCH_SOURCE}-line`, type: 'line', source: SEARCH_SOURCE,
+          paint: { 'line-color': SEARCH_COLOR, 'line-width': 2, 'line-dasharray': [2, 2] } });
+      }
+    } else {
+      if (m.getLayer(`${SEARCH_SOURCE}-fill`)) m.removeLayer(`${SEARCH_SOURCE}-fill`);
+      if (m.getLayer(`${SEARCH_SOURCE}-line`)) m.removeLayer(`${SEARCH_SOURCE}-line`);
+      if (src) m.removeSource(SEARCH_SOURCE);
+    }
+  }
 
   // Draw / update / remove the capturable-territory circles (metres-accurate,
   // holder-colored). One data-driven fill+line pair reads `color` per feature.
@@ -155,13 +205,17 @@ export default function NavMap({
       attributionControl: { compact: true },
     });
     map.current.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
-    map.current.addControl(
-      new maplibregl.GeolocateControl({ trackUserLocation: true }),
-      'top-right',
-    );
+    // MapLibre's GeolocateControl was REMOVED here (change: play-map-recenter-control).
+    // It opened a SECOND watchPosition alongside the one PlayScreen already runs
+    // (two GPS subscriptions on a racing phone), re-triggered the permission
+    // prompt, recentred on its OWN fix — which could disagree with the blue dot
+    // the app drew from the app's fix — and on a denial failed silently while
+    // still looking tappable, under MapLibre's own hardcoded English name on a
+    // Hebrew-default app. The labelled RecenterButton below replaces it and flies
+    // to the same position the marker is drawn from.
     // styledata fires on initial load AND after each setStyle (mode toggle),
     // which wipes GeoJSON sources/layers — re-apply the overlay each time.
-    map.current.on('styledata', () => { if (map.current) { applyHotZone(map.current); applyZones(map.current); } });
+    map.current.on('styledata', () => { if (map.current) { applyHotZone(map.current); applyZones(map.current); applySearchAreas(map.current); } });
     return () => { map.current?.remove(); map.current = null; };
     // Re-run when the map container appears/disappears: while `valid` is empty the
     // component renders a placeholder with NO ref div, so a NavMap that mounts
@@ -193,6 +247,13 @@ export default function NavMap({
     if (map.current) applyZones(map.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify((zones ?? []).map((z) => [z.id, z.ownerTeamId, z.radiusMeters, z.center?.lat, z.center?.lng])), myTeamId]);
+
+  // Re-apply the search circles when a mission is sealed/unsealed or its area
+  // moves. Keyed on a stable signature so a GPS ping does not redraw them.
+  useEffect(() => {
+    if (map.current) applySearchAreas(map.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify((searchAreas ?? []).map((s) => [s.id, s.lat, s.lng, s.radiusMeters]))]);
 
   // Sync target markers.
   useEffect(() => {
@@ -245,6 +306,22 @@ export default function NavMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valid.length, me?.lat, me?.lng]);
 
+  // "Focus back on me" (change: play-map-recenter-control). The map frames its
+  // content ONCE (`fitted`) and then never moves again, so a stray thumb drag —
+  // the normal case on a 208px strip held while walking — used to leave the
+  // player with no way back to their own dot. The verdict is computed by a pure
+  // module (lib/recenter.ts) so the "is there a fix, and where does the camera
+  // land" decision is testable; play-web has no component test runner.
+  const rc = recenterVerdict(me);
+  function recenter() {
+    // Re-check rather than trusting the render-time verdict: a click can race a
+    // fix disappearing, and easeTo with a non-finite centre leaves MapLibre in a
+    // permanently broken camera state. A no-op is the correct outcome.
+    const v = recenterVerdict(me);
+    if (!map.current || !v.enabled || !v.center) return;
+    map.current.easeTo({ center: v.center, zoom: v.zoom, duration: 500 });
+  }
+
   if (valid.length === 0 && !hasOverlay && !hasMe) {
     return (
       <div className={`rounded-2xl bg-app-card border border-glass-border flex items-center justify-center text-zinc-500 text-sm ${className}`}>
@@ -257,6 +334,32 @@ export default function NavMap({
     <div className={`relative rounded-2xl overflow-hidden border border-glass-border ${className}`}>
       <div ref={ref} className="w-full h-full" />
       <MapModeToggle mode={mode} onChange={setMode} />
+      {/* Sits directly under MapModeToggle (top-2, 44px tall), clear of
+          MapLibre's NavigationControl (top-right) and the compact attribution
+          (bottom-right). Logical `start-2` so it mirrors correctly in Hebrew. */}
+      <button
+        type="button"
+        onClick={recenter}
+        disabled={!rc.enabled}
+        aria-label={rc.enabled ? t.play.recenter : t.play.recenterNoFix}
+        title={rc.enabled ? t.play.recenter : t.play.recenterNoFix}
+        className="absolute top-14 start-2 z-10 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border shadow-soft text-[11px] font-medium text-zinc-100 disabled:opacity-50"
+      >
+        <span aria-hidden="true">◎</span>
+        {t.play.recenter}
+      </button>
+      {/* Legend for the dashed circle. Centred via a symmetric `inset-x-0` +
+          flex rather than a physical offset, so it never lands on MapLibre's
+          bottom-right attribution in either reading direction, and
+          `pointer-events-none` so it can never eat a map drag. */}
+      {(searchAreas ?? []).length > 0 && (
+        <div className="absolute bottom-2 inset-x-0 z-10 flex justify-center pointer-events-none">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border px-2 py-1 text-[11px] font-medium text-zinc-400">
+            <span aria-hidden="true" className="inline-block w-3 h-3 rounded-full border-2 border-dashed" style={{ borderColor: SEARCH_COLOR }} />
+            {t.play.searchAreaLegend}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

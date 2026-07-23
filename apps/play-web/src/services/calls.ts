@@ -107,6 +107,14 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
   // `locationHidden`; the client suppresses the pin and shows `locationClue`.
   coordinates?: Task['coordinates'];
   locationHidden?: boolean;
+  // Hidden-mission search area (change: hidden-mission-search-area): the ONLY
+  // locational value a SEALED hidden task carries. A grid-snapped ~445m circle
+  // that is guaranteed to contain the real spot and can never be sharpened by
+  // polling. Present only while `arrivalPending` is true; once the server
+  // confirms arrival the exact `coordinates` come back and this is absent, so
+  // the map never shows two answers for one mission. Rendered via
+  // `lib/searchAreas.ts` → NavMap.
+  searchArea?: { lat: number; lng: number; radiusMeters: number };
   steps?: { id: string; prompt: string }[];
   smart?: {
     enabled: boolean;
