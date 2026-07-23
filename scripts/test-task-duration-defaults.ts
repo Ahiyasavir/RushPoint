@@ -144,16 +144,26 @@ console.log('\n── scoring is UNCHANGED (no in-flight re-scoring) ───�
 // contributed 0 to the expected route total, so a team finishing in 10 minutes beat a
 // target of 0 and earned NO speed bonus. That must still be true: the scoring path
 // deliberately does not consult the derived default.
-const gameNoDurations = { stages: [{ tasks: [{ /* no durations at all */ }] }] } as never;
+// fix-fixed-points-speed-template-drift: the route expected-total is now summed from
+// the team's completed/skipped records (stamp, or template fallback by taskId), not
+// re-reduced over the template. So the team needs a completed record for the task —
+// here left UN-STAMPED to exercise the legacy template fallback, which resolves to the
+// same value the old reduce did. The intent is unchanged: the type-derived DEFAULT must
+// never leak into scoring; a task with no explicit durations contributes 0.
+const gameNoDurations = { stages: [{ tasks: [{ id: 't' /* no durations at all */ }] }] } as never;
 const started = '2026-01-01T10:00:00.000Z';
 const finished = '2026-01-01T10:10:00.000Z';
+const finishedTeamStages = [{
+  stageId: 's', order: 0, status: 'completed',
+  tasks: [{ taskId: 't', taskIndex: 0, status: 'completed' }],
+}] as never;
 eq('expected total of 0 still yields no speed bonus',
-  scoreFixedPointsSpeed([], started, finished, gameNoDurations), 0);
-// And an explicit expectedDurationMinutes still drives the bonus exactly as before:
-// 30 expected - 10 actual = 20 min * 10 pts = 200, capped at 200.
-const gameExplicit = { stages: [{ tasks: [{ estimatedMinutes: 30, expectedDurationMinutes: 30 }] }] } as never;
+  scoreFixedPointsSpeed(finishedTeamStages, started, finished, gameNoDurations), 0);
+// And an explicit expectedDurationMinutes still drives the bonus exactly as before (via
+// the fallback): 30 expected - 10 actual = 20 min * 10 pts = 200, capped at 200.
+const gameExplicit = { stages: [{ tasks: [{ id: 't', estimatedMinutes: 30, expectedDurationMinutes: 30 }] }] } as never;
 eq('an explicit expected total still pays the same speed bonus',
-  scoreFixedPointsSpeed([], started, finished, gameExplicit), 200);
+  scoreFixedPointsSpeed(finishedTeamStages, started, finished, gameExplicit), 200);
 
 console.log('');
 if (failures > 0) {

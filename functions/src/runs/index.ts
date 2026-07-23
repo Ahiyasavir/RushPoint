@@ -113,6 +113,7 @@ import {
   taskScoreFixed,
   taskScoreSmart,
   COMPLETION_BONUS,
+  resolveExpectedMinutes,
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
 import { taskExcludedMs, teamExcludedMs, adjustedElapsedSeconds } from '@rushpoint/shared';
@@ -955,6 +956,17 @@ export async function completeTaskForTeam(
     if (gameTask?.pausesTimer) {
       taskRec.excludedMs = taskExcludedMs({ startedAt, completedAt: now }, true);
     }
+    // fix-fixed-points-speed-template-drift: stamp the per-task EXPECTED route
+    // minutes (the same resolved value scoreFixedPointsSpeed's route reduce reads —
+    // expectedDurationMinutes ?? estimatedMinutes, with the same finite-and->0
+    // guard) onto this record via the same whole-object stage rewrite. buildRankings
+    // SUMS these stamps instead of re-reading the live template, so a creator lowering
+    // a task's expected duration mid-run cannot retroactively re-score a finished
+    // team. The already-completed guard above makes a duplicate submission a no-op,
+    // so the first stamp is final.
+    if (gameTask) {
+      taskRec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
+    }
     // survey-tasks: stamp the team's own response on its task record via the same
     // whole-object stage rewrite the record already gets (never a dotted array
     // path). The already-completed guard above makes duplicate submissions a
@@ -1039,6 +1051,11 @@ export async function completeTaskForTeam(
       if (t.status === 'completed' || t.status === 'skipped') continue;
       if (t.status === 'assigned') skippedHeldTaskIds.push(t.taskId);
       t.status = 'skipped';
+      // fix-fixed-points-speed-template-drift: stamp the skipped sibling's expected
+      // route-minutes from its template task, so a finished team's every terminal
+      // record carries the immutable stamp.
+      const siblingTemplate = gameStage?.tasks.find((gt) => gt.id === t.taskId);
+      if (siblingTemplate) t.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(siblingTemplate);
     }
 
     // Stage completion via the shared single-source helper (applyStageCompletion):
@@ -1175,6 +1192,10 @@ export const skipStage = loggedCallable('skipStage', async (data, context) => {
         taskRec.status = 'skipped';
         taskRec.completedAt = now;
         taskRec.earnedScore = award;
+        // fix-fixed-points-speed-template-drift: stamp the skipped task's expected
+        // route-minutes so a finished team's terminal record is immutable against
+        // later template edits.
+        if (gameTask) taskRec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
         awardTotal += award;
       }
     }
@@ -1338,6 +1359,13 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
     rec.status = 'skipped';
     rec.completedAt = now;
     rec.earnedScore = 0; // no consolation award — see the header
+    // fix-fixed-points-speed-template-drift: stamp the skipped task's expected
+    // route-minutes from its template task so a finished team's terminal record is
+    // immutable against later template edits.
+    {
+      const skipTemplate = gameStage?.tasks.find((gt) => gt.id === targetId);
+      if (skipTemplate) rec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(skipTemplate);
+    }
     if (plan.heldSlot) releaseIds.push(targetId);
     // The team's OWN requirement for this stage, so the stage stays winnable. Never
     // written to the template (which later runs replay and the Builder rewrites).
@@ -1461,6 +1489,11 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
         // that shrank between refreshes and broke live/final parity. Only a genuinely
         // finished team feeds a finishedAt into the bonus math; otherwise
         // scoreFixedPointsSpeed short-circuits to taskPoints (time-invariant).
+        // fix-fixed-points-speed-template-drift: the ROUTE EXPECTED-TOTAL is likewise
+        // summed from the per-task expectedDurationMinutesAtCompletion stamps the
+        // server wrote at each record's terminal transition (with a template fallback
+        // for legacy records), NOT re-reduced over game.stages — so a mid-run edit to
+        // a task's expected duration cannot retroactively re-score a finished team.
         rawScore = scoreFixedPointsSpeed(
           team.stages,
           team.startedAt,
@@ -3030,6 +3063,10 @@ function sweepExpiredInFlight(
   if (!rec) return null;
   rec.status = 'skipped'; // expired mid-work → skipped, not scored (no partial credit)
   rec.completedAt = now;
+  // fix-fixed-points-speed-template-drift: stamp the expired task's expected
+  // route-minutes so a finished team's terminal record is immutable against later
+  // template edits (gameTask is already resolved and confirmed above).
+  rec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
 
   // Stage completion via the shared single-source helper (same logic/ordering as
   // completeTaskForTeam, including the scheduled-release gate). The sweep path

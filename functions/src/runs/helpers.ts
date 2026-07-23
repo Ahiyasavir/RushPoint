@@ -1,7 +1,18 @@
 import {
-  isReleased, unreachableTaskIds,
-  type Game, type RunStageRecord, type TaskProgressStatus,
+  isReleased, unreachableTaskIds, resolveExpectedMinutes,
+  type Game, type RunStageRecord, type TaskProgressStatus, type Task,
 } from '@rushpoint/shared';
+
+// fix-fixed-points-speed-template-drift: stamp the resolved expected route-minutes
+// onto a record as it transitions to `skipped`, from the corresponding template
+// task, using the SAME resolution the completion path and scoreFixedPointsSpeed use.
+// So a finished team's EVERY terminal record carries the stamp and its
+// fixed_points_speed expected-total is immutable against later template edits.
+function stampSkipExpected(rec: { taskId: string; expectedDurationMinutesAtCompletion?: number }, templateTasks: Task[] | undefined): void {
+  if (!templateTasks) return;
+  const gameTask = templateTasks.find((t) => t.id === rec.taskId);
+  if (gameTask) rec.expectedDurationMinutesAtCompletion = resolveExpectedMinutes(gameTask);
+}
 
 // Shared run-domain helpers.
 //
@@ -48,7 +59,10 @@ export function applyStageCompletion(
     const dead = new Set(unreachableTaskIds(gameStage.tasks, statusByTaskId));
     if (dead.size > 0) {
       for (const t of stages[stageIdx].tasks) {
-        if (dead.has(t.taskId)) t.status = 'skipped';
+        if (dead.has(t.taskId)) {
+          t.status = 'skipped';
+          stampSkipExpected(t, gameStage.tasks);
+        }
       }
     }
   }
@@ -71,6 +85,7 @@ export function applyStageCompletion(
     if (t.status !== 'completed') {
       if (t.status === 'assigned') heldAssignedTaskIds.push(t.taskId);
       t.status = 'skipped';
+      stampSkipExpected(t, gameStage?.tasks);
     }
   }
   stages[stageIdx].status = 'completed';

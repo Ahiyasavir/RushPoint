@@ -9,7 +9,7 @@
 //
 // Keep this file free of Firebase/Node imports so it can run in any context.
 
-import type { Game, RunTeam, RunStageRecord, ScoringPreset } from './types';
+import type { Game, RunTeam, RunStageRecord, ScoringPreset, Task } from './types';
 import { adjustedElapsedMs } from './pausedClock';
 
 // ─── Preset A — Time Only ────────────────────────────────────────────────────
@@ -44,6 +44,55 @@ export function speedBonus(
   return Math.min(SPEED_BONUS_CAP, Math.round(delta * SPEED_BONUS_PER_MINUTE));
 }
 
+/**
+ * One task's resolved expected route-minutes, guarded exactly as the old reduce:
+ * `expectedDurationMinutes ?? estimatedMinutes`, treated as 0 when non-finite or
+ * not greater than 0. This is the exact value stamped onto a terminal
+ * RunTaskRecord at completion (fix-fixed-points-speed-template-drift).
+ */
+export function resolveExpectedMinutes(
+  t: Pick<Task, 'expectedDurationMinutes' | 'estimatedMinutes'>,
+): number {
+  const m = t.expectedDurationMinutes ?? t.estimatedMinutes;
+  return Number.isFinite(m) && (m as number) > 0 ? (m as number) : 0;
+}
+
+/**
+ * Route expected-total minutes for a team, summed from the STAMP the server wrote
+ * on each terminal (completed/skipped) record — never re-derived from the live
+ * template. A record missing the stamp (pre-change / legacy) falls back to that
+ * task's resolved template value (matched by taskId), so old runs keep scoring and
+ * nothing throws. A record whose template task can no longer be found contributes
+ * its stamp if present, else 0 — never NaN.
+ */
+export function teamExpectedRouteMinutes(
+  stages: RunStageRecord[],
+  game: Pick<Game, 'stages'>,
+): number {
+  // Build a taskId → template task lookup once for the fallback path.
+  const templateById = new Map<string, Task>();
+  for (const stage of game.stages) {
+    for (const t of stage.tasks) templateById.set(t.id, t);
+  }
+  let total = 0;
+  for (const stageRec of stages) {
+    for (const taskRec of stageRec.tasks) {
+      if (taskRec.status !== 'completed' && taskRec.status !== 'skipped') continue;
+      const stamp = taskRec.expectedDurationMinutesAtCompletion;
+      if (Number.isFinite(stamp)) {
+        total += stamp as number;
+        continue;
+      }
+      // Legacy / in-flight record with no stamp: fall back to the resolved
+      // template value for that task (pre-change behavior), or 0 if the template
+      // task is gone — never NaN, never a throw.
+      const templateTask = templateById.get(taskRec.taskId);
+      total += templateTask ? resolveExpectedMinutes(templateTask) : 0;
+    }
+  }
+  return total;
+}
+
 export function scoreFixedPointsSpeed(
   stages: RunStageRecord[],
   startedAt: string | undefined,
@@ -72,14 +121,12 @@ export function scoreFixedPointsSpeed(
 
   if (!startedAt || !finishedAt) return taskPoints;
 
-  // Build expected total from the game template's expectedDurationMinutes
-  const expectedTotal = game.stages.reduce((sum, stage) =>
-    sum + stage.tasks.reduce((s, t) => {
-      // A task missing BOTH durations yields undefined → NaN → speedBonus returns
-      // NaN (delta <= 0 is false for NaN). Mirror the sumEstimatedMinutes guard.
-      const m = t.expectedDurationMinutes ?? t.estimatedMinutes;
-      return s + (Number.isFinite(m) && m > 0 ? m : 0);
-    }, 0), 0);
+  // Build expected total from the per-task stamps the server wrote at each record's
+  // terminal transition (fix-fixed-points-speed-template-drift) — never re-read from
+  // the live template — so a mid-run edit to a task's expectedDurationMinutes cannot
+  // retroactively re-score a finished team. Legacy records with no stamp fall back to
+  // the resolved template value, so unedited/old runs score byte-identically.
+  const expectedTotal = teamExpectedRouteMinutes(stages, game);
   const rawTotalMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
   const actualTotal = adjustedElapsedMs(rawTotalMs, excludedMs) / 60_000;
 

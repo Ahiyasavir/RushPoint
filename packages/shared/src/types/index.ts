@@ -809,6 +809,17 @@ export interface RunTaskRecord {
   // `actualMinutes` above deliberately keeps the REAL measured span, because
   // benchmarks, per-type analytics and the staff over-duration warning read it.
   excludedMs?: number;
+  // fix-fixed-points-speed-template-drift: the per-task EXPECTED route-time
+  // contribution (minutes), snapshotted from the game template at the moment this
+  // record reached a terminal state — the same value scoreFixedPointsSpeed's route
+  // reduce reads today (expectedDurationMinutes ?? estimatedMinutes), with the same
+  // finite-and->0 guard. buildRankings SUMS this stamp across the team's terminal
+  // records instead of reducing over the live template, so a creator editing a
+  // task's expected duration mid-run cannot retroactively re-score a team that has
+  // already finished (which would jump the live board and break live/final parity).
+  // Absent on every pre-change record and on any run started before this shipped —
+  // read via a template fallback, never as 0.
+  expectedDurationMinutesAtCompletion?: number;
   earnedScore?: number;
   scoreBreakdown?: TaskScoreBreakdown;
   // Smart station
