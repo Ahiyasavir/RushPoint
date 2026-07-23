@@ -1331,6 +1331,9 @@ const HE = {
     powerUpsHint: 'סיכוי של בערך 25% בכל משימה שהושלמה לזכות בכוח מיוחד: פי 2 נקודות במשימה הבאה או 15 נקודות בונוס.',
     manualRevealLabel: 'חשיפה ידנית של טבלת הדירוג',
     manualRevealHint: 'בסיום המשחק הדירוג יישאר מוסתר מהמשתתפים עד שתחשפו אותו מלוח הבקרה של ההרצה.',
+    // Group the four feature toggles under one collapsed section (change: builder-settings-grouping).
+    featuresSection: 'יכולות משחק',
+    featuresOnBadge: (n: number) => `${n} פעילות`,
     instructionsSectionTitle: 'איך משחקים',
     instructionsHint: 'הסבר קצר שמוצג לשחקנים לפני תחילת המשחק ומאחורי כפתור "איך משחקים" במהלך המשחק. לא חובה.',
     instructionsTitleLabel: 'כותרת',
@@ -2838,6 +2841,9 @@ const EN: typeof HE = {
     powerUpsHint: 'About a 25% chance on each completed task to win a power up: 2x points on the next task, or 15 bonus points.',
     manualRevealLabel: 'Manual leaderboard reveal',
     manualRevealHint: 'When the game ends the standings stay hidden from players until you reveal them from the run console.',
+    // Group the four feature toggles under one collapsed section (change: builder-settings-grouping).
+    featuresSection: 'Game features',
+    featuresOnBadge: (n: number) => `${n} on`,
     instructionsSectionTitle: 'How to play',
     instructionsHint: 'A short primer shown to players before the game starts and behind a "How to play" button during the game. Optional.',
     instructionsTitleLabel: 'Heading',

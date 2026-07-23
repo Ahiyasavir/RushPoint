@@ -21,6 +21,7 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, TagChips, Textarea } from '../components/ui';
+import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
 // One mapping from a rejection to copy a creator can act on
@@ -640,6 +641,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
   const b = useT().builder;
   const [advReg, setAdvReg] = useState(false);
   const [advScore, setAdvScore] = useState(false);
+  const [advFeatures, setAdvFeatures] = useState(false);
   const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
@@ -659,8 +661,6 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <Label>{b.shortDescription}</Label>
         <Input value={game.description ?? ''} onChange={(e) => patch({ description: e.target.value })} placeholder={b.shortDescriptionPlaceholder} dir="auto" />
       </div>
-      <TagsField game={game} patch={patch} />
-
       <InstructionsField game={game} patch={patch} />
 
       <PresentationField game={game} patch={patch} />
@@ -669,41 +669,50 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
 
       <SafeZoneField game={game} patch={patch} />
 
-      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-        <input type="checkbox" checked={!!game.allowInstantPlay}
-          onChange={(e) => patch({ allowInstantPlay: e.target.checked })} />
-        {b.instantPlayLabel}
-      </label>
-      <p className="text-xs text-zinc-500 -mt-2">{b.instantPlayHelp}</p>
+      <TagsField game={game} patch={patch} />
 
-      {/* Live photo feed (change: live-photo-feed): default ON; absent = enabled. */}
-      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-        <input type="checkbox" checked={game.photoFeedEnabled !== false}
-          onChange={(e) => patch({ photoFeedEnabled: e.target.checked })} />
-        {b.photoFeedLabel}
-      </label>
-      <p className="text-xs text-zinc-400 -mt-2">{b.photoFeedHint}</p>
-      {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
-      <p className="text-xs text-zinc-500 -mt-3">{b.photoFeedResponsibility}</p>
+      {/* Feature toggles grouped into one collapsed section (change: builder-settings-grouping).
+          Presentation-only: each checkbox's checked/onChange is copied verbatim, so what
+          saves and how it saves is byte-for-byte unchanged. The badge count honors the
+          per-field defaults (photo feed defaults ON) via the pure enabledGameFeatureCount. */}
+      <Advanced title={b.featuresSection} open={advFeatures} onToggle={() => setAdvFeatures(!advFeatures)}
+        meta={<Badge>{b.featuresOnBadge(enabledGameFeatureCount(game))}</Badge>}>
+        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={!!game.allowInstantPlay}
+            onChange={(e) => patch({ allowInstantPlay: e.target.checked })} />
+          {b.instantPlayLabel}
+        </label>
+        <p className="text-xs text-zinc-500 -mt-2">{b.instantPlayHelp}</p>
 
-      {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
-      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-        <input type="checkbox" checked={!!game.powerUpsEnabled}
-          onChange={(e) => patch({ powerUpsEnabled: e.target.checked })} />
-        {b.powerUpsLabel}
-      </label>
-      <p className="text-xs text-zinc-500 -mt-2">{b.powerUpsHint}</p>
+        {/* Live photo feed (change: live-photo-feed): default ON; absent = enabled. */}
+        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={game.photoFeedEnabled !== false}
+            onChange={(e) => patch({ photoFeedEnabled: e.target.checked })} />
+          {b.photoFeedLabel}
+        </label>
+        <p className="text-xs text-zinc-400 -mt-2">{b.photoFeedHint}</p>
+        {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
+        <p className="text-xs text-zinc-500 -mt-3">{b.photoFeedResponsibility}</p>
 
-      {/* Staged leaderboard reveal (change: manual-leaderboard-reveal): default OFF
-          (absent = auto publish on finalize, the pre-existing behaviour). When ON,
-          finalizeRun leaves the board unpublished and the creator reveals it from
-          the run console. */}
-      <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
-        <input type="checkbox" checked={!!game.manualLeaderboardReveal}
-          onChange={(e) => patch({ manualLeaderboardReveal: e.target.checked })} />
-        {b.manualRevealLabel}
-      </label>
-      <p className="text-xs text-zinc-500 -mt-2">{b.manualRevealHint}</p>
+        {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
+        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={!!game.powerUpsEnabled}
+            onChange={(e) => patch({ powerUpsEnabled: e.target.checked })} />
+          {b.powerUpsLabel}
+        </label>
+        <p className="text-xs text-zinc-500 -mt-2">{b.powerUpsHint}</p>
+
+        {/* Staged leaderboard reveal (change: manual-leaderboard-reveal): default OFF
+            (absent = auto publish on finalize, the pre-existing behaviour). When ON,
+            finalizeRun leaves the board unpublished and the creator reveals it from
+            the run console. */}
+        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+          <input type="checkbox" checked={!!game.manualLeaderboardReveal}
+            onChange={(e) => patch({ manualLeaderboardReveal: e.target.checked })} />
+          {b.manualRevealLabel}
+        </label>
+        <p className="text-xs text-zinc-500 -mt-2">{b.manualRevealHint}</p>
+      </Advanced>
 
       <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
         <Label>{b.scoringPreset}</Label>
