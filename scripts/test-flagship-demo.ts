@@ -106,6 +106,53 @@ for (const task of allTasks) {
   }
 }
 
+// ── Winnability: an instructed literal token must be an ACCEPTED answer, in BOTH
+//    languages the prompt presents. Closes the "protocol"/פרוטוקול trap — a
+//    sequence step (single `answer`) or a typed-answer quiz whose prompt tells the
+//    player to type a specific word, but whose accepted value(s) omit that word for
+//    one of the two languages, is permanently unwinnable for players of that
+//    language. This assertion FAILS on the original spy-defuse step 2
+//    (prompt "type the code word: protocol" vs answer 'פרוטוקול').
+const TYPE_INSTRUCTION = /type|הקליד/i; // "type the code word" / "הקלידו"
+// A prompt presents its two languages separated by " / " (and/or a blank line).
+function languageSegments(text: string): string[] {
+  return text.split(/\s*\/\s*|\n+/).filter((s: string) => s.trim().length > 0);
+}
+// The specific literal a segment instructs the player to type: the token after the
+// segment's final colon (e.g. "…code word: protocol" → "protocol"). null when the
+// segment names no trailing literal (e.g. "…(type your answer)").
+function trailingInstructedToken(segment: string): string | null {
+  const idx = segment.lastIndexOf(':');
+  if (idx === -1) return null;
+  const tok = segment.slice(idx + 1).trim();
+  return tok.length > 0 ? tok : null;
+}
+function acceptsToken(accepted: string[], token: string): boolean {
+  const norm = token.trim().toLowerCase(); // submitSequenceStep matches trimmed + case-insensitive
+  return accepted.some((a) => String(a).trim().toLowerCase() === norm);
+}
+function assertInstructedTokensAccepted(id: string, prompt: string, accepted: string[]): void {
+  for (const seg of languageSegments(prompt)) {
+    if (!TYPE_INSTRUCTION.test(seg)) continue;
+    const token = trailingInstructedToken(seg);
+    if (!token) continue;
+    check(`[${id}] instructed token "${token}" is an accepted answer`,
+      acceptsToken(accepted, token), `accepted=${JSON.stringify(accepted)}`);
+  }
+}
+for (const task of allTasks) {
+  if (task.type === 'sequence') {
+    for (const step of task.steps ?? []) {
+      if (typeof step.answer === 'string' && step.answer.trim()) {
+        assertInstructedTokensAccepted(step.id ?? task.id, step.prompt ?? '', [step.answer]);
+      }
+    }
+  }
+  if (task.type === 'quiz' && !task.choices && Array.isArray(task.answers)) {
+    assertInstructedTokensAccepted(task.id, task.description ?? '', task.answers);
+  }
+}
+
 // ── Showcase depth: a visible-but-optional paid hint on the harder tasks ──────
 const hintedTasks = allTasks.filter((t: any) => typeof t.hint === 'string' && t.hint.trim());
 check('at least one task offers a paid hint', hintedTasks.length >= 1);

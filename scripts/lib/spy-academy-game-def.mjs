@@ -151,8 +151,8 @@ export function buildStages() {
             },
             {
               id: 'spy-defuse-2',
-              prompt: 'צעד 2: הקלידו את מילת הקוד: פרוטוקול / Step 2: type the code word: protocol',
-              answer: 'פרוטוקול',
+              prompt: 'צעד 2: הקלידו את מילת הקוד: protocol / Step 2: type the code word: protocol',
+              answer: 'protocol',
             },
             {
               id: 'spy-defuse-3',
