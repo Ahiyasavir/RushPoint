@@ -228,6 +228,7 @@ const HE = {
     cardUnpublish:'בטל פרסום',
     cardShare:    'שיתוף',
     cardDelete:   'מחיקה',
+    cardMoreActions: 'עוד פעולות',
     modalTitle:   'התחל משחק חדש',
     modalSub:     'בחר תבנית כדי להתחיל תוך שניות',
     // Delete confirmation (change: recoverable-game-deletion). Replaces the old
@@ -1737,6 +1738,7 @@ const EN: typeof HE = {
     cardUnpublish: 'Unpublish',
     cardShare:     'Share',
     cardDelete:    'Delete',
+    cardMoreActions: 'More actions',
     modalTitle:    'Start a new game',
     modalSub:      'Pick a template to get started in seconds',
     // Delete confirmation (change: recoverable-game-deletion). Replaces the old

@@ -29,6 +29,7 @@ import {
 } from '../lib/photoReviewQueue';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
+import { OverflowMenu } from '../components/OverflowMenu';
 import RichTooltip from '../components/RichTooltip';
 // Progressive disclosure (change: run-console-progressive-disclosure): the
 // console's layout, action severity, share links and human labels are pure
@@ -1189,44 +1190,6 @@ function PanelShell({ panel, badge, actions, tone, children }: {
 function PanelEmpty({ panel }: { panel: PanelId }) {
   const { meta, copy } = usePanelCopy(panel);
   return <EmptyState icon={meta.icon} title={copy.title} body={copy.empty} />;
-}
-
-// A row's secondary controls, behind one affordance (change: run-console-clarity).
-// The team row already carried a name, a status line, up to two state lines, an
-// attention badge, a rescue button and a score before a single action button,
-// and the per task skip made it four buttons wide. Which control sits where is
-// decided by `teamRowActions`, never here.
-function OverflowMenu({ label, ariaLabel, children }: {
-  label: string; ariaLabel: string; children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <Button
-        variant="ghost"
-        className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={ariaLabel}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {label}
-      </Button>
-      {open && (
-        <>
-          {/* Click anywhere else to dismiss, without trapping focus mid event. */}
-          <div className="fixed inset-0 z-10" aria-hidden="true" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute z-20 mt-1 end-0 min-w-[11rem] rounded-xl border border-[--rp-border] bg-[--surface-0] dark:bg-app-card p-1.5 shadow-lg flex flex-col gap-1"
-            onClick={() => setOpen(false)}
-          >
-            {children}
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 // Access code + shareable join link + QR — participants scan to land in the app

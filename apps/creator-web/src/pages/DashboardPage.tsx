@@ -5,6 +5,8 @@ import type { Game, ScoringPreset } from '@rushpoint/shared';
 import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
+import { OverflowMenu } from '../components/OverflowMenu';
+import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
@@ -470,7 +472,14 @@ export default function DashboardPage() {
                       </button>
                     )}
 
-                    <div className="flex gap-2 mt-auto">
+                    {/* Edit + Launch stay primary and inline; the four secondary
+                        actions collapse into one "⋯" overflow menu so the card is
+                        not a wall of six equal-weight buttons with Delete a hairline
+                        from the primaries. The inline-vs-overflow split is the pure
+                        `dashboardCardActions` decision (change:
+                        dashboard-card-actions-overflow), mirroring the Run Console
+                        team row, and every action stays one click away. */}
+                    <div className="flex gap-2 mt-auto items-stretch">
                       <button
                         onClick={() => nav(`/build/${g.id}`)}
                         className="flex-1 px-3 py-2 rounded-lg text-xs font-semibold text-[--ink-2] bg-[--surface-2] hover:bg-[--rp-border] hover:text-[--ink-1] transition-all duration-150"
@@ -485,37 +494,67 @@ export default function DashboardPage() {
                       >
                         {d.cardLaunch}
                       </Button>
-                    </div>
-
-                    <div className="flex flex-wrap gap-1 border-t border-[--rp-border] pt-3 -mb-1">
-                      <button
-                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
-                        disabled={busy}
-                        title={d.cardTestRunHint}
-                        onClick={() => void launchAction.run(g, { testDrive: true })}
-                      >
-                        {d.cardTestRun}
-                      </button>
-                      <button
-                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 disabled:opacity-40 disabled:cursor-not-allowed"
-                        disabled={publishAction.isBusy(g.id)}
-                        onClick={() => void publishAction.run(g)}
-                      >
-                        {g.visibility === 'public' ? d.cardUnpublish : d.cardPublish}
-                      </button>
-                      <button
-                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
-                        onClick={() => setSharing(g)}
-                      >
-                        {d.cardShare}
-                      </button>
-                      <button
-                        className="flex-1 min-w-[calc(50%-0.25rem)] min-h-[36px] px-2 py-2 rounded-lg text-[11px] font-medium text-rp-alert/60 hover:text-rp-alert hover:bg-rp-alert/8 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40 disabled:opacity-40 disabled:cursor-not-allowed"
-                        disabled={removeAction.isBusy(g.id)}
-                        onClick={() => setDeleting(g)}
-                      >
-                        {d.cardDelete}
-                      </button>
+                      <OverflowMenu label="⋯" ariaLabel={d.cardMoreActions}>
+                        {dashboardCardActions(g).overflow.map((id) => {
+                          const items: Record<'testRun' | 'publish' | 'unpublish' | 'share' | 'delete', {
+                            label: string; title: string | undefined; disabled: boolean;
+                            onClick: () => void; destructive: boolean;
+                          }> = {
+                            testRun: {
+                              label: d.cardTestRun,
+                              title: d.cardTestRunHint,
+                              disabled: busy,
+                              onClick: () => void launchAction.run(g, { testDrive: true }),
+                              destructive: false,
+                            },
+                            publish: {
+                              label: d.cardPublish,
+                              title: undefined as string | undefined,
+                              disabled: publishAction.isBusy(g.id),
+                              onClick: () => void publishAction.run(g),
+                              destructive: false,
+                            },
+                            unpublish: {
+                              label: d.cardUnpublish,
+                              title: undefined as string | undefined,
+                              disabled: publishAction.isBusy(g.id),
+                              onClick: () => void publishAction.run(g),
+                              destructive: false,
+                            },
+                            share: {
+                              label: d.cardShare,
+                              title: undefined as string | undefined,
+                              disabled: false,
+                              onClick: () => setSharing(g),
+                              destructive: false,
+                            },
+                            delete: {
+                              label: d.cardDelete,
+                              title: undefined as string | undefined,
+                              disabled: removeAction.isBusy(g.id),
+                              onClick: () => setDeleting(g),
+                              destructive: true,
+                            },
+                          };
+                          const item = items[id as keyof typeof items];
+                          return (
+                            <button
+                              key={id}
+                              role="menuitem"
+                              disabled={item.disabled}
+                              title={item.title}
+                              onClick={item.onClick}
+                              className={`w-full justify-start text-start min-h-[36px] px-2.5 py-2 rounded-lg text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                                item.destructive
+                                  ? 'text-rp-alert/80 hover:text-rp-alert hover:bg-rp-alert/8 focus-visible:ring-rp-alert/40'
+                                  : 'text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] focus-visible:ring-rp-fire/50'
+                              }`}
+                            >
+                              {item.label}
+                            </button>
+                          );
+                        })}
+                      </OverflowMenu>
                     </div>
                   </div>
                 </Card>
