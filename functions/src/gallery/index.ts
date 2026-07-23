@@ -10,6 +10,7 @@ import { db } from '../firebase';
 import {
   FIRESTORE_PATHS,
   rankGalleryResults,
+  publicTaskLocation,
   type PublicGame,
   type PublicTask,
   type PublicLike,
@@ -73,6 +74,47 @@ async function likedIdsFor(kind: PublicLikeKind, uid: string, itemIds: string[])
   const refs = itemIds.map((id) => db.doc(FIRESTORE_PATHS.publicLike(kind, id, uid)));
   const snaps = await db.getAll(...refs);
   return itemIds.filter((_, i) => snaps[i].exists);
+}
+
+/**
+ * READ-PATH location resolution for one stored `publicTasks` document
+ * (change: gallery-map-serve-exact). Returns the sanitized library task the
+ * callable serves: the deprecated raw `coordinates` key is dropped and
+ * `approxLocation` carries the point the client plots.
+ *
+ * Reconciles THREE generations of stored doc so every already-published mission
+ * plots at its true spot with NO re-publish and NO backfill:
+ *  • legacy docs (pre `task-library-map-view`) carry the EXACT `coordinates` and
+ *    NO `approxLocation` — they used to not plot at all; we recompute their public
+ *    point from `coordinates` via the shared rule, so they now plot exactly;
+ *  • `task-library-map-view` docs carry a coarse `approxLocation` and no
+ *    `coordinates` — `publicTaskLocation` returns undefined (no coordinates) and
+ *    we keep the stored coarse point;
+ *  • `gallery-precise-task-location` docs carry an EXACT `approxLocation` and no
+ *    `coordinates` — likewise kept verbatim.
+ *
+ * hideLocation carve-out + its residual risk (VERIFIED from git history, so it is
+ * documented rather than guessed): `publicTaskLocation` coarsens a `hideLocation`
+ * task to its ~1 km cell. But NO generation of `publishGame` ever WROTE
+ * `hideLocation`/`locationless` onto the `publicTasks` doc (the earliest
+ * projection wrote a bare `coordinates: task.coordinates`; every later one writes
+ * only `approxLocation`). So at read time that flag is always absent and a legacy
+ * `coordinates`-bearing doc is served EXACT. This is safe: the exact `coordinates`
+ * was ALREADY world-readable in that same doc (`allow read: if true`) before
+ * `hideLocation` even existed as a Task field, and the ONLY way to produce a
+ * hidden doc is a re-publish — which rewrites the doc through `publicTaskLocation`
+ * (coarsening it) and erases `coordinates`. A doc that still carries `coordinates`
+ * therefore predates any hidden-task exposure this callable could add; the
+ * residual exposure is pre-existing raw-doc data, not introduced here.
+ */
+export function publicTaskForLibrary(
+  raw: PublicTask & { hideLocation?: boolean; locationless?: boolean },
+): PublicTask {
+  const { coordinates, hideLocation, locationless, ...safe } = raw;
+  const loc = publicTaskLocation({ hideLocation, locationless, coordinates });
+  // undefined ⇒ locationless / unplaced / no coordinates: fall back to whatever
+  // `approxLocation` the doc already stores so a new-style doc still plots.
+  return loc ? { ...safe, approxLocation: loc } : safe;
 }
 
 // ─── searchGallery ───────────────────────────────────────────────────────────
@@ -146,13 +188,14 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
     likes: t.likeCount,
   })).slice(0, wanted);
 
-  // Location contract (change: task-library-map-view): `coordinates` is the EXACT
-  // authored point and must never leave the server. publishGame no longer writes
-  // it, but documents published before that change still carry one — strip it on
-  // the way out so they stop serving exact points immediately instead of waiting
-  // for their owner to re-publish. Only `approxLocation` (a coarse ~1 km area,
-  // absent entirely for hidden-location tasks) is public.
-  const tasks = ranked.map(({ coordinates: _exact, ...safe }) => safe);
+  // Location contract (change: gallery-precise-task-location + gallery-map-serve-exact):
+  // the gallery map shows WHERE a creator placed a task — a point of interest, not a
+  // person — so an ordinary task is served its EXACT point, recomputed HERE from the
+  // stored `coordinates` on every read via the same shared rule the publish path uses.
+  // That reaches already-published missions through the read path (NO re-publish, NO
+  // backfill). `publicTaskForLibrary` is the pure, unit-tested reconciliation; see its
+  // doc for the three-generation handling and the hideLocation carve-out.
+  const tasks = ranked.map((raw) => publicTaskForLibrary(raw));
 
   const likedIds = await likedIdsFor('task', context.auth.uid, tasks.map((t) => t.id));
   return { tasks, likedIds };

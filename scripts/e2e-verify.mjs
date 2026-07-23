@@ -7766,6 +7766,56 @@ async function main() {
       JSON.stringify((libSafe?.tasks ?? []).filter((t) => t.coordinates !== undefined).map((t) => t.id)));
   });
 
+  await scenario('gallery map serves EXACT location for legacy coordinate-only docs (change: gallery-map-serve-exact)', async () => {
+    // THE USER-VISIBLE BUG: a mission published before `task-library-map-view`
+    // sits in `publicTasks` with an EXACT `coordinates` field and NO
+    // `approxLocation`. The gallery/library map reads only `approxLocation`, so
+    // those missions plotted in the WRONG place or DID NOT PLOT AT ALL. The write
+    // path fixes only NEW docs; this scenario proves `searchTaskLibrary` now
+    // recomputes the exact point AT READ TIME, so old docs plot with no backfill.
+    const LEGACY_EXACT = { lat: 32.07123, lng: 34.79456 };
+    const { gameId: gLegacy } = await creator.call('createGame', { title: 'Legacy Coord Read Hunt', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: gLegacy,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'lc0', order: 0, title: 'Stage', isFinal: true,
+          tasks: [
+            { id: 'lc-legacy', title: 'Legacy read task', type: 'field', triggerMode: 'radius',
+              coordinates: { ...LEGACY_EXACT }, difficulty: 2, estimatedMinutes: 5,
+              pointValue: 50, maxConcurrentTeams: 9 },
+          ] },
+      ],
+    });
+    await creator.call('publishGame', { gameId: gLegacy, visibility: 'public' });
+
+    const legacyId = `${gLegacy}_lc-legacy`;
+    // Simulate the pre-fix on-disk shape: exact `coordinates`, NO `approxLocation`.
+    // Admin SDK bypasses rules (same tool the backfill scenario below relies on).
+    const rawDbLegacy = adminSdk.firestore();
+    await rawDbLegacy.doc(`publicTasks/${legacyId}`).set(
+      { coordinates: { ...LEGACY_EXACT } }, { merge: true });
+    await rawDbLegacy.doc(`publicTasks/${legacyId}`).update({
+      approxLocation: adminSdk.firestore.FieldValue.delete(),
+    });
+
+    const onDisk = (await creator.getDocAt(`publicTasks/${legacyId}`)).data ?? {};
+    check('setup: the legacy doc has exact coordinates and NO approxLocation',
+      onDisk.coordinates?.lat === LEGACY_EXACT.lat && onDisk.approxLocation === undefined,
+      JSON.stringify({ coordinates: onDisk.coordinates, approxLocation: onDisk.approxLocation }));
+
+    const lib = await creator.call('searchTaskLibrary', { query: 'Legacy read task', limit: 100 });
+    const served = (lib?.tasks ?? []).find((t) => t.id === legacyId);
+    check('searchTaskLibrary now serves the legacy doc a plottable approxLocation',
+      !!served?.approxLocation, JSON.stringify(served?.approxLocation));
+    check('the served approxLocation is the EXACT authored point (round5), not coarsened',
+      served?.approxLocation?.lat === Math.round(LEGACY_EXACT.lat * 1e5) / 1e5
+      && served?.approxLocation?.lng === Math.round(LEGACY_EXACT.lng * 1e5) / 1e5,
+      JSON.stringify(served?.approxLocation));
+    check('the served legacy doc never leaks the raw coordinates key',
+      served?.coordinates === undefined, JSON.stringify(served?.coordinates));
+  });
+
   await scenario('publicTasks legacy-coordinate backfill (privacy sweep, admin-only)', async () => {
     // THE EXPOSURE this scenario defends: before `task-library-map-view`,
     // `publishGame` copied the creator's EXACT authored `task.coordinates` into
