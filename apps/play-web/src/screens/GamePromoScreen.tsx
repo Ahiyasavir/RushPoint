@@ -18,6 +18,8 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
   const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [copied, setCopied] = useState(false);
   const [startErr, setStartErr] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   async function shareGame() {
     const url = window.location.href;
@@ -51,10 +53,30 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
     let alive = true;
     setImgState('loading');
     getDoc(doc(db, FIRESTORE_PATHS.publicGame(gameId)))
-      .then((snap) => { if (alive) setGame(snap.exists() ? (snap.data() as PublicGame) : null); })
-      .catch(() => { if (alive) setGame(null); });
+      .then((snap) => { if (alive) { setLoadError(false); setGame(snap.exists() ? (snap.data() as PublicGame) : null); } })
+      // A transient fetch rejection must NOT collapse into the not-found value:
+      // flag it separately so the retry card, not the dead "game not found" card,
+      // renders on the flagship demo funnel (change: fix-demo-promo-fetch-error).
+      .catch(() => { if (alive) setLoadError(true); });
     return () => { alive = false; };
-  }, [gameId]);
+  }, [gameId, reloadKey]);
+
+  if (loadError) {
+    return (
+      <Screen>
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
+          <div className="text-5xl">⚠️</div>
+          <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
+            {t.promo.loadError}
+          </h1>
+          <p className="text-zinc-500 text-sm">{t.promo.loadErrorSub}</p>
+          <Button className="mt-2" onClick={() => { setLoadError(false); setGame(undefined); setReloadKey((k) => k + 1); }}>
+            {t.common.tryAgain}
+          </Button>
+        </div>
+      </Screen>
+    );
+  }
 
   if (game === undefined) {
     return (
