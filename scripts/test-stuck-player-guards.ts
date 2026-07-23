@@ -18,8 +18,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent,
-  GPS_RETRY_BASE_MS, GPS_RETRY_MAX_MS,
+  gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance,
+  GPS_RETRY_BASE_MS, GPS_RETRY_MAX_MS, BLOCKED_HELP_KEY,
 } from '../apps/play-web/src/lib/stuckGuards';
 
 let failures = 0;
@@ -113,11 +113,84 @@ function helpCases(world: string): void {
   check(`[${world}] a failed request leaves no latch`, helpAlreadySent(null, 'task-a') === false);
 }
 
-// ─── 4. Every case, in three clock worlds ─────────────────────────────────────
+// ─── 4. blockedGuidance — a blocked player is told something ACTIONABLE ───────
+// The server already ships a rich verdict (`evaluateSafeZoneStatus`): `outside` is
+// the ONLY reason that means "you left". Every other reason means "we cannot prove
+// anything right now" — and the app rendered all of them as the same accusatory
+// "head back into the play area", with no distance, no re-check and no human.
+//
+// Three properties are asserted over EVERY fixture:
+//   a. there is no input for which the player loses the route to a human;
+//   b. only `outside` is blamed on the player;
+//   c. a distance is NEVER shown from a fix the server itself refused to trust.
+function blockedCases(world: string): void {
+  const KINDS: Array<[unknown, string]> = [
+    ['outside', 'outside'],
+    ['low_confidence', 'unconfirmed'],
+    ['stale_fix', 'unconfirmed'],
+    ['no_fix', 'unconfirmed'],
+    ['invalid_fix', 'unconfirmed'],
+    ['unverifiable', 'unconfirmed'],   // evaluateTeamOutOfBounds' catch branch
+    ['override', 'released'],          // staff already let them back in
+    ['inside', 'released'],
+    ['no_zone', 'released'],
+    // A reason we cannot substantiate must never be rendered as a violation.
+    [undefined, 'unknown'],
+    [null, 'unknown'],
+    ['', 'unknown'],
+    ['quantum_fix', 'unknown'],        // a server one version ahead
+    [42, 'unknown'],
+    [{}, 'unknown'],
+  ];
+  for (const [reason, kind] of KINDS) {
+    const g = blockedGuidance({ reason: reason as string | null | undefined });
+    check(`[${world}] reason ${JSON.stringify(reason)} → kind ${kind}`, g.kind === kind, g.kind);
+    // (a) the escape hatch is unconditional.
+    check(`[${world}] reason ${JSON.stringify(reason)} keeps the help affordance`, g.offerHelp === true);
+    check(`[${world}] reason ${JSON.stringify(reason)} keeps the server re-check`, g.offerRecheck === true);
+    // (b) only a confident, fresh, out-of-zone fix is the player's doing.
+    check(`[${world}] reason ${JSON.stringify(reason)} blame flag`, g.blameless === (kind !== 'outside'), String(g.blameless));
+  }
+
+  // Distance — shown for `outside` only, rounded, and only when it is a real number.
+  check(`[${world}] outside + 120 m → 120`, blockedGuidance({ reason: 'outside', metersOutside: 120 }).metersBack === 120);
+  check(`[${world}] outside + 119.6 m rounds`, blockedGuidance({ reason: 'outside', metersOutside: 119.6 }).metersBack === 120);
+  check(`[${world}] outside + 0.4 m rounds to nothing → null`, blockedGuidance({ reason: 'outside', metersOutside: 0.4 }).metersBack === null);
+  for (const bad of [null, undefined, NaN, Infinity, -Infinity, -5, 0, '120' as unknown as number]) {
+    const g = blockedGuidance({ reason: 'outside', metersOutside: bad as number | null | undefined });
+    check(`[${world}] outside + invalid distance ${String(bad)} → null`, g.metersBack === null, String(g.metersBack));
+  }
+  // (c) THE case that sends a player walking the wrong way: the server computed a
+  // distance but does not trust the fix it came from.
+  for (const reason of ['low_confidence', 'stale_fix', 'no_fix', 'invalid_fix', 'override', 'inside', 'no_zone']) {
+    const g = blockedGuidance({ reason, metersOutside: 500 });
+    check(`[${world}] ${reason} + a distance → no distance shown`, g.metersBack === null, String(g.metersBack));
+  }
+  const unknownWithDist = blockedGuidance({ reason: undefined, metersOutside: 500 });
+  check(`[${world}] unknown reason + a distance → no distance shown`, unknownWithDist.metersBack === null);
+
+  // Total: no input throws, including a missing argument object.
+  let threw = false;
+  try {
+    blockedGuidance({});
+    blockedGuidance(undefined as unknown as { reason?: string | null });
+  } catch { threw = true; }
+  check(`[${world}] blockedGuidance never throws`, threw === false);
+
+  // The blocked card has no task to latch the help affordance onto, so it uses a
+  // stable key — which must NOT collide with a real task id and must re-arm once a
+  // task is assigned.
+  check(`[${world}] the blocked help key is a non-empty constant`, typeof BLOCKED_HELP_KEY === 'string' && BLOCKED_HELP_KEY.length > 0);
+  check(`[${world}] help sent while blocked shows as sent on the blocked card`, helpAlreadySent(BLOCKED_HELP_KEY, BLOCKED_HELP_KEY) === true);
+  check(`[${world}] help sent while blocked re-arms on a real task`, helpAlreadySent(BLOCKED_HELP_KEY, 'task-a') === false);
+}
+
+// ─── 5. Every case, in three clock worlds ─────────────────────────────────────
 function runAllCases(world: string): void {
   gpsCases(world);
   offlineCases(world);
   helpCases(world);
+  blockedCases(world);
 }
 
 const realNow = Date.now;
@@ -133,7 +206,7 @@ try {
   Date.now = realNow;
 }
 
-// ─── 5. Wiring guards — the component must actually USE the guards ────────────
+// ─── 6. Wiring guards — the component must actually USE the guards ────────────
 // A pure function nobody calls fixes nothing. These assertions are what make the
 // RED phase meaningful for the React side, which has no component test runner.
 const runner = readFileSync(join(here, '..', 'apps', 'play-web', 'src', 'components', 'TaskRunner.tsx'), 'utf8');
@@ -147,6 +220,20 @@ const geofenceSrc = runner.slice(runner.indexOf('function GeofenceAuto'));
 check(
   'GeofenceAuto restarts its watch instead of only clearing it',
   geofenceSrc.includes('setTimeout') && geofenceSrc.includes('gpsRetryDelayMs('),
+);
+
+// The blocked-player card must be built from the SERVER's reason, and must carry
+// both affordances. Without these the pure function is decoration.
+check('the blocked card is decided by blockedGuidance', runner.includes('blockedGuidance('));
+check('the blocked card reads the server reason off the routing response', /outOfBounds/.test(runner));
+check('the blocked card can raise the host alert', runner.includes('BLOCKED_HELP_KEY'));
+check(
+  'requestHelp latches the id it is given (the blocked card has no task)',
+  /function requestHelp\(\s*forId/.test(runner) && !/setHelpSentFor\(task!\.id\)/.test(runner),
+);
+check(
+  'the geofence escape hatch no longer needs a distance to appear',
+  !/const stuckOutside = dist != null && dist > radius && stuckTooLong/.test(runner),
 );
 
 console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);

@@ -100,3 +100,81 @@ export function helpAlreadySent(sentForTaskId: string | null, taskId: string | n
   if (sentForTaskId === null || taskId === null) return false;
   return sentForTaskId === taskId;
 }
+
+// ─── 4. Blocked-player guidance — say WHICH block, and offer a human ──────────
+//
+// The server has always known more than the card said. `evaluateSafeZoneStatus`
+// returns a REASON, and both callables that can block a player forward it
+// (`requestNextTask` → `{ outOfBounds, reason }`, `updateLocation` → the same), yet
+// the app rendered every one of them as a single accusatory sentence: "you are
+// outside the play area, head back". For a team whose phone simply could not be
+// placed — an imprecise fix, an old one, none at all — that sentence is both wrong
+// and unactionable: no amount of walking changes a sensor, and the card offered no
+// distance, no re-check and no way to reach a human.
+//
+// This is the mapping, and nothing more. It grants nothing: the client never
+// decides it is in bounds, and the card's only resolutions are a SERVER re-check
+// and a host alert.
+
+/** The stable id the blocked card latches the host-help affordance onto: it has no task. */
+export const BLOCKED_HELP_KEY = 'blocked-player';
+
+export type BlockedKind =
+  | 'outside'      // a fresh, confident fix outside the boundary — walk back
+  | 'unconfirmed'  // we cannot place the team at all — NOT their doing
+  | 'released'     // the server says nothing is blocking them right now
+  | 'unknown';     // no reason, or one this app version does not know
+
+export interface BlockedGuidance {
+  kind: BlockedKind;
+  /** Metres back to the boundary. Shown for `outside` only; see below. */
+  metersBack: number | null;
+  /** True when the block is not the participant's doing, so the copy must not blame them. */
+  blameless: boolean;
+  /** Always true: no input leaves a stranded player without a route to a human. */
+  offerHelp: true;
+  /** Always true: the only way out is asking the SERVER again, never a client decision. */
+  offerRecheck: true;
+}
+
+const UNCONFIRMED = new Set(['low_confidence', 'stale_fix', 'no_fix', 'invalid_fix', 'unverifiable']);
+const RELEASED = new Set(['override', 'inside', 'no_zone']);
+
+/**
+ * Map the server's safe-zone reason to the guidance the card shows.
+ *
+ * TOTAL by design: `reason` is typed loosely because it arrives over the wire from
+ * a server that may be a version ahead. An unrecognized value produces a card that
+ * claims NO violation — copy fails open exactly like the gates above do.
+ *
+ * `metersBack` is returned for `outside` only. A distance derived from a fix the
+ * server itself refused to trust (`low_confidence`, `stale_fix`) would send a player
+ * walking in a direction nobody can vouch for, and a `released` team has nowhere to
+ * walk. It is rounded to a whole metre: GPS does not justify decimals.
+ */
+export function blockedGuidance(input?: {
+  reason?: string | null;
+  metersOutside?: number | null;
+}): BlockedGuidance {
+  const reason = typeof input?.reason === 'string' ? input.reason : '';
+  const kind: BlockedKind = reason === 'outside'
+    ? 'outside'
+    : UNCONFIRMED.has(reason)
+      ? 'unconfirmed'
+      : RELEASED.has(reason)
+        ? 'released'
+        : 'unknown';
+
+  const raw = input?.metersOutside;
+  const usable = kind === 'outside' && typeof raw === 'number' && Number.isFinite(raw) && raw > 0
+    ? Math.round(raw)
+    : 0;
+
+  return {
+    kind,
+    metersBack: usable > 0 ? usable : null,
+    blameless: kind !== 'outside',
+    offerHelp: true,
+    offerRecheck: true,
+  };
+}

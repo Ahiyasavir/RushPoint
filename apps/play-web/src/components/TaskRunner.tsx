@@ -21,7 +21,9 @@ import { quizAttemptGuard } from '../lib/interaction';
 import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
-import { gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent } from '../lib/stuckGuards';
+import {
+  gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
+} from '../lib/stuckGuards';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
 // lazyWithRetry so a stale-shell chunk 404 self-heals instead of hanging the
@@ -110,6 +112,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // that raised the alarm once saw "sent" on every later task and could never call
   // for help again — on the only escape hatch a stuck geofence player has.
   const [helpSentFor, setHelpSentFor] = useState<string | null>(null);
+  // Blocked-player guidance (change: blocked-player-guidance): the server's own
+  // verdict for the safe-zone soft-pause, straight off the routing response. The
+  // out-of-bounds card used to render from the `team.outOfBounds` BOOLEAN alone and
+  // said the same accusatory sentence for "you walked out" and "we could not place
+  // you". This is read-only information — nothing here decides the block.
+  const [blockInfo, setBlockInfo] = useState<{ reason: string | null; metersOutside: number | null } | null>(null);
   // Single in-flight guard: a slow requestNextTask must not be re-fired on every
   // poll/re-render while the team is unassigned (thundering herd).
   const routingInFlight = useRef(false);
@@ -151,6 +159,15 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     const requestRouting = (coords?: { lat: number; lng: number }) =>
       requestNextTask({ ...ctx, ...(coords ?? {}) })
         .then((res) => {
+          if (res.outOfBounds) {
+            // The safe-zone soft-pause. Keep the server's reason + distance so the
+            // card can say WHICH block this is and how far back the boundary is.
+            setBlockInfo({ reason: res.reason ?? null, metersOutside: res.metersOutside ?? null });
+            setStationBusy(false);
+            routingInFlight.current = false;
+            return;
+          }
+          setBlockInfo(null);
           if (res.reason === 'stationsFull') {
             // Transient: every eligible station is at capacity. Show the waiting
             // card and auto-retry with backoff rather than dead-ending on an error
@@ -332,14 +349,58 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         </Card>
       );
     }
-    // M1: the server soft-pauses routing while the team is outside the play area —
-    // say so explicitly instead of spinning on a neutral "finding next task".
-    if (state.team.outOfBounds) {
+    // M1: the server soft-pauses routing while the team is outside the play area.
+    //
+    // blocked-player-guidance: this card used to be the whole story — one accusatory
+    // sentence, no distance, no re-check, no human — for FOUR different situations
+    // the server already distinguishes. It now renders the server's own verdict:
+    // what is blocking them, how far back it is (only when the server vouched for
+    // that number), that staff can release them, and both escape hatches. The client
+    // still decides nothing: "check again" is a SERVER round trip, and there is no
+    // path here that clears the block locally.
+    if (state.team.outOfBounds || blockInfo) {
+      const guidance = blockedGuidance({ reason: blockInfo?.reason, metersOutside: blockInfo?.metersOutside });
+      const blockedHelpSent = helpAlreadySent(helpSentFor, BLOCKED_HELP_KEY);
+      const copy = guidance.kind === 'outside'
+        ? { icon: '⚠️', title: t.task.outOfBoundsTitle, body: t.task.outOfBoundsBody }
+        : guidance.kind === 'unconfirmed'
+          ? { icon: '📡', title: t.task.locationUnsureTitle, body: t.task.locationUnsureBody }
+          : guidance.kind === 'released'
+            ? { icon: '✅', title: t.task.blockedClearTitle, body: t.task.blockedClearBody }
+            : { icon: '⏳', title: t.task.blockedCheckingTitle, body: t.task.blockedCheckingBody };
       return (
-        <Card className="p-6 text-center space-y-2">
-          <div className="text-3xl">⚠️</div>
-          <p className="text-sm font-semibold text-amber-500">{t.task.outOfBoundsTitle}</p>
-          <p className="text-xs text-zinc-500">{t.task.outOfBoundsBody}</p>
+        <Card className="p-6 text-center space-y-2" data-testid="blocked-card" data-blocked-kind={guidance.kind}>
+          <div className="text-3xl">{copy.icon}</div>
+          <p role="status" aria-live="polite"
+            className={`text-sm font-semibold ${guidance.kind === 'released' ? 'text-ink-fire' : 'text-amber-500'}`}>
+            {copy.title}
+          </p>
+          <p className="text-xs text-zinc-500">{copy.body}</p>
+          {guidance.metersBack != null && (
+            <p className="text-xs text-zinc-400" data-testid="blocked-distance">
+              {t.task.blockedDistance({ m: guidance.metersBack })}
+            </p>
+          )}
+          <p className="text-xs text-zinc-500">{t.task.blockedStaffCanRelease}</p>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+            <Button variant="ghost" data-testid="blocked-recheck" onClick={() => {
+              // Ask the SERVER again — that is how a staff release or a recovered
+              // fix is discovered. Clear the single-flight ref first, exactly like
+              // the routing retry, or the effect short-circuits.
+              routingInFlight.current = false;
+              setRoutingAttempt((n) => n + 1);
+            }}>
+              {t.task.blockedCheckAgain}
+            </Button>
+            {blockedHelpSent
+              ? <p className="text-xs text-ink-fire font-medium" data-testid="blocked-help-sent">{t.task.helpSent}</p>
+              : <button
+                  onClick={() => { void requestHelp(BLOCKED_HELP_KEY); }}
+                  data-testid="blocked-help"
+                  className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-alert bg-rp-alert/10 border border-rp-alert/30 rounded-full px-4 py-2 hover:bg-rp-alert/20">
+                  {t.task.requestHelp}
+                </button>}
+          </div>
         </Card>
       );
     }
@@ -382,7 +443,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // H2: a stuck geofence player is never dead-ended — this raises an SOS/host
   // alert (same channel as the SOS button) so the host can step in. Best-effort
   // location, never blocks on it.
-  async function requestHelp() {
+  // `forId` is the id the "sent" state latches onto: the assigned task for a stuck
+  // geofence, the BLOCKED_HELP_KEY constant for the blocked card (which has no task
+  // at all — it used to latch `task!.id` and could therefore never be raised from
+  // there). helpAlreadySent() then re-arms the affordance whenever that id changes.
+  async function requestHelp(forId: string) {
     const coords = await new Promise<{ lat?: number; lng?: number }>((resolve) => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve({});
       navigator.geolocation.getCurrentPosition(
@@ -393,8 +458,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     });
     try {
       await triggerSOS({ ...ctx, ...coords });
-      // Scoped to the task it was raised for — a later task re-arms the button.
-      setHelpSentFor(task!.id);
+      // Scoped to the situation it was raised for — a later task re-arms the button.
+      setHelpSentFor(forId);
     } catch { /* let the player tap again; nothing persisted */ }
   }
 
@@ -771,7 +836,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <NumericEntry busy={answerFrozen} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
-            <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={requestHelp}
+            <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={() => { void requestHelp(task.id); }}
               helpSent={helpAlreadySent(helpSentFor, task.id)} />
             {session.isTestDrive && (
               <div className="mt-3">
@@ -1206,7 +1271,13 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
       </div>
     );
   }
-  const stuckOutside = dist != null && dist > radius && stuckTooLong;
+  // blocked-player-guidance: this used to require `dist != null`, so the state where
+  // the watcher produced NEITHER a fix nor an error — a permission prompt left open,
+  // a webview that silently never calls back — sat on "finding your location" with no
+  // button on it, forever, on a task type that has no manual submit. The hatch now
+  // opens whenever we are stuck and NOT known to be inside, which cannot fire while
+  // the player is standing on the spot.
+  const stuckHelp = stuckTooLong && !(dist != null && dist <= radius);
   return (
     <div className="text-center py-2" data-testid="geofence-status" data-inside={dist != null && dist <= radius}>
       <div className="text-3xl mb-2">📡</div>
@@ -1215,9 +1286,11 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
         : dist <= radius
           ? <p className="text-sm text-ink-fire font-medium">{t.task.youreHere}</p>
           : <p className="text-sm text-zinc-500">{t.task.walkCloser({ dist: Math.round(dist), radius })}</p>}
-      {stuckOutside && (
+      {stuckHelp && (
         <>
-          <p className="text-xs text-zinc-500 mt-2">{t.task.gpsStuckHint}</p>
+          {/* Never blame a player for a fix that never arrived: that copy is about
+              the signal, not about them walking. */}
+          <p className="text-xs text-zinc-500 mt-2">{dist == null ? t.task.gpsNoFixHint : t.task.gpsStuckHint}</p>
           {helpBlock}
         </>
       )}

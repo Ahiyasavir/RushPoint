@@ -178,6 +178,14 @@ type Ctx = { ownerUid: string; gameId: string; runId: string };
 // tasks remain), or 'none'. `already` marks an idempotent replay (WO-3).
 export type NoAssignmentReason = 'stationsFull' | 'allLocked' | 'none';
 
+// Safe-zone verdicts (`evaluateSafeZoneStatus`). `requestNextTask` reuses `reason`
+// for them when it answers `outOfBounds: true`, so the two spaces are distinguished
+// by that flag, never by the string. Typed as an open string on the wire because the
+// server may be a version ahead; `blockedGuidance()` is the total mapping.
+export type SafeZoneBlockReason =
+  | 'outside' | 'low_confidence' | 'stale_fix' | 'no_fix' | 'invalid_fix'
+  | 'override' | 'inside' | 'no_zone' | 'unverifiable';
+
 export const completeTask = callable<
   Ctx & { taskId: string; lat?: number; lng?: number },
   { ok: boolean; nextTaskId: string | null; already?: boolean; nextReason?: NoAssignmentReason | null }
@@ -185,7 +193,15 @@ export const completeTask = callable<
 
 export const requestNextTask = callable<
   Ctx & { lat?: number; lng?: number },
-  { taskId: string | null; reason?: NoAssignmentReason | null }
+  {
+    taskId: string | null;
+    reason?: NoAssignmentReason | SafeZoneBlockReason | (string & {}) | null;
+    // Safe-zone soft-pause: the server refused to route because the team is out of
+    // bounds. `metersOutside` is metres BEYOND the boundary (never the zone itself),
+    // present only on a confirmed breach.
+    outOfBounds?: boolean;
+    metersOutside?: number | null;
+  }
 >('requestNextTask');
 
 export const requestTaskHint = callable<
