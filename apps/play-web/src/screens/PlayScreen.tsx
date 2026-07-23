@@ -536,9 +536,13 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         )}
       </div>
 
-      {/* SECONDARY: standings, feed, chat, trackables, territory, devices — the
-          lower-priority status content lives below the task and scrolls within its
-          own bounded region so it never pushes the task off-screen. */}
+      {/* SECONDARY: standings, feed, chat, trackables, territory, devices. This
+          lower-priority status content sits below the promoted task and scrolls
+          with the page; each panel self hides when its feature is unused
+          (trackables, zones and devices return null; chat is collapsible). There
+          is deliberately no nested bounded scroll region: a second scroll surface
+          on mobile traps momentum and hides content below an invisible fold, so
+          the natural page scroll reaches every panel instead. */}
       <div className="mt-1 -mx-1 px-1">
         {!isController && (
           <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
