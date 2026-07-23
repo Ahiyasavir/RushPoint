@@ -40,7 +40,10 @@ function stripWhitelist(s: string): string {
 // English copy — strip them first so an example code in Hebrew copy isn't flagged.
 // (Kept in sync with scripts/check-i18n.ts, the authoritative i18n gate.)
 function hasEnglish(s: string): boolean {
-  const noCodes = stripWhitelist(s).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
+  // `{placeholder}` tokens are structure, not copy — substituted at runtime, never
+  // shown to a user. Kept in sync with scripts/check-i18n.ts `hasEnglishWord`.
+  const noPlaceholders = s.replace(/\{[A-Za-z0-9_]+\}/g, '');
+  const noCodes = stripWhitelist(noPlaceholders).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
   return /[A-Za-z]{2,}/.test(noCodes);
 }
 

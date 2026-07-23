@@ -69,7 +69,12 @@ function stripAll(s: string, words: string[]): string {
 // Tokens that contain a digit (sample codes/ids like "FOX42", "ABC123") are not
 // English copy and are stripped first.
 function hasEnglishWord(s: string): boolean {
-  const noCodes = stripAll(s, LATIN_WHITELIST).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
+  // `{placeholder}` tokens are STRUCTURE, not copy: they are substituted at runtime
+  // and a user never sees the token name, so a multi-letter one like `{launched}`
+  // in Hebrew text is not an English leak. (Single-letter `{n}` only ever passed
+  // because the rule below needs 2+ letters — that was luck, not intent.)
+  const noPlaceholders = s.replace(/\{[A-Za-z0-9_]+\}/g, '');
+  const noCodes = stripAll(noPlaceholders, LATIN_WHITELIST).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
   return /[A-Za-z]{2,}/.test(noCodes);
 }
 function hasHebrew(s: string): boolean {
