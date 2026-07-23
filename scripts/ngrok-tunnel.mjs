@@ -11,7 +11,14 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { restartDelayMs, isQuickFailure } from './lib/tunnelRestart.mjs';
+import { hostname } from 'node:os';
+import {
+  restartDelayMs,
+  isQuickFailure,
+  classifyTunnelFailure,
+  tunnelFailureReport,
+  machineIdentity,
+} from './lib/tunnelRestart.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENV_FILE = path.join(ROOT, '.tunnel.env');
@@ -105,16 +112,51 @@ function boot() {
 // back off (capped); a healthy run that later drops reconnects immediately.
 function startNgrok(DOMAIN) {
   const startedAt = Date.now();
+  // stdio is PIPED (not inherited) so the child's output can be classified on
+  // exit — see classifyTunnelFailure. Everything is still re-emitted verbatim,
+  // so the operator sees exactly what they saw before, plus the diagnosis.
   child = spawn(
     NPX,
     ['ngrok', 'http', String(PORT), '--domain', DOMAIN, '--log', 'stdout'],
-    { stdio: 'inherit', shell: isWin },
+    { stdio: ['ignore', 'pipe', 'pipe'], shell: isWin },
   );
+
+  // Rolling tail of the child's output — bounded so a long-lived healthy tunnel
+  // can't grow this without limit.
+  let tail = '';
+  const TAIL_MAX = 8192;
+  const capture = (buf, out) => {
+    const s = String(buf);
+    out.write(s);
+    tail = (tail + s).slice(-TAIL_MAX);
+  };
+  child.stdout?.on('data', (b) => capture(b, process.stdout));
+  child.stderr?.on('data', (b) => capture(b, process.stderr));
+
   child.on('exit', (code) => {
     if (shuttingDown) { process.exit(code ?? 0); return; }
     quickFailures = isQuickFailure(Date.now() - startedAt) ? quickFailures + 1 : 0;
     const delay = restartDelayMs(quickFailures);
-    console.error(`[ngrok] tunnel exited (code ${code ?? 0}) — reconnecting on ${DOMAIN} in ${Math.round(delay / 1000)}s…`);
+
+    const kind = classifyTunnelFailure(tail);
+    const report = tunnelFailureReport(kind, {
+      domain: DOMAIN,
+      identity: machineIdentity({ hostname: hostname(), importSource: null, importMs: NaN }),
+    });
+
+    if (report.permanent) {
+      // A PERMANENT failure is re-announced on EVERY retry, never once. Saying it
+      // a single time and letting it scroll away is exactly how a two-machine
+      // domain conflict went unnoticed for hours while the shared URL served the
+      // other computer's data. Backoff controls retry cadence, not visibility.
+      console.error('');
+      console.error(report.headline);
+      for (const line of report.lines) console.error(line);
+      console.error(`   (retrying anyway in ${Math.round(delay / 1000)}s — this will keep failing until the above is fixed)`);
+      console.error('');
+    } else {
+      console.error(`[ngrok] tunnel exited (code ${code ?? 0}) — reconnecting on ${DOMAIN} in ${Math.round(delay / 1000)}s…`);
+    }
     setTimeout(() => { if (!shuttingDown) startNgrok(DOMAIN); }, delay);
   });
 }

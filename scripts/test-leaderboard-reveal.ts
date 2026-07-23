@@ -86,7 +86,11 @@ ok((playI18n.match(/notRevealedTitle:/g) ?? []).length === 2, 'play-web i18n: no
 ok((playI18n.match(/notRevealedBody:/g) ?? []).length === 2, 'play-web i18n: notRevealedBody in both locales');
 const creatorI18n = read('apps/creator-web/src/i18n.ts');
 for (const key of ['revealStandings', 'standingsHiddenUntilReveal', 'standingsRevealed']) {
-  ok((creatorI18n.match(new RegExp(`${key}:`, 'g')) ?? []).length === 2, `creator-web i18n: ${key} in both locales`);
+  // Anchored to the namespace's own indentation. An unanchored `key:` also
+  // matched the nested `runConsole.consequence` block added by
+  // change: run-console-clarity, which reuses the action ids as its copy keys,
+  // so the count read 4 for a dictionary that is still correct.
+  ok((creatorI18n.match(new RegExp(`^ {4}${key}:`, 'gm')) ?? []).length === 2, `creator-web i18n: ${key} in both locales`);
 }
 
 console.log(`\nleaderboard-reveal: ${passed} passed, ${failed} failed`);

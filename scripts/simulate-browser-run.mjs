@@ -33,8 +33,27 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { auditRun } from './lib/run-audit.mjs';
 import { makeRng, stepToward, jitterFix } from './lib/gpsRoute.mjs';
+// Emulator ports come from ONE pure resolver (change: emulator-port-offset) so this can
+// run on an offset block beside a live playtest. Unset ⇒ exactly today's ports.
+import { resolveEmulatorPorts, BASE_EMULATOR_PORTS, PORT_OFFSET_ENV } from './lib/emulatorPorts.mjs';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
+const EMU = resolveEmulatorPorts(process.env);
+
+// FAIL CLOSED under an offset. The browser half of this sim drives the REAL play-web dev
+// server, whose Firebase client pins the DEFAULT emulator ports in product code
+// (apps/play-web/src/services/firebase.ts:101) that this tooling change deliberately does
+// not touch. On an offset block the Node half would talk to the gate's emulator while the
+// browser half talked to whatever owns the default block — i.e. a live playtest stack —
+// and would create games, runs and teams inside it. Refuse loudly instead of corrupting it.
+if (EMU.firestore !== BASE_EMULATOR_PORTS.firestore) {
+  console.error(
+    `\n✖ simulate-browser-run cannot run with ${PORT_OFFSET_ENV} set: the play-web client pins the\n` +
+      '  default emulator ports, so the browser would drive the DEFAULT block (possibly a live\n' +
+      `  playtest) while this process drove :${EMU.firestore}. Run it without the offset.\n`,
+  );
+  process.exit(1);
+}
 // A tiny but VALID 1x1 JPEG. PhotoEntry is camera-capture only now (no free-text
 // URL field): the sim sets these bytes on the hidden <input type=file> and lets
 // the real compress+upload pipeline run against the Storage emulator, whose
@@ -62,9 +81,9 @@ function makeParty(name) {
   const auth = getAuth(app);
   const functions = getFunctions(app);
   const db = getFirestore(app);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectAuthEmulator(auth, `http://127.0.0.1:${EMU.auth}`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', EMU.functions);
+  connectFirestoreEmulator(db, '127.0.0.1', EMU.firestore);
   return {
     auth,
     // Same transient-retry as e2e/simulate: absorb an emulator blip (max 2)

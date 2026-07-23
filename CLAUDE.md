@@ -25,8 +25,9 @@ logic/callable change is *write a failing test*, then minimum code to green, the
 - **UI** → verify via the preview tools (no component test runner).
 
 **Gates before any change is done:** `npm run typecheck` · `npm run lint` · `npm test` ·
-`npm run creator:build` · `npm run play:build` · `npm run bundle:budget` · `npm run i18n:check:strict` ·
-`npm run e2e` — all green (the first seven are exactly `npm run verify`). Project context +
+`npm run creator:build` · `npm run play:build` · `npm run bundle:budget` · `npm run base:check` ·
+`npm run i18n:check:strict` ·
+`npm run e2e` — all green (the first eight are exactly `npm run verify`). Project context +
 per-artifact rules that drive proposals/designs/tasks live in
 [openspec/config.yaml](openspec/config.yaml).
 
@@ -69,6 +70,9 @@ npm run dev:all    # boots EVERYTHING in one terminal
 **SEED** (seed-if-empty once Firestore+Auth are up), **CREATOR** (Vite :5180), **PLAY** (Vite :5181).
 
 **Emulator ports:** UI 4000 · Auth 9099 · Functions 5001 · Firestore 8080 · Storage 9199.
+`dev:all` and every `playtest*` target always use exactly this block. Only an **emulator-bound
+gate** can be shifted off it, via `RUSHPOINT_EMULATOR_PORT_OFFSET` (see
+`scripts/lib/emulatorPorts.mjs` below) — that is how a gate runs beside a live playtest.
 
 ### Required gates (run before declaring anything done)
 ```bash
@@ -78,6 +82,7 @@ npm run lint             # creator-web eslint — 0 errors (style warnings ok)
 npm run creator:build    # production build of creator-web — must pass
 npm run play:build       # production build of play-web — must pass (don't let a play-web break slip through)
 npm run bundle:budget    # play-web first-load byte budget + "heavy dep must stay lazy" (needs play:build first)
+npm run base:check       # built index.html asset base == the path that dist is served from (needs the builds first)
 npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
 npm run i18n:check:strict # ⚠ MANDATORY AFTER ANY UI CHANGE — Hebrew↔English correctness, PART B regressions fail
 ```
@@ -94,7 +99,7 @@ fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin`
 real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
 run: it introspects the callables the emulator serves and fails if any was never invoked (bar an
 explicit `EXEMPT` list, itself checked for stale entries), so a **new callable ships RED until it
-has a test** — add a scenario, don't just add the callable. The table below lists **95** callables
+has a test** — add a scenario, don't just add the callable. The table below lists **96** callables
 (plus `stripeWebhook`, the `pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which
 are not callables). Keep it green; extend the relevant scenario (not just the lifecycle).
 `functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
@@ -103,11 +108,13 @@ are not callables). Keep it green; extend the relevant scenario (not just the li
 teams play a real game at once, then it audits leaderboard invariants + that every station
 counter returns to 0. (`simulate:v1` is the archived v1 tournament script.)
 **One-command gauntlets for agents:** `npm run verify`
-(typecheck·lint·test·creator:build·play:build·**bundle:budget**·**i18n:check:strict**, no emulator)
-and `npm run verify:emulator` (builds → e2e → rules → 8-team simulate → adversarial simulate under a
-self-booted suite — no long-running emulator needed). `npm run test:rules:storage`
-(scripts/test-storage-rules.mjs) is emulator-bound and is **not** in either gauntlet — run it under
-`scripts/emulator-exec.mjs` when you touch `storage.rules`.
+(typecheck·lint·test·creator:build·play:build·**bundle:budget**·**base:check**·**i18n:check:strict**,
+no emulator)
+and `npm run verify:emulator` (builds → e2e → **Firestore rules** → **Storage rules** → 8-team
+simulate → adversarial simulate, each under its own self-booted suite — no long-running emulator
+needed). `npm run verify:emulator` is emulator-bound end to end; to run it **beside a live
+playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see the
+`scripts/lib/emulatorPorts.mjs` note below).
 
 > 🌐 **i18n gate — if you touch ANY UI (text, JSX, components, `i18n.ts`), you MUST run
 > `npm run i18n:check:strict` and it MUST come out clean** — `npm run verify` runs the STRICT
@@ -134,6 +141,13 @@ self-booted suite — no long-running emulator needed). `npm run test:rules:stor
   (`play:build` first) against a first-load byte budget **and** asserts the heavy deps
   (maplibre-gl / jsqr / qrcode) are absent from the entry chunk. Decisions are pure in
   `scripts/lib/bundleBudget.mjs`, unit-tested by `scripts/test-bundle-budget.ts`.
+- **`scripts/check-build-base.mjs`** (`npm run base:check`) — reads each built
+  `apps/<app>/<outDir>/index.html` and asserts its asset base is the path that directory is served
+  from (`ARTIFACT_CONTRACT`: everything is `/` except creator-web's `dist-playtest`, which is
+  `/creator/` because both apps share one tunnel origin behind the proxy). An unbuilt
+  directory is skipped, never failed. Decisions are pure in `scripts/lib/buildArtifactGuard.mjs`
+  (which also asserts the `package.json` build/serve wiring), unit-tested by
+  `scripts/test-build-artifact-guard.ts`. See the gate-vs-playtest gotcha below.
 - **`scripts/backfill-public-tasks.mjs`** (`npm run backfill:public-tasks`) — operator entry point
   that drives the admin callable `backfillPublicTaskCoordinatesNow` to completion, repairing
   legacy `publicTasks` docs that still carry exact `coordinates`. **DRY-RUN by default**; a real
@@ -146,6 +160,47 @@ self-booted suite — no long-running emulator needed). `npm run test:rules:stor
   closed**: a process dies only when lineage attributes it to a FINISHED exec session of THIS repo,
   so a live dev/playtest stack is never touched. `RUSHPOINT_REAP_DISABLE=1` disables it,
   `RUSHPOINT_REAP_DEBUG=1` prints verdicts and kills nothing (`scripts/test-emulator-reap.ts`).
+  It reasons **only** about lineage, session records and process age, **never about ports** — so it
+  is offset-agnostic by construction; don't make it port-aware (that would let a port coincidence
+  authorise a kill).
+- **`scripts/lib/emulatorPorts.mjs`** (pure) — the single source of truth for the emulator port
+  block, so an emulator-bound gate can run **beside a live playtest** instead of fighting it for
+  8080/9099/5001/9199/4000. `RUSHPOINT_EMULATOR_PORT_OFFSET=1000 npm run verify:emulator` shifts the
+  whole suite (ui · hub · logging · functions · hosting · firestore · firestore-websocket · auth ·
+  storage). **Unset / empty / `0` / garbage ⇒ byte-for-byte today's ports**, and
+  `emulator-exec.mjs` then passes no `--config` at all, so the default command line is unchanged.
+  An offset is snapped UP to a multiple of 1000 on purpose: no pairwise gap between two default
+  ports is a multiple of 1000, so a shifted port can never land on a LIVE emulator's port (a naive
+  `+1019` puts the gate's Firestore on the live Auth port). Because the Firebase CLI has **no port
+  flags**, an offset run generates root-level `firebase.emulator-offset.json` (gitignored) and
+  passes `--config`; it must be in the ROOT because the CLI resolves a config's relative paths
+  against that file's own directory. `dev:all` / `playtest*` deliberately ignore the offset and
+  always use the default block. `scripts/test-emulator-ports.ts` pins all of it.
+- **`scripts/lib/emulatorIsolation.mjs`** (pure) — **moving the ports was not enough.** The Firebase
+  CLI's emulator-hub *locator* is keyed by **project id alone** and lives in `os.tmpdir()`
+  (firebase-tools@15.18.0 `lib/emulator/hub.js:24-32`), and it is the ONLY way
+  `firebase emulators:export` picks a target (`lib/emulator/controller.js:730-745`; there is no
+  `--host`/`--port`). So the playtest's 120 s backup loop could aim its export at the GATE's
+  Firestore and wedge it — an offset gate died mid-suite with a completely clean
+  `firestore-debug.log`, and the CLI printed "you are running multiple instances of the emulator
+  suite". An offset run therefore also gets a **private temp dir**
+  (`TEMP`/`TMP`/`TMPDIR` → `.firebase/emulator-offset-tmp/offset-<n>`) ⇒ a private locator neither
+  suite can read or overwrite. Note the CLI does NOT overwrite a live locator: it warns and gives
+  up, so ownership goes to whoever booted while the file was absent and never changes hands —
+  which is why the fix must be "don't share the file", not "write it later".
+  `RUSHPOINT_EMULATOR_ISOLATE_DISABLE=1` rolls it back; at offset 0 **nothing** is overridden.
+- **`scripts/lib/staleHelperSweep.mjs`** (pure) **+ `scripts/free-ports.mjs`** (shell) — free-ports
+  used to kill emulators by **command-line pattern** only, so a playtest restart destroyed an
+  in-flight offset gate (it matches `emulators:exec`, `.cache\firebase\emulators`,
+  `functionsEmulatorRuntime` AND `scripts/emulator-exec.mjs`) no matter which ports it held. A
+  pattern match is now necessary but **not sufficient**: a match is spared when it is the sweeper or
+  its ancestor, when its lineage reaches a **still-running** session in
+  `.firebase/emulator-exec-sessions.json` (root, ancestor-of-root or descendant, including an orphan
+  naming an absent root), when its command line carries an offset marker, or when it is an emulator
+  on a `--port` outside the block being swept. The playtest's own default-block emulators carry
+  `--port 8080`/`9099`, no marker and no running session, so they still die exactly as before. An
+  unfinished session record expires after 6 h so a crashed gate can't make its debris immortal.
+  `scripts/test-emulator-gate-isolation.ts` covers both modules.
 - **`scripts/lib/callableHardening.mjs`** — pure static analysis of the callable surface: every
   `loggedCallable` must carry an auth marker (unless in the declared public allowlist) and every
   privileged one must write an `auditLogs` record. Both lists are **declared, never inferred**, so a
@@ -157,7 +212,8 @@ self-booted suite — no long-running emulator needed). `npm run test:rules:stor
 - **Rules suites (emulator-bound, NOT in `npm test`):** `npm run test:rules`
   (`scripts/test-rules.mjs`, Firestore) and `npm run test:rules:storage`
   (`scripts/test-storage-rules.mjs`, Storage — participant photo/audio prefixes, staff run scoping,
-  size/content-type limits, dead legacy prefixes). Only `test:rules` is in `verify:emulator`.
+  size/content-type limits, dead legacy prefixes). **Both** are in `verify:emulator`; run either one
+  on its own under `scripts/emulator-exec.mjs` when you touch only that rules file.
 - **New pure suites in `npm test`** (each is a `scripts/test-*.ts` run by the aggregator):
   `test-bundle-budget` · `test-callable-hardening` · `test-emulator-reap` · `test-play-a11y-scan` ·
   `test-public-task-backfill` · `test-public-task-seed` (publicTasks privacy on the write path) ·
@@ -165,8 +221,14 @@ self-booted suite — no long-running emulator needed). `npm run test:rules:stor
   (`BUILDER_EDITABLE_FIELDS` completeness) · `test-enforced-settings` · `test-tags` ·
   `test-play-web-i18n-dictionary` · `test-i18n-leak` (the shared leak predicate + that both checkers
   import it) · `test-legal-routes` · `test-join-code` · `test-held-team-notice` ·
-  `test-task-duration-defaults`. The runner **auto-discovers** every `scripts/test-*.ts` — drop a
-  file in and it is in the gate.
+  `test-task-duration-defaults` · `test-build-artifact-guard` (asset base vs. serve path + the
+  playtest build/serve wiring) · `test-emulator-ports` (the offset resolver + the generated config) ·
+  `test-emulator-gate-isolation` (private hub locator + the free-ports sweep verdicts) ·
+  `test-hidden-search-area` (the coarse sealed-task circle + the play-web selector) ·
+  `test-map-recenter` (the play map's recentre verdict) · `test-skip-single-task` (`planTaskSkip`) ·
+  `test-gallery-task-detail` (the gallery mission detail view-model + its secrecy sweep) ·
+  `test-creator-tour` (the guided-tour step data, reducer and persistence). The runner
+  **auto-discovers** every `scripts/test-*.ts` — drop a file in and it is in the gate.
 
 > ⚠️ **Stop with Ctrl+C** so `--export-on-exit` persists emulator data.
 > ⚠️ Client configs connect over **`127.0.0.1`** (not `localhost`) to avoid the Windows IPv6 mismatch.
@@ -215,7 +277,7 @@ helpers are **internal** (not triggers) — never re-export them.
 | Module | Callables |
 |---|---|
 | `games/index.ts` | createGame · updateGame · **deleteGame (SOFT: tombstone + 30-day trash)** · listDeletedGames · restoreGame · purgeGameNow · duplicateGame · publishGame · getGame · listGames · checkChallengeAnswer · translateGame · **exportGameFile** · **importGameFile** |
-| `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · finalizeRun · refreshLeaderboard · getPublicLeaderboard · getRunRecap · getRunReplay · getRunAnalytics · getRunSummary · getRunHeatmap · listRunTeams · completeTask · requestNextTask · requestTaskHint · reportArrival · submitTaskAnswer · submitSequenceStep · getRecommendedTasks · checkOutTask · getMyTeamState · listLiveRuns · getMyProfile · createTrackable · getRunTrackables · pickUpTrackable · dropTrackable · startInstantPlay · createZone · deleteZone · getRunZones · captureZone · joinTeamAsDevice · transferController · claimController · submitRunFeedback · getRunFeedbackSummary · getRunSurveyResults · requestGuardianConsent · grantGuardianConsent · activateHotZone · deactivateHotZone · getRunDiscoveryPois · claimDiscoveryPoi · **onRunFinalized (Firestore trigger, not a callable)** |
+| `runs/index.ts` | launchRun · joinRun · getJoinInfo · startTeams · skipStage · **skipTaskForTeam (skips ONE mission for ONE team, stays in the stage)** · finalizeRun · refreshLeaderboard · getPublicLeaderboard · getRunRecap · getRunReplay · getRunAnalytics · getRunSummary · getRunHeatmap · listRunTeams · completeTask · requestNextTask · requestTaskHint · reportArrival · submitTaskAnswer · submitSequenceStep · getRecommendedTasks · checkOutTask · getMyTeamState · listLiveRuns · getMyProfile · createTrackable · getRunTrackables · pickUpTrackable · dropTrackable · startInstantPlay · createZone · deleteZone · getRunZones · captureZone · joinTeamAsDevice · transferController · claimController · submitRunFeedback · getRunFeedbackSummary · getRunSurveyResults · requestGuardianConsent · grantGuardianConsent · activateHotZone · deactivateHotZone · getRunDiscoveryPois · claimDiscoveryPoi · **onRunFinalized (Firestore trigger, not a callable)** |
 | `gallery/index.ts` | searchGallery · searchTaskLibrary · incrementTaskCopyCount · **setPublicLike** |
 | `payments/index.ts` | getWallet · getWalletStatus · purchaseCredits · subscribePro · claimReferral · stripeWebhook (onRequest) |
 | `users/index.ts` | updateMyProfile · exportMyData · deleteMyAccount |
@@ -261,6 +323,19 @@ strips `answers`/`numericAnswer`/`steps[].answer`/`hint`/`secretCode`; verify vi
 - **Default task durations** — `packages/shared/src/taskDuration.ts` derives
   `expectedDurationMinutes` from the task's own interaction (authoring time only; no scoring path
   calls it, so no in-flight or finalized run moves).
+- **Hidden missions get a search AREA, never a pin** — a still-sealed `locationHidden` task's
+  participant payload carries `searchArea {lat, lng, radiusMeters}` from
+  `hiddenSearchArea(task)` (`packages/shared/src/hiddenSearchArea.ts`): a grid-snapped circle
+  guaranteed to contain the real spot. It is the ONLY locational value a sealed payload has ever
+  shipped — `sanitizeTaskForParticipant` still builds the sealed stub by construction, so no
+  `coordinates` / `geofenceRadiusMeters` / `smart` reaches it, and `reportArrival`'s server GPS
+  verdict is still the only thing that unseals.
+- **Skip ONE mission for ONE team** — `skipTaskForTeam` (owner or run-scoped staff) marks a single
+  task `skipped` with `earnedScore: 0`, releases its station slot, keeps the team **in the same
+  stage** and, if the skip put `requiredTaskCount` out of reach, lowers that team's stored
+  requirement by the smallest winnable amount. `planTaskSkip` (`packages/shared/src/taskSkip.ts`)
+  is the arithmetic. `skipStage` (whole stage + its `skipAward` consolation) is unchanged — this is
+  an addition, not a replacement.
 
 ### Scoring — 3 automatic presets (NO human judge), see `packages/shared/scoringPresets.ts`
 - `time_only` — ranked purely by completion time.
@@ -288,14 +363,31 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
 
 - **Add/realize a backend mutation** → callable in the right `functions/src/<domain>/index.ts`
   + re-export in `functions/src/index.ts` + wrapper in the app's `services/calls.ts`.
-- **Creator UI** → `apps/creator-web/src/pages/*` (Dashboard, Builder, Gallery, Wallet, RunConsole);
+- **Creator UI** → `apps/creator-web/src/pages/*` (Dashboard, Builder, Gallery, Wallet, RunConsole,
+  RunsOverview, Settings, Trash);
   shared kit in `components/ui.tsx`; data layer `services/api.ts` (`callable()`) + `services/calls.ts`.
   Builder is tile + modal (`BuilderPage` `TaskEditor`); quick-start templates in `templates.ts`;
   whole-route `RoutePreviewMap` on the Preview step. New-game flow seeds a template via updateGame.
   The Run Console's layout is DATA, not inline JSX conditions — `lib/runConsoleLayout.ts`
   (`buildRunConsolePlan` → `pinnedPanels` + `buildRunConsoleSections` + `assignPanelColumns`) drives
   a Builder-style section rail; `lib/teamAttention.ts` and `lib/photoReviewQueue.ts` are the pure
-  (clock-injected, never-throwing) triage verdicts the console renders.
+  (clock-injected, never-throwing) triage verdicts the console renders. Also pure and console-owned:
+  `lib/runConsoleSignals.ts` (`buildRunSignals` — the ranked "what needs you right now" strip; a
+  quiet run yields `[]`), `lib/runConsolePanelMeta.ts` (icon + title/help/empty copy contract per
+  `PanelId`, so no panel can ship nameless), `lib/runConsoleActions.ts` (severity **and** the
+  `CONSEQUENCE` record + `teamRowActions` inline/overflow split) and `lib/runConsoleLabels.ts`
+  (`resolveEnumLabel` — no raw enum or uid reaches a human). Gallery/library mission detail is a
+  view-model, not markup: `lib/galleryTaskDetail.ts` copies named fields OUT of a `PublicTask`, so
+  an unknown future field can never reach the screen. Every route is mounted through
+  `lib/lazyWithRetry.ts`, never bare `React.lazy` — any rebuild renames the hashed route chunk the
+  open tab still asks for, so a bare lazy import 404s and drops a healthy session on the
+  ErrorBoundary crash screen. It reloads ONCE per key, then rethrows honestly. play-web carries its
+  own copy at the same path, behaviourally matched and deliberately duplicated rather than shared
+  (`packages/shared` is framework-free — no React dependency).
+  First-run onboarding is also DATA: `lib/creatorOnboarding.ts` holds BOTH the derived checklist and
+  the guided tour (`TOUR_STEPS`, `tourReducer`, `shouldAutoStartTour`, the `localStorage`
+  `rp-tour-seen:<uid>` record); `components/CreatorTour.tsx` only renders it, anchoring on
+  `data-tour` attributes. No callable, no server state.
 - **Participant UI** → `apps/play-web/src/screens/*` (Join, Play, Final, StaffConsole,
   GamePromo, PublicLeaderboard) + `components/*` (TaskRunner, NavMap, LiveOps, ConnectionBanner).
   Session in `store.ts`. **Public marketing routes** (no router; `App.tsx` reads query params):
@@ -308,7 +400,10 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   the entry chunk). creator-web keeps `/creator/terms` + `/creator/privacy` off the same source.
   Other pure play-web decisions: `lib/stuckGuards.ts` (fail-open submit/GPS guards),
   `lib/holdNotice.ts` (why a held team is still waiting), `lib/joinCode.ts` (join-code normalize +
-  error mapping).
+  error mapping), `lib/searchAreas.ts` (`selectSearchAreas` — which sealed hidden missions get a
+  circle on the map; total, never throws), `lib/recenter.ts` (`recenterVerdict` — is there a usable
+  fix, and where should the camera go; drives the map's "focus back on me" button, which replaced
+  MapLibre's `GeolocateControl` so the app runs exactly ONE geolocation watch).
 - **Marketing & virality** — branded OG images at `apps/*/public/og.jpg` (see
   [scripts/og-cards.README.md](scripts/og-cards.README.md)); creator landing page is the
   logged-out `AuthGate`; `ShareSheet` (QR + copy + native share) powers game-promo and referral
@@ -317,7 +412,10 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   "Powered by RushPoint" footer on non-Pro runs.
 - **Types / paths / scoring / geo** → `packages/shared/src` (`types/index.ts`, `scoringPresets.ts`,
   `geo.ts`, `mapStyle.ts`, `validation.ts`; plus `pausedClock.ts`, `taskDuration.ts`,
-  `liveTaskStatus.ts`, `mutualExclusion.ts`, `safeZone.ts`, `chat.ts`, `tags.ts`). `legalContent.ts`
+  `liveTaskStatus.ts`, `mutualExclusion.ts`, `safeZone.ts`, `chat.ts`, `tags.ts`,
+  `hiddenSearchArea.ts` (the coarse circle a SEALED hidden task may reveal — separate from
+  `publicTaskLocation.ts`, the world-readable ~1 km cell, and neither is derived from the other),
+  `taskSkip.ts` (`planTaskSkip` — what skipping ONE mission does to the team's stage)). `legalContent.ts`
   + `legalMarkdown.ts` are deliberately **not** in the barrel — deep-import them only.
 - **Maps** — MapLibre + MapTiler `outdoor` with a keyless OpenTopoMap fallback; style via
   `resolveMapStyle()` in `@rushpoint/shared/mapStyle`.
@@ -368,32 +466,53 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   registers as a change (the control looks alive because local state round-trips). Add a Builder
   control ⇒ add its field to that list; `scripts/test-game-presentation.ts` enforces it.
 - **Exclusive groups cap how many tasks a stage can yield.** `Stage.requiredTaskCount` must never
-  exceed `maxCompletableTasks(stage)` (`packages/shared/src/mutualExclusion.ts:123`) — a group
+  exceed `maxCompletableTasks(stage)` (`packages/shared/src/mutualExclusion.ts`) — a group
   contributes at most ONE completion — or the stage silently shrinks or can't be completed at all.
-  Use `requiredTaskCountProblem()` (same file, `:154`); it is what the server's save/import
+  Use `requiredTaskCountProblem()` (same file); it is what the server's save/import
   validation and the Builder's launch readiness both read.
 - **A run-scoped operational override belongs on the RUN document, not the game template.** The
   template is replayed by later runs, copied by duplicate/export/publish, and rewritten wholesale by
   the Builder — so "this stop is closed today" written there is closed forever. Pattern:
-  `Run.taskStatusOverrides` (`packages/shared/src/types/index.ts:733`) written only by
-  `setRunTaskStatus` (`functions/src/index.ts:1426`).
+  `Run.taskStatusOverrides` (`packages/shared/src/types/index.ts`, `Run`) written only by
+  `setRunTaskStatus` (`functions/src/index.ts`).
 - **Live/final leaderboard parity: anything affecting duration or score must be a pure function of
   the STORED team document** — never re-derived from the current template and never from `now`.
-  `buildRankings` sums the server-stamped `RunTaskRecord.excludedMs` instead of re-reading
-  `task.pausesTimer` (`functions/src/runs/index.ts:1220-1229`), because a mid-run template edit would
-  otherwise retroactively re-time finished work and make the live board jump.
+  `buildRankings` sums the server-stamped `RunTaskRecord.excludedMs` (via `teamExcludedMs`) instead
+  of re-reading `task.pausesTimer` (`functions/src/runs/index.ts`, `buildRankings`), because a
+  mid-run template edit would otherwise retroactively re-time finished work and make the live board
+  jump.
 - **Two duration fields, NOT interchangeable.** `Task.expectedDurationMinutes` = interaction time AT
-  the stop, read only by `scoreFixedPointsSpeed` (`packages/shared/src/scoringPresets.ts:80`);
+  the stop, read only by `scoreFixedPointsSpeed` (`packages/shared/src/scoringPresets.ts`);
   defaults derived per type in `taskDuration.ts`. `Task.estimatedMinutes` is measured from
-  ASSIGNMENT (`RunTaskRecord.startedAt` is stamped when the task is claimed —
-  `functions/src/runs/index.ts:3022`), so it **includes travel**, and it feeds `taskScoreSmart` /
-  `computeSkillRatio` (`functions/src/routing/assignNextTask.ts:141-145`) and the UI.
+  ASSIGNMENT (`RunTaskRecord.startedAt` is stamped when the task is claimed, in
+  `assignNextInActiveStage`'s claim transaction, `functions/src/runs/index.ts`), so it
+  **includes travel**,
+  and it feeds `taskScoreSmart` / `computeSkillRatio` (`computeSkillRatio` in
+  `functions/src/routing/assignNextTask.ts`) and the UI.
 - **Never run `verify` and `verify:emulator` concurrently on the same working tree:** both invoke
   `shared:build`, which rewrites `packages/shared/dist` **in place**. If one gauntlet's tsc is
   rewriting `dist` while the other's typecheck/esbuild reads it, functions fails with a spurious
   `No matching export … from './runs/index'` (a partial-`dist` read, not a real code error). Run the
   two gauntlets **sequentially**; in CI keep them in **separate jobs / checkouts** so they never
   share `dist`.
+- **A gate build must never write the directory the live playtest serves.** The always-on playtest
+  serves PRE-BUILT bundles through `vite preview`; `npm run verify` builds the same apps. When both
+  wrote `apps/*/dist`, every `npm run verify` silently broke the live site in two ways, with **no
+  error anywhere** (every process healthy, every request 200):
+  **(a) base clobber** — creator-web's base is `/creator/` only under `--mode playtest`
+  (`apps/creator-web/vite.config.ts`). `creator:build` writes base `/`, so the served HTML asks for
+  `/assets/index-*.js`; the single-origin proxy routes only `/creator*` to creator-web, so that goes
+  to **play-web**, which returns 200 with its own SPA HTML → the live creator console is a **blank
+  page**. **(b) backend clobber** — `isEmulatorBuild` (`packages/shared/src/env.ts`) is
+  `DEV || MODE === 'playtest'`, so ONLY the playtest bundle keeps the emulator wiring; `play:build`'s
+  production bundle points participants' phones at real Firebase, where anonymous auth is disabled
+  (`auth/admin-restricted-operation`) and nobody can join. Fixed structurally: `--mode playtest`
+  builds to **`dist-playtest`**, the gate keeps **`dist`**, and both playtest previews pin
+  `--outDir dist-playtest` (supported on the pinned Vite 5.4.21,
+  `node_modules/vite/dist/node/cli.js:878`). So: **gate/deploy ⇒ `npm run creator:build` /
+  `npm run play:build`; live playtest ⇒ `npm run playtest:build`** — never mix them. `npm run
+  base:check` (in `verify`) + `scripts/test-build-artifact-guard.ts` (in `npm test`) make a
+  regression loud. `bundle:budget` and `firebase.json` hosting still read `dist`, unchanged.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

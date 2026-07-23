@@ -64,6 +64,10 @@ export const PRIVILEGED_CALLABLES = {
   restoreGame: 'Reverses a deletion and reinstates join codes — the counterpart of deleteGame.',
   purgeGameNow: 'Irreversible destruction of a game and everything beneath it.',
   adjustTeamScore: 'Staff override of a participant team\'s score during a live run.',
+  skipTaskForTeam:
+    'Staff override that removes a scoring opportunity from ONE identified team during a live '
+    + 'run, and can lower that team\'s stage requirement. "Who skipped this, for whom, and why" '
+    + 'must stay answerable after the event, exactly like adjustTeamScore.',
   clearTeamOutOfBounds: 'Staff override that releases a team from a safety-zone block.',
   pruneRunNow:
     'Irreversibly destroys one run\'s participant data — six subcollections, uploaded '

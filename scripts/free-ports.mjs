@@ -8,7 +8,12 @@
 
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
-import { reapOrphanEmulatorProcesses } from './lib/reapEmulatorExec.mjs';
+import {
+  enumerateProcesses,
+  readExecSessions,
+  reapOrphanEmulatorProcesses,
+} from './lib/reapEmulatorExec.mjs';
+import { planStaleHelperSweep } from './lib/staleHelperSweep.mjs';
 
 const PORTS = [
   8081,                       // Metro (Expo)
@@ -51,25 +56,45 @@ const STALE_CMDLINE_PATTERNS = [
   'scripts\\simulate-browser-run.mjs',
 ];
 
-function killStaleHelpersWindows() {
-  // Enumerate every process with its command line; kill the ones matching a
-  // stale-helper pattern. PowerShell CIM avoids the deprecated/absent wmic.
-  const ps = spawnSync('powershell', ['-NoProfile', '-Command',
-    'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ' +
-    'Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress'],
-    { encoding: 'utf8' });
-  let procs = [];
-  try {
-    const parsed = JSON.parse(ps.stdout || '[]');
-    procs = Array.isArray(parsed) ? parsed : [parsed];
-  } catch { return; }
-  for (const p of procs) {
-    const cmd = String(p.CommandLine || '');
-    if (!STALE_CMDLINE_PATTERNS.some((pat) => cmd.includes(pat))) continue;
-    const pid = String(p.ProcessId);
-    const r = spawnSync('taskkill', ['/PID', pid, '/F', '/T'], { stdio: 'ignore' });
+// Enumerate → decide → kill. There is deliberately NO selection logic here: every `if`
+// about *whether* a process may die lives in the pure, unit-tested
+// scripts/lib/staleHelperSweep.mjs (change: emulator-gate-isolation). Before that split
+// this swept purely by command-line pattern, which meant an in-flight OFFSET gate run —
+// which matches `emulators:exec`, `.cache\firebase\emulators`, `functionsEmulatorRuntime`
+// AND `scripts/emulator-exec.mjs` — was destroyed by every playtest restart regardless of
+// which ports it held. The planner now spares anything positively attributed to a
+// different LIVE port block (a running emulators:exec session, an offset marker, or a
+// `--port` outside the block being swept) and kills everything else exactly as before.
+function killStaleHelpers() {
+  const processes = enumerateProcesses();
+  if (processes.length === 0) return;   // no snapshot ⇒ no guessing, no kills
+  const plan = planStaleHelperSweep({
+    processes,
+    patterns: STALE_CMDLINE_PATTERNS,
+    sessions: readExecSessions(),
+    // The clock only ages out an unfinished session record: a gate killed by a power cut
+    // never stamps `endedAt`, and without a bound its debris would be permanently
+    // unkillable — the exact wedge this script exists to clear.
+    nowMs: Date.now(),
+    sweptPorts: PORTS,
+    selfPid: process.pid,
+    protectedPids: [process.ppid].filter((p) => Number.isFinite(Number(p))),
+  });
+  const spared = plan.keep.filter((k) => k.reason === 'live-exec-session'
+    || k.reason === 'offset-port-block' || k.reason === 'foreign-port-block');
+  if (spared.length > 0) {
+    console.log(`[free-ports] Spared ${spared.length} process(es) belonging to a different live emulator block.`);
+  }
+  for (const victim of plan.kill) {
+    const pid = String(victim.pid);
+    const r = isWin
+      ? spawnSync('taskkill', ['/PID', pid, '/F', '/T'], { stdio: 'ignore' })
+      : spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
     if (r.status === 0) console.log(`[free-ports] Killed stale helper (PID ${pid})`);
   }
+}
+
+function killStaleImagesWindows() {
   // cloudflared spawns worker exes whose command line may not carry the pattern;
   // sweep any leftover by image name (dev-only; safe in this workflow).
   spawnSync('taskkill', ['/IM', 'cloudflared.exe', '/F', '/T'], { stdio: 'ignore' });
@@ -81,14 +106,15 @@ function killStaleHelpersWindows() {
   spawnSync('taskkill', ['/IM', 'ngrok.exe', '/F', '/T'], { stdio: 'ignore' });
 }
 
-function killStaleHelpersUnix() {
-  for (const pat of [...STALE_CMDLINE_PATTERNS, 'cloudflared']) {
-    const res = spawnSync('bash', ['-c', `pgrep -f ${JSON.stringify(pat)} || true`], { encoding: 'utf8' });
-    for (const pid of (res.stdout || '').split(/\s+/).filter(Boolean)) {
-      if (Number(pid) === process.pid) continue;
-      spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
-      console.log(`[free-ports] Killed stale helper (PID ${pid})`);
-    }
+// cloudflared has no repo path in its command line and no session to belong to, so it
+// keeps the blunt pattern sweep it always had. (The Windows side does the same by image
+// name, above.)
+function killCloudflaredUnix() {
+  const res = spawnSync('bash', ['-c', 'pgrep -f cloudflared || true'], { encoding: 'utf8' });
+  for (const pid of (res.stdout || '').split(/\s+/).filter(Boolean)) {
+    if (Number(pid) === process.pid) continue;
+    spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
+    console.log(`[free-ports] Killed stale helper (PID ${pid})`);
   }
 }
 
@@ -135,8 +161,9 @@ try {
   const reaped = reapOrphanEmulatorProcesses({ label: 'free-ports' });
   if (reaped > 0) console.log(`[free-ports] Reaped ${reaped} orphaned emulator-exec process(es).`);
 
-  if (isWin) { killStaleHelpersWindows(); freeWindows(); }
-  else { killStaleHelpersUnix(); freeUnix(); }
+  killStaleHelpers();
+  if (isWin) { killStaleImagesWindows(); freeWindows(); }
+  else { killCloudflaredUnix(); freeUnix(); }
   console.log('[free-ports] Ports clear.');
 } catch (e) {
   console.warn('[free-ports] Skipped (non-fatal):', e.message);

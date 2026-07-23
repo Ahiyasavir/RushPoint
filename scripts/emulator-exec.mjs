@@ -31,9 +31,58 @@
 // never selected.
 //   RUSHPOINT_REAP_DISABLE=1  skip it · RUSHPOINT_REAP_DEBUG=1  verdicts only, no kills
 //   RUSHPOINT_REAP_MIN_AGE_MS age floor (default 5000 ms)
+//
+// OFFSET PORT BLOCK (change: emulator-port-offset). A live `playtest:forever` stack
+// owns the default emulator block, so this gate used to be unrunnable during a
+// playtest — and killing a playtest that may be serving a live event is not an
+// option. Set RUSHPOINT_EMULATOR_PORT_OFFSET=<n> and the whole suite moves to a
+// second, provably non-overlapping block:
+//
+//   RUSHPOINT_EMULATOR_PORT_OFFSET=1000 npm run verify:emulator
+//
+// The Firebase CLI has NO per-emulator port flag (verified against the pinned
+// firebase-tools: emulators:exec registers only --only/--inspect-functions/--import/
+// --export-on-exit/--log-verbosity/--ui), so ports can only come from a config file.
+// We therefore GENERATE `firebase.emulator-offset.json` from firebase.json and pass
+// `--config`. It must live in the REPO ROOT: firebase-tools derives the project root
+// from dirname(configPath) (lib/detectProjectRoot.js), so a config under .firebase/
+// would break every relative path inside it (functions source, rules, indexes). Same
+// pattern as the generated firebase.tunnel.json; both are gitignored.
+//
+// At offset 0 nothing is generated and no --config flag is passed: the spawned command
+// line is character-identical to what it was before this feature existed, so CI and
+// anyone not opting in are structurally unaffected.
+//
+// HUB ISOLATION (change: emulator-gate-isolation). Moving the ports was not enough. The
+// CLI's Emulator Hub LOCATOR is keyed by PROJECT ID ALONE and lives in os.tmpdir()
+// (firebase-tools@15.18.0 lib/emulator/hub.js:24-32), and it is the only routing mechanism
+// `firebase emulators:export` has (lib/emulator/controller.js:730-745 → hubClient.js:10 —
+// there is no --host and no --port flag). So the live playtest's 120-second backup loop
+// (scripts/emulator-backup.mjs:246) could aim its export at THIS gate's Firestore and wedge
+// it: an offset gate really did die mid-suite with a completely clean firestore-debug.log.
+// An offset run therefore ALSO gets a private temp directory (TEMP/TMP/TMPDIR →
+// .firebase/emulator-offset-tmp/offset-<n>), which gives it a private locator neither suite
+// can read or overwrite. Decision in the pure scripts/lib/emulatorIsolation.mjs.
+//   RUSHPOINT_EMULATOR_ISOLATE_DISABLE=1  turn it off in one variable
+// At offset 0 the plan is empty and NOTHING is overridden, so the child environment stays
+// byte-identical to what it was before this change existed.
 import { spawn } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import process from 'node:process';
 import { ensureModernJava, MIN_JAVA } from './lib/resolve-java.mjs';
+import {
+  resolveEmulatorPortOffset,
+  resolveEmulatorPorts,
+  buildOffsetFirebaseConfig,
+  describeEmulatorPorts,
+  PORT_OFFSET_ENV,
+} from './lib/emulatorPorts.mjs';
+import {
+  planEmulatorIsolation,
+  describeEmulatorIsolation,
+} from './lib/emulatorIsolation.mjs';
 import {
   recordExecSessionStart,
   recordExecSessionEnd,
@@ -66,7 +115,46 @@ if (!major || major < MIN_JAVA) {
 env.JAVA_TOOL_OPTIONS = env.JAVA_TOOL_OPTIONS ? `${env.JAVA_TOOL_OPTIONS} ${HEAP_OPTS}` : HEAP_OPTS;
 console.log(`[emulator-exec] Java ${major} · firebase-tools@${FIREBASE_TOOLS_VERSION} · JAVA_TOOL_OPTIONS="${env.JAVA_TOOL_OPTIONS}" · only=${only}`);
 
-const cmd = `npx --yes firebase-tools@${FIREBASE_TOOLS_VERSION} emulators:exec --only ${only} --project ${PROJECT_ID} "${script}"`;
+// ── Port block (default = today's ports, and then literally no extra flag) ────
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const OFFSET_CONFIG = path.join(ROOT, 'firebase.emulator-offset.json');
+const offsetInfo = resolveEmulatorPortOffset(env);
+let configFlag = '';
+
+if (offsetInfo.notice === 'invalid' || offsetInfo.notice === 'negative') {
+  console.warn(
+    `[emulator-exec] IGNORING ${PORT_OFFSET_ENV}="${env[PORT_OFFSET_ENV]}" (${offsetInfo.notice}); using the default port block.`,
+  );
+}
+if (offsetInfo.offset > 0) {
+  if (offsetInfo.notice === 'snapped' || offsetInfo.notice === 'clamped') {
+    console.warn(
+      `[emulator-exec] ${PORT_OFFSET_ENV}=${offsetInfo.requested} ${offsetInfo.notice} to ${offsetInfo.offset} ` +
+        '(offsets are multiples of 1000 so no shifted port can land on a live emulator port).',
+    );
+  }
+  const ports = resolveEmulatorPorts(env);
+  const baseConfig = JSON.parse(readFileSync(path.join(ROOT, 'firebase.json'), 'utf8'));
+  writeFileSync(OFFSET_CONFIG, `${JSON.stringify(buildOffsetFirebaseConfig(baseConfig, ports), null, 2)}\n`, 'utf8');
+  // Relative on purpose: resolved against cwd (= repo root) by the CLI, and shorter in logs.
+  configFlag = ' --config firebase.emulator-offset.json';
+  // Children of emulators:exec inherit this, so every gate script resolves the SAME block.
+  env[PORT_OFFSET_ENV] = String(offsetInfo.offset);
+  console.log(`[emulator-exec] ports :: ${describeEmulatorPorts(ports, offsetInfo)}`);
+
+  // Private hub locator — see the HUB ISOLATION note at the top of this file. Inside the
+  // `offset > 0` branch on purpose: the default path must not so much as touch `env`.
+  const isolation = planEmulatorIsolation({ offset: offsetInfo.offset, repoRoot: ROOT, env });
+  if (isolation.isolated) {
+    // GetTempPath / os.tmpdir() do not create the directory; a missing TEMP would make the
+    // CLI (and every emulator JVM) fail on its first temp write.
+    mkdirSync(isolation.tmpDir, { recursive: true });
+    Object.assign(env, isolation.envOverrides);
+  }
+  console.log(`[emulator-exec] ${describeEmulatorIsolation(isolation)}`);
+}
+
+const cmd = `npx --yes firebase-tools@${FIREBASE_TOOLS_VERSION} emulators:exec --only ${only} --project ${PROJECT_ID}${configFlag} "${script}"`;
 const child = spawn(cmd, { env, shell: true, stdio: 'inherit' });
 
 // The session root is this child's pid: every emulator JVM / functions worker descends

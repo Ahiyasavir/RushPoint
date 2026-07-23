@@ -15,7 +15,11 @@ rushpoint/
 │   │       │   ├── BuilderPage.tsx     # 3-step wizard: Details · Stages&Tasks (tile grid + modal) · Preview
 │   │       │   ├── GalleryPage.tsx     # public games + task library (list / map toggle)
 │   │       │   ├── WalletPage.tsx      # credit balance + Stripe top-up
-│   │       │   └── RunConsolePage.tsx  # LIVE: teams, map, standings, broadcast, finalize
+│   │       │   ├── RunConsolePage.tsx  # LIVE: teams, map, standings, broadcast, finalize
+│   │       │   ├── RunsOverviewPage.tsx # all runs across games
+│   │       │   ├── SettingsPage.tsx    # profile, language, replay the guided tour
+│   │       │   ├── TrashPage.tsx       # soft-deleted games (30-day trash) — restore / purge
+│   │       │   └── LegalPage.tsx       # /creator/terms + /creator/privacy off the shared legal source
 │   │       ├── components/
 │   │       │   ├── ui.tsx              # kit: Button, Card, Input, Textarea, Select, Label, Badge, Modal-less primitives
 │   │       │   ├── AuthGate.tsx        # Firebase Auth gate (email/Google)
@@ -24,12 +28,21 @@ rushpoint/
 │   │       │   ├── LiveTeamMap.tsx     # RunConsole live team positions
 │   │       │   ├── MapModeToggle.tsx   # topo ⇄ satellite
 │   │       │   ├── TaskLibrary.tsx     # insert a reusable task from the public library
+│   │       │   ├── GalleryTaskDetailModal.tsx # read-before-insert mission detail (Gallery + TaskLibrary)
+│   │       │   ├── CreatorTour.tsx     # first-run spotlight walkthrough (renders lib/creatorOnboarding data)
 │   │       │   ├── dialog.tsx          # confirm/alert/prompt host
 │   │       │   └── ErrorBoundary.tsx
 │   │       ├── lib/
 │   │       │   ├── runConsoleLayout.ts  # console layout as DATA: section rail, pinned panels, columns
+│   │       │   ├── runConsoleSignals.ts # buildRunSignals — ranked "what needs you right now"; quiet run ⇒ []
+│   │       │   ├── runConsolePanelMeta.ts # icon + title/help/empty copy contract per PanelId
+│   │       │   ├── runConsoleActions.ts # severity + CONSEQUENCE record + teamRowActions (inline vs overflow)
+│   │       │   ├── runConsoleLabels.ts  # resolveEnumLabel / resolveTeamLabel — no raw enum or uid reaches a human
 │   │       │   ├── teamAttention.ts     # "who is in trouble right now?" — pure, clock injected, never throws
 │   │       │   ├── photoReviewQueue.ts  # photo-review triage: wait tiers, legal decisions, focus moves
+│   │       │   ├── galleryTaskDetail.ts # mission-detail view-model: copies named fields OUT of a PublicTask
+│   │       │   ├── creatorOnboarding.ts # derived first-run checklist + the guided tour (steps, reducer, storage)
+│   │       │   ├── lazyWithRetry.ts     # every lazy route — a rebuild renames hashed chunks; reload once, then rethrow
 │   │       │   └── savePayload.ts       # BUILDER_EDITABLE_FIELDS — the save payload IS the dirty check
 │   │       └── services/
 │   │           ├── firebase.ts        # app init + emulator wiring (127.0.0.1)
@@ -59,6 +72,8 @@ rushpoint/
 │   │       │   ├── playRoute.ts        # URL → route union (staff/promo/board/legal); resolveLegalPath
 │   │       │   ├── stuckGuards.ts      # fail-OPEN submit gate, retry lockout, GPS watch backoff
 │   │       │   ├── holdNotice.ts       # why a team held back by startTeams is still waiting
+│   │       │   ├── searchAreas.ts      # selectSearchAreas — which SEALED hidden missions get a map circle
+│   │       │   ├── recenter.ts         # recenterVerdict — is there a usable fix, and where the camera goes
 │   │       │   └── joinCode.ts         # join-code normalize + join-error → message key
 │   │       ├── services/{firebase.ts, calls.ts}   # offline cache, Storage upload, typed calls
 │   │       └── store.ts                # session + staff-session persistence
@@ -69,6 +84,7 @@ rushpoint/
 │   └── src/
 │       ├── index.ts                 # re-exports all callables + staff/live-ops/station callables
 │       ├── firebase.ts              # Admin SDK init (ignoreUndefinedProperties)
+│       ├── auth.ts                  # requireAuth · assertStaffOrOwner — the ONE authz helper set
 │       ├── validation.ts            # shared payload guards
 │       ├── batchUtil.ts             # chunk() / deleteDocsInChunks() — Firestore's 500-op batch cap
 │       ├── games/index.ts           # game CRUD + soft delete/trash + publish + export/import + duplicate
@@ -88,6 +104,9 @@ rushpoint/
 │   ├── geo.ts                       # haversine, coord validation, route geo
 │   ├── mapStyle.ts                  # resolveMapStyle() — MapTiler + OpenTopoMap fallback
 │   ├── publicTaskLocation.ts        # ⭐ what a WORLD-READABLE task may say about where it is (1 km grid snap)
+│   ├── hiddenSearchArea.ts          # ⭐ the coarse circle a SEALED hidden task may reveal to its own player
+│   │                                #   (separate from publicTaskLocation — neither derives from the other)
+│   ├── taskSkip.ts                  # planTaskSkip — skipping ONE mission for ONE team, staying in the stage
 │   ├── safeZone.ts                  # isOutsideSafeZone + evaluateSafeZoneStatus (total, fail-open)
 │   ├── pausedClock.ts               # Task.pausesTimer → RunTaskRecord.excludedMs (server-stamped)
 │   ├── liveTaskStatus.ts            # per-RUN task pause/close: effectiveTaskStatus, planTaskStatusChange
@@ -109,9 +128,17 @@ rushpoint/
 │   ├── e2e-verify.mjs             # ⭐ full-lifecycle e2e vs emulator (npm run e2e)
 │   ├── check-i18n.ts              # HE/EN dictionary + hardcoded-string gate (npm run i18n:check[:strict])
 │   ├── check-bundle-budget.mjs    # play-web first-load budget + "heavy dep stays lazy" (npm run bundle:budget)
+│   ├── check-build-base.mjs       # built index.html asset base == the path that dir is served from (base:check)
 │   ├── backfill-public-tasks.mjs  # operator sweep for legacy publicTasks coordinates (DEPLOY.md §11)
+│   ├── emulator-exec.mjs          # boot a suite, run one command, tear down (offset + isolation aware)
+│   ├── playtest-forever.mjs       # supervisor: build if needed, keep playtest:prod up forever
 │   ├── test-rules.mjs · test-storage-rules.mjs   # emulator-bound Firestore / Storage rules suites
 │   ├── lib/emulatorReap.mjs · lib/reapEmulatorExec.mjs  # reap orphaned emulators:exec processes (fails closed)
+│   ├── lib/emulatorPorts.mjs      # the ONE emulator port block; RUSHPOINT_EMULATOR_PORT_OFFSET shifts a gate
+│   ├── lib/emulatorIsolation.mjs  # an offset run also needs a PRIVATE temp dir — the CLI's hub locator
+│   │                              #   is keyed by project id alone, so a shared one crosses the suites
+│   ├── lib/staleHelperSweep.mjs   # which free-ports pattern matches may actually be killed (spares live gates)
+│   ├── lib/buildArtifactGuard.mjs # asset base vs serve path + the playtest build/serve wiring in package.json
 │   ├── lib/{bundleBudget,publicTaskBackfill,callableHardening}.mjs  # pure logic behind the above
 │   ├── lib/playA11yScan.ts        # pure a11y source scan of play-web .tsx (RTL classes, icon buttons)
 │   ├── lib/i18nLeak.ts            # ⭐ the ONE HE/EN leak predicate — imported by check-i18n.ts AND

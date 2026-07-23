@@ -271,10 +271,15 @@ async function exportPrimaryNow() {
   return ok;
 }
 
-// True once both apps have a production build on disk that `vite preview` can serve.
+// True once both apps have a PLAYTEST production build on disk that `vite preview`
+// can serve. It must probe `dist-playtest`, not `dist` (change: playtest-build-isolation):
+// `dist` is what the verification gate writes, and the playtest previews are pinned to
+// `--outDir dist-playtest`. Probing `dist` would report "ready" off an artifact this
+// stack never serves, so a failed playtest:build on a fresh host would take the
+// launch-stale branch and boot `vite preview` onto an empty directory.
 function distReady() {
-  return fs.existsSync(path.join(ROOT, 'apps', 'creator-web', 'dist', 'index.html'))
-    && fs.existsSync(path.join(ROOT, 'apps', 'play-web', 'dist', 'index.html'));
+  return fs.existsSync(path.join(ROOT, 'apps', 'creator-web', 'dist-playtest', 'index.html'))
+    && fs.existsSync(path.join(ROOT, 'apps', 'play-web', 'dist-playtest', 'index.html'));
 }
 
 // Build the production bundles the prod stack serves. Runs once at boot and again
@@ -454,6 +459,14 @@ while (!stopping) {
   // npm ci path, ensureDepsInstalled → buildProd, already runs after this freePorts.)
   await freePorts();                  // start each attempt from clean ports (kills orphan Java + vite/esbuild)
   if (updateFromGit()) needBuild = NEEDS_BUILD;   // new code pulled → rebuild (prod only)
+  // Arm the build whenever there is nothing serveable, not just at boot / after a pull.
+  // A plain crash restart deliberately skips the rebuild for fast recovery, which is
+  // correct only while a serveable build exists. It does NOT after the playtest output
+  // directory moved (change: playtest-build-isolation) or if it was deleted: the preview
+  // would boot onto a missing --outDir, exit, and `concurrently --kill-others-on-fail`
+  // would tear the stack down into a permanent 4s crash-loop that no later cycle escapes,
+  // because needBuild stays false. Two stat calls; a no-op when a build is present.
+  if (NEEDS_BUILD && !distReady()) needBuild = true;
   // Build before serving prod. Decision by decidePostBuildAction (pure, unit-tested):
   //   • retry-functions — functions didn't compile; launching would crash-loop
   //     dev-emulator's exit(1). Skip the launch, keep serving the previous good stack,

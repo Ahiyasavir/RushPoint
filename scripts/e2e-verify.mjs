@@ -33,8 +33,13 @@ import { popularityScore, GAME_FILE_FORMAT, CURRENT_GAME_FILE_VERSION } from '@r
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+// Emulator ports come from ONE pure resolver (change: emulator-port-offset), so this
+// suite can run on an offset block beside a live playtest stack instead of fighting it
+// for 8080/9099/5001/9199. Unset RUSHPOINT_EMULATOR_PORT_OFFSET ⇒ exactly today's ports.
+import { resolveEmulatorPorts, resolveEmulatorHostEnv } from './lib/emulatorPorts.mjs';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
+const EMU = resolveEmulatorPorts(process.env);
 
 // Introspect the callables the emulator actually serves: require the BUILT
 // functions lib in a throwaway child process (it inits the default Admin app,
@@ -65,8 +70,13 @@ function listDeployedCallables() {
 // docs the clients can't (server-only state oracles: wallet transactions,
 // run.leaderboard snapshots). All game/run MUTATIONS still flow through the
 // callables only.
-process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
-process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080';
+// `??=` on purpose: inside `emulators:exec` the CLI already exported the ports it really
+// bound, and those must win. This only fills the gap for a standalone `npm run e2e`.
+{
+  const hosts = resolveEmulatorHostEnv(process.env);
+  process.env.FIREBASE_AUTH_EMULATOR_HOST ??= hosts.FIREBASE_AUTH_EMULATOR_HOST;
+  process.env.FIRESTORE_EMULATOR_HOST ??= hosts.FIRESTORE_EMULATOR_HOST;
+}
 adminSdk.initializeApp({ projectId: PROJECT });
 
 // ── Per-callable latency sampling (reported at the end) ───────────────────────
@@ -90,10 +100,10 @@ function makeParty(name) {
   const functions = getFunctions(app);
   const db = getFirestore(app);
   const storage = getStorage(app);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
-  connectStorageEmulator(storage, '127.0.0.1', 9199);
+  connectAuthEmulator(auth, `http://127.0.0.1:${EMU.auth}`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', EMU.functions);
+  connectFirestoreEmulator(db, '127.0.0.1', EMU.firestore);
+  connectStorageEmulator(storage, '127.0.0.1', EMU.storage);
   return {
     auth,
     // audio-tasks: upload real bytes to the Storage emulator to exercise the
@@ -273,6 +283,13 @@ const ALLOWED_TASK_KEYS = new Set([
   // unsealed. It is a boolean state flag, not content — the sealed payload it
   // accompanies carries no title/type/inputs at all.
   'arrivalPending',
+  // hidden-mission-search-area: the coarse search CIRCLE a sealed hidden mission
+  // shows its player, so a treasure hunt's map is not blank. Grid-snapped to a
+  // ~445m cell by a pure function of the coordinate (so polling cannot sharpen
+  // it), guaranteed to CONTAIN the spot and never to be it, and absent the moment
+  // the server unseals the task and returns the exact `coordinates`. The
+  // sanitizer's own vitest holds the containment + withholding contract.
+  'searchArea',
 ]);
 const ALLOWED_SMART_KEYS = new Set([
   'enabled', 'verificationType', 'longInstructions', 'longInstructionsHe',
@@ -951,7 +968,7 @@ async function main() {
   // no photo upload had ever succeeded in any local/playtest run. Round-trip the real
   // shape here so a regression fails the suite. The run/team prefix stays enforced.
   const EMULATOR_PHOTO_URL = (path) =>
-    `http://127.0.0.1:9199/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token`;
+    `http://127.0.0.1:${EMU.storage}/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(path)}?alt=media&token=e2e-token`;
   let emuOtherTeamRejected = false;
   try {
     await player.call('submitStationPhoto', {
@@ -6602,6 +6619,14 @@ async function main() {
       ['participant', pl, 'setRunTaskStatus', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', status: 'paused' }],
       ['stranger', str, 'setRunTaskStatus', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', status: 'paused' }],
       ['other-run staff', staffB, 'setRunTaskStatus', { ownerUid: OWNER, gameId: ag, runId: ar, taskId: 'az-t', status: 'paused' }],
+      // skip-single-task: skipTaskForTeam removes a scoring opportunity from ONE
+      // team. A participant must not be able to skip their own hard mission (that
+      // is a scoring exploit), and the run scope applies exactly as for
+      // setRunTaskStatus. The ALLOWED side (owner + staff scoped to this run) is
+      // proven in the 'single task skip' scenario; only denials belong here.
+      ['participant', pl, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      ['stranger', str, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      ['other-run staff', staffB, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
     ];
     for (const [who, party, fn, payload] of rows) {
       await expectError(`authz: ${who} is denied ${fn}`, party.call(fn, payload), { codeIn: DENY });
@@ -8407,6 +8432,189 @@ async function main() {
     const plainEntry = statusEntries.find((l) => l.runId === lr && l.taskId === 'lp-near' && l.newValue === 'paused');
     check('audit: an ordinary pause is recorded as NOT forced (the flag distinguishes them)',
       plainEntry?.forced === false, JSON.stringify(plainEntry));
+  });
+
+  // ═══ Single-task skip (change: skip-single-task) ════════════════════════════
+  // The bug this closes: the console's only skip was `skipStage`, so removing ONE
+  // unreachable mission destroyed every OTHER mission that team still had in the
+  // stage. The load-bearing assertions here are the NEGATIVES — after the skip the
+  // stage is STILL ACTIVE and the siblings are STILL PLAYABLE — because that is
+  // exactly what the old behaviour destroyed.
+  await scenario('single task skip (one mission, same stage, no stage jump)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: sg } = await creator.call('createGame', { title: 'Skip One Mission', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'fixed_points_speed',
+      // 3 of 3 on purpose: this is the shape that USED to strand a team. Skipping
+      // one task satisfies neither `completedCount >= required` nor `allTerminal`,
+      // so without the requirement drop the team could never finish the stage.
+      stages: [{ id: 'sk-s', order: 0, title: 'Three stops', isFinal: true, requiredTaskCount: 3, tasks: [
+        { id: 'sk-a', title: 'Stop A', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 3 },
+        { id: 'sk-b', title: 'Stop B', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 3 },
+        { id: 'sk-c', title: 'Stop C', type: 'field', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 1, pointValue: 50, maxConcurrentTeams: 3 },
+      ] }],
+    });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sg });
+    const S = { ownerUid: OWNER, gameId: sg, runId: sr };
+    const sRunPath = `users/${OWNER}/games/${sg}/runs/${sr}`;
+
+    const sp = makeParty('skipPlayer');
+    await signInAnonymously(sp.auth);
+    await sp.call('joinRun', { code: sc, displayName: 'Skipper' });
+    await creator.call('startTeams', { gameId: sg, runId: sr });
+    const spUid = sp.auth.currentUser.uid;
+    const sTeamPath = `${sRunPath}/teams/${spUid}`;
+
+    const held = (await sp.call('getMyTeamState', { code: sc }))?.team?.activeTaskId ?? null;
+    check('skip-task: the team is holding a mission before the skip', !!held, String(held));
+    const countsBefore = (await creator.getDocAt(sRunPath)).data?.taskCounts ?? {};
+    check('skip-task: the held mission reserves a station slot',
+      (countsBefore[held] ?? 0) === 1, JSON.stringify(countsBefore));
+
+    // ── The skip itself. No taskId — the console skips "the mission this team is
+    //    on right now", resolved server-side.
+    const res = await creator.call('skipTaskForTeam', { ...S, teamId: spUid, reason: 'shop shuttered' });
+    check('skip-task: the response names the mission it skipped',
+      res?.ok === true && res?.taskId === held, JSON.stringify(res));
+    check('skip-task: the STAGE did not complete (this is the whole point)',
+      res?.stageCompleted === false, JSON.stringify(res?.stageCompleted));
+    check('skip-task: the team requirement dropped 3 → 2 so the stage stays winnable',
+      res?.requiredTaskCount === 2 && res?.requirementLowered === true, JSON.stringify(res));
+    check('skip-task: the team was routed to another mission IN THE SAME STAGE',
+      !!res?.nextTaskId && res.nextTaskId !== held && ['sk-a', 'sk-b', 'sk-c'].includes(res.nextTaskId),
+      JSON.stringify({ next: res?.nextTaskId, reason: res?.nextReason }));
+
+    const teamAfter = (await creator.getDocAt(sTeamPath)).data ?? {};
+    const stageAfter = (teamAfter.stages ?? [])[0] ?? {};
+    const recOf = (id) => (stageAfter.tasks ?? []).find((t) => t.taskId === id);
+    check('skip-task: the skipped record is `skipped`', recOf(held)?.status === 'skipped', recOf(held)?.status);
+    check('skip-task: the skipped mission earned exactly 0 (no consolation award)',
+      (recOf(held)?.earnedScore ?? 0) === 0, JSON.stringify(recOf(held)?.earnedScore));
+    check('skip-task: the stage is STILL ACTIVE', stageAfter.status === 'active', stageAfter.status);
+    check('skip-task: the lowered requirement is stored on the TEAM\'s stage record',
+      stageAfter.requiredTaskCount === 2, JSON.stringify(stageAfter.requiredTaskCount));
+    check('skip-task: the team\'s score did not move', (teamAfter.score ?? 0) === 0, String(teamAfter.score));
+    const siblings = ['sk-a', 'sk-b', 'sk-c'].filter((id) => id !== held);
+    check('skip-task: both sibling missions are STILL PLAYABLE (skipStage would have killed them)',
+      siblings.every((id) => ['unassigned', 'assigned'].includes(recOf(id)?.status)),
+      JSON.stringify(siblings.map((id) => [id, recOf(id)?.status])));
+    const countsAfter = (await creator.getDocAt(sRunPath)).data?.taskCounts ?? {};
+    check('skip-task: the skipped mission gave its station slot back',
+      (countsAfter[held] ?? 0) === 0, JSON.stringify(countsAfter));
+
+    // ── The game template is untouched: this is a RUN-scoped, TEAM-scoped override.
+    const tmpl = (await creator.getDocAt(`users/${OWNER}/games/${sg}`)).data ?? {};
+    check('skip-task: the GAME TEMPLATE\'s requiredTaskCount is unchanged (still 3)',
+      (tmpl.stages ?? [])[0]?.requiredTaskCount === 3,
+      JSON.stringify((tmpl.stages ?? [])[0]?.requiredTaskCount));
+
+    // ── A repeated skip of the same mission is refused, and writes nothing.
+    await expectError('skip-task: skipping an already-skipped mission is refused',
+      creator.call('skipTaskForTeam', { ...S, teamId: spUid, taskId: held }),
+      { codeIn: ['functions/failed-precondition'] });
+    const countsRepeat = (await creator.getDocAt(sRunPath)).data?.taskCounts ?? {};
+    check('skip-task: the refused repeat did not touch the station counters',
+      (countsRepeat[held] ?? 0) === 0, JSON.stringify(countsRepeat));
+    const teamRepeat = (await creator.getDocAt(sTeamPath)).data ?? {};
+    check('skip-task: the refused repeat did not touch the score or the requirement',
+      (teamRepeat.score ?? 0) === 0 && (teamRepeat.stages ?? [])[0]?.requiredTaskCount === 2,
+      JSON.stringify({ score: teamRepeat.score, req: (teamRepeat.stages ?? [])[0]?.requiredTaskCount }));
+
+    // ── A mission that is not in the team's active stage is not found.
+    await expectError('skip-task: an unknown mission id is refused',
+      creator.call('skipTaskForTeam', { ...S, teamId: spUid, taskId: 'sk-nope' }),
+      { codeIn: ['functions/not-found'] });
+
+    // ── The team really can still finish: play the two survivors, and the stage
+    //    completes at the LOWERED requirement instead of stranding the team.
+    for (const id of siblings) {
+      const cur = (await sp.call('getMyTeamState', { code: sc }))?.team?.activeTaskId ?? null;
+      const play = cur && siblings.includes(cur) ? cur : id;
+      await sp.call('completeTask', { ...S, taskId: play });
+    }
+    const finishedState = await sp.call('getMyTeamState', { code: sc });
+    check('skip-task: the team FINISHES on the two survivors (never stranded at 3-of-3)',
+      finishedState?.team?.status === 'finished', finishedState?.team?.status);
+    const finalTeam = (await creator.getDocAt(sTeamPath)).data ?? {};
+    check('skip-task: the skipped mission was never handed out again',
+      ((finalTeam.stages ?? [])[0]?.tasks ?? []).find((t) => t.taskId === held)?.status === 'skipped',
+      JSON.stringify(((finalTeam.stages ?? [])[0]?.tasks ?? []).map((t) => [t.taskId, t.status])));
+
+    // ── Skipping the LAST playable mission DOES complete the stage — and only then.
+    //    Fresh run of the same game, skipped down to nothing.
+    const { runId: sr2, accessCode: sc2 } = await creator.call('launchRun', { gameId: sg });
+    const S2 = { ownerUid: OWNER, gameId: sg, runId: sr2 };
+    const sp2 = makeParty('skipPlayer2');
+    await signInAnonymously(sp2.auth);
+    await sp2.call('joinRun', { code: sc2, displayName: 'All Skipped' });
+    await creator.call('startTeams', { gameId: sg, runId: sr2 });
+    const sp2Uid = sp2.auth.currentUser.uid;
+
+    const first = await creator.call('skipTaskForTeam', { ...S2, teamId: sp2Uid, reason: 'one' });
+    check('skip-all: the first of three does not end the stage',
+      first?.stageCompleted === false && first?.requiredTaskCount === 2, JSON.stringify(first));
+
+    // Authz, ALLOWED side: staff scoped to THIS run may skip a mission.
+    // (participant / stranger / other-run staff denials are rows in the matrix.)
+    const { pin: skipPin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: sg, runId: sr2, name: 'Skip Marshal', permissions: ['review_photos'],
+    });
+    const skipStaff = makeParty('skipMarshal');
+    await signInAnonymously(skipStaff.auth);
+    const skipTok = await skipStaff.call('staffSignIn', { ownerUid: OWNER, gameId: sg, runId: sr2, pin: skipPin });
+    await signInWithCustomToken(skipStaff.auth, skipTok.customToken);
+    const second = await skipStaff.call('skipTaskForTeam', { ...S2, teamId: sp2Uid, reason: 'two' });
+    check('authz: staff scoped to THIS run may skip a mission for a team',
+      second?.ok === true && second?.stageCompleted === false && second?.requiredTaskCount === 1,
+      JSON.stringify(second));
+
+    const third = await creator.call('skipTaskForTeam', { ...S2, teamId: sp2Uid, reason: 'three' });
+    check('skip-all: skipping the LAST playable mission completes the stage',
+      third?.stageCompleted === true, JSON.stringify(third));
+    const team2 = (await creator.getDocAt(`${`users/${OWNER}/games/${sg}/runs/${sr2}`}/teams/${sp2Uid}`)).data ?? {};
+    check('skip-all: the team is finished with a zero score (nothing was awarded)',
+      team2.status === 'finished' && (team2.score ?? 0) === 0,
+      JSON.stringify({ status: team2.status, score: team2.score }));
+    const counts2 = (await creator.getDocAt(`users/${OWNER}/games/${sg}/runs/${sr2}`)).data?.taskCounts ?? {};
+    check('skip-all: every station counter is back to zero (no leaked capacity)',
+      Object.values(counts2).every((n) => (n ?? 0) === 0), JSON.stringify(counts2));
+
+    // ── A finished run refuses further skips (same rule as every grading path).
+    await creator.call('finalizeRun', { gameId: sg, runId: sr2 });
+    await expectError('skip-task: a finished run refuses a skip',
+      creator.call('skipTaskForTeam', { ...S2, teamId: sp2Uid, taskId: 'sk-a' }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    // ── REGRESSION: skipStage still skips the WHOLE stage. This change is an
+    //    addition, not a replacement.
+    const { runId: sr3, accessCode: sc3 } = await creator.call('launchRun', { gameId: sg });
+    const sp3 = makeParty('skipPlayer3');
+    await signInAnonymously(sp3.auth);
+    await sp3.call('joinRun', { code: sc3, displayName: 'Whole Stage' });
+    await creator.call('startTeams', { gameId: sg, runId: sr3 });
+    const sp3Uid = sp3.auth.currentUser.uid;
+    await creator.call('skipStage', { gameId: sg, runId: sr3, teamId: sp3Uid });
+    const team3 = (await creator.getDocAt(`users/${OWNER}/games/${sg}/runs/${sr3}/teams/${sp3Uid}`)).data ?? {};
+    const stage3 = (team3.stages ?? [])[0] ?? {};
+    check('regression: skipStage still marks EVERY task of the stage skipped',
+      (stage3.tasks ?? []).every((t) => t.status === 'skipped') && stage3.status === 'completed',
+      JSON.stringify((stage3.tasks ?? []).map((t) => [t.taskId, t.status])));
+
+    // ── The durable trail: a skip removes a scoring opportunity from ONE team.
+    const skipLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const skipEntries = (skipLogs?.logs ?? []).filter((l) => l.actionType === 'task_skipped');
+    const entry = skipEntries.find((l) => l.runId === sr && l.taskId === held);
+    check('audit: the skip is recorded with the team, the mission and the operator',
+      !!entry && entry.teamId === spUid && entry.newValue === 'skipped' && !!entry.operatorId,
+      JSON.stringify(entry));
+    check('audit: the operator\'s reason rides along on the record',
+      entry?.reason === 'shop shuttered', JSON.stringify(entry?.reason));
+    check('audit: the record states whether the stage ended and whether the requirement dropped',
+      entry?.stageCompleted === false && entry?.requirementLowered === true,
+      JSON.stringify({ stageCompleted: entry?.stageCompleted, requirementLowered: entry?.requirementLowered }));
   });
 
   // ═══ Callable coverage guard ════════════════════════════════════════════════

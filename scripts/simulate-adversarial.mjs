@@ -28,8 +28,12 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
+// Emulator ports come from ONE pure resolver (change: emulator-port-offset) so this can
+// run on an offset block beside a live playtest. Unset ⇒ exactly today's ports.
+import { resolveEmulatorPorts } from './lib/emulatorPorts.mjs';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
+const EMU = resolveEmulatorPorts(process.env);
 const arg = (name, dflt) => {
   const raw = (process.argv.find((a) => a.startsWith(`--${name}=`)) ?? '').split('=')[1];
   return raw === undefined ? dflt : raw;
@@ -55,9 +59,9 @@ function makeParty(name) {
   const auth = getAuth(app);
   const functions = getFunctions(app);
   const db = getFirestore(app);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectAuthEmulator(auth, `http://127.0.0.1:${EMU.auth}`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', EMU.functions);
+  connectFirestoreEmulator(db, '127.0.0.1', EMU.firestore);
   return {
     auth,
     // Returns { ok, data } | { ok:false, code } — never throws, so a cheater's

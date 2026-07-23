@@ -33,9 +33,13 @@ import {
   assertSucceeds,
 } from '@firebase/rules-unit-testing';
 import { ref, uploadBytes, getBytes, listAll } from 'firebase/storage';
+// Emulator ports come from ONE pure resolver (change: emulator-port-offset) so this gate
+// can run on an offset block beside a live playtest. Unset ⇒ exactly today's ports.
+import { resolveEmulatorPorts } from './lib/emulatorPorts.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PROJECT = 'rushpoint-storage-rules-test';
+const EMU = resolveEmulatorPorts(process.env);
 
 let failures = 0;
 async function check(label, promise) {
@@ -62,7 +66,7 @@ async function main() {
     storage: {
       rules: readFileSync(join(root, 'storage.rules'), 'utf8'),
       host: '127.0.0.1',
-      port: 9199,
+      port: EMU.storage,
     },
   });
 
