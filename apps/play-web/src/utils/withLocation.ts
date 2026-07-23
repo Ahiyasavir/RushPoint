@@ -19,6 +19,9 @@ export function withLocation(
   navigator.geolocation.getCurrentPosition(
     (p) => cb(p.coords.latitude, p.coords.longitude),
     () => onDenied?.(),
-    { enableHighAccuracy: true, timeout: 5000 },
+    // maximumAge: reuse a fix up to 10 s old so a manual check-in feels instant
+    // instead of stalling on a cold high-accuracy acquisition (matches the
+    // PlayScreen watcher's maximumAge). No safety verdict is fed by this helper.
+    { enableHighAccuracy: true, timeout: 5000, maximumAge: 10_000 },
   );
 }
