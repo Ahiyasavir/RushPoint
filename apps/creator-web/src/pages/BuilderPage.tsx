@@ -554,10 +554,11 @@ export default function BuilderPage() {
         {tab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
         {tab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
         {tab === 'analytics' && (
-          <Card className="p-10 text-center space-y-2">
+          <Card className="p-10 text-center space-y-3">
             <div className="text-3xl">📊</div>
             <p className="font-semibold text-[--ink-1]">{b.analyticsTitle}</p>
             <p className="text-sm text-[--ink-3]">{b.analyticsBody}</p>
+            <Button onClick={() => nav('/live')}>{b.analyticsOpenRuns}</Button>
           </Card>
         )}
       </div>
