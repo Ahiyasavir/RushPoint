@@ -350,22 +350,9 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
         )}
       </div>
 
-      {/* Team-mode: create a fresh team, or attach this phone to a team that's
-          already in (shared-team-devices). */}
-      {!isSolo && (
-        <div className="flex rounded-xl bg-app-card border border-glass-border p-1 mb-4 text-sm font-semibold">
-          {([['create', t.devices.joinModeCreate], ['attach', t.devices.joinModeAttach]] as const).map(([m, label]) => (
-            <button
-              key={m}
-              onClick={() => { setJoinMode(m); setErr(''); }}
-              className={`flex-1 rounded-lg min-h-[44px] transition-colors ${joinMode === m ? 'bg-white text-zinc-100 shadow-sm' : 'text-zinc-500'}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-
+      {/* Team-mode leads with creating a fresh team; attaching this phone to a
+          team that's already in (shared-team-devices) is a demoted secondary
+          link below the primary action. */}
       {!isSolo && joinMode === 'attach' ? (
         <>
           <div className="space-y-4 flex-1">
@@ -396,6 +383,13 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
           >
             {busy ? t.devices.attaching : t.devices.attachCta}
           </Button>
+          <button
+            type="button"
+            onClick={() => { setJoinMode('create'); setErr(''); }}
+            className="mx-auto mt-4 block min-h-[44px] px-2 text-sm font-semibold text-ink-fire underline-offset-2"
+          >
+            {t.devices.joinModeCreate}
+          </button>
         </>
       ) : (
       <>
@@ -471,6 +465,15 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
       >
         {busy ? t.join.joining : t.join.joinCta}
       </Button>
+      {!isSolo && (
+        <button
+          type="button"
+          onClick={() => { setJoinMode('attach'); setErr(''); }}
+          className="mx-auto mt-4 block min-h-[44px] px-2 text-sm font-semibold text-ink-fire underline-offset-2"
+        >
+          {t.devices.joinModeAttach}
+        </button>
+      )}
       </>
       )}
       {/* Also on the registration step: a deep link with a code skips step 1

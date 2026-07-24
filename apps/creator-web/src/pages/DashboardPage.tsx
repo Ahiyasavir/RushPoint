@@ -25,7 +25,7 @@ import {
   type OnboardingStepId,
 } from '../lib/creatorOnboarding';
 import {
-  CREATE_GAME_TARGET, QUICK_CARD_IDS, describeGameSettings, quickCardTarget,
+  describeGameSettings,
   templateDescription, templateLabel,
 } from '../lib/templateLabels';
 
@@ -603,25 +603,6 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
-          </div>
-
-          {/* Quick actions — the Wallet/Credits card is hidden in free mode
-              (PAYMENTS_ENABLED === false), matching the hidden /wallet nav + route. */}
-          <div className="grid sm:grid-cols-3 gap-4">
-            {d.quickCards
-              .map((a, i) => ({ a, id: QUICK_CARD_IDS[i], target: quickCardTarget(QUICK_CARD_IDS[i], games) }))
-              .filter(({ id }) => PAYMENTS_ENABLED || id !== 'wallet')
-              .map(({ a, target }, i) => (
-                <button key={a.title} onClick={() => { if (target === CREATE_GAME_TARGET) setPicking(true); else nav(target); }}
-                  className="group text-start rounded-2xl border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] backdrop-blur-sm p-5 hover:-translate-y-1 hover:border-rp-fire/30 hover:shadow-[0_12px_32px_-12px_rgba(255,87,34,0.25)] transition-all duration-200 animate-fade-up"
-                  style={{ animationDelay: `${160 + i * 60}ms` }}
-                >
-                  <div className="w-11 h-11 rounded-xl flex items-center justify-center text-xl bg-[--surface-2] mb-3.5 group-hover:scale-105 transition-transform">{a.icon}</div>
-                  <div className="font-brand font-bold text-[--ink-1] text-base">{a.title}</div>
-                  <p className="text-[13px] text-[--ink-3] mt-1.5 leading-relaxed">{a.body}</p>
-                  <div className="text-xs font-semibold text-rp-fire mt-3.5 flex items-center gap-1 group-hover:gap-2 transition-all">{a.cta} <span>→</span></div>
-                </button>
-              ))}
           </div>
         </div>
       )}

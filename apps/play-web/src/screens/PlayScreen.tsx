@@ -484,7 +484,8 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
-        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
+        timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
+        onSos={() => void sosAction.run()} sosBusy={sosAction.busy} />
       <HowToPlayButton instructions={game.instructions} lang={lang} />
       {session.isTestDrive && (
         <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-ink-amber flex items-center gap-2">
@@ -995,12 +996,15 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
   );
 }
 
-function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt }: {
+function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy }: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
   // time_only runs are ranked purely by time and never award points, so the
   // in-run "score" is a permanent 0 that misreads as a total — show a live
   // elapsed clock instead (mirrors the finish/TV/public boards).
   timeOnly?: boolean; startedAt?: string;
+  // Always-reachable SOS entry point (active-race branch only). Drives the same
+  // shared sosAction as the bottom SOS button, so sosBusy loads/disables both.
+  onSos?: () => void; sosBusy?: boolean;
 }) {
   const { t } = useT();
   return (
@@ -1020,8 +1024,16 @@ function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedA
           )}
         </div>
       </div>
-      <button onClick={onLeave} aria-label={t.play.leaveAria}
-        className="inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-zinc-500">{t.play.leave}</button>
+      <div className="flex items-center gap-1">
+        {onSos && (
+          <button type="button" onClick={onSos} aria-label={t.play.sosAria} disabled={sosBusy}
+            className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-3 rounded-lg text-xs font-bold text-ink-alert border border-rp-alert/40 disabled:opacity-50">
+            SOS
+          </button>
+        )}
+        <button onClick={onLeave} aria-label={t.play.leaveAria}
+          className="inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-zinc-500">{t.play.leave}</button>
+      </div>
     </div>
   );
 }
