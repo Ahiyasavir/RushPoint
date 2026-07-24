@@ -202,10 +202,13 @@ export function buildStages() {
         anywhere({
           id: 'spy-final-code', title: 'קוד החיסיון הסופי 🔐', type: 'numeric',
           description:
-            'דרגת חיסיון אחרונה: הזינו את מספרו של הסוכן האגדי בהיסטוריה. שלוש ספרות, אבל רק אחת שונה מאפס.\n\n' +
-            'Final clearance: enter the number of the most legendary agent in history. ' +
-            'Three digits, but only one of them is not a zero.',
+            'דרגת חיסיון אחרונה: לסוכן הסודי הכי מפורסם בעולם יש שם קוד שרובו אפסים, ' +
+            'חוץ מספרה אחת. הקלידו רק את הספרה הזו.\n\n' +
+            'Final clearance: the world’s most famous secret agent has a codename that’s ' +
+            'mostly zeros, except for one digit. Type just that digit.',
           numericAnswer: 7, numericTolerance: 0,
+          hint: 'הרמז: 007. בונד, ג׳יימס בונד. הקלידו את הספרה שהיא לא אפס. / 007. Bond, James Bond. Type the digit that isn’t a zero.',
+          hintPenalty: 25, hintAutoRevealAttempts: 3,
           difficulty: 3, pointValue: 200, estimatedMinutes: 1,
         }),
       ],
