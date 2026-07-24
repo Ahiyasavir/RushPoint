@@ -500,6 +500,13 @@ export default function RunConsolePage() {
   // the tap and the next snapshot can't double-fire acknowledgeAlert — while a
   // different alert row can still act (change: run-console-action-feedback).
   const ackAction = useAsyncAction(ack, (alertId: string) => alertId);
+  // In-flight guard, keyed per team id, so a double-tap on a held team's release
+  // can't double-fire clearTeamOutOfBounds — while a different team row can still
+  // act. Mirrors ackAction; the sibling row actions are guarded by their confirm
+  // modals, but this one fires immediately on click. Declared here (before any
+  // early return) so the hook order is stable — letTeamBackIn is a hoisted
+  // function declaration, so referencing it above its definition is fine.
+  const letBackInAction = useAsyncAction(letTeamBackIn, (team: RunTeamRow) => team.id);
   // Sharing a board/TV link implies the audience should see standings — publish
   // on share so the projection screen never sits on "not yet available".
   // EXCEPTION (change: manual-leaderboard-reveal): once the run is finished the
@@ -728,11 +735,6 @@ export default function RunConsolePage() {
     }
     catch { await dialog.alert(rc.letBackInFailed); }
   }
-  // In-flight guard, keyed per team id, so a double-tap on a held team's release
-  // can't double-fire clearTeamOutOfBounds — while a different team row can still
-  // act. Mirrors ackAction; the sibling row actions are guarded by their confirm
-  // modals, but this one fires immediately on click.
-  const letBackInAction = useAsyncAction(letTeamBackIn, (team: RunTeamRow) => team.id);
 
   async function skipTeamStage(team: RunTeamRow) {
     // The label said "skip"; it skipped the team's WHOLE STAGE. The consequence
