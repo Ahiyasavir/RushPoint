@@ -58,6 +58,10 @@ import { resolveTeamLabel, resolveTaskLabel, resolveEnumLabel, shortId } from '.
 // Clarity + navigation (change: run-console-clarity): what needs the organizer
 // right now, and the copy contract every panel renders through. Both pure.
 import { buildRunSignals, type RunSignal } from '../lib/runConsoleSignals';
+// Live-stream freshness (change: run-console-live-stream-resilience): the pure,
+// total "is the teams board stale" verdict, so a failed poll surfaces instead of
+// freezing the board silently.
+import { isTeamsStale, secondsSinceSync } from '../lib/streamFreshness';
 import { panelCopy } from '../lib/runConsolePanelMeta';
 // "Is anyone in trouble right now?" (change: run-console-attention) — a pure,
 // quiet-by-default verdict over the row data listRunTeams already returns.
@@ -106,6 +110,12 @@ export default function RunConsolePage() {
   const [busy, setBusy] = useState(false);
   const [staffPin, setStaffPin] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<{ id: string; teamId: string; type: string; message: string; lat: number | null; lng: number | null; createdAt: string }[]>([]);
+  // Live-stream resilience (change: run-console-live-stream-resilience). The teams
+  // poll and the alerts listener are the console's live picture; when either
+  // degrades the board must SAY so instead of freezing at last-known state.
+  const [teamsStale, setTeamsStale] = useState(false);
+  const [lastTeamsSyncAt, setLastTeamsSyncAt] = useState<number | null>(null);
+  const [alertsStreamError, setAlertsStreamError] = useState(false);
 
   // Live run doc (owner can read directly)
   useEffect(() => {
@@ -123,11 +133,16 @@ export default function RunConsolePage() {
   const baseTitle = useRef<string>(document.title);
   useEffect(() => {
     if (!gameId || !runId) return;
+    // A swallowed listener error was the one place the console read "no SOS" when
+    // the truth was "cannot tell". Mirror the photo listener: clear on the good
+    // path, raise a visible flag on a persistent failure.
+    setAlertsStreamError(false);
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/alerts`),
       where('acknowledged', '==', false),
     );
     return onSnapshot(ref, (snap) => {
+      setAlertsStreamError(false);
       const rows = snap.docs.map((d) => {
         const a = d.data() as Partial<{ teamId: string; type: string; message: string; lat: number; lng: number; createdAt: string }>;
         return { id: d.id, teamId: a.teamId ?? '', type: a.type ?? 'sos', message: a.message ?? '', lat: a.lat ?? null, lng: a.lng ?? null, createdAt: a.createdAt ?? '' };
@@ -141,7 +156,10 @@ export default function RunConsolePage() {
       }
       seenAlertIds.current = ids;
       setAlerts(rows);
-    }, () => undefined);
+    }, (err) => {
+      console.warn('[RunConsole] alerts listener error', err);
+      setAlertsStreamError(true);
+    });
   }, [gameId, runId, ownerUid]);
 
   // Flash the browser-tab title while any alert is unacknowledged so the
@@ -156,10 +174,42 @@ export default function RunConsolePage() {
     return () => { clearInterval(id); document.title = baseTitle.current; };
   }, [alerts.length, t]);
 
+  // Unlock the SOS audio context on the creator's FIRST interaction with the page,
+  // whatever it is (change: run-console-live-stream-resilience). unlockAudio() was
+  // only called from Start-all / Invite-staff, so a creator who opens an ALREADY
+  // live run and never presses those never unlocked audio, and every SOS cue
+  // silently dropped (sound.ts autoplay gate). unlockAudio() is idempotent and a
+  // no-op where Web Audio is unavailable, so this is safe; detach after first fire.
+  useEffect(() => {
+    const unlock = () => {
+      unlockAudio();
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
   const loadTeams = useCallback(async () => {
     if (!gameId || !runId) return;
-    const { teams } = await listRunTeams({ gameId, runId });
-    setTeams(teams);
+    // The teams poll is the console's SINGLE live picture (the table, every score,
+    // the attention verdict, the signal chips). A rejection (token refresh blip,
+    // network drop, function cold start) used to reject unhandled and freeze the
+    // whole board at last-known state with zero signal. Keep the last-known rows
+    // (do NOT call setTeams on failure) and mark the board stale instead.
+    try {
+      const { teams } = await listRunTeams({ gameId, runId });
+      setTeams(teams);            // last-known replaced only on SUCCESS
+      setLastTeamsSyncAt(Date.now());
+      setTeamsStale(false);
+    } catch (e) {
+      console.warn('[RunConsole] teams poll failed', e);
+      setTeamsStale(true);        // keep the last board on screen, just mark it stale
+    }
   }, [gameId, runId]);
 
   useEffect(() => {
@@ -725,6 +775,18 @@ export default function RunConsolePage() {
                a clean run stays visually clean. */
             badge={attentionCount > 0 ? <Badge color="gold">{rc.attentionCount({ n: attentionCount })}</Badge> : undefined}
           >
+            {/* Live-stream resilience: a failed teams poll keeps the last-known
+                rows below and only marks the board out of date. Unobtrusive,
+                role="status", never gates or disables anything. */}
+            {isTeamsStale(lastTeamsSyncAt, Date.now(), teamsStale) && (
+              <p role="status" className="text-[11px] text-rp-amber mb-2 px-1">
+                {rc.teamsReconnecting}
+                {(() => {
+                  const secs = secondsSinceSync(lastTeamsSyncAt, Date.now());
+                  return secs != null ? ` · ${rc.lastUpdatedAgo({ seconds: secs })}` : '';
+                })()}
+              </p>
+            )}
             {teams.length === 0 ? (
               <PanelEmpty panel="teams" />
             ) : (
@@ -1053,6 +1115,15 @@ export default function RunConsolePage() {
           never be one navigation away. The lanes come from the layout module, so
           a run that has just launched no longer leaves two thirds of the widest
           part of the page empty. */}
+      {/* The alerts panel only mounts when alertCount > 0, so a dead SOS stream
+          sitting at zero alerts would be invisible there. Surface the degraded
+          state in the always-rendered pinned zone (change:
+          run-console-live-stream-resilience). */}
+      {alertsStreamError && (
+        <p role="status" className="text-xs text-neon-red rounded-lg border border-neon-red/40 bg-neon-red/5 px-3 py-2">
+          {rc.alertsStreamInterrupted}
+        </p>
+      )}
       <PanelLanes layout={pinnedLayout} render={renderPanel} />
 
       {/* ── SECTIONS ────────────────────────────────────────────────────────────

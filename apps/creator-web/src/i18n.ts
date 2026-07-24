@@ -687,6 +687,11 @@ const HE = {
     skipTaskFailed: 'הדילוג על המשימה נכשל. בדקו את החיבור ונסו שוב.',
     skipTaskDone: ({ team }: { team: string }) => `המשימה הנוכחית של ${team} דולגה.`,
     newAlertTitleFlash: ({ n }: { n: number }) => `🆘 (${n}) התראה חדשה`,
+    // חוסן פידים חיים (change: run-console-live-stream-resilience): כאשר סקר
+    // הקבוצות או פיד ההתראות נקטע, הלוח נשאר על הנתונים האחרונים ומסומן כלא מעודכן.
+    teamsReconnecting: 'מתחבר מחדש, ייתכן שהנתונים אינם מעודכנים',
+    lastUpdatedAgo: ({ seconds }: { seconds: number }) => `עודכן לפני ${seconds} שניות`,
+    alertsStreamInterrupted: 'פיד ההתראות נקטע, מתחבר מחדש',
     teamsTitle: 'קבוצות',
     noOneJoinedTitle: 'עדיין אין קבוצות',
     noOneJoinedYet: 'אף אחד עוד לא הצטרף. שתפו את קוד הכניסה.',
@@ -2195,6 +2200,12 @@ const EN: typeof HE = {
     skipTaskFailed: 'Could not skip the mission. Check your connection and try again.',
     skipTaskDone: ({ team }: { team: string }) => `The current mission of ${team} was skipped.`,
     newAlertTitleFlash: ({ n }: { n: number }) => `🆘 (${n}) new alert`,
+    // Live-stream resilience (change: run-console-live-stream-resilience): when the
+    // teams poll or the alerts feed is interrupted, the board keeps its last-known
+    // data and is marked out of date instead of freezing silently.
+    teamsReconnecting: 'Reconnecting, data may be out of date',
+    lastUpdatedAgo: ({ seconds }: { seconds: number }) => `Updated ${seconds}s ago`,
+    alertsStreamInterrupted: 'Alerts feed interrupted, reconnecting',
     teamsTitle: 'Teams',
     noOneJoinedTitle: 'No teams yet',
     noOneJoinedYet: 'No one has joined yet. Share the access code.',
