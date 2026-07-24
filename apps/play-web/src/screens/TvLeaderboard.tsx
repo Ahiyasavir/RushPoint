@@ -18,6 +18,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
   const prevTopId = useRef<string | null>(null);
   const flashTimer = useRef<number | null>(null);
   const [newLeaderId, setNewLeaderId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -32,8 +33,10 @@ export default function TvLeaderboard({ code }: { code: string }) {
         );
       }
       prevTopId.current = topId;
+      setLoadError(false);
       setData(next);
     } catch {
+      setLoadError(true);
       setData(null);
     }
   }, [code]);
@@ -69,7 +72,9 @@ export default function TvLeaderboard({ code }: { code: string }) {
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
         <div className="text-7xl">📺</div>
         <h1 className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
-        <p className="text-2xl text-zinc-500">{t.tv.notAvailable}</p>
+        <p className={`text-2xl ${loadError ? 'text-rp-fire font-semibold' : 'text-zinc-500'}`}>
+          {loadError ? t.tv.loadError : t.tv.notAvailable}
+        </p>
       </div>
     );
   }

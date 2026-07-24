@@ -38,6 +38,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const [phase, setPhase] = useState<CeremonyPhase | null>(null);
   const [slide, setSlide] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const started = useRef(false);
 
   // Load + re-poll until published, so the operator can open the screen BEFORE
@@ -49,10 +50,12 @@ export default function CeremonyScreen({ code }: { code: string }) {
       try {
         const next = await getPublicLeaderboard({ code });
         if (!alive) return;
+        setLoadError(false);
         setData(next);
         if (!next.published) timer = window.setTimeout(() => void load(), POLL_MS);
       } catch {
         if (!alive) return;
+        setLoadError(true);
         setData(null);
         timer = window.setTimeout(() => void load(), POLL_MS);
       }
@@ -108,7 +111,9 @@ export default function CeremonyScreen({ code }: { code: string }) {
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
         <div className="text-7xl">🏆</div>
         <h1 dir="auto" className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
-        <p className="text-2xl text-zinc-500">{t.ceremony.ceremonyWaiting}</p>
+        <p className={`text-2xl ${loadError ? 'text-rp-fire font-semibold' : 'text-zinc-500'}`}>
+          {loadError ? t.ceremony.loadError : t.ceremony.ceremonyWaiting}
+        </p>
       </div>
     );
   }

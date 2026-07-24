@@ -567,10 +567,12 @@ const HE = {
   tv: {
     liveStandings: 'דירוג חי',
     notAvailable: 'הדירוג עדיין לא זמין לתצוגה',
+    loadError: 'לא הצלחנו לטעון את הדירוג. בדקו את הקוד, מנסים שוב…',
     nowLeading: '🔥 עכשיו בהובלה!',
   },
   ceremony: {
     ceremonyWaiting: 'הטקס יתחיל ברגע שהמארגן יפרסם את התוצאות…',
+    loadError: 'לא הצלחנו לטעון את הטקס. בדקו את הקוד, מנסים שוב…',
     ceremonyChampion: 'האלופים',
     ceremonyStandings: 'התוצאות הסופיות',
   },
@@ -1139,10 +1141,12 @@ const EN: typeof HE = {
   tv: {
     liveStandings: 'Live standings',
     notAvailable: 'Standings are not available for display yet',
+    loadError: "Couldn't load the standings. Check the code, retrying…",
     nowLeading: '🔥 Now in the lead!',
   },
   ceremony: {
     ceremonyWaiting: 'The ceremony begins the moment your host publishes the results…',
+    loadError: "Couldn't load the ceremony. Check the code, retrying…",
     ceremonyChampion: 'Champions',
     ceremonyStandings: 'Final standings',
   },
