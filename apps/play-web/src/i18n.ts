@@ -367,6 +367,9 @@ const HE = {
   },
   play: {
     syncFailed: 'הסנכרון נכשל',
+    loadingGame: 'טוענים את המשחק…',
+    syncingProgress: 'מסנכרנים את ההתקדמות…',
+    almostReady: 'כמעט מוכן…',
     gameGone: 'המשחק הזה הסתיים או הוסר.',
     reconnecting: 'מתחבר מחדש…',
     progressLabel: ({ done, total }: { done: number; total: number }) => `${done} מתוך ${total} שלבים`,
@@ -939,6 +942,9 @@ const EN: typeof HE = {
   },
   play: {
     syncFailed: 'Sync failed',
+    loadingGame: 'Loading your game…',
+    syncingProgress: 'Syncing your progress…',
+    almostReady: 'Almost ready…',
     gameGone: 'This game has ended or was removed.',
     reconnecting: 'Reconnecting…',
     progressLabel: ({ done, total }: { done: number; total: number }) => `${done} of ${total} stages`,

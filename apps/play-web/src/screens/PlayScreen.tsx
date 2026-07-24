@@ -16,6 +16,7 @@ import { Button, Collapsible, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
+import { Working } from '../components/Working';
 import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
 import type { NavTarget } from '../components/NavMap';
@@ -345,7 +346,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
               </div>
             </>
           ) : (
-            <div className="w-8 h-8 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
+            <Working messages={[t.play.loadingGame, t.play.syncingProgress, t.play.almostReady]} />
           )}
         </div>
       </Screen>

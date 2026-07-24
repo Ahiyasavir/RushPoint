@@ -866,7 +866,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
       <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
-          <Button disabled={frozen} onClick={field} data-testid="task-field-checkin">
+          <Button disabled={frozen} loading={busy} onClick={field} data-testid="task-field-checkin">
             {task.type === 'self_report'
               ? t.task.markComplete
               : task.locationHidden ? t.task.hiddenCheckIn : t.task.imHere}
@@ -1076,7 +1076,7 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
         enterKeyHint="go"
         onKeyDown={(e) => { if (e.key === 'Enter' && !busy && code) onSubmit(code); }}
         className="text-center font-mono tracking-widest" data-testid="task-code-input" />
-      <Button disabled={busy || !code} onClick={() => onSubmit(code)} data-testid="task-code-submit">{t.task.verify}</Button>
+      <Button disabled={busy || !code} loading={busy} onClick={() => onSubmit(code)} data-testid="task-code-submit">{t.task.verify}</Button>
       {canScan && (
         <Button variant="ghost" disabled={busy} onClick={() => setScanning(true)}>📷 {t.task.scanQr}</Button>
       )}
@@ -1119,7 +1119,7 @@ function QuizEntry({ task, busy, wrongSoFar, onSubmit }: {
     <div className="space-y-3">
       <Input value={val} dir="auto" onChange={(e) => setVal(e.target.value)} placeholder={t.task.yourAnswer} aria-label={t.task.yourAnswer}
         onKeyDown={(e) => e.key === 'Enter' && !busy && val.trim() && onSubmit(val.trim())} data-testid="quiz-text-input" />
-      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())} data-testid="quiz-text-submit">{t.task.submitAnswer}</Button>
+      <Button disabled={busy || !val.trim()} loading={busy} onClick={() => onSubmit(val.trim())} data-testid="quiz-text-submit">{t.task.submitAnswer}</Button>
     </div>
   );
 }
@@ -1150,7 +1150,7 @@ function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; 
       <textarea value={val} dir="auto" rows={3} maxLength={500} data-testid="survey-text"
         onChange={(e) => setVal(e.target.value)} placeholder={t.task.surveyPlaceholder} aria-label={t.task.surveyPlaceholder}
         className="w-full px-4 py-3 rounded-2xl text-base bg-white border border-glass-border text-zinc-100 placeholder:text-zinc-500 shadow-[0_1px_4px_rgba(26,10,0,0.06)] focus:outline-none focus:ring-2 focus:ring-rp-fire/30 focus:border-rp-fire/40 transition-all duration-150 resize-none" />
-      <Button disabled={busy || !val.trim()} onClick={() => onSubmit(val.trim())} data-testid="survey-submit">{t.task.surveySubmit}</Button>
+      <Button disabled={busy || !val.trim()} loading={busy} onClick={() => onSubmit(val.trim())} data-testid="survey-submit">{t.task.surveySubmit}</Button>
     </div>
   );
 }
@@ -1202,7 +1202,7 @@ function NumericEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (a: string)
       <Input type="number" value={val} onChange={(e) => setVal(e.target.value)} placeholder={t.task.enterNumber} aria-label={t.task.enterNumber} inputMode="decimal"
         className="text-center text-xl font-mono" data-testid="numeric-input"
         onKeyDown={(e) => e.key === 'Enter' && !busy && val !== '' && onSubmit(val)} />
-      <Button disabled={busy || val === ''} onClick={() => onSubmit(val)} data-testid="numeric-submit">{t.task.submit}</Button>
+      <Button disabled={busy || val === ''} loading={busy} onClick={() => onSubmit(val)} data-testid="numeric-submit">{t.task.submit}</Button>
     </div>
   );
 }
