@@ -19,7 +19,7 @@ function fit(ctx: CanvasRenderingContext2D, text: string, max: number, start: nu
   return size;
 }
 
-export async function buildPodiumCard(podium: PodiumEntry[], opts: { gameName: string; ctaUrl: string }): Promise<Blob | null> {
+export async function buildPodiumCard(podium: PodiumEntry[], opts: { gameName: string; ctaUrl: string; title?: string }): Promise<Blob | null> {
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -36,7 +36,7 @@ export async function buildPodiumCard(podium: PodiumEntry[], opts: { gameName: s
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 64px Outfit, Inter, sans-serif';
-  ctx.fillText('🏆 Podium', W / 2, 110);
+  ctx.fillText(opts.title ?? '🏆 Podium', W / 2, 110);
   const gnSize = fit(ctx, opts.gameName, W - 160, 44);
   ctx.font = `600 ${gnSize}px Inter, sans-serif`;
   ctx.fillStyle = 'rgba(255,255,255,0.9)';
@@ -75,7 +75,7 @@ type ShareNav = Navigator & {
   canShare?: (d: { files?: File[] }) => boolean;
 };
 
-export async function sharePodium(podium: PodiumEntry[], opts: { gameName: string; ctaUrl: string; text: string }): Promise<'shared' | 'downloaded' | 'copied' | 'failed'> {
+export async function sharePodium(podium: PodiumEntry[], opts: { gameName: string; ctaUrl: string; text: string; title?: string }): Promise<'shared' | 'downloaded' | 'copied' | 'failed'> {
   try {
     const nav = navigator as ShareNav;
     const blob = await buildPodiumCard(podium, opts);

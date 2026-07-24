@@ -10,6 +10,7 @@ import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
 import { fireConfetti } from '../lib/confetti';
 import { creatorUrl } from '../lib/creatorUrl';
+import { shareCardLabels } from '../lib/shareCardLabels';
 import LegalFooter from '../components/LegalFooter';
 
 function fmtDuration(sec: number): string {
@@ -93,6 +94,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
       await sharePodium(podium, {
         gameName: game.branding?.name ?? game.title,
         ctaUrl: creatorUrl(),
+        title: shareCardLabels(t.final, isTimeOnly).podiumTitle,
         text: t.final.shareText({
           team: team.displayName, game: game.branding?.name ?? game.title,
           rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
@@ -132,15 +134,23 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         timePart,
         url: creatorUrl().replace(/^https?:\/\//, ''),
       });
+      const labels = shareCardLabels(t.final, isTimeOnly);
       const { shareStoryCard } = await import('../lib/storyCard');
       const result = await shareStoryCard({
         gameName: name,
         teamName: team.displayName,
         score: finalScore,
+        heroValue: isTimeOnly ? (totalSec != null ? fmtDuration(totalSec) : undefined) : undefined,
         rank: myRank,
         totalTime: totalSec != null ? fmtDuration(totalSec) : undefined,
         stagesDone: `${completedStages.length}/${team.stages.length}`,
         ctaUrl: creatorUrl(),
+        headline: labels.headline,
+        scoreLabel: labels.scoreLabel,
+        rankLabel: labels.rankLabel,
+        timeLabel: labels.timeLabel,
+        stagesLabel: labels.stagesLabel,
+        ctaText: labels.ctaText,
       }, text);
       if (result === 'downloaded' || result === 'copied') { setShared(true); setTimeout(() => setShared(false), 2500); }
     } finally { setBusy(false); }

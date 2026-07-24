@@ -298,6 +298,14 @@ const HE = {
     shareText: ({ team, game, rankPart, timePart, url }: { team: string; game: string; rankPart: string; timePart: string; url: string }) => `🏆 ${team} סיימה את "${game}"${rankPart}${timePart}! רוצים לבנות משחק שדה משלכם? ${url}`,
     shareRankPart: ({ rank }: { rank: number }) => ` · מקום #${rank}`,
     shareTimePart: ({ time }: { time: string }) => ` תוך ${time}`,
+    // Labels drawn onto the shared story/podium canvas cards (localized-share-cards).
+    cardHeadline: 'סיימנו!',
+    cardPoints: 'נקודות',
+    cardTime: 'זמן',
+    cardRank: 'מקום',
+    cardStages: 'שלבים',
+    cardCta: 'בנו משחק שדה משלכם',
+    cardPodium: 'פודיום',
   },
   staff: {
     consoleTitle: 'קונסולת צוות',
@@ -854,6 +862,14 @@ const EN: typeof HE = {
     shareText: ({ team, game, rankPart, timePart, url }: { team: string; game: string; rankPart: string; timePart: string; url: string }) => `🏆 ${team} finished "${game}"${rankPart}${timePart}! Want to build your own field game? ${url}`,
     shareRankPart: ({ rank }: { rank: number }) => ` · Rank #${rank}`,
     shareTimePart: ({ time }: { time: string }) => ` in ${time}`,
+    // Labels drawn onto the shared story/podium canvas cards (localized-share-cards).
+    cardHeadline: 'FINISHED!',
+    cardPoints: 'POINTS',
+    cardTime: 'TIME',
+    cardRank: 'RANK',
+    cardStages: 'STAGES',
+    cardCta: 'Build your own field game',
+    cardPodium: 'Podium',
   },
   staff: {
     consoleTitle: 'Staff console',
