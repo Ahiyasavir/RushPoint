@@ -216,8 +216,13 @@ export default function DashboardPage() {
     setChosen(null);
     // The title follows the interface language now that the name is translated.
     const title = tpl.key === 'blank' ? d.untitledGame : templateLabel(tpl.key, t);
+    // Tracks the doc created by createGame so a FAILURE in the follow-up seeding
+    // step can clean up the orphan. Undefined while createGame itself is still
+    // in flight, so the catch never deletes a game that was never created.
+    let createdGameId: string | undefined;
     try {
       const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
+      createdGameId = gameId;
       const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
       // Same callable, same fields — but with the scoring style the creator saw
       // and could change, rather than one assigned invisibly.
@@ -240,6 +245,18 @@ export default function DashboardPage() {
       // (change: play-no-silent-failures). Re-open the picker so the choice the
       // creator already made is not lost.
       console.error('[dashboard] create from template failed:', e);
+      // If createGame SUCCEEDED but the seeding updateGame threw, the empty game
+      // doc is already on the dashboard and every retry would add another. Soft-
+      // delete (tombstone) the orphan before re-opening the picker. Best-effort:
+      // a cleanup failure must not mask the original template-failed error.
+      if (createdGameId) {
+        try {
+          await deleteGame({ gameId: createdGameId });
+          _gamesCache = null;
+        } catch (cleanupErr) {
+          console.error('[dashboard] failed to clean up orphaned game:', cleanupErr);
+        }
+      }
       await dialog.alert(d.templateFailed);
       setPicking(true);
       setChosen(tpl);
