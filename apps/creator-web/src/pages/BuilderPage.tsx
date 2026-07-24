@@ -1161,7 +1161,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           <label className="flex items-center gap-1 text-xs text-zinc-400">
             <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}
           </label>
-          {f.id !== 'name' && <button className="text-neon-red text-xs" onClick={() => remove(f.id)}>✕</button>}
+          {f.id !== 'name' && <button className="text-neon-red text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
         </div>
       ))}
       <Button variant="subtle" onClick={add}>+ {b.regAddField}</Button>
