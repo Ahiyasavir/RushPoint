@@ -209,11 +209,21 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           <Button className="mt-4" disabled={busy} onClick={share}>
             {busy ? t.final.shareCreating : shared ? t.final.shareSaved : t.final.shareBtn}
           </Button>
-          {firstPhotoUrl && (
-            <button disabled={busy} onClick={sharePhotoFn}
-              className="mt-2 w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
-              {t.final.sharePhoto}
-            </button>
+          {(firstPhotoUrl || podium.length > 0) && (
+            <div className="mt-2 flex flex-col gap-2">
+              {firstPhotoUrl && (
+                <button disabled={busy} onClick={sharePhotoFn}
+                  className="w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
+                  {t.final.sharePhoto}
+                </button>
+              )}
+              {podium.length > 0 && (
+                <button disabled={busy} onClick={sharePodiumFn}
+                  className="w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
+                  {t.final.sharePodium}
+                </button>
+              )}
+            </div>
           )}
         </Card>
 
@@ -249,7 +259,6 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                 );
               })}
             </div>
-            <Button variant="ghost" className="mt-3 w-full" disabled={busy} onClick={sharePodiumFn}>{t.final.sharePodium}</Button>
           </Card>
         )}
 
