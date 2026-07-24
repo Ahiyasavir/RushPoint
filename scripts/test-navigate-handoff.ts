@@ -93,8 +93,9 @@ check('the Waze link carries both coordinates',
   w.includes('31.7767') && w.includes('35.2345'));
 check('the Waze link asks for navigation', w.includes('navigate=yes'));
 check('the Waze link is https', w.startsWith('https://'));
-check('the Google Maps link carries both coordinates as its query',
-  g.includes('q=31.7767,35.2345'));
+check('the Google Maps link carries both coordinates as its destination',
+  g.includes('destination=31.7767,35.2345'));
+check('the Google Maps link asks for walking directions', g.includes('travelmode=walking'));
 check('the Google Maps link is https', g.startsWith('https://'));
 
 // LEAK GUARD: the builders take a NavTarget, never a task, so no title / clue /

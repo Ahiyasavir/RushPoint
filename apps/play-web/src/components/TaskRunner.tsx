@@ -1027,20 +1027,20 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
   return (
     <div className="flex items-center gap-2 -ms-1" aria-label={t.task.navigateAria}>
       <a
-        href={wazeUrl(target)}
+        href={googleMapsUrl(target)}
         target="_blank"
         rel="noreferrer"
-        data-testid="task-navigate-waze"
+        data-testid="task-navigate-maps"
         className="inline-flex items-center gap-1 min-h-[44px] px-2 py-2 rounded-lg text-xs font-semibold text-ink-fire hover:underline"
       >
         🧭 {t.task.navigateHere}
       </a>
       <a
-        href={googleMapsUrl(target)}
+        href={wazeUrl(target)}
         target="_blank"
         rel="noreferrer"
-        data-testid="task-navigate-maps"
-        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-xs text-zinc-500 hover:underline"
+        data-testid="task-navigate-waze"
+        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-[11px] text-zinc-500 hover:underline"
       >
         {t.task.navigateMaps}
       </a>

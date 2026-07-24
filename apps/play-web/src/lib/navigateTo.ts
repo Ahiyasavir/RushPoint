@@ -71,7 +71,10 @@ export function wazeUrl(target: NavTarget): string {
   return `https://waze.com/ul?ll=${target.lat},${target.lng}&navigate=yes`;
 }
 
-/** Google Maps fallback, same shape as the staff SOS link that already ships. */
+/** Google Maps walking directions — the primary hand-off for a walking field
+ *  game. The `dir/?api=1` Directions form is the only Google Maps URL shape that
+ *  can carry a travel mode; `&travelmode=walking` selects on-foot directions.
+ *  Only the two numeric NavTarget fields ride into the URL, nothing from the task. */
 export function googleMapsUrl(target: NavTarget): string {
-  return `https://www.google.com/maps?q=${target.lat},${target.lng}`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}&travelmode=walking`;
 }
