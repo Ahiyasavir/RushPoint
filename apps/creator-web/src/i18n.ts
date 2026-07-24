@@ -180,9 +180,11 @@ const HE = {
     // literals inside templates.ts, so an English creator's FIRST screen was in
     // Hebrew (change: creator-onboarding-and-plain-language).
     templates: {
-      bar_mitzvah: { name: 'בר / בת מצווה', description: 'מסע חוגג עם משימות צילום, טריוויה על חתן/כלת השמחה ואתגרים.' },
-      youth_trip:  { name: 'טיול שכבה / תנועת נוער', description: 'מסלול עם נקודות ציון, חידות שביל וצילומי שכבה, מושלם למדריכים.' },
-      team_gibush: { name: 'גיבוש צוות', description: 'אתגרי צוות, משימת רצף ושאלת סיום לגיבושים בעבודה או ביחידה.' },
+      bar_mitzvah: { name: 'בר / בת מצווה', description: 'חגיגה עם קפיצת פתיחה, טריוויה על חתן או כלת השמחה, משימות יצירה וריקוד ניצחון.' },
+      youth_group: { name: 'תנועת נוער', description: 'הרפתקת שטח עם חידת שביל, ציד אוצר מצולם ומדורת סיכום, מושלם למדריכים.' },
+      corporate:   { name: 'גיבוש עובדים', description: 'אתגרי צוות במשרד: שובר קרח, שוד ציוד משרדי ומרוץ ערכים לסיום.' },
+      birthday:    { name: 'מסיבת יום הולדת', description: 'משחק חגיגי עם פוזות, שאלות על החוגג או החוגגת וריקוד ניצחון.' },
+      school_race: { name: 'מרוץ בית ספר', description: 'תחנות ידע וספורט לכיתה: מדע, חשבון, גיאוגרפיה ואתגר צוות בקו הסיום.' },
       blank:       { name: 'דף ריק', description: 'שלב אחד ריק, בנו אותו איך שבא לכם.' },
       riddle:      { name: 'ציד חידות', description: 'פתרו חידה בכל עצירה כדי לפתוח את הבאה.' },
       photo:       { name: 'מסע צילום', description: 'שובל של משימות צילום ברחבי האזור שלכם.' },
@@ -1725,9 +1727,11 @@ const EN: typeof HE = {
       { icon: '💳', title: 'Wallet & credits', body: 'Top up, track spend per run, and redeem referral bonuses.', cta: 'Manage wallet' },
     ],
     templates: {
-      bar_mitzvah: { name: 'Bar / bat mitzvah', description: 'A celebration trail with photo missions, trivia about the guest of honour and playful challenges.' },
-      youth_trip:  { name: 'School or youth trip', description: 'A route with waypoints, trail riddles and group photos. Made for counsellors.' },
-      team_gibush: { name: 'Team bonding', description: 'Team challenges, a mission with ordered steps, and a closing question for work or unit days.' },
+      bar_mitzvah: { name: 'Bar / bat mitzvah', description: 'A celebration with an opening jump, trivia about the guest of honour, creative missions and a victory dance.' },
+      youth_group: { name: 'Youth group adventure', description: 'A field adventure with a trail riddle, a photo scavenger hunt and a campfire finish. Made for counsellors.' },
+      corporate:   { name: 'Corporate team building', description: 'Office team challenges: an icebreaker, an office supply heist and a closing values relay.' },
+      birthday:    { name: 'Birthday party', description: 'A festive game with party poses, questions about the birthday star and a victory dance.' },
+      school_race: { name: 'School race', description: 'Knowledge and sport stations for the class: science, math, geography and a teamwork challenge at the finish line.' },
       blank:       { name: 'Blank page', description: 'One empty stage. Build it however you like.' },
       riddle:      { name: 'Riddle hunt', description: 'Solve a riddle at every stop to unlock the next one.' },
       photo:       { name: 'Photo journey', description: 'A trail of photo missions across your area.' },
