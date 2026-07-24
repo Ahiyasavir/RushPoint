@@ -53,6 +53,17 @@ function InlineLabel({ children }: { children: ReactNode }) {
   return <span className="text-xs font-semibold text-[--ink-3] uppercase tracking-wider">{children}</span>;
 }
 
+// A lightweight subheading that breaks the Advanced mega-section into labelled
+// groups (change: advanced-subheadings). Reuses InlineLabel; the hairline + spacing
+// are the only added markup, so it separates without inventing a new visual style.
+function AdvGroup({ children }: { children: ReactNode }) {
+  return (
+    <div className="mt-3 mb-1 pt-2 border-t border-[--rp-border] first:mt-0 first:pt-0 first:border-0">
+      <InlineLabel>{children}</InlineLabel>
+    </div>
+  );
+}
+
 const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[] = [
   { key: 'easy', value: 2, test: (d) => d <= 3 },
   { key: 'mid', value: 5, test: (d) => d >= 4 && d <= 6 },
@@ -1147,11 +1158,16 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
       )}
 
       <Section k="advanced" title={b.advanced} task={task} sections={sections} b={b}>
+        <AdvGroup>{b.advGroupScoring}</AdvGroup>
         <div className="grid grid-cols-3 gap-2">
           <div>
             <Label dense>{b.points}</Label>
             <Input dense type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
           </div>
+        </div>
+
+        <AdvGroup>{b.advGroupTiming}</AdvGroup>
+        <div className="grid grid-cols-2 gap-2">
           <div>
             <Label dense>{b.estMin}</Label>
             {/* visible-time-estimates: this is the OVERRIDE for the derived estimate
@@ -1166,25 +1182,6 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
                 ),
               })} />
           </div>
-          <div>
-            <div className="flex items-center gap-1 mb-0.5">
-              <InlineLabel>{b.maxTeams}</InlineLabel>
-              <RichTooltip concept="concurrent" />
-            </div>
-            <Input dense type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
-          </div>
-          {located && (
-            <div>
-              <div className="flex items-center gap-1 mb-0.5">
-                <InlineLabel>{b.triggerRadius}</InlineLabel>
-                <RichTooltip concept="geofence" />
-              </div>
-              <Input dense type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(normalizeTriggerMode(task))}
-                onChange={(e) => set({
-                  geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(normalizeTriggerMode(task))),
-                })} />
-            </div>
-          )}
         </div>
         {/* Per-interaction duration (change: task-duration-defaults). Nothing in the
             product ever set `expectedDurationMinutes`, so a 20 second photo snap and a
@@ -1283,6 +1280,31 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
             <p className="text-[11px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
           )}
         </div>
+
+        <AdvGroup>{b.advGroupLimits}</AdvGroup>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <div className="flex items-center gap-1 mb-0.5">
+              <InlineLabel>{b.maxTeams}</InlineLabel>
+              <RichTooltip concept="concurrent" />
+            </div>
+            <Input dense type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
+          </div>
+          {located && (
+            <div>
+              <div className="flex items-center gap-1 mb-0.5">
+                <InlineLabel>{b.triggerRadius}</InlineLabel>
+                <RichTooltip concept="geofence" />
+              </div>
+              <Input dense type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(normalizeTriggerMode(task))}
+                onChange={(e) => set({
+                  geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(normalizeTriggerMode(task))),
+                })} />
+            </div>
+          )}
+        </div>
+
+        <AdvGroup>{b.advGroupTags}</AdvGroup>
         {/* Task tags (change: game-task-tags). `Task.tags` existed and was already
             denormalized into publicTasks and returned by searchTaskLibrary — but the
             ONLY code path that ever wrote it was copying a task OUT of the library,

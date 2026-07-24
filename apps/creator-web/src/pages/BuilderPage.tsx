@@ -1153,13 +1153,13 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
     <div className="space-y-2">
       <p className="text-xs text-[--ink-3]">{b.regNameNote}</p>
       {game.registrationFields.map((f) => (
-        <div key={f.id} className="flex gap-2 items-center">
+        <div key={f.id} className="flex flex-wrap gap-2 items-center">
           <Input value={f.label} onChange={(e) => update(f.id, { label: e.target.value })} disabled={f.id === 'name'} />
-          <Select value={f.type} onChange={(e) => update(f.id, { type: e.target.value as RegistrationField['type'] })}>
+          <Select aria-label={b.regFieldTypeAria} value={f.type} onChange={(e) => update(f.id, { type: e.target.value as RegistrationField['type'] })}>
             <option value="text">{b.regTypeText}</option><option value="number">{b.regTypeNumber}</option>
             <option value="phone">{b.regTypePhone}</option><option value="checkbox">{b.regTypeCheckbox}</option><option value="select">{b.regTypeSelect}</option>
           </Select>
-          <Select value={f.level} onChange={(e) => update(f.id, { level: e.target.value as RegistrationField['level'] })}>
+          <Select aria-label={b.regFieldLevelAria} value={f.level} onChange={(e) => update(f.id, { level: e.target.value as RegistrationField['level'] })}>
             <option value="member">{b.regLevelMember}</option><option value="team">{b.regLevelTeam}</option>
           </Select>
           <label className="flex items-center gap-1 text-xs text-[--ink-3]">
