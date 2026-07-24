@@ -6,7 +6,7 @@ import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
 import { useAsyncAction } from '../hooks/useAsyncAction';
-import { isFatalSyncError } from '../lib/syncError';
+import { syncErrorVerdict } from '../lib/syncError';
 // Why a not-yet-started team is not started (change: held-team-visibility).
 import { heldNotice } from '../lib/holdNotice';
 // Which sealed hidden missions may be drawn as a search circle
@@ -51,6 +51,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // `state` to refresh()'s deps (which would tear down the poll effect each poll).
   const [reconnecting, setReconnecting] = useState(false);
   const hasState = useRef(false);
+  // First-load retry grace (change: fix-play-first-load-retry-grace): count
+  // consecutive FIRST-load failures so a single transient tunnel blip degrades to
+  // the branded loader + auto-retry instead of the hard "sync failed" screen. Reset
+  // on any success and by the manual "try again" button.
+  const firstLoadFails = useRef(0);
   const [me, setMe] = useState<{ lat: number; lng: number } | null>(null);
   const timer = useRef<number>();
   // Territory zones (change: fix-territory-map-visibility): fetched once here so the
@@ -87,18 +92,21 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     try {
       const s = await getMyTeamState({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId });
       setState(s); hasState.current = true; setErr(''); setReconnecting(false);
+      firstLoadFails.current = 0;
     } catch (e) {
       const code = (e as { code?: string })?.code;
-      // A transient blip while we already have state → keep the game on screen and
-      // show "reconnecting"; only a fatal error (or a failed first load) replaces it.
-      if (hasState.current && !isFatalSyncError(code)) {
+      // A transient blip → keep the game on screen (or the branded loader on first
+      // load) and auto-retry via `reconnecting`; only a fatal code, a deleted run,
+      // or a first load that has missed FIRST_LOAD_MAX_FAILS times shows a hard
+      // screen. Never surface a raw English server message to a Hebrew-default
+      // participant — map to the localized gameGone / syncFailed copy.
+      if (!hasState.current) firstLoadFails.current += 1;
+      const verdict = syncErrorVerdict(code, hasState.current, firstLoadFails.current);
+      if (verdict === 'reconnect') {
         setReconnecting(true);
       } else {
-        // Never surface a raw English server message (e.g. "Team not found" /
-        // "Run not found") to a Hebrew-default participant. A not-found code means
-        // the run was deleted or the team pruned → say the game ended/was removed;
-        // everything else falls back to the generic localized sync message.
-        setErr(code === 'not-found' ? t.play.gameGone : t.play.syncFailed);
+        setReconnecting(false);
+        setErr(verdict === 'game-gone' ? t.play.gameGone : t.play.syncFailed);
       }
     }
   }, [session, t]);
@@ -262,6 +270,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }, [state?.run.leaderboard, state?.team.id]);
 
   async function leave() {
+    // A finished run has nothing left to lose, so skip the "are you sure" prompt
+    // (this is the demo-finish exit path via FinalScreen). Mid-run still confirms.
+    if (state?.team.status === 'finished') { clearSession(); onLeave(); return; }
     if (await dialog.confirm(t.play.leaveConfirm)) { clearSession(); onLeave(); }
   }
 
@@ -341,7 +352,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
               <div className="text-4xl">⚠️</div>
               <p className="text-danger text-sm">{err}</p>
               <div className="flex gap-2 mt-1">
-                <Button variant="ghost" onClick={() => void refresh()}>{t.common.tryAgain}</Button>
+                <Button variant="ghost" onClick={() => { firstLoadFails.current = 0; setErr(''); setReconnecting(true); void refresh(); }}>{t.common.tryAgain}</Button>
                 <Button variant="ghost" onClick={() => { clearSession(); onLeave(); }}>{t.play.leave}</Button>
               </div>
             </>

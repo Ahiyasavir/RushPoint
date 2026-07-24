@@ -116,6 +116,25 @@ function AppInner() {
     setStaffMode(false);
   }, []);
 
+  // Leaving a run MUST also drop a `?game=` promo/instant-play param from the URL.
+  // Otherwise the session clears but `search` state still carries `game=<id>`, and
+  // the resolver re-routes the now-session-less device back to the demo PROMO
+  // teaser (playRoute step 9) instead of the app's first page, the JoinScreen. We
+  // strip ONLY `game` — join code / staff / tv / recap / board / challenge params
+  // are untouched — then reflect it into `search` state so `route` re-derives to
+  // `join`. (`game` alone can never be a staff route; that needs owner+run too.)
+  const leaveRun = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('game')) {
+      params.delete('game');
+      const qs = params.toString();
+      const next = qs ? `?${qs}` : '';
+      window.history.replaceState(null, '', `${window.location.pathname}${next}${window.location.hash}`);
+      setSearch(next);
+    }
+    setSession(null);
+  }, []);
+
   if (!ready) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-app-bg">
@@ -246,7 +265,7 @@ function AppInner() {
     <>
       <ConnectionBanner />
       {bottom === 'play' && session
-        ? <PlayScreen session={session} onLeave={() => setSession(null)} />
+        ? <PlayScreen session={session} onLeave={leaveRun} />
         : <JoinScreen
             initialCode={route.kind === 'join' ? route.code : null}
             onJoined={setSession}
