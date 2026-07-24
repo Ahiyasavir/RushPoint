@@ -172,9 +172,9 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
             lands on the offending step), the next one closes. */}
         <div className="ms-auto flex items-center gap-2">
           {step < lastStep && (
-            <Button variant="ghost" disabled={!canGoNext(stepKey, task)} onClick={() => setStep((s) => (s + 1) as WizardStep)}>{b.next} →</Button>
+            <Button disabled={!canGoNext(stepKey, task)} onClick={() => setStep((s) => (s + 1) as WizardStep)}>{b.next} →</Button>
           )}
-          <Button onClick={finish}>{b.done}</Button>
+          <Button variant={step < lastStep ? 'ghost' : undefined} onClick={finish}>{b.done}</Button>
         </div>
       </div>
     </div>
