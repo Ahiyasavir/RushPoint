@@ -9,6 +9,7 @@ import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
 import { fireConfetti } from '../lib/confetti';
+import { feedback } from '../lib/sound';
 import { creatorUrl } from '../lib/creatorUrl';
 import { shareCardLabels } from '../lib/shareCardLabels';
 import LegalFooter from '../components/LegalFooter';
@@ -64,14 +65,16 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   const [shared, setShared] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Celebrate the finish once — a brand-colored confetti burst timed to land with
-  // the score-pop. Reduced-motion is honored inside fireConfetti(); the ref guard
-  // stops any re-render (live leaderboard updates, survey steps) from re-firing it.
-  const confettiFired = useRef(false);
+  // Celebrate the finish once — a brand-colored confetti burst plus the existing
+  // mute-gated rank-up sound+haptic, timed to land with the score-pop. Reduced-motion
+  // is honored inside fireConfetti() and the mute toggle inside feedback(); the ref
+  // guard stops any re-render (live leaderboard updates, survey steps) from re-firing
+  // the climax.
+  const climaxFired = useRef(false);
   useEffect(() => {
-    if (confettiFired.current) return;
-    confettiFired.current = true;
-    const id = window.setTimeout(() => fireConfetti(), 350);
+    if (climaxFired.current) return;
+    climaxFired.current = true;
+    const id = window.setTimeout(() => { fireConfetti(); feedback('rankUp'); }, 350);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -152,7 +155,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         stagesLabel: labels.stagesLabel,
         ctaText: labels.ctaText,
       }, text);
-      if (result === 'downloaded' || result === 'copied') { setShared(true); setTimeout(() => setShared(false), 2500); }
+      // Confirm a genuine delivery: a native share ('shared') as well as a download
+      // or clipboard copy. A cancellation resolves to 'failed', so it stays silent —
+      // no false "shared!". Reuses the existing shareSaved label (no new i18n key).
+      if (result === 'downloaded' || result === 'copied' || result === 'shared') { setShared(true); setTimeout(() => setShared(false), 2500); }
     } finally { setBusy(false); }
   }
 
@@ -340,31 +346,53 @@ const BADGE_EMOJI: Record<string, string> = {
   first_finish: '🏁', explorer: '🧭', pathfinder: '🗺️', veteran: '🎖️', high_scorer: '💯', legend: '👑',
 };
 
+// Badges are written by the async onRunFinalized trigger AFTER finalize completes, so
+// on a solo instant-play finish (where run.leaderboard is already set at first mount,
+// so `finalized` never flips) the first fetch races the trigger and comes back empty.
+// A small bounded poll closes that gap without ever spamming the callable.
+const MAX_BADGE_POLLS = 3;
+const BADGE_POLL_INTERVAL_MS = 2000;
+
 function BadgesCard({ finalized }: { finalized: boolean }) {
   const { t } = useT();
   const [badges, setBadges] = useState<string[] | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
 
   // Profiles are recorded when the organizer finalizes the run, so (re)fetch on mount
-  // and again once the run is finalized — that's when new badges actually appear.
+  // and again once the run is finalized — that's when new badges actually appear. If
+  // finalized but the list is still empty (the trigger hasn't landed yet), retry a
+  // bounded few times a couple of seconds apart, then stop.
   useEffect(() => {
     let alive = true;
-    getMyProfile({})
-      .then((res) => {
-        if (!alive) return;
-        const earned = res.profile.badges ?? [];
-        // Per-player key: on a shared device, each player's "already seen" set is
-        // separate so player B doesn't inherit player A's highlighted-badge state.
-        const seenKey = `rp.badges.seen.${uid() ?? 'anon'}`;
-        let seen: string[] = [];
-        try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { /* ignore */ }
-        const seenSet = new Set(seen);
-        setFresh(new Set(earned.filter((b) => !seenSet.has(b))));
-        setBadges(earned);
-        try { localStorage.setItem(seenKey, JSON.stringify(earned)); } catch { /* ignore */ }
-      })
-      .catch(() => { if (alive) setBadges((b) => b ?? []); });
-    return () => { alive = false; };
+    let timer: number | undefined;
+    let attempts = 0;
+
+    const poll = () => {
+      attempts += 1;
+      getMyProfile({})
+        .then((res) => {
+          if (!alive) return;
+          const earned = res.profile.badges ?? [];
+          // Per-player key: on a shared device, each player's "already seen" set is
+          // separate so player B doesn't inherit player A's highlighted-badge state.
+          const seenKey = `rp.badges.seen.${uid() ?? 'anon'}`;
+          let seen: string[] = [];
+          try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { /* ignore */ }
+          const seenSet = new Set(seen);
+          setFresh(new Set(earned.filter((b) => !seenSet.has(b))));
+          setBadges(earned);
+          try { localStorage.setItem(seenKey, JSON.stringify(earned)); } catch { /* ignore */ }
+          // Bounded eventual-consistency retry: only while finalized, still empty, and
+          // under the attempt cap. Stops the moment badges arrive or the cap is hit.
+          if (finalized && earned.length === 0 && attempts < MAX_BADGE_POLLS) {
+            timer = window.setTimeout(poll, BADGE_POLL_INTERVAL_MS);
+          }
+        })
+        .catch(() => { if (alive) setBadges((b) => b ?? []); });
+    };
+
+    poll();
+    return () => { alive = false; if (timer !== undefined) window.clearTimeout(timer); };
   }, [finalized]);
 
   if (!badges || badges.length === 0) return null;
