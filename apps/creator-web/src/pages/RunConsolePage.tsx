@@ -116,6 +116,18 @@ export default function RunConsolePage() {
   const [teamsStale, setTeamsStale] = useState(false);
   const [lastTeamsSyncAt, setLastTeamsSyncAt] = useState<number | null>(null);
   const [alertsStreamError, setAlertsStreamError] = useState(false);
+  // A single low-frequency wall-clock ticker for time-derived render (the
+  // "reconnecting · updated Xs ago" staleness age). On the 2nd+ consecutive
+  // failed teams poll, setTeamsStale(true) is a no-op (already true) so React
+  // bails out — and with zero unacknowledged alerts nothing else re-renders, so
+  // an age read from a render-time Date.now() froze at ~5s during a sustained
+  // outage, UNDERSTATING staleness. This drives a re-render every 5s so the age
+  // counts up. One shared ticker (change: run-console-action-feedback).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 5000);
+    return () => clearInterval(id);
+  }, []);
 
   // Live run doc (owner can read directly)
   useEffect(() => {
@@ -471,6 +483,10 @@ export default function RunConsolePage() {
     try { await acknowledgeAlert({ ...ctx, alertId }); }
     catch (e) { reportFailure(e, 'acknowledgeAlert'); }
   }
+  // In-flight guard, keyed per alert id, so a double-tap on a raised SOS between
+  // the tap and the next snapshot can't double-fire acknowledgeAlert — while a
+  // different alert row can still act (change: run-console-action-feedback).
+  const ackAction = useAsyncAction(ack, (alertId: string) => alertId);
   // Sharing a board/TV link implies the audience should see standings — publish
   // on share so the projection screen never sits on "not yet available".
   // EXCEPTION (change: manual-leaderboard-reveal): once the run is finished the
@@ -679,7 +695,11 @@ export default function RunConsolePage() {
   // zone was blocked from receiving tasks for the rest of the run and nobody —
   // staff or creator — could do anything about it.
   async function letTeamBackIn(team: RunTeamRow) {
-    try { await clearTeamOutOfBounds({ ...ctx, teamId: team.id, reason: 'staff release' }); await loadTeams(); }
+    try {
+      await clearTeamOutOfBounds({ ...ctx, teamId: team.id, reason: 'staff release' });
+      await loadTeams();
+      toast.success(rc.letBackInDone({ team: team.displayName }));
+    }
     catch { await dialog.alert(rc.letBackInFailed); }
   }
 
@@ -687,7 +707,11 @@ export default function RunConsolePage() {
     // The label said "skip"; it skipped the team's WHOLE STAGE. The consequence
     // table now says so out loud (change: run-console-clarity).
     if (!(await confirmAction('skipStage'))) return;
-    try { await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id }); await loadTeams(); }
+    try {
+      await skipStage({ gameId: gameId!, runId: runId!, teamId: team.id });
+      await loadTeams();
+      toast.success(rc.skipStageDone({ team: team.displayName }));
+    }
     catch { await dialog.alert(rc.skipFailed); }
   }
 
@@ -735,7 +759,8 @@ export default function RunConsolePage() {
                   <Button
                     variant={runActionVariant('acknowledgeAlert')}
                     className="min-h-0 px-2.5 py-1 text-xs rounded-lg ms-auto"
-                    onClick={() => ack(a.id)}
+                    disabled={ackAction.isBusy(a.id)}
+                    onClick={() => void ackAction.run(a.id)}
                   >
                     {rc.acknowledge}
                   </Button>
@@ -778,11 +803,11 @@ export default function RunConsolePage() {
             {/* Live-stream resilience: a failed teams poll keeps the last-known
                 rows below and only marks the board out of date. Unobtrusive,
                 role="status", never gates or disables anything. */}
-            {isTeamsStale(lastTeamsSyncAt, Date.now(), teamsStale) && (
+            {isTeamsStale(lastTeamsSyncAt, nowMs, teamsStale) && (
               <p role="status" className="text-[11px] text-rp-amber mb-2 px-1">
                 {rc.teamsReconnecting}
                 {(() => {
-                  const secs = secondsSinceSync(lastTeamsSyncAt, Date.now());
+                  const secs = secondsSinceSync(lastTeamsSyncAt, nowMs);
                   return secs != null ? ` · ${rc.lastUpdatedAgo({ seconds: secs })}` : '';
                 })()}
               </p>

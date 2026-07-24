@@ -686,6 +686,9 @@ const HE = {
     // דילוג על משימה בודדת (change: skip-single-task)
     skipTaskFailed: 'הדילוג על המשימה נכשל. בדקו את החיבור ונסו שוב.',
     skipTaskDone: ({ team }: { team: string }) => `המשימה הנוכחית של ${team} דולגה.`,
+    // אישור הצלחה לדילוג על שלב ולהחזרת קבוצה למשחק (change: run-console-action-feedback)
+    skipStageDone: ({ team }: { team: string }) => `השלב של ${team} דולג.`,
+    letBackInDone: ({ team }: { team: string }) => `${team} חזרה למשחק.`,
     newAlertTitleFlash: ({ n }: { n: number }) => `🆘 (${n}) התראה חדשה`,
     // חוסן פידים חיים (change: run-console-live-stream-resilience): כאשר סקר
     // הקבוצות או פיד ההתראות נקטע, הלוח נשאר על הנתונים האחרונים ומסומן כלא מעודכן.
@@ -2199,6 +2202,9 @@ const EN: typeof HE = {
     // Single mission skip (change: skip-single-task)
     skipTaskFailed: 'Could not skip the mission. Check your connection and try again.',
     skipTaskDone: ({ team }: { team: string }) => `The current mission of ${team} was skipped.`,
+    // Success confirmation for skipping a stage and letting a team back in (change: run-console-action-feedback)
+    skipStageDone: ({ team }: { team: string }) => `${team}'s stage was skipped.`,
+    letBackInDone: ({ team }: { team: string }) => `${team} is back in play.`,
     newAlertTitleFlash: ({ n }: { n: number }) => `🆘 (${n}) new alert`,
     // Live-stream resilience (change: run-console-live-stream-resilience): when the
     // teams poll or the alerts feed is interrupted, the board keeps its last-known
