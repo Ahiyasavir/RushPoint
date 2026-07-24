@@ -41,7 +41,7 @@ import {
 } from '../lib/reorder';
 import { useHistory } from '../lib/useHistory';
 import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/taskDraft';
-import { blankTask } from '../lib/wizardLogic';
+import { blankTask, shouldAutoOpenFirstTask } from '../lib/wizardLogic';
 // ONE readiness computation, shared by the persistent panel and the launch guard
 // (change: builder-first-task-flow), so the two can never drift.
 import { computeGameReadiness, canLaunchGame, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
@@ -1442,6 +1442,21 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   // Collapse the settings drawer whenever the shown stage changes, so every stage
   // opens calm regardless of the last stage's drawer state.
   useEffect(() => { setSettingsOpen(false); }, [activeStage?.id]);
+
+  // First-task auto-open (change: builder-first-task-flow). A brand-new blank
+  // game drops the creator straight into naming their first task instead of
+  // leaving them to find and click the seeded "Untitled task" card. The ref
+  // guard fires this AT MOST ONCE per mount, so it never re-opens the editor
+  // after the creator closes it, and `shouldAutoOpenFirstTask` refuses any game
+  // that is not a single untouched blank task (see wizardLogic).
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    autoOpenedRef.current = true;
+    const target = shouldAutoOpenFirstTask(game);
+    if (target) setEditing({ stageId: target.stageId, taskId: target.taskId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Land on the offending task when a readiness entry is activated, with its
   // message already visible.

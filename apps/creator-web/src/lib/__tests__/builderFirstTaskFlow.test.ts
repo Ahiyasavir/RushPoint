@@ -15,6 +15,7 @@ import { validateUnlockGraph } from '@rushpoint/shared';
 import {
   WIZARD_STEP_ORDER, type WizardStepKey, stepKeyAt, stepIndexOf, canGoNext, canGoBack,
   taskPlacementState, isTaskLocationValid, isTaskInteractionValid, blankTask,
+  shouldAutoOpenFirstTask,
 } from '../wizardLogic';
 import {
   VALIDATION_FIELDS, type ValidationField,
@@ -120,6 +121,51 @@ describe('taskPlacementState classifies placement in three states', () => {
         }
       }
     }
+  });
+});
+
+// The first-task auto-open guard is the ONLY safety guarantee that this
+// convenience never disturbs a game the creator is returning to edit. It must
+// fire for exactly one shape — a single untouched blank task — and refuse
+// everything else, so it is covered exhaustively.
+describe('shouldAutoOpenFirstTask fires only for a brand-new untouched blank game', () => {
+  it('returns the first task target for one stage holding one untouched blank task', () => {
+    const g = game([stage({ tasks: [task({ id: 't1' })] })]);
+    expect(shouldAutoOpenFirstTask(g)).toEqual({ stageId: 's1', taskId: 't1' });
+  });
+
+  it('returns null when the first task has an edited title', () => {
+    const g = game([stage({ tasks: [task({ id: 't1', title: 'My first task' })] })]);
+    expect(shouldAutoOpenFirstTask(g)).toBeNull();
+    // whitespace only is still untouched, so it DOES fire
+    expect(shouldAutoOpenFirstTask(game([stage({ tasks: [task({ id: 't1', title: '   ' })] })])))
+      .toEqual({ stageId: 's1', taskId: 't1' });
+  });
+
+  it('returns null when the first task carries a real (non 0,0) pin', () => {
+    const g = game([stage({ tasks: [task({ id: 't1', coordinates: { lat: 31.77, lng: 35.21 } })] })]);
+    expect(shouldAutoOpenFirstTask(g)).toBeNull();
+    // a single non-zero axis still counts as placed
+    expect(shouldAutoOpenFirstTask(game([stage({ tasks: [task({ id: 't1', coordinates: { lat: 0, lng: 35.21 } })] })])))
+      .toBeNull();
+  });
+
+  it('returns null for two stages, even if the first is a lone blank task', () => {
+    const g = game([
+      stage({ id: 's1', order: 0, tasks: [task({ id: 't1' })] }),
+      stage({ id: 's2', order: 1, title: 'Stage two', tasks: [task({ id: 't2' })] }),
+    ]);
+    expect(shouldAutoOpenFirstTask(g)).toBeNull();
+  });
+
+  it('returns null for a stage with two tasks', () => {
+    const g = game([stage({ tasks: [task({ id: 't1' }), task({ id: 't2' })] })]);
+    expect(shouldAutoOpenFirstTask(g)).toBeNull();
+  });
+
+  it('returns null for an empty game and for a stage with no tasks', () => {
+    expect(shouldAutoOpenFirstTask(game([]))).toBeNull();
+    expect(shouldAutoOpenFirstTask(game([stage({ tasks: [] })]))).toBeNull();
   });
 });
 

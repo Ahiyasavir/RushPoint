@@ -7,7 +7,7 @@
 // Naming is the first thing asked and the ONLY forward gate; placement is last
 // and never blocks navigation. An unplaced task is reported by the readiness
 // surface (lib/gameReadiness) instead, which also refuses the launch.
-import type { Task, TaskType } from '@rushpoint/shared';
+import type { Game, Task, TaskType } from '@rushpoint/shared';
 import { validateOrderItems, defaultEstimatedMinutes } from '@rushpoint/shared';
 
 // Step POSITIONS (1 based) — the wizard holds one of these as its current step.
@@ -157,3 +157,28 @@ export const TASK_TYPE_META: Record<TaskType, TaskTypeMeta> = {
 export const TYPE_PICKER_ORDER: TaskType[] = [
   'smart_station', 'photo', 'quiz', 'numeric', 'field', 'self_report', 'geofence', 'sequence', 'survey',
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// First-task auto-open (change: builder-first-task-flow)
+// ─────────────────────────────────────────────────────────────────────────────
+// When a creator opens a BRAND-NEW blank game we drop them straight into naming
+// their first task, instead of leaving them to discover and click the seeded
+// "Untitled task" card. The whole risk is firing on a game the creator is
+// RETURNING to edit, so the "untouched blank" test is narrow and pure: it must
+// structurally match a single freshly seeded `blankTask` the creator has not yet
+// touched. Any edit — a typed title, a dropped pin, a second task, a second
+// stage — makes it return null and the Builder opens at rest as before.
+export function shouldAutoOpenFirstTask(game: Game): { stageId: string; taskId: string } | null {
+  // Exactly one stage …
+  if (game.stages.length !== 1) return null;
+  const stage = game.stages[0];
+  // … holding exactly one task …
+  if (stage.tasks.length !== 1) return null;
+  const task = stage.tasks[0];
+  // … that is still the untouched seed: no name and no pin. `blankTask` seeds an
+  // empty title and the {0,0} null-island placeholder, so a non-empty (trimmed)
+  // title or any real coordinate means the creator has already started editing.
+  if (task.title.trim() !== '') return null;
+  if (task.coordinates.lat !== 0 || task.coordinates.lng !== 0) return null;
+  return { stageId: stage.id, taskId: task.id };
+}
