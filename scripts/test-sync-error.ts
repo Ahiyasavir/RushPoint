@@ -24,9 +24,17 @@ check('undefined (raw network error) is transient', isFatalSyncError(undefined) 
 check('empty string is transient', isFatalSyncError('') === false);
 
 // --- syncErrorVerdict (change: fix-play-first-load-retry-grace) -----------------
-// not-found → the game/run is gone.
-check('verdict not-found → game-gone', syncErrorVerdict('not-found', false, 0) === 'game-gone');
-check('verdict not-found → game-gone (with state)', syncErrorVerdict('not-found', true, 99) === 'game-gone');
+// not-found → the game/run is gone, once state has loaded at least once.
+check('verdict not-found → game-gone (with state)', syncErrorVerdict('not-found', true, 0) === 'game-gone');
+check('verdict not-found → game-gone (with state, high budget)', syncErrorVerdict('not-found', true, 99) === 'game-gone');
+
+// not-found on the FIRST load is usually transient (team doc still creating right
+// after joinRun, or a run read racing finalize/prune): grant the same first-load
+// retry grace, and only declare the game gone once the budget is spent.
+check('verdict first-load not-found within budget → reconnect', syncErrorVerdict('not-found', false, 0) === 'reconnect');
+check('verdict first-load not-found below max → reconnect', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS - 1) === 'reconnect');
+check('verdict first-load not-found at max → game-gone', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS) === 'game-gone');
+check('verdict first-load not-found over max → game-gone', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS + 2) === 'game-gone');
 
 // Fatal auth codes → hard sync-failed regardless of hasState / budget.
 check('verdict permission-denied → sync-failed', syncErrorVerdict('permission-denied', false, 0) === 'sync-failed');

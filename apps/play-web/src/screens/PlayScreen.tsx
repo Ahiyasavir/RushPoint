@@ -82,7 +82,7 @@ function computeLocationRelevant(state: MyTeamState | null, zones: CaptureZone[]
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const { t, lang } = useT();
   const [state, setState] = useState<MyTeamState | null>(null);
-  const [err, setErr] = useState('');
+  const [err, setErr] = useState<'' | 'game-gone' | 'sync-failed'>('');
   // Offline continuity (change: fix-play-offline-continuity): a transient poll
   // failure keeps the last state on screen and flips `reconnecting` (a subtle,
   // non-blocking pill) instead of blanking to the error screen. `hasState` lets the
@@ -145,10 +145,15 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         setReconnecting(true);
       } else {
         setReconnecting(false);
-        setErr(verdict === 'game-gone' ? t.play.gameGone : t.play.syncFailed);
+        // Store the verdict KIND, not the localized string, so refresh() no longer
+        // closes over `t` — a mid-run language toggle otherwise changes refresh()'s
+        // identity and tears down the live team listener + restarts the 12s poll.
+        // The copy is localized at render time, so a toggle while this error shows
+        // still switches the message.
+        setErr(verdict === 'game-gone' ? 'game-gone' : 'sync-failed');
       }
     }
-  }, [session, t]);
+  }, [session]);
 
   const reloadZones = useCallback(async () => {
     try {
@@ -399,7 +404,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
             // offer a retry and a way to leave + clear the stale session.
             <>
               <div className="text-4xl">⚠️</div>
-              <p className="text-danger text-sm">{err}</p>
+              <p className="text-danger text-sm">{err === 'game-gone' ? t.play.gameGone : t.play.syncFailed}</p>
               <div className="flex gap-2 mt-1">
                 <Button variant="ghost" onClick={() => { firstLoadFails.current = 0; setErr(''); setReconnecting(true); void refresh(); }}>{t.common.tryAgain}</Button>
                 <Button variant="ghost" onClick={() => { clearSession(); onLeave(); }}>{t.play.leave}</Button>
@@ -1028,6 +1033,15 @@ function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTea
   );
 }
 
+// Guard a skewed device clock from misdriving the scheduled-drop countdown
+// (CLAUDE.md: never count an absolute deadline against the phone's clock). The
+// payload carries no server `now`, so we defend client-side only: cap the DISPLAYED
+// remaining so a clock running far behind the server can't show an absurd multi-day
+// wait, and hide the card entirely once the release moment passes — the server's
+// advanceTeamStateOnPoll is the real authority and the next poll clears
+// nextStageReleaseAt, so a slow phone clock can no longer pin a stale card up.
+const MAX_STAGE_DROP_COUNTDOWN_MS = 24 * 60 * 60 * 1000;
+
 function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: () => void }) {
   const { t } = useT();
   const [remainingMs, setRemainingMs] = useState(() => releaseAt - Date.now());
@@ -1040,7 +1054,10 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
     return () => clearInterval(id);
   }, [releaseAt, onOpen]);
 
-  const total = Math.max(0, Math.floor(remainingMs / 1000));
+  // Past the release instant → stop rendering; don't leave a stuck 00:00 card up.
+  if (remainingMs <= 0) return null;
+  const shownMs = Math.min(remainingMs, MAX_STAGE_DROP_COUNTDOWN_MS);
+  const total = Math.max(0, Math.floor(shownMs / 1000));
   const hh = Math.floor(total / 3600);
   const mm = Math.floor((total % 3600) / 60);
   const ss = total % 60;

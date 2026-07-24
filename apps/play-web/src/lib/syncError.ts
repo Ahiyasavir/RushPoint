@@ -28,7 +28,15 @@ export function syncErrorVerdict(
   hasState: boolean,
   firstLoadFails: number,
 ): SyncVerdict {
-  if (code === 'not-found') return 'game-gone';
+  if (code === 'not-found') {
+    // On the FIRST load a `not-found` is usually transient: the team doc is still
+    // being created right after joinRun, or a run read raced finalize/prune. Give
+    // it the same first-load retry grace every other transient code gets and only
+    // declare the game gone once the budget is spent. After state has loaded at
+    // least once, a `not-found` really means the run/team is gone.
+    if (hasState) return 'game-gone';
+    return firstLoadFails >= FIRST_LOAD_MAX_FAILS ? 'game-gone' : 'reconnect';
+  }
   if (isFatalSyncError(code)) return 'sync-failed';
   // Transient / non-fatal: keep reconnecting while we have state, or until the
   // first-load retry budget is spent.
