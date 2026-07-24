@@ -234,6 +234,28 @@ html.dark .rp-skeleton::after {
   .rp-skeleton::after { animation: none; }
 }
 
+/* ── Launch liftoff (change: creator-launch-liftoff) ──────────────────────────
+   An INDETERMINATE sweep for the launchRun wait: a partial gradient bar slides
+   start→end so the wait reads as forward motion, never a fake percentage. The JS
+   also branches on prefers-reduced-motion (shows a static fill instead), so this
+   keyframe is a progressive enhancement; the guard below neutralises it too. */
+.rp-liftoff-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, var(--rp-fire, #FF5722), var(--rp-amber, #FFB300));
+  animation: rp-liftoff-sweep 1.6s ease-in-out infinite;
+}
+@keyframes rp-liftoff-sweep {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-liftoff-sweep { animation: none; }
+}
+
 /* ── Glass card ──────────────────────────────────────────────────────────── */
 html.dark .glass-card {
   background: rgba(255,255,255,0.035);

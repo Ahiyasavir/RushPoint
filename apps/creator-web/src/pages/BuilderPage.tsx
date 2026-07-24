@@ -22,6 +22,7 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, TagChips, Textarea } from '../components/ui';
 import { OverflowMenu } from '../components/OverflowMenu';
+import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
@@ -212,6 +213,10 @@ export default function BuilderPage() {
   // task with its message already visible.
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [focusIssue, setFocusIssue] = useState<{ stageId: string; taskId: string; nonce: number } | null>(null);
+  // Launch is a save + a single opaque `launchRun` round-trip with no on-screen
+  // feedback until now (change: creator-launch-liftoff). While it is in flight we
+  // show the <LaunchLiftoff> overlay and disable the launch buttons.
+  const [launching, setLaunching] = useState(false);
   const [status, setStatus] = useState<SaveStatus>('saved');
   // Why the last save failed. Persistent (never a toast): the whole failure mode
   // of this bug class is a creator who looks up ten minutes later.
@@ -365,30 +370,39 @@ export default function BuilderPage() {
   async function saveAndLaunch(testDrive = false) {
     if (!game) return;
     window.clearTimeout(saveTimer.current);
-    // Don't launch on top of a failed save — the run would use stale/unsaved data.
-    if (!(await save())) { await dialog.alert(b.saveFailed); return; }
-    // ONE launch rule (change: builder-first-task-flow). This used to be four
-    // sequential guards, each naming a single offender in its own alert and
-    // returning, so three broken tasks cost three failed launch attempts. The
-    // rules now live in lib/gameReadiness, which also renders the persistent
-    // readiness panel, so the guard and the panel cannot disagree. A refused
-    // launch points at the panel instead of naming one offender.
-    if (!canLaunchGame(game)) {
-      setReadinessOpen(true);
-      await dialog.alert(b.launchBlockedSeeReadiness); return;
-    }
+    // Show the liftoff overlay for the whole save+launch wait, and always clear it
+    // in a `finally` so a save/readiness refusal or an error can never leave it
+    // stuck open (change: creator-launch-liftoff). On success `nav(...)` unmounts
+    // the Builder before the flag would matter.
+    setLaunching(true);
     try {
-      const { runId } = await launchRun({ gameId: game.id, testDrive });
-      nav(`/run/${game.id}/${runId}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : b.launchFailed;
-      // Out of free runs + credits → offer to open the wallet. In free mode
-      // launches never fail for billing, so just surface any other error.
-      if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, b.goToWallet)) {
-        nav('/wallet');
-      } else if (!PAYMENTS_ENABLED || !/credit|pro/i.test(msg)) {
-        await dialog.alert(msg);
+      // Don't launch on top of a failed save — the run would use stale/unsaved data.
+      if (!(await save())) { await dialog.alert(b.saveFailed); return; }
+      // ONE launch rule (change: builder-first-task-flow). This used to be four
+      // sequential guards, each naming a single offender in its own alert and
+      // returning, so three broken tasks cost three failed launch attempts. The
+      // rules now live in lib/gameReadiness, which also renders the persistent
+      // readiness panel, so the guard and the panel cannot disagree. A refused
+      // launch points at the panel instead of naming one offender.
+      if (!canLaunchGame(game)) {
+        setReadinessOpen(true);
+        await dialog.alert(b.launchBlockedSeeReadiness); return;
       }
+      try {
+        const { runId } = await launchRun({ gameId: game.id, testDrive });
+        nav(`/run/${game.id}/${runId}`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : b.launchFailed;
+        // Out of free runs + credits → offer to open the wallet. In free mode
+        // launches never fail for billing, so just surface any other error.
+        if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, b.goToWallet)) {
+          nav('/wallet');
+        } else if (!PAYMENTS_ENABLED || !/credit|pro/i.test(msg)) {
+          await dialog.alert(msg);
+        }
+      }
+    } finally {
+      setLaunching(false);
     }
   }
 
@@ -406,6 +420,11 @@ export default function BuilderPage() {
     // Fills the fixed-height main (App sets it for /build/*): header is fixed, the
     // body flexes to the remaining height. The page itself never scrolls.
     <div className="h-full flex flex-col rounded-2xl border border-[--rp-border] bg-[--surface-1]/60 overflow-hidden shadow-soft">
+      <LaunchLiftoff
+        open={launching}
+        title={t.launch.title}
+        messages={[t.launch.step1, t.launch.step2, t.launch.step3]}
+      />
       {/* ── Persistent shell header bar: logo · back · title · save · tabs · launch.
           This is the only header in the Builder (the global app nav is hidden),
           so the workspace gets the full viewport height. ── */}
@@ -528,8 +547,8 @@ export default function BuilderPage() {
           }}
         />
 
-        <Button variant="ghost" onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
-        <Button onClick={() => saveAndLaunch(false)} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
+        <Button variant="ghost" loading={launching} onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
+        <Button onClick={() => saveAndLaunch(false)} loading={launching} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
       </header>
 
       {/* ── Persistent failed-save banner ──────────────────────────────────

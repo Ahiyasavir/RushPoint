@@ -5,6 +5,7 @@ import type { Game, ScoringPreset } from '@rushpoint/shared';
 import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
+import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { OverflowMenu } from '../components/OverflowMenu';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
@@ -149,6 +150,10 @@ export default function DashboardPage() {
   // A creator destroyed a real game with the old single-click dialog.confirm, so
   // deleting now costs a deliberate act: type this game's title.
   const [deleting, setDeleting] = useState<Game | null>(null);
+  // Launch is a single opaque `launchRun` round-trip with no on-screen feedback
+  // until now (change: creator-launch-liftoff). While it is in flight we show the
+  // <LaunchLiftoff> overlay (the per-card button loading state is separate).
+  const [launching, setLaunching] = useState(false);
 
   // Double-click / re-entrancy guards (change: wave-b/async-action-guard). A
   // `useState` busy flag can't stop a second click in the SAME React batch —
@@ -274,6 +279,10 @@ export default function DashboardPage() {
       await dialog.alert(launchBlockedMessage(blocker));
       return;
     }
+    // Show the liftoff overlay for the launch wait, always cleared in `finally` so
+    // an error can never leave it stuck open (change: creator-launch-liftoff). On
+    // success `nav(...)` leaves the Dashboard before the flag would matter.
+    setLaunching(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
@@ -286,6 +295,8 @@ export default function DashboardPage() {
       } else {
         await dialog.alert(msg);
       }
+    } finally {
+      setLaunching(false);
     }
   }
 
@@ -337,6 +348,11 @@ export default function DashboardPage() {
 
   return (
     <div className="animate-fade-up">
+      <LaunchLiftoff
+        open={launching}
+        title={t.launch.title}
+        messages={[t.launch.step1, t.launch.step2, t.launch.step3]}
+      />
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <div className="relative overflow-hidden mb-10 pb-10 border-b border-[--rp-border]">

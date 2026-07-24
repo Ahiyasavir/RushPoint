@@ -1535,6 +1535,12 @@ const HE = {
       },
     },
   },
+  launch: {
+    title: 'מכינים את הריצה שלכם',
+    step1: 'מכינים את הריצה',
+    step2: 'יוצרים את קוד ההצטרפות',
+    step3: 'פותחים את השערים',
+  },
 };
 
 // ── English ────────────────────────────────────────────────────────────────
@@ -3057,6 +3063,12 @@ const EN: typeof HE = {
         body: 'Build a game, do a test run, then launch it for real. The question mark at the top of the screen brings this tour back whenever you want it.',
       },
     },
+  },
+  launch: {
+    title: 'Getting your run ready',
+    step1: 'Preparing your run',
+    step2: 'Creating the join code',
+    step3: 'Opening the gates',
   },
 };
 
