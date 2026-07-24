@@ -1005,7 +1005,7 @@ function DistanceBadge({ task }: { task: SafeTask }) {
   }, [coords?.lat, coords?.lng]);
   if (dist == null) return null;
   return (
-    <div className="text-xs text-zinc-500">
+    <div className="text-base font-semibold text-zinc-100 tabular-nums">
       📍 {dist < 1 ? t.task.metersAway({ m: Math.round(dist * 1000) }) : t.task.kmAway({ km: dist.toFixed(1) })}
     </div>
   );
@@ -1332,7 +1332,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
         ? <p className="text-sm text-zinc-500">{t.task.findingLocation}</p>
         : dist <= radius
           ? <p className="text-sm text-ink-fire font-medium">{t.task.youreHere}</p>
-          : <p className="text-sm text-zinc-500">{t.task.walkCloser({ dist: Math.round(dist), radius })}</p>}
+          : <p className="text-lg font-semibold text-zinc-100 tabular-nums">{t.task.walkCloser({ dist: Math.round(dist), radius })}</p>}
       {stuckHelp && (
         <>
           {/* Never blame a player for a fix that never arrived: that copy is about
