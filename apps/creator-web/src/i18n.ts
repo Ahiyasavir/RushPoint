@@ -204,6 +204,8 @@ const HE = {
     scoringSmartWeighted:     'נקודות לפי דרגת הקושי ומהירות הפתרון',
     settingsSummary: (mode: string, scoring: string) => `${mode} · ${scoring}`,
     settingsIntro:   'ככה המשחק ייווצר. אפשר לשנות הכל גם אחר כך.',
+    changeScoring:   'שינוי שיטת הניקוד',
+    templateMeta:    (stages: number, tasks: number) => `${stages} שלבים · ${tasks} משימות`,
     createFromTemplate: 'צור את המשחק',
     // First-run checklist. Every step is derived from the creator's real games
     // and runs, so it can never claim a step is behind them when it is not.
@@ -1766,6 +1768,8 @@ const EN: typeof HE = {
     scoringSmartWeighted:    'Points scale with how hard the task is and how fast it was solved',
     settingsSummary: (mode: string, scoring: string) => `${mode} · ${scoring}`,
     settingsIntro:   'This is how the game will be created. You can change any of it later.',
+    changeScoring:   'Change scoring',
+    templateMeta:    (stages: number, tasks: number) => `${stages} stages · ${tasks} tasks`,
     createFromTemplate: 'Create the game',
     onboarding: {
       title:    'Your first game, in five steps',

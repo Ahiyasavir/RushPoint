@@ -419,6 +419,15 @@ export default function BuilderPage() {
   );
   if (!game) return <Spinner label={b.loadingBuilder} />;
 
+  // Hide the Analytics tab until the game has actually been run: pre-launch it can
+  // only render an empty "no analytics yet" message, which reads as broken to a
+  // first-time creator. Once playCount > 0 the tab returns exactly as before.
+  const hasBeenRun = (game.playCount ?? 0) > 0;
+  const visibleTabIds = BUILDER_TAB_IDS.filter((id) => id !== 'analytics' || hasBeenRun);
+  // Guard the active-tab-hidden edge: if the current tab is no longer in the
+  // visible list (e.g. analytics was selected then hidden), fall back to 'build'.
+  const activeTab: BuilderTab = visibleTabIds.includes(tab) ? tab : 'build';
+
   return (
     // Fills the fixed-height main (App sets it for /build/*): header is fixed, the
     // body flexes to the remaining height. The page itself never scrolls.
@@ -515,14 +524,14 @@ export default function BuilderPage() {
 
         {/* Centered tab strip */}
         <nav role="tablist" data-tour="builder-tabs" className="flex-1 flex items-center justify-center gap-1">
-          {BUILDER_TAB_IDS.map((id) => (
+          {visibleTabIds.map((id) => (
             <button
               key={id}
               role="tab"
-              aria-selected={tab === id}
+              aria-selected={activeTab === id}
               onClick={() => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
               className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                tab === id
+                activeTab === id
                   ? 'bg-rp-fire/10 text-rp-fire'
                   : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
             >
@@ -578,10 +587,10 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {tab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} />}
-        {tab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
-        {tab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
-        {tab === 'analytics' && (
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} />}
+        {activeTab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
+        {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
+        {activeTab === 'analytics' && (
           <Card className="p-10 text-center space-y-3">
             <div className="text-3xl">📊</div>
             <p className="font-semibold text-[--ink-1]">{b.analyticsTitle}</p>

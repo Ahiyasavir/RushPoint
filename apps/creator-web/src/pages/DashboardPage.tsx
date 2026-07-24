@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import type { Game, ScoringPreset } from '@rushpoint/shared';
 import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
-import { Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
+import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { OverflowMenu } from '../components/OverflowMenu';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
@@ -64,9 +64,12 @@ function readStoredPreviewed(): string[] {
 // First-run checklist. Every step's state is derived by buildOnboardingChecklist
 // from the creator's real games and runs, so there is deliberately no
 // "mark as done" control here.
-function OnboardingChecklist({ checklist, onDismiss }: {
+function OnboardingChecklist({ checklist, onDismiss, onStep }: {
   checklist: { steps: { id: OnboardingStepId; done: boolean }[]; completedCount: number };
   onDismiss: () => void;
+  // Navigate the creator to where they'd DO an incomplete step. No mark-as-done:
+  // every step's completion still derives from real progress, this only routes.
+  onStep: (id: OnboardingStepId) => void;
 }) {
   const t = useT();
   const o = t.dashboard.onboarding;
@@ -92,22 +95,39 @@ function OnboardingChecklist({ checklist, onDismiss }: {
       <ol className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
         {checklist.steps.map((step, i) => {
           const copy = o.steps[step.id];
-          return (
-            <li key={step.id}
-              className={`flex items-start gap-3 rounded-xl border p-3 transition-colors ${
-                step.done ? 'border-rp-go/40 bg-rp-go/5' : 'border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40'}`}
-            >
+          const rowClass = `flex items-start gap-3 rounded-xl border p-3 transition-colors ${
+            step.done ? 'border-rp-go/40 bg-rp-go/5' : 'border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40'}`;
+          const inner = (
+            <>
               <span aria-hidden="true"
                 className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
                   step.done ? 'bg-rp-go/20 text-rp-go' : 'bg-[--surface-2] text-[--ink-3]'}`}
               >
                 {step.done ? '✓' : i + 1}
               </span>
-              <div className="min-w-0">
+              <div className="min-w-0 text-start">
                 <div className="text-sm font-semibold text-[--ink-1]">{copy.title}</div>
                 <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{copy.body}</p>
                 {step.done && <span className="sr-only">{o.stepDone}</span>}
               </div>
+            </>
+          );
+          // Completed steps stay inert. An incomplete step is a real <button>
+          // that routes the creator to where they'd finish it (keyboard-safe;
+          // no onClick on a non-interactive element).
+          return (
+            <li key={step.id}>
+              {step.done ? (
+                <div className={rowClass}>{inner}</div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onStep(step.id)}
+                  className={`${rowClass} w-full text-start hover:border-rp-fire/50 hover:bg-rp-fire/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50`}
+                >
+                  {inner}
+                </button>
+              )}
             </li>
           );
         })}
@@ -141,6 +161,9 @@ export default function DashboardPage() {
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<GameTemplate | null>(null);
   const [chosenPreset, setChosenPreset] = useState<ScoringPreset>('smart_weighted');
+  // Scoring is an easy-wizard default: Create proceeds on the template's own
+  // preset unless the creator opens this disclosure to change it.
+  const [showScoring, setShowScoring] = useState(false);
   // Picking a template card reveals a settings + "Create" panel that often sits
   // below the fold, so the creator sees only a highlight and thinks nothing happened.
   // Bring it into view and land focus on the Create button whenever the choice changes.
@@ -382,6 +405,14 @@ export default function DashboardPage() {
     setDismissed(true);
     try { localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1'); } catch { /* storage unavailable */ }
   }
+  // Route an incomplete checklist step to where the creator would finish it.
+  // With no game yet, "create/add" opens the template picker; otherwise every
+  // step lands in the first game's Builder. Navigation only — no state change.
+  function onChecklistStep() {
+    const firstGameId = games?.[0]?.id;
+    if (firstGameId) nav(`/build/${firstGameId}`);
+    else setPicking(true);
+  }
   const firstName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? d.creatorFallback;
 
   return (
@@ -454,9 +485,11 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* ── First-run checklist (change: creator-onboarding-and-plain-language) ── */}
-      {checklist.visible && (
-        <OnboardingChecklist checklist={checklist} onDismiss={dismissChecklist} />
+      {/* ── First-run checklist (change: creator-onboarding-and-plain-language) ──
+          Suppressed at zero games: the empty state below is then the single focal
+          "create your first game" CTA, not a checklist stacked over an identical one. */}
+      {games.length > 0 && checklist.visible && (
+        <OnboardingChecklist checklist={checklist} onDismiss={dismissChecklist} onStep={onChecklistStep} />
       )}
 
       {/* ── Empty state ───────────────────────────────────────────────────── */}
@@ -686,6 +719,10 @@ export default function DashboardPage() {
               <div className="grid sm:grid-cols-2 gap-2.5">
                 {TEMPLATES.map((tpl) => {
                   const selected = chosen?.key === tpl.key;
+                  // Preview what the card yields. `build()` is pure; called once per
+                  // card render just to count its stages and tasks.
+                  const built = tpl.build();
+                  const tplTasks = built.reduce((sum, st) => sum + st.tasks.length, 0);
                   return (
                   <button key={tpl.key} disabled={busy}
                     onClick={() => { setChosen(tpl); setChosenPreset(tpl.scoringPreset); }}
@@ -696,6 +733,7 @@ export default function DashboardPage() {
                     <div className="min-w-0">
                       <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{templateLabel(tpl.key, t)}</div>
                       <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{templateDescription(tpl.key, t)}</div>
+                      <div className="text-[10px] text-[--ink-3] mt-1 font-medium tabular-nums">{d.templateMeta(built.length, tplTasks)}</div>
                     </div>
                   </button>
                   );
@@ -708,20 +746,28 @@ export default function DashboardPage() {
               {chosen && (
                 <div ref={chosenPanelRef} className="mt-4 rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40 p-4">
                   <p className="text-[11px] text-[--ink-3] mb-3">{d.settingsIntro}</p>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <Label>{d.modeLabel}</Label>
-                      <p className="text-sm text-[--ink-2]">{describeGameSettings(chosen.mode, chosenPreset, t).mode}</p>
-                    </div>
-                    <div>
-                      <Label>{d.scoringLabel}</Label>
-                      <Select value={chosenPreset} onChange={(e) => setChosenPreset(e.target.value as ScoringPreset)}>
-                        <option value="time_only">{d.scoringTimeOnly}</option>
-                        <option value="fixed_points_speed">{d.scoringFixedPointsSpeed}</option>
-                        <option value="smart_weighted">{d.scoringSmartWeighted}</option>
-                      </Select>
-                    </div>
+                  <div className="mb-3">
+                    <Label>{d.modeLabel}</Label>
+                    <p className="text-sm text-[--ink-2]">{describeGameSettings(chosen.mode, chosenPreset, t).mode}</p>
                   </div>
+                  {/* The template sets a sensible scoring preset; Create uses it as
+                      is. Scoring only surfaces on demand, with its one-line
+                      description — no unexplained decision before the game exists. */}
+                  <Advanced
+                    dense
+                    title={d.changeScoring}
+                    meta={b.presetLabels[chosenPreset].name}
+                    open={showScoring}
+                    onToggle={() => setShowScoring((v) => !v)}
+                  >
+                    <Label>{d.scoringLabel}</Label>
+                    <Select value={chosenPreset} onChange={(e) => setChosenPreset(e.target.value as ScoringPreset)}>
+                      <option value="time_only">{d.scoringTimeOnly}</option>
+                      <option value="fixed_points_speed">{d.scoringFixedPointsSpeed}</option>
+                      <option value="smart_weighted">{d.scoringSmartWeighted}</option>
+                    </Select>
+                    <p className="text-[11px] text-[--ink-3] leading-relaxed">{b.presetLabels[chosenPreset].desc}</p>
+                  </Advanced>
                   <Button
                     className="mt-4 w-full"
                     disabled={busy}
