@@ -10,6 +10,7 @@ import { ShareSheet } from '../components/ShareSheet';
 import { useAuth } from '../components/AuthGate';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { classifyBillingError } from '../lib/callErrors';
+import { formatTxDate } from '../lib/formatTxDate';
 import { useT } from '../components/LanguageContext';
 
 const PACKAGE_ORDER: EventPackageId[] = ['starter', 'standard', 'pro_pack'];
@@ -197,7 +198,7 @@ export default function WalletPage() {
               <div key={tx.id} className="flex items-center justify-between py-2.5 text-sm">
                 <div className="min-w-0">
                   <div className="text-[--ink-1] font-medium truncate">{txLabel(tx, w)}</div>
-                  <div className="text-[11px] text-[--ink-3]">{new Date(tx.createdAt).toLocaleDateString()}</div>
+                  <div className="text-[11px] text-[--ink-3]">{formatTxDate(tx.createdAt)}</div>
                 </div>
                 <div className="text-[--ink-2] font-mono text-xs whitespace-nowrap ps-3">{txAmount(tx)}</div>
               </div>
