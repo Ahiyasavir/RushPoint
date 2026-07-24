@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
@@ -101,11 +101,17 @@ function useCallFailureToast() {
 
 export default function RunConsolePage() {
   const { gameId, runId } = useParams();
+  const nav = useNavigate();
   const { user } = useAuth();
   const t = useT();
   const reportFailure = useCallFailureToast();
   const ownerUid = user!.uid;
   const [run, setRun] = useState<Run | null>(null);
+  // Run-doc resolution flags (change: run-console-run-not-found). notFound fires
+  // ONLY after a real snapshot reports !exists() (never before the first
+  // snapshot), so a normal pre-first-snapshot null is not misread as not-found.
+  const [runNotFound, setRunNotFound] = useState(false);
+  const [runLoadErr, setRunLoadErr] = useState(false);
   const [teams, setTeams] = useState<RunTeamRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [staffPin, setStaffPin] = useState<string | null>(null);
@@ -133,7 +139,14 @@ export default function RunConsolePage() {
   useEffect(() => {
     if (!gameId || !runId) return;
     const ref = doc(db, `users/${ownerUid}/games/${gameId}/runs/${runId}`);
-    return onSnapshot(ref, (snap) => snap.exists() && setRun(snap.data() as Run));
+    return onSnapshot(
+      ref,
+      (snap) => {
+        if (snap.exists()) { setRun(snap.data() as Run); setRunNotFound(false); setRunLoadErr(false); }
+        else { setRunNotFound(true); }
+      },
+      (e) => { console.warn('[runConsole] run-doc listener failed:', e); setRunLoadErr(true); },
+    );
   }, [gameId, runId, ownerUid]);
 
   // Live unacknowledged SOS / alerts (owner reads its own run's alerts).
@@ -511,7 +524,20 @@ export default function RunConsolePage() {
     finally { setBusy(false); }
   }
 
-  if (!run) return <Spinner label={t.runConsole.loadingRun} />;
+  if (!run) {
+    if (runNotFound || runLoadErr) {
+      return (
+        <div className="max-w-2xl mx-auto animate-fade-up">
+          <Card className="p-8 text-center">
+            <div className="text-3xl mb-3">⚠️</div>
+            <p className="text-sm text-[--ink-2] mb-4">{t.runConsole.runNotFound}</p>
+            <Button onClick={() => nav('/live')}>{t.runConsole.backToRuns}</Button>
+          </Card>
+        </div>
+      );
+    }
+    return <Spinner label={t.runConsole.loadingRun} />;
+  }
 
   const finished = run.status === 'finished';
   const rc = t.runConsole;
