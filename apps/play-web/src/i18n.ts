@@ -116,6 +116,9 @@ const HE = {
   },
   task: {
     routing: 'מחפש את המשימה הבאה שלכם…',
+    workingChecking: 'בודקים את התשובה…',
+    workingLocating: 'מאתרים את היעד הבא…',
+    workingPrepping: 'מכינים את המשימה…',
     routingError: 'לא הצלחנו לאחזר את המשימה הבאה.',
     retryRouting: 'נסו שוב',
     outOfBoundsTitle: 'אתם מחוץ לאזור המשחק',
@@ -683,6 +686,9 @@ const EN: typeof HE = {
   },
   task: {
     routing: 'Finding your next task…',
+    workingChecking: 'Checking your answer…',
+    workingLocating: 'Locating your next mission…',
+    workingPrepping: 'Prepping your mission…',
     routingError: 'Could not get your next task.',
     retryRouting: 'Try again',
     outOfBoundsTitle: "You're outside the play area",

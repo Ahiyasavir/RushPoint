@@ -21,6 +21,8 @@ import { quizAttemptGuard } from '../lib/interaction';
 import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
+import { Working } from './Working';
+import { feedback } from '../lib/sound';
 import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
   canCompleteWithoutLocation,
@@ -422,21 +424,19 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     // routingError branch already offers, so a slow assignment is never a
     // motionless dead end (change: play-no-silent-failures).
     return (
-      <Card className="p-6 text-center space-y-3">
-        <div className="flex items-center justify-center gap-2">
-          <span aria-hidden="true" className="w-5 h-5 rounded-full border-2 border-accent/30 border-t-accent animate-spin shrink-0" />
-          <p role="status" aria-live="polite" className="text-sm text-zinc-500">{t.task.routing}</p>
-        </div>
-        {shouldOfferRetry(routingWaitMs, routingAttempt) && (
-          <Button variant="ghost" data-testid="routing-retry" onClick={() => {
-            // Clear the single-flight guard: the player explicitly asked for
-            // another attempt, and without this the effect would short-circuit.
-            routingInFlight.current = false;
-            setRoutingAttempt((n) => n + 1);
-          }}>
-            {t.task.retryRouting}
-          </Button>
-        )}
+      <Card className="p-6 text-center">
+        <Working messages={[t.task.workingChecking, t.task.workingLocating, t.task.workingPrepping]}>
+          {shouldOfferRetry(routingWaitMs, routingAttempt) && (
+            <Button variant="ghost" data-testid="routing-retry" onClick={() => {
+              // Clear the single-flight guard: the player explicitly asked for
+              // another attempt, and without this the effect would short-circuit.
+              routingInFlight.current = false;
+              setRoutingAttempt((n) => n + 1);
+            }}>
+              {t.task.retryRouting}
+            </Button>
+          )}
+        </Working>
       </Card>
     );
   }
@@ -469,7 +469,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // synthetic at-the-spot coords (that would leak a hidden task's secret location and
   // pollute the movement heatmap). Callers decide when omission is allowed.
   async function submitCheckIn(coords?: { lat: number; lng: number }) {
-    try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); onChanged(); }
+    try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); onChanged(); }
     catch (e) { setMsg(submitError(e, t.task.failed)); }
     finally { end(); }
   }
@@ -543,6 +543,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     clearMsg();
     try {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
+      feedback('task');
       onChanged();
     } catch (e) {
       showError(e instanceof Error && e.message.includes('not-controller') ? t.devices.controlMoved : t.task.wrongCode);
@@ -637,7 +638,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text, ...(coords ?? {}) });
-        if (res.correct) onChanged();
+        if (res.correct) { feedback('task'); onChanged(); }
         else applyAnswerCost(res, t.task.notQuite);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
@@ -694,7 +695,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (!begin()) return Promise.resolve(true);
     clearMsg();
     return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
-      .then(() => { onChanged(); return true; })
+      .then(() => { feedback('task'); onChanged(); return true; })
       .catch((e) => { setMsg(submitError(e, t.task.checkinFailed)); return false; })
       .finally(() => end());
   }

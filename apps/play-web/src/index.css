@@ -72,6 +72,17 @@ body {
 @keyframes rp-shimmer {
   100% { transform: translateX(100%); }
 }
+/* Indeterminate "working, you're advancing" sweep: a short fill runs from the
+   reading start to the reading end, so it reads as forward motion, not a chasing
+   ring. The track uses logical inset so it works in LTR and RTL alike. */
+@keyframes rp-working {
+  0%   { inset-inline-start: -40%; width: 40%; }
+  50%  { width: 55%; }
+  100% { inset-inline-start: 100%; width: 40%; }
+}
+.rp-working-sweep {
+  animation: rp-working 1.6s ease-in-out infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
@@ -80,4 +91,5 @@ body {
     scroll-behavior: auto !important;
   }
   .rp-skeleton::after { animation: none; }
+  .rp-working-sweep { animation: none; }
 }
