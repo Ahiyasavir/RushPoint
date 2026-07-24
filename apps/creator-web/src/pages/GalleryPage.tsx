@@ -8,6 +8,7 @@ import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import GalleryMap, { type MapPoint } from '../components/GalleryMap';
 import GalleryTaskDetailModal from '../components/GalleryTaskDetailModal';
+import GalleryGameDetailModal from '../components/GalleryGameDetailModal';
 import { isValidCoord, isPlottablePublicTask, publicTaskMapCoverage, isCoarsePublicPoint } from '@rushpoint/shared';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useT } from '../components/LanguageContext';
@@ -41,6 +42,10 @@ export default function GalleryPage() {
   // whole sanitized document is already in `tasks`, so pressing a card opens the
   // detail from memory and fetches nothing.
   const [detailTask, setDetailTask] = useState<PublicTask | null>(null);
+  // The game whose full detail is open (change: gallery-game-card-preview). The
+  // whole sanitized document is already in `games`, so pressing a card opens the
+  // detail from memory and fetches nothing — the mission-card pattern, for games.
+  const [detailGame, setDetailGame] = useState<PublicGame | null>(null);
   // Like state per item id, seeded from the search response's `likedIds` so the
   // heart renders correctly on first paint. All arithmetic lives in lib/likeState.
   const [likes, setLikes] = useState<Record<string, LikeView>>({});
@@ -239,27 +244,47 @@ export default function GalleryPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {games.map((pg) => (
-            <Card key={pg.id} className={`p-4 flex flex-col gap-2.5 scroll-mt-20 transition ${focusId === pg.id ? 'ring-2 ring-rp-fire' : ''}`}>
-              <div id={`game-${pg.id}`} className="flex items-start justify-between gap-2">
-                <h3 className="font-brand font-bold text-[--ink-1] leading-snug flex-1">{pg.title}</h3>
-                <Badge color="cyan">{MODE_LABEL[pg.mode] ?? pg.mode}</Badge>
+            <Card key={pg.id} className={`scroll-mt-20 transition ${focusId === pg.id ? 'ring-2 ring-rp-fire' : ''}`}>
+              {/* Pressing a game card opens its full read-only detail (change:
+                  gallery-game-card-preview) — the mission-card affordance, for
+                  games. A role="button" div, not a <button>: the card contains the
+                  interactive like + Copy controls, and nested interactive content
+                  inside a <button> is invalid HTML and keyboard-unreachable. */}
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={pg.title}
+                onClick={() => setDetailGame(pg)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailGame(pg); }
+                }}
+                className="p-4 flex flex-col gap-2.5 h-full cursor-pointer rounded-2xl
+                  focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+              >
+                <div id={`game-${pg.id}`} className="flex items-start justify-between gap-2">
+                  <h3 className="font-brand font-bold text-[--ink-1] leading-snug flex-1">{pg.title}</h3>
+                  <Badge color="cyan">{MODE_LABEL[pg.mode] ?? pg.mode}</Badge>
+                </div>
+                <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{pg.description}</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                  <span>{gl.stages(pg.stageCount)}</span>
+                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                  <span>{gl.tasks(pg.taskCount)}</span>
+                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                  <span>~{pg.estimatedTotalMinutes}m</span>
+                  <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
+                  <span>{gl.plays(pg.playCount)}</span>
+                </div>
+                {/* Tags (change: game-task-tags) — publicGames has carried them since
+                    the gallery existed; nothing had ever rendered them. */}
+                <TagChips tags={pg.tags} more={gl.moreTags} />
+                <div><LikeButton {...likeProps('game', pg.id)} /></div>
+                {pg.approxLocation?.label && <span className="text-[11px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
+                {/* stopPropagation so a Copy tap duplicates the game WITHOUT also
+                    opening the detail behind it. */}
+                <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={(e) => { e.stopPropagation(); void copyAction.run(pg); }}>{gl.copyBtn}</Button>
               </div>
-              <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{pg.description}</p>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
-                <span>{gl.stages(pg.stageCount)}</span>
-                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                <span>{gl.tasks(pg.taskCount)}</span>
-                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                <span>~{pg.estimatedTotalMinutes}m</span>
-                <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                <span>{gl.plays(pg.playCount)}</span>
-              </div>
-              {/* Tags (change: game-task-tags) — publicGames has carried them since
-                  the gallery existed; nothing had ever rendered them. */}
-              <TagChips tags={pg.tags} more={gl.moreTags} />
-              <div><LikeButton {...likeProps('game', pg.id)} /></div>
-              {pg.approxLocation?.label && <span className="text-[11px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
-              <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={() => void copyAction.run(pg)}>{gl.copyBtn}</Button>
             </Card>
           ))}
         </div>
@@ -315,6 +340,15 @@ export default function GalleryPage() {
 
       {detailTask && (
         <GalleryTaskDetailModal task={detailTask} onClose={() => setDetailTask(null)} />
+      )}
+
+      {detailGame && (
+        <GalleryGameDetailModal
+          game={detailGame}
+          onClose={() => setDetailGame(null)}
+          onCopy={() => void copyAction.run(detailGame)}
+          copyBusy={copyAction.isBusy(detailGame.id)}
+        />
       )}
     </div>
   );

@@ -340,6 +340,14 @@ const HE = {
     typeAboutSequence:   'כמה שלבים בסדר קבוע, כולם באותה נקודה.',
     typeAboutSurvey:     'שאלה בלי תשובה נכונה, לאיסוף דעות.',
     typeAboutUnknown:    'סוג משימה שגרסת הקונסולה הזו עדיין לא מכירה.',
+    // תצוגת פרטי משחק (change: gallery-game-card-preview)
+    gameDetailTitle:     'פרטי המשחק',
+    detailMode:          'מצב משחק',
+    detailLength:        'משך משוער',
+    detailRequirement:   'דרישת מיקום',
+    detailLocation:      'אזור',
+    reqGps:              'דרוש GPS',
+    reqAnywhere:         'מכל מקום',
   },
   wallet: {
     title:          'חיוב וקרדיטים',
@@ -1872,6 +1880,14 @@ const EN: typeof HE = {
     typeAboutSequence:   'Several steps in a fixed order, all at the same spot.',
     typeAboutSurvey:     'A question with no right answer, for collecting opinions.',
     typeAboutUnknown:    'A mission type this console version does not know yet.',
+    // Game detail view (change: gallery-game-card-preview)
+    gameDetailTitle:     'Game details',
+    detailMode:          'Play mode',
+    detailLength:        'Estimated length',
+    detailRequirement:   'Location requirement',
+    detailLocation:      'Area',
+    reqGps:              'GPS required',
+    reqAnywhere:         'Anywhere',
   },
   wallet: {
     title:          'Billing & credits',
