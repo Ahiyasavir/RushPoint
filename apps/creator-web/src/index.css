@@ -17,6 +17,10 @@
   --ink-1: #0A0C1A;
   --ink-2: #3D4259;
   --ink-3: #7B82A0;
+  /* One step fainter than --ink-3 for tiny count badges (StageRail / RunConsole
+     section counts, Builder exclusive-groups hint). Was referenced but never
+     defined, so those spans fell back to the inherited color. */
+  --ink-4: #A6ABC0;
 
   --rp-fire:   #FF5722;
   --rp-amber:  #FFB300;
@@ -64,6 +68,7 @@ html.dark {
   --ink-1: #E8EAFF;
   --ink-2: #8890B8;
   --ink-3: #464D6E;
+  --ink-4: #363B54;
 
   --rp-bg: #07080F;
   --rp-bg-elevated: #0D0E1A;
