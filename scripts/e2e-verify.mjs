@@ -4419,6 +4419,29 @@ async function main() {
   await signInAnonymously(heldKid.auth);
   await heldKid.call('joinRun', { code: c6, displayName: 'Unapproved' });
   const heldId = heldKid.auth.currentUser.uid;
+
+  // ── Assignment-side gate (change: consent-gate-routing) ────────────────────
+  // The hold above only ever stopped `startTeams` from LAUNCHING a held team.
+  // Nothing stopped that same team from calling `requestNextTask` directly and
+  // self-assigning a real-world task — reserving a station slot and routing the
+  // device toward a map pin before any guardian approved. Assert the direct call
+  // is refused, with no side effects: no taskId, the documented reason, and the
+  // run's station slot count for the only task in this game untouched (0 before,
+  // 0 after — nothing was ever reserved for a held team).
+  const consentRunPath = `users/${creatorCred.user.uid}/games/${g6}/runs/${r6}`;
+  const countsBeforeHeldRequest = (await creator.getDocAt(consentRunPath)).data?.taskCounts ?? {};
+  const heldRequest = await heldKid.call('requestNextTask', {});
+  check('consent: requestNextTask directly on a held team is DENIED, not assigned',
+    heldRequest?.taskId === null && heldRequest?.reason === 'guardian_consent',
+    JSON.stringify(heldRequest));
+  const countsAfterHeldRequest = (await creator.getDocAt(consentRunPath)).data?.taskCounts ?? {};
+  check('consent: a denied held-team request reserves no station slot (taskCounts unchanged)',
+    JSON.stringify(countsBeforeHeldRequest) === JSON.stringify(countsAfterHeldRequest),
+    JSON.stringify({ before: countsBeforeHeldRequest, after: countsAfterHeldRequest }));
+  const heldTeamAfterRequest = await creator.getDocAt(`${consentRunPath}/teams/${heldId}`);
+  check('consent: a denied held-team request never sets activeTaskId',
+    !heldTeamAfterRequest.data?.activeTaskId, JSON.stringify(heldTeamAfterRequest.data?.activeTaskId));
+
   const start3 = await creator.call('startTeams', { gameId: g6, runId: r6 });
   check('consent: startTeams REPORTS the hold instead of claiming success over a no-op',
     start3?.launched === 0 && start3?.heldForConsent === 1, JSON.stringify(start3));
@@ -4465,6 +4488,11 @@ async function main() {
   const releasedState = await heldKid.call('getMyTeamState', { code: c6 });
   check('consent: holdReason clears to null once consent is recorded',
     releasedState?.holdReason === null, JSON.stringify(releasedState?.holdReason));
+  // Once launched, the same call that was denied above now routes normally —
+  // the gate only ever blocked the HELD state, never the team going forward.
+  const releasedRequest = await heldKid.call('requestNextTask', { lat: 0, lng: 0 });
+  check('consent: requestNextTask succeeds normally once consent is granted and the team is launched',
+    !!releasedRequest?.taskId, JSON.stringify(releasedRequest));
   const releasedRows = (await creator.call('listRunTeams', { gameId: g6, runId: r6 }))?.teams ?? [];
   check('consent: no console row is flagged held once every team has started',
     releasedRows.length === 2 && releasedRows.every((t) => t.heldForConsent === false),

@@ -125,6 +125,9 @@ import { assignTask, releaseTask, computeSkillRatio, buildRecommendations, withL
 import type { NoAssignmentReason } from '../routing/assignNextTask';
 import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
+// Guardian-consent assignment gate (change: consent-gate-routing): the pure,
+// total predicate that decides whether a team may be assigned a task at all.
+import { canReceiveTaskAssignment } from './consentGate';
 import { buildCompletedPins } from './completedPins';
 import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
@@ -3238,7 +3241,7 @@ export async function assignNextInActiveStage(
   // other caller (requestNextTask, completeTask's reassign, the poll sweep…)
   // is unaffected.
   preloadedGame?: Game,
-): Promise<{ taskId?: string; reason?: NoAssignmentReason }> {
+): Promise<{ taskId?: string; reason?: NoAssignmentReason | 'guardian_consent' }> {
   let game: Game;
   if (preloadedGame) {
     game = preloadedGame;
@@ -3251,6 +3254,18 @@ export async function assignNextInActiveStage(
   const teamSnap = await teamRef.get();
   if (!teamSnap.exists) return {};
   const team = teamSnap.data() as RunTeam;
+
+  // Guardian-consent gate (consent-gate-routing): a team held on guardian consent
+  // (`launched !== true`) must never be assigned a task — that reserves a station
+  // slot, sets activeTaskId and routes the team toward a real-world location
+  // BEFORE a guardian has approved. This is the single choke point every caller
+  // (requestNextTask, startTeams, completeTask's reassign, the poll sweep, …)
+  // funnels through, so checking here covers all of them. Placed before every
+  // other read/write in this function so a held team causes zero side effects —
+  // no slot reserved, no stage/expiry sweep persisted, activeTaskId stays unset.
+  // `completeTaskForTeam` already blocks the matching GRADING path with the same
+  // `team.launched !== true` check; this closes the ASSIGNMENT-side gap.
+  if (!canReceiveTaskAssignment(team)) return { reason: 'guardian_consent' };
 
   // Poll re-check: a scheduled-release stage that has since opened gets unlocked
   // here, so a team waiting on a timed drop advances the moment its gate opens.
