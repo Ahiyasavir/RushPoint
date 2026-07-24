@@ -152,6 +152,33 @@ for (const rel of SEED_SOURCES) {
   }
 }
 
+// ─── The seed self-heals legacy publicTasks (gallery-precise-task-location) ───
+//
+// A `publicTasks` document written before the precise-location rule keeps its
+// legacy shape (exact `coordinates`, no `approxLocation`) forever: the demo games
+// are seed-if-present and a creator's own games are never re-seeded, so nothing
+// ever repaired them and every located mission silently vanished from the gallery
+// map. seed-local.mjs now runs a repair sweep on every boot, reusing the SAME
+// shared rule (`repairPublicTask`) the production backfill applies. This asserts
+// that sweep is present and wired, so it can't be quietly dropped — which would
+// re-open the "no missions on the map" bug on the next fresh emulator.
+{
+  const rel = 'scripts/seed-local.mjs';
+  console.log(`\n▶ ${rel} (self-heal sweep)`);
+  const src = readFileSync(join(root, rel), 'utf8');
+  ok(/repairPublicTask\b/.test(src) && /mayNeedPublicTaskRepair\b/.test(src),
+    `${rel}: imports the shared repairPublicTask / mayNeedPublicTaskRepair rule`);
+  ok(/from\s+'@rushpoint\/shared'/.test(src),
+    `${rel}: sources the repair rule from @rushpoint/shared (single source of truth)`);
+  ok(/async function repairPublicTaskAreas\s*\(/.test(src),
+    `${rel}: defines the repairPublicTaskAreas sweep`);
+  ok(/await\s+repairPublicTaskAreas\s*\(\s*\)/.test(src),
+    `${rel}: runs the sweep from main() on every seed/boot`);
+  // The legacy exact point must be DELETED, not left beside the new area.
+  ok(/coordinates\s*:\s*DELETE/.test(src),
+    `${rel}: deletes the legacy exact "coordinates" as it writes the area`);
+}
+
 console.log(`\n${failures.length === 0
   ? `✅ ALL ${passed} PUBLIC-TASK SEED-SHAPE ASSERTIONS PASSED`
   : `❌ ${failures.length} failure(s):\n   - ${failures.join('\n   - ')}`}`);

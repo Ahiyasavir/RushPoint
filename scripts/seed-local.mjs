@@ -7,7 +7,7 @@
 //   Join codes:     PLAY01  (and 1234)
 
 import admin from 'firebase-admin';
-import { publicTaskLocation } from '@rushpoint/shared';
+import { publicTaskLocation, repairPublicTask, mayNeedPublicTaskRepair } from '@rushpoint/shared';
 import { seedSansana, GAME_ID as SANSANA_GAME_ID } from './lib/sansana-game-def.mjs';
 import { seedQaGame, GAME_ID as QA_GAME_ID, CODE as QA_CODE } from './lib/qa-game-def.mjs';
 import { seedSpyAcademy, GAME_ID as SPY_GAME_ID, CODE as SPY_CODE } from './lib/spy-academy-game-def.mjs';
@@ -222,6 +222,86 @@ async function seedDemo(now) {
   console.log('[seed] Done. Creator: creator@rushpoint.dev / test1234 · Join code: PLAY01');
 }
 
+// ── Self-healing repair of the public gallery map (gallery-precise-task-location) ──
+// The demo/QA/Sansana games are seed-if-present (skipped once they exist), and a
+// creator's own published games are never re-seeded at all — so a `publicTasks`
+// document written before the precise-location rule keeps its LEGACY shape
+// forever: an exact `coordinates` and NO `approxLocation`. The gallery map reads
+// only `approxLocation`, so every such mission silently vanishes from the map
+// (and any that carried the OLD coarse area sits ~1 km off). The maintenance
+// callable `backfillPublicTaskCoordinatesNow` fixes this in production, but
+// nothing triggers it in a dev/playtest emulator — which is why re-seeding never
+// changed what a creator saw.
+//
+// This sweep IS that repair, run on every boot. It reuses the SAME shared pure
+// rule the production backfill applies (`repairPublicTask`): resolve each public
+// task's authored source, then write the correct area (exact for an ordinary
+// located mission, a coarse ~1 km cell for a hideLocation mission, and none for
+// locationless/unplaced) and delete the legacy exact `coordinates`. Idempotent —
+// a conformant document is skipped, so a second boot is a no-op. Emulator-only
+// (this script never runs in production), so it carries no prod risk.
+const DELETE = admin.firestore.FieldValue.delete();
+
+function tasksOf(game) {
+  const out = new Map();
+  for (const stage of game?.stages ?? []) {
+    for (const task of stage.tasks ?? []) out.set(task.id, task);
+  }
+  return out;
+}
+
+async function repairPublicTaskAreas() {
+  const snap = await db.collection('publicTasks').get();
+  const gameCache = new Map();
+  const writes = [];
+  let repaired = 0, cleared = 0;
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    if (!mayNeedPublicTaskRepair(data)) continue;
+
+    let source = null;
+    if (data.ownerUid && data.sourceGameId) {
+      const key = `${data.ownerUid}/${data.sourceGameId}`;
+      let tasks = gameCache.get(key);
+      if (!tasks) {
+        let game;
+        try {
+          const g = await db.doc(`users/${data.ownerUid}/games/${data.sourceGameId}`).get();
+          game = g.exists ? g.data() : undefined;
+        } catch { game = undefined; }
+        tasks = tasksOf(game);
+        gameCache.set(key, tasks);
+      }
+      // Public id is `${gameId}_${taskId}`; strip the prefix (a task id may itself
+      // contain '_', so don't split on it).
+      const taskId = doc.id.startsWith(`${data.sourceGameId}_`)
+        ? doc.id.slice(data.sourceGameId.length + 1)
+        : doc.id;
+      source = tasks.get(taskId) ?? null;
+    }
+
+    const repair = repairPublicTask(data, source);
+    if (!repair) continue;
+    repaired++;
+    if (!repair.approxLocation) cleared++;
+    writes.push({ ref: doc.ref, data: { coordinates: DELETE, approxLocation: repair.approxLocation ?? DELETE } });
+  }
+
+  // Commit in ≤450-op chunks — a WriteBatch is hard-capped at 500.
+  for (let i = 0; i < writes.length; i += 450) {
+    const batch = db.batch();
+    for (const w of writes.slice(i, i + 450)) batch.set(w.ref, w.data, { merge: true });
+    await batch.commit();
+  }
+  if (repaired) {
+    console.log(`[seed] Repaired ${repaired} legacy public-task map pin(s) `
+      + `(${cleared} had no map location; the rest now carry their exact area).`);
+  } else {
+    console.log('[seed] Public gallery map already conformant — no pins to repair.');
+  }
+}
+
 async function main() {
   const now = new Date().toISOString();
 
@@ -233,6 +313,10 @@ async function main() {
   await ensureSansana(now);
   await ensureQaGame(now);
   await ensureSpyAcademy(now);
+
+  // Heal any legacy publicTasks (demo OR a creator's own games) so the gallery
+  // map shows every located mission at its correct spot — see repairPublicTaskAreas.
+  await repairPublicTaskAreas();
 }
 
 main().catch((err) => { console.error('[seed] Seed failed:', err); process.exit(1); });
