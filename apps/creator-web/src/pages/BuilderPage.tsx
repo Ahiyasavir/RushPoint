@@ -26,6 +26,7 @@ import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
+import { useAuth } from '../components/AuthGate';
 // One mapping from a rejection to copy a creator can act on
 // (change: creator-no-silent-failures).
 import { describeCallFailure, type CallFailure } from '../lib/callFeedback';
@@ -69,6 +70,28 @@ function MapSkeleton({ className = 'h-44' }: { className?: string }) {
 }
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+
+// One time "you are going live" confirmation (change: creator-first-launch-confirm).
+// A novice cannot tell the free Test run rehearsal from the real launch, so the
+// FIRST real launch a creator ever runs asks once, gated by a per uid localStorage
+// flag mirroring the guided tour's `rp-tour-seen`. After that first confirmed
+// launch, launches proceed with no dialog so experienced creators are never nagged.
+// The same key is shared with the Dashboard game card so confirming in either place
+// counts. Fails safe: a blocked / throwing localStorage reads as "not yet confirmed"
+// so the emotional check still shows once rather than being swallowed.
+const FIRST_LAUNCH_CONFIRMED_PREFIX = 'rp-first-launch-confirmed';
+function firstLaunchConfirmedKey(uid: string | null | undefined): string {
+  const clean = typeof uid === 'string' ? uid.trim() : '';
+  return `${FIRST_LAUNCH_CONFIRMED_PREFIX}:${clean || 'anon'}`;
+}
+function hasConfirmedFirstLaunch(uid: string | null | undefined): boolean {
+  try { return localStorage.getItem(firstLaunchConfirmedKey(uid)) === '1'; }
+  catch { return false; }
+}
+function markFirstLaunchConfirmed(uid: string | null | undefined): void {
+  try { localStorage.setItem(firstLaunchConfirmedKey(uid), '1'); }
+  catch { /* storage blocked: the confirm simply shows again next time */ }
+}
 
 /**
  * Keyboard arrow navigation for the Builder's drags (change: builder-dnd-groups).
@@ -192,6 +215,7 @@ function markGamePreviewed(gameId: string) {
 export default function BuilderPage() {
   const { gameId } = useParams();
   const nav = useNavigate();
+  const { user } = useAuth();
   const t = useT();
   const b = t.builder;
   const TAB_LABEL: Record<BuilderTab, string> = {
@@ -213,6 +237,11 @@ export default function BuilderPage() {
   // task with its message already visible.
   const [readinessOpen, setReadinessOpen] = useState(false);
   const [focusIssue, setFocusIssue] = useState<{ stageId: string; taskId: string; nonce: number } | null>(null);
+  // "Your game is ready" nudge (change: creator-ready-nudge). When nothing blocks
+  // the launch and the game has never been run, the green ready state is otherwise
+  // buried in the collapsed readiness pill; this surfaces a one line, dismissible
+  // banner near the launch controls so a first time creator knows they are done.
+  const [readyNudgeDismissed, setReadyNudgeDismissed] = useState(false);
   // Launch is a save + a single opaque `launchRun` round-trip with no on-screen
   // feedback until now (change: creator-launch-liftoff). While it is in flight we
   // show the <LaunchLiftoff> overlay and disable the launch buttons.
@@ -369,6 +398,16 @@ export default function BuilderPage() {
 
   async function saveAndLaunch(testDrive = false) {
     if (!game) return;
+    // The one time "am I sure" gate before a creator's FIRST real launch ever
+    // (change: creator-first-launch-confirm). Only the real launch is gated, never
+    // Test run, and only when the game is actually launchable (a broken game gets
+    // the readiness alert below instead, so the confirm never nags on top of it).
+    // A cancel just aborts before any liftoff overlay shows.
+    if (!testDrive && canLaunchGame(game) && !hasConfirmedFirstLaunch(user?.uid)) {
+      const ok = await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta);
+      if (!ok) return;
+      markFirstLaunchConfirmed(user?.uid);
+    }
     window.clearTimeout(saveTimer.current);
     // Show the liftoff overlay for the whole save+launch wait, and always clear it
     // in a `finally` so a save/readiness refusal or an error can never leave it
@@ -581,6 +620,31 @@ export default function BuilderPage() {
               {b.saveFailedRetry}
             </Button>
           )}
+        </div>
+      )}
+
+      {/* ── "Your game is ready" nudge (change: creator-ready-nudge) ──────────
+          Nothing blocks the launch AND the game has never been run, so the
+          creator can go live but has no obvious signal they are done. One line,
+          dismissible, right under the launch controls. It reuses the readiness
+          ready title and never shows once the game has a run or the creator
+          dismisses it. */}
+      {!readyNudgeDismissed && computeGameReadiness(game).length === 0 && (game.playCount ?? 0) === 0 && (
+        <div
+          role="status"
+          className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-go/40 bg-rp-go/10 px-4 py-2 text-xs text-[--ink-1]"
+        >
+          <span aria-hidden>✓</span>
+          <span className="font-semibold text-rp-go">{b.readinessReadyTitle}</span>
+          <span className="text-[--ink-2] text-start">{b.readyNudge}</span>
+          <button
+            type="button"
+            onClick={() => setReadyNudgeDismissed(true)}
+            aria-label={t.common.dismiss}
+            className="ms-auto shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 text-[11px] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+          >
+            {t.common.dismiss}
+          </button>
         </div>
       )}
 

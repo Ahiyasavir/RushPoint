@@ -61,11 +61,13 @@ export default function CreatorTour() {
   const step = currentTourStep(state, steps);
   const uid = user?.uid ?? '';
 
-  // ── Auto-start: only a creator with no record who does not already look
-  //    established. A returning creator is never interrupted; they get the "?".
-  //    BOTH signals are read per uid: a browser can hold several accounts, and
-  //    judging this creator by a colleague's game count is how a real first-timer
-  //    never saw the tour (change: post-review-fixes A).
+  // ── Auto-start is DISABLED: the tour is on-demand only (the header "?" button,
+  //    via restartCreatorTour). `shouldAutoStartTour` always returns false, so this
+  //    never fires — auto-launching the deep 15-step walkthrough on a brand new
+  //    creator's empty dashboard pointed its seven Builder steps at screens that
+  //    did not exist yet and buried the first-run checklist. The per-uid record /
+  //    established plumbing is kept intact so re-enabling a *scoped* welcome later
+  //    is a one-line predicate change, not a rewire (change: onboarding-overload-fix).
   useEffect(() => {
     if (!uid) return;
     const record = readTourRecord(readLocal(tourStorageKey(uid)));

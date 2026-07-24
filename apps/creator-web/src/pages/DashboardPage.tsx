@@ -61,6 +61,26 @@ function readStoredPreviewed(): string[] {
   try { return readPreviewedGames(localStorage.getItem(PREVIEWED_STORAGE_KEY)); } catch { return []; }
 }
 
+// One time "you are going live" confirmation, shared with the Builder header
+// (change: creator-first-launch-confirm). The FIRST real launch a creator ever
+// runs asks once, gated by a per uid localStorage flag; confirming here or in the
+// Builder counts, so an established creator is never nagged. Fails safe: a blocked
+// store reads as "not yet confirmed" so the check shows once rather than silently
+// vanishing. Test run is never gated.
+const FIRST_LAUNCH_CONFIRMED_PREFIX = 'rp-first-launch-confirmed';
+function firstLaunchConfirmedKey(uid: string | null | undefined): string {
+  const clean = typeof uid === 'string' ? uid.trim() : '';
+  return `${FIRST_LAUNCH_CONFIRMED_PREFIX}:${clean || 'anon'}`;
+}
+function hasConfirmedFirstLaunch(uid: string | null | undefined): boolean {
+  try { return localStorage.getItem(firstLaunchConfirmedKey(uid)) === '1'; }
+  catch { return false; }
+}
+function markFirstLaunchConfirmed(uid: string | null | undefined): void {
+  try { localStorage.setItem(firstLaunchConfirmedKey(uid), '1'); }
+  catch { /* storage blocked: the confirm simply shows again next time */ }
+}
+
 // First-run checklist. Every step's state is derived by buildOnboardingChecklist
 // from the creator's real games and runs, so there is deliberately no
 // "mark as done" control here.
@@ -328,6 +348,15 @@ export default function DashboardPage() {
     if (blocker) {
       await dialog.alert(launchBlockedMessage(blocker));
       return;
+    }
+    // The one time "am I sure" gate before a creator's FIRST real launch ever
+    // (change: creator-first-launch-confirm). Only the real launch is gated, never
+    // Test run, and only once the game is known launchable (the blocker check above
+    // already passed). Shares its flag with the Builder header.
+    if (!opts?.testDrive && !hasConfirmedFirstLaunch(user?.uid)) {
+      const ok = await dialog.confirm(t.builder.firstLaunchConfirmBody, t.builder.firstLaunchConfirmCta);
+      if (!ok) return;
+      markFirstLaunchConfirmed(user?.uid);
     }
     // Show the liftoff overlay for the launch wait, always cleared in `finally` so
     // an error can never leave it stuck open (change: creator-launch-liftoff). On

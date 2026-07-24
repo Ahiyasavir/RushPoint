@@ -362,20 +362,23 @@ export function tourRecordFor(state: TourState, steps: readonly TourStep[]): Tou
 /**
  * Whether the tour may greet this creator unprompted.
  *
- * `established` comes from the `rp-known-game-count:<uid>` signal via
- * `isEstablishedCreator`: a browser that has seen THIS ACCOUNT holding games is
- * not a first-timer, and the whole requirement is that a returning creator is
- * never interrupted. They still get the header help button.
+ * ALWAYS false: the deep 15-step walkthrough is now **on-demand only** (the
+ * header "?" help button, via `restartCreatorTour`). Auto-firing it on a brand
+ * new creator's EMPTY dashboard pointed seven Builder steps at screens that did
+ * not exist yet — "take me there" was dead and every anchored step degraded to a
+ * centred card over the (now clickable) first-run checklist. The Wave-A
+ * onboarding checklist is the first-run guide; the tour explains "what IS this?"
+ * whenever the creator asks for it (change: onboarding-overload-fix).
  *
- * Per uid, exactly like the record beside it: the signal used to be one global
- * key, so a second creator signing in on a colleague's browser inherited their
- * history and never saw the tour at all (change: post-review-fixes A).
+ * The parameters are retained so the seen-record / established plumbing around it
+ * stays intact and the predicate can be tightened again without a signature
+ * churn, but neither can make the tour interrupt a creator any more.
  */
-export function shouldAutoStartTour({ record, established }: {
+export function shouldAutoStartTour(_args: {
   record: TourRecord | null;
   established: boolean;
 }): boolean {
-  return record === null && !established;
+  return false;
 }
 
 // ── Presentation decisions (still pure) ────────────────────────────────────
