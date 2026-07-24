@@ -289,11 +289,13 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         )}
       </div>
 
-      {/* Viral footer — hidden for Pro runs (white-label) and entirely in free
-          mode (no payment/upsell surface). The ?ref tag credits the host with a
-          free run if a participant signs up as a creator. */}
-      {PAYMENTS_ENABLED && run.billingType !== 'pro' && (
-        <a href={`${creatorUrl()}/?ref=${team.ownerUid}`} target="_blank" rel="noreferrer"
+      {/* Viral footer — hidden only for Pro runs (white-label). The create-your-own
+          INVITE shows in both free and paid mode so every finisher gets a next step.
+          The ?ref REWARD (a free run credited to the host when a finisher signs up as
+          a creator) is a payments concept, so it is only appended when payments are on;
+          in free mode the CTA links to the plain creator URL (no dead ?ref param). */}
+      {run.billingType !== 'pro' && (
+        <a href={PAYMENTS_ENABLED ? `${creatorUrl()}/?ref=${team.ownerUid}` : creatorUrl()} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">
             <span>⚡</span> {t.final.poweredBy}
