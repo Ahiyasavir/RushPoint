@@ -392,13 +392,16 @@ export default function BuilderPage() {
         const { runId } = await launchRun({ gameId: game.id, testDrive });
         nav(`/run/${game.id}/${runId}`);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : b.launchFailed;
+        const msg = e instanceof Error ? e.message : '';
         // Out of free runs + credits → offer to open the wallet. In free mode
         // launches never fail for billing, so just surface any other error.
         if (PAYMENTS_ENABLED && /credit|pro/i.test(msg) && await dialog.confirm(msg, b.goToWallet)) {
           nav('/wallet');
         } else if (!PAYMENTS_ENABLED || !/credit|pro/i.test(msg)) {
-          await dialog.alert(msg);
+          // Generic failure: the raw server string is English, so show the
+          // localized copy and keep the raw error in the console.
+          console.error('[RushPoint] launch failed:', e);
+          await dialog.alert(b.launchFailed);
         }
       }
     } finally {

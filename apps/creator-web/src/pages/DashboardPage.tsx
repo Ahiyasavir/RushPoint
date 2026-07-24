@@ -287,13 +287,16 @@ export default function DashboardPage() {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : d.launchFailed;
+      const msg = e instanceof Error ? e.message : '';
       // Out of free runs + credits → route the creator to buy more. In free
       // mode launches never fail for billing, so just surface other errors.
       if (PAYMENTS_ENABLED && /credit|pro/i.test(msg)) {
         if (await dialog.confirm(msg, t.nav.wallet)) nav('/wallet');
       } else {
-        await dialog.alert(msg);
+        // Generic failure: the raw server string is English, so show the
+        // localized copy to the creator and keep the raw error in the console.
+        console.error('[RushPoint] launch failed:', e);
+        await dialog.alert(d.launchFailed);
       }
     } finally {
       setLaunching(false);
@@ -309,11 +312,19 @@ export default function DashboardPage() {
       setDeleting(null);
       void load(true);
     } catch (e) {
-      // The one expected failure: a run is still in progress. The server message
-      // names the access code, so surface it rather than a generic error.
-      const msg = e instanceof Error ? e.message : d.deleteFailed;
       setDeleting(null);
-      await dialog.alert(msg);
+      // The one expected failure: a run is still in progress. The server sends a
+      // `failed-precondition` whose message names the access code, so surface
+      // that text. Every other rejection is a raw English string a Hebrew-UI
+      // creator shouldn't see, so localize it and keep the raw error in console.
+      const code = (e as { code?: unknown }).code;
+      const bare = typeof code === 'string' ? code.replace(/^functions\//, '') : '';
+      if (bare === 'failed-precondition' && e instanceof Error) {
+        await dialog.alert(e.message);
+      } else {
+        console.error('[RushPoint] delete failed:', e);
+        await dialog.alert(d.deleteFailed);
+      }
     }
   }
 
