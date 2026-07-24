@@ -321,6 +321,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   const ackAction = useAsyncAction<[Alert], void>(ack, (a) => a.id);
   const adjustAction = useAsyncAction<[TeamRow, number], void>(adjust, (team) => team.id);
 
+  const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
 
   return (
     <div className="min-h-screen max-w-md mx-auto w-full px-5 py-6 flex flex-col">
@@ -358,12 +359,12 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-zinc-100 uppercase">{a.type}</div>
-                  <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {a.teamId.slice(0, 8)}</div>
+                  <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {nameFor(a.teamId)}</div>
                   {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
                   {a.lat != null && a.lng != null && (
                     <a
                       className="text-ink-fire text-xs underline"
-                      href={`https://www.google.com/maps?q=${a.lat},${a.lng}`}
+                      href={`https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}&travelmode=walking`}
                       target="_blank" rel="noreferrer"
                     >
                       {t.staff.openLocation}
