@@ -159,7 +159,7 @@ function ProfileCard({ s, initialName, onSaved }: { s: T['settings']; initialNam
       <Label>{s.displayName}</Label>
       <Input value={name} onChange={(e) => { setName(e.target.value); setStatus(null); }} maxLength={80} />
       <StatusLine status={status} />
-      <Button className="mt-3" disabled={busy || !dirty} onClick={save}>
+      <Button className="mt-3" disabled={busy || !dirty} loading={busy} onClick={save}>
         {busy ? s.nameSaving : s.nameSave}
       </Button>
     </Card>
@@ -205,7 +205,7 @@ function EmailCard({ s, currentEmail, isPasswordAccount, uid, onSaved }: {
           <Input type="password" value={pwd} onChange={(e) => { setPwd(e.target.value); setStatus(null); }}
             placeholder="••••••••" autoComplete="current-password" />
           <StatusLine status={status} />
-          <Button className="mt-3" disabled={busy || !newEmail.trim() || !pwd} onClick={save}>
+          <Button className="mt-3" disabled={busy || !newEmail.trim() || !pwd} loading={busy} onClick={save}>
             {busy ? s.emailChanging : s.emailChangeBtn}
           </Button>
         </>
@@ -256,7 +256,7 @@ function PasswordCard({ s, isPasswordAccount }: { s: T['settings']; isPasswordAc
             autoComplete="new-password"
             className={confirm && confirm !== next ? '!border-rp-alert/60' : ''} />
           <StatusLine status={status} />
-          <Button className="mt-3" disabled={busy || !current || !next || !confirm} onClick={save}>
+          <Button className="mt-3" disabled={busy || !current || !next || !confirm} loading={busy} onClick={save}>
             {busy ? s.passwordChanging : s.passwordChangeBtn}
           </Button>
         </>
@@ -368,7 +368,7 @@ function SignInMethodsCard({ s, providers, accountEmail, onChanged }: {
           <Input type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setStatus(null); }}
             autoComplete="new-password"
             className={confirm && confirm !== pwd ? '!border-rp-alert/60' : ''} />
-          <Button className="mt-3" disabled={busy !== null || !pwd || !confirm} onClick={() => attempt('password')}>
+          <Button className="mt-3" disabled={busy !== null || !pwd || !confirm} loading={busy === 'password'} onClick={() => attempt('password')}>
             {busy === 'password' ? s.addPasswordBusy : s.addPasswordBtn}
           </Button>
         </div>
@@ -379,7 +379,7 @@ function SignInMethodsCard({ s, providers, accountEmail, onChanged }: {
           <div className="text-sm font-semibold text-[--ink-1] mb-1">{s.linkGoogleTitle}</div>
           <p className="text-xs text-[--ink-3] mb-2">{s.linkGoogleDesc(accountEmail)}</p>
           <p className="text-xs text-[--ink-3] bg-[--surface-2] rounded-lg px-3 py-2.5 mb-3">{s.linkGoogleSameEmail}</p>
-          <Button variant="ghost" disabled={busy !== null} onClick={() => attempt('google')}>
+          <Button variant="ghost" disabled={busy !== null} loading={busy === 'google'} onClick={() => attempt('google')}>
             {busy === 'google' ? s.linkGoogleBusy : s.linkGoogleBtn}
           </Button>
         </div>
@@ -390,7 +390,7 @@ function SignInMethodsCard({ s, providers, accountEmail, onChanged }: {
           <Label>{s.passwordCurrent}</Label>
           <Input type="password" value={reauthPwd} onChange={(e) => setReauthPwd(e.target.value)}
             autoComplete="current-password" autoFocus />
-          <Button className="mt-3" disabled={busy !== null || !reauthPwd} onClick={confirmReauth}>
+          <Button className="mt-3" disabled={busy !== null || !reauthPwd} loading={busy !== null} onClick={confirmReauth}>
             {busy !== null ? s.reauthBusy : s.reauthConfirmBtn}
           </Button>
         </div>
@@ -442,7 +442,7 @@ function DataCard({ s }: { s: T['settings'] }) {
     <Card className="p-6">
       <div className="text-sm font-semibold text-[--ink-1] mb-1">{s.dataLabel}</div>
       <p className="text-xs text-[--ink-3] mb-4">{s.dataDesc}</p>
-      <Button variant="ghost" disabled={busy} onClick={exportData}>
+      <Button variant="ghost" disabled={busy} loading={busy} onClick={exportData}>
         {busy ? s.dataExporting : s.dataExportBtn}
       </Button>
       <StatusLine status={status} />

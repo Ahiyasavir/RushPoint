@@ -4,7 +4,7 @@ import type { WalletStatus, WalletTransaction, EventPackageId } from '@rushpoint
 import { EVENT_PACKAGES, PRO_MONTHLY_ILS, PRO_ANNUAL_ILS } from '@rushpoint/shared';
 import { getWalletStatus, purchaseCredits, subscribePro } from '../services/calls';
 import { db } from '../services/firebase';
-import { Button, Card, Spinner } from '../components/ui';
+import { Button, Card, Skeleton } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { useAuth } from '../components/AuthGate';
@@ -84,7 +84,35 @@ export default function WalletPage() {
   const busy: string | null = buyAction.busyKeys[0] ?? proAction.busyKeys[0] ?? null;
 
   if (!status) {
-    if (!statusErr) return <Spinner label={w.loading} />;
+    if (!statusErr) {
+      // Content-shaped skeleton mirroring the loaded layout (status card +
+      // package grid), the same idiom every other creator page uses on initial
+      // load instead of a bare spinner. Text-free (Skeleton is aria-hidden).
+      return (
+        <div className="max-w-2xl mx-auto animate-fade-up">
+          <Card className="p-6 mb-5">
+            <div className="flex items-center justify-between mb-5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-5 w-16" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          </Card>
+          <div className="grid sm:grid-cols-3 gap-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Card key={i} className="p-4 flex flex-col gap-3">
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-3 w-32" />
+                <Skeleton className="h-7 w-16" />
+                <Skeleton className="h-9 w-full mt-1" />
+              </Card>
+            ))}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="max-w-2xl mx-auto animate-fade-up">
         <Card className="p-8 text-center">
