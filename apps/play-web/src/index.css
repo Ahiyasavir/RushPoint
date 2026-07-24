@@ -83,6 +83,21 @@ body {
 .rp-working-sweep {
   animation: rp-working 1.6s ease-in-out infinite;
 }
+/* Optimistic card-out (change: optimistic-card-out): the just-answered task card
+   slides toward the reading end and fades, so a correct answer shows forward
+   motion at 0ms of the transition to the next mission. The distance is a CSS var
+   flipped for RTL so the card always exits toward the reading end (play-web is
+   Hebrew/RTL by default). Neutralized by the reduced-motion block below; the JS
+   timer — not this animation — is what actually advances the run. */
+@keyframes rp-card-exit {
+  to { opacity: 0; transform: translateX(var(--rp-card-exit-dx, 24px)); }
+}
+.rp-card-exit {
+  --rp-card-exit-dx: 24px;          /* LTR: reading end is to the right */
+  animation: rp-card-exit 220ms ease-in forwards;
+  will-change: transform, opacity;
+}
+[dir="rtl"] .rp-card-exit { --rp-card-exit-dx: -24px; } /* RTL default: reading end is left */
 @media (prefers-reduced-motion: reduce) {
   *, ::before, ::after {
     animation-duration: 0.01ms !important;
@@ -92,4 +107,5 @@ body {
   }
   .rp-skeleton::after { animation: none; }
   .rp-working-sweep { animation: none; }
+  .rp-card-exit { animation: none; }
 }

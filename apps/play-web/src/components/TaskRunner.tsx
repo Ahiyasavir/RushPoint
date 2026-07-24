@@ -23,6 +23,7 @@ import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
 import { feedback } from '../lib/sound';
+import { resolveCardExit } from '../lib/cardExit';
 import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
   canCompleteWithoutLocation,
@@ -124,6 +125,33 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // Single in-flight guard: a slow requestNextTask must not be re-fired on every
   // poll/re-render while the team is unassigned (thundering herd).
   const routingInFlight = useRef(false);
+
+  // Optimistic card-out (change: optimistic-card-out): on a server-confirmed
+  // success the outgoing task card plays a brief slide+fade before the run
+  // advances, so a correct answer shows forward motion at 0ms of the transition.
+  // Correctness NEVER depends on the animation — progression is driven only by a
+  // bounded JS timer (or a synchronous call under reduced motion), never by an
+  // animationend/transitionend event. So a dropped/janky/skipped animation still
+  // advances the run. `exiting` toggles the .rp-card-exit class on the card.
+  const [exiting, setExiting] = useState(false);
+  const exitTimer = useRef<number | null>(null);
+  // Clear a pending card-out timer on unmount so navigating away mid-exit is a
+  // harmless no-op (no double-advance, no setState on an unmounted component).
+  useEffect(() => () => { if (exitTimer.current !== null) window.clearTimeout(exitTimer.current); }, []);
+  // Advance the run on a CONFIRMED success. If motion is allowed, mark the card
+  // exiting and defer onChanged by a BOUNDED timer; otherwise advance now. The
+  // one-shot guard is a local `fired` closure so it is scoped to THIS submission
+  // (a component-level ref would strand a later task in the same stage). Resetting
+  // `exiting` on advance keeps the next card/Working from inheriting the fade.
+  function advanceWithCardExit() {
+    let fired = false;
+    const runOnChanged = () => { if (fired) return; fired = true; exitTimer.current = null; setExiting(false); onChanged(); };
+    const reduced = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const plan = resolveCardExit(reduced);
+    if (!plan.animate) { runOnChanged(); return; }
+    setExiting(true);
+    exitTimer.current = window.setTimeout(runOnChanged, plan.delayMs);
+  }
 
   // The task currently assigned to this team within the active stage.
   const assignedRec = stage.tasks.find((t) => t.status === 'assigned');
@@ -469,7 +497,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // synthetic at-the-spot coords (that would leak a hidden task's secret location and
   // pollute the movement heatmap). Callers decide when omission is allowed.
   async function submitCheckIn(coords?: { lat: number; lng: number }) {
-    try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); onChanged(); }
+    try { await completeTask({ ...ctx, taskId: task!.id, ...(coords ?? {}) }); feedback('task'); advanceWithCardExit(); }
     catch (e) { setMsg(submitError(e, t.task.failed)); }
     finally { end(); }
   }
@@ -544,7 +572,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     try {
       await verifyStationCode({ ...ctx, teamId: state.team.id, taskId: task!.id, code });
       feedback('task');
-      onChanged();
+      advanceWithCardExit();
     } catch (e) {
       showError(e instanceof Error && e.message.includes('not-controller') ? t.devices.controlMoved : t.task.wrongCode);
     } finally { end(); }
@@ -638,7 +666,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text, ...(coords ?? {}) });
-        if (res.correct) { feedback('task'); onChanged(); }
+        if (res.correct) { feedback('task'); advanceWithCardExit(); }
         else applyAnswerCost(res, t.task.notQuite);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
@@ -655,7 +683,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items, ...(coords ?? {}) });
-        if (res.correct) onChanged();
+        if (res.correct) advanceWithCardExit();
         else applyAnswerCost(res, t.task.orderingWrong);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
@@ -695,7 +723,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     if (!begin()) return Promise.resolve(true);
     clearMsg();
     return completeTask({ ...ctx, taskId: task!.id, lat: la, lng: ln })
-      .then(() => { feedback('task'); onChanged(); return true; })
+      .then(() => { feedback('task'); advanceWithCardExit(); return true; })
       .catch((e) => { setMsg(submitError(e, t.task.checkinFailed)); return false; })
       .finally(() => end());
   }
@@ -734,7 +762,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // is nothing in devtools either.
   if (task.arrivalPending) {
     return (
-      <Card className="p-5" data-testid="task-card" data-task-sealed="true" data-task-id={task.id}>
+      <Card className={exiting ? 'p-5 rp-card-exit' : 'p-5'} data-testid="task-card" data-task-sealed="true" data-task-id={task.id}>
         <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
         <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
         <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
@@ -778,7 +806,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   }
 
   return (
-    <Card className="p-5" data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
+    <Card className={exiting ? 'p-5 rp-card-exit' : 'p-5'} data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
       <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
       {/* Legibility (change: fix-play-screen-hierarchy): the primary task text was
           too small/low-contrast. Bigger title + higher-contrast body (play-web's
