@@ -334,16 +334,17 @@ export default function NavMap({
     <div className={`relative rounded-2xl overflow-hidden border border-glass-border ${className}`}>
       <div ref={ref} className="w-full h-full" />
       <MapModeToggle mode={mode} onChange={setMode} />
-      {/* Sits directly under MapModeToggle (top-2, 44px tall), clear of
-          MapLibre's NavigationControl (top-right) and the compact attribution
-          (bottom-right). Logical `start-2` so it mirrors correctly in Hebrew. */}
+      {/* Sits in the bottom inline-start corner (bottom-14), within easy thumb
+          reach on the 208px strip, clearing the bottom-2 compact attribution and
+          the bottom-2 search-area legend (both pointer-events-none). Logical
+          `start-2` so it mirrors correctly in Hebrew. */}
       <button
         type="button"
         onClick={recenter}
         disabled={!rc.enabled}
         aria-label={rc.enabled ? t.play.recenter : t.play.recenterNoFix}
         title={rc.enabled ? t.play.recenter : t.play.recenterNoFix}
-        className="absolute top-14 start-2 z-10 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border shadow-soft text-[11px] font-medium text-zinc-100 disabled:opacity-50"
+        className="absolute bottom-14 start-2 z-10 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border shadow-soft text-[11px] font-medium text-zinc-100 disabled:opacity-50"
       >
         <span aria-hidden="true">◎</span>
         {t.play.recenter}
