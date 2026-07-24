@@ -99,6 +99,21 @@ function useCallFailureToast() {
   }, [t]);
 }
 
+// Clipboard copy that never fails in silence (item 3). Three share cards used to
+// swallow a rejected `navigator.clipboard.writeText` in an empty catch, so the
+// "Copied!" state never flipped and the host walked away with an empty clipboard
+// believing they had the join link. On success flip the local copied state; on
+// failure surface it on the same toast channel the rest of the console uses.
+async function copyToClipboard(text: string, onCopied: () => void, failMessage: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    onCopied();
+  } catch (e) {
+    console.error('[runConsole] clipboard copy failed:', e);
+    toast.error(failMessage);
+  }
+}
+
 export default function RunConsolePage() {
   const { gameId, runId } = useParams();
   const nav = useNavigate();
@@ -413,12 +428,29 @@ export default function RunConsolePage() {
     setSectionPref(id);
     try { localStorage.setItem(sectionStateKey(runId ?? ''), id); } catch { /* storage off */ }
   }, [runId]);
+  // Live DOM handles for the PINNED panels, so a chip whose target is pinned can
+  // scroll it into view + flash it. The registry is populated as the pinned lanes
+  // render (see the pinned <PanelLanes panelRef=…>); a section-lane panel is never
+  // registered here because navigating to it opens its section instead.
+  const pinnedPanelRefs = useRef<Partial<Record<PanelId, HTMLElement | null>>>({});
+  const [flashedPanel, setFlashedPanel] = useState<PanelId | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
   // A triage chip navigates to the panel that ANSWERS it. Where a panel lives is
   // answered by the layout module, never re-decided here, so a chip can never
-  // point at a section that does not hold its panel.
+  // point at a section that does not hold its panel. A pinned target is already
+  // mounted but may be below the fold on a phone or a long console, so tapping
+  // (e.g.) SOS must SCROLL to it and flash it — never be a dead click.
   const goToPanel = useCallback((panel: PanelId) => {
     const where = panelPlacement(panel);
-    if (where !== 'pinned') openSection(where);
+    if (where !== 'pinned') { openSection(where); return; }
+    const el = pinnedPanelRefs.current[panel];
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    try { el.focus({ preventScroll: true }); } catch { /* focus is best effort */ }
+    setFlashedPanel(panel);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashedPanel(null), 1600);
   }, [openSection]);
 
   // How many lanes this viewport can carry. One mechanism only (useMediaQuery,
@@ -454,7 +486,14 @@ export default function RunConsolePage() {
     finally { setBusy(false); }
   }
   async function finalize() {
-    if (!(await dialog.confirm(t.runConsole.finalizeConfirmMessage, t.runConsole.finalizeConfirmTitle, true))) return;
+    // Ending the run is the one irreversible, everyone affecting action. Warn how
+    // many teams are still racing (launched, not finished) so the host cannot end
+    // it out from under a field full of players (item 2). Zero ⇒ the plain copy.
+    const stillRacing = teams.filter((tm) => tm.launched && !tm.finished).length;
+    const message = stillRacing > 0
+      ? t.runConsole.finalizeConfirmMessageWithRacing({ n: stillRacing })
+      : t.runConsole.finalizeConfirmMessage;
+    if (!(await dialog.confirm(message, t.runConsole.finalizeConfirmTitle, true))) return;
     setBusy(true);
     try { await finalizeRun({ gameId: gameId!, runId: runId! }); toast.success(t.runConsole.finalizedRun); }
     catch { await dialog.alert(t.runConsole.finalizeFailed); }
@@ -664,6 +703,9 @@ export default function RunConsolePage() {
     unstartedTeamCount: teams.filter((tm) => !tm.launched && !tm.finished).length,
   });
   const signalLabel = (s: RunSignal): string => rc.signal[s.id]({ n: s.count });
+  // The single most urgent signal, for the polite live region (item 6). `signals`
+  // is already severity sorted, so the first critical entry is the top one.
+  const criticalSignal = signals.find((s) => s.severity === 'critical') ?? null;
 
   // What a rail entry says about a section the organizer is NOT looking at.
   // The chips themselves are DECIDED by the layout module (summaryChips), so a
@@ -710,8 +752,13 @@ export default function RunConsolePage() {
     // writing a permanent audit entry for a change that never happened.
     if (delta === null) { if (raw != null && raw.trim() !== '') await dialog.alert(rc.scoreAdjustmentInvalid); return; }
     const signed = delta > 0 ? `+${delta}` : `−${Math.abs(delta)}`;
+    // Show the arithmetic (item 8): this is irreversible, audit logged and can
+    // decide a winner, yet it used to ask for a blind signed delta. The current
+    // number is the SAME ranked score the row renders, so the anchor can never
+    // disagree with what the operator is looking at.
+    const current = rankedScoreById.get(team.id) ?? team.score;
     if (!(await dialog.confirm(
-      rc.adjustScoreConfirm({ team: team.displayName, delta: signed }),
+      rc.adjustScoreConfirmWithScore({ team: team.displayName, delta: signed, current, result: current + delta }),
       rc.adjustScoreConfirmTitle, true,
     ))) return;
     // This had NO try/catch and was invoked as `void adjustScore(team)`: a
@@ -1160,13 +1207,23 @@ export default function RunConsolePage() {
           quiet run produces no signals and this renders nothing at all. */}
       {signals.length > 0 && (
         <nav aria-label={rc.signalsTitle} className="flex flex-wrap items-center gap-2">
+          {/* A raised SOS already gets an audio cue + a tab title flash, but the
+              on screen strip said nothing to a screen reader. This companion
+              region announces the single most urgent signal politely, so a screen
+              reader operator hears it without the whole strip being read on every
+              recompute (change: run-console-hardening, item 6). */}
+          <p className="sr-only" role="status" aria-live="polite">
+            {criticalSignal ? signalLabel(criticalSignal) : ''}
+          </p>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.signalsTitle}</span>
           {signals.map((s) => (
             <button
               key={s.id}
               type="button"
               onClick={() => goToPanel(s.panel)}
-              className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+              aria-label={rc.goToSignal({ label: signalLabel(s) })}
+              title={rc.goToSignal({ label: signalLabel(s) })}
+              className={`inline-flex items-center gap-1 cursor-pointer rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
                 s.severity === 'critical'
                   ? 'border-rp-alert/40 bg-rp-alert/10 text-rp-alert hover:bg-rp-alert/20'
                   : s.severity === 'warn'
@@ -1174,7 +1231,10 @@ export default function RunConsolePage() {
                     : 'border-[--rp-border] bg-[--surface-2] text-[--ink-2] hover:bg-[--surface-0]'
               }`}
             >
-              {signalLabel(s)}
+              <span>{signalLabel(s)}</span>
+              {/* Marks the chip as a jump target, not a read only badge. Flips with
+                  the reading direction so it always points "onward". */}
+              <span aria-hidden="true" className="rtl:-scale-x-100">›</span>
             </button>
           ))}
         </nav>
@@ -1194,7 +1254,12 @@ export default function RunConsolePage() {
           {rc.alertsStreamInterrupted}
         </p>
       )}
-      <PanelLanes layout={pinnedLayout} render={renderPanel} />
+      <PanelLanes
+        layout={pinnedLayout}
+        render={renderPanel}
+        panelRef={(panel, el) => { pinnedPanelRefs.current[panel] = el; }}
+        flashedPanel={flashedPanel}
+      />
 
       {/* ── SECTIONS ────────────────────────────────────────────────────────────
           The accordions are gone. A Builder style rail (StageRail's pattern: a
@@ -1269,16 +1334,31 @@ export default function RunConsolePage() {
 // is and how many lanes there are all come from `runConsoleLayout`, so a panel
 // cannot be dropped by a rendering accident. Classes are static lookups because
 // Tailwind cannot see an interpolated `grid-cols-${n}`.
-function PanelLanes({ layout, render }: {
+function PanelLanes({ layout, render, panelRef, flashedPanel }: {
   layout: ColumnLayout;
   render: (panel: PanelId) => ReactNode;
+  // When provided (the pinned zone), each panel wrapper registers its DOM node so
+  // a triage chip can scroll + flash it. Section lanes pass neither.
+  panelRef?: (panel: PanelId, el: HTMLElement | null) => void;
+  flashedPanel?: PanelId | null;
 }) {
   if (layout.columns.length === 0) return null;
   return (
     <div className={gridTemplateClass(layout.gridColumns)}>
       {layout.columns.map((lane, i) => (
         <div key={lane.join('|')} className={`space-y-4 min-w-0 ${columnSpanClass(layout.spans[i])}`}>
-          {lane.map((panel) => <div key={panel}>{render(panel)}</div>)}
+          {lane.map((panel) => (
+            <div
+              key={panel}
+              ref={panelRef ? (el) => panelRef(panel, el) : undefined}
+              tabIndex={panelRef ? -1 : undefined}
+              className={`rounded-2xl outline-none transition-shadow ${
+                panel === flashedPanel ? 'ring-2 ring-rp-alert ring-offset-2 ring-offset-[--surface-0]' : ''
+              }`}
+            >
+              {render(panel)}
+            </div>
+          ))}
         </div>
       ))}
     </div>
@@ -1348,7 +1428,7 @@ function JoinShare({ accessCode }: { accessCode: string }) {
     QRCode.toDataURL(link, { margin: 1, width: 200 }).then(setQr).catch(() => setQr(''));
   }, [link]);
   async function copy() {
-    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
+    await copyToClipboard(link, () => { setCopied(true); setTimeout(() => setCopied(false), 2000); }, t.runConsole.copyFailed);
   }
   return (
     <PanelShell panel="joinShare">
@@ -1394,7 +1474,7 @@ function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string
     QRCode.toDataURL(link, { margin: 1, width: 160 }).then(setQr).catch(() => setQr(''));
   }, [link]);
   async function copy() {
-    try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* no clipboard */ }
+    await copyToClipboard(link, () => { setCopied(true); setTimeout(() => setCopied(false), 2000); }, t.runConsole.copyFailed);
   }
   return (
     <PanelShell panel="staffInvite">
@@ -1518,6 +1598,7 @@ function AnnouncementCard({ ctx, teams }: { ctx: { ownerUid: string; gameId: str
     <PanelShell panel="broadcast" actions={<RichTooltip concept="announcementPersistence" />}>
       <div className="space-y-2">
       <select
+        aria-label={t.runConsole.announceTargetLabel}
         className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
         value={teamTarget}
         onChange={(e) => setTeamTarget(e.target.value)}
@@ -1672,12 +1753,9 @@ function ShareScreens({ accessCode, ctx, status, published, hasStaffPin, onShare
 
   async function copy(entry: ReturnType<typeof buildShareArtifacts>[number]) {
     // Copy synchronously with the click (the clipboard needs the user gesture),
-    // THEN publish the board for the audience facing links.
-    try {
-      await navigator.clipboard.writeText(entry.copyValue);
-      setCopied(entry.id);
-      setTimeout(() => setCopied(''), 2000);
-    } catch { /* no clipboard */ }
+    // THEN publish the board for the audience facing links. A failed copy now
+    // surfaces (item 3) instead of a dead "Copied!"; the publish still runs.
+    await copyToClipboard(entry.copyValue, () => { setCopied(entry.id); setTimeout(() => setCopied(''), 2000); }, rc.copyFailed);
     if (entry.requiresPublish) await onShareBoard?.();
   }
 

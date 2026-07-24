@@ -532,6 +532,7 @@ const HE = {
     activate: 'הפעלת אזור חם',
     deactivate: 'כיבוי',
     linkCopied: 'הקישור הועתק!',
+    copyFailed: 'ההעתקה נכשלה. העתיקו את הקישור ידנית.',
     analyticsTitle: '📈 ניתוח לפי משימה',
     analyticsLoad: 'טעינת ניתוח',
     analyticsExport: 'ייצוא נתונים',
@@ -691,6 +692,10 @@ const HE = {
     inviteStaffPin: 'הזמנת צוות (קוד)',
     finalizeConfirmTitle: 'סיום הריצה',
     finalizeConfirmMessage: 'לסיים את הריצה עכשיו? המשחק נגמר לכל הקבוצות, והדירוג הסופי מחושב.',
+    finalizeConfirmMessageWithRacing: ({ n }: { n: number }) =>
+      n === 1
+        ? 'קבוצה אחת עדיין באמצע המשחק. לסיים את הריצה לכל הקבוצות עכשיו?'
+        : `${n} קבוצות עדיין באמצע המשחק. לסיים את הריצה לכל הקבוצות עכשיו?`,
     staffNamePrompt: 'שם איש הצוות?',
     staffInviteFailed: 'יצירת קוד הצוות נכשלה. בדקו את החיבור ונסו שוב.',
     staffPinLabel: 'קוד צוות:',
@@ -745,6 +750,7 @@ const HE = {
     printQrCodeFallback: 'קוד ידני',
     announcementPersists: 'הודעה לשחקנים',
     announcementPlaceholder: 'הודעה לכל הקבוצות…',
+    announceTargetLabel: 'למי לשלוח את ההודעה',
     announceAllTeams: 'כל הקבוצות',
     announceToTeam: ({ name }: { name: string }) => `לקבוצה ${name} בלבד`,
     broadcast: 'שידור',
@@ -812,6 +818,9 @@ const HE = {
     adjustScoreAria: ({ team }: { team: string }) => `עדכון הניקוד של ${team}`,
     adjustScoreConfirmTitle: 'עדכון ניקוד',
     adjustScoreConfirm: ({ team, delta }: { team: string; delta: string }) => `לעדכן את הניקוד של ${team}? השינוי שיירשם: ${delta} נקודות.`,
+    // Shows the arithmetic so a winner deciding change is never a blind delta.
+    adjustScoreConfirmWithScore: ({ team, delta, current, result }: { team: string; delta: string; current: number; result: number }) =>
+      `הניקוד הנוכחי של ${team}: ${current}. השינוי ${delta} נקודות יביא ל${result}. להחיל?`,
     // Confirmations for actions that used to succeed or fail in total silence
     // (change: creator-no-silent-failures).
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `הניקוד של ${team} עודכן. השינוי שנרשם: ${delta} נקודות.`,
@@ -846,6 +855,7 @@ const HE = {
     // ── מה צריך אתכם עכשיו (change: run-console-clarity) ──
     // הרצועה הזו אמורה להיות ריקה ברוב הזמן. אם היא תמיד מלאה, מפסיקים לקרוא אותה.
     signalsTitle: 'צריך אתכם עכשיו',
+    goToSignal: ({ label }: { label: string }) => `מעבר אל ${label}`,
     signal: {
       sos: ({ n }: { n: number }) => `${n} קריאות מצוקה פתוחות`,
       outOfBounds: ({ n }: { n: number }) => `${n} קבוצות מחוץ לאזור המשחק`,
@@ -2090,6 +2100,7 @@ const EN: typeof HE = {
     activate: 'Activate Hot Zone',
     deactivate: 'Deactivate',
     linkCopied: 'Link copied!',
+    copyFailed: 'Copy failed. Copy the link manually.',
     analyticsTitle: '📈 Per task analytics',
     analyticsLoad: 'Load analytics',
     analyticsExport: 'Export CSV',
@@ -2250,6 +2261,10 @@ const EN: typeof HE = {
     inviteStaffPin: 'Invite staff (PIN)',
     finalizeConfirmTitle: 'End the run',
     finalizeConfirmMessage: 'End the run now? The game ends for every team, and the final standings are computed.',
+    finalizeConfirmMessageWithRacing: ({ n }: { n: number }) =>
+      n === 1
+        ? '1 team has not finished yet. End the run for everyone now?'
+        : `${n} teams have not finished yet. End the run for everyone now?`,
     staffNamePrompt: 'Staff member name?',
     staffInviteFailed: 'Could not create the staff PIN. Check your connection and try again.',
     staffPinLabel: 'Staff PIN:',
@@ -2306,6 +2321,7 @@ const EN: typeof HE = {
     printQrCodeFallback: 'Manual code',
     announcementPersists: 'Announcement to players',
     announcementPlaceholder: 'Heads up to all teams…',
+    announceTargetLabel: 'Who to send the message to',
     announceAllTeams: 'All teams',
     announceToTeam: ({ name }: { name: string }) => `Only team ${name}`,
     broadcast: 'Broadcast',
@@ -2374,6 +2390,9 @@ const EN: typeof HE = {
     adjustScoreAria: ({ team }: { team: string }) => `Adjust the score of ${team}`,
     adjustScoreConfirmTitle: 'Adjust score',
     adjustScoreConfirm: ({ team, delta }: { team: string; delta: string }) => `Adjust the score of ${team}? The change recorded: ${delta} points.`,
+    // Shows the arithmetic so a winner deciding change is never a blind delta.
+    adjustScoreConfirmWithScore: ({ team, delta, current, result }: { team: string; delta: string; current: number; result: number }) =>
+      `Current score of ${team}: ${current}. Applying ${delta} points makes ${result}. Apply?`,
     adjustScoreApplied: ({ team, delta }: { team: string; delta: string }) => `Score of ${team} updated by ${delta} points.`,
     skipStageAria: ({ team }: { team: string }) => `Skip the current stage of ${team}`,
     skipTaskAria: ({ team }: { team: string }) => `Skip the current mission of ${team}`,
@@ -2407,6 +2426,7 @@ const EN: typeof HE = {
     // This strip is meant to be empty most of the time. A strip that is always
     // full is a strip nobody reads.
     signalsTitle: 'Needs you now',
+    goToSignal: ({ label }: { label: string }) => `Go to ${label}`,
     signal: {
       sos: ({ n }: { n: number }) => `${n} open distress calls`,
       outOfBounds: ({ n }: { n: number }) => `${n} teams outside the play area`,
