@@ -5,6 +5,7 @@ import { getMyProfile } from '../services/calls';
 import { uid } from '../services/firebase';
 import type { Session } from '../store';
 import { Button, Card, Screen } from '../components/ui';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
@@ -63,7 +64,6 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   }
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
   const [shared, setShared] = useState(false);
-  const [busy, setBusy] = useState(false);
 
   // Celebrate the finish once — a brand-colored confetti burst plus the existing
   // mute-gated rank-up sound+haptic, timed to land with the score-pop. Reduced-motion
@@ -91,43 +91,35 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
 
   async function sharePodiumFn() {
     if (podium.length === 0) return;
-    setBusy(true);
-    try {
-      const { sharePodium } = await import('../lib/podiumCard');
-      await sharePodium(podium, {
-        gameName: game.branding?.name ?? game.title,
-        ctaUrl: creatorUrl(),
-        title: shareCardLabels(t.final, isTimeOnly).podiumTitle,
-        text: t.final.shareText({
-          team: team.displayName, game: game.branding?.name ?? game.title,
-          rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
-        }),
-      });
-    } finally { setBusy(false); }
+    const { sharePodium } = await import('../lib/podiumCard');
+    await sharePodium(podium, {
+      gameName: game.branding?.name ?? game.title,
+      ctaUrl: creatorUrl(),
+      title: shareCardLabels(t.final, isTimeOnly).podiumTitle,
+      text: t.final.shareText({
+        team: team.displayName, game: game.branding?.name ?? game.title,
+        rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
+      }),
+    });
   }
 
   async function sharePhotoFn() {
     if (!firstPhotoUrl) return;
-    setBusy(true);
-    try {
-      const playBase = window.location.origin;
-      const { sharePhoto } = await import('../lib/sharePhoto');
-      await sharePhoto(firstPhotoUrl, {
-        playBaseUrl: playBase,
-        gameId: (game as { id?: string }).id ?? null,
-        urlText: creatorUrl().replace(/^https?:\/\//, ''),
-        caption: t.final.shareText({
-          team: team.displayName, game: game.branding?.name ?? game.title,
-          rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
-        }),
-      });
-    } finally { setBusy(false); }
+    const playBase = window.location.origin;
+    const { sharePhoto } = await import('../lib/sharePhoto');
+    await sharePhoto(firstPhotoUrl, {
+      playBaseUrl: playBase,
+      gameId: (game as { id?: string }).id ?? null,
+      urlText: creatorUrl().replace(/^https?:\/\//, ''),
+      caption: t.final.shareText({
+        team: team.displayName, game: game.branding?.name ?? game.title,
+        rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
+      }),
+    });
   }
 
   async function share() {
-    setBusy(true);
-    try {
-      const name = game.branding?.name ?? game.title;
+    const name = game.branding?.name ?? game.title;
       const rankPart = myRank ? t.final.shareRankPart({ rank: myRank }) : '';
       const timePart = totalSec != null ? t.final.shareTimePart({ time: fmtDuration(totalSec) }) : '';
       const text = t.final.shareText({
@@ -159,8 +151,16 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
       // or clipboard copy. A cancellation resolves to 'failed', so it stays silent —
       // no false "shared!". Reuses the existing shareSaved label (no new i18n key).
       if (result === 'downloaded' || result === 'copied' || result === 'shared') { setShared(true); setTimeout(() => setShared(false), 2500); }
-    } finally { setBusy(false); }
   }
+
+  // Single-flight guards (mirrors PlayScreen's shareProgress): setBusy is async, so a
+  // same-batch ghost double-tap could otherwise pass the busy===false check twice and
+  // fire two canvas renders + two native share sheets / downloads before the disabled
+  // re-render lands. useAsyncAction rejects the re-entrant tap synchronously.
+  const shareAction = useAsyncAction(share);
+  const sharePhotoAction = useAsyncAction(sharePhotoFn);
+  const sharePodiumAction = useAsyncAction(sharePodiumFn);
+  const busy = shareAction.busy || sharePhotoAction.busy || sharePodiumAction.busy;
 
   return (
     <Screen>
@@ -206,19 +206,19 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
             <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
             <Stat label={t.final.statHints} value={String(hintsUsed)} accent={accent} />
           </div>
-          <Button className="mt-4" disabled={busy} onClick={share}>
+          <Button className="mt-4" disabled={busy} onClick={() => shareAction.run()}>
             {busy ? t.final.shareCreating : shared ? t.final.shareSaved : t.final.shareBtn}
           </Button>
           {(firstPhotoUrl || podium.length > 0) && (
             <div className="mt-2 flex flex-col gap-2">
               {firstPhotoUrl && (
-                <button disabled={busy} onClick={sharePhotoFn}
+                <button disabled={busy} onClick={() => sharePhotoAction.run()}
                   className="w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
                   {t.final.sharePhoto}
                 </button>
               )}
               {podium.length > 0 && (
-                <button disabled={busy} onClick={sharePodiumFn}
+                <button disabled={busy} onClick={() => sharePodiumAction.run()}
                   className="w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
                   {t.final.sharePodium}
                 </button>
