@@ -198,11 +198,21 @@ export default function WalletPage() {
           <p className="text-sm text-rp-signal font-medium">{w.proActiveNote}</p>
         ) : (
           <div className="flex flex-col sm:flex-row gap-2.5">
-            <Button variant="ghost" className="flex-1 !py-2.5" disabled={busy !== null} loading={busy === 'pro-month'} onClick={() => void proAction.run('month')}>
-              {busy === 'pro-month' ? w.purchasing : `${w.proCtaMonthly} · ${w.proMonthly(PRO_MONTHLY_ILS)}`}
+            <Button variant="ghost" className="flex-1 !py-2.5 !flex-col !gap-0.5" disabled={busy !== null} loading={busy === 'pro-month'} onClick={() => void proAction.run('month')}>
+              {busy === 'pro-month' ? w.purchasing : (
+                <>
+                  <span>{w.proCtaMonthly}</span>
+                  <span className="text-[11px] font-normal text-[--ink-3]">{w.proMonthly(PRO_MONTHLY_ILS)}</span>
+                </>
+              )}
             </Button>
-            <Button className="flex-1 !py-2.5" disabled={busy !== null} loading={busy === 'pro-year'} onClick={() => void proAction.run('year')}>
-              {busy === 'pro-year' ? w.purchasing : `${w.proCtaAnnual} · ${w.proAnnual(PRO_ANNUAL_ILS)}`}
+            <Button className="flex-1 !py-2.5 !flex-col !gap-0.5" disabled={busy !== null} loading={busy === 'pro-year'} onClick={() => void proAction.run('year')}>
+              {busy === 'pro-year' ? w.purchasing : (
+                <>
+                  <span>{w.proCtaAnnual}</span>
+                  <span className="text-[11px] font-normal text-[--ink-3]">{w.proAnnual(PRO_ANNUAL_ILS)}</span>
+                </>
+              )}
             </Button>
           </div>
         )}

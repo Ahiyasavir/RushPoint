@@ -143,6 +143,8 @@ export function Badge({
   children, color = 'zinc',
 }: { children: ReactNode; color?: 'zinc' | 'green' | 'gold' | 'red' | 'cyan' | 'purple' }) {
   const map: Record<string, string> = {
+    // NOTE: color="green" intentionally maps to rp-fire (the orange brand accent),
+    // NOT a green. The actual green token is rp-go — don't assume green === green here.
     zinc:   'bg-[--surface-2] text-[--ink-2] border-[--rp-border]',
     green:  'bg-rp-fire/10 text-rp-fire border-rp-fire/20 dark:bg-rp-fire/15',
     gold:   'bg-rp-amber/10 text-rp-amber border-rp-amber/20',

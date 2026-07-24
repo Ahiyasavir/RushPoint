@@ -272,7 +272,7 @@ export default function GalleryPage() {
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.tasks(pg.taskCount)}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
-                  <span>~{pg.estimatedTotalMinutes}m</span>
+                  <span>{gl.estMinutes(pg.estimatedTotalMinutes)}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.plays(pg.playCount)}</span>
                 </div>
@@ -291,7 +291,7 @@ export default function GalleryPage() {
       ))}
 
       {tab === 'tasks' && ((!tasks || searching) ? <CardSkeletonGrid /> : tasks.length === 0 ? (
-        <EmptyState icon="🔭" title={gl.emptyTitle} body={gl.emptyText}
+        <EmptyState icon="🔭" title={gl.emptyTasksTitle} body={gl.emptyTasksText}
           action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">

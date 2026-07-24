@@ -35,12 +35,12 @@ export default function RunsOverviewPage() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-bold text-zinc-100 mb-1">{r.title}</h1>
-      <p className="text-sm text-zinc-500 mb-5">{r.subtitle}</p>
+      <h1 className="font-brand text-2xl font-extrabold tracking-tight text-[--ink-1] mb-1">{r.title}</h1>
+      <p className="text-sm text-[--ink-3] mb-5">{r.subtitle}</p>
 
       {errored && (
         <div className="flex items-center gap-3 mb-4">
-          <p className="text-neon-red text-sm">{r.loadError}</p>
+          <p className="text-rp-alert text-sm">{r.loadError}</p>
           <Button variant="ghost" onClick={() => void load()}>{r.retry}</Button>
         </div>
       )}
@@ -59,24 +59,24 @@ export default function RunsOverviewPage() {
           {(runs ?? []).map((run) => (
             <Card key={run.runId} className="p-4 flex items-center gap-4">
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-zinc-100 truncate" dir="auto">
+                <div className="font-semibold text-[--ink-1] truncate" dir="auto">
                   {run.gameTitle || r.untitled}
                 </div>
-                <div className="text-xs text-zinc-500 mt-0.5 flex items-center gap-3 flex-wrap">
+                <div className="text-xs text-[--ink-3] mt-0.5 flex items-center gap-3 flex-wrap">
                   <span className="inline-flex items-center gap-1">{r.code}:
                     <button
                       type="button"
                       onClick={() => void copyCode(run.accessCode)}
                       aria-label={r.copyCode}
                       title={r.copyCode}
-                      className="inline-flex items-center gap-1 font-mono text-zinc-300 hover:text-rp-fire rounded px-1 -mx-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+                      className="inline-flex items-center gap-1 font-mono text-[--ink-2] hover:text-rp-fire rounded px-1 -mx-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
                     >
                       {run.accessCode}<span aria-hidden="true" className="text-[10px] opacity-70">📋</span>
                     </button>
                   </span>
                   <span>👥 {r.participants({ n: run.participantCount })}</span>
                   {run.unackedAlerts > 0 && (
-                    <span className="inline-flex items-center rounded-full bg-neon-red/15 border border-neon-red/40 text-neon-red px-2 py-0.5 font-bold">
+                    <span className="inline-flex items-center rounded-full bg-rp-alert/15 border border-rp-alert/40 text-rp-alert px-2 py-0.5 font-bold">
                       🆘 {r.alerts({ n: run.unackedAlerts })}
                     </span>
                   )}

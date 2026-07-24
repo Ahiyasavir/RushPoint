@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { doc, setDoc } from 'firebase/firestore';
 import { Button, Card, Input, Label } from '../components/ui';
 import { useAuth } from '../components/AuthGate';
@@ -64,8 +64,7 @@ export default function SettingsPage() {
     <div className="max-w-lg mx-auto animate-fade-up space-y-5">
       <h1 className="font-brand text-3xl font-extrabold text-[--ink-1] mb-2">{s.title}</h1>
 
-      <LanguageCard lang={lang} setLang={setLang} s={s} />
-      <TourCard t={t} />
+      <SectionHeader>{s.sectionAccount}</SectionHeader>
       <ProfileCard
         s={s}
         initialName={user?.displayName ?? ''}
@@ -74,9 +73,24 @@ export default function SettingsPage() {
       <EmailCard s={s} currentEmail={user?.email ?? ''} isPasswordAccount={isPasswordAccount} uid={user?.uid ?? ''} onSaved={refreshUser} />
       <PasswordCard s={s} isPasswordAccount={isPasswordAccount} />
       <SignInMethodsCard s={s} providers={providers} accountEmail={user?.email ?? ''} onChanged={refreshProviders} />
+
+      <SectionHeader>{s.sectionPreferences}</SectionHeader>
+      <LanguageCard lang={lang} setLang={setLang} s={s} />
+      <TourCard t={t} />
+
+      <SectionHeader>{s.sectionDataLegal}</SectionHeader>
       <DataCard s={s} />
       <LegalCard s={s} t={t} />
       <DangerCard s={s} onDeleted={signOut} />
+    </div>
+  );
+}
+
+// ── Section eyebrow ─────────────────────────────────────────────────────────────
+function SectionHeader({ children }: { children: ReactNode }) {
+  return (
+    <div className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3] pt-2 text-start">
+      {children}
     </div>
   );
 }
