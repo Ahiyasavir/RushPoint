@@ -353,10 +353,12 @@ export default function DashboardPage() {
     // (change: creator-first-launch-confirm). Only the real launch is gated, never
     // Test run, and only once the game is known launchable (the blocker check above
     // already passed). Shares its flag with the Builder header.
-    if (!opts?.testDrive && !hasConfirmedFirstLaunch(user?.uid)) {
+    // Ask, but burn the one-time flag only after a successful launch below — a
+    // launch failure must leave the gate intact for the next attempt.
+    const needFirstLaunchConfirm = !opts?.testDrive && !hasConfirmedFirstLaunch(user?.uid);
+    if (needFirstLaunchConfirm) {
       const ok = await dialog.confirm(t.builder.firstLaunchConfirmBody, t.builder.firstLaunchConfirmCta);
       if (!ok) return;
-      markFirstLaunchConfirmed(user?.uid);
     }
     // Show the liftoff overlay for the launch wait, always cleared in `finally` so
     // an error can never leave it stuck open (change: creator-launch-liftoff). On
@@ -364,6 +366,7 @@ export default function DashboardPage() {
     setLaunching(true);
     try {
       const { runId } = await launchRun({ gameId: g.id, testDrive: opts?.testDrive });
+      if (needFirstLaunchConfirm) markFirstLaunchConfirmed(user?.uid);
       nav(`/run/${g.id}/${runId}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';

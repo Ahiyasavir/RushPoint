@@ -257,6 +257,11 @@ export default function BuilderPage() {
   // game/saved-snapshot without re-subscribing on every keystroke.
   const gameRef = useRef<Game | null>(null);
   const savedSnapshot = useRef<string>('');
+  // Auto-open-first-task guard (change: builder-first-task-flow). Lives HERE, not
+  // in StepStages, because StepStages unmounts on a tab switch — a per-mount ref
+  // reset and re-opened the editor each time the creator returned to Build on a
+  // still-blank task. Keyed on game id so a genuinely new game still auto-opens once.
+  const autoOpenedGameRef = useRef<string | null>(null);
   const saveTimer = useRef<number>();
   // Hidden file picker behind the Builder's "load a copy" action.
   const importInput = useRef<HTMLInputElement>(null);
@@ -403,10 +408,13 @@ export default function BuilderPage() {
     // Test run, and only when the game is actually launchable (a broken game gets
     // the readiness alert below instead, so the confirm never nags on top of it).
     // A cancel just aborts before any liftoff overlay shows.
-    if (!testDrive && canLaunchGame(game) && !hasConfirmedFirstLaunch(user?.uid)) {
+    // Ask, but do NOT burn the one-time flag yet — a save/readiness/launch failure
+    // below must leave the gate intact for the creator's next attempt. Marked only
+    // after launchRun actually succeeds.
+    const needFirstLaunchConfirm = !testDrive && canLaunchGame(game) && !hasConfirmedFirstLaunch(user?.uid);
+    if (needFirstLaunchConfirm) {
       const ok = await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta);
       if (!ok) return;
-      markFirstLaunchConfirmed(user?.uid);
     }
     window.clearTimeout(saveTimer.current);
     // Show the liftoff overlay for the whole save+launch wait, and always clear it
@@ -429,6 +437,8 @@ export default function BuilderPage() {
       }
       try {
         const { runId } = await launchRun({ gameId: game.id, testDrive });
+        // Launch succeeded — now it's safe to burn the one-time first-launch gate.
+        if (needFirstLaunchConfirm) markFirstLaunchConfirmed(user?.uid);
         nav(`/run/${game.id}/${runId}`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : '';
@@ -651,7 +661,7 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} />}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} autoOpenedGameRef={autoOpenedGameRef} />}
         {activeTab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
         {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
         {activeTab === 'analytics' && (
@@ -1295,12 +1305,14 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, autoOpenedGameRef }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
   // An activated readiness entry (change: builder-first-task-flow). The `nonce`
   // makes re-activating the SAME entry a new request.
   focusIssue?: { stageId: string; taskId: string; nonce: number } | null;
+  // Parent-owned auto-open guard (survives this component's tab-switch remounts).
+  autoOpenedGameRef: { current: string | null };
 }) {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
@@ -1522,10 +1534,9 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   // guard fires this AT MOST ONCE per mount, so it never re-opens the editor
   // after the creator closes it, and `shouldAutoOpenFirstTask` refuses any game
   // that is not a single untouched blank task (see wizardLogic).
-  const autoOpenedRef = useRef(false);
   useEffect(() => {
-    if (autoOpenedRef.current) return;
-    autoOpenedRef.current = true;
+    if (autoOpenedGameRef.current === game.id) return;
+    autoOpenedGameRef.current = game.id;
     const target = shouldAutoOpenFirstTask(game);
     if (target) setEditing({ stageId: target.stageId, taskId: target.taskId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
