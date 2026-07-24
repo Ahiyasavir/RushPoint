@@ -3642,6 +3642,29 @@ async function main() {
     const fin = await pI.call('getMyTeamState', { code: res.accessCode });
     check('instant: the run completes to finished', fin?.team?.status === 'finished', fin?.team?.status);
 
+    // ── fix-solo-selfguided-finalize: hostless solo run auto-finalizes ──────────
+    // A startInstantPlay run is selfGuided:true, participantCount:1 with NO organizer,
+    // so nothing ever calls the creator-auth finalizeRun. The moment its sole team
+    // finishes, the shared grading choke point (completeTaskForTeam) auto-finalizes it
+    // with forcePublish:true — the finisher must get a real, PUBLISHED, FROZEN board
+    // (rank #1, badges) instead of a perpetual "waiting for the host" spinner. The
+    // auto-finalize call is awaited on the completion path, but poll for robustness
+    // (mirrors the onRunFinalized probe pattern above).
+    const soloRunPath = `users/${res.ownerUid}/games/${res.gameId}/runs/${res.runId}`;
+    const soloLb = (await waitFor(async () => {
+      const d = await creator.getDocAt(soloRunPath);
+      return d.data?.leaderboard?.published ? d.data.leaderboard : null;
+    })) ?? null;
+    check('instant: hostless solo run auto-finalizes to a PUBLISHED, FROZEN board',
+      soloLb?.published === true && soloLb?.frozen === true, JSON.stringify(soloLb));
+    check('instant: auto-finalized board ranks the solo finisher #1',
+      Array.isArray(soloLb?.rankings) && soloLb.rankings.length === 1 && soloLb.rankings[0]?.rank === 1,
+      JSON.stringify(soloLb?.rankings));
+    const soloBoard = await pI.call('getMyTeamState', { code: res.accessCode });
+    check('instant: getMyTeamState returns the published board (no "waiting for host" spinner)',
+      (soloBoard?.run?.leaderboard ?? null) !== null && soloBoard?.run?.leaderboard?.published === true,
+      JSON.stringify(soloBoard?.run?.leaderboard ?? null));
+
     // A published game that did NOT opt in refuses instant play.
     const { gameId: gN2 } = await creator.call('createGame', { title: 'No Instant', mode: 'individual' });
     await creator.call('updateGame', { gameId: gN2, stages: oneStage('n2-s') });
@@ -3658,6 +3681,30 @@ async function main() {
     await expectError('instant: a guardian-consent game is refused (J1 bypass closed)',
       pI.call('startInstantPlay', { gameId: gGC, displayName: 'Minor' }),
       { codeIn: ['functions/failed-precondition'], match: /guardian consent/i });
+
+    // ── Regression (solo-only guard): a NORMAL launched run is NEVER auto-finalized ──
+    // The airtight discriminator is selfGuided===true (startInstantPlay is its only
+    // writer) — NOT participantCount. A real event with a single joined team has
+    // participantCount===1, the exact shape a participantCount-only gate would falsely
+    // match; auto-finalizing it mid-event would be a P0. So a launched, non-self-guided
+    // run whose one team has finished must STILL wait for the organizer's finalizeRun.
+    const { gameId: gReg } = await creator.call('createGame', { title: 'Not Self-Guided', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gReg, stages: oneStage('reg-s') });
+    const { runId: rReg, accessCode: cReg } = await creator.call('launchRun', { gameId: gReg });
+    const pReg = makeParty('regPlayer'); await signInAnonymously(pReg.auth);
+    await pReg.call('joinRun', { code: cReg, displayName: 'Solo-ish' });
+    await creator.call('startTeams', { gameId: gReg, runId: rReg });
+    await pReg.call('completeTask', { ownerUid: creatorCred.user.uid, gameId: gReg, runId: rReg, taskId: 'reg-s-t' });
+    const regFin = await pReg.call('getMyTeamState', { code: cReg });
+    check('regression: the single team of a launched run reaches finished', regFin?.team?.status === 'finished', regFin?.team?.status);
+    const regRun = await creator.getDocAt(`users/${creatorCred.user.uid}/games/${gReg}/runs/${rReg}`);
+    check('regression: a NON-self-guided run is NOT auto-finalized (still waits for manual finalizeRun)',
+      (regRun.data?.leaderboard ?? null) === null && regRun.data?.status !== 'finished',
+      JSON.stringify({ leaderboard: regRun.data?.leaderboard ?? null, status: regRun.data?.status }));
+    // The organizer's manual finalize still works exactly as before.
+    const regManual = await creator.call('finalizeRun', { gameId: gReg, runId: rReg });
+    check('regression: manual finalizeRun still produces the board for a normal run',
+      Array.isArray(regManual?.rankings) && regManual.rankings.length === 1, JSON.stringify(regManual?.rankings));
   }); // scenario: marketplace instant play
 
   await scenario('territory capture (zones + capture bonus + flip)', async () => {

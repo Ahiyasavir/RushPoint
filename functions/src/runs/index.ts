@@ -135,6 +135,7 @@ import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSumma
 import { sendRunSummaryEmail } from './runSummaryEmail';
 import { validate, parseStored } from '../validation';
 import { parseGame, parseRun, parseRunTeam } from '@rushpoint/shared';
+import { isSoloSelfGuidedRun, soloRunReadyToAutoFinalize } from './soloAutoFinalize';
 
 import { requireAuth, assertStaffOrOwner } from '../auth';
 import { shouldFeedTask } from '../feedVisibility';
@@ -1118,6 +1119,27 @@ export async function completeTaskForTeam(
   // reconciles definitively. The e2e scenario
   //   'completeTask does not write the run-doc leaderboard during active play; organizer read recomputes it'
   // and the existing live/final parity oracle guard this move.
+
+  // Hostless-solo auto-finalize (change: fix-solo-selfguided-finalize). This is the
+  // single shared grading choke point (completeTask/submitTaskAnswer/submitSequenceStep/
+  // verifyStationCode/submitStationPhoto/reviewStationSubmission all funnel here), so
+  // finalizing a solo self-guided run once its sole team finishes only needs this one
+  // call site. GATED on the in-scope run flags — `selfGuided === true` (the airtight
+  // discriminator: startInstantPlay is the ONLY writer of selfGuided; no organizer/
+  // test-drive/duplicate/import run ever carries it) — so a normal organizer or
+  // multi-team run enters the helper zero times and pays no extra reads. Runs only
+  // after a REAL completion (result.completed), so a duplicate/idempotent no-op never
+  // re-finalizes. BEST-EFFORT: the player's completion has ALREADY committed above; any
+  // failure inside auto-finalize is swallowed here so it can never break or roll back
+  // that committed completion — worst case is "solo run not finalized" (== prior
+  // behavior, no regression). maybeAutoFinalizeSoloRun re-reads the run/team as the
+  // source of truth and no-ops on an already-finished run (idempotent).
+  if (result.completed && isSoloSelfGuidedRun(runData)) {
+    await maybeAutoFinalizeSoloRun(ownerUid, gameId, runId).catch((e) =>
+      logBestEffort('autoFinalizeSolo', { ownerUid, gameId, runId }, e),
+    );
+  }
+
   return result;
 }
 
@@ -1823,24 +1845,35 @@ export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data
 });
 
 
-export const finalizeRun = loggedCallable('finalizeRun', async (data, context) => {
-  const uid = requireAuth(context);
-  const { gameId, runId } = data as { gameId: string; runId: string };
-
-  const runRef = db.doc(runPath(uid, gameId, runId));
+// finalizeRunCore — the authoritative "write the final board" body, factored out
+// of the finalizeRun callable so it can be reused by the hostless-solo auto-finalize
+// path (change: fix-solo-selfguided-finalize) WITHOUT duplicating any scoring or the
+// run write. It performs the EXACT read (game + teams) + buildRankings + runRef.update
+// that finalizeRun has always done. Callers own auth/ownership; this core does not
+// authenticate (an internal function). Returns the computed rankings and whether the
+// run was ALREADY finished (in which case it writes nothing — the idempotency backstop).
+async function finalizeRunCore(
+  ownerUid: string,
+  gameId: string,
+  runId: string,
+  opts?: { forcePublish?: boolean },
+): Promise<{ rankings: LeaderboardEntry[]; alreadyFinal: boolean }> {
+  const runRef = db.doc(runPath(ownerUid, gameId, runId));
   const runSnap = await runRef.get();
   if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
   // Validate the stored docs that feed buildRankings — a corrupt run/game/team
   // fails loud (internal) rather than skewing the final standings (parse-boundary).
   const run = parseStored(() => parseRun(runSnap.data()));
-  if (run.ownerUid !== uid) {
-    throw new functions.https.HttpsError('permission-denied', 'Not your run');
-  }
+  // Idempotency backstop: a re-finish, or a manual finalize racing the auto path,
+  // is a no-op rather than a second status:'finished' write. This ALSO guarantees
+  // onRunFinalized (guarded on the before→'finished' transition) can never fire a
+  // second time, so badges/profile/benchmark/email consolidate exactly once.
+  if (run.status === 'finished') return { rankings: [], alreadyFinal: true };
 
-  const gameSnap = await db.doc(gamePath(uid, gameId)).get();
+  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
   const game = parseStored(() => parseGame(gameSnap.data()));
 
-  const teamsSnap = await db.collection(teamsCol(uid, gameId, runId)).get();
+  const teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
   const teams = parseTeamsQuarantining(teamsSnap.docs);
 
   const now = new Date().toISOString();
@@ -1850,15 +1883,18 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
   // opted into a staged reveal (change: manual-leaderboard-reveal) — then the
   // board is computed and frozen but withheld until the creator explicitly calls
   // refreshLeaderboard({ publish: true }) from the run console. Organizers always
-  // see the standings regardless (they read the run doc directly). This
-  // authoritative write is the ENTIRE job of finalizeRun (perf: run-perf-scale
-  // Task 9) — it's what the client is actually waiting on to move past "Ending
-  // run…", so it's the only thing awaited before returning. Heavier
-  // consolidation (per-team player-profile folds, the cross-tenant benchmark
-  // aggregate, the summary email) is handled by the `onRunFinalized` Firestore
-  // trigger below, which fires off THIS write's status:'finished' transition —
-  // see that trigger for why a background trigger (not a fire-and-forget
-  // promise here) is the correct mechanism.
+  // see the standings regardless (they read the run doc directly). A hostless solo
+  // run has no organizer to stage a reveal, so the auto-finalize path passes
+  // forcePublish:true to publish unconditionally (else the finisher would just hit
+  // the "🤫 under wraps" dead-end with nobody to reveal). This authoritative write
+  // is the ENTIRE job of finalizeRun (perf: run-perf-scale Task 9) — it's what the
+  // client is actually waiting on to move past "Ending run…", so it's the only
+  // thing awaited before returning. Heavier consolidation (per-team player-profile
+  // folds, the cross-tenant benchmark aggregate, the summary email) is handled by
+  // the `onRunFinalized` Firestore trigger below, which fires off THIS write's
+  // status:'finished' transition — see that trigger for why a background trigger
+  // (not a fire-and-forget promise here) is the correct mechanism.
+  const published = opts?.forcePublish ? true : !game.manualLeaderboardReveal;
   await runRef.update({
     status: 'finished',
     finishedAt: now,
@@ -1866,7 +1902,7 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     // (maybeRefreshLeaderboardSnapshot bails on frozen) can never recompute and
     // overwrite the published final standings after finalize. An organizer can
     // still explicitly un-freeze via refreshLeaderboard if they intend to.
-    leaderboard: { rankings, frozen: true, published: !game.manualLeaderboardReveal, updatedAt: now },
+    leaderboard: { rankings, frozen: true, published, updatedAt: now },
     // Reconcile station reservations from the live team docs (Fix 1 backstop):
     // recompute taskCounts as the ground truth of who ACTUALLY still holds a slot
     // (a non-empty activeTaskId) rather than blindly zeroing. A fully-finished run
@@ -1880,6 +1916,55 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
     updatedAt: now,
   });
 
+  return { rankings, alreadyFinal: false };
+}
+
+// maybeAutoFinalizeSoloRun — best-effort auto-finalize of a HOSTLESS solo run
+// (change: fix-solo-selfguided-finalize). A `startInstantPlay` run is
+// `selfGuided:true, participantCount:1` with no organizer, so the creator-auth
+// finalizeRun is never called and the sole finisher would hang on the "waiting for
+// the host" spinner. This re-reads the run/team as the source of truth (the team's
+// status:'finished' was just committed by the completing call's transaction) and,
+// ONLY for a genuine solo self-guided run whose single team has finished, finalizes
+// with forcePublish:true. Every disqualifying condition (not self-guided, >1
+// participant, already finished, not exactly one finished team) bails without a
+// write — so a normal organizer/multi-team run is never touched. Callers MUST treat
+// this as best-effort (see the choke point in completeTaskForTeam): any throw here
+// must not roll back the player's already-committed completion.
+async function maybeAutoFinalizeSoloRun(ownerUid: string, gameId: string, runId: string): Promise<void> {
+  const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
+  const run = runSnap.data() as Run | undefined;
+  // Cheap run-level gate first: never a normal organizer run, never multi-participant,
+  // never an already-finished run.
+  if (!isSoloSelfGuidedRun(run) || run?.status === 'finished') return;
+
+  // Confirm the sole participant has actually finished before finalizing.
+  const teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
+  const soleTeamStatus =
+    teamsSnap.size === 1 ? (teamsSnap.docs[0].data() as RunTeam).status : undefined;
+  if (!soloRunReadyToAutoFinalize(run, teamsSnap.size, soleTeamStatus)) return;
+
+  // No host to stage a reveal ⇒ publish unconditionally. finalizeRunCore's own
+  // status:'finished' guard makes a concurrent manual-vs-auto finalize a no-op.
+  await finalizeRunCore(ownerUid, gameId, runId, { forcePublish: true });
+}
+
+export const finalizeRun = loggedCallable('finalizeRun', async (data, context) => {
+  const uid = requireAuth(context);
+  const { gameId, runId } = data as { gameId: string; runId: string };
+
+  // Ownership check stays on the callable (the core is auth-agnostic). Read the run
+  // doc to confirm the caller owns it before delegating the authoritative write.
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = parseStored(() => parseRun(runSnap.data()));
+  if (run.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  // Delegate the read+buildRankings+write to the shared core. No forcePublish:
+  // organizer runs keep honoring manualLeaderboardReveal (the staged reveal path).
+  const { rankings } = await finalizeRunCore(uid, gameId, runId);
   return { rankings };
 }, { timeoutSeconds: 180, memory: '512MB' });
 

@@ -32,18 +32,25 @@ ok(publishedOnFinalize({ manualLeaderboardReveal: false }) === true, 'flag false
 ok(publishedOnFinalize({ manualLeaderboardReveal: true }) === false, 'flag true → board stays unpublished');
 ok(publishedOnFinalize({ manualLeaderboardReveal: undefined }) === true, 'undefined flag → auto-publish');
 
-// ── 2. finalizeRun must not hardcode the published flag ─────────────────────
+// ── 2. the finalize WRITE must not hardcode the published flag ───────────────
+// (change: fix-solo-selfguided-finalize) The authoritative finalize write — read
+// game+teams, buildRankings, the runRef.update — was factored out of the
+// finalizeRun callable into the internal finalizeRunCore so the hostless-solo
+// auto-finalize path can reuse it verbatim. finalizeRun the callable keeps its
+// auth/ownership check and delegates the write. So the published derivation now
+// lives in the core; assert against it (the semantic is unchanged).
 const runsSrc = read('functions/src/runs/index.ts');
-const finalizeIdx = runsSrc.indexOf('export const finalizeRun');
-ok(finalizeIdx >= 0, 'finalizeRun still exists in functions/src/runs/index.ts');
-const finalizeBody = runsSrc.slice(finalizeIdx, finalizeIdx + 6000);
+ok(runsSrc.includes('export const finalizeRun'), 'finalizeRun callable still exists in functions/src/runs/index.ts');
+const coreIdx = runsSrc.indexOf('async function finalizeRunCore');
+ok(coreIdx >= 0, 'finalizeRunCore holds the authoritative finalize write');
+const finalizeBody = runsSrc.slice(coreIdx, coreIdx + 6000);
 ok(
-  !/leaderboard:\s*\{\s*rankings,\s*frozen:\s*true,\s*published:\s*true/.test(finalizeBody),
-  'finalizeRun no longer hardcodes published: true (apply patch A from docs/wave-b/leaderboard-reveal.md)',
+  !/leaderboard:\s*\{\s*rankings,\s*frozen:\s*true,\s*published:\s*true\b/.test(finalizeBody),
+  'the finalize write no longer hardcodes published: true (it is derived)',
 );
 ok(
-  /published:\s*!game\.manualLeaderboardReveal/.test(finalizeBody),
-  'finalizeRun derives published from game.manualLeaderboardReveal',
+  /!game\.manualLeaderboardReveal/.test(finalizeBody),
+  'the finalize write derives published from game.manualLeaderboardReveal',
 );
 
 // ── 3./4. updateGame persists the flag; publicGames never carries it ─────────
@@ -95,11 +102,5 @@ for (const key of ['revealStandings', 'standingsHiddenUntilReveal', 'standingsRe
 
 console.log(`\nleaderboard-reveal: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
-  console.error(
-    '\n  NOTE: the two finalizeRun assertions stay RED until the one line patch in\n' +
-    '  docs/wave-b/leaderboard-reveal.md ("Patch A") is applied to\n' +
-    '  functions/src/runs/index.ts — that file was locked by another agent when this\n' +
-    '  test was written. Everything else is implemented.\n',
-  );
   process.exit(1);
 }
