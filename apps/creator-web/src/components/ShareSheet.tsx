@@ -52,7 +52,7 @@ export function ShareSheet({
       <div className="bg-app-card border border-glass-border rounded-2xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold">{title}</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
+          <button onClick={onClose} aria-label={b.closePanel} title={b.closePanel} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">✕</button>
         </div>
 
         {notPublic && (

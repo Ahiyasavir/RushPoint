@@ -649,6 +649,7 @@ export default function DashboardPage() {
                 <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
               </div>
               <button onClick={() => { setPicking(false); setChosen(null); }}
+                aria-label={b.closePanel} title={b.closePanel}
                 className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">✕</button>
             </div>
             {/* Body — bounded to the modal; the compact cards fit without scrolling
