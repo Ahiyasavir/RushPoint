@@ -1599,7 +1599,7 @@ function AnnouncementCard({ ctx, teams }: { ctx: { ownerUid: string; gameId: str
       <div className="space-y-2">
       <select
         aria-label={t.runConsole.announceTargetLabel}
-        className="w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+        className="w-full rounded-md border border-[--rp-border] bg-zinc-900 px-3 py-2 text-sm text-[--ink-1]"
         value={teamTarget}
         onChange={(e) => setTeamTarget(e.target.value)}
       >
@@ -1641,7 +1641,7 @@ function FlashMissionCard({ ctx }: { ctx: { ownerUid: string; gameId: string; ru
   return (
     <PanelShell panel="flashMission" actions={<RichTooltip concept="flashMission" />}>
       <div className="space-y-2">
-        <p className="text-[11px] text-zinc-500">{t.runConsole.flashMissionTtlNote({ minutes: FLASH_MISSION_TTL_MINUTES })}</p>
+        <p className="text-[11px] text-[--ink-3]">{t.runConsole.flashMissionTtlNote({ minutes: FLASH_MISSION_TTL_MINUTES })}</p>
         <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} dir="auto" />
         <div className="flex gap-2">
           <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} />
@@ -1696,8 +1696,8 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
       <div className="space-y-3">
       {active && hotZone ? (
         <div className="space-y-2 text-sm">
-          <div className="text-neon-green font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
-          <div className="text-zinc-500">{t.runConsole.hotZoneExpires({ time: new Date(hotZone.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</div>
+          <div className="text-rp-fire font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
+          <div className="text-[--ink-3]">{t.runConsole.hotZoneExpires({ time: new Date(hotZone.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</div>
           {/* Switching the zone off is CAUTIONARY, not destructive: it was
               rendered `danger` while classified `cautionary`, so the console's
               colour stopped predicting consequence (change: run-console-clarity). */}
@@ -1763,18 +1763,18 @@ function ShareScreens({ accessCode, ctx, status, published, hasStaffPin, onShare
     <PanelShell panel="shareScreens">
       <div className="space-y-2">
         {artifacts.map((entry) => (
-          <div key={entry.id} className="rounded-lg bg-app-bg p-3 flex flex-wrap items-center gap-2">
+          <div key={entry.id} className="rounded-lg bg-[--surface-2] p-3 flex flex-wrap items-center gap-2">
             <div className="flex-1 min-w-[12rem]">
-              <div className="text-sm text-zinc-200">{NAME[entry.id]}</div>
-              <div className="text-[11px] text-zinc-500 leading-relaxed">{DESC[entry.id]}</div>
+              <div className="text-sm text-[--ink-2]">{NAME[entry.id]}</div>
+              <div className="text-[11px] text-[--ink-3] leading-relaxed">{DESC[entry.id]}</div>
               {/* Copying the TV link to preview it used to publish the standings
                   to every player, silently. Say so BEFORE the click
                   (change: run-console-clarity). */}
               {entry.publishesOnShare && (
-                <div className="text-[11px] text-amber-400/90 mt-0.5">{rc.sharePublishesNote}</div>
+                <div className="text-[11px] text-rp-amber/90 mt-0.5">{rc.sharePublishesNote}</div>
               )}
               {!entry.available && (
-                <div className="text-[11px] text-amber-400/90 mt-0.5">
+                <div className="text-[11px] text-rp-amber/90 mt-0.5">
                   {entry.unavailableUntilFinished ? rc.shareAfterRunOnly
                     : entry.unavailableAfterFinish ? rc.shareWhileOpenOnly
                     : rc.shareStaffLocked}
@@ -1782,7 +1782,7 @@ function ShareScreens({ accessCode, ctx, status, published, hasStaffPin, onShare
               )}
             </div>
             {entry.id === 'accessCode' && (
-              <span className="font-mono text-neon-green tracking-[0.2em] text-sm">{accessCode}</span>
+              <span className="font-mono text-rp-fire tracking-[0.2em] text-sm">{accessCode}</span>
             )}
             <Button
               variant={runActionVariant('copyShareLink')}
@@ -1867,8 +1867,8 @@ function TrackablesConsole({ ownerUid, gameId, runId, teams }: { ownerUid: strin
         <div className="space-y-1.5">
           {items.map((tr) => (
             <div key={tr.id} className="flex items-center justify-between text-sm">
-              <span className="text-zinc-200" dir="auto">{tr.name}</span>
-              <span className="text-zinc-500 text-xs">
+              <span className="text-[--ink-2]" dir="auto">{tr.name}</span>
+              <span className="text-[--ink-3] text-xs">
                 {tr.currentHolderTeamId ? rc.trackablesHeldBy({ name: nameOf(tr.currentHolderTeamId) }) : rc.trackablesUnheld}
               </span>
             </div>
@@ -1933,10 +1933,10 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
         <div className="space-y-1.5">
           {zones.map((z) => (
             <div key={z.id} className="flex items-center justify-between text-sm gap-2">
-              <span className="text-zinc-200 flex-1" dir="auto">{z.title}</span>
+              <span className="text-[--ink-2] flex-1" dir="auto">{z.title}</span>
               {/* A holder with no denormalized name used to render "held by "
                   with nothing after it (change: run-console-clarity). */}
-              <span className="text-zinc-500 text-xs">
+              <span className="text-[--ink-3] text-xs">
                 {z.ownerTeamId
                   ? rc.zonesHeldBy({
                     name: (z.ownerTeamName ?? '').trim() || rc.unknownTeam({ id: shortId(z.ownerTeamId) }),
@@ -2029,14 +2029,14 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
   return (
     <PanelShell panel="taskAvailability">
       {stages === null ? (
-        <div className="text-sm text-zinc-500">{rc.taskAvailLoading}</div>
+        <div className="text-sm text-[--ink-3]">{rc.taskAvailLoading}</div>
       ) : stages.every((st) => st.tasks.length === 0) ? (
         <PanelEmpty panel="taskAvailability" />
       ) : (
         <div className="space-y-3">
           {stages.filter((st) => st.tasks.length > 0).map((st) => (
             <div key={st.id} className="space-y-1.5">
-              <div dir="auto" className="text-[11px] uppercase tracking-widest text-zinc-500">{st.title}</div>
+              <div dir="auto" className="text-[11px] uppercase tracking-widest text-[--ink-3]">{st.title}</div>
               {st.tasks.map((tk) => {
                 const status = effectiveTaskStatus(tk, overrides);
                 const label = status === 'paused' ? rc.taskAvailStatusPaused
@@ -2044,8 +2044,8 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
                     : rc.taskAvailStatusActive;
                 const busy = busyTaskId === tk.id;
                 return (
-                  <div key={tk.id} className="flex flex-wrap items-center gap-2 p-2 rounded-lg bg-app-bg">
-                    <span dir="auto" className="flex-1 min-w-[8rem] text-sm text-zinc-200">{tk.title}</span>
+                  <div key={tk.id} className="flex flex-wrap items-center gap-2 p-2 rounded-lg bg-[--surface-2]">
+                    <span dir="auto" className="flex-1 min-w-[8rem] text-sm text-[--ink-2]">{tk.title}</span>
                     <Badge color={status === 'active' ? 'zinc' : 'gold'}>{label}</Badge>
                     {status === 'active' ? (
                       <>
@@ -2162,7 +2162,7 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
 
   function Media({ row }: { row: SubmissionRow }) {
     if (!isRenderableMedia(row.photoUrl)) {
-      return <div className="text-[11px] text-zinc-500">{rc.photoReviewNoPhoto}</div>;
+      return <div className="text-[11px] text-[--ink-3]">{rc.photoReviewNoPhoto}</div>;
     }
     if (row.mediaKind === 'audio') {
       return <audio controls preload="none" src={row.photoUrl} className="w-full" aria-label={rc.photoReviewAudio} />;
@@ -2187,9 +2187,9 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
     return rc.photoReviewWaiting({ minutes: waitMinutes });
   }
   const WAIT_TONE = {
-    fresh: 'text-zinc-500',
-    waiting: 'text-neon-gold',
-    overdue: 'text-neon-red font-medium',
+    fresh: 'text-[--ink-3]',
+    waiting: 'text-rp-amber',
+    overdue: 'text-rp-alert font-medium',
   } as const;
 
   // Keyboard, scoped to the queue container and NEVER to `document`: a creator
@@ -2217,14 +2217,14 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
       {/* A failed load must NOT look like an empty queue: at a live event that is
           a manager silently missing submissions (change: run-console-clarity). */}
       {loadError && (
-        <p className="text-[11px] text-neon-red mb-3" role="status">{rc.photoReviewLoadError}</p>
+        <p className="text-[11px] text-rp-alert mb-3" role="status">{rc.photoReviewLoadError}</p>
       )}
 
       {items.length === 0
         ? (loadError ? null : <PanelEmpty panel="photoReview" />)
         : (
           <>
-            <p className="text-[11px] text-zinc-600 mb-2">{rc.photoReviewKeyboardHint}</p>
+            <p className="text-[11px] text-[--ink-3] mb-2">{rc.photoReviewKeyboardHint}</p>
             <div
               role="list"
               aria-label={rc.photoReviewQueueLabel}
@@ -2241,31 +2241,31 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
                     role="listitem"
                     tabIndex={focused || (focusKey === null && item === items[0]) ? 0 : -1}
                     onFocus={() => setFocusKey(key)}
-                    className={`rounded-lg bg-app-bg p-2 outline-none ${focused ? 'ring-2 ring-neon-gold' : ''}`}
+                    className={`rounded-lg bg-[--surface-2] p-2 outline-none ${focused ? 'ring-2 ring-rp-amber' : ''}`}
                   >
                     <Media row={row} />
-                    <div dir="auto" className="text-xs text-zinc-200 truncate mt-2">{row.displayName}</div>
+                    <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
                     {/* One formatter, not a bare prefix glued to a name: the old
                         concatenation rendered "task Old Market". */}
-                    <div dir="auto" className="text-[11px] text-zinc-500 truncate">
+                    <div dir="auto" className="text-[11px] text-[--ink-3] truncate">
                       {rc.photoReviewTaskLine({ name: taskLabel(row.taskId) })}
                     </div>
                     <div className={`text-[11px] ${WAIT_TONE[item.tier]}`}>
                       {waitLabel(item.waitMinutes)}
                     </div>
                     {item.tier === 'overdue' && !item.teamFinished && (
-                      <div className="text-[11px] text-neon-red">{rc.photoReviewOverdue}</div>
+                      <div className="text-[11px] text-rp-alert">{rc.photoReviewOverdue}</div>
                     )}
                     {item.teamFinished && (
-                      <div className="text-[11px] text-zinc-600">{rc.photoReviewTeamFinished}</div>
+                      <div className="text-[11px] text-[--ink-3]">{rc.photoReviewTeamFinished}</div>
                     )}
                     {row.submittedAt && (
-                      <div className="text-[11px] text-zinc-600">
+                      <div className="text-[11px] text-[--ink-3]">
                         {rc.photoReviewSubmittedAt({ time: clock(row.submittedAt) })}
                       </div>
                     )}
                     {item.failure && (
-                      <p dir="auto" className="text-[11px] text-neon-red mt-1" role="alert">{item.failure}</p>
+                      <p dir="auto" className="text-[11px] text-rp-alert mt-1" role="alert">{item.failure}</p>
                     )}
                     <div className="flex items-center gap-2 mt-2">
                       <Button
@@ -2294,7 +2294,7 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
 
       {reviewed.length > 0 && (
         <div className="mt-4">
-          <div className="text-[11px] text-zinc-500 mb-2">{rc.photoReviewRecent}</div>
+          <div className="text-[11px] text-[--ink-3] mb-2">{rc.photoReviewRecent}</div>
           <div className="space-y-1">
             {reviewed.map((row) => {
               const key = submissionKey(row);
@@ -2308,13 +2308,13 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
                 : rc.photoReviewAlreadyRejected;
               return (
                 <div key={key} className="flex items-center gap-2 text-[11px]">
-                  <span className={row.status === 'approved' ? 'text-neon-green' : 'text-neon-red'}>
+                  <span className={row.status === 'approved' ? 'text-rp-fire' : 'text-rp-alert'}>
                     {row.status === 'approved' ? rc.photoReviewTagApproved : rc.photoReviewTagRejected}
                   </span>
-                  <span dir="auto" className="text-zinc-300 truncate flex-1">{row.displayName}</span>
-                  <span dir="auto" className="text-zinc-600 truncate">{taskLabel(row.taskId)}</span>
+                  <span dir="auto" className="text-[--ink-2] truncate flex-1">{row.displayName}</span>
+                  <span dir="auto" className="text-[--ink-3] truncate">{taskLabel(row.taskId)}</span>
                   <button
-                    className="text-zinc-500 disabled:text-zinc-700 disabled:cursor-not-allowed"
+                    className="text-[--ink-3] disabled:text-[--ink-4] disabled:cursor-not-allowed"
                     disabled
                     title={rejectReason}
                   >
@@ -2357,13 +2357,13 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
       {items.length === 0 && <PanelEmpty panel="feed" />}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {items.map((item) => (
-          <div key={item.id} className="rounded-lg bg-app-bg overflow-hidden">
+          <div key={item.id} className="rounded-lg bg-[--surface-2] overflow-hidden">
             <img src={item.photoUrl} alt="" loading="lazy" className="w-full h-28 object-cover" />
             <div className="p-2">
-              <div dir="auto" className="text-xs text-zinc-200 truncate">{item.teamName}</div>
-              <div dir="auto" className="text-[11px] text-zinc-500 truncate">{item.taskTitle}</div>
+              <div dir="auto" className="text-xs text-[--ink-2] truncate">{item.teamName}</div>
+              <div dir="auto" className="text-[11px] text-[--ink-3] truncate">{item.taskTitle}</div>
               <div className="flex items-center justify-between mt-1">
-                <span className="text-[11px] text-zinc-500 font-mono">
+                <span className="text-[11px] text-[--ink-3] font-mono">
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) || ''}
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) > 0 ? ' ❤' : ''}
                 </span>
@@ -2459,21 +2459,21 @@ function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
           const unread = countUnreadChatMessages(th.messages, markerFor(th.teamId), selfUid) > 0;
           const expanded = openTeam === th.teamId;
           return (
-            <div key={th.teamId} className="rounded-lg bg-app-bg p-3">
+            <div key={th.teamId} className="rounded-lg bg-[--surface-2] p-3">
               <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages)}>
                 <div className="flex items-center justify-between gap-2">
-                  <span dir="auto" className="text-sm font-medium text-zinc-200 truncate">{nameFor(th.teamId)}</span>
+                  <span dir="auto" className="text-sm font-medium text-[--ink-2] truncate">{nameFor(th.teamId)}</span>
                   {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-neon-blue/20 text-neon-blue px-2 py-0.5 text-[11px] font-semibold">{rc.chatUnread}</span>}
                 </div>
-                {last && <div dir="auto" className="text-[11px] text-zinc-500 truncate mt-0.5">{last.from === 'hq' ? `${rc.chatHq}: ` : ''}{last.text}</div>}
+                {last && <div dir="auto" className="text-[11px] text-[--ink-3] truncate mt-0.5">{last.from === 'hq' ? `${rc.chatHq}: ` : ''}{last.text}</div>}
               </button>
               {expanded && (
                 <div className="mt-2 space-y-2">
                   <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
                     {th.messages.map((m) => (
                       <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[11px] text-zinc-500">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
-                        <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-neon-blue/15 border border-neon-blue/40 text-zinc-100' : 'bg-app-card border border-zinc-700 text-zinc-200'}`}>{m.text}</div>
+                        <span className="text-[11px] text-[--ink-3]">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
+                        <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-neon-blue/15 border border-neon-blue/40 text-[--ink-1]' : 'bg-app-card border border-[--rp-border] text-[--ink-2]'}`}>{m.text}</div>
                       </div>
                     ))}
                   </div>
@@ -2533,7 +2533,7 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
           ? <PanelEmpty panel="heatmap" />
           : (
             <div className="space-y-2">
-              <div className="text-sm text-zinc-400">{t.runConsole.heatmapPoints({ n: data.pointCount })}</div>
+              <div className="text-sm text-[--ink-3]">{t.runConsole.heatmapPoints({ n: data.pointCount })}</div>
               <HeatmapMap cells={data.cells} className="h-80" />
             </div>
           )
@@ -2576,15 +2576,15 @@ function RunSummaryPanel({ accessCode }: { accessCode: string }) {
         <div className="space-y-3">
           {/* Standings */}
           <div>
-            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryStandings}</div>
+            <div className="text-xs text-[--ink-3] mb-1">{t.runConsole.summaryStandings}</div>
             {data.standings.length === 0 ? (
-              <div className="text-sm text-zinc-500">{t.runConsole.summaryNoData}</div>
+              <div className="text-sm text-[--ink-3]">{t.runConsole.summaryNoData}</div>
             ) : (
               <ol className="space-y-0.5">
                 {data.standings.slice(0, 5).map((s) => (
                   <li key={s.teamId} className="flex items-center justify-between text-sm">
                     <span dir="auto">{s.rank}. {s.teamName}</span>
-                    <span className="font-mono text-zinc-400">{s.score}</span>
+                    <span className="font-mono text-[--ink-3]">{s.score}</span>
                   </li>
                 ))}
               </ol>
@@ -2592,8 +2592,8 @@ function RunSummaryPanel({ accessCode }: { accessCode: string }) {
           </div>
           {/* Completion headline */}
           <div>
-            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryCompletion}</div>
-            <div className="text-sm text-zinc-400">
+            <div className="text-xs text-[--ink-3] mb-1">{t.runConsole.summaryCompletion}</div>
+            <div className="text-sm text-[--ink-3]">
               {t.runConsole.summaryTeams({ n: data.completion.teamCount })}
               {' · '}
               {t.runConsole.summaryCompletionRate({ pct: Math.round(data.completion.overallCompletionRate * 100) })}
@@ -2603,8 +2603,8 @@ function RunSummaryPanel({ accessCode }: { accessCode: string }) {
           </div>
           {/* Feedback digest */}
           <div>
-            <div className="text-xs text-zinc-500 mb-1">{t.runConsole.summaryFeedback}</div>
-            <div className="text-sm text-zinc-400 space-y-1">
+            <div className="text-xs text-[--ink-3] mb-1">{t.runConsole.summaryFeedback}</div>
+            <div className="text-sm text-[--ink-3] space-y-1">
               <div>
                 {t.runConsole.feedbackResponseRate({ n: data.feedback.responseCount, total: data.feedback.participantCount })}
                 {' · '}
@@ -2621,7 +2621,7 @@ function RunSummaryPanel({ accessCode }: { accessCode: string }) {
               )}
             </div>
           </div>
-          <div className="text-xs text-zinc-500">{t.runConsole.summaryEmailNote}</div>
+          <div className="text-xs text-[--ink-3]">{t.runConsole.summaryEmailNote}</div>
         </div>
       )}
     </PanelShell>
@@ -2704,10 +2704,10 @@ function AnalyticsPanel({ accessCode }: { accessCode: string }) {
           <PanelEmpty panel="analytics" />
         ) : (
           <div className="space-y-2">
-            <div className="text-sm text-zinc-400">{t.runConsole.analyticsOverall({ pct: Math.round(data.overallCompletionRate * 100) })}</div>
+            <div className="text-sm text-[--ink-3]">{t.runConsole.analyticsOverall({ pct: Math.round(data.overallCompletionRate * 100) })}</div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="text-zinc-500 text-xs text-start">
+                <thead className="text-[--ink-3] text-xs text-start">
                   <tr>
                     <th className="text-start font-medium py-1">{t.runConsole.colTask}</th>
                     <th className="text-start font-medium py-1">{t.runConsole.colDone}</th>
@@ -2783,7 +2783,7 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
   return (
     <PanelShell
       panel="feedback"
-      actions={s ? <span className="text-xs text-zinc-500">{t.runConsole.feedbackResponseRate({ n: s.responseCount, total: s.participantCount })}</span> : undefined}
+      actions={s ? <span className="text-xs text-[--ink-3]">{t.runConsole.feedbackResponseRate({ n: s.responseCount, total: s.participantCount })}</span> : undefined}
     >
       {err && !s && <div className="text-sm text-danger" role="status">{err}</div>}
       {!s ? null : s.responseCount === 0 ? (
@@ -2791,17 +2791,17 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
       ) : (
         <div className="space-y-4">
           {s.ratings.recommend && (
-            <div className="text-sm text-neon-green">{t.runConsole.feedbackRecommend({ pct: Math.round(s.recommendScore * 100) })}</div>
+            <div className="text-sm text-rp-fire">{t.runConsole.feedbackRecommend({ pct: Math.round(s.recommendScore * 100) })}</div>
           )}
 
           {/* 1–5 dimension tiles */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {FIVE_DIMS.filter((k) => s.ratings[k]).map((k) => (
               <div key={k} className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
-                <div className="text-[11px] text-zinc-500 mb-0.5">{dimLabel[k]}</div>
-                <div className="text-lg font-bold text-neon-green">
+                <div className="text-[11px] text-[--ink-3] mb-0.5">{dimLabel[k]}</div>
+                <div className="text-lg font-bold text-rp-fire">
                   {s.ratings[k]!.avg.toFixed(1)}
-                  <span className="text-xs font-normal text-zinc-500"> / 5 · {s.ratings[k]!.count}</span>
+                  <span className="text-xs font-normal text-[--ink-3]"> / 5 · {s.ratings[k]!.count}</span>
                 </div>
               </div>
             ))}
@@ -2834,10 +2834,10 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
           {/* reported issues */}
           {FEEDBACK_ISSUES.some((i) => (s.issueCounts[i] ?? 0) > 0) && (
             <div>
-              <div className="text-xs text-zinc-500 mb-1.5">{t.runConsole.feedbackIssuesTitle}</div>
+              <div className="text-xs text-[--ink-3] mb-1.5">{t.runConsole.feedbackIssuesTitle}</div>
               <div className="flex flex-wrap gap-2">
                 {FEEDBACK_ISSUES.filter((i) => (s.issueCounts[i] ?? 0) > 0).map((i) => (
-                  <span key={i} className="rounded-full bg-neon-red/10 border border-neon-red/30 text-neon-red text-xs px-2.5 py-1">
+                  <span key={i} className="rounded-full bg-rp-alert/10 border border-rp-alert/30 text-rp-alert text-xs px-2.5 py-1">
                     {issueLabel[i]} · {s.issueCounts[i]}
                   </span>
                 ))}
@@ -2847,9 +2847,9 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
 
           {/* comments + drill-down list */}
           <div>
-            <div className="text-xs text-zinc-500 mb-1.5">{t.runConsole.feedbackCommentsTitle({ n: comments.length })}</div>
+            <div className="text-xs text-[--ink-3] mb-1.5">{t.runConsole.feedbackCommentsTitle({ n: comments.length })}</div>
             {responses.length === 0 ? (
-              <div className="text-sm text-zinc-500">{t.runConsole.feedbackNoComments}</div>
+              <div className="text-sm text-[--ink-3]">{t.runConsole.feedbackNoComments}</div>
             ) : (
               <div className="space-y-1.5">
                 {responses.map((r) => (
@@ -2859,9 +2859,9 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
                       <span dir="auto" className="text-sm font-medium truncate">
                         {r.teamName}{r.memberName ? ` · ${r.memberName}` : ''}
                       </span>
-                      <span className="text-xs text-zinc-500 shrink-0">{t.runConsole.feedbackViewResponse}</span>
+                      <span className="text-xs text-[--ink-3] shrink-0">{t.runConsole.feedbackViewResponse}</span>
                     </div>
-                    {r.comment && <div dir="auto" className="text-sm text-zinc-400 truncate mt-0.5">“{r.comment}”</div>}
+                    {r.comment && <div dir="auto" className="text-sm text-[--ink-3] truncate mt-0.5">“{r.comment}”</div>}
                   </button>
                 ))}
               </div>
@@ -2876,21 +2876,21 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
           <Card className="p-5 space-y-3">
             <div className="flex items-center justify-between">
               <div dir="auto" className="font-semibold">{open.teamName}{open.memberName ? ` · ${open.memberName}` : ''}</div>
-              <button onClick={() => setOpen(null)} className="text-zinc-500 text-sm">{t.runConsole.feedbackClose}</button>
+              <button onClick={() => setOpen(null)} className="text-[--ink-3] text-sm">{t.runConsole.feedbackClose}</button>
             </div>
-            <div className="text-xs text-zinc-500">{t.runConsole.feedbackResponseTitle}</div>
+            <div className="text-xs text-[--ink-3]">{t.runConsole.feedbackResponseTitle}</div>
             <div className="space-y-1.5">
               {(['overall', 'content', 'bonding', 'difficulty', 'smoothness', 'recommend'] as FeedbackRatingKey[]).map((k) => (
                 <div key={k} className="flex justify-between text-sm">
-                  <span className="text-zinc-400">{dimLabel[k]}</span>
-                  <span className="font-medium">{open.ratings[k] ?? <span className="text-zinc-600">{t.runConsole.feedbackNoAnswer}</span>}</span>
+                  <span className="text-[--ink-3]">{dimLabel[k]}</span>
+                  <span className="font-medium">{open.ratings[k] ?? <span className="text-[--ink-3]">{t.runConsole.feedbackNoAnswer}</span>}</span>
                 </div>
               ))}
             </div>
             {open.issues && open.issues.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {open.issues.map((i) => (
-                  <span key={i} className="rounded-full bg-neon-red/10 border border-neon-red/30 text-neon-red text-xs px-2 py-0.5">{issueLabel[i]}</span>
+                  <span key={i} className="rounded-full bg-rp-alert/10 border border-rp-alert/30 text-rp-alert text-xs px-2 py-0.5">{issueLabel[i]}</span>
                 ))}
               </div>
             )}
@@ -2907,17 +2907,17 @@ function Distribution({ title, bars }: { title: string; bars: [string, number][]
   const max = Math.max(1, ...bars.map(([, n]) => (Number.isFinite(n) ? n : 0)));
   return (
     <div className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
-      <div className="text-[11px] text-zinc-500 mb-2">{title}</div>
+      <div className="text-[11px] text-[--ink-3] mb-2">{title}</div>
       <div className="space-y-1.5">
         {bars.map(([label, rawN]) => {
           const n = Number.isFinite(rawN) ? rawN : 0;
           return (
           <div key={label} className="flex items-center gap-2 text-xs">
-            <span className="w-24 shrink-0 text-zinc-400 truncate">{label}</span>
+            <span className="w-24 shrink-0 text-[--ink-3] truncate">{label}</span>
             <div className="flex-1 h-2 rounded-full bg-black/20 overflow-hidden">
-              <div className="h-full rounded-full bg-neon-green/60" style={{ width: `${(n / max) * 100}%` }} />
+              <div className="h-full rounded-full bg-rp-fire/60" style={{ width: `${(n / max) * 100}%` }} />
             </div>
-            <span className="w-5 text-end text-zinc-400">{n}</span>
+            <span className="w-5 text-end text-[--ink-3]">{n}</span>
           </div>
           );
         })}
@@ -2955,7 +2955,7 @@ function SurveyResultsPanel({ results, loading, loadError, onRefresh }: {
         // (change: post-review-fixes D).
         <div className="text-sm text-danger" role="status">{t.runConsole.surveyError}</div>
       ) : results === null ? (
-        <div className="text-sm text-zinc-500">{t.runConsole.surveyLoading}</div>
+        <div className="text-sm text-[--ink-3]">{t.runConsole.surveyLoading}</div>
       ) : results.length === 0 ? (
         // This card could sit permanently blank: the loader swallowed its errors
         // and the panel had no zero results branch at all
@@ -2967,7 +2967,7 @@ function SurveyResultsPanel({ results, loading, loadError, onRefresh }: {
             <div key={r.taskId} className="space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div dir="auto" className="text-sm font-medium truncate">{r.title}</div>
-                <div className="text-xs text-zinc-500 shrink-0">{t.runConsole.surveyResponseCount({ n: r.responseCount })}</div>
+                <div className="text-xs text-[--ink-3] shrink-0">{t.runConsole.surveyResponseCount({ n: r.responseCount })}</div>
               </div>
               {r.counts && r.surveyChoices ? (
                 <Distribution
@@ -2975,12 +2975,12 @@ function SurveyResultsPanel({ results, loading, loadError, onRefresh }: {
                   bars={r.surveyChoices.map((c) => [c, r.counts![c] ?? 0])}
                 />
               ) : r.responseCount === 0 ? (
-                <div className="text-sm text-zinc-500">{t.runConsole.surveyNoResponses}</div>
+                <div className="text-sm text-[--ink-3]">{t.runConsole.surveyNoResponses}</div>
               ) : (
                 <div className="space-y-1.5">
                   {(r.responses ?? []).map((row, i) => (
                     <div key={i} className="rounded-lg bg-[--rp-raised] px-3 py-2">
-                      <div dir="auto" className="text-xs text-zinc-500 mb-0.5 truncate">{row.teamName}</div>
+                      <div dir="auto" className="text-xs text-[--ink-3] mb-0.5 truncate">{row.teamName}</div>
                       <div dir="auto" className="text-sm">{row.response}</div>
                     </div>
                   ))}
