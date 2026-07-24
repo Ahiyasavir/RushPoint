@@ -3,6 +3,7 @@ import { getRunRecap, type RunRecapResult } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { shareRecap } from '../lib/recapCollage';
+import { shareOutcomeFeedback } from '../lib/shareFeedback';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
@@ -27,6 +28,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
   const { t } = useT();
   const [data, setData] = useState<RunRecapResult | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [shareNote, setShareNote] = useState<'ok' | 'copied' | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -40,11 +42,21 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
     if (!data) return;
     setBusy(true);
     try {
-      await shareRecap(data.photos, {
+      const result = await shareRecap(data.photos, {
         title: data.title,
         ctaUrl: window.location.href,
         text: t.recap.shareText({ game: data.title }),
       });
+      const verdict = shareOutcomeFeedback(result);
+      if (verdict === 'confirm') {
+        setShareNote('ok');
+        setTimeout(() => setShareNote(null), 2500);
+      } else if (verdict === 'fallback') {
+        try { await navigator.clipboard.writeText(window.location.href); } catch { /* still show the notice */ }
+        setShareNote('copied');
+        setTimeout(() => setShareNote(null), 2500);
+      }
+      // 'silent' (user cancelled): no feedback.
     } finally { setBusy(false); }
   }
 
@@ -114,6 +126,11 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
         </Card>
 
         <Button disabled={busy} onClick={share}>{busy ? t.recap.creating : t.recap.shareBtn}</Button>
+        {shareNote && (
+          <p className="text-center text-sm font-semibold text-zinc-400" role="status">
+            {shareNote === 'ok' ? t.recap.shareSaved : t.recap.shareFailed}
+          </p>
+        )}
         <a href={CREATOR_URL} target="_blank" rel="noreferrer"
           className="block text-center text-sm font-semibold text-ink-fire hover:text-ink-amber">
           {t.recap.buildOwn}

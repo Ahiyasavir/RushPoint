@@ -6,6 +6,7 @@ import { checkChallengeAnswer } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { shareChallenge } from '../lib/challengeCard';
+import { shareOutcomeFeedback } from '../lib/shareFeedback';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
@@ -28,6 +29,7 @@ export default function ChallengeTeaser({
   const [answer, setAnswer] = useState('');
   const [result, setResult] = useState<'correct' | 'wrong' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shareNote, setShareNote] = useState<'ok' | 'copied' | null>(null);
   const [left, setLeft] = useState(COUNTDOWN);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -71,13 +73,28 @@ export default function ChallengeTeaser({
   }
 
   async function share() {
-    await shareChallenge({
-      gameId, taskId,
-      question: task?.title ?? '',
-      gameName,
-      playBaseUrl: window.location.origin,
-      ctaText: t.challenge.shareText({ game: gameName || 'RushPoint' }),
-    });
+    // Busy guard so a double-tap can't fire two share sheets.
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await shareChallenge({
+        gameId, taskId,
+        question: task?.title ?? '',
+        gameName,
+        playBaseUrl: window.location.origin,
+        ctaText: t.challenge.shareText({ game: gameName || 'RushPoint' }),
+      });
+      const verdict = shareOutcomeFeedback(result);
+      if (verdict === 'confirm') {
+        setShareNote('ok');
+        setTimeout(() => setShareNote(null), 2500);
+      } else if (verdict === 'fallback') {
+        try { await navigator.clipboard.writeText(window.location.href); } catch { /* still show the notice */ }
+        setShareNote('copied');
+        setTimeout(() => setShareNote(null), 2500);
+      }
+      // 'silent' (user cancelled): no feedback.
+    } finally { setBusy(false); }
   }
 
   if (task === undefined) {
@@ -167,10 +184,15 @@ export default function ChallengeTeaser({
             className="block mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
             {t.challenge.ctaBuild}
           </a>
-          <button onClick={share}
-            className="mt-3 text-xs text-zinc-500 hover:text-zinc-300">
+          <button onClick={share} disabled={busy}
+            className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
             {t.challenge.shareBtn}
           </button>
+          {shareNote && (
+            <p className="mt-2 text-xs font-semibold text-zinc-400" role="status">
+              {shareNote === 'ok' ? t.challenge.shareSaved : t.challenge.shareFailed}
+            </p>
+          )}
         </Card>
       </div>
     </Screen>
