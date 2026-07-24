@@ -26,6 +26,22 @@ proxy.on('error', (err, req, res) => {
 });
 
 const server = http.createServer((req, res) => {
+  // Canonical-slash redirect for the creator app mount point. creator-web is
+  // built/served with Vite base `/creator/`, so a request for the bare
+  // `/creator` (no trailing slash) makes Vite answer with its "did you mean
+  // /creator/?" hint page instead of the SPA. A creator hits this every time
+  // they open or refresh the shared link without the slash. Redirect the exact
+  // `/creator` (optionally with a query) to `/creator/` so the app loads.
+  // Deeper paths (`/creator/...`) already carry the slash and fall through to
+  // Vite's SPA fallback unchanged.
+  const qIdx = req.url.indexOf('?');
+  const path = qIdx === -1 ? req.url : req.url.slice(0, qIdx);
+  if (path === '/creator') {
+    const query = qIdx === -1 ? '' : req.url.slice(qIdx);
+    res.writeHead(301, { Location: `/creator/${query}` });
+    res.end();
+    return;
+  }
   const port = resolveProxyTarget(req.url);
   const ts = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
   console.log(`[${ts}] ${req.method} ${req.url} → ${PORT_LABELS[port]} (${HOST}:${port})`);
