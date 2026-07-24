@@ -9,15 +9,20 @@ import { Button } from './ui';
 // attention badge, a rescue button and a score before a single action button, and
 // the per task skip made it four buttons wide. Which control sits where is decided
 // by a pure split (`teamRowActions` / `dashboardCardActions`), never here.
-export function OverflowMenu({ label, ariaLabel, children }: {
+export function OverflowMenu({ label, ariaLabel, children, triggerClassName = 'min-h-0 px-2.5 py-1 text-[11px] rounded-lg' }: {
   label: string; ariaLabel: string; children: ReactNode;
+  // Optional trigger styling. Defaults to the dense row style the Dashboard card
+  // and Run Console team row use, so those callers stay byte-identical; the
+  // Builder's "File" menu (change: builder-file-menu) passes a header-styled,
+  // 44px tap-target class instead.
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
       <Button
         variant="ghost"
-        className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg"
+        className={triggerClassName}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={ariaLabel}

@@ -21,6 +21,7 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, TagChips, Textarea } from '../components/ui';
+import { OverflowMenu } from '../components/OverflowMenu';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
 import { useT } from '../components/LanguageContext';
@@ -454,24 +455,33 @@ export default function BuilderPage() {
         </div>
 
         {/* Creator-owned portability: save this game to a file you keep, or build
-            a new game from one. Import always creates a NEW game. */}
-        <div className="flex items-center gap-0.5 shrink-0">
-          <button
-            onClick={() => { void exportToFile(); }}
-            title={b.exportFileHint}
-            aria-label={b.exportFile}
-            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+            a new game from one. Import always creates a NEW game. One clearly
+            labelled "File" menu (change: builder-file-menu). The actions used to
+            be two bare arrow glyphs whose meaning only a hover revealed. Same
+            handlers, same hidden file input. */}
+        <div className="shrink-0">
+          <OverflowMenu
+            label={b.fileMenu}
+            ariaLabel={b.fileMenuAria}
+            triggerClassName="min-h-[44px] px-3 rounded-lg text-sm gap-1"
           >
-            ↓
-          </button>
-          <button
-            onClick={() => importInput.current?.click()}
-            title={b.importFileHint}
-            aria-label={b.importFile}
-            className="w-7 h-7 rounded-lg border border-[--rp-border] text-[--ink-3] flex items-center justify-center hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
-          >
-            ↑
-          </button>
+            <button
+              role="menuitem"
+              onClick={() => { void exportToFile(); }}
+              title={b.exportFileHint}
+              className="w-full justify-start text-start min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-medium text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            >
+              {b.exportFile}
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => importInput.current?.click()}
+              title={b.importFileHint}
+              className="w-full justify-start text-start min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-medium text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            >
+              {b.importFile}
+            </button>
+          </OverflowMenu>
           <input
             ref={importInput}
             type="file"

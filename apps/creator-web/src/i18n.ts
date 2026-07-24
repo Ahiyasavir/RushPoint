@@ -1021,6 +1021,9 @@ const HE = {
     undo: 'בטל',
     redo: 'בצע מחדש',
     // Creator-owned portability (change: game-file-export-import).
+    // Labelled "File" menu grouping export + import (change: builder-file-menu).
+    fileMenu: 'קובץ',
+    fileMenuAria: 'פעולות קובץ המשחק',
     exportFile: 'שמירת עותק',
     exportFileHint: 'הורידו קובץ של המשחק הזה למחשב שלכם. הקובץ מכיל את כל התוכן שכתבתם, כולל התשובות והרמזים, אך לא את תוצאות הריצות.',
     exportFailed: 'ההורדה נכשלה. נסו שוב.',
@@ -2539,6 +2542,9 @@ const EN: typeof HE = {
     undo: 'Undo',
     redo: 'Redo',
     // Creator-owned portability (change: game-file-export-import).
+    // Labelled "File" menu grouping export + import (change: builder-file-menu).
+    fileMenu: 'File',
+    fileMenuAria: 'Game file actions',
     exportFile: 'Save a copy',
     exportFileHint: 'Download a file of this game to your own computer. The file holds everything you authored, including answers and hints, but not the results of any run.',
     exportFailed: 'The download failed. Please try again.',
