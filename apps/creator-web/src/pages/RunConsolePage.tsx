@@ -728,6 +728,11 @@ export default function RunConsolePage() {
     }
     catch { await dialog.alert(rc.letBackInFailed); }
   }
+  // In-flight guard, keyed per team id, so a double-tap on a held team's release
+  // can't double-fire clearTeamOutOfBounds — while a different team row can still
+  // act. Mirrors ackAction; the sibling row actions are guarded by their confirm
+  // modals, but this one fires immediately on click.
+  const letBackInAction = useAsyncAction(letTeamBackIn, (team: RunTeamRow) => team.id);
 
   async function skipTeamStage(team: RunTeamRow) {
     // The label said "skip"; it skipped the team's WHOLE STAGE. The consequence
@@ -907,22 +912,26 @@ export default function RunConsolePage() {
                           clearTeamOutOfBounds: {
                             label: rc.letBackIn,
                             aria: rc.letBackInAria({ team: team.displayName }),
-                            run: () => void letTeamBackIn(team),
+                            run: () => void letBackInAction.run(team),
+                            disabled: letBackInAction.isBusy(team.id),
                           },
                           skipTask: {
                             label: rc.skipTask,
                             aria: rc.skipTaskAria({ team: team.displayName }),
                             run: () => void skipTeamTask(team),
+                            disabled: false,
                           },
                           skipStage: {
                             label: rc.skipStage,
                             aria: rc.skipStageAria({ team: team.displayName }),
                             run: () => void skipTeamStage(team),
+                            disabled: false,
                           },
                           adjustTeamScore: {
                             label: rc.adjustScore,
                             aria: rc.adjustScoreAria({ team: team.displayName }),
                             run: () => void adjustScore(team),
+                            disabled: false,
                           },
                         }[id as 'clearTeamOutOfBounds' | 'skipTask' | 'skipStage' | 'adjustTeamScore'];
                         return (
@@ -932,6 +941,7 @@ export default function RunConsolePage() {
                             role={inMenu ? 'menuitem' : undefined}
                             className={`min-h-0 px-2.5 py-1 text-[11px] rounded-lg ${inMenu ? 'w-full justify-start text-start' : ''}`}
                             aria-label={props.aria}
+                            disabled={props.disabled}
                             onClick={props.run}
                           >
                             {props.label}
