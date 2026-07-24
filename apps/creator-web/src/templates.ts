@@ -190,6 +190,126 @@ export const TEMPLATES: GameTemplate[] = [
       ], { isFinal: true, requiredTaskCount: 2 }),
     ],
   },
+  {
+    key: 'wedding', emoji: '💍',
+    mode: 'team', scoringPreset: 'smart_weighted',
+    build: () => [
+      stage('מכירים את הזוג? / Know the couple?', [
+        quiz('איפה הם נפגשו? / Where did they meet?', 'איפה הזוג נפגש בפעם הראשונה? (ערכו את התשובה)\n\nWhere did the couple first meet? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, {
+          difficulty: 3, pointValue: 120,
+          hint: 'שאלו בשקט אחד ההורים או השושבינים. / Quietly ask a parent or the best man.', hintPenalty: 20,
+        }),
+        numeric('כמה שנים הם יחד? / How many years together?', 'כמה שנים הזוג יחד? נחשו הכי קרוב. (ערכו את המספר)\n\nHow many years has the couple been together? Closest guess wins. (edit this answer)', 5, { numericTolerance: 1, difficulty: 3, pointValue: 120 }),
+      ], {
+        requiredTaskCount: 1,
+        narrative: {
+          intro: {
+            title: 'מזל טוב!',
+            body: 'A big day for a special couple. Gather your team and let the celebration begin.',
+            bodyHe: 'יום גדול לזוג מיוחד. אספו את הקבוצה ובואו נתחיל לחגוג.',
+          },
+        },
+      }),
+      stage('רחבת הריקודים / Dance floor', [
+        photo('סלפי עם הזוג / Selfie with the couple', 'תפסו את הזוג לרגע וצלמו סלפי משותף!\n\nCatch the couple for a moment and snap a selfie together!', { difficulty: 4, pointValue: 140 }),
+        photo('הנעל האבודה / Something borrowed', 'צלמו משהו שאולים ליום המיוחד. משהו כחול עדיף!\n\nPhoto something borrowed for the big day. Bonus if it is blue!', { difficulty: 4, pointValue: 140 }),
+        photo('כל השולחן רוקד / Whole table dancing', 'הרימו את כל השולחן שלכם לרחבה וצלמו את כולם רוקדים.\n\nGet your whole table onto the floor and film everyone dancing.', { difficulty: 5, pointValue: 150 }),
+      ], { requiredTaskCount: 2 }),
+      stage('ברכה / A toast', [
+        photo('ברכה בת 15 שניות / A 15 second blessing', 'צלמו ברכה קצרה של 15 שניות מהקבוצה לזוג המאושר.\n\nFilm a short 15 second blessing from the team to the happy couple.', { difficulty: 4, pointValue: 160 }),
+      ], {
+        isFinal: true,
+        narrative: {
+          outro: {
+            title: 'לחיים!',
+            body: 'A toast to a wonderful couple. May the party never end!',
+            bodyHe: 'לחיים לזוג הנפלא. שהמסיבה לא תיגמר לעולם!',
+          },
+        },
+      }),
+    ],
+  },
+  {
+    key: 'conference', emoji: '🎤',
+    mode: 'team', scoringPreset: 'fixed_points_speed',
+    build: () => [
+      stage('היכרות / Icebreaker', [
+        selfReport('מצאו מישהו מ 3 קבוצות / Find someone from 3 teams', 'הכירו מישהו חדש משלוש קבוצות שונות והקישו סיום.\n\nMeet someone new from three different teams, then tap done.', { difficulty: 2, pointValue: 100 }),
+      ], {
+        requiredTaskCount: 1,
+        narrative: {
+          intro: {
+            title: 'מתחברים',
+            body: 'The best sessions happen between the sessions. Time to meet the room.',
+            bodyHe: 'המפגשים הכי טובים קורים בין ההרצאות. הגיע הזמן להכיר את החדר.',
+          },
+        },
+      }),
+      stage('ציד קשרים / Networking hunt', [
+        photo('כרטיס ביקור / A business card selfie', 'צלמו סלפי עם כרטיס ביקור של מישהו שהכרתם היום.\n\nSnap a selfie with the business card of someone you met today.', { difficulty: 3, pointValue: 120 }),
+        quiz('מי הדובר הראשי? / Who is the keynote speaker?', 'מי הדובר הראשי של האירוע? (ערכו את התשובה)\n\nWho is the event keynote speaker? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, {
+          difficulty: 3, pointValue: 120,
+          hint: 'הציצו בלוח הזמנים של האירוע. / Peek at the event agenda.', hintPenalty: 15,
+        }),
+        photo('צוות ליד הלוגו / Team by the event banner', 'כל הקבוצה מצטלמת ליד באנר או לוגו האירוע.\n\nWhole team poses by the event banner or logo.', { difficulty: 3, pointValue: 120 }),
+      ], { requiredTaskCount: 2 }),
+      stage('טייק אווי / Takeaway', [
+        survey('התובנה הכי טובה / Best insight of the day', 'אין תשובה נכונה: מה התובנה שתיקחו הביתה?\n\nNo wrong answer: what insight are you taking home?', [
+          '💡 רעיון חדש לגמרי / A brand new idea',
+          '🤝 קשר חדש מעולה / A great new contact',
+          '☕ שיחת המסדרון הכי טובה / The best hallway chat',
+          '🚀 השראה לפרויקט הבא / Inspiration for the next project',
+        ], { difficulty: 1 }),
+      ], {
+        isFinal: true,
+        narrative: {
+          outro: {
+            title: 'עד הפעם הבאה',
+            body: 'New contacts, fresh ideas, and a team that just clicked. Well done!',
+            bodyHe: 'קשרים חדשים, רעיונות טריים וקבוצה שהתחברה. כל הכבוד!',
+          },
+        },
+      }),
+    ],
+  },
+  {
+    key: 'city_tour', emoji: '🏛️',
+    mode: 'team', scoringPreset: 'smart_weighted',
+    build: () => [
+      stage('יוצאים לדרך / Set off', [
+        quiz('איזה מבנה הכי גבוה בעיר? / Which building is the tallest in town?', 'מהו המבנה הגבוה ביותר בעיר? (ערכו את התשובה)\n\nWhich is the tallest building in town? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, {
+          difficulty: 3, pointValue: 110,
+          hint: 'הרימו מבט למעלה, או שאלו מקומי. / Look up, or ask a local.', hintPenalty: 15,
+        }),
+      ], {
+        requiredTaskCount: 1,
+        narrative: {
+          intro: {
+            title: 'הסיור מתחיל',
+            body: 'Every street has a story. Keep your eyes open and let the city surprise you.',
+            bodyHe: 'לכל רחוב יש סיפור. פקחו עיניים ותנו לעיר להפתיע אתכם.',
+          },
+        },
+      }),
+      stage('ציד תרבות / Culture hunt', [
+        photo('אמנות ברחוב / Street art', 'מצאו וצלמו יצירת אמנות רחוב שאהבתם.\n\nFind and photograph a piece of street art you love.', { difficulty: 3, pointValue: 120 }),
+        photo('פרט אדריכלי / An architectural detail', 'צלמו פרט אדריכלי יפה: קשת, עמוד או חלון מיוחד.\n\nSnap a beautiful architectural detail: an arch, a column or a special window.', { difficulty: 4, pointValue: 130 }),
+        quiz('באיזו שנה נבנה? / What year was it built?', 'באיזו שנה נבנה ציון הדרך המרכזי? (ערכו את התשובה)\n\nWhat year was the main landmark built? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, { difficulty: 4, pointValue: 130 }),
+      ], { requiredTaskCount: 2 }),
+      stage('התמונה הגדולה / The big picture', [
+        photo('כל הקבוצה מול ציון הדרך / Whole team at the landmark', 'כל הקבוצה מצטלמת יחד מול ציון הדרך המרכזי.\n\nThe whole team poses together in front of the main landmark.', { difficulty: 4, pointValue: 150 }),
+      ], {
+        isFinal: true,
+        narrative: {
+          outro: {
+            title: 'סוף הדרך',
+            body: 'You saw the city like never before. One last photo to remember it by.',
+            bodyHe: 'ראיתם את העיר כמו שלא ראיתם מעולם. תמונה אחרונה למזכרת.',
+          },
+        },
+      }),
+    ],
+  },
 
   // ── Generic starters ────────────────────────────────────────────────────────
   {
