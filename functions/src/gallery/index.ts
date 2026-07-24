@@ -11,6 +11,10 @@ import {
   FIRESTORE_PATHS,
   rankGalleryResults,
   publicTaskLocation,
+  isCoarsePublicPoint,
+  type Game,
+  type Task,
+  type GeoPoint,
   type PublicGame,
   type PublicTask,
   type PublicLike,
@@ -117,6 +121,111 @@ export function publicTaskForLibrary(
   return loc ? { ...safe, approxLocation: loc } : safe;
 }
 
+/**
+ * READ-PATH repair for the ONE generation `publicTaskForLibrary` cannot fix on
+ * its own (change: gallery-map-legacy-coarse-repair). A `task-library-map-view`
+ * era doc stores a COARSE `approxLocation` and NO `coordinates` at all — there is
+ * nothing on the doc itself to recompute an exact point from, so
+ * `publicTaskLocation({coordinates: undefined, ...})` returns `undefined` and the
+ * caller keeps the stale ~1 km cell forever. The only remaining source of truth
+ * is the private game template the task was published from.
+ *
+ * A doc needs this lookup exactly when: it carries NO `coordinates` (a doc that
+ * has one is already handled, exactly, by `publicTaskForLibrary`'s own recompute)
+ * AND its stored `approxLocation` is COARSE (`isCoarsePublicPoint` — the same
+ * structural test the reader uses everywhere else, so a doc that already stores
+ * an exact point, e.g. from `gallery-precise-task-location`, is correctly left
+ * alone).
+ */
+export function needsLegacyCoarseRepair(t: PublicTask): boolean {
+  if (t.coordinates !== undefined && t.coordinates !== null) return false;
+  return isCoarsePublicPoint(t.approxLocation);
+}
+
+/** Distinct (ownerUid, sourceGameId) pairs this batch of tasks needs a game read for. */
+export function legacyCoarseRepairKeys(
+  tasks: ReadonlyArray<PublicTask>,
+): Array<{ ownerUid: string; sourceGameId: string }> {
+  const byKey = new Map<string, { ownerUid: string; sourceGameId: string }>();
+  for (const t of tasks) {
+    if (!needsLegacyCoarseRepair(t)) continue;
+    if (!t.ownerUid || !t.sourceGameId) continue;
+    byKey.set(`${t.ownerUid}/${t.sourceGameId}`, { ownerUid: t.ownerUid, sourceGameId: t.sourceGameId });
+  }
+  return [...byKey.values()];
+}
+
+/** The authored task with id `taskId` inside `game`, or undefined (game/task gone). */
+function findAuthoredTask(game: Game | undefined, taskId: string): Task | undefined {
+  for (const stage of game?.stages ?? []) {
+    for (const task of stage.tasks ?? []) if (task.id === taskId) return task;
+  }
+  return undefined;
+}
+
+/**
+ * Batched (ownerUid, sourceGameId) -> template `Game` reader, injected so the
+ * pure resolution logic below is unit-testable without a Firestore emulator.
+ */
+export type LegacyGameFetcher = (
+  keys: ReadonlyArray<{ ownerUid: string; sourceGameId: string }>,
+) => Promise<Map<string, Game | undefined>>;
+
+/**
+ * Resolve the EXACT point for every doc that `needsLegacyCoarseRepair`, by
+ * looking up its source game template. Returns a map of publicTask doc id ->
+ * the recomputed `approxLocation` for docs that were successfully resolved;
+ * a doc that is not in the returned map keeps whatever `publicTaskForLibrary`
+ * already gave it (the stored coarse area) — this function never throws and
+ * never removes a location, only upgrades one.
+ *
+ * FAIL-OPEN by construction: `getGames` failing outright, a deleted/inaccessible
+ * game, or a task no longer present in it all fall through to "not resolved" —
+ * never an error, never a dropped mission.
+ *
+ * BOUNDED COST: exactly one batched read per distinct source game across the
+ * WHOLE input (via `legacyCoarseRepairKeys` + `db.getAll`-style batching in
+ * `getGames`), and only for docs that actually need it — a page of
+ * already-precise docs makes zero extra reads.
+ *
+ * PRIVACY: `publicTaskLocation` is reused verbatim, so a `hideLocation` task in
+ * the template is still coarsened here exactly as the write path would coarsen
+ * it — this lookup can only ever upgrade a doc to what a fresh publish would
+ * have written, never leak more.
+ */
+export async function resolveLegacyCoarseLocations(
+  tasks: ReadonlyArray<PublicTask>,
+  getGames: LegacyGameFetcher,
+): Promise<Map<string, GeoPoint>> {
+  const out = new Map<string, GeoPoint>();
+  const targets = tasks.filter(needsLegacyCoarseRepair);
+  if (targets.length === 0) return out;
+
+  const keys = legacyCoarseRepairKeys(targets);
+  if (keys.length === 0) return out;
+
+  let games: Map<string, Game | undefined>;
+  try {
+    games = await getGames(keys);
+  } catch {
+    // Fail open: leave every target doc at its stored coarse area.
+    return out;
+  }
+
+  for (const t of targets) {
+    if (!t.ownerUid || !t.sourceGameId) continue;
+    const game = games.get(`${t.ownerUid}/${t.sourceGameId}`);
+    const taskId = t.id.startsWith(`${t.sourceGameId}_`)
+      ? t.id.slice(t.sourceGameId.length + 1)
+      : t.id;
+    const source = findAuthoredTask(game, taskId);
+    if (!source) continue; // game/task gone — fail open, keep stored coarse point.
+    const loc = publicTaskLocation(source);
+    if (loc) out.set(t.id, loc);
+  }
+  return out;
+}
+
 // ─── searchGallery ───────────────────────────────────────────────────────────
 
 // The gallery is PUBLIC content, but the callable is not a public firehose: it
@@ -196,6 +305,25 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
   // backfill). `publicTaskForLibrary` is the pure, unit-tested reconciliation; see its
   // doc for the three-generation handling and the hideLocation carve-out.
   const tasks = ranked.map((raw) => publicTaskForLibrary(raw));
+
+  // Legacy-coarse repair (change: gallery-map-legacy-coarse-repair): a
+  // `task-library-map-view` era doc has no `coordinates` to recompute from, so
+  // `publicTaskForLibrary` above left it at its stale coarse `approxLocation`.
+  // Batched, read-only, fail-open — see `resolveLegacyCoarseLocations`.
+  const legacyFixes = await resolveLegacyCoarseLocations(ranked, async (keys) => {
+    const refs = keys.map((k) => db.doc(FIRESTORE_PATHS.game(k.ownerUid, k.sourceGameId)));
+    const snaps = await db.getAll(...refs);
+    const byKey = new Map<string, Game | undefined>();
+    keys.forEach((k, i) => {
+      const snap = snaps[i];
+      byKey.set(`${k.ownerUid}/${k.sourceGameId}`, snap.exists ? (snap.data() as Game) : undefined);
+    });
+    return byKey;
+  });
+  for (const t of tasks) {
+    const fixed = legacyFixes.get(t.id);
+    if (fixed) t.approxLocation = fixed;
+  }
 
   const likedIds = await likedIdsFor('task', context.auth.uid, tasks.map((t) => t.id));
   return { tasks, likedIds };
