@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ceremonyStart, ceremonyNext, type CeremonyPhase } from '@rushpoint/shared';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { useT } from '../i18nContext';
+import { Spinner } from '../components/Spinner';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const POLL_MS = 12_000;     // re-poll while unpublished — comes alive on publish
@@ -100,7 +101,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
   if (data === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-app-bg">
-        <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }

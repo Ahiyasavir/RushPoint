@@ -4,6 +4,7 @@ import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, loc
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
+import { Spinner } from '../components/Spinner';
 import { Button, Card, Screen, Skeleton, TagChips } from '../components/ui';
 import { useT } from '../i18nContext';
 
@@ -82,7 +83,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          <Spinner />
         </div>
       </Screen>
     );

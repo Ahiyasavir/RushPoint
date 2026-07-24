@@ -3,6 +3,7 @@ import { getRunRecap, type RunRecapResult } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { shareRecap } from '../lib/recapCollage';
+import { Spinner } from '../components/Spinner';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
 
 const CREATOR_URL = import.meta.env.DEV
@@ -64,7 +65,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          <Spinner />
         </div>
       </Screen>
     );

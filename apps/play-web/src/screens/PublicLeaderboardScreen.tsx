@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
+import { Spinner } from '../components/Spinner';
 import { useT } from '../i18nContext';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
@@ -68,7 +69,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          <Spinner />
         </div>
       </Screen>
     );

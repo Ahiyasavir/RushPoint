@@ -5,6 +5,7 @@ import JoinScreen from './screens/JoinScreen';
 import PlayScreen from './screens/PlayScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
+import { Spinner } from './components/Spinner';
 import { I18nProvider, useT } from './i18nContext';
 import { unlockAudio } from './lib/sound';
 import { resolvePlayRoute, resumeOrJoin, stripStaffParams } from './lib/playRoute';
@@ -206,7 +207,7 @@ function AppInner() {
         <ConnectionBanner />
         <Suspense fallback={
           <div className="min-h-screen flex items-center justify-center bg-app-bg">
-            <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+            <Spinner size="lg" />
           </div>
         }>
           <CeremonyScreen code={route.code} />

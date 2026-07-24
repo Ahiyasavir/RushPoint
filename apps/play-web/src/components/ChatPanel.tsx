@@ -108,6 +108,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
           maxLength={CHAT_TEXT_MAX_LEN}
           dir="auto"
           disabled={sending}
+          aria-label={t.chat.chatPlaceholder}
           placeholder={t.chat.chatPlaceholder}
           className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
         />

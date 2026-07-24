@@ -68,6 +68,19 @@ export default function FeedPanel({
 
   useEffect(() => { setMute(loadMute(runId)); }, [runId]);
 
+  // The report-reason sheet is a real modal: Escape dismisses it exactly as the
+  // Cancel button does, so a keyboard user is never trapped.
+  useEffect(() => {
+    if (!reportFor) return;
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setReportFor(null);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [reportFor]);
+
   useEffect(() => {
     const base = collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`);
     // Moderation view drops the active filter (rules already let staff/owner read
@@ -255,7 +268,7 @@ export default function FeedPanel({
                       onClick={() => void react(item, emoji)}
                       aria-label={t.feed.feedReactAria({ emoji })}
                       aria-pressed={selected}
-                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm transition-colors ${
+                      className={`inline-flex items-center justify-center gap-1 rounded-full border px-3 min-h-[44px] min-w-[44px] text-sm transition-colors ${
                         selected
                           ? 'bg-accent/15 border-accent/40 text-ink-fire'
                           : 'bg-app-raised border-glass-border text-zinc-400'
@@ -274,8 +287,21 @@ export default function FeedPanel({
 
       {reportFor && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border p-5 space-y-3">
-            <p className="text-base font-bold text-zinc-100 text-center">{t.feed.feedReportTitle}</p>
+          {/* Backdrop is a real <button> so a tap outside dismisses the sheet
+              without an onClick on a non-interactive element (a11y scan rule 3). */}
+          <button
+            type="button"
+            aria-label={t.common.cancel}
+            onClick={() => setReportFor(null)}
+            className="absolute inset-0 cursor-default"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rp-feed-report-title"
+            className="relative w-full max-w-md rounded-2xl bg-app-card border border-glass-border p-5 space-y-3"
+          >
+            <p id="rp-feed-report-title" className="text-base font-bold text-zinc-100 text-center">{t.feed.feedReportTitle}</p>
             <p className="text-sm text-zinc-400 text-center">{t.feed.feedReportPrompt}</p>
             <div className="space-y-2">
               {FEED_REPORT_REASONS.map((reason) => (
