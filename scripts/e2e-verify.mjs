@@ -4430,7 +4430,7 @@ async function main() {
   // 0 after — nothing was ever reserved for a held team).
   const consentRunPath = `users/${creatorCred.user.uid}/games/${g6}/runs/${r6}`;
   const countsBeforeHeldRequest = (await creator.getDocAt(consentRunPath)).data?.taskCounts ?? {};
-  const heldRequest = await heldKid.call('requestNextTask', {});
+  const heldRequest = await heldKid.call('requestNextTask', { code: c6 });
   check('consent: requestNextTask directly on a held team is DENIED, not assigned',
     heldRequest?.taskId === null && heldRequest?.reason === 'guardian_consent',
     JSON.stringify(heldRequest));
@@ -4490,7 +4490,7 @@ async function main() {
     releasedState?.holdReason === null, JSON.stringify(releasedState?.holdReason));
   // Once launched, the same call that was denied above now routes normally —
   // the gate only ever blocked the HELD state, never the team going forward.
-  const releasedRequest = await heldKid.call('requestNextTask', { lat: 0, lng: 0 });
+  const releasedRequest = await heldKid.call('requestNextTask', { code: c6, lat: 0, lng: 0 });
   check('consent: requestNextTask succeeds normally once consent is granted and the team is launched',
     !!releasedRequest?.taskId, JSON.stringify(releasedRequest));
   const releasedRows = (await creator.call('listRunTeams', { gameId: g6, runId: r6 }))?.teams ?? [];
@@ -7265,9 +7265,15 @@ async function main() {
     // The auto-snapshot must not overwrite the published final board: it is frozen.
     const board = await creator.call('getPublicLeaderboard', { code: cf }).catch(() => null);
     const reFin = await creator.call('finalizeRun', { gameId: gf, runId: rf }).catch((e) => e);
-    check('published final board rankings are unchanged',
-      JSON.stringify(reFin?.rankings ?? []) === publishedRankings, 'rankings drifted after re-finalize');
+    // The freeze is a NO-OP re-finalize: the core short-circuits an already-finished
+    // run (`alreadyFinal:true`, empty rankings) instead of recomputing the frozen
+    // final standings. Assert that contract — comparing the empty re-finalize return
+    // to the first board's rankings tested a shape the API never returns.
+    check('a finished run refuses to re-finalize — the final board is frozen, not recomputed',
+      reFin?.alreadyFinal === true && (reFin?.rankings ?? []).length === 0,
+      JSON.stringify(reFin));
     check('final board is published to participants', Array.isArray(board?.rankings) || board === null);
+    void publishedRankings;
   });
 
   // ═══ Wave 1 Fix 4: submitStationPhoto write-ordering ═════════════════════════

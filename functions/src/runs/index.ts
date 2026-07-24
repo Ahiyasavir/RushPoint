@@ -1967,8 +1967,11 @@ export const finalizeRun = loggedCallable('finalizeRun', async (data, context) =
 
   // Delegate the read+buildRankings+write to the shared core. No forcePublish:
   // organizer runs keep honoring manualLeaderboardReveal (the staged reveal path).
-  const { rankings } = await finalizeRunCore(uid, gameId, runId);
-  return { rankings };
+  // `alreadyFinal` is surfaced (additive) so a caller can tell a genuine finalize
+  // from a no-op re-finalize of an already-frozen board — the core returns empty
+  // rankings in that case rather than recomputing the frozen final standings.
+  const { rankings, alreadyFinal } = await finalizeRunCore(uid, gameId, runId);
+  return { rankings, ...(alreadyFinal ? { alreadyFinal: true } : {}) };
 }, { timeoutSeconds: 180, memory: '512MB' });
 
 
@@ -3344,7 +3347,9 @@ export async function assignNextInActiveStage(
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeStageIdx < 0) return {};
   const stageRec = team.stages[activeStageIdx];
-  const gameStage = game.stages.sort((a, b) => a.order - b.order)[activeStageIdx];
+  // .slice() before sort: never mutate the shared preloaded game array in place
+  // (getMyTeamState already sorts defensively; these two hot paths did not).
+  const gameStage = game.stages.slice().sort((a, b) => a.order - b.order)[activeStageIdx];
   if (!gameStage) return {};
 
   // Already have a task in flight in this stage? Don't double-assign.
@@ -4216,7 +4221,9 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
 
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeStageIdx < 0) return { recommendations: [] };
-  const gameStage = game.stages.sort((a, b) => a.order - b.order)[activeStageIdx];
+  // .slice() before sort: never mutate the shared preloaded game array in place
+  // (getMyTeamState already sorts defensively; these two hot paths did not).
+  const gameStage = game.stages.slice().sort((a, b) => a.order - b.order)[activeStageIdx];
   if (!gameStage) return { recommendations: [] };
 
   const completedTaskIds = team.stages.flatMap((s) => s.tasks)
