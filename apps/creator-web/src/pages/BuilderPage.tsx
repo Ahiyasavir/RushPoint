@@ -432,13 +432,9 @@ export default function BuilderPage() {
           This is the only header in the Builder (the global app nav is hidden),
           so the workspace gets the full viewport height. ── */}
       <header className="shrink-0 flex items-center gap-3 px-4 h-14 border-b border-[--rp-border] bg-[--surface-1]">
-        <button onClick={() => nav('/')} className="font-brand text-lg font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent tracking-tight shrink-0" title="RushPoint">
-          RushPoint
-        </button>
         <button onClick={() => nav('/')} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
           <span className="text-sm leading-none">←</span> {b.backToGames}
         </button>
-        <span className="text-[--ink-4] shrink-0">/</span>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
         {/* A FAILED save gets its own colour and its own word — it can never be
             read as an ordinary pending save (change: creator-no-silent-failures). */}
@@ -684,7 +680,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           {(['individual', 'team'] as GameMode[]).map((m) => (
             <button key={m} onClick={() => patch({ mode: m })}
               className={`flex-1 py-2 rounded-lg text-sm border ${
-                game.mode === m ? 'border-neon-green/50 bg-neon-green/10 text-neon-green' : 'border-glass-border text-zinc-400'}`}>
+                game.mode === m ? 'border-rp-fire/50 bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-3]'}`}>
               {modeLabel[m]}
             </button>
           ))}
@@ -694,15 +690,43 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <Label>{b.shortDescription}</Label>
         <Input value={game.description ?? ''} onChange={(e) => patch({ description: e.target.value })} placeholder={b.shortDescriptionPlaceholder} dir="auto" />
       </div>
-      <InstructionsField game={game} patch={patch} />
+      <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
+        <Label>{b.scoringPreset}</Label>
+        <div className="space-y-2">
+          {(Object.keys(PRESET_LABELS) as ScoringPreset[]).map((p) => (
+            <button key={p} onClick={() => patch({ scoringPreset: p })}
+              className={`w-full text-start p-3 rounded-lg border ${
+                game.scoringPreset === p ? 'border-rp-fire/50 bg-rp-fire/10' : 'border-[--rp-border]'}`}>
+              <div className="text-sm font-medium text-[--ink-2]">{b.presetLabels[p].name}</div>
+              <div className="text-xs text-[--ink-3]">{b.presetLabels[p].desc}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* Wrong-answer cost (change: wrong-answer-cost). Absent = 'off', which is
+            exactly how every game authored before this change behaves, so nothing
+            in flight changes. New games are seeded at DEFAULT_WRONG_ANSWER_LEVEL. */}
+        <Label>{b.wrongAnswerCost}</Label>
+        <p className="text-xs text-zinc-500 -mt-2 mb-2">{b.wrongAnswerCostHint}</p>
+        <div className="space-y-2">
+          {WRONG_ANSWER_LEVEL_ORDER.map((lv) => {
+            const current = game.scoringOptions?.wrongAnswerPenalty ?? 'off';
+            return (
+              <button key={lv}
+                onClick={() => patch({ scoringOptions: { ...(game.scoringOptions ?? {}), wrongAnswerPenalty: lv } })}
+                className={`w-full text-start p-3 rounded-lg border ${
+                  current === lv ? 'border-rp-fire/50 bg-rp-fire/10' : 'border-[--rp-border]'}`}>
+                <div className="text-sm font-medium text-[--ink-2]">{b.wrongAnswerLevels[lv].name}</div>
+                <div className="text-xs text-[--ink-3]">{b.wrongAnswerLevels[lv].desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </Advanced>
 
       <PresentationField game={game} patch={patch} />
 
-      <WebhookField game={game} patch={patch} />
-
-      <SafeZoneField game={game} patch={patch} />
-
-      <TagsField game={game} patch={patch} />
+      <InstructionsField game={game} patch={patch} />
 
       {/* Feature toggles grouped into one collapsed section (change: builder-settings-grouping).
           Presentation-only: each checkbox's checked/onChange is copied verbatim, so what
@@ -747,43 +771,15 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
         <p className="text-xs text-zinc-500 -mt-2">{b.manualRevealHint}</p>
       </Advanced>
 
-      <Advanced title={b.advScoring} open={advScore} onToggle={() => setAdvScore(!advScore)}>
-        <Label>{b.scoringPreset}</Label>
-        <div className="space-y-2">
-          {(Object.keys(PRESET_LABELS) as ScoringPreset[]).map((p) => (
-            <button key={p} onClick={() => patch({ scoringPreset: p })}
-              className={`w-full text-start p-3 rounded-lg border ${
-                game.scoringPreset === p ? 'border-neon-green/50 bg-neon-green/10' : 'border-glass-border'}`}>
-              <div className="text-sm font-medium text-zinc-200">{b.presetLabels[p].name}</div>
-              <div className="text-xs text-zinc-500">{b.presetLabels[p].desc}</div>
-            </button>
-          ))}
-        </div>
-
-        {/* Wrong-answer cost (change: wrong-answer-cost). Absent = 'off', which is
-            exactly how every game authored before this change behaves, so nothing
-            in flight changes. New games are seeded at DEFAULT_WRONG_ANSWER_LEVEL. */}
-        <Label>{b.wrongAnswerCost}</Label>
-        <p className="text-xs text-zinc-500 -mt-2 mb-2">{b.wrongAnswerCostHint}</p>
-        <div className="space-y-2">
-          {WRONG_ANSWER_LEVEL_ORDER.map((lv) => {
-            const current = game.scoringOptions?.wrongAnswerPenalty ?? 'off';
-            return (
-              <button key={lv}
-                onClick={() => patch({ scoringOptions: { ...(game.scoringOptions ?? {}), wrongAnswerPenalty: lv } })}
-                className={`w-full text-start p-3 rounded-lg border ${
-                  current === lv ? 'border-neon-green/50 bg-neon-green/10' : 'border-glass-border'}`}>
-                <div className="text-sm font-medium text-zinc-200">{b.wrongAnswerLevels[lv].name}</div>
-                <div className="text-xs text-zinc-500">{b.wrongAnswerLevels[lv].desc}</div>
-              </button>
-            );
-          })}
-        </div>
-      </Advanced>
-
       <Advanced title={b.advRegistration} open={advReg} onToggle={() => setAdvReg(!advReg)}>
         <RegFields game={game} patch={patch} />
       </Advanced>
+
+      <TagsField game={game} patch={patch} />
+
+      <SafeZoneField game={game} patch={patch} />
+
+      <WebhookField game={game} patch={patch} />
     </Card>
   );
 }
@@ -952,6 +948,7 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
 
 function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
   const b = useT().builder;
+  const [open, setOpen] = useState(false);
   const [val, setVal] = useState(game.integrationWebhookUrl ?? '');
   const [err, setErr] = useState('');
   // Keep the field in sync when the game loads async or an undo/redo restores a prior
@@ -964,9 +961,16 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
     setErr('');
     patch({ integrationWebhookUrl: raw });
   }
+  const configured = (game.integrationWebhookUrl ?? '').trim() !== '';
   return (
-    <div>
-      <Label>{b.webhookLabel}</Label>
+    <Advanced
+      title={b.webhookLabel}
+      open={open}
+      onToggle={() => setOpen(!open)}
+      meta={configured
+        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(1)}</span>
+        : undefined}
+    >
       <Input
         type="url"
         value={val}
@@ -976,9 +980,9 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
         dir="ltr"
       />
       {err
-        ? <p className="text-neon-red text-xs mt-1">{err}</p>
-        : <p className="text-xs text-zinc-500 mt-1">{b.webhookHelp}</p>}
-    </div>
+        ? <p className="text-rp-alert text-xs mt-1">{err}</p>
+        : <p className="text-xs text-[--ink-3] mt-1">{b.webhookHelp}</p>}
+    </Advanced>
   );
 }
 
@@ -1147,7 +1151,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
   }
   return (
     <div className="space-y-2">
-      <p className="text-xs text-zinc-500">{b.regNameNote}</p>
+      <p className="text-xs text-[--ink-3]">{b.regNameNote}</p>
       {game.registrationFields.map((f) => (
         <div key={f.id} className="flex gap-2 items-center">
           <Input value={f.label} onChange={(e) => update(f.id, { label: e.target.value })} disabled={f.id === 'name'} />
@@ -1158,10 +1162,10 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           <Select value={f.level} onChange={(e) => update(f.id, { level: e.target.value as RegistrationField['level'] })}>
             <option value="member">{b.regLevelMember}</option><option value="team">{b.regLevelTeam}</option>
           </Select>
-          <label className="flex items-center gap-1 text-xs text-zinc-400">
+          <label className="flex items-center gap-1 text-xs text-[--ink-3]">
             <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}
           </label>
-          {f.id !== 'name' && <button className="text-neon-red text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
+          {f.id !== 'name' && <button className="text-rp-alert text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
         </div>
       ))}
       <Button variant="subtle" onClick={add}>+ {b.regAddField}</Button>
@@ -1209,9 +1213,9 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="flex-1 h-11 rounded-xl border border-dashed border-glass-border text-zinc-500
+      className="flex-1 h-11 rounded-xl border border-dashed border-[--rp-border] text-[--ink-3]
                  flex items-center justify-center gap-1.5 text-sm
-                 hover:border-neon-green/60 hover:text-neon-green transition"
+                 hover:border-rp-fire/60 hover:text-rp-fire transition"
     >
       <span className="text-lg leading-none">＋</span>{label}
     </button>
@@ -1995,9 +1999,9 @@ function StepPreview({ game }: { game: Game }) {
       <ol className="space-y-2">
         {game.stages.map((s, i) => (
           <li key={s.id} className="flex items-center gap-3">
-            <span className="w-6 h-6 rounded-full bg-neon-green/15 text-neon-green text-xs flex items-center justify-center">{i + 1}</span>
-            <span className="text-sm text-zinc-200" dir="auto">{s.title}</span>
-            <span className="text-xs text-zinc-500">
+            <span className="w-6 h-6 rounded-full bg-rp-fire/15 text-rp-fire text-xs flex items-center justify-center">{i + 1}</span>
+            <span className="text-sm text-[--ink-2]" dir="auto">{s.title}</span>
+            <span className="text-xs text-[--ink-3]">
               {b.taskCount(s.tasks.length)}{s.tasks.length > 1 ? b.routedSuffix : ''}
               {s.isFinal ? ` · 🏁 ${b.finalTag}` : ''}
             </span>

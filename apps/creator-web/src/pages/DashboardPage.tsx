@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game, ScoringPreset } from '@rushpoint/shared';
@@ -141,6 +141,16 @@ export default function DashboardPage() {
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<GameTemplate | null>(null);
   const [chosenPreset, setChosenPreset] = useState<ScoringPreset>('smart_weighted');
+  // Picking a template card reveals a settings + "Create" panel that often sits
+  // below the fold, so the creator sees only a highlight and thinks nothing happened.
+  // Bring it into view and land focus on the Create button whenever the choice changes.
+  const chosenPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!chosen) return;
+    const panel = chosenPanelRef.current;
+    panel?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    panel?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [chosen]);
   // First-run checklist. Only `dismissed` is stored; every step is derived.
   const [dismissed, setDismissed] = useState(() => readFlag(ONBOARDING_DISMISSED_KEY));
   const previewedGameIds = readStoredPreviewed();
@@ -391,7 +401,7 @@ export default function DashboardPage() {
             <p className="text-[--ink-3] text-sm font-medium mb-1 uppercase tracking-widest">
               {d.welcomeBack(firstName)}
             </p>
-            <h1 className="font-brand text-5xl font-extrabold tracking-tight leading-none bg-gradient-to-r from-rp-fire via-rp-amber to-rp-amber bg-clip-text text-transparent">
+            <h1 className="font-brand text-3xl sm:text-4xl font-extrabold tracking-tight leading-none bg-gradient-to-r from-rp-fire via-rp-amber to-rp-amber bg-clip-text text-transparent">
               {d.title}
             </h1>
             <p className="text-[--ink-3] mt-3 text-base max-w-sm">{d.subtitle}</p>
@@ -628,7 +638,7 @@ export default function DashboardPage() {
       {games.length > 0 && (
         <div className="mt-12 animate-fade-up" style={{ animationDelay: '120ms' }}>
           {/* Feature banner */}
-          <div className="relative overflow-hidden rounded-3xl border border-[--rp-border] bg-gradient-to-br from-rp-fire/10 via-rp-amber/5 to-transparent p-7 sm:p-9 mb-6">
+          <div className="relative overflow-hidden rounded-3xl border border-[--rp-border] bg-gradient-to-br from-rp-fire/10 via-rp-amber/5 to-transparent px-7 py-5 sm:px-9 sm:py-6 mb-6">
             <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-rp-fire/15 blur-3xl pointer-events-none" />
             <div className="absolute -right-4 -bottom-12 w-48 h-48 rounded-full bg-rp-amber/15 blur-3xl pointer-events-none" />
             <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-5">
@@ -636,8 +646,8 @@ export default function DashboardPage() {
                 <div className="inline-flex items-center gap-1.5 rounded-full bg-rp-fire/10 text-rp-fire text-[11px] font-semibold px-2.5 py-1 mb-3">
                   {d.bannerBadge}
                 </div>
-                <h3 className="font-brand text-2xl font-extrabold text-[--ink-1] leading-tight">{d.bannerTitle}</h3>
-                <p className="text-[--ink-2] text-sm mt-2 leading-relaxed">{d.bannerBody}</p>
+                <h3 className="font-brand text-xl font-extrabold text-[--ink-1] leading-tight">{d.bannerTitle}</h3>
+                <p className="text-[--ink-2] text-sm mt-1.5 leading-relaxed">{d.bannerBody}</p>
               </div>
               <div className="flex sm:flex-col gap-2.5 shrink-0">
                 <Button className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/gallery')}>{d.bannerCta1}</Button>
@@ -696,7 +706,7 @@ export default function DashboardPage() {
                   and the scoring style are stated here, and the scoring style can
                   be changed BEFORE the game is created. */}
               {chosen && (
-                <div className="mt-4 rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40 p-4">
+                <div ref={chosenPanelRef} className="mt-4 rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40 p-4">
                   <p className="text-[11px] text-[--ink-3] mb-3">{d.settingsIntro}</p>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div>
