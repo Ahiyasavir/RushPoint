@@ -40,6 +40,45 @@ const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
   : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
 
+// "Is location relevant right now?" (change: locationless-no-gps-no-map).
+// TRUE if ANYTHING located could appear on the map or drive GPS this render:
+// a real task pin, a sealed-hidden search area, a territory zone, an active hot
+// zone, or a sealed hidden task awaiting a GPS-confirmed arrival. Only when ALL
+// of those are absent (the confidently pure-locationless case, e.g. the
+// all-locationless "Pocket Spy Academy" demo) is it FALSE.
+//
+// Fail SAFE toward today's behavior: total and never throws — if state isn't
+// loaded yet, or any piece is missing/undefined, it returns TRUE, so a located
+// game keeps its GPS watcher + map exactly as before. Suppression only happens
+// when we are CONFIDENT nothing is located.
+function computeLocationRelevant(state: MyTeamState | null, zones: CaptureZone[]): boolean {
+  if (!state) return true; // not loaded yet — keep current behavior
+  try {
+    if (zones.length > 0) return true;
+    if (state.run?.hotZone) return true;
+    const contents = state.activeStageTasks ?? [];
+    // A sealed hidden task is unsealed by a server-verified GPS arrival, so it
+    // MUST count as location-relevant (it also draws completed pins + a circle).
+    if (contents.some((c) => c.arrivalPending)) return true;
+    if (selectSearchAreas(contents).length > 0) return true;
+    const stage = state.team?.stages?.find((s) => s.status === 'active');
+    if (stage) {
+      for (const rec of stage.tasks) {
+        if (rec.status === 'completed' || rec.status === 'skipped') continue;
+        const content = contents.find((c) => c.id === rec.taskId);
+        if (!content) return true; // unknown content → assume located (fail safe)
+        if (content.locationless) continue;
+        if (content.arrivalPending) continue; // sealed — no pin (handled above)
+        const coords = content.smart?.stationCoords ?? content.coordinates;
+        if (coords && (coords.lat !== 0 || coords.lng !== 0)) return true;
+      }
+    }
+    return false;
+  } catch {
+    return true; // never throw — default to current (located) behavior
+  }
+}
+
 export default function PlayScreen({ session, onLeave }: { session: Session; onLeave: () => void }) {
   const { t, lang } = useT();
   const [state, setState] = useState<MyTeamState | null>(null);
@@ -173,9 +212,19 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     return () => window.clearInterval(id);
   }, [reconnecting, refresh]);
 
+  // Is location relevant for this render? Drives BOTH the GPS watcher (below) and
+  // the map block. A boolean, so the watcher effect only re-mounts when the value
+  // actually flips (not on every poll). When a later located stage flips it true,
+  // the watcher starts THEN — so an all-locationless demo never prompts for GPS.
+  const locationRelevant = computeLocationRelevant(state, zones);
+
   // Track the participant's live position for the navigation map, and report it
   // to the host's live team map (throttled to once per ~20s, only while active).
   useEffect(() => {
+    // Locationless-only render: no map, no live ping, no arrival probe — and,
+    // crucially, no browser location prompt. When location becomes relevant this
+    // effect re-runs (locationRelevant is a dep) and the watcher starts then.
+    if (!locationRelevant) return;
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
       (p) => {
@@ -210,7 +259,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       { enableHighAccuracy: true, maximumAge: 10_000 },
     );
     return () => navigator.geolocation.clearWatch(id);
-  }, [session, refresh]);
+  }, [session, refresh, locationRelevant]);
 
   // Keep the screen awake while actively racing (map open, navigating).
   useWakeLock(!!state && state.team.launched && state.team.status !== 'finished');
@@ -522,7 +571,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       {/* PRIMARY: the map + current task sit at the TOP, prominent
           (change: fix-play-screen-hierarchy) — the family playtest buried the task
           under status panels and the screen scrolled to find it. */}
-      {(activeStage || zones.length > 0) && (
+      {locationRelevant && (
         <Suspense fallback={<div className="h-52 mb-4 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
           <NavMap targets={mapTargets} me={me} hotZone={state.run.hotZone} zones={zones} searchAreas={searchAreas} myTeamId={team.id} accent={accent} keepMapWithMe={activeMissionSealed} className="h-52 mb-4" />
         </Suspense>
