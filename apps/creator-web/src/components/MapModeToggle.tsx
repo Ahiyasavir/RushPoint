@@ -10,7 +10,7 @@ export default function MapModeToggle({ mode, onChange }: {
 }) {
   const b = useT().builder;
   return (
-    <div className="absolute bottom-2 left-2 z-10 flex bg-app-card/90 backdrop-blur rounded-lg p-0.5 border border-glass-border shadow-soft">
+    <div className="absolute bottom-2 start-2 z-10 flex bg-app-card/90 backdrop-blur rounded-lg p-0.5 border border-glass-border shadow-soft">
       {(['topo', 'satellite'] as MapMode[]).map((m) => (
         <button
           key={m}

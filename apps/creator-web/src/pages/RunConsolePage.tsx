@@ -2498,7 +2498,7 @@ function RunSummaryPanel({ accessCode }: { accessCode: string }) {
               <ol className="space-y-0.5">
                 {data.standings.slice(0, 5).map((s) => (
                   <li key={s.teamId} className="flex items-center justify-between text-sm">
-                    <span>{s.rank}. {s.teamName}</span>
+                    <span dir="auto">{s.rank}. {s.teamName}</span>
                     <span className="font-mono text-zinc-400">{s.score}</span>
                   </li>
                 ))}
