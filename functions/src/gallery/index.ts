@@ -97,19 +97,15 @@ async function likedIdsFor(kind: PublicLikeKind, uid: string, itemIds: string[])
  *  • `gallery-precise-task-location` docs carry an EXACT `approxLocation` and no
  *    `coordinates` — likewise kept verbatim.
  *
- * hideLocation carve-out + its residual risk (VERIFIED from git history, so it is
- * documented rather than guessed): `publicTaskLocation` coarsens a `hideLocation`
- * task to its ~1 km cell. But NO generation of `publishGame` ever WROTE
- * `hideLocation`/`locationless` onto the `publicTasks` doc (the earliest
- * projection wrote a bare `coordinates: task.coordinates`; every later one writes
- * only `approxLocation`). So at read time that flag is always absent and a legacy
- * `coordinates`-bearing doc is served EXACT. This is safe: the exact `coordinates`
- * was ALREADY world-readable in that same doc (`allow read: if true`) before
- * `hideLocation` even existed as a Task field, and the ONLY way to produce a
- * hidden doc is a re-publish — which rewrites the doc through `publicTaskLocation`
- * (coarsening it) and erases `coordinates`. A doc that still carries `coordinates`
- * therefore predates any hidden-task exposure this callable could add; the
- * residual exposure is pre-existing raw-doc data, not introduced here.
+ * hideLocation is served EXACT now (change: gallery-exact-hidden-location).
+ * `publicTaskLocation` returns the exact authored point for EVERY located task,
+ * hidden included, so the gallery map pins each mission precisely and a game's
+ * nearby hidden missions no longer collapse onto one coarse ~1 km cell. The
+ * in-game puzzle is not weakened here: the PLAYER is sealed off from a hidden
+ * task's spot by the participant sanitizer (`sanitizeTaskForParticipant`), a
+ * separate control this callable never feeds. The accepted trade-off is that a
+ * hidden mission's exact spot is world-visible in the gallery (this doc is
+ * `allow read: if true`) — the platform owner's choice, for an accurate map.
  */
 export function publicTaskForLibrary(
   raw: PublicTask & { hideLocation?: boolean; locationless?: boolean },
@@ -188,10 +184,12 @@ export type LegacyGameFetcher = (
  * `getGames`), and only for docs that actually need it — a page of
  * already-precise docs makes zero extra reads.
  *
- * PRIVACY: `publicTaskLocation` is reused verbatim, so a `hideLocation` task in
- * the template is still coarsened here exactly as the write path would coarsen
- * it — this lookup can only ever upgrade a doc to what a fresh publish would
- * have written, never leak more.
+ * CONSISTENCY: `publicTaskLocation` is reused verbatim, so a `hideLocation` task
+ * resolves to its EXACT point here exactly as the write path now writes it
+ * (change: gallery-exact-hidden-location) — this lookup can only ever upgrade a
+ * doc to what a fresh publish would produce, never something different. It is
+ * also what heals a legacy COARSE hidden pin to its precise spot ON READ, so the
+ * creator's map is correct even before any re-publish or backfill.
  */
 export async function resolveLegacyCoarseLocations(
   tasks: ReadonlyArray<PublicTask>,

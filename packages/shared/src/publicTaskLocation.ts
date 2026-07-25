@@ -114,32 +114,40 @@ function usableCoord(c: { lat?: unknown; lng?: unknown } | undefined | null): c 
 /**
  * THE WRITER'S RULE — what `publishGame` may write as a public task's location.
  *
- * Returns the EXACT authored point for an ordinary usably-placed task, a
- * coarsened ~1 km area for a `hideLocation` task, and `undefined` (⇒ omit the
- * field entirely) when the task is `locationless` or is not usably placed.
+ * Returns the EXACT authored point for EVERY usably-placed task (ordinary OR
+ * `hideLocation`), and `undefined` (⇒ omit the field entirely) when the task is
+ * `locationless` or is not usably placed.
  *
- * WHY ORDINARY TASKS ARE NOW PRECISE (change: gallery-precise-task-location).
- * The gallery and mission-library maps exist so a creator can see, and copy,
- * WHERE ANOTHER CREATOR PUT A TASK. That coordinate is an authored point of
- * interest — a landmark, a shop, a viewpoint — not a person's location, so
- * coarsening it to a kilometre was hiding the one thing these maps are for and
- * making every mission look misplaced. The exact point is published.
+ * WHY EVERY LOCATED TASK IS PRECISE — INCLUDING hideLocation
+ * (change: gallery-exact-hidden-location). The gallery and mission-library maps
+ * exist so a creator can SEE, on a map, where the missions of a game actually
+ * are. Coarsening `hideLocation` missions to a ~1 km grid cell broke that map in
+ * two compounding ways the creator experienced directly:
+ *   1. every hidden pin sat up to half a kilometre from its real spot ("the pin
+ *      is in the wrong place"); and
+ *   2. several hidden missions in one neighbourhood snapped to the SAME cell and
+ *      COLLAPSED into a single pin — so a game with 8 hidden missions in Ramot
+ *      showed only 1-2 pins ("I only see 2 of them").
+ * A published task coordinate is an authored point of interest — where the
+ * creator PUT a checkpoint — so the honest, useful thing on the creator's own
+ * map is the exact point. This is a deliberate product decision by the platform
+ * owner: map accuracy for the creator over hiding a hidden mission's spot from a
+ * stranger who opens the gallery.
  *
- * WHY `hideLocation` IS THE ONE EXCEPTION. A hidden-location task's spot is a
- * deliberate puzzle the creator withholds from players. `publicTasks` is
- * world-readable (`firestore.rules`: `allow read: if true`), so publishing its
- * exact point here would hand the answer to anyone, including a player who opens
- * the gallery. It stays coarsened to the ~1 km cell: enough for the author to
- * see roughly where it sits, never enough to solve it. The snap is a pure
- * function of the input, so repeated publishes cannot be averaged back to truth.
+ * THE IN-GAME PUZZLE IS A SEPARATE CONTROL, UNCHANGED. The PLAYER never learns a
+ * hideLocation spot from this projection: `sanitizeTaskForParticipant`
+ * (functions/src/runs/sanitizeTask.ts) SEALS a hideLocation task until the server
+ * confirms the team physically arrived, and strips `coordinates`,
+ * `geofenceRadiusMeters` and `smart.stationCoords` — no location reaches the
+ * device. That, plus `hiddenSearchArea` (the coarse search circle a SEALED task
+ * may reveal), is what makes the location a puzzle in play. This function feeds
+ * only the world-readable gallery/library maps, not the participant device.
  *
- * THE PLAYER-FACING PUZZLE IS A DIFFERENT CONTROL, UNTOUCHED BY EITHER BRANCH.
- * The PLAYER gets `sanitizeTaskForParticipant` (functions/src/runs/
- * sanitizeTask.ts), which SEALS a `hideLocation` task until the server confirms
- * the team physically arrived, and strips `coordinates`, `geofenceRadiusMeters`
- * and `smart.stationCoords` — no location reaches the device, coarse or exact.
- * That is what makes the location a puzzle in play; this function is not it, and
- * neither may be relaxed on the grounds that the other exists.
+ * TRADE-OFF, STATED PLAINLY: `publicTasks` is world-readable
+ * (`firestore.rules`: `allow read: if true`), so a hidden mission's exact spot is
+ * now visible to anyone who opens the gallery — including a player who goes there
+ * to cheat. That is the accepted cost of an accurate creator map; the in-game
+ * seal above is what still stops a location leak on the player's own device.
  */
 export function publicTaskLocation(task: {
   hideLocation?: boolean;
@@ -150,13 +158,9 @@ export function publicTaskLocation(task: {
   // A locationless task has no map presence by definition.
   if (task.locationless) return undefined;
   if (!usableCoord(task.coordinates)) return undefined;
-  // A hideLocation task's spot is a deliberate puzzle, secret from players, and
-  // this document is world-readable — so it, and only it, is still coarsened to
-  // the ~1 km cell (a creator sees roughly where it is; the answer never leaks).
-  if (task.hideLocation) return approximatePublicPoint(task.coordinates);
-  // Every other task publishes its EXACT authored placement. The gallery shows
-  // WHERE A CREATOR PUT A TASK — a point of interest they authored, not any
-  // person's location — so a precise pin is the honest, useful thing to draw.
+  // EVERY located task — hidden or not — publishes its EXACT authored placement,
+  // so the gallery map pins each mission where the creator actually put it. The
+  // in-game hideLocation puzzle is enforced elsewhere (sanitizeTaskForParticipant).
   return { lat: round5(task.coordinates.lat), lng: round5(task.coordinates.lng) };
 }
 

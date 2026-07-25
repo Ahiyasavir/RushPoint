@@ -29,7 +29,7 @@
 // See `mayNeedPublicTaskRepair`.
 
 import type { GeoPoint } from './types';
-import { isPlottablePublicTask, publicTaskLocation } from './publicTaskLocation';
+import { isPlottablePublicTask, publicTaskLocation, isCoarsePublicPoint } from './publicTaskLocation';
 
 /** The authored task, as much of it as the rule needs. `null` ⇒ not findable. */
 export interface BackfillSourceTask {
@@ -73,16 +73,16 @@ export function hasLegacyCoordinates(doc: BackfillPublicTaskDoc | null | undefin
 /**
  * The sweep's cheap pre-check: is it worth spending a game read on this document?
  *
- * TWO reasons a document can need work (change: hidden-location-map-visibility):
+ * THREE reasons a document can need work:
  *   1. it still carries the deprecated exact `coordinates` — the original
- *      exposure; or
+ *      exposure (change: task-library-map-view); or
  *   2. it carries no USABLE published area, and its authored task might now be
- *      able to supply one.
- *
- * (2) exists because hidden-location tasks now publish an area. A hidden task
- * published AFTER `task-library-map-view` has neither a legacy `coordinates` key
- * nor an `approxLocation`, so rule (1) alone never fires on it and it would stay
- * off the map forever, no matter how many times the sweep is run.
+ *      able to supply one (change: hidden-location-map-visibility); or
+ *   3. it carries a COARSE ~1 km area, but the rule now publishes EXACT points
+ *      for every located task — so a hidden mission stored under the old coarsening
+ *      rule needs re-repairing to its precise spot
+ *      (change: gallery-exact-hidden-location). Without this, every hidden mission
+ *      published before the change would stay a kilometre off / stacked on the map.
  *
  * "Usable" is `isPlottablePublicTask` — the READER's own predicate — so a stored
  * area that is non-finite, out of range or the null-island placeholder counts as
@@ -90,7 +90,19 @@ export function hasLegacyCoordinates(doc: BackfillPublicTaskDoc | null | undefin
  */
 export function mayNeedPublicTaskRepair(doc: BackfillPublicTaskDoc | null | undefined): boolean {
   if (!doc) return false;
-  return hasLegacyCoordinates(doc) || !isPlottablePublicTask(doc);
+  return hasLegacyCoordinates(doc)
+    || !isPlottablePublicTask(doc)
+    || isCoarsePublicPoint(doc.approxLocation);
+}
+
+/** Two published points are equal iff both are finite and match — both sides are
+ *  already round5'd by publicTaskLocation, so an exact numeric compare is right. */
+function geoEquals(
+  a: { lat?: unknown; lng?: unknown } | null | undefined,
+  b: GeoPoint,
+): boolean {
+  return !!a && typeof a.lat === 'number' && typeof a.lng === 'number'
+    && a.lat === b.lat && a.lng === b.lng;
 }
 
 export function repairPublicTask(
@@ -103,11 +115,16 @@ export function repairPublicTask(
   // ever publishable, so we publish nothing. With nothing to strip either, the
   // document is left entirely alone rather than rewritten to the same state.
   if (!sourceTask) return legacy ? {} : null;
-  const approxLocation = publicTaskLocation(sourceTask);
+  const desired = publicTaskLocation(sourceTask);
   // A doc with no exact point to strip AND no area to gain is already in its
   // final state (a locationless or unplaced task). Returning null here is what
   // keeps the sweep idempotent and stops it rewriting every such document on
   // every run.
-  if (!legacy && !approxLocation) return null;
-  return approxLocation ? { approxLocation } : {};
+  if (!legacy && !desired) return null;
+  // Already correct: no legacy point to strip and the stored area already equals
+  // the rule's output. This keeps the sweep idempotent for an EXACT point that
+  // merely happens to sit on the coarse grid (which trips the isCoarsePublicPoint
+  // pre-check in mayNeedPublicTaskRepair) — it is not rewritten to itself forever.
+  if (!legacy && desired && geoEquals(doc?.approxLocation, desired)) return null;
+  return desired ? { approxLocation: desired } : {};
 }

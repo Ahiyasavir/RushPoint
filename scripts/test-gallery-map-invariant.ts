@@ -1,21 +1,21 @@
-// The gallery missions map must show EVERY located mission, at its exact spot
-// (change: gallery-precise-task-location + the seed self-heal in seed-local.mjs).
+// The gallery missions map must show EVERY located mission, at its EXACT spot
+// (change: gallery-exact-hidden-location + the seed self-heal in seed-local.mjs).
 //
 // THE USER-FACING CONTRACT THIS PROVES
 //   1. COUNT   — the number of pins on the map equals the number of missions that
-//                have a location (an ordinary located mission OR a hidden-location
-//                mission). Locationless / unplaced missions contribute NO pin.
-//   2. ACCURACY— an ordinary located mission's pin is its EXACT authored
-//                coordinate, not a coarsened cell.
+//                have a location (ordinary OR hidden-location). Locationless /
+//                unplaced missions contribute NO pin.
+//   2. ACCURACY— EVERY located mission's pin — hidden included — is its EXACT
+//                authored coordinate, not a coarsened cell. This is what a game
+//                with 8 hidden missions in one neighbourhood needs: 8 distinct pins
+//                at the right spots, not the 1-2 stacked, offset pins the old ~1 km
+//                grid-coarsening produced.
 //
-// THE ONE DELIBERATE EXCEPTION (documented, not a bug)
-//   A `hideLocation` mission still plots as a COARSE ~1 km cell, never its exact
-//   point. `publicTasks` is world-readable (`firestore.rules`: allow read: if
-//   true), so publishing a hidden mission's exact spot would hand its puzzle
-//   answer — and a real-world location, sometimes of a kids' event — to anyone who
-//   opens the gallery. It still COUNTS toward the map (invariant 1 holds); only its
-//   precision is withheld. The player-facing secrecy is a separate control (the
-//   participant sanitizer), untouched here.
+// THE IN-GAME PUZZLE IS A SEPARATE CONTROL, UNTOUCHED
+//   A `hideLocation` mission's spot IS now visible on the world-readable gallery
+//   (an accepted product trade-off for an accurate creator map). The PLAYER still
+//   never learns it from their device: the participant sanitizer seals a hidden
+//   task until the server confirms arrival. That control is not exercised here.
 //
 // WHY THIS TEST EXISTS
 //   The map read path (isPlottablePublicTask), the write path (publicTaskLocation,
@@ -90,15 +90,15 @@ console.log('\n🗺️  gallery missions-map count + accuracy invariant\n');
     const doc = publish(m) as { approxLocation?: { lat: number; lng: number } };
     if (m.locationless || (m.coordinates.lat === 0 && m.coordinates.lng === 0)) {
       ok(!isPlottablePublicTask(doc), `${m.id}: locationless/unplaced ⇒ NO pin`);
-    } else if (m.hideLocation) {
-      ok(isPlottablePublicTask(doc), `${m.id}: hidden ⇒ has a pin (counts toward the map)`);
-      ok(isCoarsePublicPoint(doc.approxLocation), `${m.id}: hidden ⇒ pin is a COARSE cell (privacy)`);
-      ok(!(doc.approxLocation!.lat === m.coordinates.lat && doc.approxLocation!.lng === m.coordinates.lng),
-        `${m.id}: hidden ⇒ pin is NOT the exact point`);
     } else {
+      // Every located mission — HIDDEN or not — pins at its EXACT authored point
+      // (change: gallery-exact-hidden-location). A hidden mission is no longer a
+      // coarse-cell exception, so nearby hidden missions never collapse onto one pin.
+      const tag = m.hideLocation ? ' (hidden)' : '';
       ok(doc.approxLocation!.lat === m.coordinates.lat && doc.approxLocation!.lng === m.coordinates.lng,
-        `${m.id}: located ⇒ pin is the EXACT authored coordinate`);
-      ok(!isCoarsePublicPoint(doc.approxLocation), `${m.id}: located ⇒ pin is precise, not coarsened`);
+        `${m.id}: located${tag} ⇒ pin is the EXACT authored coordinate`);
+      ok(!isCoarsePublicPoint(doc.approxLocation),
+        `${m.id}: located${tag} ⇒ pin is precise, not a coarse cell`);
     }
   }
 }
@@ -128,19 +128,16 @@ console.log('\n🗺️  gallery missions-map count + accuracy invariant\n');
   ok(plotted.length === LOCATED.length,
     `after repair the map plots the located+hidden missions again (${plotted.length} == ${LOCATED.length})`);
 
-  // Accuracy is restored: located missions back to their exact point, hidden coarse.
+  // Accuracy is restored: EVERY located mission (hidden included) back to its exact point.
   MISSIONS.forEach((m, i) => {
     const doc = repairedDocs[i] as { approxLocation?: { lat: number; lng: number } };
     if (m.locationless || (m.coordinates.lat === 0 && m.coordinates.lng === 0)) {
       ok(!isPlottablePublicTask(doc), `${m.id}: still NO pin after repair (correctly)`);
-    } else if (m.hideLocation) {
-      ok(isPlottablePublicTask(doc) && isCoarsePublicPoint(doc.approxLocation),
-        `${m.id}: hidden ⇒ repaired to a coarse pin`);
     } else {
       ok(!!doc.approxLocation
         && doc.approxLocation.lat === m.coordinates.lat
         && doc.approxLocation.lng === m.coordinates.lng,
-        `${m.id}: located ⇒ repaired to its EXACT coordinate`);
+        `${m.id}: located${m.hideLocation ? ' (hidden)' : ''} ⇒ repaired to its EXACT coordinate`);
     }
   });
 

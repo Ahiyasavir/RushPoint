@@ -250,9 +250,14 @@ users/{ownerUid}/games/{gameId}/runs/{runId}                 a live run (CF-writ
        …/runs/{runId}/{announcements|flashMissions}          live-ops broadcasts (read: any authed)
        …/runs/{runId}/{alerts|teamLocations|staffInvites}    SOS, live map pings, staff PINs
        …/runs/{runId}/{chat|feedItems|locationTrack}         team↔HQ chat, live photo feed, GPS track (90-day prune)
-publicGames/{gameId}, publicTasks/{taskId}                   denormalized gallery (public read) — location is
-                                                             the COARSE `approxLocation` only, never exact
-                                                             `coordinates` (write-path contract, not a rule)
+publicGames/{gameId}, publicTasks/{taskId}                   denormalized gallery (public read). A publicTask's
+                                                             `approxLocation` is the EXACT authored point of
+                                                             EVERY located mission — hidden included
+                                                             (gallery-exact-hidden-location): the creator's map
+                                                             must be accurate, and the in-game hidden puzzle is
+                                                             sealed separately by the participant sanitizer.
+                                                             Locationless/unplaced ⇒ field omitted. The deprecated
+                                                             exact `coordinates` key is never written.
 wallets/{uid}, wallets/{uid}/transactions/{txId}             creator credit ledger
 accessCodes/{CODE}                                           join-code → {ownerUid, gameId, runId}
 auditLogs/{id}                                               immutable admin trail (CF only)
@@ -413,8 +418,10 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
 - **Types / paths / scoring / geo** → `packages/shared/src` (`types/index.ts`, `scoringPresets.ts`,
   `geo.ts`, `mapStyle.ts`, `validation.ts`; plus `pausedClock.ts`, `taskDuration.ts`,
   `liveTaskStatus.ts`, `mutualExclusion.ts`, `safeZone.ts`, `chat.ts`, `tags.ts`,
-  `hiddenSearchArea.ts` (the coarse circle a SEALED hidden task may reveal — separate from
-  `publicTaskLocation.ts`, the world-readable ~1 km cell, and neither is derived from the other),
+  `hiddenSearchArea.ts` (the coarse circle a SEALED hidden task reveals to a PLAYER — separate from
+  `publicTaskLocation.ts`, which now publishes the EXACT authored point of every located mission to the
+  world-readable gallery, hidden included (gallery-exact-hidden-location); the in-game hidden puzzle is
+  sealed only by the participant sanitizer, not by this projection),
   `taskSkip.ts` (`planTaskSkip` — what skipping ONE mission does to the team's stage)). `legalContent.ts`
   + `legalMarkdown.ts` are deliberately **not** in the barrel — deep-import them only.
 - **Maps** — MapLibre + MapTiler `outdoor` with a keyless OpenTopoMap fallback; style via
@@ -456,10 +463,13 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   server does all five; a client delete does one and leaves no tombstone for `purgeGameNow` to act
   on. `firestore.rules` is `allow delete: if false` on `users/{uid}/games/{gameId}` — the client path
   is the `deleteGame` callable.
-- **Rules gate documents, not fields — and never run for the Admin SDK.** The per-field privacy
-  contract on world-readable `publicTasks` is enforced on the WRITE path only (`publishGame` writes a
-  coarse `approxLocation`, `searchTaskLibrary` strips, the backfill repairs legacy docs). Don't
-  re-raise it as a rules finding.
+- **Rules gate documents, not fields — and never run for the Admin SDK.** The projection contract on
+  world-readable `publicTasks` is enforced on the WRITE path only (`publishGame`/the seed write
+  `approxLocation` via `publicTaskLocation` — now the EXACT point of every located mission, hidden
+  included; `searchTaskLibrary` strips server-secret keys; the backfill repairs legacy docs, including
+  upgrading old coarse hidden pins to exact). Don't re-raise it as a rules finding — and note a hidden
+  mission's exact spot IS deliberately world-visible in the gallery now (gallery-exact-hidden-location);
+  the in-game puzzle is sealed by the participant sanitizer, not here.
 - **The Builder's save payload IS its dirty check.** `buildSavePayload()` copies only
   `BUILDER_EDITABLE_FIELDS` (`apps/creator-web/src/lib/savePayload.ts`) and the Builder diffs
   `JSON.stringify` of that payload — so a field missing from the list never saves *and* never even

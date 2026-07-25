@@ -117,36 +117,34 @@ describe('approximatePublicPoint — coarsening', () => {
 });
 
 describe('publicTaskLocation — the writer\'s rule', () => {
-  // ── hideLocation (change: gallery-precise-task-location) ────────────────────
-  // A hidden-location task is the ONE exception to precise publishing: its spot
-  // is a deliberate puzzle, and publicTasks is world-readable, so it stays
-  // coarsened to the ~1 km cell — a creator sees roughly where it is, the answer
-  // never leaks. The secrecy that makes the puzzle a puzzle IN PLAY lives in a
-  // different code path entirely — the participant sanitizer, which seals the
-  // task until the server confirms arrival and never sends any coordinate, coarse
-  // or exact. See sanitizeTask.test.ts for the pair of assertions that hold both
-  // halves of that boundary at once.
-  test('a hideLocation task publishes a coarse area, never the authored point', () => {
+  // ── hideLocation (change: gallery-exact-hidden-location) ────────────────────
+  // A hidden-location task now publishes its EXACT authored point, exactly like an
+  // ordinary task, so the gallery map pins every mission where the creator actually
+  // put it — a game with 8 hidden missions in one neighbourhood shows 8 distinct
+  // pins, not the 1-2 the coarse-grid collapse used to produce. The secrecy that
+  // makes the puzzle a puzzle IN PLAY lives in a DIFFERENT code path — the
+  // participant sanitizer, which seals the task until the server confirms arrival
+  // and never sends any coordinate to the device. See sanitizeTask.test.ts.
+  test('a hideLocation task now publishes its EXACT point too (not a coarse cell)', () => {
     const hidden = publicTaskLocation(task({ hideLocation: true }));
     expect(hidden).toBeDefined();
-    expect(hidden).toEqual(approximatePublicPoint(AUTHORED));
-    // …and it is an AREA, never the authored point.
-    expect(hidden!.lat).not.toBe(AUTHORED.lat);
-    expect(hidden!.lng).not.toBe(AUTHORED.lng);
-    // …and it now DIFFERS from an ordinary task, which publishes the exact point.
-    expect(hidden).not.toEqual(publicTaskLocation(task()));
+    expect(hidden).toEqual({ lat: AUTHORED.lat, lng: AUTHORED.lng });
+    // …and it is NOT the coarse cell the old rule emitted…
+    expect(hidden).not.toEqual(approximatePublicPoint(AUTHORED));
+    // …and it MATCHES an ordinary task's projection.
+    expect(hidden).toEqual(publicTaskLocation(task()));
   });
 
-  test('a hideLocation task publishes an area regardless of its other config', () => {
+  test('a hideLocation task publishes its exact point regardless of its other config', () => {
     expect(publicTaskLocation(task({
       hideLocation: true,
       triggerMode: 'radius',
       locationClue: 'Where the lions guard the gate',
       geofenceRadiusMeters: 40,
-    }))).toEqual(approximatePublicPoint(AUTHORED));
+    }))).toEqual({ lat: AUTHORED.lat, lng: AUTHORED.lng });
   });
 
-  test('a hideLocation area is deterministic — repeated publishes cannot be averaged', () => {
+  test('a hideLocation projection is deterministic (a pure function of the input)', () => {
     const first = publicTaskLocation(task({ hideLocation: true }));
     for (let i = 0; i < 25; i++) {
       expect(publicTaskLocation(task({ hideLocation: true }))).toEqual(first);
@@ -203,8 +201,8 @@ describe('publicTaskLocation — the writer\'s rule', () => {
 describe('isCoarsePublicPoint', () => {
   test('a coarsened point (a grid-cell centre) is coarse', () => {
     expect(isCoarsePublicPoint(approximatePublicPoint(AUTHORED))).toBe(true);
-    // A hidden task publishes exactly this, so its pin is always flagged coarse.
-    expect(isCoarsePublicPoint(publicTaskLocation(task({ hideLocation: true }))!)).toBe(true);
+    // A hidden task now publishes its EXACT (off-grid) point, so it is NOT coarse.
+    expect(isCoarsePublicPoint(publicTaskLocation(task({ hideLocation: true }))!)).toBe(false);
   });
 
   test('an exact off-grid authored point is precise', () => {

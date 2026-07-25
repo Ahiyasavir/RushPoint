@@ -256,17 +256,20 @@ describe('sanitizeTaskForParticipant — the three location projections stay sep
     ]);
   });
 
-  test('the participant area and the public area are independent projections', () => {
+  test('the public projection is now the EXACT spot, yet the PLAYER never receives it', () => {
     const task = hiddenTask();
+    // The world-readable gallery now pins the hidden mission at its EXACT spot
+    // (change: gallery-exact-hidden-location) so the creator's map is accurate…
     const publicArea = publicTaskLocation(task);
-    expect(publicArea).toBeDefined();
-    expect(publicArea).not.toEqual(task.coordinates);
+    expect(publicArea).toEqual({ lat: task.coordinates!.lat, lng: task.coordinates!.lng });
 
+    // …but the PLAYER's sealed payload still leaks nothing: no exact coordinates,
+    // no public approxLocation, only a coarse search circle that is NOT the spot.
+    // This is the whole safety boundary — the public projection being exact does
+    // not reach the participant device; the seal is a separate control.
     const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
-    // The public projection's own key never appears in a participant payload…
+    expect(sealed.coordinates).toBeUndefined();
     expect(sealed.approxLocation).toBeUndefined();
-    // …and the participant's circle is a strictly finer, separately-derived cell,
-    // so it is not simply the public one forwarded under a new name.
     const area = sealed.searchArea as { lat: number; lng: number };
     expect(area.lat === publicArea!.lat && area.lng === publicArea!.lng).toBe(false);
   });

@@ -61,11 +61,13 @@ describe('publicTaskForLibrary — read-path exact location (change: gallery-map
     expect(out.approxLocation).not.toEqual(approximatePublicPoint(EXACT));
   });
 
-  test('a doc explicitly flagged hideLocation is coarsened to its ~1 km cell', () => {
-    // Defense-in-depth: no stored publicTasks doc actually carries this flag today,
-    // but if a future projection wrote it the carve-out must still coarsen.
+  test('a doc explicitly flagged hideLocation is served EXACT now (gallery-exact-hidden-location)', () => {
+    // The gallery pins EVERY located mission — hidden included — at its exact spot,
+    // so a game's hidden missions no longer collapse onto one coarse cell. The
+    // in-game puzzle is sealed separately by the participant sanitizer.
     const out = publicTaskForLibrary(baseTask({ coordinates: EXACT, hideLocation: true }));
-    expect(out.approxLocation).toEqual(approximatePublicPoint(EXACT));
+    expect(out.approxLocation).toEqual({ lat: 31.77654, lng: 35.23489 }); // round5 of EXACT
+    expect(out.approxLocation).not.toEqual(approximatePublicPoint(EXACT));
   });
 
   test('a new-style doc with an exact approxLocation and no coordinates is kept verbatim', () => {
@@ -147,14 +149,15 @@ describe('legacy-coarse repair (change: gallery-map-legacy-coarse-repair)', () =
       expect(out.get('g1_t1')).toEqual({ lat: 31.77654, lng: 35.23489 });
     });
 
-    test('hideLocation in the template keeps the resolved point COARSE, never leaking the exact spot', async () => {
+    test('a hideLocation task in the template is now resolved to its EXACT point (gallery-exact-hidden-location)', async () => {
       const hidden = gameOf({
         stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', coordinates: EXACT, hideLocation: true }] }],
       });
       const getGames: LegacyGameFetcher = vi.fn(async () => new Map([['owner/g1', hidden]]));
       const tasks = [baseTask({ id: 'g1_t1', sourceGameId: 'g1', ownerUid: 'owner', approxLocation: COARSE })];
       const out = await resolveLegacyCoarseLocations(tasks, getGames);
-      expect(out.get('g1_t1')).toEqual(approximatePublicPoint(EXACT));
+      // A legacy coarse hidden pin is upgraded to its precise spot on read.
+      expect(out.get('g1_t1')).toEqual({ lat: 31.77654, lng: 35.23489 }); // round5 of EXACT
     });
 
     test('a missing/deleted game falls open to the stored coarse point (no throw, no entry)', async () => {

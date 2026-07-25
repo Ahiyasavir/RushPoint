@@ -3,15 +3,26 @@ import { mayNeedPublicTaskRepair, repairPublicTask } from './publicTaskBackfill'
 import { approximatePublicPoint } from './publicTaskLocation';
 
 const PT = { lat: 31.7767, lng: 35.2345 };
+// The coarse ~1 km cell PT snaps to. Under the OLD rule a hidden mission was
+// stored as this; the sweep must now UPGRADE such a legacy value to the exact point.
 const AREA = approximatePublicPoint(PT);
-// change: gallery-precise-task-location. An ordinary task now backfills to its
-// EXACT authored point; only a hideLocation task is coarsened to AREA. PT is
-// off-grid, so PRECISE (== PT) and AREA are distinct values here.
+// change: gallery-exact-hidden-location. EVERY located task now backfills to its
+// EXACT authored point — ordinary AND hideLocation. PT is off-grid, so PRECISE
+// (== PT) is distinct from AREA, which appears here only as a legacy stored value.
 const PRECISE = { lat: 31.7767, lng: 35.2345 };
 
 describe('repairPublicTask — which stored docs need fixing', () => {
-  it('skips a conformant doc (area present, no legacy coordinates)', () => {
-    expect(repairPublicTask({ approxLocation: AREA }, { coordinates: PT })).toBeNull();
+  it('skips a conformant doc (EXACT area present, no legacy coordinates)', () => {
+    expect(repairPublicTask({ approxLocation: PRECISE }, { coordinates: PT })).toBeNull();
+  });
+
+  it('re-repairs a stored COARSE area to the exact point (gallery-exact-hidden-location)', () => {
+    // A hidden mission published under the old coarsening rule sits on the grid;
+    // the sweep must now upgrade it from the ~1 km cell to the precise authored spot,
+    // so nearby hidden missions stop collapsing onto one pin.
+    expect(mayNeedPublicTaskRepair({ approxLocation: AREA })).toBe(true);
+    expect(repairPublicTask({ approxLocation: AREA }, { hideLocation: true, coordinates: PT }))
+      .toEqual({ approxLocation: PRECISE });
   });
 
   it('repairs any doc that still carries the deprecated exact point', () => {
@@ -23,19 +34,18 @@ describe('repairPublicTask — which stored docs need fixing', () => {
       { coordinates: { lat: 'x', lng: null } },
       { coordinates: PT },
     );
-    // Ordinary task ⇒ the replacement is now the EXACT authored point, not a cell.
     expect(r).toEqual({ approxLocation: PRECISE });
   });
 
   // ── change: hidden-location-map-visibility ──────────────────────────────────
-  // A hidden-location task published AFTER task-library-map-view has neither a
-  // legacy `coordinates` key nor an area, so the old trigger never fired and the
-  // document stayed off the map forever. "Bare" is now a repairable state.
+  // A task published AFTER task-library-map-view has neither a legacy `coordinates`
+  // key nor an area, so the old trigger never fired and the document stayed off the
+  // map. "Bare" is a repairable state.
   it('repairs a BARE doc (no coordinates, no area) whose task can supply one', () => {
-    // Ordinary task ⇒ exact point; hideLocation task ⇒ coarse cell.
+    // Ordinary AND hidden ⇒ the exact authored point now.
     expect(repairPublicTask({}, { coordinates: PT })).toEqual({ approxLocation: PRECISE });
     expect(repairPublicTask({}, { hideLocation: true, coordinates: PT }))
-      .toEqual({ approxLocation: AREA });
+      .toEqual({ approxLocation: PRECISE });
   });
 
   it('repairs a doc whose stored area is unusable', () => {
@@ -67,9 +77,11 @@ describe('repairPublicTask — which stored docs need fixing', () => {
       { coordinates: PT },
       {},
       { approxLocation: { lat: 0, lng: 0 } },
+      { approxLocation: AREA },            // a legacy coarse value gets upgraded once…
     ] as const) {
       const first = repairPublicTask(doc, { hideLocation: true, coordinates: PT });
-      expect(first).toEqual({ approxLocation: AREA });
+      expect(first).toEqual({ approxLocation: PRECISE });
+      // …and feeding the exact result back is a no-op.
       expect(repairPublicTask({ approxLocation: first!.approxLocation }, {
         hideLocation: true, coordinates: PT,
       })).toBeNull();
@@ -78,16 +90,18 @@ describe('repairPublicTask — which stored docs need fixing', () => {
 });
 
 describe('mayNeedPublicTaskRepair — the sweep\'s cheap pre-check', () => {
-  it('is true for a legacy doc and for any doc without a usable area', () => {
+  it('is true for a legacy doc, a doc without a usable area, and a COARSE area', () => {
     expect(mayNeedPublicTaskRepair({ coordinates: PT })).toBe(true);
     expect(mayNeedPublicTaskRepair({ coordinates: PT, approxLocation: AREA })).toBe(true);
     expect(mayNeedPublicTaskRepair({})).toBe(true);
     expect(mayNeedPublicTaskRepair({ approxLocation: { lat: 0, lng: 0 } })).toBe(true);
     expect(mayNeedPublicTaskRepair({ approxLocation: { lat: NaN, lng: 3 } })).toBe(true);
+    // A coarse ~1 km cell is now stale (every located task should be exact).
+    expect(mayNeedPublicTaskRepair({ approxLocation: AREA })).toBe(true);
   });
 
-  it('is false for a conformant doc, so the sweep spends no game read on it', () => {
-    expect(mayNeedPublicTaskRepair({ approxLocation: AREA })).toBe(false);
+  it('is false for a conformant doc (an EXACT off-grid area), so the sweep spends no game read on it', () => {
+    expect(mayNeedPublicTaskRepair({ approxLocation: PRECISE })).toBe(false);
   });
 
   it('never throws on a nullish doc, and treats it as nothing to do', () => {
@@ -99,20 +113,16 @@ describe('mayNeedPublicTaskRepair — the sweep\'s cheap pre-check', () => {
 
 describe('repairPublicTask — what replaces the exact point', () => {
   it('backfills a plain placed task to its EXACT authored point', () => {
-    // change: gallery-precise-task-location. The gallery shows WHERE a creator put
-    // a task, an authored point of interest — so an ordinary task publishes the
-    // exact spot, no longer coarsened.
     expect(repairPublicTask({ coordinates: PT }, { coordinates: PT }))
       .toEqual({ approxLocation: PRECISE });
   });
 
-  it('coarsens a hideLocation task too, and still strips its exact point', () => {
-    // change: hidden-location-map-visibility. The exact authored point is still
-    // erased from the world-readable document; what replaces it is the same ~1 km
-    // cell any other task gets, so the creator's own hunt is on their own map.
+  it('backfills a hideLocation task to its EXACT point too (gallery-exact-hidden-location)', () => {
+    // The world-readable gallery now pins hidden missions precisely so the creator's
+    // own map is accurate; the in-game puzzle is sealed separately by the participant
+    // sanitizer. The legacy exact `coordinates` key is still stripped either way.
     const r = repairPublicTask({ coordinates: PT }, { hideLocation: true, coordinates: PT });
-    expect(r).toEqual({ approxLocation: AREA });
-    expect(r?.approxLocation).not.toEqual(PT);
+    expect(r).toEqual({ approxLocation: PRECISE });
   });
 
   it('publishes nothing for a locationless or unplaced task', () => {
@@ -140,11 +150,9 @@ describe('repairPublicTask — what replaces the exact point', () => {
     expect(r && 'approxLocation' in r && r.approxLocation).toBeFalsy();
   });
 
-  it('returns the exact authored point for an ordinary task, but never for a hidden one', () => {
-    // change: gallery-precise-task-location. Ordinary ⇒ exact; hideLocation ⇒ the
-    // exact point is still erased and replaced by a coarse cell.
+  it('returns the exact authored point for EVERY located task, hidden included', () => {
     expect(repairPublicTask({ coordinates: PT }, { coordinates: PT })?.approxLocation).toEqual(PT);
     expect(repairPublicTask({ coordinates: PT }, { hideLocation: true, coordinates: PT })?.approxLocation)
-      .not.toEqual(PT);
+      .toEqual(PT);
   });
 });
