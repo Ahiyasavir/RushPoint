@@ -99,6 +99,28 @@ export function normalizeTags(input: string | string[] | null | undefined): stri
   return out;
 }
 
+// ─── Recommended seed tags (feature: gallery-popular-tags) ─────────────────────
+//
+// A small, broadly-useful, BILINGUAL set of quick-add chips the Builder can offer
+// so a brand-new platform (or a creator whose niche has no gallery data yet) still
+// gets sensible suggestions. `getPopularTags` layers these UNDER the live,
+// data-driven counts — real popularity always wins, the seed only fills the tail.
+// Normalized on read like any other tag, so casing/dedup rules apply uniformly.
+export const RECOMMENDED_TAGS: string[] = [
+  'עיר',       // city
+  'טבע',       // nature
+  'משפחה',     // family
+  'חברים',     // friends
+  'תחרות',     // competition
+  'צילום',     // photo
+  'חידות',     // puzzles
+  'הרפתקה',    // adventure
+  'היסטוריה',  // history
+  'אוכל',      // food
+  'ילדים',     // kids
+  'צוות',      // team
+];
+
 // ─── Game → task tag propagation (feature: game-tags-propagate) ────────────────
 //
 // A game's tags are UNIONED into EVERY mission (task) so tagging the game once makes

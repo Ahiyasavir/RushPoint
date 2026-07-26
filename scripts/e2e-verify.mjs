@@ -7793,6 +7793,24 @@ async function main() {
 
     check('tags needed NO participant-allowlist change (already allowlisted)',
       ALLOWED_TASK_KEYS.has('tags'));
+
+    // (change: gallery-popular-tags) getPopularTags surfaces the tags creators are
+    // actually using, so the Builder can offer real quick-add chips. The published
+    // game above put 'Jerusalem' (and its Hebrew siblings) into the world-readable
+    // gallery, so a popular-tags read must return them. A generous limit keeps the
+    // published tags in the window regardless of how much other gallery data the
+    // suite has accumulated.
+    const popular = await creator.call('getPopularTags', { limit: 50 });
+    const popularLower = (popular?.tags ?? []).map((t) => String(t).toLowerCase());
+    check('getPopularTags returns a non-empty tag list', (popular?.tags ?? []).length > 0,
+      JSON.stringify(popular?.tags?.slice(0, 12)));
+    check('getPopularTags includes a tag that was just published to the gallery',
+      popularLower.includes('jerusalem'), JSON.stringify(popular?.tags?.slice(0, 12)));
+    check('getPopularTags caps the returned list at the requested limit',
+      (popular?.tags ?? []).length <= 50, String((popular?.tags ?? []).length));
+    const popularCapped = await creator.call('getPopularTags', {});
+    check('getPopularTags honors the default limit ceiling (≤50)',
+      (popularCapped?.tags ?? []).length <= 50, String((popularCapped?.tags ?? []).length));
   });
 
   // (change: task-library-map-view) Authored blind — no emulator was available in

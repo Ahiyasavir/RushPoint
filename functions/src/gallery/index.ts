@@ -20,7 +20,14 @@ import {
   type PublicLike,
   type PublicLikeKind,
 } from '@rushpoint/shared';
+import { RECOMMENDED_TAGS, normalizeTags } from '@rushpoint/shared';
 import { bumpPublicSignals, publicItemPath, scoreFor } from './popularityStore';
+import {
+  readStoredTagCounts,
+  tallyTags,
+  sortTagCounts,
+  type TagCounts,
+} from './tagStats';
 
 /**
  * Case-insensitive substring match of `query` against a set of text fields.
@@ -407,4 +414,65 @@ export const setPublicLike = loggedCallable('setPublicLike', async (data, contex
     // Authoritative state, so the UI's optimistic guess is reconciled, not trusted.
     return { liked, likeCount, popularity };
   });
+});
+
+
+// ─── getPopularTags ────────────────────────────────────────────────────────────
+// A cheap, data-driven list of quick-add tag chips for the Builder
+// (change: gallery-popular-tags).
+//
+// Auth is required (anonymous is fine — same posture as searchGallery) so the read
+// is metered by uid. It reuses the `searchGallery` rate-limit budget rather than
+// inventing a new bucket: it is the same class of gallery read, and RATE_LIMITS
+// (packages/shared) is owned elsewhere so a dedicated bucket cannot be added from
+// here without leaving `enforceRateLimit` fail-open (which rateLimitCoverage would
+// then flag). See DENORM-WIRING note below on where `bumpTagStats` must be called.
+//
+// Resolution order, most-authoritative first:
+//   1. the denormalized `publicTagStats/global` counts (one point read — cheap);
+//   2. if that doc is empty (e.g. before any publish has bumped it), a BOUNDED
+//      live aggregation of the public gallery's own tags, so the feature is useful
+//      immediately and self-heals;
+//   3. the RECOMMENDED_TAGS seed layered UNDERNEATH, filling the tail so an empty
+//      platform still returns sensible chips. Real usage always outranks the seed.
+
+/** Bounded live tally of the tags actually present in the public gallery. */
+async function liveGalleryTagCounts(): Promise<TagCounts> {
+  const CAP = 300; // bounded, index-free read — tag counting doesn't need ordering
+  const [games, tasks] = await Promise.all([
+    db.collection('publicGames').limit(CAP).get().catch(() => null),
+    db.collection('publicTasks').limit(CAP).get().catch(() => null),
+  ]);
+  const lists: Array<string[] | undefined> = [];
+  for (const d of games?.docs ?? []) lists.push(d.data()?.tags as string[] | undefined);
+  for (const d of tasks?.docs ?? []) lists.push(d.data()?.tags as string[] | undefined);
+  return tallyTags(lists);
+}
+
+export const getPopularTags = loggedCallable('getPopularTags', async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  await enforceRateLimit(context.auth.uid, 'searchGallery');
+
+  const { limit = 20 } = data as { limit?: number };
+  const wanted = Math.min(Math.max(1, Math.floor(Number(limit)) || 20), 50);
+
+  let counts = await readStoredTagCounts();
+  if (Object.keys(counts).length === 0) {
+    // Denormalized doc not populated yet — derive from the gallery itself.
+    counts = await liveGalleryTagCounts();
+  }
+
+  const top = sortTagCounts(counts).slice(0, wanted).map((e) => e.tag);
+
+  // Layer the seed underneath the real, data-driven tags without duplicating one.
+  const seen = new Set(top.map((t) => t.toLowerCase()));
+  const tags = [...top];
+  for (const seed of normalizeTags(RECOMMENDED_TAGS)) {
+    if (tags.length >= wanted) break;
+    if (seen.has(seed.toLowerCase())) continue;
+    seen.add(seed.toLowerCase());
+    tags.push(seed);
+  }
+
+  return { tags };
 });
