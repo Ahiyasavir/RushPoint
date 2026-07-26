@@ -17,6 +17,7 @@
 // server-owned fields (ownerUid, visibility, playCount, deletedAt, timestamps) on every
 // autosave and force updateGame to grow a rejection list to stay safe.
 import type { Game, UpdateGamePayload } from '@rushpoint/shared';
+import { propagateGameTagsToTasks } from '@rushpoint/shared';
 
 /**
  * Every `Game` field the Builder may mutate. Adding a control to the Builder means
@@ -74,5 +75,17 @@ export function buildSavePayload(game: Game): UpdateGamePayload {
   const src = game as unknown as Record<BuilderEditableField, unknown>;
   const payload: Record<string, unknown> = { gameId: game.id };
   for (const key of BUILDER_EDITABLE_FIELDS) payload[key] = src[key];
+  // Union the game's tags into every task before the Builder diffs this payload
+  // (feature: game-tags-propagate). The server does the SAME union on save, and the
+  // helper is idempotent, so the tasks `getGame` returns after a save already carry
+  // these tags — which keeps `JSON.stringify(buildSavePayload(loaded))` STABLE and
+  // stops a phantom "unsaved changes" the moment a game has tags. When either half is
+  // absent (a tagless game, or a game with no stages) nothing changes.
+  if (Array.isArray(payload.stages) && Array.isArray(payload.tags)) {
+    payload.stages = propagateGameTagsToTasks(
+      payload.tags as string[],
+      payload.stages as Parameters<typeof propagateGameTagsToTasks>[1],
+    );
+  }
   return payload as unknown as UpdateGamePayload;
 }

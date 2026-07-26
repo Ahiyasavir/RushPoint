@@ -98,3 +98,40 @@ export function normalizeTags(input: string | string[] | null | undefined): stri
   }
   return out;
 }
+
+// ─── Game → task tag propagation (feature: game-tags-propagate) ────────────────
+//
+// A game's tags are UNIONED into EVERY mission (task) so tagging the game once makes
+// its missions inherit those tags — the foundation for gallery tag-search. This runs
+// on the client (keeping the Builder's dirty check honest) AND on the server
+// (updateGame / importGameFile), so it MUST be idempotent and never mutate its input.
+//
+// Structural shape rather than the full `Stage`/`Task` types on purpose: it needs
+// nothing but `tasks[].tags`, and staying structural keeps this file free of a
+// (harmless but avoidable) type dependency, so a client and the server can call it
+// with either the shared types or a plain payload object.
+type WithTaskTags<T> = T & { tags?: string[] };
+type StageLike<T> = { tasks: WithTaskTags<T>[] };
+
+/**
+ * Return a NEW stages array in which every task's `tags` is the normalized UNION of
+ * the game's tags (listed FIRST, so they survive the MAX_TAGS cap) and the task's own
+ * prior tags. Dedup / casing / cap all come from `normalizeTags`, so the client, the
+ * write path and publish can re-apply this without ever disagreeing.
+ *
+ * Idempotent (re-running is a no-op) and non-mutating (each stage and task is rebuilt;
+ * no input array is touched).
+ */
+export function propagateGameTagsToTasks<St extends StageLike<unknown>>(
+  gameTags: string[] | undefined,
+  stages: St[],
+): St[] {
+  const game = gameTags ?? [];
+  return stages.map((stage) => ({
+    ...stage,
+    tasks: stage.tasks.map((task) => ({
+      ...task,
+      tags: normalizeTags([...game, ...(task.tags ?? [])]),
+    })),
+  }));
+}

@@ -43,7 +43,10 @@ const fullGame = {
   // `estimatedMinutes` (visible-time-estimates) is the THIRD TASK-level Builder field on
   // the same passthrough, and the one that is actually SCORED (the smart_weighted
   // sigmoid divides by it), so a silently-unsaved override would move real scores.
-  stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field', pausesTimer: true, expectedDurationMinutes: 4, estimatedMinutes: 9 }] }],
+  // The task carries the game's tags PRE-PROPAGATED (feature: game-tags-propagate):
+  // buildSavePayload unions `game.tags` into every task, so a fixture task that already
+  // holds them makes that union a no-op and keeps the `stages` deep-equal below honest.
+  stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [{ id: 't1', title: 'Go', type: 'field', pausesTimer: true, expectedDurationMinutes: 4, estimatedMinutes: 9, tags: ['jerusalem', 'walking'] }] }],
   scoringPreset: 'smart_weighted',
   scoringOptions: { wrongAnswerPenalty: 'strict' },
   registrationFields: [{ id: 'name', label: 'Name', type: 'text', required: true, level: 'member' }],
@@ -151,6 +154,39 @@ const minimal = { id: 'g2', title: 'X', mode: 'individual', stages: [], tags: []
 const minPayload = buildSavePayload(minimal) as Record<string, unknown>;
 ok(minPayload.gameId === 'g2', 'minimal game still yields a gameId');
 ok(minPayload.coverImage === undefined, 'absent optional field stays undefined, never ""');
+
+// ── game-tags propagate → dirty-check stability (feature: game-tags-propagate) ─
+// buildSavePayload unions the game's tags into every task. The server does the SAME
+// union on save, and the union is idempotent, so a game reconstructed from a saved
+// payload must yield BYTE-IDENTICAL stages on the next buildSavePayload — otherwise
+// every tagged game would show a phantom "unsaved changes" the instant it loaded.
+{
+  const tagged = {
+    ...fullGame,
+    tags: ['jerusalem', 'fun'],
+    stages: [{ id: 's1', order: 0, title: 'Stage 1', tasks: [
+      { id: 't1', title: 'A', type: 'field', tags: ['puzzle'] },
+      { id: 't2', title: 'B', type: 'field' },
+    ] }],
+  } as unknown as Game;
+
+  const first = buildSavePayload(tagged) as Record<string, unknown>;
+  // Every task now carries the game tags (game tags first).
+  const firstTasks = (first.stages as { tasks: { tags?: string[] }[] }[])[0].tasks;
+  ok(same(firstTasks[0].tags, ['jerusalem', 'fun', 'puzzle']),
+    'buildSavePayload unions game tags into a task (game tags first, own tags kept)');
+  ok(same(firstTasks[1].tags, ['jerusalem', 'fun']),
+    'buildSavePayload gives a tagless task exactly the game tags');
+
+  // Reconstruct the game as getGame would return it after a save (stages now carry the
+  // unioned tags), then re-run buildSavePayload: the stages must be byte-identical.
+  const reloaded = { ...tagged, stages: first.stages } as unknown as Game;
+  const second = buildSavePayload(reloaded) as Record<string, unknown>;
+  ok(JSON.stringify(second.stages) === JSON.stringify(first.stages),
+    're-propagation is a no-op: reloaded stages serialize identically (no phantom dirty)');
+  ok(JSON.stringify(second) === JSON.stringify(first),
+    'the whole reloaded payload is byte-identical (dirty check stays clean)');
+}
 
 // ── normalizeHttpsUrl ────────────────────────────────────────────────────────
 ok(normalizeHttpsUrl('https://cdn.example.com/a.jpg') === 'https://cdn.example.com/a.jpg',

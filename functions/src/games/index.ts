@@ -41,6 +41,7 @@ import {
   // diverge — and a client that skips it (or is hostile) still cannot store an
   // unbounded list, because every write path below runs it server-side.
   normalizeTags,
+  propagateGameTagsToTasks,
   cleanGameInstructions,
   FIRESTORE_PATHS,
   // Game trash / tombstone lifecycle (change: recoverable-game-deletion).
@@ -116,11 +117,19 @@ function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined 
 // stage + task title/description (wave-j J6) before persisting. Returns a NEW
 // stages array (never dotted-update an array element — coerces it to a map).
 // Only display text is touched; answer keys, coordinates, and types are untouched.
-function sanitizeStagesText(stages: Stage[] | undefined): Stage[] | undefined {
+//
+// `gameTags` (feature: game-tags-propagate): when the EFFECTIVE game tags are known,
+// they are UNIONED into every task's tags so tagging the game once makes its missions
+// inherit those tags (the foundation for gallery tag-search). The union runs on the
+// same NEW array this pass already builds; `propagateGameTagsToTasks` is idempotent
+// and delegates dedup/cap/casing to `normalizeTags`, so the per-task `normalizeTags`
+// below and this call cannot disagree. When `gameTags` is omitted the behaviour is
+// exactly the prior per-task normalize.
+function sanitizeStagesText(stages: Stage[] | undefined, gameTags?: string[]): Stage[] | undefined {
   if (!Array.isArray(stages)) return stages;
   const clean = (s: string | undefined): string | undefined =>
     s === undefined ? undefined : stripUnsafeDisplayChars(s);
-  return stages.map((stage) => ({
+  const sanitized = stages.map((stage) => ({
     ...stage,
     title: clean(stage.title) ?? stage.title,
     tasks: (stage.tasks ?? []).map((task) => ({
@@ -133,6 +142,12 @@ function sanitizeStagesText(stages: Stage[] | undefined): Stage[] | undefined {
       ...(task.tags !== undefined ? { tags: normalizeTags(task.tags) } : {}),
     })),
   }));
+  // Union the effective game tags into every task (feature: game-tags-propagate).
+  // Only when the caller supplied them — a caller that does not know the game's tags
+  // must not blank the inherited ones away.
+  return gameTags === undefined
+    ? sanitized
+    : (propagateGameTagsToTasks(gameTags, sanitized) as Stage[]);
 }
 
 /**
@@ -277,7 +292,13 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     // Strip control / bidi-override / zero-width spoofing chars from every authored
     // title/description (game handled below; stage + task here) before persisting
     // (wave-j J6). Returns a NEW stages array (never dotted-update an array element).
-    updates.stages = normalizeStagesMedia(sanitizeStagesText(stages));
+    // Effective game tags for propagation (feature: game-tags-propagate): the payload's
+    // tags when this save carries them, else the tags already stored on the game — so
+    // saving stages alone still inherits the game's existing tags onto every task, and
+    // renaming the tags in the same save propagates the NEW set. Normalized here so the
+    // union is against the same bounded list the game itself stores.
+    const effectiveTags = normalizeTags(tags ?? (snap.data() as Game).tags);
+    updates.stages = normalizeStagesMedia(sanitizeStagesText(stages, effectiveTags));
   }
   if (scoringPreset !== undefined)      updates.scoringPreset = scoringPreset;
   if (scoringOptions !== undefined)     updates.scoringOptions = scoringOptions;
@@ -1069,7 +1090,10 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // reference whose Storage object is gone is dropped here rather than persisted
   // as a dead pointer). Both return NEW arrays — never dotted-update an array
   // element, it coerces the array to a map.
-  const safeStages = normalizeStagesMedia(sanitizeStagesText(stages)) ?? [];
+  // The imported game's own tags are unioned into every task (feature:
+  // game-tags-propagate), using the SAME normalized list the game will store below.
+  const importedTags = normalizeTags(parsed.tags);
+  const safeStages = normalizeStagesMedia(sanitizeStagesText(stages, importedTags)) ?? [];
   const instructions = parsed.instructions ? cleanGameInstructions(parsed.instructions) : undefined;
 
   const now = new Date().toISOString();

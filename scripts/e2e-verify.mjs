@@ -7743,6 +7743,19 @@ async function main() {
     check('stages survived as an ARRAY (never a dotted array-element update)',
       Array.isArray(saved.stages) && Array.isArray(saved.stages[0]?.tasks));
 
+    // (feature: game-tags-propagate) The game's tags are UNIONED into every task on
+    // save, so tagging the game once makes its missions inherit those tags — the
+    // foundation for gallery tag-search below. The mission also keeps its own tags.
+    const gameTagSet = new Set(saved.tags ?? []);
+    check('updateGame propagates the game tags onto EVERY task',
+      (saved.stages ?? []).every((st) =>
+        (st.tasks ?? []).every((t) =>
+          [...gameTagSet].every((g) => (t.tags ?? []).includes(g)))),
+      JSON.stringify(savedTask.tags?.slice(0, 8)));
+    check('propagation keeps the task\'s own tag too (union, not replace)',
+      (savedTask.tags ?? []).some((t) => t.toLowerCase() === 'photo'),
+      JSON.stringify(savedTask.tags?.slice(0, 8)));
+
     // Publish → the world-readable copies are bounded too, and searchGallery
     // actually RETURNS the tags (nothing strips them on the way out).
     await creator.call('publishGame', { gameId: gT, visibility: 'public' });
@@ -7763,6 +7776,15 @@ async function main() {
     const foundTask = (libT?.tasks ?? []).find((t) => t.id === `${gT}_tg-a`);
     check('searchTaskLibrary RETURNS the task tags',
       Array.isArray(foundTask?.tags) && foundTask.tags.length > 0, JSON.stringify(foundTask?.tags));
+    // (feature: game-tags-propagate) Because the game tag rode onto the task and into
+    // publicTasks, a gallery tag-search by that GAME tag finds the mission — the whole
+    // point of the feature.
+    check('the propagated game tag reached publicTasks',
+      Array.isArray(pubTask.tags) && pubTask.tags.includes('Jerusalem'), JSON.stringify(pubTask.tags));
+    const libByTag = await creator.call('searchTaskLibrary', { query: '', tags: ['Jerusalem'], limit: 50 });
+    check('searchTaskLibrary finds the mission by the inherited GAME tag',
+      (libByTag?.tasks ?? []).some((t) => t.id === `${gT}_tg-a`),
+      String((libByTag?.tasks ?? []).length));
 
     // The `tags` filter argument must still work against the normalized values.
     const byTag = await creator.call('searchGallery', { query: '', tags: ['Jerusalem'], limit: 50 });
