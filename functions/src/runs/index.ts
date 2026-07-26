@@ -114,6 +114,7 @@ import {
   taskScoreSmart,
   COMPLETION_BONUS,
   resolveExpectedMinutes,
+  FIRESTORE_PATHS,
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
 import { taskExcludedMs, teamExcludedMs, adjustedElapsedSeconds } from '@rushpoint/shared';
@@ -3042,6 +3043,16 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
       updatedAt: now,
     });
     tx.update(runRef, { deviceCount: usedDevices + 1, updatedAt: now });
+    // Device-membership reverse index. The attaching phone has no team doc of its
+    // own, so firestore.rules' isRunParticipant() (an exists() at the caller's OWN
+    // uid) failed for it and every secondary phone got permission-denied on the
+    // run's announcements / flashMissions / feedItems — which PlayScreen renders
+    // unconditionally. Rules cannot query deviceUids across the teams collection,
+    // so membership has to be addressable BY the device uid. Written in the same
+    // transaction as the deviceUids append: the two can never disagree.
+    tx.set(db.doc(FIRESTORE_PATHS.runDeviceMember(ownerUid, gameId, runId, uid)), {
+      teamId: teamRef.id, deviceUid: uid, joinedAt: now,
+    });
   });
 
   return { ownerUid, gameId, runId, teamId: teamRef.id, role: 'viewer', alreadyAttached: false };

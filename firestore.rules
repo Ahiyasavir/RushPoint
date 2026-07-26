@@ -319,14 +319,30 @@ service cloud.firestore {
           && request.auth.token.gameId == gameId
           && request.auth.token.runId == runId;
     }
-    // A participant of THIS run: the caller owns a team doc under the run. Team
-    // docs are keyed by the founding uid (uid == teamId), so run membership for
-    // the founding device is exactly the existence of its team doc. Costs one
-    // document read per subscription. (Secondary attached devices — deviceUids —
-    // are NOT matched here; they read via the team/chat docs, not the raw feed.)
+    // A participant of THIS run — EITHER the founding phone or any secondary phone
+    // attached to a team (shared-team-devices).
+    //
+    //   • founding phone: team docs are keyed by the founding uid (uid == teamId),
+    //     so its membership is exactly the existence of its own team doc.
+    //   • attached phone: it has NO team doc — joinTeamAsDevice only appends its uid
+    //     to the FOUNDER's `deviceUids` array. isAttachedDevice() cannot help here:
+    //     that trick reads `resource.data.deviceUids` off the doc being read, which
+    //     exists on the team/chat docs but NOT on an announcement. And rules cannot
+    //     query a collection, so "is this uid in ANY team's deviceUids" is
+    //     unanswerable from an announcement. The fix is the deviceMembers reverse
+    //     index — a server-written marker keyed by the DEVICE uid
+    //     (FIRESTORE_PATHS.runDeviceMember), written in the same transaction that
+    //     appends to deviceUids, so the two can never disagree.
+    //
+    // Without the second clause every secondary phone on a multi-phone team got
+    // permission-denied on announcements / flashMissions / feedItems, which
+    // PlayScreen renders unconditionally: only the founder saw organizer broadcasts.
+    // Costs at most two document reads per subscription (the second is only
+    // evaluated when the first misses, i.e. for attached phones).
     function isRunParticipant(uid, gameId, runId) {
       return request.auth != null
-          && exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/teams/$(request.auth.uid));
+          && (exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/teams/$(request.auth.uid))
+              || exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/deviceMembers/$(request.auth.uid)));
     }
   }
 }

@@ -87,6 +87,11 @@ async function main() {
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/feedItems/f1`),
       { active: true, photoUrl: 'https://example/p.jpg', teamName: 'Lions', taskTitle: 'Mural' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/announcements/an1`), { title: 'Go' });
+    // shared-team-devices: the reverse index joinTeamAsDevice writes for an
+    // attached phone. It has NO team doc of its own, so this marker is the ONLY
+    // thing that can make isRunParticipant() true for it.
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/deviceMembers/${DEVICE}`),
+      { teamId: TEAM, deviceUid: DEVICE, joinedAt: '2020-01-01T00:00:00Z' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/flashMissions/fm1`), { title: 'Flash' });
     await setDoc(doc(db, `wallets/${OWNER}`), { eventCredits: 5 });
     await setDoc(doc(db, `publicGames/${GAME}`), { title: 'Public', likeCount: 3, popularity: 1.5 });
@@ -261,6 +266,26 @@ async function main() {
   await check('run participant CAN read announcements', assertSucceeds(getDoc(doc(team, `${runPath}/announcements/an1`))));
   await check('a stranger CANNOT read announcements', assertFails(getDoc(doc(other, `${runPath}/announcements/an1`))));
   await check('a stranger CANNOT read flash missions', assertFails(getDoc(doc(other, `${runPath}/flashMissions/fm1`))));
+
+  // ── Multi-phone teams (shared-team-devices) ────────────────────────────────
+  // A secondary phone attached via joinTeamAsDevice has no team doc, so the old
+  // isRunParticipant() (exists() at the caller's OWN uid) rejected it and every
+  // non-founder phone got permission-denied on live-ops UI that PlayScreen
+  // renders unconditionally. The deviceMembers reverse index is what admits it —
+  // and it must admit ONLY it: a stranger has no marker and still gets nothing.
+  await check('attached device CAN read announcements', assertSucceeds(getDoc(doc(device, `${runPath}/announcements/an1`))));
+  await check('attached device CAN list announcements', assertSucceeds(getDocs(collection(device, `${runPath}/announcements`))));
+  await check('attached device CAN read flash missions', assertSucceeds(getDoc(doc(device, `${runPath}/flashMissions/fm1`))));
+  await check('attached device CAN list flash missions', assertSucceeds(getDocs(collection(device, `${runPath}/flashMissions`))));
+  await check('attached device CAN read the feed', assertSucceeds(getDoc(doc(device, feedDoc))));
+  await check('attached device CAN list the feed collection', assertSucceeds(getDocs(collection(device, `${runPath}/feedItems`))));
+  await check('a stranger (no deviceMembers marker) still CANNOT read announcements', assertFails(getDoc(doc(other, `${runPath}/announcements/an1`))));
+  await check('a stranger (no deviceMembers marker) still CANNOT list flash missions', assertFails(getDocs(collection(other, `${runPath}/flashMissions`))));
+  await check('a stranger (no deviceMembers marker) still CANNOT read the feed', assertFails(getDoc(doc(other, feedDoc))));
+  // The marker is server-write-only: a stranger must not be able to mint one for
+  // itself and self-admit to the whole run's live-ops.
+  await check('client CANNOT read a deviceMembers marker', assertFails(getDoc(doc(device, `${runPath}/deviceMembers/${DEVICE}`))));
+  await check('client CANNOT forge a deviceMembers marker', assertFails(setDoc(doc(other, `${runPath}/deviceMembers/${OTHER}`), { teamId: TEAM })));
 
   console.log('\n── Public/join reads behave as designed ──');
   await check('anyone (even anon) CAN read publicGames', assertSucceeds(getDoc(doc(anon, `publicGames/${GAME}`))));

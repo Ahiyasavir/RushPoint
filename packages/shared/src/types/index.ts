@@ -105,6 +105,21 @@ export const FIRESTORE_PATHS = {
   runChatCol: (ownerUid: string, gameId: string, runId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/chat`,
 
+  // Device-membership reverse index (fix: shared-team-devices live-ops read).
+  // A secondary phone attached via joinTeamAsDevice has NO team doc of its own —
+  // its uid only lives inside the FOUNDER's `deviceUids` array. firestore.rules
+  // cannot query a collection, so from an announcement/flashMission/feedItem doc
+  // there is no way to ask "is this uid in ANY team's deviceUids in this run"
+  // (isAttachedDevice() works on the team + chat docs only because deviceUids is
+  // on the very document being read). This marker is that missing reverse index:
+  // one tiny doc keyed by the DEVICE uid that rules can `exists()` in O(1).
+  // Server-write-only; holds {teamId, joinedAt} — no PII, so it is not part of
+  // the retention prune's PII_BULK_SUBCOLLECTIONS.
+  runDeviceMember: (ownerUid: string, gameId: string, runId: string, deviceUid: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/deviceMembers/${deviceUid}`,
+  runDeviceMembersCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/deviceMembers`,
+
   teamLocation: (ownerUid: string, gameId: string, runId: string, teamId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
 

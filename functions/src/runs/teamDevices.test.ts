@@ -1,5 +1,5 @@
 import { expect, test, describe } from 'vitest';
-import type { RunTeam } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, type RunTeam } from '@rushpoint/shared';
 import {
   resolveDeviceRole,
   assertController,
@@ -171,5 +171,25 @@ describe('canAddRunDevice (global per-run phone ceiling)', () => {
   test('refuses once the run already holds MAX_RUN_DEVICES phones', () => {
     expect(canAddRunDevice(MAX_RUN_DEVICES)).toEqual({ ok: false, reason: 'run-full' });
     expect(canAddRunDevice(MAX_RUN_DEVICES + 1)).toEqual({ ok: false, reason: 'run-full' });
+  });
+});
+
+// ── Device-membership reverse index (fix: attached devices can't read live-ops) ──
+// Firestore rules cannot query a collection, so from an announcement document
+// there is no way to ask "is this uid in ANY team's deviceUids in this run".
+// isAttachedDevice() only works on the team/chat docs because deviceUids sits on
+// the very doc being read. A secondary phone therefore failed isRunParticipant()
+// and got permission-denied on announcements / flashMissions / feedItems while
+// PlayScreen rendered that UI unconditionally. The fix is a reverse index: a
+// server-written marker keyed by the DEVICE uid that rules can `exists()`.
+describe('FIRESTORE_PATHS.runDeviceMember (device-membership reverse index)', () => {
+  test('is keyed by the DEVICE uid under the run, so rules can exists() it', () => {
+    expect(FIRESTORE_PATHS.runDeviceMember('owner1', 'game1', 'run1', 'uid-viewer'))
+      .toBe('users/owner1/games/game1/runs/run1/deviceMembers/uid-viewer');
+  });
+
+  test('exposes the collection path for the same run', () => {
+    expect(FIRESTORE_PATHS.runDeviceMembersCol('owner1', 'game1', 'run1'))
+      .toBe('users/owner1/games/game1/runs/run1/deviceMembers');
   });
 });
