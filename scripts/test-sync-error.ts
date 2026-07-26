@@ -36,11 +36,22 @@ check('verdict first-load not-found below max → reconnect', syncErrorVerdict('
 check('verdict first-load not-found at max → game-gone', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS) === 'game-gone');
 check('verdict first-load not-found over max → game-gone', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS + 2) === 'game-gone');
 
-// Fatal auth codes → hard sync-failed regardless of hasState / budget.
+// permission-denied → hard sync-failed regardless of hasState / budget (a real
+// access removal, e.g. the team was pruned or the run's rules changed).
 check('verdict permission-denied → sync-failed', syncErrorVerdict('permission-denied', false, 0) === 'sync-failed');
 check('verdict permission-denied → sync-failed (with state)', syncErrorVerdict('permission-denied', true, 0) === 'sync-failed');
-check('verdict unauthenticated → sync-failed', syncErrorVerdict('unauthenticated', false, 0) === 'sync-failed');
-check('verdict unauthenticated → sync-failed (with state)', syncErrorVerdict('unauthenticated', true, 0) === 'sync-failed');
+
+// unauthenticated on the FIRST load (!hasState) is still fatal — no board to keep,
+// and we never got past auth.
+check('verdict unauthenticated → sync-failed (first load)', syncErrorVerdict('unauthenticated', false, 0) === 'sync-failed');
+check('verdict unauthenticated → sync-failed (first load, high budget)', syncErrorVerdict('unauthenticated', false, 99) === 'sync-failed');
+
+// unauthenticated mid-game (hasState) is almost always a transient Firebase
+// ID-token refresh window, not a terminal state: keep the live board and reconnect
+// (regression: fix-play-unauthenticated-midgame-reconnect). Bouncing an actively-
+// playing participant to the recovery card here was the P2 bug.
+check('verdict unauthenticated + hasState → reconnect', syncErrorVerdict('unauthenticated', true, 0) === 'reconnect');
+check('verdict unauthenticated + hasState → reconnect (high budget)', syncErrorVerdict('unauthenticated', true, 99) === 'reconnect');
 
 // Transient WITH state → keep the game on screen and reconnect.
 check('verdict transient undefined + hasState → reconnect', syncErrorVerdict(undefined, true, 0) === 'reconnect');
