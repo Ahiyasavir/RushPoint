@@ -86,21 +86,93 @@ export function logBestEffort(op: string, ctx: Record<string, unknown>, err: unk
 // scale to Google's project-wide instance ceiling and generate a real bill. Every
 // callable is built via loggedCallable (verified: zero direct
 // `functions.https.onCall` call sites elsewhere), so capping here bounds the
-// worst case for all ~85 of them by construction — no per-call-site discipline
-// required. 10 concurrent instances comfortably covers this app's realistic peak
-// (a few hundred concurrent participants firing short, cheap callables) while
-// keeping worst-case spend bounded; a genuinely heavy callable can still opt
-// into a higher ceiling by passing its own `maxInstances` in runtimeOpts.
-export const DEFAULT_MAX_INSTANCES = 10;
+// worst case for all ~96 of them by construction — no per-call-site discipline
+// required.
+//
+// THE DEFAULT IS 3, NOT 10. The operating budget for this project is ~$10/month
+// on Blaze, and a uniform ceiling of 10 does not respect it: 96 callables x 10 is
+// 960 concurrent gen1 instances, which if flooded bills on the order of
+// $2,000-2,500 per 24h. 3 is still far above real demand — the app's realistic
+// peak is a few hundred participants firing SHORT callables, and at ~200ms per
+// call 3 concurrent instances serve ~15 requests/second PER CALLABLE, which
+// comfortably covers a 100-200 player event with headroom to spare. The callables
+// that genuinely see per-player-per-action traffic keep a higher ceiling via
+// HOT_PATH_MAX_INSTANCES below, so nothing a real event does gets throttled.
+export const DEFAULT_MAX_INSTANCES = 3;
+
+/**
+ * Per-callable ceilings for the genuinely hot paths — the callables a live event
+ * hits once per player per action, plus the two fan-out ones that already ask for
+ * extra time/memory. Everything absent from this map runs at
+ * DEFAULT_MAX_INSTANCES.
+ *
+ * This lives HERE, as data, rather than as a `maxInstances` argument at each call
+ * site: the whole cost property of this codebase is "one file decides the
+ * ceiling", and spraying the numbers across functions/src is how a cap quietly
+ * becomes 96 independent decisions nobody re-reads. One map, one review.
+ *
+ * PRECEDENCE (widest to narrowest — narrowest wins):
+ *   1. DEFAULT_MAX_INSTANCES              — applied by resolveRuntimeOpts.
+ *   2. HOT_PATH_MAX_INSTANCES[name]       — overrides the default for this name.
+ *   3. runtimeOpts.maxInstances (explicit) — overrides both, at the call site.
+ * Implemented by spread order in withHotPathCeiling/resolveRuntimeOpts: each
+ * later spread overwrites the earlier one's maxInstances.
+ *
+ * WORST-CASE ARITHMETIC (what these numbers cost):
+ *   before: 96 callables x 10                    =  960 concurrent instances
+ *   now:    13 hot x 10  +  ~83 others x 3       =  ~379 concurrent instances
+ * i.e. the flooded ceiling drops ~2.5x, and the ceiling for the ~83 cold
+ * callables — the ones an abuser would pick precisely because nobody watches
+ * them — drops 3.3x. Sustained-flood exposure scales with that number, so the
+ * $2,000-2,500/24h worst case becomes roughly $800-1,000/24h; a Blaze budget
+ * alert remains the actual stop, this is the ceiling that makes the alert
+ * survivable.
+ */
+export const HOT_PATH_MAX_INSTANCES: Record<string, number> = {
+  // Per player, per task, throughout the whole run — the true hot loop.
+  requestNextTask: 10,
+  completeTask: 10,
+  submitTaskAnswer: 10,
+  submitSequenceStep: 10,
+  reportArrival: 10,
+  getMyTeamState: 10,
+  verifyStationCode: 10,
+  submitStationPhoto: 10,
+  // Continuous background GPS pings from every device at once.
+  updateLocation: 10,
+  // Thundering herd: a whole event scans the join code within the same minute.
+  getJoinInfo: 10,
+  joinRun: 10,
+  // Fan-out over every team in one invocation (already runWith 180s/512MB).
+  startTeams: 10,
+  finalizeRun: 10,
+};
 
 /**
  * Merge a per-callable `maxInstances` cost cap into runtimeOpts. Additive, not
  * exclusive: existing timeout/memory settings are preserved, and an explicit
  * `maxInstances` on the passed opts always wins (lets a heavy callable raise its
  * own ceiling) — the default only fills the gap when the caller didn't set one.
+ * That "caller wins" rule is what lets withHotPathCeiling raise a hot callable.
  */
 export function resolveRuntimeOpts(runtimeOpts?: functions.RuntimeOptions): functions.RuntimeOptions {
   return { maxInstances: DEFAULT_MAX_INSTANCES, ...runtimeOpts };
+}
+
+/**
+ * Fold this callable's HOT_PATH_MAX_INSTANCES entry (if any) into its runtimeOpts,
+ * BELOW an explicit per-call-site `maxInstances` — see the precedence block above.
+ * A name with no entry is returned untouched, so it falls through to the default.
+ */
+export function withHotPathCeiling(
+  name: string,
+  runtimeOpts?: functions.RuntimeOptions,
+): functions.RuntimeOptions | undefined {
+  const hot = Object.prototype.hasOwnProperty.call(HOT_PATH_MAX_INSTANCES, name)
+    ? HOT_PATH_MAX_INSTANCES[name]
+    : undefined;
+  if (typeof hot !== 'number' || !Number.isFinite(hot) || hot <= 0) return runtimeOpts;
+  return { maxInstances: hot, ...runtimeOpts };
 }
 
 // firebase-functions v1 onCall handler signature is (data: any, context). We
@@ -130,13 +202,18 @@ function idsFromPayload(data: unknown): Pick<CallMeta, 'runId' | 'gameId'> {
  * default (60s / 256MB). Pass e.g. `{ timeoutSeconds: 180, memory: '512MB' }` for
  * a callable whose work legitimately needs more time/headroom than the default
  * (bulk per-team fan-out) — see startTeams/finalizeRun (perf: run-perf-scale).
+ *
+ * The instance ceiling is resolved here, by NAME, so no call site has to know
+ * about cost: withHotPathCeiling applies HOT_PATH_MAX_INSTANCES (an explicit
+ * runtimeOpts.maxInstances still wins) and resolveRuntimeOpts fills
+ * DEFAULT_MAX_INSTANCES into whatever gap is left.
  */
 export function loggedCallable(
   name: string,
   handler: CallableHandler,
   runtimeOpts?: functions.RuntimeOptions,
 ) {
-  return functions.runWith(resolveRuntimeOpts(runtimeOpts)).https.onCall(async (data, context) =>
+  return functions.runWith(resolveRuntimeOpts(withHotPathCeiling(name, runtimeOpts))).https.onCall(async (data, context) =>
     logCall(
       { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
       // Backstop: a callable must never return a non-finite number — one Infinity
