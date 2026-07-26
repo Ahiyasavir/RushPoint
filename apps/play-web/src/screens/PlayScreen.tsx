@@ -16,7 +16,7 @@ import { Button, Collapsible, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
-import { Working } from '../components/Working';
+import { LoadingView } from '../components/LoadingView';
 import TeamDevicesPanel from '../components/TeamDevicesPanel';
 import InRunAlerts from '../components/InRunAlerts';
 import type { NavTarget } from '../components/NavMap';
@@ -394,25 +394,35 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const shareAction = useAsyncAction(shareProgress);
   const sharing = shareAction.busy;
 
+  // A FATAL sync verdict (run deleted/finalized, or the team pruned → "Team not
+  // found") must surface even AFTER the first successful load — otherwise a run
+  // that ends mid-game froze the player on a stale board with no message and no
+  // way out, because this recovery card used to live only inside the `!state`
+  // first-load branch below. `err` is set ONLY for fatal verdicts (a transient
+  // blip flips `reconnecting`, never `err` — see refresh()), so rendering the
+  // recovery card whenever `err !== ''` is safe and never pre-empts the
+  // ReconnectingPill. Copy is localized here at render time so a language toggle
+  // while it shows still switches the message.
+  if (err) {
+    return (
+      <Screen>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
+          <div className="text-4xl">⚠️</div>
+          <p className="text-danger text-sm">{err === 'game-gone' ? t.play.gameGone : t.play.syncFailed}</p>
+          <div className="flex gap-2 mt-1">
+            <Button variant="ghost" onClick={() => { firstLoadFails.current = 0; setErr(''); setReconnecting(true); void refresh(); }}>{t.common.tryAgain}</Button>
+            <Button variant="ghost" onClick={() => { clearSession(); onLeave(); }}>{t.play.leave}</Button>
+          </div>
+        </div>
+      </Screen>
+    );
+  }
+
   if (!state) {
     return (
       <Screen>
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center">
-          {err ? (
-            // A persistent failure (e.g. the run was deleted, or the team pruned
-            // → "Team not found") must not trap the participant on a dead screen:
-            // offer a retry and a way to leave + clear the stale session.
-            <>
-              <div className="text-4xl">⚠️</div>
-              <p className="text-danger text-sm">{err === 'game-gone' ? t.play.gameGone : t.play.syncFailed}</p>
-              <div className="flex gap-2 mt-1">
-                <Button variant="ghost" onClick={() => { firstLoadFails.current = 0; setErr(''); setReconnecting(true); void refresh(); }}>{t.common.tryAgain}</Button>
-                <Button variant="ghost" onClick={() => { clearSession(); onLeave(); }}>{t.play.leave}</Button>
-              </div>
-            </>
-          ) : (
-            <Working messages={[t.play.loadingGame, t.play.syncingProgress, t.play.almostReady]} />
-          )}
+          <LoadingView messages={[t.play.loadingWarm, t.play.loadingGame, t.play.syncingProgress, t.play.almostReady]} />
         </div>
       </Screen>
     );

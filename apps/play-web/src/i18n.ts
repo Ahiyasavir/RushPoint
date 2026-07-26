@@ -18,6 +18,8 @@ const HE = {
     soundOn: 'צלילים ורטט פעילים',
     soundOff: 'צלילים ורטט כבויים',
     loading: 'טוען…',
+    preparing: 'מכינים את המסך…',
+    almostThere: 'עוד רגע וזה כאן…',
     close: 'סגירה',
     errorTitle: 'משהו השתבש',
     errorBody: 'האפליקציה נתקלה בשגיאה בלתי צפויה. ההתקדמות שלכם נשמרה. נסו שוב, או טענו מחדש אם זה חוזר.',
@@ -367,6 +369,7 @@ const HE = {
   },
   play: {
     syncFailed: 'הסנכרון נכשל',
+    loadingWarm: 'טוב שבאתם, תכף מתחילים…',
     loadingGame: 'טוענים את המשחק…',
     syncingProgress: 'מסנכרנים את ההתקדמות…',
     almostReady: 'כמעט מוכן…',
@@ -600,6 +603,8 @@ const EN: typeof HE = {
     soundOn: 'Sound & vibration on',
     soundOff: 'Sound & vibration off',
     loading: 'Loading…',
+    preparing: 'Putting the screen together…',
+    almostThere: 'Almost there…',
     close: 'Close',
     errorTitle: 'Something went wrong',
     errorBody: 'The app hit an unexpected error. Your progress is saved. Try again, or reload if it keeps happening.',
@@ -944,6 +949,7 @@ const EN: typeof HE = {
   },
   play: {
     syncFailed: 'Sync failed',
+    loadingWarm: 'Great to have you, warming things up…',
     loadingGame: 'Loading your game…',
     syncingProgress: 'Syncing your progress…',
     almostReady: 'Almost ready…',

@@ -6,6 +6,7 @@ import PlayScreen from './screens/PlayScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 import { Spinner } from './components/Spinner';
+import { LoadingView } from './components/LoadingView';
 import { I18nProvider, useT } from './i18nContext';
 import { unlockAudio } from './lib/sound';
 import { resolvePlayRoute, resumeOrJoin, stripStaffParams } from './lib/playRoute';
@@ -48,11 +49,13 @@ function AppInner() {
   // without changing the URL. Only ever downgrades to the plain join screen.
   const [dismissed, setDismissed] = useState(false);
 
-  const { dir, lang } = useT();
+  const { t, dir, lang } = useT();
 
+  // Route-level Suspense fallback (change: engaging-loaders): a branded, cycling
+  // loader instead of a bare chasing ring while a lazy route chunk downloads.
   const routeFallback = (
     <div className="min-h-screen flex items-center justify-center bg-app-bg">
-      <div className="w-8 h-8 rounded-full border-2 border-accent/30 border-t-accent animate-spin" />
+      <LoadingView messages={[t.common.loading, t.common.preparing, t.common.almostThere]} />
     </div>
   );
 
