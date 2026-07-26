@@ -22,7 +22,15 @@ const KEY = 'rushpoint.session';
 export function loadSession(): Session | null {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
+    if (!raw) return null;
+    const s = JSON.parse(raw) as Partial<Session> | null;
+    // A valid-JSON-but-wrong-shape value (e.g. {}, a bare string, or a session
+    // missing the run coordinates) must fail OPEN to the Join screen — not boot
+    // into PlayScreen and land on the stuck "sync failed" card because
+    // getMyTeamState was called with undefined ids. Require the fields needed to
+    // restore a run.
+    if (!s || typeof s !== 'object' || !s.ownerUid || !s.gameId || !s.runId || !s.code) return null;
+    return s as Session;
   } catch {
     return null;
   }

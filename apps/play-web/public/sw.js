@@ -39,8 +39,15 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('/index.html', copy));
+          // Only cache a healthy same-origin shell. A deploy-in-progress 5xx, a
+          // field captive-portal interstitial, or any non-basic/redirected body
+          // would otherwise be persisted as /index.html and served as the app
+          // shell on every later OFFLINE boot until a good navigation overwrites
+          // it — a poisoned, blank boot exactly when signal is lost.
+          if (res && res.ok && res.type === 'basic') {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('/index.html', copy));
+          }
           return res;
         })
         .catch(() => caches.match('/index.html').then((r) => r || caches.match('/'))),
