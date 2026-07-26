@@ -1,0 +1,359 @@
+# RushPoint — local Supabase stack (change: supabase-local-dev)
+# =============================================================================
+# Do not run `docker compose -f docker-compose.supabase.yml up` by hand. Use the
+# launcher, which validates the environment, waits for Postgres, applies
+# supabase/migrations/*.sql in filename order and prints the connection details:
+#
+#     node scripts/supabase-dev.mjs             # bring the stack up + migrate
+#     node scripts/supabase-dev.mjs --down      # stop it, KEEP the data
+#     node scripts/supabase-dev.mjs --reset     # stop it and DESTROY the volume
+#     node scripts/supabase-dev.mjs --status    # what is running, and where
+#
+# Copy `.env.supabase.example` to `.env.supabase` first (gitignored). The launcher
+# refuses to start without it and tells you exactly which keys are absent.
+#
+# -----------------------------------------------------------------------------
+# THE PORT BLOCK — 54321..54327, and why it cannot collide
+# -----------------------------------------------------------------------------
+#   kong (API gateway) 54321   ← the ONLY port an app should talk to (SUPABASE_URL)
+#   postgres           54322   ← psql / migrations
+#   studio             54323   ← the web console
+#   gotrue  (auth)     54324   ┐
+#   postgrest (rest)   54325   │ published for DEBUGGING only — an app that skips
+#   realtime           54326   │ Kong stops exercising the gateway's routing/CORS
+#   storage-api        54327   ┘ locally and only breaks in production
+#
+# This machine permanently runs the Firebase Emulator Suite (`playtest:forever`),
+# which owns 4000 · 4400 · 4500 · 5001 · 5002 · 8080 · 9099 · 9150 · 9199, plus the
+# Vite dev servers on 5180/5181 and the tunnel proxy on 3000. During the migration
+# BOTH stacks must be up at once, so a collision here does not fail loudly — it makes
+# one of the two stacks silently unreachable. Two independent reasons this block is
+# safe:
+#
+#   1. DEFAULT CASE — 54321..54327 sits ~45000 above the highest port any of those
+#      binds. 54321 is also the port the official `supabase` CLI uses locally, so it
+#      is already a well-avoided address.
+#
+#   2. OFFSET CASE — the one that actually bites. The Firebase gate can be shifted by
+#      any multiple of 1000 up to +56000 (RUSHPOINT_EMULATOR_PORT_OFFSET), which puts
+#      a Firebase port as high as 65199 — inside Supabase's range. It still cannot
+#      collide, because BOTH stacks only ever move by whole multiples of 1000, so
+#      every port keeps its last three digits forever:
+#          Firebase / Vite / proxy last-3:  000 · 001 · 002 · 080 · 099 · 150 · 180 ·
+#                                           181 · 199 · 400 · 500
+#          Supabase last-3:                 321 · 322 · 323 · 324 · 325 · 326 · 327
+#      Those digit-sets are disjoint ⇒ no offset of either stack can ever land a
+#      Supabase port on a Firebase one. Proven exhaustively (every port × every
+#      offset of both stacks) in scripts/test-supabase-env.ts §5 — that assertion is
+#      the reason this block may not be edited casually.
+#
+# A SECOND Supabase stack (for a gate running beside a live one) sets
+# RUSHPOINT_SUPABASE_PORT_OFFSET=1000, which shifts every port AND changes
+# COMPOSE_PROJECT_NAME + the data volume. Moving ports alone would leave the second
+# stack reusing the first one's containers and database — the same lesson as
+# scripts/lib/emulatorIsolation.mjs. All of that is resolved by the pure module
+# scripts/lib/supabaseEnv.mjs; nothing here reads an offset directly.
+#
+# -----------------------------------------------------------------------------
+# IMAGE TAGS ARE PINNED — never `latest`
+# -----------------------------------------------------------------------------
+# A floating tag makes the environment unreproducible: two developers (or a developer
+# and CI) silently run different GoTrue/PostgREST builds and disagree about whether a
+# bug exists. Bump these deliberately, one at a time, and note it in the migration
+# plan.
+#
+# NOTE: `postgres-meta` is an eighth service not in the original list — Studio is a
+# thin client over it and shows an empty console without it.
+# =============================================================================
+
+name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}
+
+services:
+  # ── Postgres ───────────────────────────────────────────────────────────────
+  # supabase/postgres, NOT stock postgres: it ships the extensions and the roles
+  # (supabase_admin · supabase_auth_admin · supabase_storage_admin · authenticator ·
+  # anon · authenticated · service_role) that every other service logs in as. Stock
+  # postgres boots fine and then every other container fails authentication.
+  # wal_level=logical is required by realtime and cannot be set after the fact
+  # without a restart.
+  db:
+    image: supabase/postgres:15.8.1.060
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-db
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=10
+      - -c
+      - max_wal_senders=10
+    environment:
+      POSTGRES_USER: supabase_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    ports:
+      # Bound to 127.0.0.1 on purpose: an unauthenticated-by-default local database
+      # must not be reachable from the LAN when the developer is on café Wi-Fi.
+      - "127.0.0.1:${SUPABASE_DB_PORT:-54322}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supabase_admin -d ${POSTGRES_DB:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  # ── GoTrue (auth) ──────────────────────────────────────────────────────────
+  # GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED is load-bearing for RushPoint: play-web
+  # signs participants in ANONYMOUSLY (uid == teamId). Leave it off and joining a run
+  # fails the same way production did before anonymous auth was enabled there.
+  # MAILER_AUTOCONFIRM skips the confirmation email — local only; there is no SMTP.
+  auth:
+    image: supabase/gotrue:v2.170.0
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-auth
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL:-http://127.0.0.1:54321}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      GOTRUE_SITE_URL: ${SITE_URL:-http://127.0.0.1:5181}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-http://127.0.0.1:5180,http://127.0.0.1:5181,http://localhost:5180,http://localhost:5181}
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_SMS_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "true"
+      GOTRUE_LOG_LEVEL: ${GOTRUE_LOG_LEVEL:-info}
+    ports:
+      - "127.0.0.1:${SUPABASE_AUTH_PORT:-54324}:9999"
+
+  # ── PostgREST (REST) ───────────────────────────────────────────────────────
+  # Connects as `authenticator`, which has no rights of its own and SET ROLEs to
+  # anon/authenticated/service_role per request — that is what makes RLS the only
+  # thing standing between a client and the data. Do not "fix" a permission error by
+  # pointing this at supabase_admin; that disables RLS wholesale.
+  rest:
+    image: postgrest/postgrest:v12.2.8
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-rest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS:-public,storage,graphql_public}
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+      PGRST_LOG_LEVEL: ${PGRST_LOG_LEVEL:-error}
+    ports:
+      - "127.0.0.1:${SUPABASE_REST_PORT:-54325}:3000"
+
+  # ── Realtime ───────────────────────────────────────────────────────────────
+  # The live-ops surface (announcements, leaderboard, chat, team locations) is what
+  # replaces Firestore snapshot listeners, so this is not optional for RushPoint.
+  # SEED_SELF_HOST creates the `_realtime` tenant on first boot; without it every
+  # websocket connects and is immediately closed with an unhelpful 401.
+  realtime:
+    image: supabase/realtime:v2.34.31
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-realtime
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "4000"
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: ${REALTIME_DB_ENC_KEY:-supabaserealtime}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${REALTIME_SECRET_KEY_BASE}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+    ports:
+      - "127.0.0.1:${SUPABASE_REALTIME_PORT:-54326}:4000"
+
+  # ── Storage ────────────────────────────────────────────────────────────────
+  # Replaces Firebase Storage (task photos, audio, game media). STORAGE_BACKEND=file
+  # keeps everything in a container volume — no S3, no credentials, no network.
+  # Image transformation is OFF: it needs a separate imgproxy container and nothing in
+  # RushPoint uses it.
+  storage:
+    image: supabase/storage-api:v1.19.3
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-storage
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+    ports:
+      - "127.0.0.1:${SUPABASE_STORAGE_PORT:-54327}:5000"
+
+  # ── postgres-meta ──────────────────────────────────────────────────────────
+  # Studio's backend (schema browser, SQL editor metadata). Deliberately NOT
+  # published on a host port: it talks to the database as supabase_admin, so exposing
+  # it is exposing an unauthenticated superuser API.
+  meta:
+    image: supabase/postgres-meta:v0.87.1
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-meta
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  # ── Kong (API gateway) ─────────────────────────────────────────────────────
+  # The declarative config is written inline by the entrypoint rather than mounted
+  # from a `volumes/api/kong.yml`, so this whole stack is ONE file with nothing to
+  # forget to copy.
+  #
+  # NO key-auth plugin, on purpose: Kong here is a router, and GoTrue/PostgREST/
+  # Storage each validate the JWT themselves against the same JWT_SECRET. Adding
+  # key-auth would mean maintaining consumer definitions that drift from the keys in
+  # .env.supabase and produce 401s that look like application bugs. Hosted Supabase
+  # does gate at the edge — this is a LOCAL-ONLY simplification, and it is why the
+  # port is bound to 127.0.0.1.
+  kong:
+    image: kong:2.8.1
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-kong
+    restart: unless-stopped
+    depends_on:
+      - auth
+      - rest
+      - realtime
+      - storage
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+    ports:
+      - "127.0.0.1:${SUPABASE_KONG_PORT:-54321}:8000"
+    entrypoint:
+      - bash
+      - -c
+      - |
+        cat > /home/kong/kong.yml <<'KONG_DECLARATIVE_EOF'
+        _format_version: "2.1"
+        _transform: true
+        services:
+          - name: auth-v1
+            url: http://auth:9999/
+            routes:
+              - name: auth-v1-route
+                strip_path: true
+                paths:
+                  - /auth/v1/
+            plugins:
+              - name: cors
+          - name: rest-v1
+            url: http://rest:3000/
+            routes:
+              - name: rest-v1-route
+                strip_path: true
+                paths:
+                  - /rest/v1/
+            plugins:
+              - name: cors
+          - name: realtime-v1
+            url: http://realtime:4000/socket/
+            routes:
+              - name: realtime-v1-route
+                strip_path: true
+                paths:
+                  - /realtime/v1/
+            plugins:
+              - name: cors
+          - name: storage-v1
+            url: http://storage:5000/
+            routes:
+              - name: storage-v1-route
+                strip_path: true
+                paths:
+                  - /storage/v1/
+            plugins:
+              - name: cors
+        KONG_DECLARATIVE_EOF
+        exec /docker-entrypoint.sh kong docker-start
+
+  # ── Studio ─────────────────────────────────────────────────────────────────
+  # SUPABASE_URL is the INTERNAL gateway address (container-to-container);
+  # SUPABASE_PUBLIC_URL is what Studio hands to the browser. Setting both to the same
+  # value is the classic self-hosting mistake — Studio then tells your browser to call
+  # `http://kong:8000`, which resolves nowhere.
+  studio:
+    image: supabase/studio:20250224-d10db0f
+    container_name: ${COMPOSE_PROJECT_NAME:-rushpoint-supabase}-studio
+    restart: unless-stopped
+    depends_on:
+      - meta
+      - kong
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-RushPoint}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-RushPoint Local}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-http://127.0.0.1:54321}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+    ports:
+      - "127.0.0.1:${SUPABASE_STUDIO_PORT:-54323}:3000"
+
+volumes:
+  # Named, and scoped by the compose project name, so an offset stack gets its OWN
+  # database instead of quietly sharing the live one. `--down` keeps these;
+  # only `--reset` removes them.
+  db-data:
+  storage-data:

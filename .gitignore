@@ -2,6 +2,10 @@ node_modules/
 .env
 .env.local
 *.env
+# `*.env` matches "foo.env", NOT ".env.supabase" — a dotted SUFFIX needs its own
+# rule or a real secrets file is silently committable. Keep .env.*.example visible.
+.env.*
+!.env.*.example
 
 # Expo
 apps/mobile/.expo/
