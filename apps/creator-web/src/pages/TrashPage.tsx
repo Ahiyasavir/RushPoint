@@ -161,6 +161,7 @@ function PurgeDialog({ game, busy, onCancel, onConfirm }: {
   const tr = t.trash;
   const [typed, setTyped] = useState('');
   const confirmed = matchesGameDeleteConfirmation(typed, game.title);
+  const untitled = (game.title ?? '').trim() === '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onCancel}>
@@ -170,12 +171,12 @@ function PurgeDialog({ game, busy, onCancel, onConfirm }: {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="font-brand font-bold text-rp-alert text-lg mb-1">{tr.purgeDialogTitle}</div>
-        <p className="text-xs text-[--ink-2] leading-relaxed mb-4">{tr.purgeDialogBody(game.title)}</p>
-        <Label>{tr.purgeDialogHint}</Label>
+        <p className="text-xs text-[--ink-2] leading-relaxed mb-4">{untitled ? tr.purgeDialogBodyUntitled : tr.purgeDialogBody(game.title)}</p>
+        <Label>{untitled ? tr.purgeDialogHintUntitled : tr.purgeDialogHint}</Label>
         <Input
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
-          placeholder={game.title}
+          placeholder={untitled ? 'DELETE' : game.title}
           disabled={busy}
           autoFocus
           dir="auto"
