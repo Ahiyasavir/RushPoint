@@ -14,6 +14,7 @@ import { feedback } from '../lib/sound';
 import { creatorUrl } from '../lib/creatorUrl';
 import { shareCardLabels } from '../lib/shareCardLabels';
 import LegalFooter from '../components/LegalFooter';
+import { LoadingView } from '../components/LoadingView';
 
 function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -307,10 +308,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         )}
 
         {!run.leaderboard && (
-          <div className="flex items-center justify-center gap-2.5 text-zinc-500 text-sm py-2">
-            <span aria-hidden="true" className="w-4 h-4 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin shrink-0" />
-            <span>{t.final.waitingFinalize}</span>
-          </div>
+          <LoadingView
+            className="py-2"
+            messages={[t.final.waitingFinalize, t.final.finalizingTally, t.final.finalizingRanks]}
+          />
         )}
       </div>
 

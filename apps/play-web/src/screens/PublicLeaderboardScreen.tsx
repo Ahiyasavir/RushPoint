@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
-import { Spinner } from '../components/Spinner';
+import { LoadingView } from '../components/LoadingView';
 import { useT } from '../i18nContext';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
@@ -69,7 +69,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <Spinner />
+          <LoadingView messages={[t.board.loadingA, t.board.loadingB]} />
         </div>
       </Screen>
     );

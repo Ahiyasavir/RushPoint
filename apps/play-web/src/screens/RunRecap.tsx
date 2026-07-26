@@ -3,7 +3,7 @@ import { getRunRecap, type RunRecapResult } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { shareRecap } from '../lib/recapCollage';
-import { Spinner } from '../components/Spinner';
+import { LoadingView } from '../components/LoadingView';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
 
 const CREATOR_URL = import.meta.env.DEV
@@ -65,7 +65,7 @@ export default function RunRecap({ code, onJoin }: { code: string; onJoin: () =>
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <Spinner />
+          <LoadingView messages={[t.recap.loadingA, t.recap.loadingB]} />
         </div>
       </Screen>
     );

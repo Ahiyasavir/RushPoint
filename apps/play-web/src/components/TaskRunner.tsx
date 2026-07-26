@@ -22,6 +22,7 @@ import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
 import { Working } from './Working';
+import { LoadingView } from './LoadingView';
 import { feedback } from '../lib/sound';
 import { resolveCardExit } from '../lib/cardExit';
 import {
@@ -1056,7 +1057,7 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
   const canScan = typeof navigator !== 'undefined' && !!navigator.mediaDevices;
   if (scanning) {
     return (
-      <Suspense fallback={<div className="h-64 rounded-2xl bg-app-raised animate-pulse" />}>
+      <Suspense fallback={<LoadingView className="h-64 rounded-2xl bg-app-raised" messages={[t.task.scannerOpeningA, t.task.scannerOpeningB]} />}>
         <QrScanner
           onClose={() => setScanning(false)}
           onDecode={(scanned) => { setCode(scanned); setScanning(false); onSubmit(scanned); }}
