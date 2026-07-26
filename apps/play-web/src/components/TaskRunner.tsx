@@ -117,6 +117,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // that raised the alarm once saw "sent" on every later task and could never call
   // for help again — on the only escape hatch a stuck geofence player has.
   const [helpSentFor, setHelpSentFor] = useState<string | null>(null);
+  // A located `field` check-in has no background watcher (unlike geofence), so a
+  // permanently-denied GPS permission used to be a dead end: warn + stop, with no
+  // in-card route to a human. This latches on a GPS failure for a located field
+  // task and surfaces the SAME requestHelp affordance the geofence/blocked cards
+  // use. Reset whenever the task changes (below, with hint/msg).
+  const [fieldGpsFailed, setFieldGpsFailed] = useState(false);
   // Blocked-player guidance (change: blocked-player-guidance): the server's own
   // verdict for the safe-zone soft-pause, straight off the routing response. The
   // out-of-bounds card used to render from the `team.outOfBounds` BOOLEAN alone and
@@ -241,7 +247,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     : undefined;
 
   // Clear a revealed hint / message when the assigned task changes.
-  useEffect(() => { setHint(null); setMsg(null); }, [assignedRec?.taskId]);
+  useEffect(() => { setHint(null); setMsg(null); setFieldGpsFailed(false); }, [assignedRec?.taskId]);
 
   // Wrong-answer cost (change: wrong-answer-cost): what a wrong answer just cost,
   // and the retry lockout it started. The SERVER is the only authority (it
@@ -520,6 +526,10 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         // permission prompt. A genuinely located field task still warns and does not
         // submit blind — the server needs its proximity coords.
         if (canCompleteWithoutLocation(task)) { void submitCheckIn(); return; }
+        // A genuinely located field task with no fix: warn, and open the same
+        // "request help" escape hatch the geofence/blocked cards use so a player
+        // who permanently denied location still has an in-card route to a human.
+        setFieldGpsFailed(true);
         showError(t.task.gpsWarning); end();
       },
     );
@@ -867,11 +877,29 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
       <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
-          <Button disabled={frozen} loading={busy} onClick={field} data-testid="task-field-checkin">
-            {task.type === 'self_report'
-              ? t.task.markComplete
-              : task.locationHidden ? t.task.hiddenCheckIn : t.task.imHere}
-          </Button>
+          <>
+            <Button disabled={frozen} loading={busy} onClick={field} data-testid="task-field-checkin">
+              {task.type === 'self_report'
+                ? t.task.markComplete
+                : task.locationHidden ? t.task.hiddenCheckIn : t.task.imHere}
+            </Button>
+            {/* GPS-denied escape hatch — same affordance as the geofence/blocked
+                cards. Only appears once a located check-in has failed on GPS
+                (fieldGpsFailed is never set for locationless / self_report tasks,
+                which submit without a fix), never blocking the normal submit. */}
+            {fieldGpsFailed && (
+              <div className="mt-2 text-center">
+                {helpAlreadySent(helpSentFor, task.id)
+                  ? <p className="text-xs text-ink-fire font-medium" data-testid="field-help-sent">{t.task.helpSent}</p>
+                  : <button
+                      onClick={() => { void requestHelp(task.id); }}
+                      data-testid="field-help"
+                      className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-alert bg-rp-alert/10 border border-rp-alert/30 rounded-full px-4 py-2 hover:bg-rp-alert/20">
+                      {t.task.requestHelp}
+                    </button>}
+              </div>
+            )}
+          </>
         ) : task.type === 'smart_station' ? (
           <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
@@ -1373,7 +1401,12 @@ function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
   );
 }
 
-const MAX_PHOTO_BYTES = 12 * 1024 * 1024; // 12 MB — generous for a phone photo
+const MAX_PHOTO_BYTES = 12 * 1024 * 1024; // 12 MB — the cap on the COMPRESSED upload
+// Sanity ceiling on the RAW capture, before compression. Modern high-MP phones
+// routinely produce originals well over 12 MB that compress down to ~400 KB, so the
+// real limit must be enforced on the compressed output (below), not the raw file —
+// this only rejects genuinely absurd inputs early.
+const MAX_RAW_PHOTO_BYTES = 40 * 1024 * 1024; // 40 MB
 
 function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) => void }) {
   const { t } = useT();
@@ -1415,10 +1448,17 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
     e.target.value = ''; // allow re-selecting the same capture
     if (!f) { setFile(null); setPreviewUrl(null); return; }
     if (!f.type.startsWith('image/')) { setFileErr(t.task.chooseImage); setFile(null); setPreviewUrl(null); return; }
-    if (f.size > MAX_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
+    // Reject only genuinely absurd RAW inputs here — the real 12 MB cap is enforced
+    // on the COMPRESSED output below, so a valid high-MP capture (often >12 MB raw,
+    // ~400 KB compressed) is no longer wrongly rejected as "too large".
+    if (f.size > MAX_RAW_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
     // compressImageWithReport reports WHY it fell back instead of silently
     // handing back the full-size capture (Task 11).
     const report = await compressImageWithReport(f);
+    // Enforce the 12 MB ceiling on the COMPRESSED result. Only fails when
+    // compression couldn't get under the cap (e.g. it fell back to a still-huge
+    // full-size blob), not on the raw capture size.
+    if (report.blob.size > MAX_PHOTO_BYTES) { setFileErr(t.task.imageTooLarge({ mb: Math.round(MAX_PHOTO_BYTES / 1024 / 1024) })); setFile(null); setPreviewUrl(null); return; }
     if (!report.compressed) setWarn(t.task.photoNotCompressed);
     const compressed = new File([report.blob], `photo-${Date.now()}.jpg`, { type: report.blob.type || 'image/jpeg' });
     setFile(compressed);
