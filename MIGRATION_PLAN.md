@@ -502,6 +502,20 @@ committed, with the 50 hard ones tagged in the source.
 ### Phase 1 — Data-access seam + the port · **~45 pd (8–10 weeks solo)** 🔴 the monster
 **Depends on:** P0.
 
+> **Status — 2026-07-26.** The seam exists as `@rushpoint/data`: a storage-agnostic
+> `Repository` interface (149 ops), an in-memory reference, a Firestore implementation, and a
+> **Postgres implementation** that is now **verified, not merely typechecked**. A single
+> engine-agnostic CONTRACT suite (`packages/data/test/contract.ts`) is passed by both the
+> in-memory reference (73/73) and Postgres (67/67) — so the swap is behaviour-neutral *by
+> construction*. Crucially, the Postgres lane runs against a **real Postgres** (PGlite /
+> Postgres-in-WASM) with the **real `supabase/migrations/*.sql`** applied, so the schema that
+> was previously reviewed only by eye now provably **executes** — no Docker required
+> (`scripts/test-data-contract-postgres.ts`, in `npm test`). Gap closed en route:
+> `0004_once_flags.sql` (the `data_once_flags` latch the repo requires). **Still open in
+> Phase 1:** the bulk of the 417 call-site rewrite; widening the contract past the
+> runs/teams/claims core (live-ops/gallery/etc. in progress); and RLS *enforcement* proof
+> (RLS currently proven to parse + apply, not yet to deny/allow per role).
+
 Implement `repositories/*` against Postgres and route all 417 call sites through them. Order the
 work by concentration, not by module alphabetics:
 
