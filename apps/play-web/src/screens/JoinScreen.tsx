@@ -220,8 +220,8 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               aria-checked={colorblind}
               aria-label={t.common.colorblindMode}
               title={t.common.colorblindMode}
-              className={`text-xs font-semibold border rounded-full w-11 h-11 flex items-center justify-center transition-colors ${
-                colorblind ? 'border-accent text-ink-fire' : 'border-glass-border text-zinc-400 hover:text-zinc-200'
+              className={`text-[10px] rounded-full w-11 h-11 flex items-center justify-center transition-colors opacity-60 hover:opacity-100 ${
+                colorblind ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
               ◐
@@ -405,7 +405,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
           <Card className="p-5">
             <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
               <span>🏷️</span>
-              {t.join.teamName}
+              {t.join.teamName} *
             </div>
             <Input
               value={values.teamName ?? ''}
@@ -421,7 +421,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
         <Card className="p-5">
           <div className="text-sm font-bold text-zinc-200 mb-4 flex items-center gap-2">
             <span>{isSolo ? '👤' : '👥'}</span>
-            {isSolo ? t.join.yourName : t.join.teamMembers}
+            {isSolo ? t.join.yourName : t.join.teamMembers} *
           </div>
           {isSolo ? (
             // Solo: exactly one name input. No member list, no add-member.
