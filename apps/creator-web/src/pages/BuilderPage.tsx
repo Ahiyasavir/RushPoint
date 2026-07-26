@@ -863,41 +863,37 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           per-field defaults (photo feed defaults ON) via the pure enabledGameFeatureCount. */}
       <Advanced title={b.featuresSection} open={advFeatures} onToggle={() => setAdvFeatures(!advFeatures)}
         meta={<Badge>{b.featuresOnBadge(enabledGameFeatureCount(game))}</Badge>}>
-        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+        <label title={b.instantPlayHelp} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={!!game.allowInstantPlay}
             onChange={(e) => patch({ allowInstantPlay: e.target.checked })} />
           {b.instantPlayLabel}
         </label>
-        <p className="text-xs text-[--ink-3] -mt-2">{b.instantPlayHelp}</p>
 
         {/* Live photo feed (change: live-photo-feed): default ON; absent = enabled. */}
-        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+        <label title={b.photoFeedHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={game.photoFeedEnabled !== false}
             onChange={(e) => patch({ photoFeedEnabled: e.target.checked })} />
           {b.photoFeedLabel}
         </label>
-        <p className="text-xs text-[--ink-3] -mt-2">{b.photoFeedHint}</p>
         {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
-        <p className="text-xs text-[--ink-3] -mt-3">{b.photoFeedResponsibility}</p>
+        <p className="text-xs text-[--ink-3] -mt-2">{b.photoFeedResponsibility}</p>
 
         {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
-        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+        <label title={b.powerUpsHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={!!game.powerUpsEnabled}
             onChange={(e) => patch({ powerUpsEnabled: e.target.checked })} />
           {b.powerUpsLabel}
         </label>
-        <p className="text-xs text-[--ink-3] -mt-2">{b.powerUpsHint}</p>
 
         {/* Staged leaderboard reveal (change: manual-leaderboard-reveal): default OFF
             (absent = auto publish on finalize, the pre-existing behaviour). When ON,
             finalizeRun leaves the board unpublished and the creator reveals it from
             the run console. */}
-        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+        <label title={b.manualRevealHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={!!game.manualLeaderboardReveal}
             onChange={(e) => patch({ manualLeaderboardReveal: e.target.checked })} />
           {b.manualRevealLabel}
         </label>
-        <p className="text-xs text-[--ink-3] -mt-2">{b.manualRevealHint}</p>
       </Advanced>
 
       <Advanced title={b.advRegistration} open={advReg} onToggle={() => setAdvReg(!advReg)}>
