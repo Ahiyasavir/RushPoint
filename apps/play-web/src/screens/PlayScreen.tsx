@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
@@ -671,6 +671,7 @@ function ReconnectingPill({ show, text }: { show: boolean; text: string }) {
 function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarrative[]; runId: string; lang: 'he' | 'en' }) {
   const { t } = useT();
   const [, bump] = useState(0);
+  const titleId = useId();
   const key = (sid: string, kind: string) => `rp.story.${runId}.${sid}.${kind}`;
   const seen = (sid: string, kind: string) => {
     try { return localStorage.getItem(key(sid, kind)) === '1'; } catch { return false; }
@@ -684,6 +685,7 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
   } else if (active?.narrative.intro && beatHasContent(active.narrative.intro) && !seen(active.stageId, 'intro')) {
     pick = { sid: active.stageId, kind: 'intro', order: active.order, stageTitle: active.title, beat: active.narrative.intro };
   }
+  useDialogReturnFocus(!!pick);
   if (!pick) return null;
 
   const body = localizedBeatBody(pick.beat, lang);
@@ -695,7 +697,7 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
     <>
     <EscapeKey onEscape={dismiss} />
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
-      <div className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
         {pick.beat.imageUrl && (
           <img src={pick.beat.imageUrl} alt="" className="w-full max-h-48 object-cover" />
         )}
@@ -703,9 +705,9 @@ function StoryInterstitial({ narratives, runId, lang }: { narratives: StageNarra
           <div className="text-xs font-bold text-ink-fire uppercase tracking-wide">
             {t.play.chapterLabel({ n: pick.order + 1 })}
           </div>
-          <h2 className="text-lg font-bold text-zinc-100" dir="auto">{pick.beat.title ?? pick.stageTitle}</h2>
+          <h2 id={titleId} className="text-lg font-bold text-zinc-100" dir="auto">{pick.beat.title ?? pick.stageTitle}</h2>
           {body && <p className="text-sm text-zinc-300 whitespace-pre-line" dir="auto">{body}</p>}
-          <Button onClick={dismiss} className="w-full">{t.play.storyContinue}</Button>
+          <Button autoFocus onClick={dismiss} className="w-full">{t.play.storyContinue}</Button>
         </div>
       </div>
     </div>
@@ -727,6 +729,18 @@ function EscapeKey({ onEscape }: { onEscape: () => void }) {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
   return null;
+}
+
+// Move focus back to whatever was focused before a modal overlay opened, so a
+// keyboard/screen-reader user is not dumped at the top of the page when it closes.
+// Focus INTO the dialog is handled by autoFocus on the primary button.
+function useDialogReturnFocus(active: boolean) {
+  const prevFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    prevFocus.current = (document.activeElement as HTMLElement | null) ?? null;
+    return () => { try { prevFocus.current?.focus?.(); } catch { /* element gone */ } };
+  }, [active]);
 }
 
 // Game intro primer (change: game-intro-instructions): the game-level "How to play"
@@ -758,6 +772,8 @@ function HowToPlayCard({ instructions, lang }: { instructions?: GameInstructions
 function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructions | null; lang: 'he' | 'en' }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
+  const titleId = useId();
+  useDialogReturnFocus(open);
   if (!gameInstructionsHasContent(instructions ?? undefined)) return null;
   const ins = instructions!;
   const body = localizedInstructionsBody(ins, lang);
@@ -772,12 +788,12 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
           <EscapeKey onEscape={() => setOpen(false)} />
-          <div className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
+          <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="w-full max-w-md rounded-2xl bg-app-card border border-glass-border shadow-task-card overflow-hidden">
             {ins.imageUrl && <img src={ins.imageUrl} alt="" className="w-full max-h-48 object-cover" />}
             <div className="p-5 space-y-3">
-              <h2 className="text-lg font-bold text-zinc-100" dir="auto">{ins.title ?? t.play.howToPlayTitle}</h2>
+              <h2 id={titleId} className="text-lg font-bold text-zinc-100" dir="auto">{ins.title ?? t.play.howToPlayTitle}</h2>
               {body && <p className="text-sm text-zinc-300 whitespace-pre-line" dir="auto">{body}</p>}
-              <Button onClick={() => setOpen(false)} className="w-full">{t.play.howToPlayClose}</Button>
+              <Button autoFocus onClick={() => setOpen(false)} className="w-full">{t.play.howToPlayClose}</Button>
             </div>
           </div>
         </div>
