@@ -410,7 +410,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         <Card className="p-6 text-center space-y-2" data-testid="blocked-card" data-blocked-kind={guidance.kind}>
           <div className="text-3xl">{copy.icon}</div>
           <p role="status" aria-live="polite"
-            className={`text-sm font-semibold ${guidance.kind === 'released' ? 'text-ink-fire' : 'text-amber-500'}`}>
+            className={`text-sm font-semibold ${guidance.kind === 'released' ? 'text-ink-fire' : guidance.kind === 'outside' ? 'text-ink-alert' : 'text-ink-amber'}`}>
             {copy.title}
           </p>
           <p className="text-xs text-zinc-500">{copy.body}</p>
@@ -1336,7 +1336,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
 
   if (gpsError) {
     return (
-      <div className="text-center py-2 space-y-2" data-testid="geofence-status" data-gps-error="true">
+      <div className="text-center py-2 space-y-2" data-testid="geofence-status" data-gps-error="true" role="status" aria-live="polite">
         <div className="text-3xl">📡</div>
         <p className="text-sm text-ink-alert font-medium">{t.task.gpsUnavailable}</p>
         {/* Say that we are still trying — the watcher retries on a backoff, so a
@@ -1355,7 +1355,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
   // the player is standing on the spot.
   const stuckHelp = stuckTooLong && !(dist != null && dist <= radius);
   return (
-    <div className="text-center py-2" data-testid="geofence-status" data-inside={dist != null && dist <= radius}>
+    <div className="text-center py-2" data-testid="geofence-status" data-inside={dist != null && dist <= radius} role="status" aria-live="polite">
       <div className="text-3xl mb-2">📡</div>
       {dist == null
         ? <p className="text-sm text-zinc-500">{t.task.findingLocation}</p>
@@ -1482,7 +1482,7 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
           <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
             <div className="h-full bg-rp-fire transition-all duration-200" style={{ width: `${pct}%` }} />
           </div>
-          <p className="text-xs text-zinc-400">
+          <p className="text-xs text-zinc-400" dir="auto">
             {retrying ? t.task.uploadRetrying : t.task.uploadingPercent({ pct })}
           </p>
         </div>

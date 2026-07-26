@@ -50,7 +50,7 @@ export default function InRunAlerts({ hotZone, outOfBounds }: { hotZone: HotZone
         </div>
       )}
       {outOfBounds && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-amber-300">
+        <div className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-ink-amber">
           <span className="text-base leading-none">⚠️</span>
           <span className="flex-1">{t.play.outOfBounds}</span>
         </div>

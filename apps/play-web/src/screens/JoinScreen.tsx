@@ -267,7 +267,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
           </div>
 
           {err && (
-            <p className="text-ink-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
+            <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
           )}
 
           <Button
@@ -374,7 +374,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
               />
             </Card>
           </div>
-          {err && <p className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+          {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
           <Button
             disabled={busy || teamCode.trim().length < 6}
             loading={attachAction.busy}
@@ -454,7 +454,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
         </Card>
       </div>
 
-      {err && <p className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
+      {err && <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center my-3 font-medium animate-fade-up">{err}</p>}
 
       <Button
         disabled={busy || !members.some((m) => m.trim()) || (!isSolo && !(values.teamName ?? '').trim())}

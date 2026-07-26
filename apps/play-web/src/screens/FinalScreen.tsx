@@ -287,7 +287,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                       )}
                     </span>
                     <span dir="auto" className="flex-1 text-start font-medium">{r.teamName}</span>
-                    <span className="font-mono text-xs font-semibold" style={{ color: isMe ? accent : undefined }}>
+                    <span className={`font-mono text-xs font-semibold${isMe ? ' text-ink-fire' : ''}`}>
                       {isTimeOnly ? (r.durationSeconds != null ? fmtDuration(r.durationSeconds) : '—') : r.score}
                     </span>
                   </div>
