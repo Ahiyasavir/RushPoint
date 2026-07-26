@@ -1,0 +1,24 @@
+# RushPoint daily retention sweep — runs the SAME prune the Cloud Functions
+# pubsub schedule used to run, now that the schedule no longer fires off GCP.
+#
+# Install (as root):
+#   cp deploy/rushpoint-prune.service /etc/systemd/system/
+#   cp deploy/rushpoint-prune.timer   /etc/systemd/system/
+#   # edit WorkingDirectory below to wherever docker-compose.api.yml lives
+#   systemctl daemon-reload
+#   systemctl enable --now rushpoint-prune.timer
+#   systemctl start rushpoint-prune.service   # optional: run once now
+#   journalctl -u rushpoint-prune.service     # view output
+[Unit]
+Description=RushPoint daily retention sweep (prune expired run PII + purge trashed games)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The directory that holds docker-compose.api.yml + service-account.json.
+WorkingDirectory=/opt/rushpoint
+# Spin up a one-shot container from the SAME image/env as the API (so it gets the
+# service-account credential and GCLOUD_PROJECT) and run the cron entry, then
+# remove it. --no-deps: don't touch the running api container.
+ExecStart=/usr/bin/docker compose -f docker-compose.api.yml run --rm --no-deps api node lib/prune-cron.js

@@ -55,16 +55,20 @@ docker compose -f docker-compose.api.yml up -d --build
 curl http://127.0.0.1:8080/healthz        # -> {"ok":true}
 ```
 
-**HTTPS is required in production** (the request carries Firebase ID tokens). Put
-a TLS reverse proxy in front — Caddy is two lines and auto-provisions a cert:
+**HTTPS + Cloudflare (required in production).** The request carries Firebase ID
+tokens, so put Caddy (TLS) behind Cloudflare (WAF + DDoS + Israel-only geo-block):
 
-```
-# /etc/caddy/Caddyfile
-api.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
-Now the API is at `https://api.example.com`. (PM2 alternative: `pm2 start
+- **`deploy/Caddyfile`** — ready to use: terminates TLS, trusts Cloudflare and
+  recovers the real client IP from `CF-Connecting-IP`, and refuses any connection
+  that didn't come through Cloudflare. Copy to `/etc/caddy/Caddyfile`, set your
+  hostname + the Origin-CA cert paths, `systemctl reload caddy`.
+- **`deploy/CLOUDFLARE.md`** — step-by-step for the Cloudflare Free tier: the
+  proxied `A` record, `Full (strict)` TLS + Origin certificate, the WAF rule
+  `(ip.geoip.country ne "IL") → Block` (with a dev-IP exception), Bot Fight Mode,
+  and a `ufw` origin lock.
+
+Now the API is at `https://api.example.com`, reachable only from Israel + your dev
+IPs, with the origin IP hidden behind Cloudflare. (PM2 alternative: `pm2 start
 functions/server.js --name rushpoint-api` after `npm ci && npm --prefix
 packages/shared run build && npm --prefix functions run build`, with the same env
 vars exported — but Docker is the simpler, reproducible path.)
@@ -112,9 +116,24 @@ from the browser, and its origin must be in the server's `ALLOWED_ORIGINS`.
     (player-profile/badge recording, benchmark contribution). If your app needs
     that work, it must be moved inline into `finalizeRun` or hosted by a
     Firestore-trigger runner — a plain HTTP server can't receive it.
-  - `pruneExpiredRunData` (daily pubsub schedule, 90-day retention). Add a daily
-    cron on the VPS that calls the **`pruneExpiredRunDataNow`** admin callable so
-    old GPS/location data is still pruned.
+  - `pruneExpiredRunData` (daily pubsub schedule, 90-day retention). **Handled:**
+    `functions/prune-cron.js` (built by `npm run build:cron`, shipped in the
+    image) runs the SAME sweep with Admin privileges; install the systemd timer
+    `deploy/rushpoint-prune.service` + `deploy/rushpoint-prune.timer`
+    (`systemctl enable --now rushpoint-prune.timer`) to fire it daily.
+
+**Verify the server ↔ Firebase link before you rely on it.**
+`scripts/test-api-live.mjs` boots the server, mints a real anonymous Firebase
+token, and calls a read-only callable through it. Run it green against the
+emulators today, and against your LIVE project once the service account is on the
+box:
+```bash
+# emulator (no creds): proves the exact wiring
+npx firebase emulators:exec --only auth,firestore --project rushpoint-pwa-7daaa "node scripts/test-api-live.mjs"
+# live (on the VPS): your service account + Web API key
+GOOGLE_APPLICATION_CREDENTIALS=./service-account.json GCLOUD_PROJECT=rushpoint-pwa-7daaa \
+  FIREBASE_WEB_API_KEY=<web-api-key> node scripts/test-api-live.mjs
+```
 - **Rate limiting still works** — it's Firestore-counter based, and this server
   talks to the same Firestore.
 - **Payments** are behind `PAYMENTS_ENABLED` (off by default); set the Stripe env

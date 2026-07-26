@@ -1,0 +1,75 @@
+# ─── RushPoint API — HTTPS reverse proxy behind Cloudflare ───────────────────
+#
+# Topology:   client → Cloudflare (WAF: DDoS, bots, geo-block to IL) → Caddy → :8080
+#
+# Caddy's jobs here:
+#   1. Terminate TLS for the origin (Cloudflare re-encrypts to us — "Full (strict)").
+#   2. TRUST Cloudflare and recover the REAL client IP from CF-Connecting-IP, so
+#      logs / rate-limits see the visitor, not a Cloudflare edge node.
+#   3. REFUSE any connection that did not come through Cloudflare, so an attacker
+#      who learns the origin IP cannot bypass the WAF + geo rules by hitting it
+#      directly. (Also enforce this at the host firewall — see deploy/CLOUDFLARE.md.)
+#
+# Replace api.example.com with your real hostname. Cloudflare's IP ranges are
+# listed inline; re-check them against https://www.cloudflare.com/ips/ periodically
+# (they change rarely).
+
+{
+	# Recover the real client IP: when the immediate peer is a Cloudflare edge,
+	# trust CF-Connecting-IP (Caddy also honours X-Forwarded-For from it).
+	servers {
+		trusted_proxies static \
+			173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+			141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+			197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+			104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 \
+			2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 \
+			2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+# Only-through-Cloudflare guard, reused per site. `remote_ip` is the ACTUAL TCP
+# peer (a Cloudflare edge for proxied traffic); anything else is aborted.
+(cloudflare_only) {
+	@not_cloudflare not remote_ip \
+		173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+		141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+		197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+		104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 \
+		2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 \
+		2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	abort @not_cloudflare
+}
+
+api.example.com {
+	# ── TLS ──────────────────────────────────────────────────────────────────
+	# With Cloudflare proxying (orange cloud), the HTTP-01/TLS-ALPN challenges
+	# Caddy uses by default are intercepted by Cloudflare. Pick ONE:
+	#
+	#  (A) RECOMMENDED — Cloudflare Origin CA certificate (no plugin, 15-yr cert):
+	#      CF dashboard → SSL/TLS → Origin Server → Create Certificate; save the
+	#      cert + key on the box; set the CF SSL/TLS mode to "Full (strict)". Then:
+	tls /etc/caddy/origin.pem /etc/caddy/origin.key
+	#
+	#  (B) Keep Caddy's automatic HTTPS via the DNS-01 challenge — needs a Caddy
+	#      build that includes the caddy-dns/cloudflare module and a scoped CF API
+	#      token in the environment. Replace the `tls` line above with:
+	#          tls { dns cloudflare {env.CF_API_TOKEN} }
+
+	import cloudflare_only
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8080 {
+		health_uri /healthz
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	header -Server
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+	}
+}

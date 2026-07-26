@@ -5,7 +5,8 @@
   "main": "lib/index.js",
   "scripts": {
     "prebuild": "npm --prefix ../packages/shared run build",
-    "build": "npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=lib/index.js --external:firebase-admin --external:firebase-functions --external:stripe",
+    "build": "npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=lib/index.js --external:firebase-admin --external:firebase-functions --external:stripe && npm run build:cron",
+    "build:cron": "npx esbuild src/prune-cron.ts --bundle --platform=node --target=node20 --outfile=lib/prune-cron.js --external:firebase-admin --external:firebase-functions --external:stripe",
     "serve": "npm run build && npx firebase emulators:start --only functions,firestore,auth",
     "deploy": "npm run build && npx firebase deploy --only functions",
     "typecheck": "npx tsc --noEmit",
