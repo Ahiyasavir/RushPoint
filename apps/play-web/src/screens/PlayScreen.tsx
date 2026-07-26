@@ -1106,7 +1106,7 @@ function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedA
         <div className="text-xs text-zinc-500 flex items-center gap-2">
           {timeOnly
             ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
-            : <span>{t.play.score}: <span className="text-ink-fire font-mono">{score}</span></span>}
+            : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
           {powerUpArmed && (
             <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
               {t.play.powerUpArmedChip}
@@ -1147,7 +1147,7 @@ function PowerUpToast({ type }: { type: 'double_points' | 'bonus_points' | null 
   if (!type) return null;
   const text = type === 'double_points' ? t.play.powerUpDoubleToast : t.play.powerUpBonusToast;
   return (
-    <div className="fixed inset-x-0 rp-safe-top-3 z-50 flex justify-center px-4 pointer-events-none">
+    <div role="status" aria-live="polite" className="fixed inset-x-0 rp-safe-top-3 z-50 flex justify-center px-4 pointer-events-none">
       <div className="rounded-full bg-ink-fire text-white font-bold text-sm px-4 py-2 shadow-lg animate-score-pop motion-reduce:animate-none">
         {text}
       </div>
