@@ -1158,12 +1158,9 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
       )}
 
       <Section k="advanced" title={b.advanced} task={task} sections={sections} b={b}>
-        <AdvGroup>{b.advGroupScoring}</AdvGroup>
-        <div className="grid grid-cols-3 gap-2">
-          <div>
-            <Label dense>{b.points}</Label>
-            <Input dense type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
-          </div>
+        <div>
+          <Label dense>{b.points}</Label>
+          <Input dense type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
         </div>
 
         <AdvGroup>{b.advGroupTiming}</AdvGroup>
@@ -1183,6 +1180,31 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
               })} />
           </div>
         </div>
+        {/* The VISIBLE, SCORED estimate (change: visible-time-estimates). Distinct from
+            the per-interaction duration below: the server stamps a task's clock at
+            ASSIGNMENT, so this number is measured against WALK + interaction. It is
+            derived as the interaction default plus a transit allowance taken from the
+            median leg to this task's placed stage siblings. Suggestion only — nothing is
+            written until the creator taps apply, so no stored game and no run in flight
+            moves by a point. */}
+        {(() => {
+          const suggestedEstimate = defaultEstimatedMinutes(task, siblings ?? []);
+          return (
+            <div className="mt-2 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
+                <span dir="auto">🚶 {b.estimateSuggested(String(suggestedEstimate))}</span>
+                {task.estimatedMinutes !== suggestedEstimate && (
+                  <button type="button" className="underline text-[--ink-2]"
+                    onClick={() => set({ estimatedMinutes: suggestedEstimate })}>
+                    {b.estimateUseSuggested}
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
+            </div>
+          );
+        })()}
+
         {/* Per-interaction duration (change: task-duration-defaults). Nothing in the
             product ever set `expectedDurationMinutes`, so a 20 second photo snap and a
             10 minute puzzle were estimated identically. Show what THIS interaction
@@ -1219,31 +1241,6 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
                   }} />
               </div>
               <p className="text-[11px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
-            </div>
-          );
-        })()}
-
-        {/* The VISIBLE, SCORED estimate (change: visible-time-estimates). Distinct from
-            the per-interaction duration above: the server stamps a task's clock at
-            ASSIGNMENT, so this number is measured against WALK + interaction. It is
-            derived as the interaction default plus a transit allowance taken from the
-            median leg to this task's placed stage siblings. Suggestion only — nothing is
-            written until the creator taps apply, so no stored game and no run in flight
-            moves by a point. */}
-        {(() => {
-          const suggestedEstimate = defaultEstimatedMinutes(task, siblings ?? []);
-          return (
-            <div className="mt-2 space-y-1">
-              <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
-                <span dir="auto">🚶 {b.estimateSuggested(String(suggestedEstimate))}</span>
-                {task.estimatedMinutes !== suggestedEstimate && (
-                  <button type="button" className="underline text-[--ink-2]"
-                    onClick={() => set({ estimatedMinutes: suggestedEstimate })}>
-                    {b.estimateUseSuggested}
-                  </button>
-                )}
-              </div>
-              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
             </div>
           );
         })()}

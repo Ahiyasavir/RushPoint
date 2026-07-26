@@ -790,21 +790,21 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
             exactly how every game authored before this change behaves, so nothing
             in flight changes. New games are seeded at DEFAULT_WRONG_ANSWER_LEVEL. */}
         <Label>{b.wrongAnswerCost}</Label>
-        <p className="text-xs text-zinc-500 -mt-2 mb-2">{b.wrongAnswerCostHint}</p>
-        <div className="space-y-2">
-          {WRONG_ANSWER_LEVEL_ORDER.map((lv) => {
-            const current = game.scoringOptions?.wrongAnswerPenalty ?? 'off';
-            return (
-              <button key={lv}
-                onClick={() => patch({ scoringOptions: { ...(game.scoringOptions ?? {}), wrongAnswerPenalty: lv } })}
-                className={`w-full text-start p-3 rounded-lg border ${
-                  current === lv ? 'border-rp-fire/50 bg-rp-fire/10' : 'border-[--rp-border]'}`}>
-                <div className="text-sm font-medium text-[--ink-2]">{b.wrongAnswerLevels[lv].name}</div>
-                <div className="text-xs text-[--ink-3]">{b.wrongAnswerLevels[lv].desc}</div>
-              </button>
-            );
-          })}
-        </div>
+        <p className="text-xs text-[--ink-3] -mt-2 mb-2">{b.wrongAnswerCostHint}</p>
+        {(() => {
+          const current = game.scoringOptions?.wrongAnswerPenalty ?? 'off';
+          return (
+            <>
+              <Select aria-label={b.wrongAnswerCost} value={current}
+                onChange={(e) => patch({ scoringOptions: { ...(game.scoringOptions ?? {}), wrongAnswerPenalty: e.target.value as typeof current } })}>
+                {WRONG_ANSWER_LEVEL_ORDER.map((lv) => (
+                  <option key={lv} value={lv}>{b.wrongAnswerLevels[lv].name}</option>
+                ))}
+              </Select>
+              <p className="text-xs text-[--ink-3] mt-1">{b.wrongAnswerLevels[current].desc}</p>
+            </>
+          );
+        })()}
       </Advanced>
 
       <PresentationField game={game} patch={patch} />
@@ -817,41 +817,41 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
           per-field defaults (photo feed defaults ON) via the pure enabledGameFeatureCount. */}
       <Advanced title={b.featuresSection} open={advFeatures} onToggle={() => setAdvFeatures(!advFeatures)}
         meta={<Badge>{b.featuresOnBadge(enabledGameFeatureCount(game))}</Badge>}>
-        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={!!game.allowInstantPlay}
             onChange={(e) => patch({ allowInstantPlay: e.target.checked })} />
           {b.instantPlayLabel}
         </label>
-        <p className="text-xs text-zinc-500 -mt-2">{b.instantPlayHelp}</p>
+        <p className="text-xs text-[--ink-3] -mt-2">{b.instantPlayHelp}</p>
 
         {/* Live photo feed (change: live-photo-feed): default ON; absent = enabled. */}
-        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={game.photoFeedEnabled !== false}
             onChange={(e) => patch({ photoFeedEnabled: e.target.checked })} />
           {b.photoFeedLabel}
         </label>
-        <p className="text-xs text-zinc-400 -mt-2">{b.photoFeedHint}</p>
+        <p className="text-xs text-[--ink-3] -mt-2">{b.photoFeedHint}</p>
         {/* UGC disclosure (change: feed-ugc-safety, D7): run-wide visibility + organizer responsibility. */}
-        <p className="text-xs text-zinc-500 -mt-3">{b.photoFeedResponsibility}</p>
+        <p className="text-xs text-[--ink-3] -mt-3">{b.photoFeedResponsibility}</p>
 
         {/* Power-ups (change: power-ups): default OFF; absent = disabled. */}
-        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={!!game.powerUpsEnabled}
             onChange={(e) => patch({ powerUpsEnabled: e.target.checked })} />
           {b.powerUpsLabel}
         </label>
-        <p className="text-xs text-zinc-500 -mt-2">{b.powerUpsHint}</p>
+        <p className="text-xs text-[--ink-3] -mt-2">{b.powerUpsHint}</p>
 
         {/* Staged leaderboard reveal (change: manual-leaderboard-reveal): default OFF
             (absent = auto publish on finalize, the pre-existing behaviour). When ON,
             finalizeRun leaves the board unpublished and the creator reveals it from
             the run console. */}
-        <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+        <label className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
           <input type="checkbox" checked={!!game.manualLeaderboardReveal}
             onChange={(e) => patch({ manualLeaderboardReveal: e.target.checked })} />
           {b.manualRevealLabel}
         </label>
-        <p className="text-xs text-zinc-500 -mt-2">{b.manualRevealHint}</p>
+        <p className="text-xs text-[--ink-3] -mt-2">{b.manualRevealHint}</p>
       </Advanced>
 
       <Advanced title={b.advRegistration} open={advReg} onToggle={() => setAdvReg(!advReg)}>
@@ -892,7 +892,7 @@ function PresentationField({ game, patch }: { game: Game; patch: (p: Partial<Gam
   return (
     <Advanced title={b.presentationSectionTitle} open={open} onToggle={() => setOpen(!open)}>
       <div className="space-y-3">
-        <p className="text-xs text-zinc-500">{b.presentationHint}</p>
+        <p className="text-xs text-[--ink-3]">{b.presentationHint}</p>
         <div>
           <Label>{b.coverImageLabel}</Label>
           <Input
@@ -907,7 +907,7 @@ function PresentationField({ game, patch }: { game: Game; patch: (p: Partial<Gam
             placeholder="https://…" // i18n-ignore — canonical sample https URL, not translatable copy
             dir="ltr"
           />
-          <p className="text-xs text-zinc-500 mt-1">{b.coverImageHint}</p>
+          <p className="text-xs text-[--ink-3] mt-1">{b.coverImageHint}</p>
         </div>
         <div>
           <Label>{b.brandNameLabel}</Label>
@@ -917,7 +917,7 @@ function PresentationField({ game, patch }: { game: Game; patch: (p: Partial<Gam
             placeholder={game.title}
             dir="auto"
           />
-          <p className="text-xs text-zinc-500 mt-1">{b.brandNameHint}</p>
+          <p className="text-xs text-[--ink-3] mt-1">{b.brandNameHint}</p>
         </div>
         <div>
           <Label>{b.brandColorLabel}</Label>
@@ -931,18 +931,18 @@ function PresentationField({ game, patch }: { game: Game; patch: (p: Partial<Gam
             />
             {color && (
               <>
-                <span className="text-xs text-zinc-400" dir="ltr">{color}</span>
+                <span className="text-xs text-[--ink-3]" dir="ltr">{color}</span>
                 <button
                   type="button"
                   onClick={() => setBrand({ primaryColor: undefined })}
-                  className="ms-auto text-xs text-zinc-400 underline"
+                  className="ms-auto text-xs text-[--ink-3] underline"
                 >
                   {b.brandColorClear}
                 </button>
               </>
             )}
           </div>
-          <p className="text-xs text-zinc-500 mt-1">{b.brandColorHint}</p>
+          <p className="text-xs text-[--ink-3] mt-1">{b.brandColorHint}</p>
         </div>
       </div>
     </Advanced>
@@ -962,7 +962,7 @@ function InstructionsField({ game, patch }: { game: Game; patch: (p: Partial<Gam
   return (
     <Advanced title={b.instructionsSectionTitle} open={open} onToggle={() => setOpen(!open)}>
       <div className="space-y-3">
-        <p className="text-xs text-zinc-500">{b.instructionsHint}</p>
+        <p className="text-xs text-[--ink-3]">{b.instructionsHint}</p>
         <div>
           <Label>{b.instructionsTitleLabel}</Label>
           <Input value={ins.title ?? ''} onChange={(e) => set({ title: e.target.value })} dir="auto" />
@@ -1113,13 +1113,13 @@ function SafeZoneField({ game, patch }: { game: Game; patch: (p: Partial<Game>) 
   return (
     <Advanced title={b.safeZoneSectionTitle} open={open} onToggle={() => setOpen(!open)}>
       <div className="space-y-3">
-        <p className="text-xs text-zinc-500">{b.safeZoneHint}</p>
+        <p className="text-xs text-[--ink-3]">{b.safeZoneHint}</p>
         {!zone ? (
           <>
             <Button variant="ghost" onClick={enable} disabled={!suggestion}>
               {b.safeZoneEnable}
             </Button>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-[--ink-3]">
               {suggestion ? b.safeZoneEnableHint : b.safeZoneNeedsTasks}
             </p>
           </>
@@ -1138,14 +1138,14 @@ function SafeZoneField({ game, patch }: { game: Game; patch: (p: Partial<Game>) 
                 dir="ltr"
               />
               {err
-                ? <p className="text-neon-red text-xs mt-1">{err}</p>
-                : <p className="text-xs text-zinc-500 mt-1">{b.safeZoneRadiusHint}</p>}
+                ? <p className="text-rp-alert text-xs mt-1">{err}</p>
+                : <p className="text-xs text-[--ink-3] mt-1">{b.safeZoneRadiusHint}</p>}
             </div>
-            <p className="text-xs text-zinc-400" dir="ltr">
+            <p className="text-xs text-[--ink-3]" dir="ltr">
               {zone.center.lat.toFixed(5)}, {zone.center.lng.toFixed(5)}
             </p>
             {suggestion && suggestion.coversAllTasks === false && (
-              <p className="text-xs text-amber-400">{b.safeZoneTooSpread}</p>
+              <p className="text-xs text-rp-amber">{b.safeZoneTooSpread}</p>
             )}
             <div className="flex gap-2">
               <Button variant="ghost" onClick={enable} disabled={!suggestion}>
