@@ -64,7 +64,7 @@ async function fetchRankedWindow<T extends { id: string }>(
   fetchSize: number,
 ): Promise<T[]> {
   const withTags = <Q extends FirebaseFirestore.Query>(q: Q): Q =>
-    (tags.length > 0 ? q.where('tags', 'array-contains-any', tags.slice(0, 10)) : q) as Q;
+    (Array.isArray(tags) && tags.length > 0 ? q.where('tags', 'array-contains-any', tags.slice(0, 10)) : q) as Q;
 
   const ordered = await withTags(
     db.collection(collection).orderBy('popularity', 'desc'),
@@ -247,13 +247,21 @@ export const searchGallery = loggedCallable('searchGallery', async (data, contex
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   await enforceRateLimit(context.auth.uid, 'searchGallery');
 
-  const { query = '', tags = [], limit = 20, mode, sort } = data as {
-    query?: string;
-    tags?: string[];
-    limit?: number;
-    mode?: GameMode;
-    sort?: GalleryGameSort;
+  // The web client sends optional facets as `undefined`, which the Firebase callable
+  // SDK serializes to `null` on the wire — so a destructuring default (`tags = []`)
+  // does NOT apply (defaults fire only for `undefined`). Coerce every optional here so a
+  // null/omitted facet means "no filter", never a crash. (This is why fetchRankedWindow's
+  // `tags.length` threw a 500 on the real gallery while the e2e — which omits the keys
+  // entirely — passed.)
+  const d = (data ?? {}) as {
+    query?: string | null; tags?: string[] | null; limit?: number | null;
+    mode?: GameMode | null; sort?: GalleryGameSort | null;
   };
+  const query = typeof d.query === 'string' ? d.query : '';
+  const tags = Array.isArray(d.tags) ? d.tags : [];
+  const limit = typeof d.limit === 'number' ? d.limit : 20;
+  const mode = d.mode ?? undefined;
+  const sort = d.sort ?? undefined;
 
   const HARD_CAP = 50;
   const wanted = Math.min(limit, HARD_CAP);
@@ -292,15 +300,20 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   await enforceRateLimit(context.auth.uid, 'searchTaskLibrary');
 
-  const { query = '', tags = [], limit = 30, type, difficulty, hasLocation, sort } = data as {
-    query?: string;
-    tags?: string[];
-    limit?: number;
-    type?: TaskType;
-    difficulty?: number;
-    hasLocation?: boolean;
-    sort?: GalleryTaskSort;
+  // Same wire-null coercion as searchGallery: the client's `undefined` facets arrive as
+  // `null`, so destructuring defaults don't apply. A null/omitted facet = "no filter".
+  const d = (data ?? {}) as {
+    query?: string | null; tags?: string[] | null; limit?: number | null;
+    type?: TaskType | null; difficulty?: number | null; hasLocation?: boolean | null;
+    sort?: GalleryTaskSort | null;
   };
+  const query = typeof d.query === 'string' ? d.query : '';
+  const tags = Array.isArray(d.tags) ? d.tags : [];
+  const limit = typeof d.limit === 'number' ? d.limit : 30;
+  const type = d.type ?? undefined;
+  const difficulty = d.difficulty ?? undefined;
+  const hasLocation = d.hasLocation ?? undefined;
+  const sort = d.sort ?? undefined;
 
   const HARD_CAP = 100;
   const wanted = Math.min(limit, HARD_CAP);

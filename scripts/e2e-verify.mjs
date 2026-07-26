@@ -7597,6 +7597,21 @@ async function main() {
     // 5) The popular-tags chips call (also fired when the gallery opens) must not throw.
     const pop = await creator.call('getPopularTags', { limit: 50 });
     check('getPopularTags returns a tags array (no INTERNAL)', Array.isArray(pop?.tags));
+
+    // 6) CLIENT-SHAPE regression: the web gallery sends absent facets as `undefined`,
+    //    which the Firebase callable SDK serializes to `null` on the wire — so the
+    //    server's destructuring default (`tags = []`) does NOT apply and `tags.length`
+    //    threw a 500 on the REAL gallery while the checks above (which omit the keys)
+    //    passed. Send the null shape explicitly: the server must treat null facets as
+    //    "no filter" and still return the game + missions.
+    const nullish = await creator.call('searchGallery', { query: '', tags: null, mode: null, sort: 'popular', limit: 50 });
+    check('searchGallery tolerates null tags/mode (client undefined→null) and still returns the game',
+      Array.isArray(nullish?.games) && nullish.games.some((g) => g.id === gR),
+      JSON.stringify((nullish?.games ?? []).map((g) => g.id).slice(0, 8)));
+    const libNull = await creator.call('searchTaskLibrary', { query: '', tags: null, type: null, difficulty: null, hasLocation: null, sort: 'popular', limit: 100 });
+    check('searchTaskLibrary tolerates null facets (client undefined→null) and returns the missions',
+      Array.isArray(libNull?.tasks) && (libNull.tasks ?? []).some((t) => t.id === `${gR}_gr-loc`),
+      JSON.stringify((libNull?.tasks ?? []).map((t) => t.id).slice(0, 8)));
   });
 
   await scenario('gallery popularity + likes', async () => {
