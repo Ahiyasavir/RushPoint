@@ -48,6 +48,9 @@ export * from './reactions';
 export * from './schedule';
 export * from './gating';
 export * from './env';
+// Firebase App Check wiring decision (change: app-check-ready) — READY BUT DARK:
+// never in an emulator build, never without a site key, enforcement opt-in.
+export * from './appCheck';
 export * from './webhookPayload';
 export * from './narrative';
 export * from './gameInstructions';

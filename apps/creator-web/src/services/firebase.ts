@@ -31,7 +31,13 @@ import {
   uploadBytesResumable,
   getDownloadURL,
 } from 'firebase/storage';
-import { resolveEmulatorHost, isEmulatorBuild } from '@rushpoint/shared';
+import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
+import {
+  resolveEmulatorHost,
+  isEmulatorBuild,
+  shouldInitAppCheck,
+  appCheckSiteKey,
+} from '@rushpoint/shared';
 import { buildEmulatorGoogleClaims } from './authClaims';
 import {
   GOOGLE_PROVIDER_ID,
@@ -55,6 +61,28 @@ const firebaseConfig = {
 };
 
 const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+
+// ── App Check (change: app-check-ready) — READY, BUT DARK BY DEFAULT ─────────
+// Attached ONLY when shouldInitAppCheck() says so: never in an emulator build
+// (dev:all / --mode playtest / e2e — those emulators mint no App Check tokens),
+// and never without a configured reCAPTCHA v3 site key. With today's env this is
+// a no-op and the bundle behaves exactly as before. Note the `google-oauth`
+// secondary app below is deliberately NOT attested — it only opens the account
+// chooser. FAIL OPEN: a missing/invalid/blocked key must never keep the console
+// from booting, so the call is wrapped. Enforcement is a SERVER decision
+// (functions/src/appCheckGuard.ts) and is currently 'off' everywhere.
+const appCheckFlag = globalThis as unknown as { __rpCreatorAppCheck?: boolean };
+if (shouldInitAppCheck(import.meta.env) && !appCheckFlag.__rpCreatorAppCheck) {
+  appCheckFlag.__rpCreatorAppCheck = true;
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(appCheckSiteKey(import.meta.env) as string),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } catch {
+    // Already initialized (HMR) or a bad key — carry on unattested.
+  }
+}
 
 // Playtest tunnel detection: when the page is served from a remote origin (a
 // cloudflared/ngrok tunnel), every emulator service must be reached through that
