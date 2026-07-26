@@ -425,7 +425,6 @@ export default function DashboardPage() {
 
   if (!games) return <DashboardSkeleton uid={user?.uid} />;
 
-  const totalTasks = games.reduce((s, g) => s + g.stages.reduce((ss, st) => ss + st.tasks.length, 0), 0);
   // Derived from the creator's REAL games and runs. Nothing here reads a stored
   // progress flag, so the list can never claim a step is behind them when it is not.
   const checklist = buildOnboardingChecklist({
@@ -494,10 +493,9 @@ export default function DashboardPage() {
 
         {/* Stats row */}
         {games.length > 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-8">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
             {[
               { label: d.statGamesBuilt, value: games.length, icon: '🗺️', tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30' },
-              { label: d.statTotalTasks, value: totalTasks, icon: '✅', tint: 'from-rp-go/12 to-rp-go/5', ring: 'group-hover:border-rp-go/30' },
               { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: '🌐', tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30' },
               { label: d.statTotalPlays, value: games.reduce((s, g) => s + (g.playCount ?? 0), 0), icon: '🏁', tint: 'from-rp-signal/12 to-rp-signal/5', ring: 'group-hover:border-rp-signal/30' },
             ].map((s) => (
@@ -700,33 +698,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Explore / next steps ──────────────────────────────────────────── */}
-      {games.length > 0 && (
-        <div className="mt-12 animate-fade-up" style={{ animationDelay: '120ms' }}>
-          {/* Feature banner */}
-          <div className="relative overflow-hidden rounded-3xl border border-[--rp-border] bg-gradient-to-br from-rp-fire/10 via-rp-amber/5 to-transparent px-7 py-5 sm:px-9 sm:py-6 mb-6">
-            <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-rp-fire/15 blur-3xl pointer-events-none" />
-            <div className="absolute -right-4 -bottom-12 w-48 h-48 rounded-full bg-rp-amber/15 blur-3xl pointer-events-none" />
-            <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-              <div className="max-w-lg">
-                <div className="inline-flex items-center gap-1.5 rounded-full bg-rp-fire/10 text-rp-fire text-[11px] font-semibold px-2.5 py-1 mb-3">
-                  {d.bannerBadge}
-                </div>
-                <h3 className="font-brand text-xl font-extrabold text-[--ink-1] leading-tight">{d.bannerTitle}</h3>
-                <p className="text-[--ink-2] text-sm mt-1.5 leading-relaxed">{d.bannerBody}</p>
-              </div>
-              <div className="flex sm:flex-col gap-2.5 shrink-0">
-                <Button className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/gallery')}>{d.bannerCta1}</Button>
-                {/* "Invite & earn" routes to the wallet — hidden in free mode. */}
-                {PAYMENTS_ENABLED && (
-                  <Button variant="ghost" className="!px-5 !py-2.5 !text-sm whitespace-nowrap" onClick={() => nav('/wallet')}>{d.bannerCta2}</Button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Template picker modal ─────────────────────────────────────────── */}
       {picking && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
@@ -921,8 +892,8 @@ function DashboardSkeleton({ uid }: { uid?: string }) {
           </div>
           <Skeleton className="h-11 w-36 rounded-xl" />
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-8">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[68px] rounded-2xl" />)}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[68px] rounded-2xl" />)}
         </div>
       </div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
