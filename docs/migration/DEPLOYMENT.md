@@ -334,8 +334,17 @@ Content-Type: application/json
 
 { "data": { ...args } }
 → 200 { "result": { ...response } }
-→ 4xx/5xx { "error": { "status": "permission-denied", "message": "..." } }
+→ 4xx/5xx { "error": { "status": "PERMISSION_DENIED", "message": "..." } }
 ```
+
+> 🔴 **`status` MUST be the UPPER_SNAKE canonical name, not the hyphenated code.**
+> This example previously read `"permission-denied"` and that was wrong. The client SDK
+> (`@firebase/functions` `errorCodeMap`, `_errorForResponse`) keys its lookup on
+> `PERMISSION_DENIED` and *maps it to* the hyphenated `permission-denied` the app sees. Send the
+> hyphenated form on the wire and the lookup misses, so the SDK **discards the real code and
+> reports `internal`** — every error in the app would surface as a generic internal failure with
+> the true cause erased. `scripts/test-api-contract.ts` pins this with an explicit counter-example.
+> The SDK source is the contract here, not this document.
 
 **Client changes: one line, in one file, per app.** `apps/play-web/src/services/firebase.ts:112`
 is `export const functions = getFunctions(app);`. It becomes
