@@ -59,7 +59,8 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
     <div className="rounded-xl bg-app-card border border-glass-border mb-3">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-zinc-300"
+        aria-expanded={open}
+        className="w-full flex items-center justify-between px-4 py-2.5 min-h-[44px] text-sm font-semibold text-zinc-300"
       >
         <span className="flex items-center gap-2">📱 {t.devices.panelTitle}</span>
         <span className="text-xs text-zinc-500">{devices.length} {open ? '▴' : '▾'}</span>
@@ -73,7 +74,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                 <div className="text-[11px] text-zinc-500">{t.devices.inviteHint}</div>
                 <div className="font-mono font-bold text-lg tracking-[0.3em] text-zinc-100">{team.deviceJoinCode}</div>
               </div>
-              <button onClick={copyCode} className="text-xs font-semibold text-ink-fire hover:underline shrink-0">
+              <button onClick={copyCode} className="inline-flex items-center min-h-[44px] px-2 text-xs font-semibold text-ink-fire hover:underline shrink-0">
                 {copied ? t.devices.copied : t.devices.copy}
               </button>
             </div>
@@ -94,7 +95,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                   <button
                     disabled={busy}
                     onClick={() => void transferAction.run(d.uid, d.name || t.devices.deviceFallbackName)}
-                    className="shrink-0 text-xs text-ink-fire hover:underline disabled:opacity-40"
+                    className="shrink-0 inline-flex items-center min-h-[44px] px-2 text-xs text-ink-fire hover:underline disabled:opacity-40"
                   >
                     {t.devices.transferBtn}
                   </button>
@@ -107,13 +108,13 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
             <button
               disabled={busy}
               onClick={() => void takeControlAction.run()}
-              className="w-full text-sm font-semibold text-ink-fire border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
+              className="w-full min-h-[44px] text-sm font-semibold text-ink-fire border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
             >
               ✏️ {t.devices.takeControl}
             </button>
           )}
 
-          {err && <p className="text-ink-alert text-xs text-center">{err}</p>}
+          {err && <p role="status" aria-live="polite" className="text-ink-alert text-xs text-center">{err}</p>}
         </div>
       )}
     </div>
