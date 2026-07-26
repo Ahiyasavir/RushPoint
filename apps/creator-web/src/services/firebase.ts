@@ -122,7 +122,12 @@ function initDb() {
 }
 export const db = initDb();
 export const auth      = getAuth(app);
-export const functions = getFunctions(app);
+// Self-hosted API server (change: self-host-functions-on-vps). When
+// VITE_API_ORIGIN is set, httpsCallable() routes to `<VITE_API_ORIGIN>/<name>`
+// (the Node server running the SAME functions on the VPS) instead of Cloud
+// Functions. Auth/Firestore/Storage stay on real Firebase. Unset ⇒ unchanged.
+const apiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.trim() || undefined;
+export const functions = apiOrigin ? getFunctions(app, apiOrigin) : getFunctions(app);
 export const storage   = getStorage(app);
 
 // ── Emulator wiring (dev only) ────────────────────────────────────────────────
@@ -134,7 +139,7 @@ if (emulatorBuild && !emuFlag.__rushpointEmu) {
     connectAuthEmulator(auth, pageOrigin, { disableWarnings: true });
     // Functions/Storage have no https-origin emulator API in firebase 10.x, so we
     // set the documented internal fields directly (verified against the SDK).
-    (functions as unknown as { emulatorOrigin: string }).emulatorOrigin = pageOrigin;
+    if (!apiOrigin) (functions as unknown as { emulatorOrigin: string }).emulatorOrigin = pageOrigin;
     (storage as unknown as { host: string; _protocol: string }).host = originHost;
     (storage as unknown as { host: string; _protocol: string })._protocol = 'https';
   } else {
@@ -142,7 +147,7 @@ if (emulatorBuild && !emuFlag.__rushpointEmu) {
     const host = resolveEmulatorHost(import.meta.env, pageOrigin || null);
     connectFirestoreEmulator(db, host, 8080);
     connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
-    connectFunctionsEmulator(functions, host, 5001);
+    if (!apiOrigin) connectFunctionsEmulator(functions, host, 5001);
     connectStorageEmulator(storage, host, 9199);
   }
 }

@@ -109,7 +109,14 @@ function initDb() {
 }
 export const db = initDb();
 export const auth      = getAuth(app);
-export const functions = getFunctions(app);
+// Self-hosted API server (change: self-host-functions-on-vps). When
+// VITE_API_ORIGIN is set, every httpsCallable() is routed to
+// `<VITE_API_ORIGIN>/<name>` (the Node server running the SAME functions code on
+// the VPS) instead of Cloud Functions. Auth, Firestore and Storage keep talking
+// to real Firebase — only the callable compute moves off Cloud Functions. Unset
+// ⇒ today's behaviour exactly (Cloud Functions, or the emulator wiring below).
+const apiOrigin = (import.meta.env.VITE_API_ORIGIN as string | undefined)?.trim() || undefined;
+export const functions = apiOrigin ? getFunctions(app, apiOrigin) : getFunctions(app);
 export const storage   = getStorage(app);
 
 const emuFlag = globalThis as unknown as { __rpPlayEmu?: boolean };
@@ -121,7 +128,8 @@ if (emulatorBuild && !emuFlag.__rpPlayEmu) {
     // in initDb() above. Functions/Storage lack an https-origin emulator API in
     // firebase 10.x, so set the (SDK-verified) internal fields directly.
     connectAuthEmulator(auth, pageOrigin, { disableWarnings: true });
-    (functions as unknown as { emulatorOrigin: string }).emulatorOrigin = pageOrigin;
+    // VITE_API_ORIGIN, when set, wins over the emulator for callables.
+    if (!apiOrigin) (functions as unknown as { emulatorOrigin: string }).emulatorOrigin = pageOrigin;
     (storage as unknown as { host: string; _protocol: string }).host = originHost;
     (storage as unknown as { host: string; _protocol: string })._protocol = 'https';
   } else {
@@ -129,7 +137,7 @@ if (emulatorBuild && !emuFlag.__rpPlayEmu) {
     const host = resolveEmulatorHost(import.meta.env, pageOrigin || null);
     connectFirestoreEmulator(db, host, 8080);
     connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
-    connectFunctionsEmulator(functions, host, 5001);
+    if (!apiOrigin) connectFunctionsEmulator(functions, host, 5001);
     connectStorageEmulator(storage, host, 9199);
   }
 }

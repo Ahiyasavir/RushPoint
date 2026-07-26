@@ -1,0 +1,41 @@
+# ─── RushPoint API server (self-hosted Cloud Functions) — VPS image ──────────
+#
+# Builds the functions bundle from the monorepo, then ships a tiny runtime image
+# that runs `functions/server.js` (every callable, as a plain Node HTTP server).
+# Talks to your REAL Firebase project (Auth + Firestore) via the Admin SDK.
+#
+#   docker build -f Dockerfile.api -t rushpoint-api .
+#   docker run -p 8080:8080 \
+#     -e GCLOUD_PROJECT=rushpoint-pwa-7daaa \
+#     -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json \
+#     -e ALLOWED_ORIGINS=https://play.example.com,https://creator.example.com \
+#     -v /path/to/service-account.json:/secrets/sa.json:ro \
+#     rushpoint-api
+#
+# Prefer `docker compose up -d` (see docker-compose.api.yml) so restart, env and
+# the secret mount are declared once.
+
+# ---- build: compile @rushpoint/shared and bundle the functions ----
+FROM node:20-slim AS build
+WORKDIR /repo
+COPY . .
+RUN npm ci --no-audit --no-fund
+RUN npm --prefix packages/shared run build \
+ && npm --prefix functions run build
+
+# ---- runtime: node + only the deps the bundle externalises + the bundle ----
+FROM node:20-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+# functions/package.json's runtime deps are firebase-admin, firebase-functions,
+# stripe and express — exactly what the esbuild bundle leaves external plus the
+# HTTP host. --omit=dev skips shared/tsc/esbuild/vitest.
+COPY functions/package.json ./package.json
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY --from=build /repo/functions/lib ./lib
+COPY --from=build /repo/functions/server.js ./server.js
+ENV PORT=8080
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||8080)+'/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+CMD ["node", "server.js"]

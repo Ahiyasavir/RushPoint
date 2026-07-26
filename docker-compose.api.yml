@@ -1,0 +1,41 @@
+# ─── RushPoint API server on the VPS ─────────────────────────────────────────
+#
+#   docker compose -f docker-compose.api.yml up -d --build
+#
+# Put your Firebase service-account JSON next to this file as `service-account.json`
+# (download from Firebase console → Project settings → Service accounts →
+# "Generate new private key"). Fill the env values below, then bring it up.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: rushpoint-api
+    restart: always
+    # Bind to localhost only and put a TLS reverse proxy (Caddy/nginx) in front —
+    # the callable protocol carries Firebase ID tokens and MUST be HTTPS in prod.
+    # For a quick test you can expose 8080 directly and use http://<vps-ip>:8080.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # The Firebase project whose Auth + Firestore this server reads/writes.
+      GCLOUD_PROJECT: rushpoint-pwa-7daaa
+      # Admin SDK credential (mounted below). Verifies client ID tokens + Firestore.
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/service-account.json
+      # Comma-separated browser origins allowed to call this server. MUST match the
+      # exact origins your play-web + creator-web are served from (scheme + host).
+      ALLOWED_ORIGINS: "https://play.example.com,https://creator.example.com"
+      PORT: "8080"
+      # Server-only secrets the functions read (same as functions/.env today).
+      QR_SECRET: "change-me-to-the-same-value-you-use-today"
+      # Payments are behind PAYMENTS_ENABLED; only needed if you turn them on.
+      # STRIPE_SECRET_KEY: "sk_live_..."
+      # STRIPE_WEBHOOK_SECRET: "whsec_..."
+    volumes:
+      - ./service-account.json:/secrets/service-account.json:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
