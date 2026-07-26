@@ -13,7 +13,7 @@
 //  - in `moderate` mode the listener drops the `active == true` clause so staff
 //    can see (and restore) hidden items. The participant listener is unchanged.
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import {
   FEED_EMOJIS, FEED_REPORT_REASONS, applyReaction,
   EMPTY_FEED_MUTE, addMutedItem, addMutedTeam, isFeedItemMuted,
@@ -26,6 +26,13 @@ import { useT } from '../i18nContext';
 import { dialog } from './dialog';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
+
+/**
+ * Newest-N feed cards a listener will ever hold. Deliberately generous (the
+ * whole panel is a scroll of recent photos) while still making the read cost of
+ * a long run flat instead of linear — see the listener comment below.
+ */
+const FEED_WINDOW = 100;
 
 /** Run-scoped so a mute never leaks across unrelated events. */
 const muteKey = (runId: string) => `rp.feedMute.${runId}`;
@@ -85,7 +92,25 @@ export default function FeedPanel({
     const base = collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`);
     // Moderation view drops the active filter (rules already let staff/owner read
     // hidden docs); the participant listener keeps `active == true` exactly as-is.
-    const ref = moderate ? query(base) : query(base, where('active', '==', true));
+    // COST BOUND (why, not what): Firestore reads cannot be hard-capped on Blaze —
+    // there is no user-lowerable read quota — so an unbounded onSnapshot over a
+    // collection that GROWS for the entire run is the uncapped billing tail: every
+    // new photo re-delivers nothing old, but a late joiner (or a reconnect, or a
+    // second device) re-reads the whole feed from doc one. A feed is recency-only,
+    // so 100 cards is far more than anyone scrolls while keeping the worst case flat.
+    // The orderBy is NOT decoration: these docs carry Firestore auto-IDs, so a bare
+    // limit() would order by __name__ and hand back an ARBITRARY 100 — it could drop
+    // the photo taken ten seconds ago. `createdAt` is the ISO string stamped by
+    // writeFeedItem (functions/src/index.ts).
+    // ⚠ DEPLOY ORDER: `active` + `createdAt` needs the composite index in
+    // firestore.indexes.json; the emulator auto-indexes and HIDES a missing one.
+    // Indexes must ship BEFORE this code — `deploy:all` is safe (deploy:backend
+    // precedes deploy:hosting), a hosting-only deploy against an unindexed project
+    // is not. The moderation query is unfiltered, so it needs only the automatic
+    // single-field createdAt index.
+    const ref = moderate
+      ? query(base, orderBy('createdAt', 'desc'), limit(FEED_WINDOW))
+      : query(base, where('active', '==', true), orderBy('createdAt', 'desc'), limit(FEED_WINDOW));
     return onSnapshot(ref, (snap) => {
       const docs = snap.docs.map((d) => ({ ...(d.data() as FeedItem), id: d.id }));
       docs.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));

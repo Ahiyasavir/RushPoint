@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { translations } from '../i18n';
@@ -13,6 +13,33 @@ interface Ctx { ownerUid: string; gameId: string; runId: string }
 // Score notices (kind:'score') auto-hide once older than this so a stale bonus
 // doesn't pile up on late joiners; global announcements persist until dismissed.
 const SCORE_NOTICE_TTL_MS = 10 * 60 * 1000;
+
+// COST BOUND (why, not what): Firestore reads cannot be hard-capped on Blaze, so
+// an unbounded onSnapshot over a collection that grows all run long is the
+// uncapped billing tail — and these two are on EVERY participant's screen, so the
+// cost is per-phone. Both are already recency-only by construction: an
+// announcement is a banner the player dismisses, a score notice self-expires
+// after SCORE_NOTICE_TTL_MS (10 min), and a flash mission is filtered out the
+// moment `expiresAt` passes. Nothing older than the newest few dozen docs can
+// ever reach the screen, so the windows below cost nothing visible while making
+// the read cost of a 4-hour run flat instead of linear.
+//   30 announcements: a run pushes a handful of global banners plus per-team
+//   score notices; 30 covers a burst of adjustments and still can't starve a
+//   global broadcast, which is always among the newest.
+//   20 flash missions: they are short-TTL by design, so more than a handful can
+//   be live at once only if staff spam them — and only unexpired ones render.
+// The orderBy is load-bearing, NOT cosmetic: these docs carry Firestore auto-IDs,
+// so a bare limit() orders by __name__ and returns an ARBITRARY subset — it could
+// silently drop the announcement pushed one second ago. `createdAt` is the ISO
+// string stamped by pushAnnouncement / pushFlashMission / adjustTeamScore
+// (functions/src/index.ts).
+// ⚠ DEPLOY ORDER: equality + orderBy needs the composite indexes in
+// firestore.indexes.json, and the EMULATOR AUTO-INDEXES so a missing one is
+// invisible in dev and fails only in production. Indexes must ship BEFORE this
+// code: `deploy:all` is safe (deploy:backend runs before deploy:hosting), a
+// hosting-only deploy against a project without them is not.
+const ANNOUNCEMENT_WINDOW = 30;
+const FLASH_WINDOW = 20;
 
 interface AnnouncementDoc {
   id: string; message: string; messageHe?: string; active: boolean; createdAt?: string;
@@ -45,6 +72,12 @@ export default function LiveOps({
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/announcements`),
       where('active', '==', true),
+      // Newest-first (see the ANNOUNCEMENT_WINDOW note above). The render below
+      // preserves this order, so the freshest banner sits at the top of the
+      // stack where the player looks — previously the order was __name__, i.e.
+      // effectively random, so this is a fix as well as a bound.
+      orderBy('createdAt', 'desc'),
+      limit(ANNOUNCEMENT_WINDOW),
     );
     return onSnapshot(ref, (snap) => {
       setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnouncementDoc, 'id'>) })));
@@ -55,6 +88,10 @@ export default function LiveOps({
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/flashMissions`),
       where('isActive', '==', true),
+      // Newest-first, bounded (see FLASH_WINDOW above). Expiry is still decided
+      // in the render filter against `expiresAt`, never by this ordering.
+      orderBy('createdAt', 'desc'),
+      limit(FLASH_WINDOW),
     );
     return onSnapshot(ref, (snap) => {
       setFlashes(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FlashDoc, 'id'>) })));

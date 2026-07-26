@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
@@ -83,6 +83,13 @@ import { isValidCoord } from '@rushpoint/shared';
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
   : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
+
+// Newest-N feed cards this console's listener will ever hold — matches the
+// participant panel's window so the two surfaces never disagree about what
+// "recent" means. Rationale for bounding at all lives on the listener below.
+// Note the feed rail's badge count is therefore capped at this number; it is a
+// "there is activity" cue, not an audited total, so a saturated badge is fine.
+const FEED_WINDOW = 100;
 
 // One way for this console to say "that did not work"
 // (change: creator-no-silent-failures). Several live-ops handlers here used to
@@ -329,6 +336,25 @@ export default function RunConsolePage() {
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/feedItems`),
       where('active', '==', true),
+      // COST BOUND (why, not what): Firestore reads cannot be hard-capped on
+      // Blaze — no user-lowerable read quota exists — so an unbounded listener
+      // over a collection that grows for the whole run is the uncapped billing
+      // tail. This console is left OPEN on a laptop for hours, and every
+      // reconnect re-reads the feed from doc one. The panel is a recency wall of
+      // photos, so the newest 100 is everything a moderator acts on.
+      // The orderBy is load-bearing: feed docs carry Firestore auto-IDs, so a
+      // bare limit() would order by __name__ and return an ARBITRARY 100 —
+      // dropping the photo that just landed, which is exactly the one being
+      // moderated. `createdAt` is the ISO string stamped by writeFeedItem.
+      // ⚠ DEPLOY ORDER: `active` + `createdAt` needs the composite index in
+      // firestore.indexes.json, and the emulator auto-indexes so a missing one
+      // is invisible in dev and fails only in production. Indexes must ship
+      // BEFORE this code: `deploy:all` is safe (deploy:backend precedes
+      // deploy:hosting); a hosting-only deploy against an unindexed project is
+      // not. (`watchOrRead` degrades a finished run to a one-shot getDocs — same
+      // query, so the same index and the same bound apply there.)
+      orderBy('createdAt', 'desc'),
+      limit(FEED_WINDOW),
     );
     return watchOrRead(ref, runLive, (snap) => {
       const rows = snap.docs.map((d) => ({ ...(d.data() as Omit<FeedItemRow, 'id'>), id: d.id }));

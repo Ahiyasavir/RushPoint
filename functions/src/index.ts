@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 import { validate } from './validation';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
@@ -601,6 +601,128 @@ export const clearTeamOutOfBounds = loggedCallable('clearTeamOutOfBounds', async
 });
 
 
+// ─── Stale live-ops sweep (opportunistic) ─────────────────────────────────────
+// WHY THIS EXISTS. Two live-ops docs are written `active`/`isActive: true` and
+// then nothing ever turns them off: the `kind:'score'` notice `adjustTeamScore`
+// writes (only the CLIENT hides it, on a 10-minute TTL) and a `flashMission`
+// past its `expiresAt` (only the client's render filter drops it). Both keep
+// matching every participant's `onSnapshot` query forever.
+//
+// This is NOT the unbounded billing tail it looks like — `LiveOps.tsx` already
+// caps both listeners (`limit(30)` / `limit(20)`, `orderBy('createdAt','desc')`),
+// so a long run can never cost more than that per attach. What it IS, is a
+// CORRECTNESS bug against those bounds: expired docs occupy slots in a
+// newest-first window, so a still-relevant global banner can be pushed out of
+// the window by a burst of score notices the player is no longer even shown.
+// Clearing them keeps the bounded window full of things that still render, and
+// as a side effect shrinks each re-attach (a backgrounded PWA re-attaches a lot).
+//
+// SAFETY — the reason this cannot hide a live announcement: we only deactivate
+// documents the client ALREADY refuses to render (a score notice past the same
+// TTL the client applies, a flash mission past its own `expiresAt`). A global
+// `kind:'announcement'` banner is never touched at any age; it persists until an
+// operator calls `deactivateAnnouncement` or a player dismisses it, exactly as
+// before. Nothing anywhere reads an INACTIVE doc from either collection (the
+// sole reader is `LiveOps.tsx`, on `active == true` / `isActive == true`), and we
+// deactivate rather than delete so the history survives for any future recap.
+//
+// Shape: opportunistic — it piggybacks on the next staff-driven live-ops write
+// instead of a new scheduled function (deploy cost) or a new callable (which the
+// callable-coverage guard would fail until a test exists).
+
+/**
+ * Mirror of `SCORE_NOTICE_TTL_MS` in `apps/play-web/src/components/LiveOps.tsx`.
+ * If that TTL ever grows, this must grow with it — a smaller value here would
+ * retire a notice the client would still be showing.
+ */
+const SCORE_NOTICE_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * Extra slack on top of the TTL before the server retires a notice. The TTL is
+ * evaluated against each PHONE's clock, so a phone running slow could still be
+ * counting down a notice the server considers expired; this makes the server the
+ * strictly later of the two and keeps the sweep invisible.
+ */
+const SCORE_NOTICE_SWEEP_GRACE_MS = 60 * 1000;
+
+/**
+ * Hard cap on documents examined per collection per sweep. Bounds both the read
+ * cost of the sweep itself and the resulting batch: 2 × 40 = 80 writes, far under
+ * the 500-op WriteBatch ceiling (`MAX_BATCH_OPS = 450`), so this sweep is bounded
+ * by construction and never needs `chunk`/`deleteDocsInChunks`.
+ */
+const LIVE_OPS_SWEEP_LIMIT = 40;
+
+/**
+ * Retire live-ops documents that have outlived their own visibility rules.
+ * Best-effort and total: it NEVER throws, because every caller has already
+ * completed the operation the staff member actually asked for.
+ */
+async function sweepStaleLiveOps(ownerUid: string, gameId: string, runId: string): Promise<void> {
+  try {
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const runPath = FIRESTORE_PATHS.run(ownerUid, gameId, runId);
+    const batch = db.batch();
+    let ops = 0;
+
+    // Score notices. The `createdAt` range does the filtering server-side so a
+    // quiet run reads ZERO documents — the sweep costs nothing when there is
+    // nothing to clear. Comparing ISO strings lexicographically is chronological
+    // here because every writer stamps `new Date().toISOString()`: fixed-width,
+    // always UTC. The range also excludes any legacy doc with no `createdAt`,
+    // which is the fail-closed outcome we want (unknown age ⇒ leave it alone).
+    // `kind` is filtered in memory rather than in the query on purpose: a third
+    // equality would need a new composite index, and the range already keeps the
+    // candidate set tiny.
+    const noticeCutoff = new Date(now - SCORE_NOTICE_TTL_MS - SCORE_NOTICE_SWEEP_GRACE_MS).toISOString();
+    const staleNotices = await db
+      .collection(`${runPath}/${COLLECTIONS.ANNOUNCEMENTS}`)
+      .where('active', '==', true)
+      .where('createdAt', '<', noticeCutoff)
+      .orderBy('createdAt', 'asc')
+      .limit(LIVE_OPS_SWEEP_LIMIT)
+      .get();
+    for (const doc of staleNotices.docs) {
+      // Only a score notice self-expires. A `kind:'announcement'` doc (or a
+      // legacy doc with no `kind` at all, which the type says means
+      // 'announcement') stays active however old it is — retiring one of those
+      // WOULD be the "hid a live announcement mid-game" failure.
+      if ((doc.data() as { kind?: string }).kind !== 'score') continue;
+      batch.update(doc.ref, { active: false, deactivatedAt: nowIso });
+      ops++;
+    }
+
+    // Flash missions. Their lifetime is a per-doc `expiresAt` (the TTL is caller
+    // supplied), so there is no `createdAt` cutoff that would be correct for all
+    // of them, and no index on (isActive, expiresAt) to range on. Instead we scan
+    // the oldest still-active ones and expire in memory. That is self-limiting:
+    // because this sweep retires them, the active set stays down to the handful
+    // that are genuinely live, so the scan reads a handful too.
+    const activeFlashes = await db
+      .collection(`${runPath}/${COLLECTIONS.FLASH_MISSIONS}`)
+      .where('isActive', '==', true)
+      .orderBy('createdAt', 'asc')
+      .limit(LIVE_OPS_SWEEP_LIMIT)
+      .get();
+    for (const doc of activeFlashes.docs) {
+      const expiresAt = (doc.data() as { expiresAt?: unknown }).expiresAt;
+      if (typeof expiresAt !== 'string') continue;
+      const expiresMs = Date.parse(expiresAt);
+      // An unparseable stamp is not proof of expiry — leave it live and let the
+      // client keep deciding, same fail-open posture as the rest of the app.
+      if (!Number.isFinite(expiresMs) || expiresMs > now) continue;
+      batch.update(doc.ref, { isActive: false, deactivatedAt: nowIso });
+      ops++;
+    }
+
+    if (ops > 0) await batch.commit();
+  } catch (e) {
+    functions.logger.warn('sweepStaleLiveOps skipped', { ownerUid, gameId, runId, err: String(e) });
+  }
+}
+
+
 // ─── pushAnnouncement ─────────────────────────────────────────────────────────
 
 export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, context) => {
@@ -654,6 +776,12 @@ export const pushAnnouncement = loggedCallable('pushAnnouncement', async (data, 
   // it went to.
   const mirrorMsg = cleanTeamId ? `[→ ${teamName || cleanTeamId}] ${cleanMsg}` : cleanMsg;
   await mirrorToChat(ownerUid, gameId, { kind: 'announcement', message: mirrorMsg });
+
+  // Opportunistic: retire anything that has outlived its own visibility rules, so
+  // the banner just pushed isn't competing for a slot in the client's bounded
+  // newest-first window with notices nobody is being shown. AFTER the write, so a
+  // sweep failure can never cost the announcement itself (it also cannot throw).
+  await sweepStaleLiveOps(ownerUid, gameId, runId);
 
   return { announcementId: ref.id };
 });
@@ -729,6 +857,11 @@ export const pushFlashMission = loggedCallable('pushFlashMission', async (data, 
   await mirrorToChat(ownerUid, gameId, {
     kind: 'flashMission', title: cleanTitle, message: cleanDesc ?? '', bonusPoints: bonus,
   });
+
+  // Opportunistic sweep (see sweepStaleLiveOps): this is the write that most often
+  // follows a batch of missions having quietly expired, so it is the cheapest
+  // moment to retire them. Never throws; the mission above is already live.
+  await sweepStaleLiveOps(ownerUid, gameId, runId);
 
   return { id: ref.id, expiresAt };
 });
@@ -1388,6 +1521,12 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   } catch (e) {
     functions.logger.warn('adjustTeamScore score-notice write failed', { ownerUid, gameId, runId, teamId, err: String(e) });
   }
+
+  // This callable is the ONLY producer of `kind:'score'` notices, so it is also
+  // the natural place to retire the ones that have aged out — a run where staff
+  // adjust scores repeatedly is exactly the run where the notices accumulate.
+  // Runs after the notice write and, like it, cannot throw.
+  await sweepStaleLiveOps(ownerUid, gameId, runId);
 
   // The operator expects the adjustment on the board NOW — forced (unthrottled)
   // refresh; still skipped for a frozen board and best-effort like the notice.
