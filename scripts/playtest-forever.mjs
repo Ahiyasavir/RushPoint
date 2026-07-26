@@ -324,6 +324,26 @@ function ensureDepsInstalled() {
 // stack we won't launch). ensureDepsInstalled runs first as before.
 function buildProd() {
   return ensureDepsInstalled().then(() => new Promise((resolve) => {
+    // Rebuild @rushpoint/shared FIRST. functions compiles+bundles against
+    // packages/shared/dist, so a pull that adds a new shared export (e.g.
+    // galleryFilter) must rewrite dist BEFORE the functions build reads it — build
+    // functions against a stale dist and either the compile fails (→ stack keeps
+    // serving the old build) or the emulator later loads a shared missing that
+    // export and the callable throws INTERNAL at runtime. playtest:build (below)
+    // also builds shared, but it runs AFTER functions — too late. This honors the
+    // documented "shared before functions" invariant (see CLAUDE.md). Idempotent:
+    // the later shared:build inside playtest:build is a cheap no-op re-run.
+    log('building @rushpoint/shared before functions (functions compiles against shared/dist)…');
+    const sharedBuild = spawnSync('npm', ['run', 'shared:build'], {
+      cwd: ROOT,
+      stdio: ['ignore', fs.openSync(LOG, 'a'), fs.openSync(LOG, 'a')],
+      shell: process.platform === 'win32',
+    });
+    if (sharedBuild.status !== 0) {
+      log(`shared build FAILED (status=${sharedBuild.status ?? '?'}${sharedBuild.error ? `, ${sharedBuild.error.message}` : ''}) — not launching (functions would compile against a stale/broken shared); retrying next cycle.`);
+      resolve({ functionsOk: false, appsBuilt: false });
+      return;
+    }
     log('compile-gating functions: npm run build --workspace=functions…');
     const fnBuild = spawnSync('npm', ['run', 'build', '--workspace=functions'], {
       cwd: ROOT,
