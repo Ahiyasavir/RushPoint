@@ -1,0 +1,30 @@
+// Typecheck-only config for the CONTRACT SUITE.
+//
+// packages/data/tsconfig.check.json deliberately includes only `src` (it is the
+// types-only public surface). This config is its twin for `test`, so the suite
+// and the reference implementation are typechecked too:
+//
+//   npx tsc --noEmit -p packages/data/test/tsconfig.json
+//
+// Same compiler options as the package's check config, with @rushpoint/shared
+// resolved against shared's SOURCE so it runs in a fresh checkout with no
+// install and no shared:build. Emits nothing.
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "lib": ["ES2020", "DOM"],
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@rushpoint/shared": ["../../shared/src/index.ts"],
+      "@rushpoint/shared/*": ["../../shared/src/*"]
+    }
+  },
+  "include": [".", "../src"],
+  "exclude": ["node_modules"]
+}
