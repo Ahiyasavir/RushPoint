@@ -182,7 +182,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
       if (!teamId) return;
       const ref = doc(db, FIRESTORE_PATHS.team(session.ownerUid, session.gameId, session.runId, teamId));
       unsubDoc = onSnapshot(ref, () => { void refresh(); }, () => undefined);
-    });
+    }).catch(() => undefined);
+    // ensureAuth() deliberately rejects (and clears its cached promise) on a
+    // transient first-auth failure, so a reload on flaky signal would otherwise throw
+    // an unhandled promise rejection and skip attaching the listener for this mount.
+    // Swallow it — the 12s fallback poll below still recovers gameplay state.
 
     // Slow fallback poll keeps the leaderboard fresh (it arrives via the
     // callable, not our team doc) and recovers if the listener can't attach.

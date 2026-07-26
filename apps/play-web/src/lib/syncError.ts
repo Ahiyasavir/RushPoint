@@ -37,14 +37,19 @@ export function syncErrorVerdict(
     if (hasState) return 'game-gone';
     return firstLoadFails >= FIRST_LOAD_MAX_FAILS ? 'game-gone' : 'reconnect';
   }
-  if (code === 'unauthenticated' && hasState) {
-    // Mid-game `unauthenticated` is almost always a transient Firebase ID-token
-    // refresh window, not a terminal state: the SDK is briefly between tokens and
-    // the next poll succeeds once it re-mints. Once state has loaded at least once,
-    // treat it like any other transient code — keep the live board and reconnect
-    // instead of bouncing an actively-playing participant to the recovery card. On
-    // the FIRST load (!hasState) it stays fatal via isFatalSyncError below.
-    return 'reconnect';
+  if (code === 'unauthenticated') {
+    // `unauthenticated` is almost always a transient Firebase ID-token refresh
+    // window, not a terminal state: the SDK is briefly between tokens and the next
+    // poll succeeds once it re-mints.
+    //  - Mid-game (hasState): keep the live board and reconnect instead of bouncing
+    //    an actively-playing participant to the recovery card.
+    //  - FIRST load (!hasState): a tab reload mid-run races the anonymous ID-token
+    //    refresh, so the very first getMyTeamState can return `unauthenticated`
+    //    before the SDK re-mints. Give it the same first-load retry grace every
+    //    other transient code gets (change: fix-play-first-load-unauth-grace) and
+    //    only escalate to the hard "sync failed" screen once the budget is spent.
+    if (hasState) return 'reconnect';
+    return firstLoadFails >= FIRST_LOAD_MAX_FAILS ? 'sync-failed' : 'reconnect';
   }
   if (isFatalSyncError(code)) return 'sync-failed';
   // Transient / non-fatal: keep reconnecting while we have state, or until the

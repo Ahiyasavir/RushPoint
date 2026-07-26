@@ -41,10 +41,15 @@ check('verdict first-load not-found over max → game-gone', syncErrorVerdict('n
 check('verdict permission-denied → sync-failed', syncErrorVerdict('permission-denied', false, 0) === 'sync-failed');
 check('verdict permission-denied → sync-failed (with state)', syncErrorVerdict('permission-denied', true, 0) === 'sync-failed');
 
-// unauthenticated on the FIRST load (!hasState) is still fatal — no board to keep,
-// and we never got past auth.
-check('verdict unauthenticated → sync-failed (first load)', syncErrorVerdict('unauthenticated', false, 0) === 'sync-failed');
-check('verdict unauthenticated → sync-failed (first load, high budget)', syncErrorVerdict('unauthenticated', false, 99) === 'sync-failed');
+// unauthenticated on the FIRST load (!hasState) now gets the same first-load retry
+// grace as not-found / transient codes (change: fix-play-first-load-unauth-grace): a
+// tab reload mid-run races the anonymous ID-token refresh, so the very first
+// getMyTeamState can return `unauthenticated` before the SDK re-mints. Reconnect
+// while within the budget, and only give up (sync-failed) once it is spent.
+check('verdict first-load unauthenticated within budget → reconnect', syncErrorVerdict('unauthenticated', false, 0) === 'reconnect');
+check('verdict first-load unauthenticated below max → reconnect', syncErrorVerdict('unauthenticated', false, FIRST_LOAD_MAX_FAILS - 1) === 'reconnect');
+check('verdict first-load unauthenticated at max → sync-failed', syncErrorVerdict('unauthenticated', false, FIRST_LOAD_MAX_FAILS) === 'sync-failed');
+check('verdict first-load unauthenticated over max → sync-failed', syncErrorVerdict('unauthenticated', false, FIRST_LOAD_MAX_FAILS + 2) === 'sync-failed');
 
 // unauthenticated mid-game (hasState) is almost always a transient Firebase
 // ID-token refresh window, not a terminal state: keep the live board and reconnect

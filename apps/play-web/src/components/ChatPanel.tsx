@@ -22,16 +22,45 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
   const { ownerUid, gameId, runId } = ctx;
   const myUid = uid(); // stable for the session; drives own-vs-others attribution
 
-  // Single-doc listen on this team's thread.
+  // Single-doc listen on this team's thread. Firestore tears the listener down on
+  // error, and this effect only re-subscribes when its deps change — which they
+  // don't for a stable run — so one `unavailable`/token-refresh blip would freeze
+  // chat for the rest of the run. On error we fail open (clear the thread) AND
+  // schedule a bounded re-subscribe (2s→…→30s cap, always finite), unsubscribing
+  // the old listener first so we never stack concurrent ones (change:
+  // fix-play-chat-listener-resubscribe).
   useEffect(() => {
     const ref = doc(db, FIRESTORE_PATHS.runChat(ownerUid, gameId, runId, teamId));
-    return onSnapshot(ref, (snap) => {
-      const msgs = (snap.data() as { messages?: ChatMessage[] } | undefined)?.messages ?? [];
-      setMessages(msgs);
-      // The panel is open while mounted, so anything arriving now is seen.
-      // Marker, not a count (change: team-chat-unread-accuracy).
-      saveChatSeen(runId, teamId, chatSeenMarker(msgs));
-    }, () => setMessages([]));
+    let unsub: (() => void) | undefined;
+    let retryTimer: number | undefined;
+    let backoff = 2_000;
+    let cancelled = false;
+
+    const subscribe = () => {
+      if (cancelled) return;
+      unsub = onSnapshot(ref, (snap) => {
+        backoff = 2_000; // healthy snapshot — reset the backoff
+        const msgs = (snap.data() as { messages?: ChatMessage[] } | undefined)?.messages ?? [];
+        setMessages(msgs);
+        // The panel is open while mounted, so anything arriving now is seen.
+        // Marker, not a count (change: team-chat-unread-accuracy).
+        saveChatSeen(runId, teamId, chatSeenMarker(msgs));
+      }, () => {
+        setMessages([]); // fail open — never crash the panel
+        unsub?.();
+        unsub = undefined;
+        if (cancelled) return;
+        retryTimer = window.setTimeout(subscribe, backoff);
+        backoff = Math.min(backoff * 2, 30_000);
+      });
+    };
+    subscribe();
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
   }, [ownerUid, gameId, runId, teamId]);
 
   // Keep the newest message in view.

@@ -111,11 +111,41 @@ export default function FeedPanel({
     const ref = moderate
       ? query(base, orderBy('createdAt', 'desc'), limit(FEED_WINDOW))
       : query(base, where('active', '==', true), orderBy('createdAt', 'desc'), limit(FEED_WINDOW));
-    return onSnapshot(ref, (snap) => {
-      const docs = snap.docs.map((d) => ({ ...(d.data() as FeedItem), id: d.id }));
-      docs.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-      setItems(docs);
-    }, () => setItems([]));
+
+    // Firestore tears the listener down on error, and this effect only re-subscribes
+    // when its deps change — which they don't for a stable run — so one
+    // `unavailable`/token-refresh blip would freeze the feed for the rest of the run.
+    // On error we fail open (clear the feed) AND schedule a bounded re-subscribe
+    // (2s→…→30s cap, always finite), unsubscribing the old listener first so we never
+    // stack concurrent ones (change: fix-play-feed-listener-resubscribe).
+    let unsub: (() => void) | undefined;
+    let retryTimer: number | undefined;
+    let backoff = 2_000;
+    let cancelled = false;
+
+    const subscribe = () => {
+      if (cancelled) return;
+      unsub = onSnapshot(ref, (snap) => {
+        backoff = 2_000; // healthy snapshot — reset the backoff
+        const docs = snap.docs.map((d) => ({ ...(d.data() as FeedItem), id: d.id }));
+        docs.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+        setItems(docs);
+      }, () => {
+        setItems([]); // fail open — never crash the panel
+        unsub?.();
+        unsub = undefined;
+        if (cancelled) return;
+        retryTimer = window.setTimeout(subscribe, backoff);
+        backoff = Math.min(backoff * 2, 30_000);
+      });
+    };
+    subscribe();
+
+    return () => {
+      cancelled = true;
+      unsub?.();
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
   }, [ownerUid, gameId, runId, moderate]);
 
   function persistMute(next: FeedMuteState) {
