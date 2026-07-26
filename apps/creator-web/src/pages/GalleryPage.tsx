@@ -163,9 +163,14 @@ export default function GalleryPage() {
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(tasks.map((tk) => [tk.id, deriveLikeView(tk, likedIds)])) }));
       }
     } catch (e) {
-      // A failed search must not hang the gallery on an eternal spinner: surface
-      // the error and settle to an empty result the user can retry from.
-      await dialog.alert(e instanceof Error ? e.message : t.gallery.searchFailed);
+      // A failed search must not hang the gallery on an eternal spinner: surface a
+      // FRIENDLY, localized message and settle to an empty result the user can retry
+      // from. Never echo the raw server error to the user — a Firebase callable
+      // failure carries a dev-facing code as its message (e.g. "INTERNAL"), which is
+      // meaningless (and untranslated) to a creator. Keep the real error in the
+      // console for diagnosis.
+      console.warn('gallery search failed', e);
+      await dialog.alert(t.gallery.searchFailed);
       if (tab === 'games') setGames([]); else setTasks([]);
     } finally { setSearching(false); }
   }
