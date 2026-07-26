@@ -340,6 +340,15 @@ const HE = {
     teamLabel: 'קבוצה',
     openLocation: 'פתחו מיקום',
     ack: 'קבלה',
+    // Human labels for the alert doc `type` written by the server (triggerSOS ⇒
+    // 'sos', safe-zone breach ⇒ 'safe_zone_breach'); the extra AlertType members
+    // are covered too. Unknown types fall back to the raw value at the call site.
+    alertType: {
+      sos: 'מצוקה',
+      safe_zone_breach: 'יציאה מהאזור המותר',
+      technical: 'תקלה טכנית',
+      stationary: 'ללא תנועה',
+    },
     photoReview: 'בדיקת תמונות',
     noSubmissions: 'אין הגשות ממתינות.',
     taskLabel: 'משימה',
@@ -928,6 +937,15 @@ const EN: typeof HE = {
     teamLabel: 'team',
     openLocation: 'open location',
     ack: 'Ack',
+    // Human labels for the alert doc `type` written by the server (triggerSOS ⇒
+    // 'sos', safe-zone breach ⇒ 'safe_zone_breach'); the extra AlertType members
+    // are covered too. Unknown types fall back to the raw value at the call site.
+    alertType: {
+      sos: 'SOS',
+      safe_zone_breach: 'Left safe zone',
+      technical: 'Technical issue',
+      stationary: 'Not moving',
+    },
     photoReview: 'Photo review',
     noSubmissions: 'No submissions waiting.',
     taskLabel: 'task',

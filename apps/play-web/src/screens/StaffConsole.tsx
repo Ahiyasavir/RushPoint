@@ -358,7 +358,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             <Card key={a.id} className="p-3 mb-2 border-danger/40">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-zinc-100 uppercase">{a.type}</div>
+                  <div className="text-sm font-medium text-zinc-100">{(t.staff.alertType as Record<string, string>)[a.type] ?? a.type}</div>
                   <div className="text-xs text-zinc-500 truncate">{t.staff.teamLabel} {nameFor(a.teamId)}</div>
                   {a.message && <div dir="auto" className="text-sm text-zinc-300 mt-1">{a.message}</div>}
                   {a.lat != null && a.lng != null && (
@@ -393,17 +393,22 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           : pending.map((s) => {
             const key = `${s.teamId}:${s.taskId}`;
             const hasUrl = /^https?:\/\//.test(s.photoUrl);
-            // audio-tasks: an audio submission plays inline; everything else falls
-            // back to the existing photo <img> (or a plain link for non-URLs).
+            // audio-tasks: an audio submission plays inline. Render the <img> ONLY
+            // when the submission is positively an image — a declared 'photo', or a
+            // legacy row (no mediaKind) whose URL carries an image extension. A
+            // missing/malformed mediaKind on an AUDIO doc then routes to <audio> (by
+            // kind) or, failing that, to the 📎 fallback below — never a broken <img>.
             const isAudio = s.mediaKind === 'audio';
+            const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
+            const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
             return (
               <Card key={key} className="p-3 mb-2">
                 <div dir="auto" className="text-sm font-medium text-zinc-100">{s.displayName}</div>
                 <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} {s.taskId.slice(0, 10)}</div>
                 {hasUrl && isAudio
                   ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
-                  : hasUrl
-                  ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-cover" />
+                  : hasUrl && isImage
+                  ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
                   : <div className="text-xs text-zinc-500 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
                 <div className="flex gap-2">
                   <button
