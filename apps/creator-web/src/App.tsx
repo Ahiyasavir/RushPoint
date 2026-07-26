@@ -31,13 +31,15 @@ const LegalPage      = lazyWithRetry('legal', () => import('./pages/LegalPage'))
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const stored = localStorage.getItem('rp-theme');
-    if (stored) return stored === 'dark';
+    try {
+      const stored = localStorage.getItem('rp-theme');
+      if (stored) return stored === 'dark';
+    } catch { /* storage blocked — fall back to the OS preference */ }
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
-    localStorage.setItem('rp-theme', dark ? 'dark' : 'light');
+    try { localStorage.setItem('rp-theme', dark ? 'dark' : 'light'); } catch { /* storage blocked — no-op */ }
   }, [dark]);
   return [dark, setDark] as const;
 }

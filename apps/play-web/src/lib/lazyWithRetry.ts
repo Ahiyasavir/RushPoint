@@ -22,7 +22,14 @@ export function lazyWithRetry<P extends object>(
   factory: () => Promise<{ default: ComponentType<P> }>,
 ) {
   return lazy<ComponentType<P>>(() =>
-    factory().catch((err) => {
+    factory().then((mod) => {
+      // Import succeeded: clear any prior stale-chunk reload flag so a LATER
+      // redeploy in the same session gets its own one automatic reload instead
+      // of rethrowing to the ErrorBoundary (the self-heal must be per-redeploy,
+      // not one-shot per session).
+      try { sessionStorage.removeItem(`rushpoint.chunkReload.${key}`); } catch { /* storage blocked — no-op */ }
+      return mod;
+    }).catch((err) => {
       const flag = `rushpoint.chunkReload.${key}`;
       let already = true;
       try {
