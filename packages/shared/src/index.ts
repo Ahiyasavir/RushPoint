@@ -95,3 +95,6 @@ export * from './tags';
 // Live per-run task availability — the pause/close/resume decision both the
 // routing filters and the run console read (change: live-task-pause).
 export * from './liveTaskStatus';
+// In-memory gallery FACET filters applied after the tags DB query + ranking,
+// before the page slice (change: gallery-facet-filters).
+export * from './galleryFilter';

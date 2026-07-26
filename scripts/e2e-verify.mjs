@@ -7794,6 +7794,60 @@ async function main() {
     check('tags needed NO participant-allowlist change (already allowlisted)',
       ALLOWED_TASK_KEYS.has('tags'));
 
+    // (change: gallery-facet-filters) In-memory facets applied AFTER the tags DB
+    // query and popularity ranking, BEFORE the page slice. `tags` stays the sole
+    // DB filter; mode/type/difficulty/hasLocation/sort are the second pass.
+    // Publish a distinctly-tagged INDIVIDUAL game so the mode facet has both to
+    // include and to exclude within one tag window.
+    const FACET_TAG = 'facetprobe';
+    const { gameId: gTeam } = await creator.call('createGame', {
+      title: 'Facet Team Game', mode: 'team', tags: [FACET_TAG],
+    });
+    await creator.call('updateGame', {
+      gameId: gTeam, tags: [FACET_TAG],
+      stages: [{ id: 'ft0', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'ft-a', title: 'Facet quiz', type: 'quiz', triggerMode: 'instant',
+          answers: ['x'], difficulty: 3, estimatedMinutes: 3, pointValue: 20, maxConcurrentTeams: 5 },
+      ] }],
+    });
+    await creator.call('publishGame', { gameId: gTeam, visibility: 'public' });
+    const { gameId: gSolo } = await creator.call('createGame', {
+      title: 'Facet Solo Game', mode: 'individual', tags: [FACET_TAG],
+    });
+    await creator.call('updateGame', {
+      gameId: gSolo, tags: [FACET_TAG],
+      stages: [{ id: 'fs0', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'fs-a', title: 'Facet field', type: 'self_report', triggerMode: 'instant',
+          difficulty: 1, estimatedMinutes: 3, pointValue: 20, maxConcurrentTeams: 5 },
+      ] }],
+    });
+    await creator.call('publishGame', { gameId: gSolo, visibility: 'public' });
+
+    const facetTeam = await creator.call('searchGallery', { tags: [FACET_TAG], mode: 'team', limit: 50 });
+    const facetTeamIds = (facetTeam?.games ?? []).map((g) => g.id);
+    check('searchGallery mode facet returns ONLY team games',
+      facetTeamIds.includes(gTeam) && !facetTeamIds.includes(gSolo)
+      && (facetTeam?.games ?? []).every((g) => g.mode === 'team'),
+      JSON.stringify(facetTeamIds));
+    const facetSolo = await creator.call('searchGallery', { tags: [FACET_TAG], mode: 'individual', limit: 50 });
+    const facetSoloIds = (facetSolo?.games ?? []).map((g) => g.id);
+    check('searchGallery mode facet returns ONLY individual games',
+      facetSoloIds.includes(gSolo) && !facetSoloIds.includes(gTeam),
+      JSON.stringify(facetSoloIds));
+
+    const libQuiz = await creator.call('searchTaskLibrary', { tags: [FACET_TAG], type: 'quiz', limit: 100 });
+    check('searchTaskLibrary type facet narrows to that type',
+      (libQuiz?.tasks ?? []).length > 0
+      && (libQuiz?.tasks ?? []).every((t) => t.type === 'quiz')
+      && (libQuiz?.tasks ?? []).some((t) => t.id === `${gTeam}_ft-a`),
+      JSON.stringify((libQuiz?.tasks ?? []).map((t) => t.type)));
+    const libHard = await creator.call('searchTaskLibrary', { tags: [FACET_TAG], difficulty: 3, limit: 100 });
+    check('searchTaskLibrary difficulty facet is AT-LEAST (>=)',
+      (libHard?.tasks ?? []).every((t) => (t.difficulty ?? 0) >= 3)
+      && (libHard?.tasks ?? []).some((t) => t.id === `${gTeam}_ft-a`)
+      && !(libHard?.tasks ?? []).some((t) => t.id === `${gSolo}_fs-a`),
+      JSON.stringify((libHard?.tasks ?? []).map((t) => t.difficulty)));
+
     // (change: gallery-popular-tags) getPopularTags surfaces the tags creators are
     // actually using, so the Builder can offer real quick-add chips. The published
     // game above put 'Jerusalem' (and its Hebrew siblings) into the world-readable

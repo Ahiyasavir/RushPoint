@@ -12,9 +12,14 @@ import {
   rankGalleryResults,
   publicTaskLocation,
   isCoarsePublicPoint,
+  applyGalleryFacets,
   type Game,
   type Task,
   type GeoPoint,
+  type GameMode,
+  type TaskType,
+  type GalleryGameSort,
+  type GalleryTaskSort,
   type PublicGame,
   type PublicTask,
   type PublicLike,
@@ -242,32 +247,38 @@ export const searchGallery = loggedCallable('searchGallery', async (data, contex
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   await enforceRateLimit(context.auth.uid, 'searchGallery');
 
-  const { query = '', tags = [], limit = 20 } = data as {
+  const { query = '', tags = [], limit = 20, mode, sort } = data as {
     query?: string;
     tags?: string[];
     limit?: number;
+    mode?: GameMode;
+    sort?: GalleryGameSort;
   };
 
   const HARD_CAP = 50;
   const wanted = Math.min(limit, HARD_CAP);
-  // With a text query the in-memory filter runs AFTER the fetch, so a small
-  // `limit` used to shrink the pool the filter got to search. Widen to the cap
-  // and trim after ranking instead.
-  const fetchSize = query.trim() ? HARD_CAP : wanted;
+  // With a text query OR a facet the in-memory pass runs AFTER the fetch, so a
+  // small `limit` used to shrink the pool it got to work on. Widen to the cap and
+  // trim after ranking+faceting instead.
+  const fetchSize = query.trim() || mode || sort ? HARD_CAP : wanted;
 
   const window = await fetchRankedWindow<PublicGame>('publicGames', tags, fetchSize);
 
   // Relevance first, popularity as the tiebreak inside a relevance tier — a more
   // popular weaker match must never outrank a stronger one. With an empty query
   // every item is an equal match and this degenerates to pure popularity order.
-  const games = rankGalleryResults(window, query, (g) => ({
+  const ranked = rankGalleryResults(window, query, (g) => ({
     id: g.id,
     title: g.title,
     extras: [g.description, ...(g.tags ?? [])],
     popularity: g.popularity,
     uses: g.playCount,
     likes: g.likeCount,
-  })).slice(0, wanted);
+  }));
+
+  // FACET pass (change: gallery-facet-filters): mode narrows, sort re-orders — in
+  // memory, after ranking, before the page slice. `tags` stays the sole DB filter.
+  const games = applyGalleryFacets(ranked, { mode, sort }, 'game').slice(0, wanted);
 
   const likedIds = await likedIdsFor('game', context.auth.uid, games.map((g) => g.id));
   return { games, likedIds };
@@ -281,26 +292,41 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
   await enforceRateLimit(context.auth.uid, 'searchTaskLibrary');
 
-  const { query = '', tags = [], limit = 30 } = data as {
+  const { query = '', tags = [], limit = 30, type, difficulty, hasLocation, sort } = data as {
     query?: string;
     tags?: string[];
     limit?: number;
+    type?: TaskType;
+    difficulty?: number;
+    hasLocation?: boolean;
+    sort?: GalleryTaskSort;
   };
 
   const HARD_CAP = 100;
   const wanted = Math.min(limit, HARD_CAP);
-  const fetchSize = query.trim() ? HARD_CAP : wanted;
+  const hasFacet = type !== undefined || difficulty !== undefined || hasLocation !== undefined || !!sort;
+  const fetchSize = query.trim() || hasFacet ? HARD_CAP : wanted;
 
   const window = await fetchRankedWindow<PublicTask>('publicTasks', tags, fetchSize);
 
-  const ranked = rankGalleryResults(window, query, (t) => ({
+  const rankedAll = rankGalleryResults(window, query, (t) => ({
     id: t.id,
     title: t.title,
     extras: [t.description, t.sourceGameTitle, ...(t.tags ?? [])],
     popularity: t.popularity,
     uses: t.copyCount,
     likes: t.likeCount,
-  })).slice(0, wanted);
+  }));
+
+  // FACET pass (change: gallery-facet-filters): type/difficulty(≥)/hasLocation
+  // narrow, sort re-orders — in memory, after ranking, before the page slice.
+  // `tags` stays the sole DB filter. hasLocation reads the stored `approxLocation`
+  // (a mission published as located carries one); the exact-point reconciliation
+  // below only refines WHERE a located task plots, never whether it has a spot.
+  const ranked = applyGalleryFacets(rankedAll, { type, difficulty, hasLocation, sort }, 'task').slice(
+    0,
+    wanted,
+  );
 
   // Location contract (change: gallery-precise-task-location + gallery-map-serve-exact):
   // the gallery map shows WHERE a creator placed a task — a point of interest, not a
