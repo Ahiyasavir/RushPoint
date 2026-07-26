@@ -174,6 +174,24 @@ export const setPublicLike     = callable<
   { liked: boolean; likeCount: number; popularity: number }
 >('setPublicLike');
 
+// ── Popular tags (Builder quick-add suggestions) ──
+// Most-used tags across the gallery, so the Builder can offer a one-tap "add this
+// tag" row. Callable per the deployed backend (functions/src/gallery/index.ts).
+export const getPopularTags = callable<{ limit?: number }, { tags: string[] }>('getPopularTags');
+// Memoized once per session so the game-tags field and the task-tags field share a
+// single round trip instead of each calling. Fails SAFE: any error resolves to an
+// empty list, so a suggestion row that cannot load simply never renders — it never
+// throws into the Builder.
+let popularTagsCache: Promise<string[]> | undefined;
+export function loadPopularTags(limit = 20): Promise<string[]> {
+  if (!popularTagsCache) {
+    popularTagsCache = getPopularTags({ limit })
+      .then((r) => (Array.isArray(r?.tags) ? r.tags : []))
+      .catch(() => []);
+  }
+  return popularTagsCache;
+}
+
 // ── Account management ──
 export const updateMyProfile = callable<{ displayName: string }, { ok: boolean; displayName: string }>('updateMyProfile');
 export const exportMyData    = callable<void, MyDataExport>('exportMyData');

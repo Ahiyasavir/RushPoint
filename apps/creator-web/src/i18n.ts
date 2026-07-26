@@ -1389,6 +1389,8 @@ const HE = {
     tagsHelp: 'פסיק פותח תגית חדשה. התגיות מופיעות מתחת לשדה מיד עם ההקלדה.',
     taskTagsLabel: 'תגיות למשימה (מופרדות בפסיק)',
     taskTagsPlaceholder: 'חוץ, חידה, צילום',
+    // Quick add row of popular gallery tags (change: recommended-tags-quick-add).
+    popularTags: 'תגיות מומלצות',
     moreTags: (n: number) => `+${n} תגיות`,
     webhookLabel: 'התראות לצ׳אט (סלאק / טימס)',
     webhookHelp: 'הדביקו קישור נכנס מסלאק או טימס כדי לשקף הודעות ומשימות בזק לערוץ שלכם.',
@@ -2996,6 +2998,8 @@ const EN: typeof HE = {
     tagsHelp: 'A comma starts a new tag. Your tags appear below the field as you type.',
     taskTagsLabel: 'Mission tags (comma separated)',
     taskTagsPlaceholder: 'outdoor, puzzle, photo',
+    // Quick add row of popular gallery tags (change: recommended-tags-quick-add).
+    popularTags: 'Recommended tags',
     moreTags: (n: number) => `+${n} tags`,
     webhookLabel: 'Chat alerts (Slack / Teams)',
     webhookHelp: 'Paste a Slack or Teams incoming webhook URL to mirror announcements and flash missions to your channel.',

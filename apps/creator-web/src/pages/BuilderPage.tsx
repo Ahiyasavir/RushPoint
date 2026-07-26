@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
-import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks } from '@rushpoint/shared';
+import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags } from '@rushpoint/shared';
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
@@ -16,7 +16,7 @@ import {
 import type {
   Announcements, DragEndEvent, DragStartEvent, KeyboardCoordinateGetter, ScreenReaderInstructions,
 } from '@dnd-kit/core';
-import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '../services/calls';
+import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPopularTags } from '../services/calls';
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
@@ -1048,6 +1048,10 @@ function InstructionsField({ game, patch }: { game: Game; patch: (p: Partial<Gam
 function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
   const b = useT().builder;
   const [raw, setRaw] = useState(game.tags.join(', '));
+  // Popular gallery tags offered as one-tap "quick add" chips. Loaded once, shared
+  // with the task-tags field; a failed fetch resolves to [] so the row just hides.
+  const [popular, setPopular] = useState<string[]>([]);
+  useEffect(() => { let live = true; void loadPopularTags().then((t) => { if (live) setPopular(t); }); return () => { live = false; }; }, []);
   // Resync the raw string only when the persisted tags diverge from what the raw
   // string would produce — i.e. an async load or undo/redo, NOT the creator's own
   // keystrokes (which must keep their in-progress separators intact).
@@ -1056,6 +1060,10 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
     if (JSON.stringify(derived) !== JSON.stringify(game.tags)) setRaw(game.tags.join(', '));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.tags]);
+  // Only suggest tags the game does not already carry (case-insensitive). normalizeTags
+  // on add makes the tap idempotent regardless, so this is purely to keep the row tidy.
+  const have = new Set(game.tags.map((t) => t.toLowerCase()));
+  const suggestions = popular.filter((t) => !have.has(t.toLowerCase())).slice(0, 12);
   return (
     <div>
       <Label>{b.tagsLabel}</Label>
@@ -1070,6 +1078,24 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           copy (change: game-task-tags). Typing a comma now visibly splits one
           chip into two. */}
       <TagChips tags={game.tags} className="mt-1.5" more={b.moreTags} max={20} />
+      {suggestions.length > 0 && (
+        <div className="mt-2">
+          <p className="text-[11px] text-[--ink-3] mb-1">{b.popularTags}</p>
+          <div className="flex flex-wrap items-center gap-1">
+            {suggestions.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                dir="auto"
+                onClick={() => patch({ tags: normalizeTags([...game.tags, tag]) })}
+                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-rp-fire hover:bg-rp-fire/10"
+              >
+                + {tag}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="text-xs text-zinc-500 mt-1">{b.tagsHelp}</p>
     </div>
   );

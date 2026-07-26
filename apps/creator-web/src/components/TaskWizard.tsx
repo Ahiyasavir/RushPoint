@@ -21,9 +21,11 @@ import {
   defaultExpectedDurationMinutes, TASK_DURATION_MAX_MINUTES,
   // visible-time-estimates: the WALK INCLUSIVE estimate the scoring sigmoid reads.
   defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
+  normalizeTags,
 } from '@rushpoint/shared';
 import { Advanced, Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
+import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
 import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
@@ -1320,6 +1322,10 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
 // label, it was that nothing ever showed the tags back.
 function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
   const [raw, setRaw] = useState((task.tags ?? []).join(', '));
+  // Popular gallery tags for one-tap "quick add" (change: recommended-tags-quick-add).
+  // Shares the memoized fetch with the game-tags field; failure resolves to [].
+  const [popular, setPopular] = useState<string[]>([]);
+  useEffect(() => { let live = true; void loadPopularTags().then((t) => { if (live) setPopular(t); }); return () => { live = false; }; }, []);
   // Resync only when the persisted tags diverge from what the raw string would
   // produce (task switch / undo), never on the creator's own keystrokes.
   useEffect(() => {
@@ -1327,12 +1333,33 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
     if (JSON.stringify(derived) !== JSON.stringify(task.tags ?? [])) setRaw((task.tags ?? []).join(', '));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task.id, task.tags]);
+  const current = task.tags ?? [];
+  const have = new Set(current.map((t) => t.toLowerCase()));
+  const suggestions = popular.filter((t) => !have.has(t.toLowerCase())).slice(0, 12);
   return (
     <div>
       <Label dense>{b.taskTagsLabel}</Label>
       <Input dense value={raw} placeholder={b.taskTagsPlaceholder} dir="auto"
         onChange={(e) => { setRaw(e.target.value); set({ tags: parseTagsInput(e.target.value) }); }} />
       <TagChips tags={task.tags} className="mt-1.5" more={b.moreTags} max={20} />
+      {suggestions.length > 0 && (
+        <div className="mt-2">
+          <p className="text-[11px] text-[--ink-3] mb-1">{b.popularTags}</p>
+          <div className="flex flex-wrap items-center gap-1">
+            {suggestions.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                dir="auto"
+                onClick={() => set({ tags: normalizeTags([...current, tag]) })}
+                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-rp-fire hover:bg-rp-fire/10"
+              >
+                + {tag}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <p className="text-[11px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
     </div>
   );
