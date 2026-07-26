@@ -21,19 +21,20 @@
 ## 5. TDD — build-integrity guard (pure, in `npm test`)
 - [x] `scripts/test-functions-shared-bundle.ts`: functions declares shared; shared is
       bundled not `--external`; the build rebuilds shared before esbuild. Source-only.
-- [ ] `npx tsx scripts/test-functions-shared-bundle.ts` passes; and it goes RED if the
-      `prebuild` is removed (spot-check by temporarily deleting it).
+- [x] Verified RED→GREEN: fails (exit 1) with `prebuild` removed, passes (4/4) with it.
 
 ## 6. TDD — e2e reachability scenario
-- [ ] Add "gallery reachability" scenario to `scripts/e2e-verify.mjs`: publish a game with
-      a tag + located + locationless mission; assert reachable via searchGallery (text /
-      tag / mode+sort) and searchTaskLibrary (tag / type+hasLocation); getPopularTags no
-      throw.
-- [ ] `node scripts/emulator-exec.mjs "node scripts/e2e-verify.mjs"` → the new scenario is
-      GREEN and the callable-coverage guard stays satisfied.
+- [x] Added "gallery reachability" scenario to `scripts/e2e-verify.mjs`: publish a game
+      with a tag + located + locationless mission; assert reachable via searchGallery
+      (text / tag / mode+sort) and searchTaskLibrary (tag / type+hasLocation);
+      getPopularTags no throw.
+- [x] `node scripts/emulator-exec.mjs "node scripts/e2e-verify.mjs"` → GREEN: 9/9 checks,
+      0 failures suite-wide; callable-coverage guard stays satisfied.
 
 ## 7. Gates
-- [ ] `npm run verify` (typecheck · lint · test · builds · bundle · base · i18n) green.
-- [ ] `npm run e2e` (under emulator-exec) green end to end.
-- [ ] Commit + push. The auto-deploy host self-heals on its next poll (the direct
-      functions build now rebuilds shared first); no supervisor restart required.
+- [x] `npm run verify` (typecheck · lint · test · builds · bundle · base · i18n) green
+      (includes the new build guard).
+- [x] `npm run e2e` (under emulator-exec) green end to end (exit 0, twice).
+- [x] Commit + push (c43dea6, a81c9a6, ac47d63, 7468845, ed2e1ff). The auto-deploy host
+      self-heals on its next poll (the direct functions build now rebuilds shared first);
+      no supervisor restart required.
