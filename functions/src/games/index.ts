@@ -72,6 +72,7 @@ import {
 // Gallery ranking signals (change: gallery-popularity-ranking) — the single
 // transactional writer, so a counter can never move without its score.
 import { bumpPublicSignals, scoreFor } from '../gallery/popularityStore';
+import { bumpTagStats } from '../gallery/tagStats';
 import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
 
@@ -423,11 +424,22 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
 
 /** Remove the game's public gallery index (doc + its task rows). Idempotent. */
 async function removeGalleryIndex(gameId: string): Promise<void> {
+  // Gather the tags on the docs about to be removed BEFORE deletion, so the
+  // denormalized popular-tag counter can be decremented (change:
+  // gallery-popular-tags). Best-effort — read failures fall back to [].
+  const priorGameSnap = await db.doc(`publicGames/${gameId}`).get()
+    .catch((e) => { logBestEffort('publicGames.readPrior.remove', { gameId }, e); return null; });
   await db.doc(`publicGames/${gameId}`).delete().catch((e) => logBestEffort('publicGames.delete', { gameId }, e));
   // Chunked: a large game can have >500 public tasks, past the per-batch cap.
   const publicTasksSnap = await db.collection('publicTasks')
     .where('sourceGameId', '==', gameId).get();
+  const priorTags = normalizeTags([
+    ...normalizeTags((priorGameSnap?.data() as Partial<PublicGame> | undefined)?.tags),
+    ...publicTasksSnap.docs.flatMap((d) => normalizeTags((d.data() as Partial<PublicTask>).tags)),
+  ]);
   await deleteDocsInChunks(publicTasksSnap.docs.map((d) => d.ref));
+  // OUTSIDE/AFTER the deletion; never throws, so removal always succeeds.
+  await bumpTagStats([], priorTags);
 }
 
 /** Every access code pointing at a run of this game. Needs the ownerUid+gameId index. */
@@ -835,14 +847,44 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
       batch.set(publicTaskRef, publicTask);
     }
     await batch.commit();
+
+    // Popular-tag denormalizer (change: gallery-popular-tags). OUTSIDE the critical
+    // batch and best-effort (bumpTagStats never throws), so it can never affect
+    // publish success. Diff the distinct tag union this game NOW publishes against
+    // the union it published before (from the prior docs read at ~748-756): the
+    // published game's tags + every published task's tags, deduped via normalizeTags.
+    // Unchanged tags ⇒ added/removed both empty ⇒ no-op ⇒ re-publish is idempotent.
+    const newTags = normalizeTags([
+      ...publicGame.tags,
+      ...allTasks.flatMap((t) => normalizeTags(t.tags)),
+    ]);
+    const priorTags = normalizeTags([
+      ...normalizeTags(priorGame.tags),
+      ...[...priorTasks.values()].flatMap((t) => normalizeTags(t.tags)),
+    ]);
+    const priorSet = new Set(priorTags);
+    const newSet = new Set(newTags);
+    const added = newTags.filter((t) => !priorSet.has(t));
+    const removed = priorTags.filter((t) => !newSet.has(t));
+    await bumpTagStats(added, removed);
   } else {
     // Remove from public index
     const batch = db.batch();
     batch.delete(db.doc(`publicGames/${gameId}`));
     const publicTasksSnap = await db.collection('publicTasks')
       .where('sourceGameId', '==', gameId).get();
+    // Gather the tags on the docs being removed BEFORE deletion, so the
+    // denormalized popular-tag counter can be decremented (change:
+    // gallery-popular-tags). Best-effort + outside the batch below.
+    const priorGameSnap = await db.doc(`publicGames/${gameId}`).get()
+      .catch((e) => { logBestEffort('publicGames.readPrior.unpublish', { gameId }, e); return null; });
+    const priorTags = normalizeTags([
+      ...normalizeTags((priorGameSnap?.data() as Partial<PublicGame> | undefined)?.tags),
+      ...publicTasksSnap.docs.flatMap((d) => normalizeTags((d.data() as Partial<PublicTask>).tags)),
+    ]);
     for (const d of publicTasksSnap.docs) batch.delete(d.ref);
     await batch.commit();
+    await bumpTagStats([], priorTags);
   }
 
   await ref.update({ visibility, updatedAt: now });
