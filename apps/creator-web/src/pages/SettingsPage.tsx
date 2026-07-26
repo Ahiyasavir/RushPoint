@@ -71,7 +71,7 @@ export default function SettingsPage() {
         onSaved={refreshUser}
       />
       <EmailCard s={s} currentEmail={user?.email ?? ''} isPasswordAccount={isPasswordAccount} uid={user?.uid ?? ''} onSaved={refreshUser} />
-      <PasswordCard s={s} isPasswordAccount={isPasswordAccount} />
+      {isPasswordAccount && <PasswordCard s={s} />}
       <SignInMethodsCard s={s} providers={providers} accountEmail={user?.email ?? ''} onChanged={refreshProviders} />
 
       <SectionHeader>{s.sectionPreferences}</SectionHeader>
@@ -231,7 +231,7 @@ function EmailCard({ s, currentEmail, isPasswordAccount, uid, onSaved }: {
 }
 
 // ── Password ──────────────────────────────────────────────────────────────────
-function PasswordCard({ s, isPasswordAccount }: { s: T['settings']; isPasswordAccount: boolean }) {
+function PasswordCard({ s }: { s: T['settings'] }) {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -256,27 +256,21 @@ function PasswordCard({ s, isPasswordAccount }: { s: T['settings']; isPasswordAc
   return (
     <Card className="p-6">
       <div className="text-sm font-semibold text-[--ink-1] mb-1">{s.passwordLabel}</div>
-      {isPasswordAccount ? (
-        <>
-          <p className="text-xs text-[--ink-3] mb-4">{s.passwordDesc}</p>
-          <Label>{s.passwordCurrent}</Label>
-          <Input type="password" value={current} onChange={(e) => { setCurrent(e.target.value); setStatus(null); }}
-            autoComplete="current-password" className="mb-3" />
-          <Label>{s.passwordNew}</Label>
-          <Input type="password" value={next} onChange={(e) => { setNext(e.target.value); setStatus(null); }}
-            autoComplete="new-password" className="mb-3" />
-          <Label>{s.passwordConfirm}</Label>
-          <Input type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setStatus(null); }}
-            autoComplete="new-password"
-            className={confirm && confirm !== next ? '!border-rp-alert/60' : ''} />
-          <StatusLine status={status} />
-          <Button className="mt-3" disabled={busy || !current || !next || !confirm} loading={busy} onClick={save}>
-            {busy ? s.passwordChanging : s.passwordChangeBtn}
-          </Button>
-        </>
-      ) : (
-        <p className="text-xs text-[--ink-3] bg-[--surface-2] rounded-lg px-3 py-2.5 mt-3">{s.passwordGoogleNote}</p>
-      )}
+      <p className="text-xs text-[--ink-3] mb-4">{s.passwordDesc}</p>
+      <Label>{s.passwordCurrent}</Label>
+      <Input type="password" value={current} onChange={(e) => { setCurrent(e.target.value); setStatus(null); }}
+        autoComplete="current-password" className="mb-3" />
+      <Label>{s.passwordNew}</Label>
+      <Input type="password" value={next} onChange={(e) => { setNext(e.target.value); setStatus(null); }}
+        autoComplete="new-password" className="mb-3" />
+      <Label>{s.passwordConfirm}</Label>
+      <Input type="password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setStatus(null); }}
+        autoComplete="new-password"
+        className={confirm && confirm !== next ? '!border-rp-alert/60' : ''} />
+      <StatusLine status={status} />
+      <Button className="mt-3" disabled={busy || !current || !next || !confirm} loading={busy} onClick={save}>
+        {busy ? s.passwordChanging : s.passwordChangeBtn}
+      </Button>
     </Card>
   );
 }
