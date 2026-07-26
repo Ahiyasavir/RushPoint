@@ -20,7 +20,8 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile } from '
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
-import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Spinner, TagChips, Textarea } from '../components/ui';
+import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, TagChips, Textarea } from '../components/ui';
+import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
@@ -466,7 +467,7 @@ export default function BuilderPage() {
       <Button onClick={() => { setError(null); setLoadKey((k) => k + 1); }}>{b.tryAgain}</Button>
     </Card>
   );
-  if (!game) return <Spinner label={b.loadingBuilder} />;
+  if (!game) return <LoadingState messages={b.loadingGame} />;
 
   // Hide the Analytics tab until the game has actually been run: pre-launch it can
   // only render an empty "no analytics yet" message, which reads as broken to a

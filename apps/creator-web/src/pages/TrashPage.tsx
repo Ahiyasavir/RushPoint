@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { daysUntilPurge } from '@rushpoint/shared';
 import { listDeletedGames, restoreGame, purgeGameNow, type TrashedGame } from '../services/calls';
 import { Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
+import { LoadingState } from '../components/LoadingState';
 import { dialog } from '../components/dialog';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { useAsyncAction } from '../hooks/useAsyncAction';
@@ -71,6 +72,7 @@ export default function TrashPage() {
   if (!games) {
     return (
       <div className="animate-fade-up space-y-4">
+        <LoadingState messages={tr.loading} className="!py-6" />
         <Skeleton className="h-10 w-64" />
         {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
       </div>

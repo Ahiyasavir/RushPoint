@@ -5,6 +5,7 @@ import { EVENT_PACKAGES, PRO_MONTHLY_ILS, PRO_ANNUAL_ILS } from '@rushpoint/shar
 import { getWalletStatus, purchaseCredits, subscribePro } from '../services/calls';
 import { db } from '../services/firebase';
 import { Button, Card, Skeleton } from '../components/ui';
+import { LoadingState } from '../components/LoadingState';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { useAuth } from '../components/AuthGate';
@@ -90,6 +91,7 @@ export default function WalletPage() {
       // load instead of a bare spinner. Text-free (Skeleton is aria-hidden).
       return (
         <div className="max-w-2xl mx-auto animate-fade-up">
+          <LoadingState messages={w.loadingBilling} className="!py-6" />
           <Card className="p-6 mb-5">
             <div className="flex items-center justify-between mb-5">
               <Skeleton className="h-4 w-24" />
