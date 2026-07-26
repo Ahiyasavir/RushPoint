@@ -6,8 +6,26 @@ dialog with the game/mission cards stuck as skeletons — the gallery could not 
 games or missions. The console showed `searchGallery` returning HTTP **500** and
 `FirebaseError: INTERNAL`.
 
-Root cause (confirmed, not a logic bug in the gallery code — the e2e suite calls
-`searchGallery`/`searchTaskLibrary` successfully against a fresh build):
+### ACTUAL root cause (found by reproducing live in the browser against seeded data)
+The emulator logged the real throw: `TypeError: Cannot read properties of null (reading
+'length')` in `fetchRankedWindow`'s `withTags` (`tags.length`). **`tags` was `null`.**
+The gallery filter bar (`7c202cf`) started sending absent facets as `undefined`
+(`tags: gameTags.length ? gameTags : undefined`, `mode: gameMode || undefined`, …); the
+Firebase **callable SDK serializes `undefined` to `null` on the wire**, so the server's
+destructuring default (`tags = []`, which only applies to `undefined`) did NOT apply →
+`null.length` → 500 on every gallery open. This regressed exactly when the filter bar
+landed (~05:14, after the 3am "working" state, when the client sent only `{query, limit}`
+with no facet keys → server default `[]`). The e2e passed because it OMITS the keys — it
+never sent the `null` shape the real client sends.
+
+**Fix:** coerce every optional facet at the `searchGallery`/`searchTaskLibrary` boundary
+(null/omitted = "no filter"), and harden `fetchRankedWindow`'s `withTags`
+(`Array.isArray(tags) && tags.length > 0`). Verified live: searchGallery 500 → **200 OK,
+4 games + 48 missions render**. The e2e reachability scenario now also sends the explicit
+`null`-facet client shape so this cannot regress.
+
+### Compounding issue also fixed (stale-shared bundle)
+Separately confirmed and hardened (not the trigger here, but a real deploy fragility):
 
 - `functions/` builds with `esbuild --bundle` and does **not** mark `@rushpoint/shared`
   external, so shared is **inlined into `lib/index.js` from `packages/shared/dist` at
