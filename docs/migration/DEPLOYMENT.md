@@ -480,10 +480,23 @@ steps. The `RUSHPOINT_DATASTORE = firestore | postgres` switch from §10.1 is as
 
 ## 6. Ballpark monthly cost
 
+> ### ✅ DECIDED (owner, this session): the **8 GB tier (~$15/mo)**.
+> D1 in §7 is closed. §2.2's trimming work (drop Studio + postgres-meta, pin
+> `KONG_NGINX_WORKER_PROCESSES=1`, never expose PostgREST) still applies — the bigger box buys
+> headroom for the OS page cache and a Realtime load we have **not** yet measured, not a licence
+> to run the stock stack untrimmed.
+>
+> **The arithmetic the owner should see plainly.** Earlier in this project the stated goal was a
+> **≤$10/month ceiling** on Firebase. This migration lands at **≈$16/month, guaranteed** — i.e.
+> the fixed cost of escaping the tail risk is *higher than the budget that motivated escaping it*.
+> That is not an argument against the decision: the point was never the expected cost, it was
+> that Firebase's worst case is unbounded and the card is not the owner's. Bounded-and-higher
+> beats unbounded-and-lower here. But it should be a chosen trade, and it is recorded as one.
+
 | Line item | Monthly | Basis |
 |---|---|---|
-| IONOS VPS, 2 vCPU / 4 GB / 160 GB | **~$8** | [HostAdvice](https://hostadvice.com/hosting-company/ionos-reviews/pricing/) renewal pricing (VPS Linux M) |
-| *(recommended instead: 8 GB tier)* | *~$11–15* | [ionos.com](https://www.ionos.com/servers/vps) VPS L+ (promo $6, renewal higher) — see §2.2 |
+| ~~IONOS VPS, 2 vCPU / 4 GB / 160 GB~~ | ~~**~$8**~~ | Not chosen — §2.2 shows the stock stack OOMs at the bad end |
+| **IONOS VPS, 8 GB (CHOSEN)** | **~$15** | [ionos.com](https://www.ionos.com/servers/vps) VPS L+ (promo $6, renewal higher) — see §2.2 |
 | Domain | ~$1 | ~$12–15/yr amortized; may already be owned |
 | **Firebase Auth** | **$0** | Spark, 50k MAU free — far above our ceiling |
 | **Firebase Hosting** (2 sites) | **$0** | Spark: 10 GB stored / 360 MB day. §1.1 quantifies the ceiling |
@@ -512,7 +525,7 @@ person-days MIGRATION_PLAN §Totals estimates. Restating §0's framing without s
 
 | # | Question | Owner | Needed by |
 |---|---|---|---|
-| D1 | 4 GB or 8 GB box? §2.2 says the 4 GB tier works **only** trimmed. Recommendation: 8 GB. | Owner (budget) | Phase 0 |
+| ~~D1~~ | ✅ **CLOSED** — owner chose the **8 GB tier (~$15/mo)**. Trimming still applies; see §6. | Owner (budget) | Decided |
 | D2 | Can GoTrue be dropped entirely, given Firebase Auth is kept? Depends on whether Realtime/Storage need it present. | `docs/migration/AUTH.md` | Phase 0 |
 | D3 | How is the Supabase-compatible HS256 token minted for Realtime/Storage (§4.3)? Design belongs to AUTH.md; it determines a route on this server. | `docs/migration/AUTH.md` | Phase 4/5 |
 | D4 | Does Realtime's memory footprint hold under 39 ported listeners × N concurrent participants? Estimate only until measured. | `docs/migration/REALTIME_AND_OFFLINE.md` + D3 soak | Phase 5 |
