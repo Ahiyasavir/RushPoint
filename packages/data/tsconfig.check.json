@@ -1,0 +1,33 @@
+{
+  // Typecheck-only config. Identical rules to tsconfig.json, except that it
+  // resolves @rushpoint/shared against shared's SOURCE instead of its built
+  // dist. That makes `npx tsc --noEmit -p tsconfig.check.json` runnable in a
+  // fresh checkout with no `npm install` and no `shared:build` — which matters
+  // because @rushpoint/data is a types-only package and its whole job is to
+  // agree with shared's types.
+  //
+  // It emits nothing, so `rootDir` is deliberately absent (shared's sources sit
+  // outside this package and would trip TS6059 the moment an outDir existed).
+  //
+  // The real build/typecheck the monorepo runs is tsconfig.json.
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    // DOM is added ONLY here, for lib globals (TextEncoder) that shared's
+    // sources reference and that shared itself gets from @types/node at build
+    // time. It has no effect on what @rushpoint/data may use.
+    "lib": ["ES2020", "DOM"],
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@rushpoint/shared": ["../shared/src/index.ts"],
+      "@rushpoint/shared/*": ["../shared/src/*"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}

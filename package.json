@@ -8,6 +8,7 @@
         "apps/play-web",
         "functions",
         "packages/shared",
+        "packages/data",
         "scripts"
     ],
     "scripts": {
