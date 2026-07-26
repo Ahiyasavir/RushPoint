@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { PublicGame, PublicTask } from '@rushpoint/shared';
-import { searchGallery, searchTaskLibrary, duplicateGame, setPublicLike } from '../services/calls';
+import type { PublicGame, PublicTask, GameMode, TaskType, GalleryGameSort, GalleryTaskSort } from '@rushpoint/shared';
+import { searchGallery, searchTaskLibrary, duplicateGame, setPublicLike, loadPopularTags } from '../services/calls';
 import { deriveLikeView, applyOptimisticLike, reconcileLike, type LikeView } from '../lib/likeState';
 import { Badge, Button, Card, EmptyState, Input, Skeleton, TagChips } from '../components/ui';
 import { dialog } from '../components/dialog';
@@ -36,6 +36,38 @@ export default function GalleryPage() {
   const [tab, setTab] = useState<'games' | 'tasks'>('games');
   const [view, setView] = useState<'list' | 'map'>('list');
   const [q, setQ] = useState('');
+
+  // ── Facet filters (change: gallery-facet-filters) ──
+  // Held per tab so switching tabs never carries a games facet onto missions.
+  // Empty strings / 0 are the IDENTITY value (no filter), matching the server's
+  // `applyGalleryFacets`; only a set value narrows the popularity window.
+  const [popularTags, setPopularTags] = useState<string[]>([]);
+  const [gameTags, setGameTags] = useState<string[]>([]);
+  const [gameMode, setGameMode] = useState<GameMode | ''>('');
+  const [gameSort, setGameSort] = useState<GalleryGameSort>('popular');
+  const [taskTags, setTaskTags] = useState<string[]>([]);
+  const [taskType, setTaskType] = useState<TaskType | ''>('');
+  const [taskDifficulty, setTaskDifficulty] = useState(0);          // 0 = any; else "at least N"
+  const [taskLocation, setTaskLocation] = useState<'' | 'on' | 'off'>('');
+  const [taskSort, setTaskSort] = useState<GalleryTaskSort>('popular');
+
+  // Popular tags for the one-tap chip row. Fails SAFE: an empty list simply hides
+  // the row (loadPopularTags never throws).
+  useEffect(() => { void loadPopularTags().then(setPopularTags); }, []);
+
+  const activeTags = tab === 'games' ? gameTags : taskTags;
+  const setActiveTags = tab === 'games' ? setGameTags : setTaskTags;
+  const toggleTag = (tag: string) =>
+    setActiveTags((prev) => (prev.includes(tag) ? prev.filter((x) => x !== tag) : [...prev, tag]));
+
+  // Whether the current tab carries any non-identity filter (drives the "clear" affordance).
+  const filtersActive = tab === 'games'
+    ? gameTags.length > 0 || gameMode !== '' || gameSort !== 'popular'
+    : taskTags.length > 0 || taskType !== '' || taskDifficulty !== 0 || taskLocation !== '' || taskSort !== 'popular';
+  function clearFilters() {
+    if (tab === 'games') { setGameTags([]); setGameMode(''); setGameSort('popular'); }
+    else { setTaskTags([]); setTaskType(''); setTaskDifficulty(0); setTaskLocation(''); setTaskSort('popular'); }
+  }
   const [games, setGames] = useState<PublicGame[] | null>(null);
   const [tasks, setTasks] = useState<PublicTask[] | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -110,11 +142,23 @@ export default function GalleryPage() {
     if (tab === 'games') setGames(null); else setTasks(null);
     try {
       if (tab === 'games') {
-        const { games, likedIds } = await searchGallery({ query: q, limit: GALLERY_FETCH_LIMIT });
+        const { games, likedIds } = await searchGallery({
+          query: q, limit: GALLERY_FETCH_LIMIT,
+          tags: gameTags.length ? gameTags : undefined,
+          mode: gameMode || undefined,
+          sort: gameSort,
+        });
         setGames(games);
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(games.map((g) => [g.id, deriveLikeView(g, likedIds)])) }));
       } else {
-        const { tasks, likedIds } = await searchTaskLibrary({ query: q, limit: TASK_LIBRARY_FETCH_LIMIT });
+        const { tasks, likedIds } = await searchTaskLibrary({
+          query: q, limit: TASK_LIBRARY_FETCH_LIMIT,
+          tags: taskTags.length ? taskTags : undefined,
+          type: taskType || undefined,
+          difficulty: taskDifficulty || undefined,
+          hasLocation: taskLocation === '' ? undefined : taskLocation === 'on',
+          sort: taskSort,
+        });
         setTasks(tasks);
         setLikes((prev) => ({ ...prev, ...Object.fromEntries(tasks.map((tk) => [tk.id, deriveLikeView(tk, likedIds)])) }));
       }
@@ -138,10 +182,12 @@ export default function GalleryPage() {
   // Reload when the tab changes AND debounce search-as-you-type on the query.
   // A single 350ms debounce covers both first mount and every keystroke, so we
   // never double-fetch; Enter / the button still fire immediately via run().
+  // Every facet is in the dep array so changing a filter re-runs the debounced
+  // search exactly like a keystroke does.
   useEffect(() => {
     const id = setTimeout(() => void runRef.current(), 350);
     return () => clearTimeout(id);
-  }, [q, tab]);
+  }, [q, tab, gameTags, gameMode, gameSort, taskTags, taskType, taskDifficulty, taskLocation, taskSort]);
 
   async function copy(g: PublicGame) {
     try {
@@ -208,10 +254,58 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-6">
+      <div className="flex gap-2 mb-3">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={gl.searchPlaceholder}
           onKeyDown={(e) => { if (e.key === 'Enter') void searchAction.run(); }} />
         <Button loading={searchAction.busy} onClick={() => void searchAction.run()} className="shrink-0">{gl.searchBtn}</Button>
+      </div>
+
+      {/* Compact facet filter bar (change: gallery-facet-filters). Facets are held
+          per tab and threaded into run(); the debounce effect re-runs on any change. */}
+      <div className="mb-5 flex flex-col gap-3">
+        {popularTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-[--ink-3] me-1">{gl.filterPopularTags}</span>
+            {popularTags.map((tag) => {
+              const on = activeTags.includes(tag);
+              return (
+                <button key={tag} type="button" onClick={() => toggleTag(tag)} aria-pressed={on}
+                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+                    on ? 'border-rp-fire/40 bg-rp-fire/12 text-rp-fire'
+                       : 'border-[--rp-border] text-[--ink-3] hover:text-[--ink-1]'}`}>
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {tab === 'games' ? (
+            <>
+              <FacetSelect label={gl.filterMode} value={gameMode} onChange={(v) => setGameMode(v as GameMode | '')}
+                options={[{ value: '', label: gl.filterAny }, { value: 'individual', label: MODE_LABEL.individual }, { value: 'team', label: MODE_LABEL.team }]} />
+              <FacetSelect label={gl.filterSort} value={gameSort} onChange={(v) => setGameSort(v as GalleryGameSort)}
+                options={[{ value: 'popular', label: gl.sortPopular }, { value: 'newest', label: gl.sortNewest }, { value: 'plays', label: gl.sortPlays }]} />
+            </>
+          ) : (
+            <>
+              <FacetSelect label={gl.filterType} value={taskType} onChange={(v) => setTaskType(v as TaskType | '')}
+                options={[{ value: '', label: gl.filterAny }, ...Object.keys(TASK_TYPE_LABEL).map((k) => ({ value: k, label: TASK_TYPE_LABEL[k] }))]} />
+              <FacetSelect label={gl.filterDifficulty} value={String(taskDifficulty)} onChange={(v) => setTaskDifficulty(Number(v))}
+                options={[{ value: '0', label: gl.filterAny }, ...[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: gl.filterDifficultyAtLeast(n) }))]} />
+              <FacetSelect label={gl.filterLocation} value={taskLocation} onChange={(v) => setTaskLocation(v as '' | 'on' | 'off')}
+                options={[{ value: '', label: gl.filterAny }, { value: 'on', label: gl.filterLocOnMap }, { value: 'off', label: gl.filterLocAnywhere }]} />
+              <FacetSelect label={gl.filterSort} value={taskSort} onChange={(v) => setTaskSort(v as GalleryTaskSort)}
+                options={[{ value: 'popular', label: gl.sortPopular }, { value: 'newest', label: gl.sortNewest }, { value: 'copies', label: gl.sortCopies }]} />
+            </>
+          )}
+          {filtersActive && (
+            <button type="button" onClick={clearFilters}
+              className="text-[11px] font-semibold text-[--ink-3] underline-offset-2 hover:text-rp-fire hover:underline">
+              {gl.filterClear}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tell the creator WHY things are in this order: popularity by default,
@@ -391,6 +485,28 @@ function LikeButton({ view, busy, gl, onToggle }: {
       <span aria-hidden="true">{view.liked ? '♥' : '♡'}</span>
       <span>{gl.likes(view.likeCount)}</span>
     </button>
+  );
+}
+
+/**
+ * One compact labeled facet dropdown for the gallery filter bar
+ * (change: gallery-facet-filters). Presentational: every visible string is passed
+ * in already localized, so no UI copy is hardcoded here.
+ */
+function FacetSelect({ label, value, onChange, options }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[--ink-3]">
+      <span>{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)}
+        className="rounded-lg border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] px-2 py-1 text-xs font-medium text-[--ink-1] focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
+        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </label>
   );
 }
 

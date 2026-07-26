@@ -24,6 +24,8 @@ import type {
   CaptureZone,
   GameFile,
   StationStatus,
+  GalleryGameFacets,
+  GalleryTaskFacets,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -164,8 +166,12 @@ export interface RunTeamRow {
 // `likedIds` is the CALLER'S own likes among the returned items — so the like
 // button renders correctly on first paint with no second round trip and without
 // any client ever reading the (server-only) publicLikes collection.
-export const searchGallery     = callable<{ query?: string; tags?: string[]; limit?: number }, { games: PublicGame[]; likedIds: string[] }>('searchGallery');
-export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; limit?: number }, { tasks: PublicTask[]; likedIds: string[] }>('searchTaskLibrary');
+// The optional facet fields (mode / sort for games; type / difficulty /
+// hasLocation / sort for tasks) mirror the server's `applyGalleryFacets`
+// (change: gallery-facet-filters); reuse the shared facet shapes so the two can
+// never drift.
+export const searchGallery     = callable<{ query?: string; tags?: string[]; limit?: number } & GalleryGameFacets, { games: PublicGame[]; likedIds: string[] }>('searchGallery');
+export const searchTaskLibrary = callable<{ query?: string; tags?: string[]; limit?: number } & GalleryTaskFacets, { tasks: PublicTask[]; likedIds: string[] }>('searchTaskLibrary');
 export const incrementTaskCopyCount = callable<{ publicTaskId: string }, { ok: boolean; applied?: boolean }>('incrementTaskCopyCount');
 // Desired-END-STATE setter, not a toggle: sending `liked: true` twice is a no-op,
 // so a retry or a double tap can never double-count (change: gallery-popularity-ranking).
