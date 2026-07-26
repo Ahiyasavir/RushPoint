@@ -264,6 +264,11 @@ export default function BuilderPage() {
   // still-blank task. Keyed on game id so a genuinely new game still auto-opens once.
   const autoOpenedGameRef = useRef<string | null>(null);
   const saveTimer = useRef<number>();
+  // Monotonic id of the newest save started. A save only stamps `savedSnapshot`
+  // (or the failure status) if it is still the latest in flight, so an
+  // out-of-order resolution of a superseded save can't roll the dirty-check back
+  // to a stale snapshot (data-safety: stale-snapshot stamp).
+  const saveSeq = useRef(0);
   // Hidden file picker behind the Builder's "load a copy" action.
   const importInput = useRef<HTMLInputElement>(null);
   useEffect(() => { gameRef.current = game; }, [game]);
@@ -291,22 +296,35 @@ export default function BuilderPage() {
     if (!g) return true;
     const snap = serializeGame(g);
     if (snap === savedSnapshot.current) return true;
+    const seq = ++saveSeq.current;
     setStatus('saving');
     try {
       await updateGame(buildSavePayload(g));
-      savedSnapshot.current = snap;
-      setSaveError(null);
-      // If the user kept editing during the round-trip, stay 'unsaved'.
-      const latest = gameRef.current;
-      setStatus(latest && serializeGame(latest) !== snap ? 'unsaved' : 'saved');
+      // Ignore a superseded (out-of-order) resolution: a newer save has already
+      // taken ownership of `savedSnapshot`, so stamping this older snap would
+      // wrongly mark the game dirty (or persist a stale snapshot).
+      if (seq === saveSeq.current) {
+        savedSnapshot.current = snap;
+        setSaveError(null);
+        // If the user kept editing during the round-trip, stay 'unsaved'.
+        const latest = gameRef.current;
+        setStatus(latest && serializeGame(latest) !== snap ? 'unsaved' : 'saved');
+      }
       return true;
     } catch (e) {
       // This used to be `catch { setStatus('unsaved') }` — indistinguishable
       // from a save that simply had not fired yet. Say it failed, say why, and
       // keep saying it until a save succeeds.
       console.error('[builder] updateGame failed:', e);
-      setSaveError(describeCallFailure(e, { online: navigator.onLine }));
-      setStatus('failed');
+      if (seq === saveSeq.current) {
+        const failure = describeCallFailure(e, { online: navigator.onLine });
+        setSaveError(failure);
+        setStatus('failed');
+        // A validation rejection points at a specific stage/task. Open the
+        // readiness panel so the creator sees WHICH one, instead of just a
+        // generic "save failed" (no new copy — reuses the readiness surface).
+        if (failure.key === 'rejected') setReadinessOpen(true);
+      }
       return false;
     }
   }, []);
@@ -336,6 +354,33 @@ export default function BuilderPage() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
+
+  // `beforeunload` only fires on real browser unloads, NOT on SPA route changes,
+  // so an in-app navigation (back button, browser back/forward) used to abandon
+  // both a still-pending debounced edit AND a prior FAILED save. Flush any
+  // pending debounced save when the Builder unmounts: save() is a no-op when the
+  // game already matches what was last saved, so a clean game unmounts silently.
+  // `save` is stable ([] deps), so this cleanup runs only on unmount.
+  useEffect(() => () => {
+    window.clearTimeout(saveTimer.current);
+    const g = gameRef.current;
+    if (g && serializeGame(g) !== savedSnapshot.current) void save();
+  }, [save]);
+
+  // In-app "back to games" guard: the back button is the Builder's main exit (the
+  // global app nav is hidden here). Flush + persist before leaving; only if that
+  // save fails do we surface it and let the creator decide, rather than silently
+  // dropping the divergence the failure banner is warning about. A clean game
+  // navigates straight through with no prompt.
+  const leaveToGames = useCallback(async () => {
+    window.clearTimeout(saveTimer.current);
+    const g = gameRef.current;
+    const dirty = !!g && serializeGame(g) !== savedSnapshot.current;
+    if (dirty && !(await save())) {
+      if (!(await dialog.confirm(b.saveFailed))) return;
+    }
+    nav('/');
+  }, [save, nav, b.saveFailed]);
 
   // Keyboard undo/redo: Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (or Ctrl+Y). When focus
   // is in a text field we defer to the browser's native field-level undo so we
@@ -491,7 +536,7 @@ export default function BuilderPage() {
           This is the only header in the Builder (the global app nav is hidden),
           so the workspace gets the full viewport height. ── */}
       <header className="shrink-0 flex items-center gap-3 px-4 h-14 border-b border-[--rp-border] bg-[--surface-1]">
-        <button onClick={() => nav('/')} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
+        <button onClick={() => { void leaveToGames(); }} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
           <span className="text-sm leading-none">←</span> {b.backToGames}
         </button>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
@@ -2081,7 +2126,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
 function StepPreview({ game }: { game: Game }) {
   const b = useT().builder;
   const taskCount = game.stages.reduce((s, st) => s + st.tasks.length, 0);
-  const estMin = game.stages.flatMap((s) => s.tasks).reduce((s, t) => s + t.estimatedMinutes, 0);
+  const estMin = game.stages.flatMap((s) => s.tasks).reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0);
   const modeLabel: Record<GameMode, string> = { individual: b.modeIndividual, team: b.modeTeam };
   return (
     <Card className="p-5 space-y-4">
