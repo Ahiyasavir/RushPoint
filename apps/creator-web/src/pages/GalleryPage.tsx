@@ -254,10 +254,9 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      <div className="flex gap-2 mb-3">
+      <div className="mb-3">
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={gl.searchPlaceholder}
           onKeyDown={(e) => { if (e.key === 'Enter') void searchAction.run(); }} />
-        <Button loading={searchAction.busy} onClick={() => void searchAction.run()} className="shrink-0">{gl.searchBtn}</Button>
       </div>
 
       {/* Compact facet filter bar (change: gallery-facet-filters). Facets are held
@@ -285,6 +284,7 @@ export default function GalleryPage() {
               <FacetSelect label={gl.filterMode} value={gameMode} onChange={(v) => setGameMode(v as GameMode | '')}
                 options={[{ value: '', label: gl.filterAny }, { value: 'individual', label: MODE_LABEL.individual }, { value: 'team', label: MODE_LABEL.team }]} />
               <FacetSelect label={gl.filterSort} value={gameSort} onChange={(v) => setGameSort(v as GalleryGameSort)}
+                title={q.trim() ? gl.sortedByMatch : gl.sortedByPopular}
                 options={[{ value: 'popular', label: gl.sortPopular }, { value: 'newest', label: gl.sortNewest }, { value: 'plays', label: gl.sortPlays }]} />
             </>
           ) : (
@@ -296,6 +296,7 @@ export default function GalleryPage() {
               <FacetSelect label={gl.filterLocation} value={taskLocation} onChange={(v) => setTaskLocation(v as '' | 'on' | 'off')}
                 options={[{ value: '', label: gl.filterAny }, { value: 'on', label: gl.filterLocOnMap }, { value: 'off', label: gl.filterLocAnywhere }]} />
               <FacetSelect label={gl.filterSort} value={taskSort} onChange={(v) => setTaskSort(v as GalleryTaskSort)}
+                title={q.trim() ? gl.sortedByMatch : gl.sortedByPopular}
                 options={[{ value: 'popular', label: gl.sortPopular }, { value: 'newest', label: gl.sortNewest }, { value: 'copies', label: gl.sortCopies }]} />
             </>
           )}
@@ -307,10 +308,6 @@ export default function GalleryPage() {
           )}
         </div>
       </div>
-
-      {/* Tell the creator WHY things are in this order: popularity by default,
-          relevance once they type (popularity only breaks ties within a tier). */}
-      <p className="text-[11px] text-[--ink-3] mb-4">{q.trim() ? gl.sortedByMatch : gl.sortedByPopular}</p>
 
       {tab === 'games' && view === 'map' && games && games.length > 0 && (
         <div className="mb-4">
@@ -493,14 +490,17 @@ function LikeButton({ view, busy, gl, onToggle }: {
  * (change: gallery-facet-filters). Presentational: every visible string is passed
  * in already localized, so no UI copy is hardcoded here.
  */
-function FacetSelect({ label, value, onChange, options }: {
+function FacetSelect({ label, value, onChange, options, title }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  // Optional hover/focus tooltip — used to keep the "sorted by…" explanation
+  // discoverable on the Sort control without a persistent caption row.
+  title?: string;
 }) {
   return (
-    <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[--ink-3]">
+    <label title={title} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[--ink-3]">
       <span>{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="rounded-lg border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] px-2 py-1 text-xs font-medium text-[--ink-1] focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
