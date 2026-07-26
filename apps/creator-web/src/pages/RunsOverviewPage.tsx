@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, EmptyState, Skeleton } from '../components/ui';
+import { LoadingState } from '../components/LoadingState';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
 import { useLiveRuns } from '../hooks/useLiveRuns';
@@ -26,6 +27,7 @@ export default function RunsOverviewPage() {
       <div className="max-w-3xl mx-auto">
         <Skeleton className="h-8 w-40 mb-2" />
         <Skeleton className="h-4 w-72 mb-5" />
+        <LoadingState messages={r.loading} className="!py-6" />
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
         </div>

@@ -6,6 +6,7 @@ import { deriveLikeView, applyOptimisticLike, reconcileLike, type LikeView } fro
 import { Badge, Button, Card, EmptyState, Input, Skeleton, TagChips } from '../components/ui';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
+import { LoadingState } from '../components/LoadingState';
 import GalleryMap, { type MapPoint } from '../components/GalleryMap';
 import GalleryTaskDetailModal from '../components/GalleryTaskDetailModal';
 import GalleryGameDetailModal from '../components/GalleryGameDetailModal';
@@ -238,7 +239,9 @@ export default function GalleryPage() {
         </div>
       )}
 
-      {tab === 'games' && ((!games || searching) ? <CardSkeletonGrid /> : games.length === 0 ? (
+      {tab === 'games' && ((!games || searching) ? (
+        <><LoadingState messages={gl.loadingGames} /><CardSkeletonGrid /></>
+      ) : games.length === 0 ? (
         <EmptyState icon="🔭" title={gl.emptyTitle} body={gl.emptyText}
           action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
       ) : (
@@ -290,7 +293,9 @@ export default function GalleryPage() {
         </div>
       ))}
 
-      {tab === 'tasks' && ((!tasks || searching) ? <CardSkeletonGrid /> : tasks.length === 0 ? (
+      {tab === 'tasks' && ((!tasks || searching) ? (
+        <><LoadingState messages={gl.loadingTasks} /><CardSkeletonGrid /></>
+      ) : tasks.length === 0 ? (
         <EmptyState icon="🔭" title={gl.emptyTasksTitle} body={gl.emptyTasksText}
           action={q ? <Button variant="ghost" onClick={() => setQ('')}>{gl.clearSearch}</Button> : undefined} />
       ) : (

@@ -25,6 +25,11 @@ const HE = {
     retry: 'נסה שוב',
     copyCode: 'העתק קוד גישה',
     copied: 'הקוד הועתק',
+    loading: [
+      'מתחברים לריצות החיות שלך',
+      'סופרים שחקנים בשטח',
+      'טוענים את האקשן',
+    ],
     // ── סרגל הריצה החיה הצף (ActiveRunBar) ──
     barLabel: 'פקדי ריצה חיה',
     barBadge: 'ריצה חיה',
@@ -160,6 +165,11 @@ const HE = {
     emptyBody:  'עצב שלבים, הוסף משימות גיאוגרפיות והשק משחק חי לקבוצה שלך.',
     untitledGame: 'משחק ללא שם',
     loadGamesFailed: 'טעינת המשחקים נכשלה',
+    loading: [
+      'מחממים את משחקי השדה שלך',
+      'אוספים את ההרפתקאות האחרונות שלך',
+      'עוד רגע הכל מוכן',
+    ],
     templateFailed: 'יצירת המשחק מהתבנית נכשלה. בחרו תבנית שוב.',
     publishFailed: 'עדכון הפרסום נכשל. נסו שוב.',
     launchFailed: 'ההשקה נכשלה',
@@ -278,6 +288,16 @@ const HE = {
     searchFailed:      'החיפוש נכשל',
     tabGames:          'משחקים ציבוריים',
     tabTasks:          'ספריית משימות',
+    loadingGames: [
+      'סורקים את השטח אחרי משחקים מעולים',
+      'אוספים הרפתקאות ששווה לשחק',
+      'טוענים את הגלריה',
+    ],
+    loadingTasks: [
+      'חופרים בספריית המשימות',
+      'אוספים משימות לשילוב מחדש',
+      'טוענים משימות',
+    ],
     viewList:          'רשימה',
     viewMap:           'מפה',
     searchPlaceholder: 'חפש לפי שם או תג...',
@@ -1610,6 +1630,11 @@ const EN: typeof HE = {
     retry: 'Retry',
     copyCode: 'Copy access code',
     copied: 'Code copied',
+    loading: [
+      'Tuning in to your live runs',
+      'Counting players out in the field',
+      'Loading the action',
+    ],
     // ── Floating active-run bar (ActiveRunBar) ──
     barLabel: 'Live run controls',
     barBadge: 'Live run',
@@ -1741,6 +1766,11 @@ const EN: typeof HE = {
     emptyBody:  'Design stages, drop in geolocated tasks, and launch a live game for your group.',
     untitledGame: 'Untitled game',
     loadGamesFailed: 'Failed to load games',
+    loading: [
+      'Warming up your field games',
+      'Gathering your latest adventures',
+      'Almost ready to play',
+    ],
     templateFailed: 'Creating the game from that template failed. Pick a template again.',
     publishFailed: 'Updating publishing failed. Try again.',
     launchFailed: 'Launch failed',
@@ -1853,6 +1883,16 @@ const EN: typeof HE = {
     searchFailed:      'Search failed',
     tabGames:          'Public games',
     tabTasks:          'Task library',
+    loadingGames: [
+      'Scouting the field for great games',
+      'Rounding up adventures worth playing',
+      'Loading the gallery',
+    ],
+    loadingTasks: [
+      'Digging through the mission library',
+      'Gathering missions to remix',
+      'Loading missions',
+    ],
     viewList:          'List',
     viewMap:           'Map',
     searchPlaceholder: 'Search by name or tag…',

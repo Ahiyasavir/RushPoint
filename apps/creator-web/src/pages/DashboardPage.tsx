@@ -6,6 +6,7 @@ import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, DEFAULT
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
+import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
 import { dashboardCardActions } from '../lib/dashboardCardActions';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
@@ -901,6 +902,7 @@ function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
 // Content-shaped loading placeholder mirroring the hero + stats + card grid, so
 // the first paint has the same footprint as the loaded dashboard (no layout jump).
 function DashboardSkeleton({ uid }: { uid?: string }) {
+  const t = useT();
   // A creator with no games used to watch six game-card placeholders resolve
   // into an empty state. Draw only what THIS account is known to have — the
   // count is per uid, so a colleague's six games cannot size this grid.
@@ -909,6 +911,7 @@ function DashboardSkeleton({ uid }: { uid?: string }) {
   const cards = skeletonCardCount(known);
   return (
     <div className="animate-fade-up">
+      <LoadingState messages={t.dashboard.loading} className="!py-6" />
       <div className="mb-10 pb-10 border-b border-[--rp-border]">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
           <div className="space-y-3">
