@@ -192,6 +192,11 @@ export default function NavMap({
   // Create the map once.
   useEffect(() => {
     if (!ref.current || map.current) return;
+    // A fresh map has never been framed — reset the fit-bounds guard so the
+    // re-created map (this effect is keyed on emptiness and CAN tear down + rebuild)
+    // frames all pins + the player again. Without this, `fitted` stays true from the
+    // previous map instance and the rebuilt map only centres on its first point.
+    fitted.current = false;
     const first = valid[0] ?? overlayPts[0] ?? (hasMe && me ? { lat: me.lat, lng: me.lng } : undefined);
     map.current = new maplibregl.Map({
       container: ref.current,
@@ -216,7 +221,7 @@ export default function NavMap({
     // styledata fires on initial load AND after each setStyle (mode toggle),
     // which wipes GeoJSON sources/layers — re-apply the overlay each time.
     map.current.on('styledata', () => { if (map.current) { applyHotZone(map.current); applyZones(map.current); applySearchAreas(map.current); } });
-    return () => { map.current?.remove(); map.current = null; };
+    return () => { map.current?.remove(); map.current = null; fitted.current = false; };
     // Re-run when the map container appears/disappears: while `valid` is empty the
     // component renders a placeholder with NO ref div, so a NavMap that mounts
     // before its targets load would otherwise create the map against a null ref

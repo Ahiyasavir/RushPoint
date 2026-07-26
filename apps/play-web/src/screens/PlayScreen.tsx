@@ -196,16 +196,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   }, [refresh, session]);
 
   // Offline continuity: resume the instant the browser reports it's back online
-  // (don't wait up to 12s for the fallback poll), and show "reconnecting" the
-  // moment it goes offline.
+  // (don't wait up to 12s for the fallback poll). We deliberately do NOT flip
+  // `reconnecting` on the `offline` event — the globally-mounted ConnectionBanner
+  // already owns the offline message, and stacking both produced two overlapping
+  // fixed top banners. The ReconnectingPill is reserved for the "online but a
+  // poll/sync is failing" case, still driven by refresh() below.
   useEffect(() => {
     const onOnline = () => { void refresh(); };
-    const onOffline = () => { if (hasState.current) setReconnecting(true); };
     window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
     return () => {
       window.removeEventListener('online', onOnline);
-      window.removeEventListener('offline', onOffline);
     };
   }, [refresh]);
 
@@ -637,8 +637,6 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
         )}
       </div>
-
-      <Button variant="danger" className="mt-4" loading={sosAction.busy} onClick={() => void sosAction.run()}>SOS</Button>
     </Screen>
   );
 }
