@@ -6,6 +6,7 @@ import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
 import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
 import { TAP_INLINE } from '../lib/interaction';
+import { loadDismissed, saveDismissed } from '../lib/dismissedAnnouncements';
 import { Collapsible } from './ui';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
@@ -63,7 +64,10 @@ export default function LiveOps({
 }) {
   const [announcements, setAnnouncements] = useState<AnnouncementDoc[]>([]);
   const [flashes, setFlashes] = useState<FlashDoc[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  // Dismissed banners persist to run-scoped localStorage so a persistent GLOBAL
+  // announcement (server still `active`) stays dismissed across reloads/reconnects
+  // — same pattern as FeedPanel's per-run mutes; fails open if storage is absent.
+  const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissed(ctx.runId));
   const [now, setNow] = useState(() => Date.now());
 
   const { ownerUid, gameId, runId } = ctx;
@@ -116,7 +120,11 @@ export default function LiveOps({
   });
 
   function dismiss(id: string) {
-    setDismissed((prev) => new Set(prev).add(id));
+    setDismissed((prev) => {
+      const next = new Set(prev).add(id);
+      saveDismissed(runId, next);
+      return next;
+    });
   }
 
   // Haptic buzz when a NEW score notice arrives — success for a gain, warn for a
