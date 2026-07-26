@@ -61,8 +61,13 @@ import {
   isDelete,
   ok,
   refused,
+  type AdminAlert,
+  type Announcement,
   type ClaimActiveTaskResult,
   type ClaimTaskSlotResult,
+  type Cursor,
+  type Page,
+  type PageRequest,
   type Patch,
   type Run,
   type RunScope,
@@ -107,6 +112,48 @@ const teamKey = (s: TeamScope) => `team:${s.ownerUid}/${s.gameId}/${s.runId}/${s
 const teamPrefix = (s: RunScope) => `team:${s.ownerUid}/${s.gameId}/${s.runId}/`;
 const inviteKey = (s: RunScope, id: string) =>
   `invite:${s.ownerUid}/${s.gameId}/${s.runId}/${id}`;
+const annPrefix = (s: RunScope) => `ann:${s.ownerUid}/${s.gameId}/${s.runId}/`;
+const annKey = (s: RunScope, id: string) => `${annPrefix(s)}${id}`;
+const alertPrefix = (s: RunScope) => `alert:${s.ownerUid}/${s.gameId}/${s.runId}/`;
+const alertKey = (s: RunScope, id: string) => `${alertPrefix(s)}${id}`;
+
+/**
+ * NEWEST-FIRST keyset page over `(orderKey desc, id desc)`. Mirrors the Postgres
+ * `page` helper closely enough that the two agree on the assertions the contract
+ * makes (membership + order within a single page); cross-engine CURSOR pagination
+ * is NOT-IN-CONTRACT 5 and deliberately not exercised.
+ */
+function pageNewestFirst<T>(
+  items: T[],
+  orderKey: (t: T) => string,
+  id: (t: T) => string,
+  req: PageRequest,
+): Page<T> {
+  const sorted = [...items].sort((a, b) => {
+    const ka = orderKey(a);
+    const kb = orderKey(b);
+    if (ka !== kb) return ka < kb ? 1 : -1;
+    const ia = id(a);
+    const ib = id(b);
+    return ia === ib ? 0 : ia < ib ? 1 : -1;
+  });
+  const limit = Math.max(1, Math.floor(req.limit));
+  let arr = sorted;
+  if (req.cursor !== undefined) {
+    const [c0, c1] = JSON.parse(req.cursor as unknown as string) as [string, string];
+    arr = arr.filter((x) => {
+      const k = orderKey(x);
+      return k < c0 || (k === c0 && id(x) < c1);
+    });
+  }
+  const pageItems = arr.slice(0, limit);
+  const out: Page<T> = { items: pageItems };
+  if (pageItems.length === limit) {
+    const last = pageItems[pageItems.length - 1];
+    out.nextCursor = JSON.stringify([orderKey(last), id(last)]) as unknown as Cursor;
+  }
+  return out;
+}
 
 /**
  * Apply a `Patch` to a document IN PLACE, honouring the three-valued rule.
@@ -273,6 +320,82 @@ export class InMemoryRepository implements ContractRepository {
 
   async putStaffInvite(scope: RunScope, invite: StaffInvite): Promise<void> {
     this.write(inviteKey(scope, invite.id), invite as unknown as Doc);
+  }
+
+  // ── live-ops: announcements ───────────────────────────────────────────────
+  //
+  // `put*` create-or-replaces the whole document; `patch*` on a missing document
+  // THROWS not-found (patch means "modify a doc that exists"), matching patchRun
+  // / patchTeam and the Postgres implementation's `patchRow`.
+
+  async putAnnouncement(scope: RunScope, a: Announcement): Promise<void> {
+    this.write(annKey(scope, a.id), a as unknown as Doc);
+  }
+
+  async patchAnnouncement(scope: RunScope, id: string, patch: Patch<Announcement>): Promise<void> {
+    const key = annKey(scope, id);
+    const doc = this.read(key);
+    if (!doc) throw new DataError('not-found', 'announcement', { ...scope, id });
+    applyPatch(doc, patch as Record<string, unknown>);
+    this.write(key, doc);
+  }
+
+  private allAnnouncements(scope: RunScope): Announcement[] {
+    const prefix = annPrefix(scope);
+    const out: Announcement[] = [];
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) out.push(this.read(key) as Announcement);
+    }
+    return out;
+  }
+
+  /** History read — newest first, NOT filtered on `active`. */
+  async listAnnouncements(scope: RunScope, page: PageRequest): Promise<Page<Announcement>> {
+    return pageNewestFirst(this.allAnnouncements(scope), (a) => a.createdAt, (a) => a.id, page);
+  }
+
+  /** Participant window — `active === true`, newest first. */
+  async listActiveAnnouncements(scope: RunScope): Promise<Announcement[]> {
+    return pageNewestFirst(
+      this.allAnnouncements(scope).filter((a) => a.active === true),
+      (a) => a.createdAt, (a) => a.id, { limit: 30 },
+    ).items;
+  }
+
+  // ── live-ops: alerts ──────────────────────────────────────────────────────
+
+  async putAlert(scope: RunScope, a: AdminAlert): Promise<void> {
+    this.write(alertKey(scope, a.id), a as unknown as Doc);
+  }
+
+  async getAlert(scope: RunScope, id: string): Promise<AdminAlert | null> {
+    return this.read(alertKey(scope, id)) as AdminAlert | null;
+  }
+
+  async patchAlert(scope: RunScope, id: string, patch: Patch<AdminAlert>): Promise<void> {
+    const key = alertKey(scope, id);
+    const doc = this.read(key);
+    if (!doc) throw new DataError('not-found', 'alert', { ...scope, id });
+    applyPatch(doc, patch as Record<string, unknown>);
+    this.write(key, doc);
+  }
+
+  private allAlerts(scope: RunScope): AdminAlert[] {
+    const prefix = alertPrefix(scope);
+    const out: AdminAlert[] = [];
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) out.push(this.read(key) as AdminAlert);
+    }
+    return out;
+  }
+
+  /** Newest first — order field is the domain `timestamp`. */
+  async listAlerts(scope: RunScope, page: PageRequest): Promise<Page<AdminAlert>> {
+    return pageNewestFirst(this.allAlerts(scope), (a) => a.timestamp, (a) => a.id, page);
+  }
+
+  async countUnackedAlerts(scope: RunScope): Promise<number> {
+    return this.allAlerts(scope).filter((a) => a.acknowledged === false).length;
   }
 
   // ── atomic operations ─────────────────────────────────────────────────────

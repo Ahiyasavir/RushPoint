@@ -66,6 +66,8 @@
 import {
   DELETE,
   DataError,
+  type AdminAlert,
+  type Announcement,
   type ClaimTaskSlotResult,
   type Repository,
   type Run,
@@ -100,6 +102,9 @@ export type ContractRepository = Pick<
   | 'putStaffInvite'
   | 'claimTaskSlot' | 'releaseTaskSlot' | 'claimActiveTask'
   | 'claimOnceFlag' | 'consumeStaffInvite'
+  // Live-ops aggregate family (widened for the live-ops-broadcast scenario).
+  | 'putAnnouncement' | 'patchAnnouncement' | 'listAnnouncements' | 'listActiveAnnouncements'
+  | 'putAlert' | 'getAlert' | 'patchAlert' | 'listAlerts' | 'countUnackedAlerts'
   | 'runInTransaction'
 > & {
   withTx(tx: Tx): ContractTxRepository;
@@ -137,6 +142,10 @@ const T = {
   flag:    '2026-01-01T04:00:00.000Z',
   patch:   '2026-01-01T05:00:00.000Z',
   tx:      '2026-01-01T06:00:00.000Z',
+  bcast1:  '2026-01-01T07:00:00.000Z',
+  bcast2:  '2026-01-01T08:00:00.000Z',
+  bcast3:  '2026-01-01T09:00:00.000Z',
+  ack:     '2026-01-01T10:00:00.000Z',
 } as const;
 
 const OWNER = 'owner-1';
@@ -145,6 +154,21 @@ const RUN_ID = 'run-1';
 const STAGE = 'stage-1';
 const TASK_A = 'task-a';
 const TASK_B = 'task-b';
+
+// Live-ops ids are CANONICAL uuids on purpose: the Postgres schema addresses
+// announcements/alerts by a `uuid` PK with no `legacy_firebase_uid` companion, so
+// only a value that already IS a uuid round-trips its id across the engine
+// (ids.ts). A non-uuid id would read back as its derived uuid on Postgres and its
+// literal string in-memory — a difference the contract has no business surfacing.
+const ANN_1 = '11111111-1111-4111-8111-111111111111';
+const ANN_2 = '22222222-2222-4222-8222-222222222222';
+const ANN_3 = '33333333-3333-4333-8333-333333333333';
+const ANN_UNKNOWN = '99999999-9999-4999-8999-999999999999';
+const ALERT_1 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const ALERT_2 = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const ALERT_UNKNOWN = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+// A uuid team id, for the same round-trip reason (alerts.team_id is a uuid column).
+const ALERT_TEAM = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 const RUN: RunScope = { ownerUid: OWNER, gameId: GAME, runId: RUN_ID };
 const team = (teamId: string): TeamScope => ({ ...RUN, teamId });
@@ -203,6 +227,21 @@ function makeInvite(id: string, pin: string): StaffInvite {
   };
 }
 
+function makeAnnouncement(
+  id: string,
+  createdAt: string,
+  extra: Partial<Announcement> = {},
+): Announcement {
+  return { id, message: `msg-${id}`, level: 'info', active: true, createdAt, ...extra };
+}
+
+function makeAlert(id: string, timestamp: string, extra: Partial<AdminAlert> = {}): AdminAlert {
+  return {
+    id, type: 'sos', teamId: ALERT_TEAM, message: `alert-${id}`,
+    timestamp, acknowledged: false, ...extra,
+  };
+}
+
 /** Always picks `taskId` if it is on the table. Pure — required by SlotChooser. */
 const alwaysChoose = (taskId: string) => (occupancy: ReadonlyMap<string, number>) =>
   occupancy.has(taskId) ? taskId : null;
@@ -244,6 +283,7 @@ export async function runRepositoryContract(
     ['refusals-are-values', refusalsAreValues],
     ['claim-once-flag', claimOnceFlagScenario],
     ['patch-semantics', (r, a) => patchSemantics(r, a, options)],
+    ['live-ops-broadcast', liveOpsBroadcast],
     ['transaction-atomicity', transactionAtomicity],
     ['transaction-re-execution', (r, a) => probeTransactionReExecution(r, a, note)],
   ];
@@ -602,7 +642,101 @@ async function patchSemantics(
 }
 
 
-// ── 7. Transactions: all-or-nothing, and the return value is the only exit ──
+// ── 7. Live-ops broadcast family — announcements + alerts ───────────────────
+//
+// The aggregate every participant's phone listens to. Two engine-neutral
+// guarantees are asserted, both documented in `firestore/liveOps.ts`:
+//
+//   * the PARTICIPANT window (`listActiveAnnouncements`) is filtered on `active`
+//     and ordered NEWEST-FIRST — a deactivated banner leaves the window while the
+//     operator HISTORY read (`listAnnouncements`, not active-filtered) still shows
+//     it. The newest-first order here is a load-bearing product contract, not the
+//     generic paging NOT-IN-CONTRACT 5 excludes; and
+//   * acknowledging an alert is a repeatable UPDATE whose observable effect
+//     (the unacked count) is idempotent.
+//
+// A refusal-vs-throw boundary is checked at both ends: patching a MISSING
+// announcement THROWS not-found (patch means "modify a doc that exists", the same
+// channel patchRun/patchTeam use), while reading a MISSING alert returns a VALUE
+// (null). A run is seeded first because the Postgres schema enforces the
+// announcements/alerts → runs foreign key the document stores never had.
+
+async function liveOpsBroadcast(repo: ContractRepository, ok: Assert): Promise<void> {
+  await repo.putRun(makeRun());
+
+  // ── Announcements ──────────────────────────────────────────────────────────
+  await repo.putAnnouncement(RUN, makeAnnouncement(ANN_1, T.bcast1));
+  await repo.putAnnouncement(RUN, makeAnnouncement(ANN_2, T.bcast2));
+  await repo.putAnnouncement(RUN, makeAnnouncement(ANN_3, T.bcast3, { level: 'warning' }));
+
+  const active1 = await repo.listActiveAnnouncements(RUN);
+  ok(active1.length === 3, `all three active announcements are listed, got ${active1.length}`);
+  ok(active1.map((a) => a.id).join(',') === `${ANN_3},${ANN_2},${ANN_1}`,
+    `the participant window is newest-first, got ${active1.map((a) => a.id).join(',')}`);
+  ok(active1[0]?.level === 'warning', 'a pushed field round-trips through the window');
+
+  // Deactivating one drops it from the PARTICIPANT window…
+  await repo.patchAnnouncement(RUN, ANN_2, { active: false });
+  const active2 = await repo.listActiveAnnouncements(RUN);
+  ok(active2.length === 2 && !active2.some((a) => a.id === ANN_2),
+    `a deactivated announcement leaves the active window, got ${active2.map((a) => a.id).join(',')}`);
+
+  // …but the operator HISTORY read still sees it — that read is NOT active-filtered.
+  const history = await repo.listAnnouncements(RUN, { limit: 10 });
+  ok(history.items.length === 3,
+    `the history read still shows the retired banner, got ${history.items.length}`);
+  const retired = history.items.find((a) => a.id === ANN_2);
+  ok(retired?.active === false,
+    `the retired banner reads back active:false, got ${String(retired?.active)}`);
+  ok(history.items.map((a) => a.id).join(',') === `${ANN_3},${ANN_2},${ANN_1}`,
+    `the history read is newest-first too, got ${history.items.map((a) => a.id).join(',')}`);
+
+  // Patching a MISSING announcement is a THROW, not a silent no-op.
+  let missingThrew: unknown = null;
+  try {
+    await repo.patchAnnouncement(RUN, ANN_UNKNOWN, { active: false });
+  } catch (e) { missingThrew = e; }
+  ok(missingThrew instanceof DataError && missingThrew.code === 'not-found',
+    `patching a missing announcement throws not-found, got ${describe(missingThrew)}`);
+
+  // ── Alerts ─────────────────────────────────────────────────────────────────
+  await repo.putAlert(RUN, makeAlert(ALERT_1, T.bcast1));
+  await repo.putAlert(RUN, makeAlert(ALERT_2, T.bcast2, { type: 'technical' }));
+
+  const fetched = await repo.getAlert(RUN, ALERT_1);
+  ok(fetched?.id === ALERT_1 && fetched.acknowledged === false,
+    `a stored alert reads back unacknowledged, got ${String(fetched?.acknowledged)}`);
+  ok(fetched?.teamId === ALERT_TEAM,
+    `the alert's teamId round-trips, got ${String(fetched?.teamId)}`);
+  ok(fetched?.timestamp === T.bcast1,
+    `the alert's caller-supplied instant round-trips, got ${String(fetched?.timestamp)}`);
+
+  ok((await repo.countUnackedAlerts(RUN)) === 2, 'both fresh alerts count as unacknowledged');
+
+  await repo.patchAlert(RUN, ALERT_1, { acknowledged: true, acknowledgedAt: T.ack });
+  const acked = await repo.getAlert(RUN, ALERT_1);
+  ok(acked?.acknowledged === true && acked.acknowledgedAt === T.ack,
+    `acknowledging stamps the alert, got ${String(acked?.acknowledged)}/${String(acked?.acknowledgedAt)}`);
+  ok((await repo.countUnackedAlerts(RUN)) === 1, 'acknowledging one drops the unacked count to 1');
+
+  // Idempotent: a second acknowledge changes nothing observable.
+  await repo.patchAlert(RUN, ALERT_1, { acknowledged: true, acknowledgedAt: T.ack });
+  ok((await repo.countUnackedAlerts(RUN)) === 1,
+    'a second acknowledge is idempotent — still exactly 1 unacked');
+
+  const alerts = await repo.listAlerts(RUN, { limit: 10 });
+  ok(alerts.items.length === 2, `both alerts are listed, got ${alerts.items.length}`);
+  ok(alerts.items.map((a) => a.id).join(',') === `${ALERT_2},${ALERT_1}`,
+    `alerts come back newest-first, got ${alerts.items.map((a) => a.id).join(',')}`);
+
+  // A missing alert is a VALUE (null), never a throw — the other side of the
+  // refusal/throw boundary the missing-announcement patch just exercised.
+  ok((await repo.getAlert(RUN, ALERT_UNKNOWN)) === null,
+    'getAlert for an unknown id returns null, not a throw');
+}
+
+
+// ── 8. Transactions: all-or-nothing, and the return value is the only exit ──
 
 async function transactionAtomicity(repo: ContractRepository, ok: Assert): Promise<void> {
   await seed(repo, ['a']);
@@ -645,7 +779,7 @@ async function transactionAtomicity(repo: ContractRepository, ok: Assert): Promi
 }
 
 
-// ── 8. Re-execution: proving the "no side effects outside tx" rule has teeth ─
+// ── 9. Re-execution: proving the "no side effects outside tx" rule has teeth ─
 //
 // `transaction.ts` rule 1 says a body MAY run more than once, and rule 2 forbids
 // mutating anything in the enclosing scope. Both are unenforceable by a type —

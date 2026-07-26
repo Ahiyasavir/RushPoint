@@ -215,6 +215,59 @@ function notImplemented(method: string): never {
 
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Live-ops field maps (announcements + alerts)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Declared HERE rather than in schema.ts because this migration phase only wires
+// a narrow live-ops slice for the repository CONTRACT — the same reasoning the
+// Firestore live-ops store gives for restating its helpers locally. When the
+// parent promotes the whole live-ops surface, move these next to the other maps.
+//
+// `run_id` / `owner_uid` are appended by hand (they come from the SCOPE, not the
+// domain object) exactly as `putStaffInvite` does, so they are NOT in the map.
+// The newest-first ORDER of the two list reads is a documented, load-bearing
+// guarantee of these windows (see firestore/liveOps.ts header), not a generic
+// paging convenience — which is why the contract may assert it.
+
+/** Client participant-window cap, mirroring firestore/liveOps.ts. */
+const ANNOUNCEMENT_WINDOW = 30;
+
+const ANNOUNCEMENT_COLUMNS: FieldMap = {
+  // uuid PK, resolved on read; appended by hand on write (like staff invites).
+  id: { name: 'id', type: 'uuid', readOnly: true },
+  message: { name: 'message', type: 'text' },
+  messageHe: { name: 'message_he', type: 'text', nullable: true },
+  level: { name: 'level', type: 'enum', enumType: 'announcement_level' },
+  // `not null default 'announcement'` over an OPTIONAL domain field: absent means
+  // 'announcement', so DELETE ⇒ DEFAULT ⇒ reads back absent.
+  kind: { name: 'kind', type: 'enum', enumType: 'announcement_kind', omitWhenDefault: 'announcement' },
+  active: { name: 'active', type: 'boolean' },
+  // `teamId`/`operatorId` are uuid columns with no `legacy_firebase_uid`, so a
+  // non-uuid id would not round-trip (ids.ts). A global broadcast leaves them null.
+  teamId: { name: 'team_id', type: 'uuid', nullable: true },
+  operatorId: { name: 'operator_id', type: 'uuid', nullable: true },
+  delta: { name: 'delta', type: 'numeric', nullable: true },
+  createdAt: { name: 'created_at', type: 'timestamptz' },
+};
+
+const ALERT_COLUMNS: FieldMap = {
+  id: { name: 'id', type: 'uuid', readOnly: true },
+  type: { name: 'type', type: 'enum', enumType: 'alert_type' },
+  teamId: { name: 'team_id', type: 'uuid' },
+  teamName: { name: 'team_name', type: 'text', nullable: true },
+  taskId: { name: 'task_id', type: 'text', nullable: true },
+  stationTitle: { name: 'station_title', type: 'text', nullable: true },
+  message: { name: 'message', type: 'text' },
+  // The domain calls the instant `timestamp`; the column is `created_at` (same
+  // shape as AUDIT_COLUMNS). `AdminAlert.location` is a `lat`/`lng` PAIR here and
+  // is deliberately not mapped — the contract never sets it; see the scenario.
+  timestamp: { name: 'created_at', type: 'timestamptz' },
+  acknowledged: { name: 'acknowledged', type: 'boolean' },
+  acknowledgedAt: { name: 'acknowledged_at', type: 'timestamptz', nullable: true },
+};
+
+
+// ═══════════════════════════════════════════════════════════════════════════
 // The bound repository (identical inside and outside a transaction)
 // ═══════════════════════════════════════════════════════════════════════════
 //
@@ -1256,18 +1309,107 @@ class BoundPostgresRepository implements TransactionalRepository {
   async scanPublicTasks(_p: PageRequest): Promise<Page<PublicTask>> { return notImplemented('scanPublicTasks'); }
   async getTagStats(): Promise<Record<string, number>> { return notImplemented('getTagStats'); }
 
-  async putAnnouncement(_s: RunScope, _a: Announcement): Promise<void> { return notImplemented('putAnnouncement'); }
-  async patchAnnouncement(_s: RunScope, _id: string, _p: Patch<Announcement>): Promise<void> { return notImplemented('patchAnnouncement'); }
-  async listAnnouncements(_s: RunScope, _p: PageRequest): Promise<Page<Announcement>> { return notImplemented('listAnnouncements'); }
-  async listActiveAnnouncements(_s: RunScope): Promise<Announcement[]> { return notImplemented('listActiveAnnouncements'); }
+  // ── Announcements ────────────────────────────────────────────────────────
+  //
+  // Genuinely implemented for the live-ops contract scenario. `run_id`/`owner_uid`
+  // come from the scope and are appended by hand (they are not domain fields).
+
+  async putAnnouncement(scope: RunScope, a: Announcement): Promise<void> {
+    if (!a?.id) {
+      throw new DataError('failed-precondition', 'putAnnouncement: Announcement.id is required');
+    }
+    const plan = buildInsert(a as unknown as Record<string, unknown>, ANNOUNCEMENT_COLUMNS, 'putAnnouncement');
+    this.append(plan, 'id', 'uuid', toUuid(a.id));
+    this.append(plan, 'run_id', 'text', scope.runId);
+    this.append(plan, 'owner_uid', 'uuid', toUuid(scope.ownerUid));
+    await guard('putAnnouncement', () => this.q.query(
+      `insert into announcements (${plan.columns.join(', ')}) values (${plan.placeholders.join(', ')})
+       on conflict (id) do update set ${excludedAssignments(plan)}`,
+      plan.params,
+    ));
+  }
+
+  async patchAnnouncement(scope: RunScope, id: string, patch: Patch<Announcement>): Promise<void> {
+    await this.patchRow(
+      'announcements', patch as Record<string, unknown>, ANNOUNCEMENT_COLUMNS,
+      (i) => ({ sql: `id = $${i}::uuid and run_id = $${i + 1}::text`, params: [toUuid(id), scope.runId] }),
+      'patchAnnouncement',
+    );
+  }
+
+  /** History read — newest first, NOT filtered on `active` (the console sees retired banners). */
+  async listAnnouncements(scope: RunScope, page: PageRequest): Promise<Page<Announcement>> {
+    return this.page<Announcement>(
+      `select * from announcements`, `run_id = $1::text and owner_uid = $2::uuid`,
+      [scope.runId, toUuid(scope.ownerUid)],
+      'created_at', 'id::text', page, ANNOUNCEMENT_COLUMNS, 'listAnnouncements', ['created_at', 'id'],
+    );
+  }
+
+  /** Participant window — `active = true`, newest first, capped. */
+  async listActiveAnnouncements(scope: RunScope): Promise<Announcement[]> {
+    return this.many<Announcement>(
+      `select * from announcements where run_id = $1::text and active = true
+        order by created_at desc, id desc limit ${ANNOUNCEMENT_WINDOW}`,
+      [scope.runId], ANNOUNCEMENT_COLUMNS, 'listActiveAnnouncements',
+    );
+  }
+
   async putFlashMission(_s: RunScope, _m: FlashMission): Promise<void> { return notImplemented('putFlashMission'); }
   async patchFlashMission(_s: RunScope, _id: string, _p: Patch<FlashMission>): Promise<void> { return notImplemented('patchFlashMission'); }
   async listActiveFlashMissions(_s: RunScope, _now: string): Promise<FlashMission[]> { return notImplemented('listActiveFlashMissions'); }
-  async putAlert(_s: RunScope, _a: AdminAlert): Promise<void> { return notImplemented('putAlert'); }
-  async getAlert(_s: RunScope, _id: string): Promise<AdminAlert | null> { return notImplemented('getAlert'); }
-  async patchAlert(_s: RunScope, _id: string, _p: Patch<AdminAlert>): Promise<void> { return notImplemented('patchAlert'); }
-  async listAlerts(_s: RunScope, _p: PageRequest): Promise<Page<AdminAlert>> { return notImplemented('listAlerts'); }
-  async countUnackedAlerts(_s: RunScope): Promise<number> { return notImplemented('countUnackedAlerts'); }
+
+  // ── Alerts (SOS + safe-zone breach) ──────────────────────────────────────
+
+  async putAlert(scope: RunScope, a: AdminAlert): Promise<void> {
+    if (!a?.id) {
+      throw new DataError('failed-precondition', 'putAlert: AdminAlert.id is required');
+    }
+    const plan = buildInsert(a as unknown as Record<string, unknown>, ALERT_COLUMNS, 'putAlert');
+    this.append(plan, 'id', 'uuid', toUuid(a.id));
+    this.append(plan, 'run_id', 'text', scope.runId);
+    this.append(plan, 'owner_uid', 'uuid', toUuid(scope.ownerUid));
+    await guard('putAlert', () => this.q.query(
+      `insert into alerts (${plan.columns.join(', ')}) values (${plan.placeholders.join(', ')})
+       on conflict (id) do update set ${excludedAssignments(plan)}`,
+      plan.params,
+    ));
+  }
+
+  async getAlert(scope: RunScope, id: string): Promise<AdminAlert | null> {
+    return this.one<AdminAlert>(
+      `select * from alerts where id = $1::uuid and run_id = $2::text`,
+      [toUuid(id), scope.runId], ALERT_COLUMNS, 'getAlert',
+    );
+  }
+
+  async patchAlert(scope: RunScope, id: string, patch: Patch<AdminAlert>): Promise<void> {
+    await this.patchRow(
+      'alerts', patch as Record<string, unknown>, ALERT_COLUMNS,
+      (i) => ({ sql: `id = $${i}::uuid and run_id = $${i + 1}::text`, params: [toUuid(id), scope.runId] }),
+      'patchAlert',
+    );
+  }
+
+  /** Newest first (order field is the stored `created_at` — see ALERT_COLUMNS). */
+  async listAlerts(scope: RunScope, page: PageRequest): Promise<Page<AdminAlert>> {
+    return this.page<AdminAlert>(
+      `select * from alerts`, `run_id = $1::text and owner_uid = $2::uuid`,
+      [scope.runId, toUuid(scope.ownerUid)],
+      'created_at', 'id::text', page, ALERT_COLUMNS, 'listAlerts', ['created_at', 'id'],
+    );
+  }
+
+  async countUnackedAlerts(scope: RunScope): Promise<number> {
+    return guard('countUnackedAlerts', async () => {
+      const r = await this.q.query<{ n: number }>(
+        `select count(*)::int as n from alerts
+          where run_id = $1::text and owner_uid = $2::uuid and acknowledged = false`,
+        [scope.runId, toUuid(scope.ownerUid)],
+      );
+      return Number(r.rows[0]?.n ?? 0);
+    });
+  }
   async putTeamLocation(_s: RunScope, _l: TeamLocation): Promise<void> { return notImplemented('putTeamLocation'); }
   async listTeamLocations(_s: RunScope): Promise<TeamLocation[]> { return notImplemented('listTeamLocations'); }
   async appendLocationTrackPoint(_s: RunScope, _p: LocationTrackPoint): Promise<void> { return notImplemented('appendLocationTrackPoint'); }
