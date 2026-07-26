@@ -1162,7 +1162,7 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
       <Section k="advanced" title={b.advanced} task={task} sections={sections} b={b}>
         <div>
           <Label dense>{b.points}</Label>
-          <Input dense type="number" value={task.pointValue} onChange={(e) => set({ pointValue: parseInt(e.target.value) || 0 })} />
+          <Input dense type="number" min={0} value={task.pointValue} onChange={(e) => set({ pointValue: Math.max(0, parseInt(e.target.value) || 0) })} />
         </div>
 
         <AdvGroup>{b.advGroupTiming}</AdvGroup>
@@ -1287,7 +1287,7 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
               <InlineLabel>{b.maxTeams}</InlineLabel>
               <RichTooltip concept="concurrent" />
             </div>
-            <Input dense type="number" value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: parseInt(e.target.value) || 1 })} />
+            <Input dense type="number" min={1} value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: Math.max(1, parseInt(e.target.value) || 1) })} />
           </div>
           {located && (
             <div>
