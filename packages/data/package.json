@@ -19,6 +19,7 @@
     "@rushpoint/shared": "*"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
     "typescript": "^5.4.0"
   }
 }

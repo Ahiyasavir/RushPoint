@@ -8,10 +8,30 @@ Three migrations, applied in order:
 | `migrations/0002_rls_policies.sql` | `is_run_participant` / `is_staff_for_run` / `can_read_run` / `get_join_info`, RLS enabled on every table, one read policy per audience |
 | `migrations/0003_indexes.sql` | Indexes mirroring the real query patterns (derived from `firestore.indexes.json` + the callables) |
 
-They are plain SQL and depend only on the Supabase platform pieces: the `auth` schema
+They are plain SQL and depend on the Supabase platform pieces: the `auth` schema
 (`users.uid` references `auth.users(id)`), the `auth.uid()` function used by every
 policy, and the `anon` / `authenticated` / `service_role` roles. They will **not**
 apply to a bare Postgres without those.
+
+### The one extension: `btree_gin`
+
+`0001_core_schema.sql` creates **`btree_gin`** and nothing else. It is a genuine hard
+dependency — the four GIN indexes in `0003_indexes.sql`
+(`games_stages_gin_idx`, `run_teams_device_uids_gin_idx`, `public_games_tags_gin_idx`,
+`public_tasks_tags_gin_idx`) need it. It ships with Supabase and with any standard
+`postgresql-contrib` install; a Postgres built without contrib will fail on line 1.
+
+There is deliberately **no `pgcrypto`**: the only function this schema ever wanted from
+it is `gen_random_uuid()`, which has been a core built-in since PostgreSQL 13.
+
+### Schema smoke gate
+
+`scripts/test-supabase-schema.ts` (run by `npm test`) applies all three files to a real
+PostgreSQL — PGlite, i.e. Postgres compiled to WASM, no Docker — and asserts the
+catalogue that results. It proves the schema **installs**; it does **not** prove the RLS
+policies are correct (`auth.uid()` is stubbed to null, so no predicate is ever
+evaluated). The script prints its own "NOT VALIDATED" block on every run. Real
+authorization testing still needs `supabase start` + `supabase db reset` with real JWTs.
 
 ## Run it locally
 

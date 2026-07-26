@@ -28,7 +28,15 @@
 --   must convert with to_timestamp(ms / 1000.0).
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-create extension if not exists pgcrypto;   -- gen_random_uuid()
+-- NO pgcrypto. The only thing this schema ever wanted from it is gen_random_uuid(),
+-- which has been a CORE built-in since PostgreSQL 13 (Supabase runs 15+). Verified:
+-- no crypt() / digest() / hmac() / gen_salt() call exists anywhere in these
+-- migrations, so the extension was pure ceremony — and requiring it needlessly
+-- narrows the set of Postgres installs this schema applies to.
+
+-- REQUIRED in the target environment: btree_gin backs the mixed btree+gin composite
+-- indexes in 0003_indexes.sql. It ships with Supabase and with any standard
+-- postgresql-contrib install; a bare Postgres without contrib will fail here.
 create extension if not exists btree_gin;  -- mixed btree+gin composite indexes
 
 
