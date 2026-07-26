@@ -36,6 +36,15 @@ function zoneColor(z: CaptureZone, myTeamId?: string): string {
   return z.ownerTeamId === myTeamId ? '#22C55E' : '#EF4444';
 }
 
+// Ownership as a non-color channel too (change: colorblind-safe zones): mine vs a
+// rival's territory is the classic red/green confusable pair, so we ALSO encode it in
+// ring weight + fill opacity — a redundant cue that reads for colorblind players (and
+// makes your own turf pop for everyone). Data-driven off this property.
+function zoneOwnership(z: CaptureZone, myTeamId?: string): 'mine' | 'rival' | 'open' {
+  if (!z.ownerTeamId) return 'open';
+  return z.ownerTeamId === myTeamId ? 'mine' : 'rival';
+}
+
 export default function NavMap({
   targets, me, hotZone = null, zones = [], searchAreas = [], myTeamId, accent = '#F97316', className = '', keepMapWithMe = false,
 }: {
@@ -144,7 +153,7 @@ export default function NavMap({
         type: 'FeatureCollection',
         features: zs.map((z) => {
           const f = circlePolygonGeoJSON(z.center, z.radiusMeters) as GeoJSON.Feature;
-          f.properties = { color: zoneColor(z, myTeamIdRef.current) };
+          f.properties = { color: zoneColor(z, myTeamIdRef.current), ownership: zoneOwnership(z, myTeamIdRef.current) };
           return f;
         }),
       };
@@ -153,9 +162,11 @@ export default function NavMap({
       } else {
         m.addSource(ZONES_SOURCE, { type: 'geojson', data });
         m.addLayer({ id: `${ZONES_SOURCE}-fill`, type: 'fill', source: ZONES_SOURCE,
-          paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.18 } });
+          paint: { 'fill-color': ['get', 'color'],
+            'fill-opacity': ['match', ['get', 'ownership'], 'mine', 0.3, 'rival', 0.1, 0.15] } });
         m.addLayer({ id: `${ZONES_SOURCE}-line`, type: 'line', source: ZONES_SOURCE,
-          paint: { 'line-color': ['get', 'color'], 'line-width': 2 } });
+          paint: { 'line-color': ['get', 'color'],
+            'line-width': ['match', ['get', 'ownership'], 'mine', 4, 'rival', 2, 2] } });
       }
     } else {
       if (m.getLayer(`${ZONES_SOURCE}-fill`)) m.removeLayer(`${ZONES_SOURCE}-fill`);
