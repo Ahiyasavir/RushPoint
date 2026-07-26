@@ -7537,6 +7537,68 @@ async function main() {
   //     failure here, because nothing errors),
   //   • re-publishing a game silently wiping its accumulated signals,
   //   • the new gallery fields leaking into a run-time Task payload.
+  // Gallery REACHABILITY (change: gallery-reachability-guard). The entire point of the
+  // gallery is to let a creator FIND published games and their missions. This is the
+  // explicit end-to-end contract: publish a game with tags + a located mission + a
+  // locationless one, then assert it is reachable through searchGallery AND its missions
+  // through searchTaskLibrary — exercising the EXACT facet args the creator UI sends
+  // (query / tags / mode / sort / type / hasLocation). The live "gallery shows INTERNAL"
+  // outage was searchGallery throwing in this path; a throw here aborts the scenario and
+  // fails the suite, so that class of regression can never reach a phone again.
+  await scenario('gallery reachability (published game + missions are findable)', async () => {
+    const stamp = Date.now();
+    const TAG = `guardtag${stamp}`;
+    const TITLE = `Reachable Game ${stamp}`;
+    const { gameId: gR } = await creator.call('createGame', { title: TITLE, mode: 'individual' });
+    await creator.call('updateGame', { gameId: gR, scoringPreset: 'fixed_points_speed', tags: [TAG], stages: [
+      { id: 'gr-s', order: 0, title: 'Stage', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'gr-loc', title: `Located Mission ${stamp}`, type: 'field',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 2, estimatedMinutes: 3, pointValue: 30, maxConcurrentTeams: 3 },
+        { id: 'gr-any', title: `Anywhere Mission ${stamp}`, type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 2, pointValue: 20, maxConcurrentTeams: 3 } ] },
+    ] });
+    await creator.call('publishGame', { gameId: gR, visibility: 'public' });
+
+    // 1) Reachable by text search — no INTERNAL, and the game is actually returned.
+    const byText = await creator.call('searchGallery', { query: TITLE, limit: 50 });
+    check('searchGallery returns a games array (no INTERNAL)', Array.isArray(byText?.games));
+    check('the published game is reachable via searchGallery text search',
+      (byText?.games ?? []).some((g) => g.id === gR),
+      JSON.stringify((byText?.games ?? []).map((g) => g.id).slice(0, 8)));
+
+    // 2) Reachable by the tag filter (the sole DB filter); F3 propagated the game tag.
+    const byTag = await creator.call('searchGallery', { query: '', tags: [TAG], limit: 50 });
+    check('the published game is reachable by its tag',
+      (byTag?.games ?? []).some((g) => g.id === gR),
+      JSON.stringify((byTag?.games ?? []).map((g) => g.id).slice(0, 8)));
+
+    // 3) The EXACT facet args the creator UI sends (mode + sort) — the path that 500'd
+    //    in production — must not throw and must still surface the game.
+    const byFacet = await creator.call('searchGallery', { query: '', mode: 'individual', sort: 'popular', limit: 50 });
+    check('searchGallery with mode+sort facets does not throw and returns the game',
+      Array.isArray(byFacet?.games) && byFacet.games.some((g) => g.id === gR),
+      JSON.stringify((byFacet?.games ?? []).map((g) => g.id).slice(0, 8)));
+
+    // 4) The game's MISSIONS are reachable via the task library, including the facet
+    //    args (type + hasLocation) the missions tab sends.
+    const libAll = await creator.call('searchTaskLibrary', { query: '', tags: [TAG], limit: 100 });
+    check('searchTaskLibrary returns a tasks array (no INTERNAL)', Array.isArray(libAll?.tasks));
+    const libIds = (libAll?.tasks ?? []).map((t) => t.id);
+    check('the located mission is reachable via searchTaskLibrary',
+      libIds.includes(`${gR}_gr-loc`), JSON.stringify(libIds.slice(0, 8)));
+    check('the locationless mission is reachable via searchTaskLibrary',
+      libIds.includes(`${gR}_gr-any`), JSON.stringify(libIds.slice(0, 8)));
+    const libLocated = await creator.call('searchTaskLibrary', { query: '', tags: [TAG], type: 'field', hasLocation: true, limit: 100 });
+    check('searchTaskLibrary type+hasLocation facets narrow to the located field mission',
+      (libLocated?.tasks ?? []).some((t) => t.id === `${gR}_gr-loc`)
+      && !(libLocated?.tasks ?? []).some((t) => t.id === `${gR}_gr-any`),
+      JSON.stringify((libLocated?.tasks ?? []).map((t) => t.id).slice(0, 8)));
+
+    // 5) The popular-tags chips call (also fired when the gallery opens) must not throw.
+    const pop = await creator.call('getPopularTags', { limit: 50 });
+    check('getPopularTags returns a tags array (no INTERNAL)', Array.isArray(pop?.tags));
+  });
+
   await scenario('gallery popularity + likes', async () => {
     const OWNER = creatorCred.user.uid;
     const stamp = Date.now();
