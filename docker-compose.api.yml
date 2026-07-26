@@ -26,11 +26,14 @@ services:
       # exact origins your play-web + creator-web are served from (scheme + host).
       ALLOWED_ORIGINS: "https://play.example.com,https://creator.example.com"
       PORT: "8080"
-      # Server-only secrets the functions read (same as functions/.env today).
-      QR_SECRET: "change-me-to-the-same-value-you-use-today"
-      # Payments are behind PAYMENTS_ENABLED; only needed if you turn them on.
-      # STRIPE_SECRET_KEY: "sk_live_..."
-      # STRIPE_WEBHOOK_SECRET: "whsec_..."
+      # Run-summary emails (Resend) are ON by default. Simplest: turn them off.
+      RUN_SUMMARY_EMAIL_ENABLED: "false"
+      #   ...or keep them on by REMOVING the line above and setting:
+      #   RESEND_API_KEY: "re_..."
+      #   RUN_SUMMARY_EMAIL_FROM: "RushPoint <noreply@yourdomain>"
+      #   RUN_SUMMARY_EMAIL_TO: "you@yourdomain"
+      # NOTE: payments are hard-disabled in code (PAYMENTS_ENABLED=false) — no
+      # Stripe/APP_URL/QR env is needed. RUSHPOINT_APP_ID defaults to the project id.
     volumes:
       - ./service-account.json:/secrets/service-account.json:ro
     healthcheck:
