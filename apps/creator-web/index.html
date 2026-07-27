@@ -2,6 +2,40 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Google tag (gtag.js) — change: google-analytics-tag.
+         AFTER <meta charset> on purpose: the charset declaration must stay inside the
+         document's first 1024 bytes or encoding detection can fail, and this console is
+         Hebrew-first. Google's "immediately after <head>" is guidance for ordinary
+         pages, not a constraint — one meta tag later changes nothing about collection.
+
+         Loaded IMPERATIVELY, never as a static <script async src>: a static tag fires
+         the request to Google before any JS can decide, so localhost would still be
+         contacted. The early return below is what makes "no request at all on a dev
+         machine" actually true.
+
+         The host rule duplicates shouldLoadAnalytics() in packages/shared/src/analytics.ts
+         because an inline classic script cannot import from the module graph. It is NOT
+         trusted: scripts/test-analytics-gate.ts extracts this predicate and executes it
+         against the same case table as the shared function, so drift fails `npm test`.
+         Change the rule here => change it there (and in play-web/index.html). -->
+    <script>
+      (function () {
+        if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
+        var ID = 'G-89TM5X68RR';
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=' + ID;
+        document.head.appendChild(s);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { window.dataLayer.push(arguments); };
+        gtag('js', new Date());
+        gtag('config', ID, {
+          anonymize_ip: true,
+          allow_google_signals: false,
+          allow_ad_personalization_signals: false
+        });
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#050508" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

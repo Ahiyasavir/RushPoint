@@ -201,11 +201,15 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 ## 9. עוגיות ועקיבה
 
-אנו משתמשים **בעוגיות חיוניות בלבד:**
+**עוגיות חיוניות** (נדרשות לתפעול השירות):
 - עוגיות אימות Firebase (נדרשות לשמירת המצב המחובר)
 - העדפות שפה (HE/EN)
 
-אין שימוש בעוגיות מעקב, ניתוח פרסומי, ריטרגטינג, ו/או פיקסלים של רשתות פרסום.
+**עוגיות ניתוח.** אנו משתמשים ב-**Google Analytics** (Google Ireland Limited) כדי למדוד שימוש מצטבר בשירות — כמה אנשים פותחים קישור הצטרפות, לאילו מסכים הם מגיעים, והיכן הם נוטשים. זה עוזר לנו לתקן את מה שמבלבל ולהחליט מה לבנות בהמשך. Google Analytics מציבה בדפדפן שלך עוגיות משלה, בשמות _ga ו-_ga_G-89TM5X68RR, המבחינות בין דפדפן אחד למשנהו למשך עד שנתיים.
+
+אנו מגדירים את Google Analytics באופן מצומצם: **אנונימיזציה של כתובת ה-IP מופעלת**, ו**אותות Google Signals והתאמה אישית של פרסום מושבתים**. אין שימוש בריטרגטינג או בפיקסלים של רשתות פרסום, איננו מציגים פרסומות, ואיננו מוכרים או משתפים מידע זה עם מפרסמים.
+
+**כיצד לבטל את ההסכמה:** ניתן לחסום או למחוק עוגיות בהגדרות הדפדפן, להשתמש באמצעי ההגנה מפני מעקב של הדפדפן, או להתקין את תוסף ההסרה הרשמי של Google מהכתובת https://tools.google.com/dlpage/gaoptout — ביטול ההסכמה אינו פוגע ביכולת לשחק או להפעיל משחק.
 
 ## 10. מסרים שיווקיים ותקשורת
 
@@ -435,11 +439,15 @@ To exercise these rights: **privacy@rushpoint.app** · spendora.tracker@gmail.co
 
 ## 9. Cookies and Tracking
 
-We use **essential cookies only:**
+**Essential cookies** (required for the Service to work):
 - Firebase authentication cookies (required to maintain the logged-in state)
 - Language preferences (HE/EN)
 
-No tracking cookies, advertising analytics, retargeting, or advertising network pixels are used.
+**Analytics cookies.** We use **Google Analytics** (Google Ireland Limited) to measure aggregate usage of the Service — how many people open a join link, which screens are reached, and where people drop off. This helps us fix what is confusing and decide what to build next. Google Analytics sets its own cookies in your browser, named _ga and _ga_G-89TM5X68RR, which distinguish one browser from another for up to two years.
+
+We configure Google Analytics restrictively: **IP anonymization is enabled**, and **Google Signals and advertising personalization are disabled**. We do not use retargeting or advertising network pixels, we do not run ads, and we do not sell or share this data with advertisers.
+
+**How to opt out:** you may block or delete cookies in your browser settings, use your browser's tracking-protection features, or install Google's official opt-out add-on from https://tools.google.com/dlpage/gaoptout — opting out does not affect your ability to play or to run a game.
 
 ## 10. Marketing Messages
 

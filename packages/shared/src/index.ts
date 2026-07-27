@@ -8,6 +8,10 @@ export * from './registration';
 export * from './freeMode';
 export * from './staffThrottle';
 export * from './rateLimit';
+// Which hostnames report to Google Analytics, and how the tag is hardened
+// (change: google-analytics-tag). Pure — the inline copy in each app's index.html
+// is pinned to it by scripts/test-analytics-gate.ts.
+export * from './analytics';
 // Public gallery / task library ranking (change: gallery-popularity-ranking).
 export * from './popularity';
 // What a PUBLIC task may say about where it is (change: task-library-map-view).
