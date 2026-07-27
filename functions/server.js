@@ -71,8 +71,21 @@ app.use((req, res, next) => {
 // Liveness/readiness for the reverse proxy and `docker healthcheck`.
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
 
-// Mount every callable at POST /<name>. `__endpoint.callableTrigger` is how a v1
+// Mount every callable at /<name>. `__endpoint.callableTrigger` is how a v1
 // `onCall` announces itself; anything else (triggers, schedules) is skipped.
+//
+// `app.all`, NOT `app.post` — this is load-bearing. A cross-origin browser call
+// sends a CORS **preflight** `OPTIONS /<name>` before the POST. The callable layer
+// answers preflights itself (it wraps the handler in cors({origin:true})), but with
+// a POST-only route the OPTIONS never reaches it: Express's default handler replies
+// 200 with `Allow: POST` and NO `Access-Control-Allow-Origin`, so the browser blocks
+// the real request and the app fails with an opaque "failed to load" error.
+//
+// This is invisible to every non-browser test — curl/server-to-server POSTs carry no
+// Origin header and therefore never preflight — so it only surfaces once a real page
+// on a different origin calls the API. Handing OPTIONS to the callable is what makes
+// the deployed topology (app on rush-point.com, API on api.rush-point.com) work at all.
+// Non-POST/OPTIONS verbs are still rejected, by the callable layer rather than by us.
 const mounted = [];
 for (const name of Object.keys(fns)) {
   const fn = fns[name];
@@ -85,7 +98,7 @@ for (const name of Object.keys(fns)) {
     continue;
   }
   if (!isCallable) continue;
-  app.post(`/${name}`, (req, res) => fn(req, res));
+  app.all(`/${name}`, (req, res) => fn(req, res));
   mounted.push(name);
 }
 
