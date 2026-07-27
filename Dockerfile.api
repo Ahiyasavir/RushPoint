@@ -22,6 +22,18 @@ COPY . .
 RUN npm ci --no-audit --no-fund
 RUN npm --prefix packages/shared run build \
  && npm --prefix functions run build
+# Runtime-only package.json: `functions/package.json`'s devDependencies list the
+# LOCAL workspace package `@rushpoint/shared` (never published to npm). Copying
+# that file as-is into the runtime stage and running `npm install --omit=dev`
+# still 404s — with no lockfile present, npm resolves the FULL dependency graph
+# (including devDependencies) before it can decide what to omit, so it tries to
+# fetch `@rushpoint/shared` from the public registry and the build fails before
+# a single runtime package installs. Stripping devDependencies here, rather than
+# relying on --omit=dev, means npm never has a reason to look for it at all.
+RUN node -e "\
+  const p = require('/repo/functions/package.json'); \
+  const { devDependencies, scripts, ...rest } = p; \
+  require('fs').writeFileSync('/repo/functions/package.runtime.json', JSON.stringify(rest, null, 2));"
 
 # ---- runtime: node + only the deps the bundle externalises + the bundle ----
 FROM node:20-slim AS runtime
@@ -29,8 +41,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 # functions/package.json's runtime deps are firebase-admin, firebase-functions,
 # stripe and express — exactly what the esbuild bundle leaves external plus the
-# HTTP host. --omit=dev skips shared/tsc/esbuild/vitest.
-COPY functions/package.json ./package.json
+# HTTP host. package.runtime.json (built above) carries ONLY those — no
+# devDependencies section for npm to ever try resolving.
+COPY --from=build /repo/functions/package.runtime.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /repo/functions/lib ./lib
 COPY --from=build /repo/functions/server.js ./server.js
