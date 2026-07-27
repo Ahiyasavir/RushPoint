@@ -37,9 +37,11 @@ export const TASK_ESTIMATE_MAX_MINUTES = 60;
 /** Routing's own walking model: great-circle distance at 5 km/h (assignNextTask.ts:58).
  *  Reused verbatim so the authoring estimate and the routing cost cannot drift. */
 export const WALK_MINUTES_PER_KM = 12;
-/** What "we cannot know this leg" costs. The SAME constant routing charges for a task
- *  with unusable coordinates or a hidden location (assignNextTask.ts:51,53,55). */
-export const TRANSIT_UNKNOWN_MINUTES = 5;
+/** What "we cannot know this leg" costs in the AUTHORING estimate shown to the creator.
+ *  Routing's own coords-unavailable / hidden-location constant (assignNextTask.ts:52-53) is a
+ *  separate literal `5` used for live task-priority scoring — deliberately not shared with this
+ *  one, which only feeds the Builder's displayed total. */
+export const TRANSIT_UNKNOWN_MINUTES = 1;
 /** Two stops in one courtyard still cost arriving, orienting and finding the marker.
  *  A 0 floor would collapse the estimate back to interaction-only, the exact bug. */
 export const TRANSIT_MIN_MINUTES = 1;
