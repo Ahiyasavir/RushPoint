@@ -282,6 +282,7 @@ export const searchGallery = loggedCallable('searchGallery', async (data, contex
     popularity: g.popularity,
     uses: g.playCount,
     likes: g.likeCount,
+    pinnedLast: g.pinnedLast,
   }));
 
   // FACET pass (change: gallery-facet-filters): mode narrows, sort re-orders — in
@@ -329,6 +330,7 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
     popularity: t.popularity,
     uses: t.copyCount,
     likes: t.likeCount,
+    pinnedLast: t.pinnedLast,
   }));
 
   // FACET pass (change: gallery-facet-filters): type/difficulty(≥)/hasLocation

@@ -148,6 +148,19 @@ describe('comparePopularity — deterministic total order', () => {
     expect(comparePopularity(item('a', 0.1), { id: 'b' })).toBeLessThan(0);
   });
 
+  it('pinnedLast always ranks after a non-pinned item, regardless of popularity', () => {
+    const pinned = { ...item('pinned', 999, 999, 999), pinnedLast: true };
+    const ordinary = item('ordinary', 0, 0, 0);
+    expect(comparePopularity(pinned, ordinary)).toBeGreaterThan(0);
+    expect(comparePopularity(ordinary, pinned)).toBeLessThan(0);
+  });
+
+  it('two pinnedLast items still order between themselves normally', () => {
+    const a = { ...item('a', 2), pinnedLast: true };
+    const b = { ...item('b', 1), pinnedLast: true };
+    expect(comparePopularity(a, b)).toBeLessThan(0);
+  });
+
   it('is antisymmetric, transitive, and never zero for distinct ids', () => {
     let seed = 99;
     const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
@@ -192,8 +205,18 @@ describe('relevanceTier — search relevance beats popularity', () => {
 });
 
 describe('rankGalleryResults', () => {
-  interface Row { id: string; title: string; description?: string; popularity: number }
-  const adapt = (r: Row) => ({ id: r.id, title: r.title, extras: [r.description], popularity: r.popularity });
+  interface Row { id: string; title: string; description?: string; popularity: number; pinnedLast?: boolean }
+  const adapt = (r: Row) => ({
+    id: r.id, title: r.title, extras: [r.description], popularity: r.popularity, pinnedLast: r.pinnedLast,
+  });
+
+  it('sorts a pinnedLast row after every other match even with a matching query', () => {
+    const rows: Row[] = [
+      { id: 'qa', title: 'Kotel QA Playground', popularity: 999, pinnedLast: true },
+      { id: 'real', title: 'Kotel Hunt', popularity: 0.01 },
+    ];
+    expect(rankGalleryResults(rows, 'kotel', adapt).map((r) => r.id)).toEqual(['real', 'qa']);
+  });
 
   it('with an empty query, orders purely by popularity', () => {
     const rows: Row[] = [

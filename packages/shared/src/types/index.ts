@@ -624,6 +624,10 @@ export interface PublicGame {
   // undefined as 0 and the document self-heals on its next signal.
   likeCount?: number;
   popularity?: number;
+  // Always ranks after every non-pinned item, regardless of popularity/likes/uses
+  // (change: gallery-pin-last). For content that must stay reachable but never
+  // compete for the front of the gallery — e.g. the QA playground game.
+  pinnedLast?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -666,6 +670,8 @@ export interface PublicTask {
   // same contract as PublicGame above. `uses` for a task is its copyCount.
   likeCount?: number;
   popularity?: number;
+  // See PublicGame.pinnedLast (change: gallery-pin-last) — same contract.
+  pinnedLast?: boolean;
   createdAt: string;
 }
 

@@ -116,17 +116,27 @@ export interface RankFields {
   popularity?: number;
   uses?: number;
   likes?: number;
+  /** See PublicGame.pinnedLast (change: gallery-pin-last). */
+  pinnedLast?: boolean;
 }
 
 /**
- * Deterministic TOTAL order: score desc → uses desc → likes desc → id asc.
+ * Deterministic TOTAL order: pinnedLast last → score desc → uses desc →
+ * likes desc → id asc.
  *
  * Firestore's `orderBy('popularity','desc')` is only a partial order, so equal
  * scores could shuffle between calls and break paging. The id tiebreak
  * guarantees two callers ranking the same set always produce the same sequence.
  * A missing score counts as 0, so a legacy document ranks last rather than NaN.
+ *
+ * `pinnedLast` is checked FIRST and outranks every other signal: a pinned item
+ * sorts after every non-pinned item no matter how much popularity/uses/likes it
+ * has, and two pinned items still fall through to the normal order between
+ * themselves (so pinning is a floor, not a black hole).
  */
 export function comparePopularity(a: RankFields, b: RankFields): number {
+  const byPinned = (a.pinnedLast ? 1 : 0) - (b.pinnedLast ? 1 : 0);
+  if (byPinned !== 0) return byPinned;
   const byScore = clampCount(b.popularity) - clampCount(a.popularity);
   if (byScore !== 0) return byScore;
   const byUses = clampCount(b.uses) - clampCount(a.uses);

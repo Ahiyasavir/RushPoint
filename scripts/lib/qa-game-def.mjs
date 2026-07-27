@@ -380,6 +380,9 @@ export async function seedQaGame(admin, db, auth, now) {
     playCount: 0, stageCount: stages.length, taskCount: allTasks.length,
     estimatedTotalMinutes: allTasks.reduce((s, t) => s + (t.estimatedMinutes ?? 0), 0),
     requirement: 'gps',
+    // Always ranks last in the public gallery (change: gallery-pin-last) — this
+    // is a QA-only game, not real content to compete for the front of the list.
+    pinnedLast: true,
     createdAt: now, updatedAt: now,
   });
   const pb = db.batch();
@@ -396,7 +399,7 @@ export async function seedQaGame(admin, db, auth, now) {
       title: t.title, description: t.description ?? '', type: t.type,
       ...(approxLocation ? { approxLocation } : {}),
       difficulty: t.difficulty, estimatedMinutes: t.estimatedMinutes, pointValue: t.pointValue,
-      tags: t.tags ?? [], copyCount: 0, createdAt: now,
+      tags: t.tags ?? [], copyCount: 0, pinnedLast: true, createdAt: now,
     });
   }
   await pb.commit();
