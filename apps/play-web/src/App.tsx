@@ -10,6 +10,7 @@ import { LoadingView } from './components/LoadingView';
 import { I18nProvider, useT } from './i18nContext';
 import { unlockAudio } from './lib/sound';
 import { resolvePlayRoute, resumeOrJoin, stripStaffParams } from './lib/playRoute';
+import { demoPromoSearch, shouldOfferDemo } from './lib/demoEntry';
 import { lazyWithRetry } from './lib/lazyWithRetry';
 // Every participant-facing chunk goes through lazyWithRetry so a stale
 // service-worker shell (old hashed chunk 404s after a redeploy) self-heals with a
@@ -137,6 +138,21 @@ function AppInner() {
       setSearch(next);
     }
     setSession(null);
+  }, []);
+
+  // The cold-launch demo (change: cold-launch-demo-entry). A Play Store install
+  // opens the app with a BARE url, which resolves to the access-code prompt and
+  // nothing else. This rewrites the URL to the EXISTING public promo route for the
+  // flagship instant-play demo, so the resolver re-derives `promo` and
+  // GamePromoScreen's "Play now" starts a fresh solo run via `startInstantPlay` —
+  // no new route, no new screen, no new callable. `replaceState` (not push)
+  // matches exitStaff/leaveRun, and `leaveRun` already strips `game` again on the
+  // way out, so finishing the demo returns to the join screen.
+  const openDemo = useCallback(() => {
+    const next = demoPromoSearch();
+    window.history.replaceState(null, '', `${window.location.pathname}${next}${window.location.hash}`);
+    setSearch(next);
+    setDismissed(false);
   }, []);
 
   if (!ready) {
@@ -274,6 +290,7 @@ function AppInner() {
             initialCode={route.kind === 'join' ? route.code : null}
             onJoined={setSession}
             onStaff={() => setStaffMode(true)}
+            onDemo={shouldOfferDemo(route, !!session) ? openDemo : undefined}
           />}
       <DialogHost />
     </>

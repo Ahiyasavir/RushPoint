@@ -1,5 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type RegistrationField } from '@rushpoint/shared';
+import { doc, getDoc } from 'firebase/firestore';
+import { FIRESTORE_PATHS, resolveDisplayName, resolveRegistrationFields, validateRequiredFields, type PublicGame, type RegistrationField } from '@rushpoint/shared';
+import { db } from '../services/firebase';
+import { DEMO_GAME_ID } from '../lib/demoEntry';
 import { getJoinInfo, joinRun, joinTeamAsDevice, type JoinInfo } from '../services/calls';
 import { saveSession, loadSound, saveSound, type Session } from '../store';
 import { Button, Card, Input, Screen } from '../components/ui';
@@ -14,7 +17,7 @@ import { normalizeJoinCodeInput, joinErrorKey } from '../lib/joinCode';
 // the same links (a player who finishes without ever re-reading Join still needs
 // a route to the privacy policy).
 
-export default function JoinScreen({ initialCode, onJoined, onStaff }: {
+export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
   /**
    * The access code carried by the link, already resolved by lib/playRoute.ts.
    * The URL is parsed in exactly ONE place now: a screen re-reading
@@ -23,6 +26,13 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
   initialCode?: string | null;
   onJoined: (s: Session) => void;
   onStaff?: () => void;
+  /**
+   * Open the flagship instant-play demo (change: cold-launch-demo-entry). Passed
+   * by App.tsx ONLY for a bare cold launch — no code in the URL and no stored
+   * session — so a participant with a real link never sees it. Undefined means
+   * "not that situation", and this screen renders exactly as it always has.
+   */
+  onDemo?: () => void;
 }) {
   const { t, toggleLang, lang, colorblind, setColorblind } = useT();
   // Snapshot at mount, not at module-parse time (P9).
@@ -51,6 +61,31 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
     saveSound(next);
     if (next) unlockAudio(); // turning it on is a gesture — unlock so cues are audible
   }
+
+  // Is the flagship demo actually there? (change: cold-launch-demo-entry)
+  //
+  // The demo button must never lead to a dead end: a backend with no demo seeded
+  // would otherwise answer a first-ever tap with a "game not found" card, which is
+  // worse than the code gate this change removes. So we PROBE the world-readable
+  // `publicGames/{id}` doc — public read, no callable, no auth requirement beyond
+  // the anonymous session App already established — and render the button only
+  // once the game is confirmed present AND instant-play eligible (without
+  // `allowInstantPlay` the promo screen has no "Play now" and the trip is
+  // pointless). Any failure — offline, rules, missing doc — simply leaves the
+  // button hidden and the join screen byte-identical to today.
+  const [demoReady, setDemoReady] = useState(false);
+  useEffect(() => {
+    if (!onDemo) return;
+    let alive = true;
+    getDoc(doc(db, FIRESTORE_PATHS.publicGame(DEMO_GAME_ID)))
+      .then((snap) => {
+        if (!alive) return;
+        const g = snap.exists() ? (snap.data() as PublicGame) : null;
+        setDemoReady(!!g && g.allowInstantPlay === true);
+      })
+      .catch(() => { /* no demo offer; the join screen is unchanged */ });
+    return () => { alive = false; };
+  }, [onDemo]);
 
   useEffect(() => {
     if (linkCode.length >= 4) void lookup();
@@ -278,6 +313,23 @@ export default function JoinScreen({ initialCode, onJoined, onStaff }: {
           >
             {busy ? t.join.lookingUp : t.join.continue}
           </Button>
+
+          {/* The no-code way in (change: cold-launch-demo-entry). Deliberately a
+              SECONDARY affordance under the primary code CTA: a real participant
+              arrives with a code and must not be pulled sideways, while a Play
+              Store installer with nothing to enter still has somewhere to go. */}
+          {onDemo && demoReady && (
+            <div className="mt-5 text-center animate-fade-up">
+              <button
+                type="button"
+                onClick={onDemo}
+                className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 rounded-2xl border border-glass-border bg-white/70 text-sm font-bold text-ink-fire hover:bg-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              >
+                <span aria-hidden="true">🎭</span> {t.join.tryDemo}
+              </button>
+              <p className="text-[11px] text-zinc-500 mt-2 leading-snug px-4">{t.join.tryDemoSub}</p>
+            </div>
+          )}
 
           {onStaff && (
             <button
