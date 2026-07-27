@@ -105,8 +105,19 @@ ok(LOCAL_ANALYTICS_HOSTS.length >= 3, 'LOCAL_ANALYTICS_HOSTS must cover localhos
 console.log('2. index.html inline rule agrees with the shared function');
 
 const APPS = [
-  { name: 'play-web', html: join(ROOT, 'apps', 'play-web', 'index.html') },
-  { name: 'creator-web', html: join(ROOT, 'apps', 'creator-web', 'index.html') },
+  {
+    name: 'play-web',
+    html: join(ROOT, 'apps', 'play-web', 'index.html'),
+    // Firebase default hosts that must bounce to the canonical domain, and where to.
+    canonical: 'rush-point.com',
+    defaultHosts: ['rushpoint-play.web.app', 'rushpoint-play.firebaseapp.com'],
+  },
+  {
+    name: 'creator-web',
+    html: join(ROOT, 'apps', 'creator-web', 'index.html'),
+    canonical: 'creator.rush-point.com',
+    defaultHosts: ['rushpoint-creator.web.app', 'rushpoint-creator.firebaseapp.com'],
+  },
 ];
 
 /** The inline analytics <script> body, identified by the marker comment above it. */
@@ -219,6 +230,53 @@ for (const app of APPS) {
   ok(
     charsetByte < 1024,
     `[${app.name}] <meta charset> must start within the first 1024 bytes (starts at ${charsetByte})`,
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUP 4b — the canonical-host redirect, and that it runs BEFORE analytics
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('4b. canonical-host redirect precedes the analytics tag');
+
+for (const app of APPS) {
+  let html = '';
+  try { html = readFileSync(app.html, 'utf8'); } catch { /* reported in group 2 */ }
+  if (!html) continue;
+
+  const redirectAt = html.indexOf('Canonical host redirect');
+  ok(redirectAt !== -1, `[${app.name}] must carry the canonical-host redirect`);
+  if (redirectAt === -1) continue;
+
+  // ORDERING IS THE POINT. A redirect placed after gtag would fire a page_view
+  // against the non-canonical hostname before navigating away, which is exactly
+  // the split-analytics problem the redirect exists to prevent.
+  const tagAt = html.indexOf('Google tag (gtag.js)');
+  ok(
+    tagAt === -1 || redirectAt < tagAt,
+    `[${app.name}] the canonical redirect must run BEFORE the analytics tag, or it records a hit on the wrong host`,
+  );
+
+  // Every Firebase default host must be mapped, or that door stays open.
+  for (const host of app.defaultHosts) {
+    ok(html.includes(`'${host}'`), `[${app.name}] must redirect the default host ${host}`);
+  }
+  ok(html.includes(`'${app.canonical}'`), `[${app.name}] must target the canonical host ${app.canonical}`);
+
+  // replace(), not assign(): the non-canonical URL must not enter history, or
+  // Back bounces the visitor straight back out to it.
+  ok(
+    /location\.replace\(/.test(html),
+    `[${app.name}] the redirect must use location.replace so Back does not bounce`,
+  );
+  // A deep link (?game=<id>, #signin) must survive the hop.
+  ok(
+    /location\.pathname\s*\+\s*location\.search\s*\+\s*location\.hash/.test(html),
+    `[${app.name}] the redirect must preserve pathname + search + hash`,
+  );
+  // The canonical host must never map to itself — that is an infinite reload.
+  ok(
+    !new RegExp(`'${app.canonical.replace(/\./g, '\\.')}'\\s*:`).test(html),
+    `[${app.name}] the canonical host must not be a redirect SOURCE (infinite loop)`,
   );
 }
 

@@ -2,6 +2,31 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Canonical host redirect (change: canonical-host-redirect).
+         Firebase serves every site at its default *.web.app / *.firebaseapp.com
+         URLs as well as the custom domain, so the app has several working front
+         doors. That splits analytics, produces inconsistent shared links, and
+         means an origin allow-list has to name all of them. Send the defaults to
+         the canonical domain instead.
+
+         FIRST in <head>, before the analytics tag, deliberately: a redirect that
+         ran after gtag would record a page_view against the non-canonical
+         hostname before leaving it. `location.replace` (not assign) so the
+         non-canonical URL never enters history and Back doesn't bounce.
+         pathname + search + hash are preserved, so a deep link such as
+         ?game=<id> survives the hop. -->
+    <script>
+      (function () {
+        var CANONICAL = {
+          'rushpoint-play.web.app': 'rush-point.com',
+          'rushpoint-play.firebaseapp.com': 'rush-point.com'
+        };
+        var target = CANONICAL[location.hostname];
+        if (target) {
+          location.replace('https://' + target + location.pathname + location.search + location.hash);
+        }
+      })();
+    </script>
     <!-- Google tag (gtag.js) — change: google-analytics-tag.
          AFTER <meta charset> on purpose: the charset declaration must stay inside the
          document's first 1024 bytes or encoding detection can fail, and this app is
