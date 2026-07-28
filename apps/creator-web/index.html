@@ -47,6 +47,7 @@
       (function () {
         if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) return;
         var ID = 'G-89TM5X68RR';
+        var ID_SECONDARY = 'G-4LELMBZWPZ';
         var s = document.createElement('script');
         s.async = true;
         s.src = 'https://www.googletagmanager.com/gtag/js?id=' + ID;
@@ -55,6 +56,11 @@
         window.gtag = function () { window.dataLayer.push(arguments); };
         gtag('js', new Date());
         gtag('config', ID, {
+          anonymize_ip: true,
+          allow_google_signals: false,
+          allow_ad_personalization_signals: false
+        });
+        gtag('config', ID_SECONDARY, {
           anonymize_ip: true,
           allow_google_signals: false,
           allow_ad_personalization_signals: false

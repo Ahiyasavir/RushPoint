@@ -26,6 +26,14 @@
 export const GA_MEASUREMENT_ID = 'G-89TM5X68RR';
 
 /**
+ * A second GA4 property that mirrors the same traffic. One `gtag('js', …)` load feeds
+ * BOTH properties via two separate `gtag('config', …)` calls — GA4's supported pattern
+ * for reporting to multiple properties without a second script tag. Added alongside
+ * GA_MEASUREMENT_ID, not instead of it: the original property keeps collecting.
+ */
+export const GA_MEASUREMENT_ID_SECONDARY = 'G-4LELMBZWPZ';
+
+/**
  * Hosts that must NEVER reach the production property. Matched against the WHOLE
  * normalized hostname, never as a substring: `localhost.evil.example.com` is a real,
  * routable host and must report, and a substring test would silently swallow it.

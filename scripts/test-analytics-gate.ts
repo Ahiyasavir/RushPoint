@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   GA_MEASUREMENT_ID,
+  GA_MEASUREMENT_ID_SECONDARY,
   GA_CONFIG,
   LOCAL_ANALYTICS_HOSTS,
   shouldLoadAnalytics,
@@ -91,6 +92,10 @@ for (const bad of UNUSABLE) {
 
 // The constants the HTML is pinned against.
 ok(GA_MEASUREMENT_ID === 'G-89TM5X68RR', `GA_MEASUREMENT_ID is ${GA_MEASUREMENT_ID}`);
+ok(
+  GA_MEASUREMENT_ID_SECONDARY === 'G-4LELMBZWPZ',
+  `GA_MEASUREMENT_ID_SECONDARY is ${GA_MEASUREMENT_ID_SECONDARY}`,
+);
 ok(GA_CONFIG.anonymize_ip === true, 'GA_CONFIG.anonymize_ip must be true');
 ok(GA_CONFIG.allow_google_signals === false, 'GA_CONFIG.allow_google_signals must be false');
 ok(
@@ -186,6 +191,7 @@ for (const app of APPS) {
   if (!html) continue;
 
   ok(html.includes(GA_MEASUREMENT_ID), `[${app.name}] must carry the measurement id`);
+  ok(html.includes(GA_MEASUREMENT_ID_SECONDARY), `[${app.name}] must carry the secondary measurement id`);
   ok(html.includes('googletagmanager.com'), `[${app.name}] must reference googletagmanager.com`);
   for (const key of Object.keys(GA_CONFIG)) {
     ok(html.includes(key), `[${app.name}] must configure ${key}`);
