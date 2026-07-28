@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
@@ -10,7 +10,7 @@ import { useT } from '../i18nContext';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
   const { t, lang } = useT();

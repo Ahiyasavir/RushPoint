@@ -39,15 +39,13 @@ const HE = {
     // reversed-looking letters — so the Hebrew hint moved out of the placeholder
     // and the placeholder itself is now a neutral code sample in both languages.
     codeLabel: 'הקוד שלכם',
-    // One token with a digit, so the shared leak predicate reads it as a sample
-    // code rather than English copy (scripts/lib/i18nLeak.ts, DIGIT_CODE_RE).
-    codePlaceholder: 'ABC123',
     lookingUp: 'מחפש…',
     continue: 'המשך',
     // "אני צוות" read as "we are a team" and sent whole groups down the staff
-    // path. Say מפעילים/מארגנים (operators), never צוות, and say who it is NOT for.
-    staff: 'כניסת מפעילי האירוע',
-    staffHint: 'למארגנים ולמפעילים בלבד, לא לשחקנים',
+    // path. מארגנים is unambiguous on its own, so the label carries the whole
+    // meaning and the explanatory second line is gone — it was long, awkward,
+    // and only needed because the old label was unclear.
+    staff: 'כניסת מארגנים',
     // Groups were signing in on every phone (change: one-device-per-team-clarity).
     oneDeviceNote: 'נציג אחד מכל קבוצה מזין את הקוד. לא כל המשתתפים.',
     createOwnCta: 'רוצים ליצור משחק משלכם?',
@@ -653,11 +651,9 @@ const EN: typeof HE = {
     removeMember: (name: string) => `Remove ${name}`,
     subtitle: 'Enter the access code from your host to join the race',
     codeLabel: 'Your code',
-    codePlaceholder: 'ABC123',
     lookingUp: 'Looking up…',
     continue: 'Continue',
-    staff: 'Event staff sign in',
-    staffHint: 'For hosts and staff only, not for players',
+    staff: 'Organizer sign in',
     oneDeviceNote: 'One person per team enters the code, not everyone.',
     createOwnCta: 'Want to run your own game?',
     createOwnLink: 'Build a game',

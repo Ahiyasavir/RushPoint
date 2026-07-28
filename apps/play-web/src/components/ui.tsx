@@ -37,7 +37,21 @@ export const Button = forwardRef<
   return (
     <button
       ref={ref}
-      className={`inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${map[variant]} ${className}`}
+      // Disabled uses a SOLID muted skin, not `opacity-40`. Opacity made the
+      // whole button translucent, so the page's dot-grid showed through it, the
+      // label fell to ~1.9:1 contrast, and the variant's coloured glow survived
+      // at 40% — a glowing, see-through dead button. A flat surface + a readable
+      // muted label reads as "not yet", which is what a disabled CTA must say.
+      //
+      // `disabled:bg-none` MUST come first and is not redundant. The primary
+      // variant paints with `bg-gradient-to-r`, which is a background-IMAGE;
+      // `disabled:bg-zinc-800` only sets background-COLOR, so without bg-none
+      // the gradient still paints on top and the disabled button looks fully
+      // enabled — worse than the opacity it replaced, because it then invites a
+      // tap that does nothing. Verifying this needs `backgroundImage`, not just
+      // `backgroundColor`: reading the colour alone reports a contrast ratio for
+      // a layer the user never sees.
+      className={`inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:bg-none disabled:bg-zinc-800 disabled:text-zinc-400 disabled:shadow-none disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${map[variant]} ${className}`}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...rest}

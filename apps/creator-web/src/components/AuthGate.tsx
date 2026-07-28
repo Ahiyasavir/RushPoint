@@ -16,7 +16,7 @@ import { Button, Card, Input, Label, Spinner } from './ui';
 import { claimReferral } from '../services/calls';
 import { dialog, DialogHost } from './dialog';
 import { ToastHost } from './toast';
-import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin } from '@rushpoint/shared';
+import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 
 const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
@@ -32,7 +32,7 @@ const LEGAL_PATHS = ['/privacy', '/terms'];
 const DEMO_GAME_ID = 'demo-instant-spy';
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
-  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
 const DEMO_URL = `${PLAY_URL}/?game=${DEMO_GAME_ID}`;
 
 interface AuthCtx {

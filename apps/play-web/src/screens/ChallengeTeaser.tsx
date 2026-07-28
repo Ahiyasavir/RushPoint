@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, type PublicTask, type PublicGame } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, type PublicTask, type PublicGame, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { checkChallengeAnswer } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
@@ -11,7 +11,7 @@ import { shareOutcomeFeedback } from '../lib/shareFeedback';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const COUNTDOWN = 30;
 

@@ -218,34 +218,19 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
         {/* Tightened from pt-16/pb-12 (change: join-screen-fits-one-phone). The
             hero alone ate ~180px of vertical space, which is what pushed the
             join screen just past the fold and gave it that short, janky scroll. */}
-        <div className="relative flex flex-col items-center justify-center px-6 pt-10 pb-7 text-center overflow-hidden">
+        <div className="relative flex flex-col items-center justify-center px-6 pt-3 pb-7 text-center overflow-hidden">
           {/* Background glow */}
           <div className="absolute inset-0 bg-gradient-to-b from-[#FFF0E0] via-[#FFFCF7] to-transparent" />
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-48 bg-gradient-radial from-rp-fire/20 to-transparent blur-3xl" />
 
-          <div className="relative">
-            {/* App icon */}
-            <div
-              className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4"
-              style={{
-                background: 'linear-gradient(135deg, #FF5722 0%, #FFB300 100%)',
-                boxShadow: '0 8px 32px rgba(255,87,34,0.45), 0 2px 8px rgba(255,87,34,0.3)',
-              }}
-            >
-              🏁
-            </div>
-
-            <h1 className="font-brand text-4xl font-extrabold tracking-tight leading-none mb-2"
-              style={{ background: 'linear-gradient(135deg, #FF5722 0%, #FF8A00 50%, #FFB300 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-              RushPoint
-            </h1>
-            <p className="text-zinc-500 text-base leading-relaxed max-w-xs">
-              {t.join.subtitle}
-            </p>
-          </div>
-
-          {/* Language + accessibility toggles */}
-          <div className="absolute top-4 end-4 flex items-center gap-2">
+          {/* Language + accessibility toggles. In NORMAL FLOW, not `absolute`:
+              an absolutely-positioned cluster has no width of its own, so it
+              shrink-wrapped ~170px of controls and grew inward until it sat on
+              top of the centred hero icon (measured 11x20px overlap in Hebrew,
+              5x20px in English — both directions, so not an RTL bug). A flex row
+              cannot overlap its sibling, and it costs no extra height because
+              the hero's top padding shrank by the same amount. */}
+          <div className="relative w-full flex items-center justify-end gap-2 mb-1">
             <button
               onClick={toggleSound}
               role="switch"
@@ -278,6 +263,28 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               {lang === 'he' ? 'English' : 'עברית'} {/* i18n-ignore — language switcher shows the target language in its own script */}
             </button>
           </div>
+
+          <div className="relative">
+            {/* App icon */}
+            <div
+              className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4"
+              style={{
+                background: 'linear-gradient(135deg, #FF5722 0%, #FFB300 100%)',
+                boxShadow: '0 8px 32px rgba(255,87,34,0.45), 0 2px 8px rgba(255,87,34,0.3)',
+              }}
+            >
+              🏁
+            </div>
+
+            <h1 className="font-brand text-4xl font-extrabold tracking-tight leading-none mb-2"
+              style={{ background: 'linear-gradient(135deg, #FF5722 0%, #FF8A00 50%, #FFB300 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              RushPoint
+            </h1>
+            <p className="text-zinc-500 text-base leading-relaxed max-w-xs">
+              {t.join.subtitle}
+            </p>
+          </div>
+
         </div>
 
         {/* Code input section */}
@@ -297,7 +304,13 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               value={code}
               dir="ltr"
               onChange={(e) => setCode(normalizeJoinCodeInput(e.target.value))}
-              placeholder={t.join.codePlaceholder}
+              // NO placeholder on purpose. `placeholder:` can override size and
+              // tracking but NOT weight or family, so a sample code inherited
+              // `font-mono font-bold` from the base class and rendered at 4.80:1
+              // contrast in 700-weight mono — the exact typographic signature of
+              // a real access code. On a cold landing the field looked already
+              // filled, above a disabled-looking CTA. The visible <label> above
+              // already names the field, so the sample added nothing.
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
@@ -307,7 +320,6 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
                 text-center text-3xl font-mono font-bold tracking-[0.5em]
                 bg-white border-2 border-glass-border
                 text-zinc-100
-                placeholder:text-zinc-500 placeholder:tracking-normal placeholder:text-xl
                 shadow-[0_2px_16px_rgba(26,10,0,0.08)]
                 focus:outline-none focus:border-rp-fire/60 focus:ring-4 focus:ring-rp-fire/15
                 transition-all duration-200
@@ -356,36 +368,44 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
             </div>
           )}
 
-          {/* "אני צוות" was read as "we are a team" — whole groups tapped it and
-              got stuck on a PIN screen meant for organizers. The label now says
-              operators (never צוות) and carries an explicit not-for-players line. */}
-          {onStaff && (
-            <div className="mt-5 text-center">
-              <button
-                className="text-zinc-400 text-sm mx-auto inline-flex items-center justify-center min-h-[44px] px-3 font-medium hover:text-zinc-300 transition-colors"
-                onClick={onStaff}
-              >
-                🔑 {t.join.staff}
-              </button>
-              <p className="text-[11px] text-zinc-500 leading-snug">{t.join.staffHint}</p>
-            </div>
-          )}
+          {/* Everything below the rule is NOT the player's path. Before, the
+              staff link (14px, darker, emoji, own caption) read as a section
+              heading and outranked both the demo and the creator link — backwards
+              by audience size — and five consecutive 11px/zinc-500 paragraphs ran
+              together with no separator. Now: one hairline rule marks "this is the
+              other-audience shelf", both entries are the same quiet weight, and
+              the more common need (build a game) comes before the rarest (staff).
+              The 🔑 emoji is gone: it also marks the "join" how-to card, and these
+              are precisely the two things players already confuse. */}
+          <div className="mt-6 pt-4 border-t border-glass-border text-center space-y-2">
+              <p className="text-[11px] text-zinc-500">
+                {t.join.createOwnCta}{' '}
+                <a
+                  href={creatorUrl()}
+                  className="font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
+                >
+                  {t.join.createOwnLink}
+                </a>
+              </p>
+              {onStaff && (
+                <p className="text-[11px] text-zinc-500">
+                  {/* Visually 11px to stay quiet, but a REAL 44px tap target:
+                      organizers hit this outdoors, one-handed. Styling it down
+                      to inline text shrank it to 17px. */}
+                  <button
+                    className="inline-flex items-center justify-center min-h-[44px] px-3 font-bold text-zinc-400 underline underline-offset-2 hover:text-zinc-300 transition-colors"
+                    onClick={onStaff}
+                  >
+                    {t.join.staff}
+                  </button>
+                </p>
+              )}
+          </div>
 
-          {/* Cross-app link (change: cross-app-discovery). creator-web's logged-out
-              landing already points at the player app; this is the return path, so
-              a would-be organizer who only ever sees the join screen has a way in. */}
-          <p className="mt-4 text-center text-[11px] text-zinc-500">
-            {t.join.createOwnCta}{' '}
-            <a
-              href={creatorUrl()}
-              className="font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
-            >
-              {t.join.createOwnLink}
-            </a>
-          </p>
-
-          {/* How it works — fills the lower screen + sets expectations */}
-          <div className="mt-auto pt-4">
+          {/* How it works — a FIXED gap, not `mt-auto`. Pushing this to the bottom
+              of a min-h-screen box left 103px of dead space on a Pixel 7 and 0px on
+              an iPhone SE: the same screen with two different rhythms. */}
+          <div className="mt-8">
             <div className="grid grid-cols-3 gap-2.5">
               {[
                 { icon: '🔑', label: t.join.how1Label, sub: t.join.how1Sub },

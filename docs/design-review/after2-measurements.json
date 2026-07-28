@@ -1,0 +1,207 @@
+{
+  "disabled": {
+    "disabled": true,
+    "className": "inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:bg-none disabled:bg-zinc-800 disabled:text-zinc-400 disabled:shadow-none disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg bg-gradient-to-r from-[#C2410C] to-[#B45309] text-white font-bold tracking-wide shadow-[0_4px_16px_rgba(255,87,34,0.40),0_1px_4px_rgba(255,87,34,0.25)] hover:shadow-[0_6px_24px_rgba(255,87,34,0.55),0_2px_8px_rgba(255,87,34,0.30)] active:brightness-90 active:scale-[0.98] !py-4 !text-lg !rounded-2xl",
+    "color": "rgb(87, 83, 78)",
+    "backgroundColor": "rgb(231, 229, 228)",
+    "backgroundImage": "none",
+    "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+    "twShadow": "0 0 #0000",
+    "twGradientFrom": "#C2410C",
+    "cursor": "not-allowed",
+    "fontSize": "18px",
+    "padding": "16px 0px",
+    "borderRadius": "16px",
+    "matched": [
+      {
+        "ctx": "",
+        "sel": "*, ::before, ::after",
+        "css": "--tw-border-spacing-x: 0; --tw-border-spacing-y: 0; --tw-translate-x: 0; --tw-translate-y: 0; --tw-rotate: 0; --tw-skew-x: 0; --tw-skew-y: 0; --tw-scale-x: 1; -"
+      },
+      {
+        "ctx": "",
+        "sel": "*, ::before, ::after",
+        "css": "box-sizing: border-box; border-width: 0px; border-style: solid; border-color: rgb(229, 231, 235);"
+      },
+      {
+        "ctx": "",
+        "sel": "button, input, optgroup, select, textarea",
+        "css": "font-family: inherit; font-feature-settings: inherit; font-variation-settings: inherit; font-size: 100%; font-weight: inherit; line-height: inherit; letter-spac"
+      },
+      {
+        "ctx": "",
+        "sel": "button, input:where([type=\"button\"]), input:where([type=\"reset\"]), input:where([type=\"submit\"])",
+        "css": "appearance: button; background-color: transparent; background-image: none;"
+      },
+      {
+        "ctx": "",
+        "sel": ".bg-gradient-to-r",
+        "css": "background-image: linear-gradient(to right, var(--tw-gradient-stops));"
+      },
+      {
+        "ctx": "",
+        "sel": ".from-\\[\\#C2410C\\]",
+        "css": "--tw-gradient-from: #C2410C var(--tw-gradient-from-position); --tw-gradient-to: rgb(194 65 12 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw"
+      },
+      {
+        "ctx": "",
+        "sel": ".to-\\[\\#B45309\\]",
+        "css": "--tw-gradient-to: #B45309 var(--tw-gradient-to-position);"
+      },
+      {
+        "ctx": "",
+        "sel": ".text-white",
+        "css": "--tw-text-opacity: 1; color: rgb(255 255 255 / var(--tw-text-opacity, 1));"
+      },
+      {
+        "ctx": "",
+        "sel": ".shadow-\\[0_4px_16px_rgba\\(255\\,87\\,34\\,0\\.40\\)\\,0_1px_4px_rgba\\(255\\,87\\,34\\,0\\.25\\)\\]",
+        "css": "--tw-shadow: 0 4px 16px rgba(255,87,34,0.40),0 1px 4px rgba(255,87,34,0.25); --tw-shadow-colored: 0 4px 16px var(--tw-shadow-color), 0 1px 4px var(--tw-shadow-c"
+      },
+      {
+        "ctx": "",
+        "sel": ".disabled\\:bg-zinc-800:disabled",
+        "css": "--tw-bg-opacity: 1; background-color: rgb(231 229 228 / var(--tw-bg-opacity, 1));"
+      },
+      {
+        "ctx": "",
+        "sel": ".disabled\\:bg-none:disabled",
+        "css": "background-image: none;"
+      },
+      {
+        "ctx": "",
+        "sel": ".disabled\\:text-zinc-400:disabled",
+        "css": "--tw-text-opacity: 1; color: rgb(87 83 78 / var(--tw-text-opacity, 1));"
+      },
+      {
+        "ctx": "",
+        "sel": ".disabled\\:shadow-none:disabled",
+        "css": "--tw-shadow: 0 0 #0000; --tw-shadow-colored: 0 0 #0000; box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);"
+      }
+    ],
+    "paintedLayer": "background-color",
+    "contrastVsPainted": [
+      {
+        "against": "rgb(231, 229, 228)",
+        "ratio": 6.08
+      }
+    ]
+  },
+  "staff": {
+    "text": "כניסת מארגנים",
+    "w": 101,
+    "h": 44,
+    "fontSize": "11px",
+    "fontWeight": "700",
+    "color": "rgb(87, 83, 78)",
+    "textDecoration": "underline",
+    "display": "inline-flex",
+    "minHeight": "44px",
+    "padding": "0px 12px",
+    "parentPText": "כניסת מארגנים",
+    "siblingCount": 1
+  },
+  "shelf": {
+    "rule": {
+      "y": 495,
+      "h": 86,
+      "bot": 581
+    },
+    "ruleChildren": [
+      {
+        "tag": "P",
+        "t": "רוצים ליצור משחק משלכם? בנו משחק",
+        "y": 512,
+        "h": 17,
+        "bot": 529
+      },
+      {
+        "tag": "P",
+        "t": "כניסת מארגנים",
+        "y": 537,
+        "h": 44,
+        "bot": 581
+      }
+    ],
+    "grid": {
+      "y": 613,
+      "h": 88,
+      "bot": 701
+    },
+    "gapRuleToGrid": 32,
+    "docH": 839,
+    "vp": 839
+  },
+  "enabled": {
+    "disabled": false,
+    "className": "inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:bg-none disabled:bg-zinc-800 disabled:text-zinc-400 disabled:shadow-none disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg bg-gradient-to-r from-[#C2410C] to-[#B45309] text-white font-bold tracking-wide shadow-[0_4px_16px_rgba(255,87,34,0.40),0_1px_4px_rgba(255,87,34,0.25)] hover:shadow-[0_6px_24px_rgba(255,87,34,0.55),0_2px_8px_rgba(255,87,34,0.30)] active:brightness-90 active:scale-[0.98] !py-4 !text-lg !rounded-2xl",
+    "color": "rgb(255, 255, 255)",
+    "backgroundColor": "rgba(0, 0, 0, 0)",
+    "backgroundImage": "linear-gradient(to right, rgb(194, 65, 12), rgb(180, 83, 9))",
+    "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(255, 87, 34, 0.4) 0px 4px 16px 0px, rgba(255, 87, 34, 0.25) 0px 1px 4px 0px",
+    "twShadow": "0 4px 16px rgba(255,87,34,0.40),0 1px 4px rgba(255,87,34,0.25)",
+    "twGradientFrom": "#C2410C",
+    "cursor": "pointer",
+    "fontSize": "18px",
+    "padding": "16px 0px",
+    "borderRadius": "16px",
+    "matched": [
+      {
+        "ctx": "",
+        "sel": "*, ::before, ::after",
+        "css": "--tw-border-spacing-x: 0; --tw-border-spacing-y: 0; --tw-translate-x: 0; --tw-translate-y: 0; --tw-rotate: 0; --tw-skew-x: 0; --tw-skew-y: 0; --tw-scale-x: 1; -"
+      },
+      {
+        "ctx": "",
+        "sel": "*, ::before, ::after",
+        "css": "box-sizing: border-box; border-width: 0px; border-style: solid; border-color: rgb(229, 231, 235);"
+      },
+      {
+        "ctx": "",
+        "sel": "button, input, optgroup, select, textarea",
+        "css": "font-family: inherit; font-feature-settings: inherit; font-variation-settings: inherit; font-size: 100%; font-weight: inherit; line-height: inherit; letter-spac"
+      },
+      {
+        "ctx": "",
+        "sel": "button, input:where([type=\"button\"]), input:where([type=\"reset\"]), input:where([type=\"submit\"])",
+        "css": "appearance: button; background-color: transparent; background-image: none;"
+      },
+      {
+        "ctx": "",
+        "sel": ".bg-gradient-to-r",
+        "css": "background-image: linear-gradient(to right, var(--tw-gradient-stops));"
+      },
+      {
+        "ctx": "",
+        "sel": ".from-\\[\\#C2410C\\]",
+        "css": "--tw-gradient-from: #C2410C var(--tw-gradient-from-position); --tw-gradient-to: rgb(194 65 12 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw"
+      },
+      {
+        "ctx": "",
+        "sel": ".to-\\[\\#B45309\\]",
+        "css": "--tw-gradient-to: #B45309 var(--tw-gradient-to-position);"
+      },
+      {
+        "ctx": "",
+        "sel": ".text-white",
+        "css": "--tw-text-opacity: 1; color: rgb(255 255 255 / var(--tw-text-opacity, 1));"
+      },
+      {
+        "ctx": "",
+        "sel": ".shadow-\\[0_4px_16px_rgba\\(255\\,87\\,34\\,0\\.40\\)\\,0_1px_4px_rgba\\(255\\,87\\,34\\,0\\.25\\)\\]",
+        "css": "--tw-shadow: 0 4px 16px rgba(255,87,34,0.40),0 1px 4px rgba(255,87,34,0.25); --tw-shadow-colored: 0 4px 16px var(--tw-shadow-color), 0 1px 4px var(--tw-shadow-c"
+      }
+    ],
+    "paintedLayer": "gradient",
+    "contrastVsPainted": [
+      {
+        "against": "rgb(194, 65, 12)",
+        "ratio": 5.18
+      },
+      {
+        "against": "rgb(180, 83, 9)",
+        "ratio": 5.02
+      }
+    ]
+  }
+}

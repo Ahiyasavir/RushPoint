@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Game, ScoringPreset } from '@rushpoint/shared';
-import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
+import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
 import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
@@ -46,7 +46,7 @@ function readGamesCache(uid: string | undefined): Game[] | null {
 
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
-  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
 
 function getAccentBar(g: Game): string {
   if (g.visibility === 'public') return 'from-rp-plasma to-rp-go';

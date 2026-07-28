@@ -1,0 +1,729 @@
+{
+  "after-join-pixel7-he": {
+    "dir": "rtl",
+    "docH": 839,
+    "vp": 839,
+    "input": {
+      "x": 20,
+      "y": 292,
+      "w": 372,
+      "h": 80,
+      "r": 392,
+      "bot": 372,
+      "placeholderAttr": null,
+      "value": "",
+      "fs": "30px",
+      "ls": "15px",
+      "fw": "700",
+      "ff": "\"JetBrains Mono\", monospace",
+      "color": "rgb(28, 25, 23)"
+    },
+    "icon": {
+      "x": 174,
+      "y": 60,
+      "w": 64,
+      "h": 64,
+      "r": 238,
+      "bot": 124
+    },
+    "toggleRow": {
+      "x": 24,
+      "y": 12,
+      "w": 364,
+      "h": 44,
+      "r": 388,
+      "bot": 56
+    },
+    "cta": {
+      "x": 20,
+      "y": 411,
+      "w": 372,
+      "h": 60,
+      "r": 392,
+      "bot": 471,
+      "disabled": true,
+      "opacity": "1",
+      "bgColor": "rgb(231, 229, 228)",
+      "bgImage": "linear-gradient(to right, rgb(194, 65, 12), rgb(180, 83, 9))",
+      "color": "rgb(87, 83, 78)",
+      "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0",
+      "cursor": "not-allowed",
+      "contrastLabelOnFill": "6.08"
+    },
+    "rule": {
+      "x": 20,
+      "y": 495,
+      "w": 372,
+      "h": 77,
+      "r": 392,
+      "bot": 572
+    },
+    "grid": {
+      "x": 20,
+      "y": 604,
+      "w": 372,
+      "h": 88,
+      "r": 392,
+      "bot": 692
+    },
+    "staffBtn": {
+      "x": 153,
+      "y": 537,
+      "w": 107,
+      "h": 17,
+      "r": 259,
+      "bot": 553
+    },
+    "creatorLink": {
+      "x": 114,
+      "y": 513,
+      "w": 49,
+      "h": 14,
+      "r": 163,
+      "bot": 527
+    },
+    "oneDevice": {
+      "x": 20,
+      "y": 384,
+      "w": 372,
+      "h": 15,
+      "r": 392,
+      "bot": 399
+    },
+    "label": {
+      "x": 20,
+      "y": 264,
+      "w": 372,
+      "h": 20,
+      "r": 392,
+      "bot": 284
+    },
+    "staffStyle": {
+      "fs": "11px",
+      "color": "rgb(87, 83, 78)",
+      "fw": "700",
+      "h": 17
+    },
+    "creatorStyle": {
+      "fs": "11px",
+      "color": "rgb(176, 58, 11)",
+      "h": 14
+    },
+    "howCards": [
+      {
+        "t": "🔑הצטרפוהזינו את הקו",
+        "x": 275,
+        "y": 604,
+        "w": 117,
+        "h": 88,
+        "r": 392,
+        "bot": 692
+      },
+      {
+        "t": "🧭תרוצותנותבו למשימו",
+        "x": 147,
+        "y": 604,
+        "w": 117,
+        "h": 88,
+        "r": 265,
+        "bot": 692
+      },
+      {
+        "t": "🏆תנצחוטפסו בטבלה",
+        "x": 20,
+        "y": 604,
+        "w": 117,
+        "h": 88,
+        "r": 137,
+        "bot": 692
+      }
+    ],
+    "paras": [
+      {
+        "t": "הזינו את קוד הגישה מהמארגן כדי להצ",
+        "y": 184,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "נציג אחד מכל קבוצה מזין את הקוד. ל",
+        "y": 384,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "רוצים ליצור משחק משלכם? בנו משחק",
+        "y": 512,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "כניסת מפעילי האירועלמארגנים ולמפעי",
+        "y": 537,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "● לא צריך חשבון. רק הטלפון שלכם.",
+        "y": 704,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "תנאי שימוש·מדיניות פרטיות",
+        "y": 736,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      }
+    ],
+    "overlapIconToggles": false
+  },
+  "after-join-pixel7-en": {
+    "dir": "ltr",
+    "docH": 839,
+    "vp": 839,
+    "input": {
+      "x": 20,
+      "y": 292,
+      "w": 372,
+      "h": 80,
+      "r": 392,
+      "bot": 372,
+      "placeholderAttr": null,
+      "value": "",
+      "fs": "30px",
+      "ls": "15px",
+      "fw": "700",
+      "ff": "\"JetBrains Mono\", monospace",
+      "color": "rgb(28, 25, 23)"
+    },
+    "icon": {
+      "x": 174,
+      "y": 60,
+      "w": 64,
+      "h": 64,
+      "r": 238,
+      "bot": 124
+    },
+    "toggleRow": {
+      "x": 24,
+      "y": 12,
+      "w": 364,
+      "h": 44,
+      "r": 388,
+      "bot": 56
+    },
+    "cta": {
+      "x": 20,
+      "y": 411,
+      "w": 372,
+      "h": 60,
+      "r": 392,
+      "bot": 471,
+      "disabled": true,
+      "opacity": "1",
+      "bgColor": "rgb(231, 229, 228)",
+      "bgImage": "linear-gradient(to right, rgb(194, 65, 12), rgb(180, 83, 9))",
+      "color": "rgb(87, 83, 78)",
+      "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0",
+      "cursor": "not-allowed",
+      "contrastLabelOnFill": "6.08"
+    },
+    "rule": {
+      "x": 20,
+      "y": 495,
+      "w": 372,
+      "h": 77,
+      "r": 392,
+      "bot": 572
+    },
+    "grid": {
+      "x": 20,
+      "y": 604,
+      "w": 372,
+      "h": 88,
+      "r": 392,
+      "bot": 692
+    },
+    "staffBtn": {
+      "x": 158,
+      "y": 537,
+      "w": 96,
+      "h": 17,
+      "r": 254,
+      "bot": 553
+    },
+    "creatorLink": {
+      "x": 248,
+      "y": 513,
+      "w": 69,
+      "h": 14,
+      "r": 316,
+      "bot": 527
+    },
+    "oneDevice": {
+      "x": 20,
+      "y": 384,
+      "w": 372,
+      "h": 15,
+      "r": 392,
+      "bot": 399
+    },
+    "label": {
+      "x": 20,
+      "y": 264,
+      "w": 372,
+      "h": 20,
+      "r": 392,
+      "bot": 284
+    },
+    "staffStyle": {
+      "fs": "11px",
+      "color": "rgb(87, 83, 78)",
+      "fw": "700",
+      "h": 17
+    },
+    "creatorStyle": {
+      "fs": "11px",
+      "color": "rgb(176, 58, 11)",
+      "h": 14
+    },
+    "howCards": [
+      {
+        "t": "🔑JoinEnter the code",
+        "x": 20,
+        "y": 604,
+        "w": 117,
+        "h": 88,
+        "r": 137,
+        "bot": 692
+      },
+      {
+        "t": "🧭RaceGet routed to ",
+        "x": 147,
+        "y": 604,
+        "w": 117,
+        "h": 88,
+        "r": 265,
+        "bot": 692
+      },
+      {
+        "t": "🏆WinClimb the board",
+        "x": 275,
+        "y": 604,
+        "w": 117,
+        "h": 88,
+        "r": 392,
+        "bot": 692
+      }
+    ],
+    "paras": [
+      {
+        "t": "Enter the access code from your ho",
+        "y": 184,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "One person per team enters the cod",
+        "y": 384,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "Want to run your own game? Build a",
+        "y": 512,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "Event staff sign inFor hosts and s",
+        "y": 537,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "● No account needed. Just your pho",
+        "y": 704,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "Terms of Use·Privacy Policy",
+        "y": 736,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      }
+    ],
+    "overlapIconToggles": false
+  },
+  "after-join-iphonese-he": {
+    "dir": "rtl",
+    "docH": 789,
+    "vp": 568,
+    "input": {
+      "x": 20,
+      "y": 292,
+      "w": 280,
+      "h": 80,
+      "r": 300,
+      "bot": 372,
+      "placeholderAttr": null,
+      "value": "",
+      "fs": "30px",
+      "ls": "15px",
+      "fw": "700",
+      "ff": "\"JetBrains Mono\", monospace",
+      "color": "rgb(28, 25, 23)"
+    },
+    "icon": {
+      "x": 128,
+      "y": 60,
+      "w": 64,
+      "h": 64,
+      "r": 192,
+      "bot": 124
+    },
+    "toggleRow": {
+      "x": 24,
+      "y": 12,
+      "w": 272,
+      "h": 44,
+      "r": 296,
+      "bot": 56
+    },
+    "cta": {
+      "x": 20,
+      "y": 411,
+      "w": 280,
+      "h": 60,
+      "r": 300,
+      "bot": 471,
+      "disabled": true,
+      "opacity": "1",
+      "bgColor": "rgb(231, 229, 228)",
+      "bgImage": "linear-gradient(to right, rgb(194, 65, 12), rgb(180, 83, 9))",
+      "color": "rgb(87, 83, 78)",
+      "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0",
+      "cursor": "not-allowed",
+      "contrastLabelOnFill": "6.08"
+    },
+    "rule": {
+      "x": 20,
+      "y": 495,
+      "w": 280,
+      "h": 77,
+      "r": 300,
+      "bot": 572
+    },
+    "grid": {
+      "x": 20,
+      "y": 604,
+      "w": 280,
+      "h": 101,
+      "r": 300,
+      "bot": 704
+    },
+    "staffBtn": {
+      "x": 107,
+      "y": 537,
+      "w": 107,
+      "h": 17,
+      "r": 213,
+      "bot": 553
+    },
+    "creatorLink": {
+      "x": 68,
+      "y": 513,
+      "w": 49,
+      "h": 14,
+      "r": 117,
+      "bot": 527
+    },
+    "oneDevice": {
+      "x": 20,
+      "y": 384,
+      "w": 280,
+      "h": 15,
+      "r": 300,
+      "bot": 399
+    },
+    "label": {
+      "x": 20,
+      "y": 264,
+      "w": 280,
+      "h": 20,
+      "r": 300,
+      "bot": 284
+    },
+    "staffStyle": {
+      "fs": "11px",
+      "color": "rgb(87, 83, 78)",
+      "fw": "700",
+      "h": 17
+    },
+    "creatorStyle": {
+      "fs": "11px",
+      "color": "rgb(176, 58, 11)",
+      "h": 14
+    },
+    "howCards": [
+      {
+        "t": "🔑הצטרפוהזינו את הקו",
+        "x": 213,
+        "y": 604,
+        "w": 87,
+        "h": 101,
+        "r": 300,
+        "bot": 704
+      },
+      {
+        "t": "🧭תרוצותנותבו למשימו",
+        "x": 117,
+        "y": 604,
+        "w": 87,
+        "h": 101,
+        "r": 203,
+        "bot": 704
+      },
+      {
+        "t": "🏆תנצחוטפסו בטבלה",
+        "x": 20,
+        "y": 604,
+        "w": 87,
+        "h": 101,
+        "r": 107,
+        "bot": 704
+      }
+    ],
+    "paras": [
+      {
+        "t": "הזינו את קוד הגישה מהמארגן כדי להצ",
+        "y": 184,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "נציג אחד מכל קבוצה מזין את הקוד. ל",
+        "y": 384,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "רוצים ליצור משחק משלכם? בנו משחק",
+        "y": 512,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "כניסת מפעילי האירועלמארגנים ולמפעי",
+        "y": 537,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "● לא צריך חשבון. רק הטלפון שלכם.",
+        "y": 716,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "תנאי שימוש·מדיניות פרטיות",
+        "y": 749,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      }
+    ],
+    "overlapIconToggles": false
+  },
+  "after-join-iphonese-en": {
+    "dir": "ltr",
+    "docH": 804,
+    "vp": 568,
+    "input": {
+      "x": 20,
+      "y": 292,
+      "w": 280,
+      "h": 80,
+      "r": 300,
+      "bot": 372,
+      "placeholderAttr": null,
+      "value": "",
+      "fs": "30px",
+      "ls": "15px",
+      "fw": "700",
+      "ff": "\"JetBrains Mono\", monospace",
+      "color": "rgb(28, 25, 23)"
+    },
+    "icon": {
+      "x": 128,
+      "y": 60,
+      "w": 64,
+      "h": 64,
+      "r": 192,
+      "bot": 124
+    },
+    "toggleRow": {
+      "x": 24,
+      "y": 12,
+      "w": 272,
+      "h": 44,
+      "r": 296,
+      "bot": 56
+    },
+    "cta": {
+      "x": 20,
+      "y": 426,
+      "w": 280,
+      "h": 60,
+      "r": 300,
+      "bot": 486,
+      "disabled": true,
+      "opacity": "1",
+      "bgColor": "rgb(231, 229, 228)",
+      "bgImage": "linear-gradient(to right, rgb(194, 65, 12), rgb(180, 83, 9))",
+      "color": "rgb(87, 83, 78)",
+      "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0",
+      "cursor": "not-allowed",
+      "contrastLabelOnFill": "6.08"
+    },
+    "rule": {
+      "x": 20,
+      "y": 510,
+      "w": 280,
+      "h": 77,
+      "r": 300,
+      "bot": 587
+    },
+    "grid": {
+      "x": 20,
+      "y": 619,
+      "w": 280,
+      "h": 101,
+      "r": 300,
+      "bot": 719
+    },
+    "staffBtn": {
+      "x": 112,
+      "y": 552,
+      "w": 96,
+      "h": 17,
+      "r": 208,
+      "bot": 568
+    },
+    "creatorLink": {
+      "x": 202,
+      "y": 528,
+      "w": 69,
+      "h": 14,
+      "r": 270,
+      "bot": 542
+    },
+    "oneDevice": {
+      "x": 20,
+      "y": 384,
+      "w": 280,
+      "h": 30,
+      "r": 300,
+      "bot": 414
+    },
+    "label": {
+      "x": 20,
+      "y": 264,
+      "w": 280,
+      "h": 20,
+      "r": 300,
+      "bot": 284
+    },
+    "staffStyle": {
+      "fs": "11px",
+      "color": "rgb(87, 83, 78)",
+      "fw": "700",
+      "h": 17
+    },
+    "creatorStyle": {
+      "fs": "11px",
+      "color": "rgb(176, 58, 11)",
+      "h": 14
+    },
+    "howCards": [
+      {
+        "t": "🔑JoinEnter the code",
+        "x": 20,
+        "y": 619,
+        "w": 87,
+        "h": 101,
+        "r": 107,
+        "bot": 719
+      },
+      {
+        "t": "🧭RaceGet routed to ",
+        "x": 117,
+        "y": 619,
+        "w": 87,
+        "h": 101,
+        "r": 203,
+        "bot": 719
+      },
+      {
+        "t": "🏆WinClimb the board",
+        "x": 213,
+        "y": 619,
+        "w": 87,
+        "h": 101,
+        "r": 300,
+        "bot": 719
+      }
+    ],
+    "paras": [
+      {
+        "t": "Enter the access code from your ho",
+        "y": 184,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "One person per team enters the cod",
+        "y": 384,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "Want to run your own game? Build a",
+        "y": 527,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "Event staff sign inFor hosts and s",
+        "y": 552,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "● No account needed. Just your pho",
+        "y": 731,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      },
+      {
+        "t": "Terms of Use·Privacy Policy",
+        "y": 764,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)"
+      }
+    ],
+    "overlapIconToggles": false
+  },
+  "typed": {
+    "ctaDisabled": false,
+    "bgImage": "linear-gradient(to right, rgb(194, 65, 12), rgb(180, 83, 9))",
+    "bgColor": "rgba(0, 0, 0, 0)",
+    "color": "rgb(255, 255, 255)",
+    "shadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0) 0px 0px 0",
+    "inputFs": "30px",
+    "inputLs": "15px",
+    "inputFw": "700",
+    "inputColor": "rgb(28, 25, 23)"
+  }
+}

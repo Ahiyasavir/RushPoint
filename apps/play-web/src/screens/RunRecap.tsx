@@ -5,10 +5,11 @@ import { useT } from '../i18nContext';
 import { shareRecap } from '../lib/recapCollage';
 import { LoadingView } from '../components/LoadingView';
 import { shareOutcomeFeedback } from '../lib/shareFeedback';
+import { CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
