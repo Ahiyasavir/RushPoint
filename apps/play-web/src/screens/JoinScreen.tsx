@@ -12,6 +12,7 @@ import LegalFooter from '../components/LegalFooter';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { TAP_TARGET } from '../lib/interaction';
 import { normalizeJoinCodeInput, joinErrorKey } from '../lib/joinCode';
+import { creatorUrl } from '../lib/creatorUrl';
 
 // The legal footer moved to components/LegalFooter so the Final screen can show
 // the same links (a player who finishes without ever re-reading Join still needs
@@ -50,6 +51,11 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
   const [memberName, setMemberName] = useState('');
   // Auto-focus the code field and animate/focus a newly-added member row.
   const codeRef = useRef<HTMLInputElement>(null);
+  // Ties the visible Hebrew label to the code field. Declared with the other
+  // hooks at the top of the component — NOT beside its use below the `if (!info)`
+  // early return, which is exactly the hooks-order mistake that crashed
+  // TaskRunner in production (see CLAUDE.md, react-hooks/rules-of-hooks).
+  const codeInputId = useId();
   const memberRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [justAdded, setJustAdded] = useState<number | null>(null);
   // Sound/haptic feedback preference (change: audio-haptic-feedback). Persisted in
@@ -209,7 +215,10 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
       <div className="min-h-screen flex flex-col max-w-md mx-auto w-full animate-race-in">
 
         {/* Full-bleed gradient hero */}
-        <div className="relative flex flex-col items-center justify-center px-6 pt-16 pb-12 text-center overflow-hidden">
+        {/* Tightened from pt-16/pb-12 (change: join-screen-fits-one-phone). The
+            hero alone ate ~180px of vertical space, which is what pushed the
+            join screen just past the fold and gave it that short, janky scroll. */}
+        <div className="relative flex flex-col items-center justify-center px-6 pt-10 pb-7 text-center overflow-hidden">
           {/* Background glow */}
           <div className="absolute inset-0 bg-gradient-to-b from-[#FFF0E0] via-[#FFFCF7] to-transparent" />
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-48 bg-gradient-radial from-rp-fire/20 to-transparent blur-3xl" />
@@ -217,7 +226,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
           <div className="relative">
             {/* App icon */}
             <div
-              className="w-20 h-20 rounded-3xl flex items-center justify-center text-4xl mx-auto mb-6"
+              className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4"
               style={{
                 background: 'linear-gradient(135deg, #FF5722 0%, #FFB300 100%)',
                 boxShadow: '0 8px 32px rgba(255,87,34,0.45), 0 2px 8px rgba(255,87,34,0.3)',
@@ -226,7 +235,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               🏁
             </div>
 
-            <h1 className="font-brand text-5xl font-extrabold tracking-tight leading-none mb-3"
+            <h1 className="font-brand text-4xl font-extrabold tracking-tight leading-none mb-2"
               style={{ background: 'linear-gradient(135deg, #FF5722 0%, #FF8A00 50%, #FFB300 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
               RushPoint
             </h1>
@@ -273,14 +282,22 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
 
         {/* Code input section */}
         <div className="flex-1 flex flex-col px-5 rp-safe-b">
-          <div className="relative mb-4">
+          {/* The Hebrew hint is a real LABEL, never the placeholder: the field is
+              dir="ltr" with tracking-[0.5em] so the Latin code reads as separated
+              glyphs, and that same styling shredded Hebrew placeholder text into
+              spaced-out, reversed-looking letters. A visible label also gives the
+              field an accessible name that does not vanish once typing starts. */}
+          <label htmlFor={codeInputId} className="block text-sm font-bold text-zinc-300 mb-2 text-center">
+            {t.join.codeLabel}
+          </label>
+          <div className="relative mb-3">
             <input
               ref={codeRef}
+              id={codeInputId}
               value={code}
               dir="ltr"
               onChange={(e) => setCode(normalizeJoinCodeInput(e.target.value))}
               placeholder={t.join.codePlaceholder}
-              aria-label={t.join.codePlaceholder}
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
@@ -289,7 +306,8 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
                 w-full px-6 py-5 rounded-2xl
                 text-center text-3xl font-mono font-bold tracking-[0.5em]
                 bg-white border-2 border-glass-border
-                text-zinc-100 placeholder:text-zinc-500
+                text-zinc-100
+                placeholder:text-zinc-500 placeholder:tracking-normal placeholder:text-xl
                 shadow-[0_2px_16px_rgba(26,10,0,0.08)]
                 focus:outline-none focus:border-rp-fire/60 focus:ring-4 focus:ring-rp-fire/15
                 transition-all duration-200
@@ -305,6 +323,13 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
             <p role="status" aria-live="polite" className="text-ink-alert text-sm text-center mb-4 font-medium animate-fade-up">{err}</p>
           )}
 
+          {/* Whole groups were signing in phone-by-phone and then could not work
+              out why they were separate teams (change: one-device-per-team-clarity).
+              Say it BEFORE the code is entered, not in the registration step. */}
+          <p className="text-[11px] text-zinc-500 text-center mb-3 leading-snug px-2">
+            {t.join.oneDeviceNote}
+          </p>
+
           <Button
             disabled={busy || code.length < 4}
             loading={lookupAction.busy}
@@ -319,7 +344,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               arrives with a code and must not be pulled sideways, while a Play
               Store installer with nothing to enter still has somewhere to go. */}
           {onDemo && demoReady && (
-            <div className="mt-5 text-center animate-fade-up">
+            <div className="mt-4 text-center animate-fade-up">
               <button
                 type="button"
                 onClick={onDemo}
@@ -331,17 +356,36 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
             </div>
           )}
 
+          {/* "אני צוות" was read as "we are a team" — whole groups tapped it and
+              got stuck on a PIN screen meant for organizers. The label now says
+              operators (never צוות) and carries an explicit not-for-players line. */}
           {onStaff && (
-            <button
-              className="text-zinc-400 text-sm mt-5 mx-auto inline-flex items-center justify-center min-h-[44px] px-3 font-medium hover:text-zinc-300 transition-colors"
-              onClick={onStaff}
-            >
-              {t.join.staff}
-            </button>
+            <div className="mt-5 text-center">
+              <button
+                className="text-zinc-400 text-sm mx-auto inline-flex items-center justify-center min-h-[44px] px-3 font-medium hover:text-zinc-300 transition-colors"
+                onClick={onStaff}
+              >
+                🔑 {t.join.staff}
+              </button>
+              <p className="text-[11px] text-zinc-500 leading-snug">{t.join.staffHint}</p>
+            </div>
           )}
 
+          {/* Cross-app link (change: cross-app-discovery). creator-web's logged-out
+              landing already points at the player app; this is the return path, so
+              a would-be organizer who only ever sees the join screen has a way in. */}
+          <p className="mt-4 text-center text-[11px] text-zinc-500">
+            {t.join.createOwnCta}{' '}
+            <a
+              href={creatorUrl()}
+              className="font-bold text-ink-fire underline underline-offset-2 hover:opacity-80"
+            >
+              {t.join.createOwnLink}
+            </a>
+          </p>
+
           {/* How it works — fills the lower screen + sets expectations */}
-          <div className="mt-auto pt-10">
+          <div className="mt-auto pt-4">
             <div className="grid grid-cols-3 gap-2.5">
               {[
                 { icon: '🔑', label: t.join.how1Label, sub: t.join.how1Sub },
@@ -350,7 +394,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               ].map((s, i) => (
                 <div
                   key={s.label}
-                  className="rounded-2xl bg-white/70 border border-glass-border px-2 py-3.5 text-center shadow-[0_1px_4px_rgba(26,10,0,0.05)] animate-fade-up"
+                  className="rounded-2xl bg-white/70 border border-glass-border px-2 py-2.5 text-center shadow-[0_1px_4px_rgba(26,10,0,0.05)] animate-fade-up"
                   style={{ animationDelay: `${i * 80}ms` }}
                 >
                   <div className="text-xl mb-1">{s.icon}</div>
@@ -359,7 +403,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
                 </div>
               ))}
             </div>
-            <p className="text-center text-[11px] text-zinc-500 mt-5 flex items-center justify-center gap-1.5">
+            <p className="text-center text-[11px] text-zinc-500 mt-3 flex items-center justify-center gap-1.5">
               <span className="text-ink-go">●</span> {t.join.noAccountNeeded}
             </p>
             <LegalFooter />

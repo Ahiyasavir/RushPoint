@@ -83,6 +83,10 @@ const HE = {
     ctaPrimary:   'התחל לבנות, חינם →',
     ctaSecondary: 'ראה איך זה עובד ↓',
     tryDemo:      'נסה משחק לדוגמה ←',
+    // Cross-app link (change: cross-app-discovery). A player who lands on the
+    // creator console has no route back to the join screen without one.
+    playerCta:    'יש לכם קוד גישה?',
+    playerLink:   'הצטרפו למשחק ←',
     useCasesTitle: 'מושלם ל…',
     useCases: [
       { emoji: '🎉', label: 'בר / בת מצווה' },
@@ -1719,6 +1723,8 @@ const EN: typeof HE = {
     ctaPrimary:   'Start building, free →',
     ctaSecondary: 'See how it works ↓',
     tryDemo:      'Try a sample game →',
+    playerCta:    'Have an access code?',
+    playerLink:   'Join a game →',
     useCasesTitle: 'Perfect for…',
     useCases: [
       { emoji: '🎉', label: 'Bar / Bat Mitzvahs' },

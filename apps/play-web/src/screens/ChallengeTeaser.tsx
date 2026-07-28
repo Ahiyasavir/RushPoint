@@ -156,7 +156,7 @@ export default function ChallengeTeaser({
               value={answer}
               disabled={timesUp}
               onChange={(e) => setAnswer(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
               placeholder={t.challenge.yourAnswer}
               className="w-full bg-app-raised rounded-xl px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-rp-fire/40 disabled:opacity-50 disabled:cursor-not-allowed"
             />

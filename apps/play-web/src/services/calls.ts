@@ -208,7 +208,9 @@ export const requestNextTask = callable<
   Ctx & { lat?: number; lng?: number },
   {
     taskId: string | null;
-    reason?: NoAssignmentReason | SafeZoneBlockReason | (string & {}) | null;
+    // `string & Record<never, never>` is the widen-to-string-but-keep-autocomplete
+    // idiom. Spelled the long way because the usual `string & {}` trips ban-types.
+    reason?: NoAssignmentReason | SafeZoneBlockReason | (string & Record<never, never>) | null;
     // Safe-zone soft-pause: the server refused to route because the team is out of
     // bounds. `metersOutside` is metres BEYOND the boundary (never the zone itself),
     // present only on a confirmed breach.

@@ -34,10 +34,24 @@ const HE = {
     langToggleAria: 'החלף שפה',
     removeMember: (name: string) => `הסר ${name}`,
     subtitle: 'הזינו את קוד הגישה מהמארגן כדי להצטרף למירוץ',
-    codePlaceholder: 'הקוד שלכם',
+    // Visible LABEL above the field. The input is dir="ltr" + tracking-[0.5em]
+    // for the Latin code, which shredded a Hebrew PLACEHOLDER into spaced-out
+    // reversed-looking letters — so the Hebrew hint moved out of the placeholder
+    // and the placeholder itself is now a neutral code sample in both languages.
+    codeLabel: 'הקוד שלכם',
+    // One token with a digit, so the shared leak predicate reads it as a sample
+    // code rather than English copy (scripts/lib/i18nLeak.ts, DIGIT_CODE_RE).
+    codePlaceholder: 'ABC123',
     lookingUp: 'מחפש…',
     continue: 'המשך',
-    staff: 'אני צוות',
+    // "אני צוות" read as "we are a team" and sent whole groups down the staff
+    // path. Say מפעילים/מארגנים (operators), never צוות, and say who it is NOT for.
+    staff: 'כניסת מפעילי האירוע',
+    staffHint: 'למארגנים ולמפעילים בלבד, לא לשחקנים',
+    // Groups were signing in on every phone (change: one-device-per-team-clarity).
+    oneDeviceNote: 'נציג אחד מכל קבוצה מזין את הקוד. לא כל המשתתפים.',
+    createOwnCta: 'רוצים ליצור משחק משלכם?',
+    createOwnLink: 'בנו משחק',
     tryDemo: 'נסו משחק לדוגמה',
     tryDemoSub: 'אין לכם קוד? שחקו עכשיו במשחק הדגמה, בלי הרשמה ובלי לצאת מהבית.',
     how1Label: 'הצטרפו', how1Sub: 'הזינו את הקוד',
@@ -638,10 +652,15 @@ const EN: typeof HE = {
     langToggleAria: 'Switch language',
     removeMember: (name: string) => `Remove ${name}`,
     subtitle: 'Enter the access code from your host to join the race',
-    codePlaceholder: 'ABC 123',
+    codeLabel: 'Your code',
+    codePlaceholder: 'ABC123',
     lookingUp: 'Looking up…',
     continue: 'Continue',
-    staff: "I'm staff",
+    staff: 'Event staff sign in',
+    staffHint: 'For hosts and staff only, not for players',
+    oneDeviceNote: 'One person per team enters the code, not everyone.',
+    createOwnCta: 'Want to run your own game?',
+    createOwnLink: 'Build a game',
     tryDemo: 'Try a sample game',
     tryDemoSub: 'No code? Play the demo game right now. No signup, no going outside.',
     how1Label: 'Join', how1Sub: 'Enter the code',

@@ -523,6 +523,36 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `npm run play:build`; live playtest ⇒ `npm run playtest:build`** — never mix them. `npm run
   base:check` (in `verify`) + `scripts/test-build-artifact-guard.ts` (in `npm test`) make a
   regression loud. `bundle:budget` and `firebase.json` hosting still read `dist`, unchanged.
+- **`npm run lint` is `turbo run lint` — a workspace with no `lint` SCRIPT is silently NOT linted,
+  and turbo still reports "Tasks: N successful".** play-web had neither `.eslintrc.cjs` nor a `lint`
+  script, so the app players actually hold was the ONE app never linted — while `verify` and CI both
+  looked green. That is how a `useState` sitting BELOW the `if (!task) { … return … }` early returns
+  in `TaskRunner` reached production: `task` is null while routing has not yet handed back the next
+  mission, so any render that hit the waiting state ran one hook fewer than the render before it and
+  React threw #300 *"Rendered fewer hooks than expected"*, crashing the whole tree to the
+  ErrorBoundary. It fired on SOME transitions, not all — that intermittency is what made it look
+  random rather than like a rendering bug. The callable had already succeeded server-side, so
+  the player saw "Something went wrong" on an action that actually worked — and a reload resumed
+  with the points banked, which is why it read as random. `react-hooks/rules-of-hooks` names this
+  exact defect (`error React Hook "useState" is called conditionally`), so the fix is structural:
+  **every React workspace declares a `lint` script and extends `plugin:react-hooks/recommended`**
+  (`apps/play-web/.eslintrc.cjs`). Adding a new app ⇒ add its lint script in the same commit, and
+  confirm turbo actually ran it by finding `@rushpoint/<app>:lint` in the output — a passing gate
+  that never ran is indistinguishable from a passing gate that did.
+- **Never pipe a gate through `tail`/`head` and trust the exit status — you get the PAGER's code,
+  not the gate's.** `npm run verify:emulator | tail -80` reported exit 0 while the run had actually
+  died partway: e2e printed "✅ ALL PASS", then the NEXT `emulators:exec` aborted with *"Could not
+  start Firestore Emulator, port taken"* (stale JVMs from a killed dev stack), so the rules, storage
+  rules, simulate and adversarial stages never ran at all. The truncated tail showed only the happy
+  part. Redirect to a file and capture the code (`npm run verify:emulator > /tmp/vem.log 2>&1; echo
+  $?`), then read the file. Related: a preview/dev stack stopped by anything other than Ctrl+C can
+  leave emulator JVMs holding 8080/9099/5001 — run `node scripts/free-ports.mjs` before the next
+  emulator-bound gate, or use the `RUSHPOINT_EMULATOR_PORT_OFFSET` lane.
+- **Firestore's `WebChannelConnection RPC 'Listen' stream transport errored` is NOISE, not an
+  outage.** It is the SDK's long-polling auto-detect handshake failing over, and it retries on
+  backoff and connects. Confirm before chasing it: `localStorage['firestore_online_state_…']` reads
+  `{"onlineState":"Online"}` and the chat/feed panels render their empty state instead of hanging.
+  Do not "fix" it by forcing `experimentalForceLongPolling` in production.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

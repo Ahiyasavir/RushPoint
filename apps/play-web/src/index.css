@@ -12,9 +12,36 @@
   background-color: #FFFCF7;
 }
 
+/* `min-height` only — deliberately NOT `height: 100%` (change: join-screen-scroll).
+   With a fixed `height: 100%`, html/body/#root stayed pinned to the viewport
+   (812px on the reported phone) while their content was taller (874px), so every
+   screen scrolled a fixed-height root instead of a root that grows with its
+   content. That is what made the join screen's scroll feel short and janky, and
+   on iOS it is also what produces the double bounce. `min-height` still fills the
+   viewport when content is short, which is all the original rule was for.
+   Nothing depends on the root having a DEFINITE height: the only `h-full` users
+   in play-web sit inside explicitly-sized parents (the map container, an
+   `absolute inset-0` overlay, a progress bar). */
 html, body, #root {
   min-height: 100%;
-  height: 100%;
+}
+
+/* Mobile browsers report `100vh` as the LARGE viewport — the height the page
+   would have if the retracting address bar were hidden. So a screen that fits
+   perfectly is still ~60-100px taller than what the player can actually see,
+   and every screen using `min-h-screen` scrolls a little for no reason. That
+   is the "weird scrolling on the first page" players reported on the join
+   screen. `100dvh` is the DYNAMIC viewport (what is visible right now), which
+   is what these full-height layouts always meant.
+
+   Done as a progressive-enhancement override of Tailwind's own utility rather
+   than by editing ~14 call sites: it fixes every full-height screen at once,
+   and a browser without dvh support keeps today's exact behaviour. This rule
+   comes after `@tailwind utilities`, so at equal specificity it wins. */
+@supports (min-height: 100dvh) {
+  .min-h-screen {
+    min-height: 100dvh;
+  }
 }
 
 body {

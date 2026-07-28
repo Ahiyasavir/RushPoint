@@ -301,6 +301,24 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   }, [cooldownUntil]);
   const cooldownLeft = cooldownRemainingSeconds(cooldownUntil, cooldownNow);
 
+  // Wrong answers seen on THIS device, this session (change: play-touch-rtl-a11y).
+  // The participant payload carries smart.attemptLimit but never the team's
+  // server-side taskAttempts, so this is an optimistic lower bound on attempts
+  // used — which makes the "attempts left" it feeds an UPPER bound, never an
+  // understatement. The server stays the only authority on the real cap.
+  //
+  // MUST stay above the `if (!task)` early returns below. It used to sit next to
+  // its only reader (`applyAnswerCost`), *after* them — so any render with no
+  // assigned task ran one hook fewer than the render before it, and React threw
+  // #300 "rendered fewer hooks than expected", crashing the whole tree to the
+  // ErrorBoundary. `task` is null whenever routing has not yet handed back the
+  // next mission, so this fired on SOME (not all) task transitions — whichever
+  // ones actually rendered the waiting state. That intermittency is why it read
+  // as random in production: the callable had already succeeded server-side, so
+  // the player saw "something went wrong" on an action that had really worked,
+  // and a reload resumed with the points banked.
+  const [wrongAttempts, setWrongAttempts] = useState<Record<string, number>>({});
+
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
   const frozen = busy || readOnly;
@@ -645,13 +663,6 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       void run(undefined);
     }
   }
-
-  // Wrong answers seen on THIS device, this session (change: play-touch-rtl-a11y).
-  // The participant payload carries smart.attemptLimit but never the team's
-  // server-side taskAttempts, so this is an optimistic lower bound on attempts
-  // used — which makes the "attempts left" it feeds an UPPER bound, never an
-  // understatement. The server stays the only authority on the real cap.
-  const [wrongAttempts, setWrongAttempts] = useState<Record<string, number>>({});
 
   // Turn a wrong-answer response into the local message + lockout. A `replay`
   // (a network retry of the identical answer) charged nothing, so it must not
@@ -1294,7 +1305,7 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
             fired.current = true;
             // Un-latch on a failed arrival so the watcher retries as the player
             // stays in range, instead of freezing after one transient failure.
-            Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude))
+            void Promise.resolve(onArrive(p.coords.latitude, p.coords.longitude))
               .then((ok) => { if (ok === false) fired.current = false; });
           }
         },

@@ -380,6 +380,16 @@ function Landing({ authCard }: { authCard: ReactNode }) {
               </a>
               <a href="#how" className="text-sm font-medium text-[--ink-2] hover:text-[--ink-1] px-3 py-2.5 rounded-xl hover:bg-[--surface-2] transition-colors">{l.ctaSecondary}</a>
             </div>
+            {/* The return half of the cross-app link (change: cross-app-discovery).
+                play-web's join screen points here for would-be organizers; this
+                points back for a player who followed a creator link by mistake.
+                Deliberately the bare join screen, not the demo — they have a code. */}
+            <p className="mt-4 text-sm text-[--ink-3]">
+              {l.playerCta}{' '}
+              <a href={PLAY_URL} className="font-semibold text-rp-fire underline underline-offset-2 hover:opacity-80">
+                {l.playerLink}
+              </a>
+            </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustNoCc}</span>
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustDemo}</span>
