@@ -172,9 +172,14 @@ async function main() {
       (get.headers.get('content-type') || '').startsWith('image/jpeg'),
       `served as image/jpeg — ${get.headers.get('content-type')}`,
     );
+    // `includes`, not `===`. Both the app and Caddy set this header, and the
+    // Headers API joins duplicates into "nosniff, nosniff" — a strict equality
+    // check reports a security header as MISSING when it is in fact set twice,
+    // which is the most misleading way for a check to be wrong.
     ok(
-      get.headers.get('x-content-type-options') === 'nosniff',
+      (get.headers.get('x-content-type-options') || '').includes('nosniff'),
       'served with X-Content-Type-Options: nosniff',
+      `got: ${get.headers.get('x-content-type-options')}`,
     );
   }
 
