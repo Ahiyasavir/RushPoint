@@ -1,1 +1,15 @@
-[]
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.rushpoint.app",
+      "sha256_cert_fingerprints": [
+        "22:88:A9:E5:DB:E4:51:2A:75:3D:C6:D3:52:F6:18:DF:9E:37:AE:34:F6:74:6A:AD:21:86:46:1C:99:27:47:45",
+        "3B:46:2C:70:65:52:1F:D5:1A:47:EF:55:52:E0:8B:34:FA:F9:58:47:77:CB:DA:E7:EA:F4:4F:2B:77:A2:F6:71"
+      ]
+    }
+  }
+]

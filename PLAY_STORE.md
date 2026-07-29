@@ -47,14 +47,14 @@ It validates three things against the real files:
    with "no statements (empty array)" — that is the correct signal, not a bug. The
    file ships as `[]` because no signing fingerprint exists yet.
 3. **The generated Android project's target API level** meets Play's current floor
-   (`PLAY_MIN_TARGET_SDK`, currently **35**). Play rejects uploads below it. Before
+   (`PLAY_MIN_TARGET_SDK`, currently **36**). Play rejects uploads below it. Before
    Step 2 there is no generated project, so this check reports *"not checked"* and
    **skips** — re-run it after `play:twa:init` to get a real verdict. Bump the
    constant in [`packages/shared/src/playStore.ts`](packages/shared/src/playStore.ts)
    when Google raises the floor.
 
 Deploy the current `play-web` to its production origin
-(`https://rushpoint-play.web.app` by default — see [DEPLOY.md](DEPLOY.md)) so the
+(`https://rush-point.com` by default — see [DEPLOY.md](DEPLOY.md)) so the
 manifest, icons, and (later) `assetlinks.json` are actually served over HTTPS.
 
 ---
@@ -66,7 +66,7 @@ The TWA is configured by [`twa-manifest.json`](twa-manifest.json) at the repo ro
 signing-key alias `rushpoint`).
 
 > ⚠️ **Origin must match exactly.** If `play-web` is served from anything other than
-> `https://rushpoint-play.web.app` (e.g. a custom domain like `play.rushpoint.app`),
+> `https://rush-point.com` (e.g. a custom domain like `play.rushpoint.app`),
 > update **every** URL in `twa-manifest.json` (`host`, `startUrl`, `iconUrl`,
 > `maskableIconUrl`, `webManifestUrl`, `fullScopeUrl`) before initializing, and make
 > sure the generated `assetlinks.json` (Step 3) is deployed at **that** origin's

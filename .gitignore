@@ -69,6 +69,23 @@ android.keystore
 *.aab
 *.apk
 /app/
+# The rest of the generated Android project. Bubblewrap writes these at the REPO
+# ROOT next to /app/, and `bubblewrap update` rewrites them on every version bump,
+# so committing them means a diff on every release that nobody reads. The Gradle
+# wrapper is normally checked in for an Android repo, but here it is generated
+# alongside /app/ (which is already ignored) rather than authored, so it belongs
+# with the rest of the build output. Regenerate with `npm run play:twa:init`.
+/build/
+/.gradle/
+/gradle/
+/gradlew
+/gradlew.bat
+/build.gradle
+/settings.gradle
+/gradle.properties
+/manifest-checksum.txt
+/store_icon.png
+*.idsig
 twa-manifest.json.bak
 android.keystore.pub.pem
 

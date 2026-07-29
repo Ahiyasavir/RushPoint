@@ -188,7 +188,7 @@ Both language sets are real frames from a real playthrough of a Hebrew/English g
 | Contains ads | **No** |
 | In-app purchases | **No** — free mode, `PAYMENTS_ENABLED = false` |
 | Price | Free |
-| Privacy Policy URL | ✅ **`https://rushpoint-creator.web.app/privacy`** — deployed & browser-verified 2026-07-22 |
+| Privacy Policy URL | ✅ **`https://creator.rush-point.com/privacy`** — deployed & browser-verified 2026-07-22 |
 | App access | ⚠️ **Provide a live access code** — see the cold-install warning above |
 | Data Safety | answers pre-derived in [PLAY_STORE.md §6](../../PLAY_STORE.md) |
 | Target audience | ⚠️ decide deliberately — [PLAY_STORE.md §7](../../PLAY_STORE.md) |

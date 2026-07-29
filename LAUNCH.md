@@ -87,7 +87,7 @@ use. (Tiles have a keyless OpenTopoMap fallback; the geocoder was the real probl
 
 > **Status 2026-07-22 — hosting is LIVE; the backend is NOT.** `deploy:hosting` succeeded for both
 > sites and is verified serving real content (privacy policy live at
-> `https://rushpoint-creator.web.app/privacy`). `deploy:backend` **fails** until Phase 0 (Blaze)
+> `https://creator.rush-point.com/privacy`). `deploy:backend` **fails** until Phase 0 (Blaze)
 > and Phase 1 step 3 (Storage) are done — Functions cannot deploy without Blaze.
 >
 > ⚠️ **Both sites had been overwritten by a stale `playtest:ngrok` redirect stub**, which returned
@@ -109,8 +109,8 @@ npm run deploy:all
 `deploy:hosting` (builds shared + both apps, deploys both sites).
 
 You'll end up with:
-- Creator console → `https://rushpoint-creator.web.app`
-- Participant app → `https://rushpoint-play.web.app`
+- Creator console → `https://creator.rush-point.com`
+- Participant app → `https://rush-point.com`
 
 **Smoke test before going further:** sign up on the creator site, create a game from a quick-start
 template, launch a run, join from your phone on the play site with the access code, complete a
@@ -170,7 +170,7 @@ Both checks should now pass. (Before this step, `assetlinks.json` failing with *
 npm run deploy:hosting
 ```
 
-Confirm live: open `https://rushpoint-play.web.app/.well-known/assetlinks.json` in a browser.
+Confirm live: open `https://rush-point.com/.well-known/assetlinks.json` in a browser.
 
 ### 5d. ⚙️ Build the bundle
 
