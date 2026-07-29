@@ -81,6 +81,16 @@ export function logBestEffort(op: string, ctx: Record<string, unknown>, err: unk
   active.warn('bestEffort.failed', { op, ...redact(ctx), err: String(err) });
 }
 
+/**
+ * A best-effort side effect SUCCEEDED — log an info, never throw. Exists so a
+ * success breadcrumb isn't emitted through logBestEffort, which stamps every
+ * record `warn`/`bestEffort.failed`: a delivered email showing up as a failure is
+ * exactly the sort of thing that misleads the next person reading the log.
+ */
+export function logBestEffortOk(op: string, ctx: Record<string, unknown>): void {
+  active.info('bestEffort.ok', { op, ...redact(ctx) });
+}
+
 // Cost containment (change: cost-containment-max-instances): no callable in this
 // codebase has ever set maxInstances, so a runaway loop or an abuse spike can
 // scale to Google's project-wide instance ceiling and generate a real bill. Every

@@ -10,7 +10,7 @@
 // network socket is ever opened under test.
 import type { RunSummary } from '@rushpoint/shared';
 import { formatRunSummaryEmail } from '@rushpoint/shared';
-import { logBestEffort } from '../obs/log';
+import { logBestEffort, logBestEffortOk } from '../obs/log';
 
 /**
  * Master switch for outbound run-summary email. Defaults ON — a run only actually
@@ -97,5 +97,5 @@ async function deliver(
     logBestEffort('runSummary.email.failed', { subject, status: res.status }, `provider ${res.status}`);
     return;
   }
-  logBestEffort('runSummary.email.sent', { subject }, 'delivered');
+  logBestEffortOk('runSummary.email.sent', { subject });
 }
