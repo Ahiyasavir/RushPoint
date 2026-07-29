@@ -43,7 +43,20 @@ services:
       # live here; the actual RESEND_API_KEY comes from ./api.env (gitignored,
       # see api.env.example) via env_file above so the secret never lands in git.
       RUN_SUMMARY_EMAIL_FROM: "onboarding@resend.dev"
-      RUN_SUMMARY_EMAIL_TO: "8bit7845@gmail.com"
+      RUN_SUMMARY_EMAIL_TO: "spendora.tracker@gmail.com"
+      # Daily digest (deploy/rushpoint-digest.timer, 03:30 local). It reports the
+      # PREVIOUS complete day in RUN_DIGEST_TIMEZONE — set explicitly because a
+      # container's local time is UTC even though the host is Asia/Jerusalem, and
+      # inheriting that would shift the day boundary and split an evening's runs
+      # across two digests. RUN_DIGEST_OWNER_UID is the operator whose runs get
+      # itemized; other creators' runs collapse to a bare count so the digest can
+      # never become a cross-tenant leak.
+      RUN_DIGEST_EMAIL_TO: "spendora.tracker@gmail.com"
+      RUN_DIGEST_TIMEZONE: "Asia/Jerusalem"
+      # Comma-separated. The operator's real creator account FIRST, then the seeded
+      # accounts that own the platform's own demo games — those demo runs are the
+      # whole point of the digest, and they are NOT owned by the personal account.
+      RUN_DIGEST_OWNER_UID: "wTYDwnEZP6MhGyaGINbumaYqKem1,demo-spy-academy,demo-creator,qa-creator,sansana-creator"
       # NOTE: payments are hard-disabled in code (PAYMENTS_ENABLED=false) — no
       # Stripe/APP_URL/QR env is needed. RUSHPOINT_APP_ID defaults to the project id.
       VPS_UPLOAD_ORIGIN: "https://api.rush-point.com"

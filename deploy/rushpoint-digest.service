@@ -1,0 +1,35 @@
+# RushPoint daily run digest — reports how many DEMO runs were played and which
+# REAL runs finished, once a day. Demo runs deliberately do not send a per-run
+# email (there can be many a day from the public demo link, and they would bury
+# the one email that matters), so this digest is where their volume shows up.
+#
+# On a day with no demo runs and no real runs this sends NOTHING. Silence means
+# "nothing happened", not "the job broke" — check `journalctl` if you want proof
+# the unit ran.
+#
+# Install (as root):
+#   cp deploy/rushpoint-digest.service /etc/systemd/system/
+#   cp deploy/rushpoint-digest.timer   /etc/systemd/system/
+#   # edit WorkingDirectory below to wherever docker-compose.api.yml lives
+#   systemctl daemon-reload
+#   systemctl enable --now rushpoint-digest.timer
+#   systemctl start rushpoint-digest.service   # optional: run once now
+#   journalctl -u rushpoint-digest.service     # view output
+#
+# Requires RESEND_API_KEY in the api.env loaded by docker-compose.api.yml, plus
+# RUN_DIGEST_EMAIL_TO / RUN_DIGEST_OWNER_UID / RUN_DIGEST_TIMEZONE in the compose
+# `environment:` block. With no provider key the job still runs and logs, but
+# sends nothing.
+[Unit]
+Description=RushPoint daily run digest (demo-run count + real runs finished)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# The directory that holds docker-compose.api.yml + service-account.json.
+WorkingDirectory=/root/RushPoint
+# Spin up a one-shot container from the SAME image/env as the API (so it gets the
+# service-account credential, GCLOUD_PROJECT and the mail env) and run the digest
+# entry, then remove it. --no-deps: don't touch the running api container.
+ExecStart=/usr/bin/docker compose -f docker-compose.api.yml run --rm --no-deps api node lib/digest-cron.js

@@ -118,6 +118,7 @@ import {
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
 import { taskExcludedMs, teamExcludedMs, adjustedElapsedSeconds } from '@rushpoint/shared';
+import { shouldEmailRunSummary } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 // Gallery ranking signals (change: gallery-popularity-ranking).
@@ -1920,6 +1921,35 @@ async function finalizeRunCore(
     updatedAt: now,
   });
 
+  // Post-finalize consolidation, INLINE (change: run-email-scope-and-digest).
+  // The `onRunFinalized` trigger below is not invoked at all on a callable-only
+  // host, which is why the summary email, the player-profile folds and the
+  // benchmark contribution had all silently stopped. Running it here makes the
+  // behavior topology-independent; the per-concern transactional claims keep it
+  // exactly-once if the trigger also fires.
+  //
+  // Ordered AFTER the authoritative write and wrapped whole: consolidation can
+  // never prevent a run from being finalized. It is AWAITED rather than
+  // fire-and-forget because an unawaited promise is not guaranteed to finish on
+  // Cloud Functions (the very silent-data-loss failure the trigger comment
+  // warns about) — one correct behavior on both hosts is worth the latency.
+  try {
+    // Must carry the leaderboard just written: the profile fold reads
+    // `run.leaderboard.rankings` for each team's FINAL score (which includes
+    // bonusPenalty adjustments). Passing the pre-write `run` would leave those
+    // rankings empty and silently bank `team.score` instead — the unadjusted
+    // number — into every player's badge total.
+    const finalizedRun: Run = {
+      ...run,
+      status: 'finished',
+      finishedAt: now,
+      leaderboard: { rankings, frozen: true, published, updatedAt: now },
+    };
+    await runPostFinalizeConsolidation(ownerUid, gameId, runId, runRef, finalizedRun);
+  } catch (e) {
+    logBestEffort('finalizeRunCore.consolidation', { runId }, e);
+  }
+
   return { rankings, alreadyFinal: false };
 }
 
@@ -2024,64 +2054,89 @@ export const onRunFinalized = functions.firestore
     if (run.status !== 'finished') return null; // not the transition we care about
 
     const { ownerUid, gameId, runId } = context.params as { ownerUid: string; gameId: string; runId: string };
-    const runRef = change.after.ref;
-
-    let game: Game;
-    let teams: RunTeam[];
-    let teamsSnap: FirebaseFirestore.QuerySnapshot;
-    try {
-      const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
-      if (!gameSnap.exists) return null; // game deleted between finalize and trigger — nothing to fold
-      game = parseStored(() => parseGame(gameSnap.data()));
-      teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
-      teams = parseTeamsQuarantining(teamsSnap.docs);
-    } catch (e) {
-      logBestEffort('onRunFinalized.read', { runId }, e);
-      return null;
-    }
-
-    // Player profiles (change: player-profile-badges): fold each finished
-    // team's result into the player's cross-run profile. A test-drive run is a
-    // rehearsal — excluded (change: test-drive-mode).
-    if (!run.isTestDrive) {
-      try {
-        const scoreByTeam = new Map((run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]));
-        await Promise.all(teamsSnap.docs.map(async (d) => {
-          const team = d.data() as RunTeam & { profileRecorded?: boolean };
-          if (team.status !== 'finished' || team.profileRecorded) return;
-          const tasksCompleted = (team.stages ?? []).reduce(
-            (n, s) => n + (s.tasks ?? []).filter((t) => t.status === 'completed').length, 0);
-          await recordPlayerResult({
-            uid: d.id,
-            displayName: team.displayName,
-            tasksCompleted,
-            points: scoreByTeam.get(d.id) ?? team.score ?? 0,
-          }, d.ref);
-        }));
-      } catch (e) {
-        logBestEffort('onRunFinalized.playerProfiles', { runId }, e);
-      }
-    }
-
-    // Platform benchmark contribution (platform-benchmark): opt-outable via
-    // game.benchmarkOptOut; test-drive runs are excluded (change: test-drive-mode).
-    if (!game.benchmarkOptOut && !run.isTestDrive) {
-      try {
-        await foldPlatformBenchmark(runRef, game, teams);
-      } catch (e) {
-        logBestEffort('onRunFinalized.benchmark', { runId }, e);
-      }
-    }
-
-    // Run summary email seam (change: run-summary-report).
-    try {
-      await sendRunSummaryEmailOnce(runRef, ownerUid, gameId, runId, game, run, teams);
-    } catch (e) {
-      logBestEffort('onRunFinalized.runSummaryEmail', { runId }, e);
-    }
-
+    await runPostFinalizeConsolidation(ownerUid, gameId, runId, change.after.ref, run);
     return null;
   });
+
+// runPostFinalizeConsolidation — the three post-finalize concerns, in ONE place
+// (change: run-email-scope-and-digest).
+//
+// WHY THIS IS NOT INSIDE THE TRIGGER ANY MORE. `onRunFinalized` is a Firestore
+// trigger, and the self-hosted deployment (`functions/server.js`) mounts
+// CALLABLES ONLY — triggers are skipped by design. So on that topology this work
+// never ran at all: no summary email, no player-profile/badge folds, no benchmark
+// contribution, silently, for every finalized run. `finalizeRunCore` now calls
+// this directly, which is what makes the behavior topology-independent.
+//
+// Both callers may fire for the same run (a Cloud Functions deployment has the
+// trigger too). That is SAFE, not a hazard, because each concern owns a
+// transactional claim — per-team `profileRecorded`, run-level
+// `benchmarkContributed`, run-level `summaryEmailSent` — so whichever path
+// arrives first does the work and the other no-ops. The claims are why "call it
+// from both places" is correct rather than reckless.
+//
+// Each concern stays independently try/caught: a down email provider must never
+// block a badge fold, and none of them may fail the organizer's finalize call.
+export async function runPostFinalizeConsolidation(
+  ownerUid: string, gameId: string, runId: string,
+  runRef: FirebaseFirestore.DocumentReference,
+  run: Run,
+): Promise<void> {
+  let game: Game;
+  let teams: RunTeam[];
+  let teamsSnap: FirebaseFirestore.QuerySnapshot;
+  try {
+    const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+    if (!gameSnap.exists) return; // game deleted between finalize and here — nothing to fold
+    game = parseStored(() => parseGame(gameSnap.data()));
+    teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
+    teams = parseTeamsQuarantining(teamsSnap.docs);
+  } catch (e) {
+    logBestEffort('postFinalize.read', { runId }, e);
+    return;
+  }
+
+  // Player profiles (change: player-profile-badges): fold each finished
+  // team's result into the player's cross-run profile. A test-drive run is a
+  // rehearsal — excluded (change: test-drive-mode).
+  if (!run.isTestDrive) {
+    try {
+      const scoreByTeam = new Map((run.leaderboard?.rankings ?? []).map((r) => [r.teamId, r.score]));
+      await Promise.all(teamsSnap.docs.map(async (d) => {
+        const team = d.data() as RunTeam & { profileRecorded?: boolean };
+        if (team.status !== 'finished' || team.profileRecorded) return;
+        const tasksCompleted = (team.stages ?? []).reduce(
+          (n, s) => n + (s.tasks ?? []).filter((t) => t.status === 'completed').length, 0);
+        await recordPlayerResult({
+          uid: d.id,
+          displayName: team.displayName,
+          tasksCompleted,
+          points: scoreByTeam.get(d.id) ?? team.score ?? 0,
+        }, d.ref);
+      }));
+    } catch (e) {
+      logBestEffort('postFinalize.playerProfiles', { runId }, e);
+    }
+  }
+
+  // Platform benchmark contribution (platform-benchmark): opt-outable via
+  // game.benchmarkOptOut; test-drive runs are excluded (change: test-drive-mode).
+  if (!game.benchmarkOptOut && !run.isTestDrive) {
+    try {
+      await foldPlatformBenchmark(runRef, game, teams);
+    } catch (e) {
+      logBestEffort('postFinalize.benchmark', { runId }, e);
+    }
+  }
+
+  // Run summary email seam (change: run-summary-report). Scoped to real
+  // organizer runs by sendRunSummaryEmailOnce's own eligibility gate.
+  try {
+    await sendRunSummaryEmailOnce(runRef, ownerUid, gameId, runId, game, run, teams);
+  } catch (e) {
+    logBestEffort('postFinalize.runSummaryEmail', { runId }, e);
+  }
+}
 
 // Fold anonymized per-task-type aggregates (median completion time +
 // completion rate) into benchmarks/{taskType}. No per-run identifiers are
@@ -2153,6 +2208,31 @@ async function sendRunSummaryEmailOnce(
   ownerUid: string, gameId: string, runId: string,
   game: Game, run: Run, teams: RunTeam[],
 ): Promise<void> {
+  // Read the owner FIRST: it supplies both the eligibility input (does this run
+  // belong to an identifiable creator?) and, further down, the recipient and the
+  // attribution — one read serving three purposes.
+  const ownerSnap = await db.doc(`users/${ownerUid}`).get();
+  const owner = ownerSnap.data() as { email?: string; displayName?: string } | undefined;
+  const ownerEmail = owner?.email?.trim() || '';
+
+  // Scope gate BEFORE the claim (change: run-email-scope-and-digest). A rehearsal
+  // (isTestDrive), a self-guided demo run, or a run owned by an anonymous creator
+  // (every simulation and the e2e suite) must not email: demos can happen many
+  // times a day from the public demo link and sims would burn provider quota, and
+  // together they would bury the one email that matters. Checked before the
+  // transaction on purpose, so an ineligible run neither burns the
+  // `summaryEmailSent` claim nor opens a socket. Demo volume is reported by the
+  // daily digest instead.
+  if (!shouldEmailRunSummary(run, { hasEmail: ownerEmail.length > 0 })) {
+    logBestEffort('runSummary.email.notEligible', {
+      runId,
+      isTestDrive: run.isTestDrive === true,
+      selfGuided: run.selfGuided === true,
+      ownerHasEmail: ownerEmail.length > 0,
+    }, 'test-drive, self-guided, or synthetic (anonymous) owner');
+    return;
+  }
+
   const claimed = await db.runTransaction(async (tx) => {
     const snap = await tx.get(runRef);
     if ((snap.data() as { summaryEmailSent?: boolean } | undefined)?.summaryEmailSent) return false;
@@ -2164,11 +2244,17 @@ async function sendRunSummaryEmailOnce(
   const feedbackSnap = await db.collection(feedbackCol(ownerUid, gameId, runId)).get();
   const responses = feedbackSnap.docs.map((d) => d.data() as RunFeedback);
   const summary = buildRunSummaryResult(game, run, teams, responses);
-  const ownerSnap = await db.doc(`users/${ownerUid}`).get();
-  const recipient = process.env.RUN_SUMMARY_EMAIL_TO
-    ?? (ownerSnap.data() as { email?: string } | undefined)?.email
-    ?? null;
-  await sendRunSummaryEmail(summary, recipient);
+  const recipient = process.env.RUN_SUMMARY_EMAIL_TO ?? ownerEmail ?? null;
+  // Attribute the run to the creator who built and ran it. Read from the SAME doc
+  // the recipient already comes from — no extra Firestore read. Both fields are
+  // optional and the formatter degrades to whatever is present, so a creator with
+  // no display name (or a legacy doc missing both) renders cleanly instead of
+  // emitting "undefined". Player identity travels as standings[].teamName; there
+  // is no participant email to attach — they authenticate anonymously.
+  await sendRunSummaryEmail(
+    { ...summary, organizer: { displayName: owner?.displayName, email: owner?.email } },
+    recipient,
+  );
 }
 
 

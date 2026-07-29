@@ -49,6 +49,8 @@ export * from './benchmark';
 export * from './playtest';
 export * from './runAnalytics';
 export * from './runSummary';
+export * from './runEmailEligibility';
+export * from './runDigest';
 export * from './reactions';
 export * from './schedule';
 export * from './gating';

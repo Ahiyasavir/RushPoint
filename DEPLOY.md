@@ -191,6 +191,35 @@ Then rebuild: `docker compose -f docker-compose.api.yml up -d --build`. With no 
 sending is a safe no-op (a log breadcrumb only) — nothing is sent and no network call is made.
 Set `RUN_SUMMARY_EMAIL_ENABLED: "false"` in the compose file's `environment:` block to hard-disable.
 
+**Which runs email.** Only *real* runs: not a `testDrive` rehearsal, not a `selfGuided`
+instant-play/demo run, and not a run whose owner is an anonymous account (which is what excludes
+every simulation and the e2e suite — they create their creator with `signInAnonymously`). A skipped
+run logs `runSummary.email.notEligible` naming the rule that fired, so a missing summary is
+diagnosable. Demo volume is reported by the daily digest instead.
+
+**Daily digest.** `deploy/rushpoint-digest.{service,timer}` fires at 03:30 local and reports the
+PREVIOUS complete day: how many demo runs were played (with the players' display names) plus the real
+runs that finished. A fully quiet day sends **nothing** — silence means "nothing happened", so check
+`journalctl -u rushpoint-digest` if you want proof the unit ran. Install:
+
+```bash
+cp deploy/rushpoint-digest.service deploy/rushpoint-digest.timer /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now rushpoint-digest.timer
+```
+
+Its `environment:` knobs in the compose file: `RUN_DIGEST_EMAIL_TO` (falls back to
+`RUN_SUMMARY_EMAIL_TO`), `RUN_DIGEST_TIMEZONE` (set explicitly — a container's local time is UTC even
+when the host is `Asia/Jerusalem`, which would shift the day boundary), and `RUN_DIGEST_OWNER_UID`, a
+comma-separated allowlist of the accounts whose runs get itemized (the operator's real account plus
+the seeded accounts owning the platform's demo games). Any other creator's runs appear as a bare
+count only, so the digest can't become a cross-tenant leak.
+
+**Post-finalize work needs no trigger runtime.** The summary email, player-profile/badge folds and
+the platform-benchmark contribution used to run only from the `onRunFinalized` Firestore trigger,
+which this VPS never invokes (it mounts callables only) — so all three silently stopped after the
+2026-07-27 migration. `finalizeRunCore` now invokes them inline, guarded by the existing
+per-concern transactional claims so a Cloud Functions deployment that fires both paths still does the
+work exactly once.
+
 **Cloud Functions (legacy path, not the current deploy target):** add the same three vars to
 `functions/.env` and redeploy (§5) so the function picks them up.
 

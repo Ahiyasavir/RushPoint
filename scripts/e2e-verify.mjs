@@ -8915,6 +8915,88 @@ async function main() {
       JSON.stringify({ stageCompleted: entry?.stageCompleted, requirementLowered: entry?.requirementLowered }));
   });
 
+  await scenario('run-summary email scope (real runs only; demo/sim/synthetic excluded)', async () => {
+    // change: run-email-scope-and-digest. The emulator has no RESEND_API_KEY, so
+    // NOTHING is ever actually sent here — which is itself part of the contract.
+    // The observable is the run doc's `summaryEmailSent` claim: it is set only on
+    // the path that would have delivered. That makes this a real assertion about
+    // eligibility without a single network call.
+    const OWNER = creatorCred.user.uid;
+    const claimOf = async (gid, rid) =>
+      (await adminDb.doc(`users/${OWNER}/games/${gid}/runs/${rid}`).get()).data()?.summaryEmailSent;
+
+    const mkGame = async (title, extra = {}) => {
+      const { gameId } = await creator.call('createGame', { title, mode: 'individual' });
+      await creator.call('updateGame', {
+        gameId, scoringPreset: 'fixed_points_speed', ...extra,
+        stages: [{ id: 'es-s', order: 0, title: 'One stop', isFinal: true, tasks: [
+          { id: 'es-a', title: 'Stop A', type: 'self_report', triggerMode: 'instant',
+            locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 5 },
+        ] }],
+      });
+      return gameId;
+    };
+
+    // (a) NEGATIVE — anonymous owner. The e2e creator is signInAnonymously, so its
+    // users/{uid} doc has no email: the synthetic-run rule must suppress the email
+    // even though the run is otherwise a perfectly normal organizer run. This is
+    // the rule that keeps a simulation pointed at production from mailing.
+    const gSyn = await mkGame('Email Scope Synthetic');
+    const { runId: rSyn } = await creator.call('launchRun', { gameId: gSyn });
+    await creator.call('finalizeRun', { gameId: gSyn, runId: rSyn });
+    check('an anonymous-owner (synthetic) run does NOT claim the email',
+      (await claimOf(gSyn, rSyn)) !== true, String(await claimOf(gSyn, rSyn)));
+
+    // Make the creator identifiable for the remaining cases. Written with the
+    // Admin SDK because users/{uid} is server-write-only.
+    await adminDb.doc(`users/${OWNER}`).set(
+      { email: 'e2e-creator@example.test', displayName: 'E2E Creator' }, { merge: true });
+
+    // (b) POSITIVE — real organizer run, identifiable owner ⇒ the claim is set.
+    const gReal = await mkGame('Email Scope Real');
+    const { runId: rReal } = await creator.call('launchRun', { gameId: gReal });
+    await creator.call('finalizeRun', { gameId: gReal, runId: rReal });
+    check('a real organizer run CLAIMS the email exactly once',
+      (await claimOf(gReal, rReal)) === true, String(await claimOf(gReal, rReal)));
+
+    // (c) NEGATIVE — test-drive rehearsal, same identifiable owner.
+    const gTd = await mkGame('Email Scope TestDrive');
+    const { runId: rTd } = await creator.call('launchRun', { gameId: gTd, testDrive: true });
+    await creator.call('finalizeRun', { gameId: gTd, runId: rTd });
+    check('a test-drive run does NOT claim the email',
+      (await claimOf(gTd, rTd)) !== true, String(await claimOf(gTd, rTd)));
+
+    // (d) NEGATIVE — self-guided demo run via startInstantPlay. Reported by the
+    // daily digest as a count instead of mailing per run.
+    const gDemo = await mkGame('Email Scope Demo', { allowInstantPlay: true });
+    await creator.call('publishGame', { gameId: gDemo, visibility: 'public' });
+    const demoPlayer = makeParty('email-scope-demo');
+    await signInAnonymously(demoPlayer.auth);
+    const ip = await demoPlayer.call('startInstantPlay', { gameId: gDemo, displayName: 'Demo Player' });
+    if (ip?.runId) {
+      const demoRun = (await adminDb.doc(`users/${OWNER}/games/${gDemo}/runs/${ip.runId}`).get()).data();
+      check('startInstantPlay produced a selfGuided run', demoRun?.selfGuided === true,
+        JSON.stringify(demoRun?.selfGuided));
+      // MUST finalize before asserting, or the check is vacuous: an unfinalized run
+      // has no claim regardless of eligibility, so it would "pass" for the wrong
+      // reason and keep passing if the demo exclusion were later removed.
+      await creator.call('finalizeRun', { gameId: gDemo, runId: ip.runId });
+      const demoFinal = (await adminDb.doc(`users/${OWNER}/games/${gDemo}/runs/${ip.runId}`).get()).data();
+      check('the demo run really did finalize (so the next check is not vacuous)',
+        demoFinal?.status === 'finished', demoFinal?.status);
+      check('a FINALIZED self-guided demo run does NOT claim the email',
+        demoFinal?.summaryEmailSent !== true, String(demoFinal?.summaryEmailSent));
+    } else {
+      check('startInstantPlay returned a runId for the demo case', false, JSON.stringify(ip));
+    }
+
+    // (e) The inline consolidation must be exactly-once: re-finalizing is a no-op
+    // and must not flip or re-run anything.
+    await creator.call('finalizeRun', { gameId: gReal, runId: rReal });
+    check('re-finalizing leaves the email claim set exactly once (no double-send)',
+      (await claimOf(gReal, rReal)) === true);
+  });
+
   // ═══ Callable coverage guard ════════════════════════════════════════════════
   // Introspect the callables the emulator actually serves (from the built lib)
   // and require every one to have been INVOKED by the suite above (positively or
