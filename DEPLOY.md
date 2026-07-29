@@ -177,18 +177,22 @@ Most of the app needs no admin. Two things use elevated access:
 ## 7b. Run summary email (optional)
 
 Every finalized run composes an organizer summary (final standings + completion stats + player
-feedback digest). It is always shown in the creator Run Console. To also **email** it after each run,
-add a mail provider key to `functions/.env`:
+feedback digest). It is always shown in the creator Run Console. To also **email** it after each run:
+
+**Self-hosted VPS (current setup):** the flag/sender/recipient
+defaults live in `docker-compose.api.yml`; the secret key goes in a gitignored `api.env` next to it
+(copy from `api.env.example`):
 
 ```
-RESEND_API_KEY=re_xxx                            # from resend.com (free tier) — enables delivery
-RUN_SUMMARY_EMAIL_TO=you@example.com             # optional — override recipient (else the owner's account email)
-RUN_SUMMARY_EMAIL_FROM=onboarding@resend.dev      # optional — sender (default is Resend's sandbox address)
-RUN_SUMMARY_EMAIL_ENABLED=false                   # optional — set to hard-disable (default ON)
+RESEND_API_KEY=re_xxx      # from resend.com (free tier) — enables delivery
 ```
 
-Then **deploy the backend again** (§5) so the function picks it up. With no `RESEND_API_KEY`, sending
-is a safe no-op (a log breadcrumb only) — nothing is sent and no network call is made.
+Then rebuild: `docker compose -f docker-compose.api.yml up -d --build`. With no `RESEND_API_KEY`,
+sending is a safe no-op (a log breadcrumb only) — nothing is sent and no network call is made.
+Set `RUN_SUMMARY_EMAIL_ENABLED: "false"` in the compose file's `environment:` block to hard-disable.
+
+**Cloud Functions (legacy path, not the current deploy target):** add the same three vars to
+`functions/.env` and redeploy (§5) so the function picks them up.
 
 ---
 

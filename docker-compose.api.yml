@@ -12,6 +12,11 @@ services:
       dockerfile: Dockerfile.api
     image: rushpoint-api
     restart: always
+    # Secrets (RESEND_API_KEY etc.) live in a gitignored .env next to this file,
+    # never inline here — see api.env.example for the template.
+    env_file:
+      - path: ./api.env
+        required: false
     # Bind to localhost only and put a TLS reverse proxy (Caddy/nginx) in front —
     # the callable protocol carries Firebase ID tokens and MUST be HTTPS in prod.
     # For a quick test you can expose 8080 directly and use http://<vps-ip>:8080.
@@ -34,12 +39,11 @@ services:
       # Matches what the VPS was already running.
       ALLOWED_ORIGINS: "https://rush-point.com,https://creator.rush-point.com,https://rushpoint-play.web.app,https://rushpoint-creator.web.app,https://rushpoint-play.firebaseapp.com,https://rushpoint-creator.firebaseapp.com"
       PORT: "8080"
-      # Run-summary emails (Resend) are ON by default. Simplest: turn them off.
-      RUN_SUMMARY_EMAIL_ENABLED: "false"
-      #   ...or keep them on by REMOVING the line above and setting:
-      #   RESEND_API_KEY: "re_..."
-      #   RUN_SUMMARY_EMAIL_FROM: "RushPoint <noreply@yourdomain>"
-      #   RUN_SUMMARY_EMAIL_TO: "you@yourdomain"
+      # Run-summary emails (Resend): the on/off flag + sender/recipient defaults
+      # live here; the actual RESEND_API_KEY comes from ./api.env (gitignored,
+      # see api.env.example) via env_file above so the secret never lands in git.
+      RUN_SUMMARY_EMAIL_FROM: "onboarding@resend.dev"
+      RUN_SUMMARY_EMAIL_TO: "8bit7845@gmail.com"
       # NOTE: payments are hard-disabled in code (PAYMENTS_ENABLED=false) — no
       # Stripe/APP_URL/QR env is needed. RUSHPOINT_APP_ID defaults to the project id.
       VPS_UPLOAD_ORIGIN: "https://api.rush-point.com"
