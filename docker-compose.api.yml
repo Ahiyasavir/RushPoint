@@ -24,7 +24,10 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /secrets/service-account.json
       # Comma-separated browser origins allowed to call this server. MUST match the
       # exact origins your play-web + creator-web are served from (scheme + host).
-      ALLOWED_ORIGINS: "https://play.example.com,https://creator.example.com"
+      # These are the REAL production origins, not placeholders. The gate 403s any
+      # browser origin not on this list, so a stale example.com value here takes
+      # the whole app down with a CORS failure that looks like a client bug.
+      ALLOWED_ORIGINS: "https://rush-point.com,https://creator.rush-point.com"
       PORT: "8080"
       # Run-summary emails (Resend) are ON by default. Simplest: turn them off.
       RUN_SUMMARY_EMAIL_ENABLED: "false"
@@ -34,8 +37,11 @@ services:
       #   RUN_SUMMARY_EMAIL_TO: "you@yourdomain"
       # NOTE: payments are hard-disabled in code (PAYMENTS_ENABLED=false) — no
       # Stripe/APP_URL/QR env is needed. RUSHPOINT_APP_ID defaults to the project id.
+      VPS_UPLOAD_ORIGIN: "https://api.rush-point.com"
+      UPLOAD_DIR: "/data/uploads"
     volumes:
       - ./service-account.json:/secrets/service-account.json:ro
+      - ./uploads:/data/uploads
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8080/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 30s

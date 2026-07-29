@@ -172,14 +172,17 @@ export async function signInStaff(customToken: string) {
   await signInWithCustomToken(auth, customToken);
 }
 
-// ── Resilient Storage upload ────────────────────────────────────────────────
-// The upload used to be a bare, non-resumable `uploadBytes`: no timeout, no
-// retry, no progress — while the callable right below it already retried 3× with
-// a timeout. So `submitStationPhoto` survived a flaky moment on mobile data but
-// the upload before it did not, and the player just got "couldn't save the photo,
-// take it again". Now: uploadBytesResumable + progress + stall/absolute timeouts
-// + the SAME bounded jittered-backoff retry policy (shared implementation in
-// lib/uploadResiliency.ts). See docs/wave-a/upload-resiliency.md.
+// ── Resilient upload ────────────────────────────────────────────────────────
+// Dual path (change: vps-upload-route):
+//   • When VITE_API_ORIGIN is set (production — api.rush-point.com), files are
+//     uploaded directly to the VPS via PUT /upload?path=…. No Firebase Storage
+//     bucket needed. This is what makes photo/audio work without Blaze billing.
+//   • When VITE_API_ORIGIN is unset (local emulator dev:all), the original
+//     Firebase Storage upload is used so the emulator workflow is unchanged.
+//
+// Both paths share the same retry / timeout / stall-detection / progress
+// infrastructure (lib/uploadResiliency.ts) and the SAME public API
+// (uploadTaskPhoto, uploadTaskAudio). Callers don't know which transport ran.
 const UPLOAD_ATTEMPTS = 3;
 /** No progress byte for this long ⇒ the attempt is dead; cancel and retry. */
 const UPLOAD_STALL_MS = 45_000;
@@ -188,56 +191,164 @@ const UPLOAD_MAX_MS = 180_000;
 /** Cap on the post-upload getDownloadURL metadata fetch (the old un-timed leg). */
 const DOWNLOAD_URL_MS = 30_000;
 
+// ── VPS upload (production path) ────────────────────────────────────────────
+// Uses XMLHttpRequest (not fetch) for upload-progress events — the same UX the
+// Firebase resumable upload provided. The VPS endpoint is a plain PUT with the
+// file as the raw body, path + content-type in query/header. Auth is a Firebase
+// ID token in the Authorization header.
+function uploadViaVps(
+  path: string,
+  data: Blob | File,
+  contentType: string,
+  // Receives an aborter so the caller's ABSOLUTE timeout can actually stop the
+  // request. Without it a timed-out upload kept streaming in the background
+  // while the retry sent a second copy of the same file over the same link —
+  // exactly the congestion that makes a slow upload look frozen.
+  onAbortable?: (abort: () => void) => void,
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    onAbortable?.(() => { try { xhr.abort(); } catch { /* already settled */ } });
+    const url = `${apiOrigin}/upload?path=${encodeURIComponent(path)}`;
+    xhr.open('PUT', url);
+
+    // Firebase ID token for server-side auth (same token the callables use).
+    const token = auth.currentUser?.getIdToken();
+    if (!token) { reject(new Error('Not authenticated')); return; }
+
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let stalled = false;
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => { stalled = true; xhr.abort(); }, UPLOAD_STALL_MS);
+    };
+
+    // Progress tracking — mirrors the Firebase `state_changed` callback.
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) {
+        armStall();
+        setUploadProgress(uploadPercent(e.loaded, e.total));
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const body = JSON.parse(xhr.responseText);
+          setUploadProgress(100);
+          resolve(body.url);
+        } catch {
+          reject(Object.assign(new Error('Invalid server response'), { code: 'storage/internal-error' }));
+        }
+      } else if (xhr.status === 401 || xhr.status === 403) {
+        reject(Object.assign(new Error('Auth failed'), { code: 'storage/unauthorized' }));
+      } else if (xhr.status >= 400 && xhr.status < 500 && xhr.status !== 408 && xhr.status !== 429) {
+        // A PERMANENT client error — oversized file, disallowed content type,
+        // malformed path. Must NOT carry a retryable code: `runWithRetry` would
+        // re-send the identical body twice more, so the player waits three times
+        // as long to be told the same no. Only 408/429 are worth re-sending.
+        reject(Object.assign(
+          new Error(`Upload rejected: ${xhr.status}`),
+          { code: 'storage/invalid-argument' },
+        ));
+      } else {
+        // 5xx, 408, 429 → genuinely transient, safe to re-send (same path ⇒
+        // idempotent overwrite).
+        reject(Object.assign(new Error(`Upload failed: ${xhr.status}`), { code: 'storage/internal-error' }));
+      }
+    });
+
+    xhr.addEventListener('error', () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      reject(Object.assign(new Error('Network error'), { code: 'storage/unknown' }));
+    });
+
+    xhr.addEventListener('abort', () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      reject(Object.assign(
+        new Error(stalled ? 'upload stalled' : 'upload aborted'),
+        { code: 'storage/deadline-exceeded' },
+      ));
+    });
+
+    // Send the raw file body with the correct content-type.
+    token.then((t) => {
+      xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+      xhr.setRequestHeader('Content-Type', contentType);
+      armStall();
+      xhr.send(data);
+    }).catch(reject);
+  });
+}
+
+// ── Firebase Storage upload (emulator fallback) ─────────────────────────────
+// Kept for local dev (dev:all / playtest). Identical to the pre-VPS version.
+function uploadViaFirebaseStorage(
+  path: string,
+  data: Blob | File,
+  contentType: string,
+  onAbortable?: (abort: () => void) => void,
+): Promise<string> {
+  const r = storageRef(storage, path);
+  return new Promise<string>((resolve, reject) => {
+    setUploadProgress(0);
+    const task = uploadBytesResumable(r, data, { contentType });
+    onAbortable?.(() => { try { task.cancel(); } catch { /* already settled */ } });
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let stalled = false;
+    const cancel = () => { try { task.cancel(); } catch { /* already settled */ } };
+    const armStall = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => { stalled = true; cancel(); }, UPLOAD_STALL_MS);
+    };
+    armStall();
+    task.on(
+      'state_changed',
+      (snap) => {
+        armStall();
+        setUploadProgress(uploadPercent(snap.bytesTransferred, snap.totalBytes));
+      },
+      (err) => {
+        if (stallTimer) clearTimeout(stallTimer);
+        reject(stalled
+          ? Object.assign(new Error('upload stalled'), { code: 'storage/deadline-exceeded' })
+          : err);
+      },
+      async () => {
+        if (stallTimer) clearTimeout(stallTimer);
+        try {
+          setUploadProgress(100);
+          const url = await withTimeout(getDownloadURL(r), DOWNLOAD_URL_MS, 'storage/deadline-exceeded');
+          resolve(url);
+        } catch (e) { reject(e); }
+      },
+    );
+  });
+}
+
+// ── Resilient upload dispatcher ─────────────────────────────────────────────
+// Routes to VPS or Firebase Storage depending on whether VITE_API_ORIGIN is set.
+// Wraps either transport in the same retry/timeout/progress envelope.
 async function uploadResilient(
   path: string,
   data: Blob | File,
   contentType: string,
 ): Promise<string> {
   await ensureAuth();
-  // The path is computed ONCE by the caller, so a retry overwrites the same
-  // object instead of leaving an orphan — and the server-validated shape
-  // (runs/{runId}/teams/{teamId}/{taskId}-{ts}.ext, requireStorageUrl) is stable.
-  const r = storageRef(storage, path);
   try {
     return await runWithRetry(
       async () => {
         setUploadRetrying(false);
         setUploadProgress(0);
-        const task = uploadBytesResumable(r, data, { contentType });
-        let stallTimer: ReturnType<typeof setTimeout> | undefined;
-        let stalled = false;
-        const cancel = () => { try { task.cancel(); } catch { /* already settled */ } };
-        const armStall = () => {
-          if (stallTimer) clearTimeout(stallTimer);
-          stallTimer = setTimeout(() => { stalled = true; cancel(); }, UPLOAD_STALL_MS);
-        };
-        const done = new Promise<void>((resolve, reject) => {
-          armStall();
-          task.on(
-            'state_changed',
-            (snap) => {
-              armStall();
-              setUploadProgress(uploadPercent(snap.bytesTransferred, snap.totalBytes));
-            },
-            (err) => {
-              if (stallTimer) clearTimeout(stallTimer);
-              // A cancel WE caused is a stall, not a user abort — surface it with
-              // the retryable synthetic code so the loop tries again.
-              reject(stalled
-                ? Object.assign(new Error('upload stalled'), { code: 'storage/deadline-exceeded' })
-                : err);
-            },
-            () => { if (stallTimer) clearTimeout(stallTimer); resolve(); },
-          );
-        });
-        await withTimeout(done, UPLOAD_MAX_MS, 'storage/deadline-exceeded', cancel);
-        setUploadProgress(100);
-        // The bytes are up; the metadata GET that mints the download URL was the ONE
-        // unbounded leg of the pipeline — over the emulator, and especially through the
-        // playtest tunnel, that request can stall and leave the player on the "working"
-        // spinner forever with no outcome. Bound it with the retryable synthetic code so
-        // runWithRetry re-issues the (idempotent, same-path) upload instead of hanging.
-        return await withTimeout(getDownloadURL(r), DOWNLOAD_URL_MS, 'storage/deadline-exceeded');
+        let abortUpload: (() => void) | undefined;
+        const upload = apiOrigin
+          ? uploadViaVps(path, data, contentType, (abort) => { abortUpload = abort; })
+          : uploadViaFirebaseStorage(path, data, contentType, (abort) => { abortUpload = abort; });
+        return await withTimeout(
+          upload, UPLOAD_MAX_MS, 'storage/deadline-exceeded',
+          () => abortUpload?.(),
+        );
       },
       {
         attempts: UPLOAD_ATTEMPTS,

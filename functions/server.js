@@ -28,6 +28,19 @@
 // mounted explicitly at /stripeWebhook when present.
 const express = require('express');
 const admin = require('firebase-admin');
+const fs = require('fs');
+const fsPath = require('path');
+
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
+const VPS_UPLOAD_ORIGIN = process.env.VPS_UPLOAD_ORIGIN || '';
+
+// Content-type allowlist — mirrors storage.rules exactly.
+const ALLOWED_CONTENT_TYPES = /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|audio\/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr))$/;
+// Creator media also allows video types (SVG stays excluded for images).
+const ALLOWED_CREATOR_TYPES = /^(image\/(?!svg)(jpeg|jpg|png|webp|heic|heif|gif)|video\/.+|audio\/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr))$/;
+
+const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;  // 10MB
+const MAX_CREATOR_BYTES = 50 * 1024 * 1024;      // 50MB
 
 // Initialise the Admin SDK ONCE. With GOOGLE_APPLICATION_CREDENTIALS set it uses
 // that service account; GCLOUD_PROJECT (or the credential's project) picks the
@@ -68,8 +81,175 @@ app.use((req, res, next) => {
   next();
 });
 
+function reflectCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin && (!ALLOWED.length || ALLOWED.includes(origin))) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+  }
+}
+
 // Liveness/readiness for the reverse proxy and `docker healthcheck`.
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// ── File upload + serving (change: vps-upload-route) ──────────────────────
+// With Firebase Storage behind Blaze billing (no bucket), uploads are routed
+// through this server instead. Files are saved to /data/uploads/<path> (where
+// <path> mirrors the same Firebase Storage scheme: runs/{runId}/teams/{teamId}/…
+// and gameMedia/{ownerUid}/…). The download URL is just a static-serve path
+// on this origin.
+
+// Raw body parser for uploads — separate from the JSON parser (which stays at 1mb
+// for callables). Cross-origin PUT with Authorization preflights here (callables
+// handle their own CORS; this route is custom).
+app.options('/upload', (req, res) => {
+  reflectCors(req, res);
+  res.set('Access-Control-Allow-Methods', 'PUT, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.set('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+
+app.put('/upload',
+  express.raw({ type: '*/*', limit: '50mb' }),
+  async (req, res) => {
+    try {
+      // 1. Auth: verify Firebase ID token
+      const authHeader = req.headers.authorization || '';
+      const match = authHeader.match(/^Bearer\s+(.+)$/i);
+      if (!match) return res.status(401).json({ error: { status: 'UNAUTHENTICATED', message: 'Missing auth token' } });
+      let uid;
+      try {
+        const decoded = await admin.auth().verifyIdToken(match[1]);
+        uid = decoded.uid;
+      } catch {
+        return res.status(401).json({ error: { status: 'UNAUTHENTICATED', message: 'Invalid auth token' } });
+      }
+
+      // 2. Validate path
+      const uploadPath = req.query.path;
+      if (typeof uploadPath !== 'string' || !uploadPath) {
+        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Missing path query parameter' } });
+      }
+      if (uploadPath.includes('..') || uploadPath.startsWith('/') || uploadPath.startsWith('\\')) {
+        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Invalid path' } });
+      }
+      const isParticipant = uploadPath.startsWith('runs/');
+      const isCreator = uploadPath.startsWith('gameMedia/');
+      if (!isParticipant && !isCreator) {
+        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Path must start with runs/ or gameMedia/' } });
+      }
+
+      // 3. Validate content type
+      const contentType = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      const typeAllowed = isCreator ? ALLOWED_CREATOR_TYPES.test(contentType) : ALLOWED_CONTENT_TYPES.test(contentType);
+      if (!typeAllowed) {
+        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: `Content type not allowed: ${contentType}` } });
+      }
+
+      // 4. Validate size
+      const maxBytes = isCreator ? MAX_CREATOR_BYTES : MAX_PARTICIPANT_BYTES;
+      if (!Buffer.isBuffer(req.body) || req.body.length > maxBytes) {
+        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: `File too large (max ${maxBytes / 1024 / 1024}MB)` } });
+      }
+      if (req.body.length === 0) {
+        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Empty file' } });
+      }
+
+      // 5. IDOR guard: participant uploads must be under runs/{runId}/teams/{uid}/
+      if (isParticipant) {
+        const parts = uploadPath.split('/');
+        // Expected: runs/{runId}/teams/{teamId}/{filename}
+        if (parts.length < 5 || parts[2] !== 'teams' || parts[3] !== uid) {
+          return res.status(403).json({ error: { status: 'PERMISSION_DENIED', message: 'Cannot upload to another team folder' } });
+        }
+      }
+      // Creator uploads must be under gameMedia/{uid}/
+      if (isCreator) {
+        const parts = uploadPath.split('/');
+        if (parts.length < 3 || parts[1] !== uid) {
+          return res.status(403).json({ error: { status: 'PERMISSION_DENIED', message: 'Cannot upload to another creator folder' } });
+        }
+      }
+
+      // 6. Save to disk
+      const fullPath = fsPath.join(UPLOAD_DIR, uploadPath);
+      await fs.promises.mkdir(fsPath.dirname(fullPath), { recursive: true });
+      await fs.promises.writeFile(fullPath, req.body);
+
+      // 7. Return download URL
+      const origin = VPS_UPLOAD_ORIGIN || `${req.protocol}://${req.get('host')}`;
+      const url = `${origin}/uploads/${encodeURI(uploadPath)}`;
+      reflectCors(req, res);
+      res.json({ url });
+    } catch (e) {
+      console.error('Upload error:', e);
+      res.status(500).json({ error: { status: 'INTERNAL', message: 'Upload failed' } });
+    }
+  }
+);
+
+// Serve uploaded files. Content-Type is derived from the extension.
+// These URLs are the "download URLs" — equivalent to Firebase's getDownloadURL().
+const EXTENSION_TYPES = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heif',
+  '.gif': 'image/gif', '.webm': 'audio/webm', '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.mp4': 'video/mp4',
+  '.aac': 'audio/aac', '.3gp': 'audio/3gpp', '.3gpp': 'audio/3gpp', '.amr': 'audio/amr',
+  '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
+};
+
+app.get(/^\/uploads\/(.+)$/, (req, res) => {
+  const relativePath = req.params[0];
+  if (!relativePath || relativePath.includes('..')) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  const fullPath = fsPath.join(UPLOAD_DIR, relativePath);
+  // Ensure we don't escape UPLOAD_DIR
+  if (!fullPath.startsWith(fsPath.resolve(UPLOAD_DIR))) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  if (!fs.existsSync(fullPath)) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  const ext = fsPath.extname(fullPath).toLowerCase();
+  const ct = EXTENSION_TYPES[ext] || 'application/octet-stream';
+  res.set('Content-Type', ct);
+  // nosniff is load-bearing here, not boilerplate. Content-Type is derived from
+  // the FILENAME, while the upload validated the declared Content-Type HEADER —
+  // two different things, so the two can disagree. Without nosniff a browser may
+  // ignore our declared type, sniff the bytes and render an uploaded file as
+  // HTML on this origin. An unknown extension is served as octet-stream, and
+  // nosniff is what makes that verdict stick.
+  res.set('X-Content-Type-Options', 'nosniff');
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  // Allow cross-origin (play-web on rush-point.com fetches from api.rush-point.com).
+  res.set('Access-Control-Allow-Origin', '*');
+  fs.createReadStream(fullPath).pipe(res);
+});
+
+// Internal: delete an upload prefix (local ops only — not for browser use).
+app.delete(/^\/uploads\/(.+)$/, async (req, res) => {
+  // Only allow from localhost / internal
+  const origin = req.headers.origin;
+  if (origin) return res.status(403).json({ error: 'External delete not allowed' });
+  const relativePath = req.params[0];
+  if (!relativePath || relativePath.includes('..')) {
+    return res.status(400).json({ error: 'Invalid path' });
+  }
+  const fullPath = fsPath.join(UPLOAD_DIR, relativePath);
+  if (!fullPath.startsWith(fsPath.resolve(UPLOAD_DIR))) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    await fs.promises.rm(fullPath, { recursive: true, force: true });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('Delete error:', e);
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
 
 // Mount every callable at /<name>. `__endpoint.callableTrigger` is how a v1
 // `onCall` announces itself; anything else (triggers, schedules) is skipped.

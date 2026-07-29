@@ -99,5 +99,37 @@ check('rejects a non-string', rejected(() => requireStorageUrl(undefined as unkn
     normalizeTaskMedia([{ id: 'm1', kind: 'image' as const, url: 'https://evil.example.com/p.jpg' }], on).length === 0);
 }
 
+// ── VPS-hosted upload URLs (vps-upload-route) ───────────────────────────────
+{
+  const VPS = 'https://api.rush-point.com';
+  const vpsOpts = { vpsOrigin: VPS };
+  const ownVps = `${VPS}/uploads/runs/run123/teams/uidABC/photo-1.jpg`;
+  check('requireStorageUrl accepts VPS URL with vpsOrigin', requireStorageUrl(ownVps, RUN, UID, vpsOpts) === ownVps);
+  check('requireStorageUrl rejects VPS URL without vpsOrigin', rejected(() => requireStorageUrl(ownVps, RUN, UID)));
+  check('requireStorageUrl rejects another team on VPS', rejected(() => requireStorageUrl(`${VPS}/uploads/runs/run123/teams/OTHER/x.jpg`, RUN, UID, vpsOpts)));
+  check('isFirebaseStorageUrl accepts VPS URL with vpsOrigin', isFirebaseStorageUrl(ownVps, vpsOpts));
+  check('normalizeTaskMedia keeps VPS task media with vpsOrigin',
+    normalizeTaskMedia([{ id: 'm1', kind: 'image' as const, url: `${VPS}/uploads/gameMedia/u1/games/g1/p.jpg` }], vpsOpts).length === 1);
+
+  // Traversal: the run/team check is a startsWith, so without an explicit `..`
+  // rejection `runs/<run>/teams/<uid>/../../<other>` satisfies the prefix while
+  // naming another team's object. Both the raw and percent-encoded forms must go.
+  check('requireStorageUrl rejects `..` traversal on VPS',
+    rejected(() => requireStorageUrl(`${VPS}/uploads/runs/${RUN}/teams/${UID}/../../otherteam/x.jpg`, RUN, UID, vpsOpts)));
+  check('requireStorageUrl rejects percent-encoded `..` traversal on VPS',
+    rejected(() => requireStorageUrl(`${VPS}/uploads/runs/${RUN}/teams/${UID}/%2e%2e/%2e%2e/other/x.jpg`, RUN, UID, vpsOpts)));
+  check('requireStorageUrl rejects `..` traversal on a Firebase URL too',
+    rejected(() => requireStorageUrl(`${FIREBASE_STORAGE_ORIGIN}o/runs%2F${RUN}%2Fteams%2F${UID}%2F..%2F..%2Fother%2Fx.jpg?alt=media`, RUN, UID)));
+  check('normalizeTaskMedia drops VPS media containing traversal',
+    normalizeTaskMedia([{ id: 'm1', kind: 'image' as const, url: `${VPS}/uploads/gameMedia/../../etc/passwd` }], vpsOpts).length === 0);
+  // Backslash separator: `path.join` treats it as one on Windows, so the payload
+  // must not survive just because the host OS differs from the container's.
+  check('requireStorageUrl rejects backslash traversal on VPS',
+    rejected(() => requireStorageUrl(String.raw`${VPS}/uploads/runs/${RUN}/teams/${UID}/..\..\other/x.jpg`, RUN, UID, vpsOpts)));
+  // …and a segment that merely CONTAINS dots is a legal object name, not traversal.
+  const dotty = `${VPS}/uploads/runs/${RUN}/teams/${UID}/photo..1.jpg`;
+  check('requireStorageUrl accepts a filename containing dots', requireStorageUrl(dotty, RUN, UID, vpsOpts) === dotty);
+}
+
 console.log(`\n${failures === 0 ? 'ALL STORAGE-URL TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

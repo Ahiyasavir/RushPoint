@@ -1,0 +1,57 @@
+# Caddy config for api.rush-point.com (the self-hosted callable + upload server).
+#
+#   sudo cp Caddyfile.api /etc/caddy/Caddyfile     # or import it from yours
+#   sudo systemctl reload caddy
+#
+# WHY THIS FILE EXISTS: the API container binds to 127.0.0.1:8080 only, so every
+# public request arrives through this proxy. A proxy that forwards ONLY the
+# callable POSTs works fine right up until photo/audio upload, which needs three
+# more things — `PUT /upload`, its `OPTIONS /upload` preflight, and `GET
+# /uploads/*` to serve the file back. Miss them and uploads fail with a 404 that
+# looks exactly like a broken client.
+#
+# `handle` blocks are evaluated in order and only the first match runs, so the
+# upload routes are listed before the catch-all.
+
+api.rush-point.com {
+	encode gzip
+
+	# Upload endpoint. `request_body` must be raised well above Caddy's 10MB
+	# default or a 50MB creator video is rejected by the PROXY before the server
+	# ever sees it — and the server's own limit (50MB) would never apply.
+	# Keep this >= MAX_CREATOR_BYTES in functions/server.js.
+	@upload path /upload
+	handle @upload {
+		request_body {
+			max_size 60MB
+		}
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Serving uploaded media back. These are the "download URLs" stored in
+	# Firestore, so they must stay reachable for the life of the run.
+	handle /uploads/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Health probe for uptime monitoring.
+	handle /healthz {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# Everything else: the callables. `reverse_proxy` passes every verb through,
+	# which matters because a cross-origin browser call sends `OPTIONS /<name>`
+	# before the POST and the callable layer answers the preflight itself.
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# The API sets its own CORS headers (origin-reflecting, gated by
+	# ALLOWED_ORIGINS). Do NOT add Access-Control-* here as well — two sources of
+	# the same header is a spec violation and browsers reject the response.
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+	}
+}

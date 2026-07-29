@@ -314,6 +314,8 @@ export const FIREBASE_STORAGE_ORIGIN = `${FIREBASE_STORAGE_HTTPS_PREFIX}rushpoin
 export interface StorageOriginOptions {
   /** Also accept an emulator-hosted / tunnel-proxied Storage URL. */
   allowLocalEmulator?: boolean;
+  /** Also accept a VPS-hosted upload URL (e.g. 'https://api.rush-point.com'). */
+  vpsOrigin?: string;
 }
 
 // The Firebase Storage download REST shape, host-agnostic: <origin>/v0/b/<bucket>/o/<encodedPath>.
@@ -326,12 +328,33 @@ const EMULATOR_STORAGE_URL_RE = /^https?:\/\/[^/?#]+\/v0\/b\/[^/?#]+\/o\/([^?#]+
  * The Storage object path a URL points at, or null if the URL is not one we trust.
  * Production accept-set: our project's Firebase download origins, or `gs://`.
  * With `allowLocalEmulator`, additionally any origin serving the `/v0/b/<bucket>/o/<path>`
- * download shape (emulator or tunnel proxy). Never accepts an arbitrary URL in any mode.
+ * download shape (emulator or tunnel proxy). With `vpsOrigin`, additionally accepts
+ * the `/uploads/<path>` shape on that origin. Never accepts an arbitrary URL in any mode.
  */
 function extractStorageObjectPath(s: string, opts?: StorageOriginOptions): string | null {
   const decode = (raw: string): string | null => {
-    try { return decodeURIComponent(raw); } catch { return null; }
+    let out: string;
+    try { out = decodeURIComponent(raw); } catch { return null; }
+    // Reject traversal in EVERY shape. The run/team prefix check below is a
+    // startsWith, so `runs/<run>/teams/<uid>/../../elsewhere` would satisfy it
+    // while naming a different team's object. The upload server also refuses
+    // `..` on read and write; this makes the stored URL itself untrustworthy
+    // to begin with, rather than relying on that one downstream check.
+    //
+    // A SEGMENT-wise test, not `includes('..')`: only a segment that IS `..`
+    // traverses. A plain substring test also rejects innocent names like
+    // `photo..jpg` or `runs/...`, which are legal object paths. Backslash counts
+    // as a separator too — `path.join` treats it as one on Windows, so a
+    // `..\..\x` payload must not survive by virtue of the server's OS.
+    if (out.split(/[/\\]/).some((seg) => seg === '..')) return null;
+    return out;
   };
+  if (opts?.vpsOrigin) {
+    const prefix = `${opts.vpsOrigin}/uploads/`;
+    if (s.startsWith(prefix)) {
+      return decode(s.slice(prefix.length));
+    }
+  }
   if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
     const m = s.match(/\/o\/([^?]+)/);
     return m ? decode(m[1]) : null;
@@ -339,7 +362,9 @@ function extractStorageObjectPath(s: string, opts?: StorageOriginOptions): strin
   if (s.startsWith('gs://')) {
     const rest = s.slice('gs://'.length);
     const slash = rest.indexOf('/');
-    return slash >= 0 ? rest.slice(slash + 1) : null;
+    // decode() (not a raw slice) so gs:// gets the same traversal rejection as
+    // every other shape — otherwise it is the one way in that skips the check.
+    return slash >= 0 ? decode(rest.slice(slash + 1)) : null;
   }
   if (opts?.allowLocalEmulator) {
     const m = s.match(EMULATOR_STORAGE_URL_RE);
@@ -348,10 +373,18 @@ function extractStorageObjectPath(s: string, opts?: StorageOriginOptions): strin
   return null;
 }
 
+/**
+ * Is this a URL we trust to be one of OUR stored objects?
+ *
+ * Delegates to `extractStorageObjectPath` rather than re-listing the accepted
+ * origins. The two used to carry separate copies of the accept rule, so a fix to
+ * one silently left the other permissive — which is exactly how a traversal
+ * `..` path stayed acceptable to `normalizeTaskMedia` after `requireStorageUrl`
+ * had already learned to reject it. One rule, one place.
+ */
 export function isFirebaseStorageUrl(url: unknown, opts?: StorageOriginOptions): boolean {
   if (typeof url !== 'string') return false;
-  if (FIREBASE_STORAGE_ORIGINS.some((o) => url.startsWith(o))) return true;
-  return opts?.allowLocalEmulator === true && EMULATOR_STORAGE_URL_RE.test(url);
+  return extractStorageObjectPath(url, opts) !== null;
 }
 
 // ─── Task media: YouTube parsing + upload-URL validation (change: task-media-attachments) ─

@@ -13,18 +13,24 @@
 // by `npm run play:store:check` before anything reaches a Play upload. Pure logic
 // on purpose — fully testable without an emulator or the Android toolchain.
 
-/** Canonical Android application id for the play-web TWA (reverse-DNS of rushpoint.app). */
-export const PLAY_PACKAGE_NAME = 'app.rushpoint.play';
+/** Canonical Android application id for the play-web TWA — pinned to the package name the Play Console listing was created with. */
+export const PLAY_PACKAGE_NAME = 'com.rushpoint.app';
 
 /**
  * Lowest Android API level Google Play accepts for a new app or an update.
- * Play raises this every year (API 35 = Android 15, the floor since Aug 2025) and
- * REJECTS uploads below it. Bubblewrap picks the level when it generates the
- * Android project, so nothing in this repo would otherwise notice a stale value —
- * `validateAndroidTargetSdk` + `npm run play:store:check` close that gap.
- * Bump this constant when Play's floor rises.
+ * Play raises this every year and REJECTS uploads below it. Bubblewrap picks the
+ * level when it generates the Android project, so nothing in this repo would
+ * otherwise notice a stale value — `validateAndroidTargetSdk` +
+ * `npm run play:store:check` close that gap.
+ *
+ * API 36 = Android 16, the newest stable level and the highest we can target
+ * (there is no released 37). Play's rule is "within one year of the latest
+ * release", so targeting the newest — rather than merely the current floor —
+ * buys the longest possible runway before another forced bump: the floor rises
+ * to 36 on 31 Aug 2026, and an app already on 36 needs no action then.
+ * Must stay <= compileSdkVersion in app/build.gradle (currently 36).
  */
-export const PLAY_MIN_TARGET_SDK = 35;
+export const PLAY_MIN_TARGET_SDK = 36;
 
 /** One Digital Asset Links statement — grants a package permission to handle the origin's URLs. */
 export interface AssetLinkStatement {

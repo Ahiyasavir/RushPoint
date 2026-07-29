@@ -54,11 +54,23 @@ ok(src.length > 0, 'functions/server.js must be readable');
 if (src) {
   // Strip comments so the prose above (which necessarily mentions `app.post`)
   // cannot satisfy or trip these assertions. Only real code is inspected.
+  //
+  // ORDER IS LOAD-BEARING. This was one `/*…*/` regex over the raw source, which
+  // treats ANY `/*` as a block opener — including text inside a line comment
+  // (`// … allows video/* …`) or inside a string literal
+  // (`express.raw({ type: '*/*' })`). One such `/*` swallowed everything up to
+  // the next `*/`: 3KB of server.js vanished, taking the ALLOWED_ORIGINS gate
+  // these assertions exist to protect with it. The guard then reported "gate
+  // missing" for a gate that was plainly there — and would just as readily have
+  // reported all-clear while inspecting almost nothing.
+  // So: neutralise string literals, then line comments, and only then blocks.
   const code = src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/'[^'\n]*'/g, "''")
+    .replace(/"[^"\n]*"/g, '""')
     .split('\n')
-    .filter((l) => !/^\s*\/\//.test(l))
-    .join('\n');
+    .map((l) => { const i = l.indexOf('//'); return i === -1 ? l : l.slice(0, i); })
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
 
   // ── The load-bearing assertion ────────────────────────────────────────────
   // The callable mount must accept every verb so the preflight reaches the

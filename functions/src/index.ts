@@ -10,6 +10,7 @@ import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
 import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 import { validate } from './validation';
+import { storageOriginOpts } from './storageOriginOpts';
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
 function generatePin(): string {
@@ -1218,9 +1219,7 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   // the Functions emulator and is absent in deployed functions, so production keeps
   // the exact old accept-set. The runs/{runId}/teams/{uid}/ prefix (the IDOR guard)
   // is enforced in both modes. See docs/wave-c/photo-upload-fix.md.
-  validate(() => requireStorageUrl(photoUrl, runId, uid, {
-    allowLocalEmulator: process.env.FUNCTIONS_EMULATOR === 'true',
-  }));
+  validate(() => requireStorageUrl(photoUrl, runId, uid, storageOriginOpts()));
 
   // Check the task's smart config for autoApprove (staffless events). The same
   // snapshot also yields the task title + the photoFeedEnabled gate for the

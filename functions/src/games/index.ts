@@ -86,6 +86,7 @@ function gamePath(uid: string, gameId: string) {
 }
 
 import { requireAuth } from '../auth';
+import { storageOriginOpts } from '../storageOriginOpts';
 
 // Enforce the task-media trust boundary on every write: run each task's `media`
 // through normalizeTaskMedia so a client can never persist an off-origin image/video
@@ -101,9 +102,7 @@ function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined 
       // creator-uploaded image/video gets an emulator-hosted download URL, which the
       // production-origin gate silently DROPPED on every save. FUNCTIONS_EMULATOR is
       // absent in deployed functions, so production behaviour is unchanged.
-      const media = normalizeTaskMedia(task.media, {
-        allowLocalEmulator: process.env.FUNCTIONS_EMULATOR === 'true',
-      }) as TaskMedia[];
+      const media = normalizeTaskMedia(task.media, storageOriginOpts()) as TaskMedia[];
       // Drop the field entirely when it normalizes to empty (avoid persisting []).
       if (media.length === 0) {
         const { media: _omit, ...rest } = task;

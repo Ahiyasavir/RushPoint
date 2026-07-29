@@ -152,11 +152,48 @@ if (emulatorBuild && !emuFlag.__rushpointEmu) {
   }
 }
 
-// ── Task-media upload (change: task-media-attachments) ────────────────────────
-// Upload a creator-picked image/video file to the creator's own media folder so
-// Storage rules (gameMedia/{ownerUid}/…) confine writes to the authenticated owner.
-// Returns the download URL to store on the task's `media` entry. `onProgress` gets
-// 0–100. The task's media kind is derived from the file's MIME type.
+// ── Task-media upload (change: task-media-attachments + vps-upload-route) ───
+// When VITE_API_ORIGIN is set, POST raw body to PUT /upload on the VPS (same as
+// play-web). Unset ⇒ Firebase Storage (emulator dev:all).
+
+function uploadMediaViaVps(
+  path: string,
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', `${apiOrigin}/upload?path=${encodeURIComponent(path)}`);
+    const tokenP = auth.currentUser?.getIdToken();
+    if (!tokenP) { reject(new Error('Not signed in')); return; }
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100));
+    });
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          onProgress?.(100);
+          resolve(JSON.parse(xhr.responseText).url as string);
+        } catch { reject(new Error('Invalid server response')); }
+      } else {
+        reject(new Error(`Upload failed: ${xhr.status}`));
+      }
+    });
+    xhr.addEventListener('error', () => reject(new Error('Network error')));
+    // Bound the request. Without this a stalled connection leaves the creator on
+    // a progress bar that never moves and never fails — the same dead-end the
+    // participant upload path was hardened against. Generous, because the cap
+    // here is a 50MB video on whatever uplink the creator happens to have.
+    xhr.timeout = 5 * 60 * 1000;
+    xhr.addEventListener('timeout', () => reject(new Error('Upload timed out')));
+    tokenP.then((t) => {
+      xhr.setRequestHeader('Authorization', `Bearer ${t}`);
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+      xhr.send(file);
+    }).catch(reject);
+  });
+}
+
 export async function uploadTaskMedia(
   file: File,
   p: { gameId: string; taskId: string },
@@ -169,6 +206,10 @@ export async function uploadTaskMedia(
     .toLowerCase().replace(/[^a-z0-9]/g, '') || (kind === 'video' ? 'mp4' : 'jpg');
   const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const path = `gameMedia/${uid}/games/${p.gameId}/${safeTask}-${Date.now()}.${ext}`;
+  if (apiOrigin) {
+    const url = await uploadMediaViaVps(path, file, onProgress);
+    return { url, kind };
+  }
   const r = storageRef(storage, path);
   const task = uploadBytesResumable(r, file, { contentType: file.type || 'image/jpeg' });
   await new Promise<void>((resolve, reject) => {

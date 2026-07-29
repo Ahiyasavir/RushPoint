@@ -47,7 +47,15 @@ COPY --from=build /repo/functions/package.runtime.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /repo/functions/lib ./lib
 COPY --from=build /repo/functions/server.js ./server.js
+# Upload storage. This mkdir only matters when NO volume is mounted (a bind mount
+# at the same path replaces the image's directory entirely, ownership included) —
+# it keeps the server writable in a bare `docker run` rather than 500ing on the
+# first photo. Deliberately no `chown`: there is no USER directive, so the process
+# runs as root and writes to a host-owned bind mount fine. If a USER is ever added,
+# the HOST directory's ownership is what has to change, not this line.
+RUN mkdir -p /data/uploads
 ENV PORT=8080
+ENV UPLOAD_DIR=/data/uploads
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
   CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||8080)+'/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"

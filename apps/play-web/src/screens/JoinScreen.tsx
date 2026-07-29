@@ -218,7 +218,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
         {/* Tightened from pt-16/pb-12 (change: join-screen-fits-one-phone). The
             hero alone ate ~180px of vertical space, which is what pushed the
             join screen just past the fold and gave it that short, janky scroll. */}
-        <div className="relative flex flex-col items-center justify-center px-6 pt-3 pb-7 text-center overflow-hidden">
+        <div className="relative flex flex-col items-center justify-center px-6 pt-3 pb-5 text-center overflow-hidden">
           {/* Background glow */}
           <div className="absolute inset-0 bg-gradient-to-b from-[#FFF0E0] via-[#FFFCF7] to-transparent" />
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-48 bg-gradient-radial from-rp-fire/20 to-transparent blur-3xl" />
@@ -267,7 +267,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
           <div className="relative">
             {/* App icon */}
             <div
-              className="w-16 h-16 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-4"
+              className="w-14 h-14 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-3"
               style={{
                 background: 'linear-gradient(135deg, #FF5722 0%, #FFB300 100%)',
                 boxShadow: '0 8px 32px rgba(255,87,34,0.45), 0 2px 8px rgba(255,87,34,0.3)',
@@ -276,11 +276,11 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               🏁
             </div>
 
-            <h1 className="font-brand text-4xl font-extrabold tracking-tight leading-none mb-2"
+            <h1 className="font-brand text-4xl font-extrabold tracking-tight leading-none mb-1.5"
               style={{ background: 'linear-gradient(135deg, #FF5722 0%, #FF8A00 50%, #FFB300 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
               RushPoint
             </h1>
-            <p className="text-zinc-500 text-base leading-relaxed max-w-xs">
+            <p className="text-zinc-500 text-sm leading-snug max-w-xs">
               {t.join.subtitle}
             </p>
           </div>
@@ -304,22 +304,24 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               value={code}
               dir="ltr"
               onChange={(e) => setCode(normalizeJoinCodeInput(e.target.value))}
-              // NO placeholder on purpose. `placeholder:` can override size and
-              // tracking but NOT weight or family, so a sample code inherited
-              // `font-mono font-bold` from the base class and rendered at 4.80:1
-              // contrast in 700-weight mono — the exact typographic signature of
-              // a real access code. On a cold landing the field looked already
-              // filled, above a disabled-looking CTA. The visible <label> above
-              // already names the field, so the sample added nothing.
+              // Decorative SLOT DOTS, never a sample code. A sample like "ABC123"
+              // inherits `font-mono font-bold` from the base class and lands at
+              // 4.80:1 — the exact typographic signature of a real access code, so
+              // the field looked already filled on a cold landing. Dots carry no
+              // language (nothing to translate, no leak), and the styling below
+              // explicitly overrides weight/colour so they read as empty slots
+              // waiting for input rather than as content.
+              placeholder="••••••" // i18n-ignore — decorative slot marks, not copy
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
               enterKeyHint="go"
               className="
-                w-full px-6 py-5 rounded-2xl
+                w-full px-6 py-4 rounded-2xl
                 text-center text-3xl font-mono font-bold tracking-[0.5em]
                 bg-white border-2 border-glass-border
                 text-zinc-100
+                placeholder:text-zinc-600 placeholder:font-normal
                 shadow-[0_2px_16px_rgba(26,10,0,0.08)]
                 focus:outline-none focus:border-rp-fire/60 focus:ring-4 focus:ring-rp-fire/15
                 transition-all duration-200
@@ -377,7 +379,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               the more common need (build a game) comes before the rarest (staff).
               The 🔑 emoji is gone: it also marks the "join" how-to card, and these
               are precisely the two things players already confuse. */}
-          <div className="mt-6 pt-4 border-t border-glass-border text-center space-y-2">
+          <div className="mt-5 pt-3 border-t border-glass-border text-center space-y-1.5">
               <p className="text-[11px] text-zinc-500">
                 {t.join.createOwnCta}{' '}
                 <a
@@ -405,7 +407,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
           {/* How it works — a FIXED gap, not `mt-auto`. Pushing this to the bottom
               of a min-h-screen box left 103px of dead space on a Pixel 7 and 0px on
               an iPhone SE: the same screen with two different rhythms. */}
-          <div className="mt-8">
+          <div className="mt-6">
             <div className="grid grid-cols-3 gap-2.5">
               {[
                 { icon: '🔑', label: t.join.how1Label, sub: t.join.how1Sub },
@@ -414,7 +416,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
               ].map((s, i) => (
                 <div
                   key={s.label}
-                  className="rounded-2xl bg-white/70 border border-glass-border px-2 py-2.5 text-center shadow-[0_1px_4px_rgba(26,10,0,0.05)] animate-fade-up"
+                  className="rounded-2xl bg-white/70 border border-glass-border px-2 py-2 text-center shadow-[0_1px_4px_rgba(26,10,0,0.05)] animate-fade-up"
                   style={{ animationDelay: `${i * 80}ms` }}
                 >
                   <div className="text-xl mb-1">{s.icon}</div>
@@ -423,7 +425,7 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
                 </div>
               ))}
             </div>
-            <p className="text-center text-[11px] text-zinc-500 mt-3 flex items-center justify-center gap-1.5">
+            <p className="text-center text-[11px] text-zinc-500 mt-2 flex items-center justify-center gap-1.5">
               <span className="text-ink-go">●</span> {t.join.noAccountNeeded}
             </p>
             <LegalFooter />

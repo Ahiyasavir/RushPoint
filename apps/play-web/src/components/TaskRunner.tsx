@@ -17,7 +17,7 @@ import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button, Card, Input, Progress } from '../components/ui';
 import { dialog } from '../components/dialog';
-import { quizAttemptGuard } from '../lib/interaction';
+import { quizAttemptGuard, TAP_TARGET } from '../lib/interaction';
 import { navigationTarget, wazeUrl, googleMapsUrl } from '../lib/navigateTo';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { taskMessageClass, shouldOfferRetry, type TaskMessage } from '../lib/failureCopy';
@@ -1512,6 +1512,21 @@ function PhotoEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) 
 const MAX_AUDIO_SECONDS = 60;
 const MAX_AUDIO_BYTES = 12 * 1024 * 1024; // mirrors the photo cap; 60s opus « 1MB
 
+// Map a picked file's extension to a content type the server accepts. Only used
+// when the File carries an EMPTY `type`, which some Android pickers do — guessing
+// one fixed value there would mislabel a .3gp recording as mp3 and the server
+// would refuse it on content-type after a successful upload.
+// Keys mirror AUDIO_CONTENT_TYPES in @rushpoint/shared.
+const AUDIO_EXT_TYPES: Record<string, string> = {
+  webm: 'audio/webm', m4a: 'audio/x-m4a', mp4: 'audio/mp4', aac: 'audio/aac',
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', '3gp': 'audio/3gpp', '3gpp': 'audio/3gpp',
+  amr: 'audio/amr',
+};
+function audioTypeFromName(name: string): string {
+  const ext = name.toLowerCase().split('.').pop() ?? '';
+  return AUDIO_EXT_TYPES[ext] ?? 'audio/mp4';
+}
+
 function pickAudioMimeType(): string | null {
   const rec = (typeof window !== 'undefined' ? window.MediaRecorder : undefined) as
     | (typeof MediaRecorder & { isTypeSupported?: (t: string) => boolean }) | undefined;
@@ -1579,7 +1594,11 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
+      // Denied, OR the embedded browser (WhatsApp / Instagram in-app webview)
+      // refuses mic access entirely. Both leave the player stuck on a task they
+      // cannot complete, so offer the phone's own recorder as a way through.
       setErr(t.task.micDenied);
+      setUnsupported(true);
       return;
     }
     streamRef.current = stream;
@@ -1588,7 +1607,21 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
     setBlob(null);
     setPreview(null);
 
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    // `new MediaRecorder(...)` and `.start()` throw NotSupportedError on some
+    // Android/in-app webviews EVEN AFTER isTypeSupported() said yes and the mic
+    // was granted. This whole function is async and is wired straight to onClick,
+    // so an uncaught throw here became a floating rejected promise: the tap did
+    // nothing at all, with no error and no state change. That is the reported
+    // "start recording won't press". Fail loudly into the file-picker fallback.
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: mime });
+    } catch {
+      stopTracks();
+      setErr(t.task.audioUnsupported);
+      setUnsupported(true);
+      return;
+    }
     recorderRef.current = recorder;
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
     recorder.onstop = () => {
@@ -1606,7 +1639,17 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
 
     setRecording(true);
     setRemaining(MAX_AUDIO_SECONDS);
-    recorder.start();
+    try {
+      recorder.start();
+    } catch {
+      // Same class as the constructor throw above — must not escape as a
+      // rejected promise, or the button silently does nothing.
+      stopTracks();
+      setRecording(false);
+      setErr(t.task.audioUnsupported);
+      setUnsupported(true);
+      return;
+    }
     timerRef.current = setInterval(() => {
       setRemaining((r) => (r > 0 ? r - 1 : 0));
     }, 1000);
@@ -1614,8 +1657,38 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
     stopTimeoutRef.current = setTimeout(() => stop(), MAX_AUDIO_SECONDS * 1000);
   }
 
-  if (unsupported) {
-    return <p className="text-ink-alert text-sm">{t.task.audioUnsupported}</p>;
+  // Fallback path: hand off to the phone's own recorder via a file input.
+  // `accept="audio/*"` opens the native recorder/picker on both Android and iOS,
+  // and works inside in-app webviews where getUserMedia/MediaRecorder do not.
+  // A task the player cannot complete is worse than an extra tap.
+  function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be re-picked after an error
+    if (!file) return;
+    if (file.size > MAX_AUDIO_BYTES) {
+      setErr(t.task.audioTooLarge({ mb: Math.round(MAX_AUDIO_BYTES / 1024 / 1024) }));
+      return;
+    }
+    setErr('');
+    // Some Android pickers hand back a File with an EMPTY type. Guessing one
+    // fixed value would mislabel a .3gp as mp3 and the server would refuse it on
+    // content-type, so fall back to the extension and only then to a default.
+    mimeRef.current = file.type || audioTypeFromName(file.name);
+    setBlob(file);
+    setPreview(URL.createObjectURL(file));
+  }
+
+  if (unsupported && !blob) {
+    return (
+      <div className="space-y-3">
+        {err && <p className="text-ink-alert text-sm">{err}</p>}
+        <p className="text-sm text-zinc-400">{t.task.audioUnsupported}</p>
+        <label className={`${TAP_TARGET} inline-flex items-center justify-center gap-2 rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-bold text-ink-fire cursor-pointer hover:bg-white transition-colors`}>
+          <input type="file" accept="audio/*" className="sr-only" onChange={pickFile} />
+          {t.task.audioPickFile}
+        </label>
+      </div>
+    );
   }
 
   return (
@@ -1630,7 +1703,14 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
         <div className="space-y-2">
           <audio controls src={previewUrl} className="w-full" />
           <div className="flex gap-2">
-            <Button variant="ghost" disabled={busy} onClick={start}>{t.task.reRecord}</Button>
+            {unsupported ? (
+              <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>
+                <input type="file" accept="audio/*" className="sr-only" onChange={pickFile} />
+                {t.task.reRecord}
+              </label>
+            ) : (
+              <Button variant="ghost" disabled={busy} onClick={start}>{t.task.reRecord}</Button>
+            )}
             <Button disabled={busy} onClick={() => onSubmit(blob, mimeRef.current)}>
               {busy ? t.task.working : t.task.submitAudio}
             </Button>
