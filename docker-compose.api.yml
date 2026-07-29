@@ -27,7 +27,12 @@ services:
       # These are the REAL production origins, not placeholders. The gate 403s any
       # browser origin not on this list, so a stale example.com value here takes
       # the whole app down with a CORS failure that looks like a client bug.
-      ALLOWED_ORIGINS: "https://rush-point.com,https://creator.rush-point.com"
+      # The canonical domains plus the Firebase default hosts. The defaults now
+      # redirect to canonical, but an app installed BEFORE that redirect can still
+      # run on a *.web.app origin, and this list is a CORS allowlist rather than a
+      # link — narrowing it during an unrelated fix would silently 403 those users.
+      # Matches what the VPS was already running.
+      ALLOWED_ORIGINS: "https://rush-point.com,https://creator.rush-point.com,https://rushpoint-play.web.app,https://rushpoint-creator.web.app,https://rushpoint-play.firebaseapp.com,https://rushpoint-creator.firebaseapp.com"
       PORT: "8080"
       # Run-summary emails (Resend) are ON by default. Simplest: turn them off.
       RUN_SUMMARY_EMAIL_ENABLED: "false"
