@@ -34,6 +34,8 @@
         "play": "npm run dev --workspace=apps/play-web",
         "play:build": "npm run build     --workspace=apps/play-web",
         "play:store:check": "npx tsx scripts/check-play-store.ts",
+        "upload:check": "node scripts/check-upload-health.mjs",
+        "upload:check:local": "node scripts/check-upload-health.mjs --origin http://127.0.0.1:8080 --skip-auth",
         "play:assets": "node scripts/gen-play-assets.mjs",
         "play:screenshots": "node scripts/gen-play-screenshots.mjs",
         "play:twa:init": "npx @bubblewrap/cli init --manifest https://rush-point.com/manifest.webmanifest",
