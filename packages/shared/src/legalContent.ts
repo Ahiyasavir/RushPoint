@@ -117,6 +117,12 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - מספר משחקים, ריצות, ומשתתפים לכל חשבון יוצר
 - **דוחות קריסה (Sentry):** כאשר תכונה זו מופעלת בסביבת הייצור, שגיאות יישום (crash reports) הכוללות כתובת IP, מעקב קריאות טכני (stack trace), וסוג הדפדפן/מכשיר נשלחות לספק ניטור השגיאות שלנו לצורך איתור ותיקון תקלות בלבד. ראה סעיף 5 לפרטי ספק המשנה.
 
+### 3.7 דוחות ריצה אוטומטיים (דוא"ל)
+
+עם סיום ריצה, אנו שולחים אוטומטית ליוצר (ולכתובת מפעיל נוספת שהגדרנו, ככל שהוגדרה) דוא"ל המסכם את הריצה, הכולל: תוצאות סופיות (שמות צוותים וניקוד), נתוני השלמת משימות, ותמצית משוב שחקנים (לרבות מספר מצומצם של תגובות, המיוחסות רק לשם הצוות). זהות המשתתפים בדוא"ל זה מוגבלת לשם הצוות שנבחר בעת ההצטרפות — משתתפים מתחברים באופן אנונימי ואין להם כתובת דוא"ל הקשורה לחשבון RushPoint, ולכן היא אינה יכולה להיכלל.
+
+הדוא"ל נשלח באמצעות **Resend** (ראה סעיף 5), ספק דוא"ל טרנזקציוני חיצוני. לאחר המשלוח, הדוא"ל שוכן בתיבת הדואר של הנמען ואינו כפוף למחיקה האוטומטית תוך 90 יום המתוארת בסעיף 7 — מחיקתו היא באחריות הנמען.
+
 ## 4. מטרות עיבוד המידע
 
 אנו מעבדים מידע אישי למטרות הבאות בלבד:
@@ -145,6 +151,8 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **רשויות:** נמסור מידע לרשויות אכיפת חוק אך ורק בהתאם לחובה חוקית מפורשת או צו שיפוטי בר-תוקף.
 
+**Resend**: ספק הדוא"ל הטרנזקציוני שלנו, המשמש אך ורק לשליחת דוא"ל סיכום הריצה האוטומטי המתואר בסעיף 3.7 ליוצר (או לנמען מיועד אחר). מקבל את תוכן הדוא"ל (תוצאות, שמות צוותים, תגובות משוב) ואת כתובת הנמען בלבד.
+
 **עדכון רשימת ספקי המשנה:** נעדכן רשימה זו כאשר נוסיף ו/או נחליף ספק משנה מהותי, ונודיע על שינוי כאמור בהתאם לסעיף 15 (שינויים במדיניות).
 
 **הסכם עיבוד נתונים (DPA) ליוצרים:** יוצר שהוא עסק הכפוף לדין הגנת מידע זר (למשל GDPR) ואוסף מידע אישי של משתתפים דרך שדות מותאמים (סעיף 3.5) פועל כ"בקר מידע" (data controller) לגבי אותו מידע, כאשר RushPoint פועלת כ"מעבד מידע" (data processor) מטעמו. יוצר כאמור רשאי לפנות ל-**legal@rushpoint.app** לקבלת הסכם עיבוד נתונים (DPA) חתום הכולל את פרטי ספקי המשנה שלנו והתחייבויותינו כמעבד.
@@ -170,6 +178,7 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 - תוצאות מצטברות (ניקוד ודירוג): נשמרות כל עוד החשבון פעיל; נמחקות עם מחיקת החשבון
 - שדות מותאמים: נמחקים עם מחיקת החשבון או הריצה
 - נתוני שימוש אנונימיים: עד 24 חודשים
+- תוכן דוא"ל סיכום ריצה: אינו נמחק על ידינו לאחר השליחה — נשמר בתיבת הדואר של הנמען בהתאם למדיניות השמירה שלו (ראה סעיף 3.7)
 
 **בקשת מחיקה:** יוצרים יכולים לבקש מחיקת חשבון וכל הנתונים הקשורים אליו על-ידי פנייה ל-privacy@rushpoint.app. ביצוע המחיקה תוך 30 יום.
 
@@ -356,6 +365,12 @@ By joining a game that includes custom fields, the participant consents to the C
 - Number of games, runs, and participants per Creator account
 - **Crash reports (Sentry):** when this feature is enabled in production, application error reports — including IP address, technical stack trace, and browser/device type — are sent to our error-monitoring sub-processor solely to diagnose and fix defects. See Section 5 for sub-processor details.
 
+### 3.7 Automated Run Reports (Email)
+
+When a run finishes, we automatically email the Creator (and, if configured, an additional operator address we designate) a run-summary report containing: final standings (team names and scores), completion statistics, and a digest of player feedback (including a small number of comments, attributed only to a team name). Participant identity in this email is limited to the team name chosen at sign-in — participants authenticate anonymously and have no email address associated with their RushPoint use, so none can be included.
+
+The email is delivered via **Resend** (see Section 5), a third-party transactional-email provider. Once delivered, the email lives in the recipient's own inbox and is not subject to the 90-day automatic deletion described in Section 7 — deleting it is the recipient's responsibility.
+
 ## 4. Purposes of Data Processing
 
 We process personal data only for these purposes:
@@ -384,6 +399,8 @@ We **do not sell or rent** personal data. We share data with:
 
 **Authorities:** we will disclose data to law enforcement only when required by an explicit legal obligation or a valid court order.
 
+**Resend**: our transactional-email provider, used solely to deliver the automated run-summary email described in Section 3.7 to the Creator (or a designated recipient). Receives the email content (standings, team names, feedback comments) and the recipient address only.
+
 **Sub-processor list updates:** we will update this list whenever we add or replace a material sub-processor, and will notify users of such changes per Section 15 (Policy Changes).
 
 **Data Processing Addendum (DPA) for Creators:** a Creator who is a business subject to foreign data-protection law (e.g. the GDPR) and who collects participants' personal data via custom fields (Section 3.5) acts as the "data controller" for that data, with RushPoint acting as its "data processor." Such a Creator may contact **legal@rushpoint.app** to receive a signed Data Processing Addendum detailing our sub-processors and our obligations as processor.
@@ -408,6 +425,7 @@ We implement security measures in accordance with the Israeli Privacy Protection
 - Aggregate results (scores and rankings): retained while the account is active; deleted when the account is deleted
 - Custom field data: deleted when the account or run is deleted
 - Anonymous usage data: up to 24 months
+- Run-summary email content: not deleted by us after sending — retained in the recipient's mailbox per their own retention settings (see Section 3.7)
 
 **Deletion request:** Creators can request deletion of their account and all associated data by contacting privacy@rushpoint.app. Deletion is carried out within 30 days.
 
