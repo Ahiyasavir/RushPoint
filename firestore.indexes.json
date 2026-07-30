@@ -105,6 +105,15 @@
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
         { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
       ]
+    },
+    {
+      "_comment": "listPlatformUsers (change: admin-user-activity-dashboard) runs an EQUALITY-ONLY collection-group query: collectionGroup('runs').where('ownerUid','==',uid). Firestore does NOT auto-index single fields at COLLECTION_GROUP scope, and the (ownerUid, status) composite above does not satisfy it either — production answered this exact query with FAILED_PRECONDITION asking for COLLECTION_GROUP_ASC on runs.ownerUid. Deploy indexes BEFORE the functions that use them.",
+      "collectionGroup": "runs",
+      "fieldPath": "ownerUid",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
     }
   ]
 }
