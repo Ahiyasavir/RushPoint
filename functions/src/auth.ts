@@ -35,3 +35,19 @@ export function assertStaffOrOwner(
   }
   throw new functions.https.HttpsError('permission-denied', 'Staff or owner access required');
 }
+
+/**
+ * Platform-admin gate. Was defined verbatim in both index.ts and
+ * maintenance/index.ts (change: admin-user-activity-dashboard moved it here,
+ * same reason assertStaffOrOwner moved — a new module, admin/index.ts, needs it
+ * too and cannot import from index.ts without a cycle). Behavior unchanged: no
+ * emulator bypass — the e2e suite mints a real `admin` custom-token claim
+ * against the Auth emulator, so tests exercise the SAME gate production runs.
+ */
+export function assertAdmin(context: functions.https.CallableContext): string {
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
+  if (!context.auth.token.admin) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin access required');
+  }
+  return context.auth.uid;
+}

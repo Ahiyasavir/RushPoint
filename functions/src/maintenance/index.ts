@@ -34,19 +34,7 @@ import {
   AUDIT_RUN_PII_PRUNED, AUDIT_RUN_PII_SWEEP, AUDIT_GAME_PURGE_SWEEP, AUDIT_PUBLIC_TASK_BACKFILL,
 } from '../obs/audit';
 import { backfillPublicTaskCoordinates } from './publicTaskBackfill';
-
-// Admin only (platform maintenance). No emulator bypass — the e2e suite mints
-// a real `admin` custom-token claim against the Auth emulator, so tests hit
-// the same gate production runs.
-// Returns the admin's uid (matching the root module's assertAdmin) so the callables
-// below can attribute their audit records to the person who actually invoked them.
-function assertAdmin(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  if (!context.auth.token.admin) {
-    throw new functions.https.HttpsError('permission-denied', 'Admin access required');
-  }
-  return context.auth.uid;
-}
+import { assertAdmin } from '../auth';
 
 interface RunRef {
   ownerUid: string;

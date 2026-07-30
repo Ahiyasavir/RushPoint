@@ -168,9 +168,22 @@ them from `process.env`, so only that binding needs adding. Keep `APP_URL` in `.
 Most of the app needs no admin. Two things use elevated access:
 - **Staff console** (photo review / SOS / announcements): the **creator** generates a one-time PIN
   from the live Run Console ("Invite staff"); staff sign in with it. No admin role needed.
-- **Audit-log reading** (`listAuditLogs`) requires an admin custom claim. To mint the first admin,
-  set `RUSHPOINT_ADMIN_BOOTSTRAP=<your-email-or-uid>` in `functions/.env`, deploy, call the admin
-  bootstrap once, then remove it.
+- **Admin callables** (`listAuditLogs`, `pruneRunNow`, `backfillPublicTaskCoordinatesNow`,
+  `listPlatformUsers` — the `/admin/users` creator activity dashboard) require an `admin` custom
+  claim on the caller's Firebase Auth account. To grant it: **first sign in normally** via the
+  regular creator-web login (email/password or Google — this is your own account, nobody else's
+  credentials are involved), then run:
+
+  ```bash
+  GOOGLE_APPLICATION_CREDENTIALS=/abs/path/sa.json \
+  node scripts/grant-admin-claim.mjs --project=rushpoint-pwa-7daaa \
+       --email=you@example.com --execute --confirm-project=rushpoint-pwa-7daaa
+  ```
+
+  Dry-run by default (omit `--execute` to just preview). Against the local emulator, drop
+  `--project`/`--confirm-project`/the credentials env var entirely. Sign out and back in (or wait
+  for the ~1h token refresh) before the new claim shows up. `--revoke` removes it. See
+  `scripts/grant-admin-claim.mjs` for the full flag list.
 
 ---
 

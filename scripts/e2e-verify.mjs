@@ -6659,6 +6659,11 @@ async function main() {
       // public-task-coordinates-backfill: the sweep is platform-admin-only, same
       // gate/trust level as pruneRunNow — an owner must not be able to trigger it.
       ['owner', creator, 'backfillPublicTaskCoordinatesNow', {}],
+      // admin-user-activity-dashboard: listPlatformUsers is platform-admin-only,
+      // same trust level as listAuditLogs — a mere game owner (even one who owns
+      // real games/runs) must not be able to list every creator on the platform.
+      ['owner', creator, 'listPlatformUsers', { limit: 5 }],
+      ['participant', pl, 'listPlatformUsers', { limit: 5 }],
       // Staff of a DIFFERENT run (same owner) must not reach this run:
       ['other-run staff', staffB, 'adjustTeamScore', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, delta: 500 }],
       ['other-run staff', staffB, 'reviewStationSubmission', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t', approved: true }],
@@ -6744,6 +6749,35 @@ async function main() {
     check('authz: team score/penalty untouched by the denial sweep',
       (teamDoc.data?.score ?? 0) === 0 && (teamDoc.data?.bonusPenalty ?? 0) === 0,
       JSON.stringify({ score: teamDoc.data?.score, bonusPenalty: teamDoc.data?.bonusPenalty }));
+
+    // ── admin-user-activity-dashboard: the ADMIN side of listPlatformUsers ─────
+    // The denial matrix above proves owner/participant are rejected; this proves
+    // the admin token gets back an honest rollup for the creator this scenario
+    // just drove real activity through (games created above via createGame, and
+    // `ar`/`ar2` launched via launchRun).
+    //
+    // The suite's `creator` identity is signed in ANONYMOUSLY (a test-harness
+    // shortcut — real creator-web never offers anonymous sign-in, only email or
+    // Google, per CLAUDE.md). listPlatformUsers deliberately excludes anonymous
+    // accounts (design.md §D1: they are participants, not creators), so without
+    // an email this uid would correctly be invisible to the report — that would
+    // prove the WRONG thing here. Giving it an email via the Admin SDK models
+    // what a real creator account actually looks like, without disturbing its
+    // uid (so every game/run already created above stays attributed to it).
+    await adminSdk.auth().updateUser(OWNER, { email: 'e2e-authz-creator@example.com', emailVerified: true });
+    const report = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const userRows = report?.users ?? [];
+    const ownerRow = userRows.find((r) => r.uid === OWNER);
+    check('admin: listPlatformUsers includes the creator this scenario drove',
+      !!ownerRow, `${userRows.length} rows returned`);
+    check('admin: the creator row counts at least the game(s) created in this scenario',
+      (ownerRow?.gamesCreatedCount ?? 0) >= 1, JSON.stringify(ownerRow?.gamesCreatedCount));
+    check('admin: the creator row lists the run(s) launched in this scenario',
+      (ownerRow?.runs ?? []).some((r) => r.id === ar) && (ownerRow?.runs ?? []).some((r) => r.id === ar2),
+      JSON.stringify(ownerRow?.runs?.map((r) => r.id)));
+    check('admin: anonymous participant/player uids never appear as a row',
+      !userRows.some((r) => r.uid === plUid || r.uid === (str.auth.currentUser?.uid)),
+      JSON.stringify(userRows.map((r) => r.uid)));
   });
 
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════

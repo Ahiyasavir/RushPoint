@@ -1642,6 +1642,33 @@ const HE = {
     step2: 'יוצרים את קוד ההצטרפות',
     step3: 'פותחים את השערים',
   },
+  // Admin-only platform user activity report (change: admin-user-activity-dashboard).
+  adminUsers: {
+    title:            'משתמשי הפלטפורמה',
+    subtitle:         'רשימת כל היוצרים: כמה משחקים יצרו, אילו ריצות הפעילו, ומתי היו פעילים לאחרונה.',
+    deniedTitle:      'הדף הזה מוגבל למנהלי הפלטפורמה',
+    deniedBody:       'לחשבון שלך אין הרשאת מנהל.',
+    loading: [
+      'טוענים את רשימת היוצרים',
+      'סופרים משחקים וריצות',
+    ],
+    loadFailed:       'טעינת רשימת המשתמשים נכשלה',
+    colUser:          'יוצר',
+    colSignedUp:      'נרשם בתאריך',
+    colLastActive:    'פעיל לאחרונה',
+    colGames:         'משחקים שנוצרו',
+    colRuns:          'ריצות שהופעלו',
+    never:            'מעולם לא',
+    unnamed:          'ללא שם',
+    gamesCount:       (n: number) => `${n} משחקים`,
+    runsCount:        (n: number) => `${n} ריצות`,
+    deletedTag:       'נמחק',
+    truncatedNotice:  (shown: number) => `מוצגים ${shown} היוצרים הפעילים ביותר. יש עוד יוצרים בפלטפורמה שלא מוצגים כאן.`,
+    refreshBtn:       'רענון',
+    noGames:          'לא נוצרו משחקים',
+    noRuns:           'לא הופעלו ריצות',
+    noUsers:          'לא נמצאו משתמשים',
+  },
 };
 
 // ── English ────────────────────────────────────────────────────────────────
@@ -3269,6 +3296,33 @@ const EN: typeof HE = {
     step1: 'Preparing your run',
     step2: 'Creating the join code',
     step3: 'Opening the gates',
+  },
+  // Admin-only platform user activity report (change: admin-user-activity-dashboard).
+  adminUsers: {
+    title:            'Platform users',
+    subtitle:         'Every creator: how many games they made, which runs they launched, and when they were last active.',
+    deniedTitle:      'This page is restricted to platform admins',
+    deniedBody:       'Your account does not have admin access.',
+    loading: [
+      'Loading the creator list',
+      'Counting games and runs',
+    ],
+    loadFailed:       'Could not load the user list',
+    colUser:          'Creator',
+    colSignedUp:      'Signed up',
+    colLastActive:    'Last active',
+    colGames:         'Games created',
+    colRuns:          'Runs launched',
+    never:            'Never',
+    unnamed:          'Unnamed',
+    gamesCount:       (n: number) => `${n} games`,
+    runsCount:        (n: number) => `${n} runs`,
+    deletedTag:       'deleted',
+    truncatedNotice:  (shown: number) => `Showing the ${shown} most active creators. There are more creators on the platform not shown here.`,
+    refreshBtn:       'Refresh',
+    noGames:          'No games created',
+    noRuns:           'No runs launched',
+    noUsers:          'No users found',
   },
 };
 

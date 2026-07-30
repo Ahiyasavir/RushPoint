@@ -26,6 +26,7 @@ import type {
   StationStatus,
   GalleryGameFacets,
   GalleryTaskFacets,
+  AdminUserSummary,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -253,3 +254,11 @@ export const setRunTaskStatus      = callable<
     stageUnwinnable: boolean;
   }
 >('setRunTaskStatus');
+
+// Admin-only creator activity rollup (change: admin-user-activity-dashboard). Only
+// resolves when the signed-in user's ID token carries the `admin` custom claim —
+// see AdminUsersPage, which gates the call itself on `isAdminClaim`.
+export const listPlatformUsers = callable<
+  { limit?: number },
+  { users: AdminUserSummary[]; truncated: boolean }
+>('listPlatformUsers');

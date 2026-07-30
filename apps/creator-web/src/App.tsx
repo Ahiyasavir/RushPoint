@@ -27,6 +27,9 @@ const SettingsPage   = lazyWithRetry('settings', () => import('./pages/SettingsP
 // Recently deleted games (change: recoverable-game-deletion).
 const TrashPage      = lazyWithRetry('trash', () => import('./pages/TrashPage'));
 const LegalPage      = lazyWithRetry('legal', () => import('./pages/LegalPage'));
+// Admin-only platform user activity report (change: admin-user-activity-dashboard).
+// Not in buildNavDestinations — reachable only by direct URL, same treatment as /live.
+const AdminUsersPage = lazyWithRetry('adminUsers', () => import('./pages/AdminUsersPage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -185,6 +188,9 @@ export default function App() {
             <Route path="/run/:gameId/:runId"  element={<RunConsolePage />} />
             <Route path="/settings"            element={<SettingsPage />} />
             <Route path="/trash"               element={<TrashPage />} />
+            {/* Admin-only, not in buildNavDestinations — reachable only by direct
+                URL (bookmark it); the page itself gates on the admin claim. */}
+            <Route path="/admin/users"         element={<AdminUsersPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>

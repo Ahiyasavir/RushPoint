@@ -35,8 +35,17 @@ export default defineConfig({
     { name: 'creator', testMatch: /creator\.spec\.ts/, use: { ...devices['Desktop Chrome'], baseURL: CREATOR } },
     { name: 'play', testMatch: /play.*\.spec\.ts/, use: { ...devices['Pixel 7'], baseURL: PLAY } },
   ],
+  // ⚠ VITE_API_ORIGIN is forced EMPTY for the UI suite, and that is load-bearing.
+  // `apps/*/.env` may point callables at the self-hosted VPS
+  // (`VITE_API_ORIGIN=https://api.rush-point.com`, change: self-host-functions-vps), and
+  // `services/firebase.ts` only wires the functions emulator `if (!apiOrigin)`. Inherit
+  // that value and the smoke suite signs in against the LOCAL Auth emulator but fires
+  // every callable at PRODUCTION — which fails (an emulator token is not valid there)
+  // and, far worse, would be writing to real data if it ever did succeed. A test must
+  // never be able to reach production; an empty value restores the emulator wiring.
+  // Vite gives process env precedence over .env, and firebase.ts treats '' as unset.
   webServer: [
-    { command: 'npm run creator', url: CREATOR, reuseExistingServer: true, timeout: 120_000 },
-    { command: 'npm run play', url: PLAY, reuseExistingServer: true, timeout: 120_000 },
+    { command: 'npm run creator', url: CREATOR, reuseExistingServer: true, timeout: 120_000, env: { VITE_API_ORIGIN: '' } },
+    { command: 'npm run play', url: PLAY, reuseExistingServer: true, timeout: 120_000, env: { VITE_API_ORIGIN: '' } },
   ],
 });

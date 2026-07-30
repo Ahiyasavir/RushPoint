@@ -28,6 +28,7 @@ export {
   pruneExpiredRunData, pruneExpiredRunDataNow, pruneRunNow, purgeDeletedGamesNow,
   backfillPublicTaskCoordinatesNow,
 } from './maintenance/index';
+export { listPlatformUsers } from './admin/index';
 export {
   getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
 } from './payments/index';
@@ -61,17 +62,7 @@ export { onRunFinalized } from './runs/index';
 
 // ─── Shared auth helpers ───────────────────────────────────────────────────────
 
-import { requireAuth, assertStaffOrOwner } from './auth';
-
-function assertAdmin(context: functions.https.CallableContext): string {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sign in required');
-  // No emulator bypass: the e2e suite mints a real `admin` custom-token claim
-  // against the Auth emulator, so tests exercise the SAME gate production runs.
-  if (!context.auth.token.admin) {
-    throw new functions.https.HttpsError('permission-denied', 'Admin access required');
-  }
-  return context.auth.uid;
-}
+import { requireAuth, assertStaffOrOwner, assertAdmin } from './auth';
 
 // Live-ops actions (announce, flash, ack SOS, review photo, adjust score) are
 // performed by EITHER the game owner running their own console OR a staff member
