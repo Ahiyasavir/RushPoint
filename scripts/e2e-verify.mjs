@@ -6664,6 +6664,11 @@ async function main() {
       // real games/runs) must not be able to list every creator on the platform.
       ['owner', creator, 'listPlatformUsers', { limit: 5 }],
       ['participant', pl, 'listPlatformUsers', { limit: 5 }],
+      // admin-user-notes: a note is written BY an admin ABOUT someone else, so it is not
+      // the subject's own data to edit. An owner must not be able to write their own note
+      // (that would let a creator author the record kept about them), nor anyone else's.
+      ['owner', creator, 'setUserNote', { uid: OWNER, note: 'self written' }],
+      ['participant', pl, 'setUserNote', { uid: OWNER, note: 'pwn' }],
       // Staff of a DIFFERENT run (same owner) must not reach this run:
       ['other-run staff', staffB, 'adjustTeamScore', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, delta: 500 }],
       ['other-run staff', staffB, 'reviewStationSubmission', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t', approved: true }],
@@ -6831,6 +6836,84 @@ async function main() {
       (meAfterJunk?.gamesCreatedCount ?? 0) > 0 && (meAfterJunk?.runsLaunchedCount ?? 0) > 0);
     check('admin: participantsReached is derived, not absent',
       typeof meAfterJunk?.participantsReached === 'number');
+
+    // ── admin-user-notes: the operator's own CRM field ────────────────────────
+    const NOTE = 'Emailed 12.7, replied they want a school run';
+    const wrote = await platformAdmin.call('setUserNote', { uid: OWNER, note: NOTE });
+    check('notes: setUserNote returns the stored note', wrote?.note === NOTE, JSON.stringify(wrote));
+    const withNote = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const rowWithNote = (withNote?.users ?? []).find((r) => r.uid === OWNER);
+    check('notes: the note comes back on the roster row', rowWithNote?.note === NOTE, JSON.stringify(rowWithNote?.note));
+    check('notes: a write stamps noteUpdatedAt', typeof rowWithNote?.noteUpdatedAt === 'string');
+
+    // Over-long input is TRUNCATED, not rejected: an admin pasting something slightly too
+    // long should keep their note, shortened, rather than lose what they typed.
+    const huge = await platformAdmin.call('setUserNote', { uid: OWNER, note: 'x'.repeat(9000) });
+    check('notes: an over long note is truncated to the cap, not rejected',
+      (huge?.note ?? '').length === 4000, String((huge?.note ?? '').length));
+
+    // Empty CLEARS, and clearing must leave no residual record.
+    const cleared = await platformAdmin.call('setUserNote', { uid: OWNER, note: '   ' });
+    check('notes: a blank note clears rather than storing whitespace',
+      cleared?.cleared === true && cleared?.note === '', JSON.stringify(cleared));
+    const afterClear = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const rowCleared = (afterClear?.users ?? []).find((r) => r.uid === OWNER);
+    check('notes: a cleared note reads as empty on the roster',
+      (rowCleared?.note ?? '') === '' && rowCleared?.noteUpdatedAt === null,
+      JSON.stringify({ note: rowCleared?.note, at: rowCleared?.noteUpdatedAt }));
+
+    // A note for a uid that has no Auth account is accepted (the callable does not
+    // resolve the subject) but simply never surfaces, which is the honest behaviour:
+    // the roster is driven by Auth, not by whatever notes happen to exist.
+    await platformAdmin.call('setUserNote', { uid: 'no-such-uid-12345', note: 'orphan' });
+    const afterOrphan = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    check('notes: an orphan note never invents a roster row',
+      !(afterOrphan?.users ?? []).some((r) => r.uid === 'no-such-uid-12345'));
+
+    // ── the manual "I emailed them" tick ──────────────────────────────────────
+    // The property that matters is INDEPENDENCE: a note save must not disturb the tick,
+    // and a tick must not wipe the note. Those are the two ways this silently loses an
+    // operator's work, and neither is visible from the UI until it has already happened.
+    const NOTE2 = 'Second round of outreach';
+    await platformAdmin.call('setUserNote', { uid: OWNER, note: NOTE2 });
+    const ticked = await platformAdmin.call('setUserNote', { uid: OWNER, note: NOTE2, emailed: true });
+    check('outreach: ticking emailed returns emailed true with a date',
+      ticked?.emailed === true && typeof ticked?.emailedAt === 'string', JSON.stringify(ticked));
+    check('outreach: ticking emailed did NOT wipe the note text',
+      ticked?.note === NOTE2, JSON.stringify(ticked?.note));
+
+    // Saving the note again WITHOUT sending `emailed` must leave the tick alone.
+    const noteOnly = await platformAdmin.call('setUserNote', { uid: OWNER, note: NOTE2 + ' plus' });
+    check('outreach: a note save with no emailed field leaves the tick set',
+      noteOnly?.emailed === true, JSON.stringify(noteOnly));
+
+    const rosterTicked = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const rowTicked = (rosterTicked?.users ?? []).find((r) => r.uid === OWNER);
+    check('outreach: the roster row carries emailed and emailedAt',
+      rowTicked?.emailed === true && typeof rowTicked?.emailedAt === 'string',
+      JSON.stringify({ e: rowTicked?.emailed, at: rowTicked?.emailedAt }));
+
+    // Unticking clears the flag and its date, and keeps the note.
+    const unticked = await platformAdmin.call('setUserNote', { uid: OWNER, note: NOTE2, emailed: false });
+    check('outreach: unticking clears the flag and its date but keeps the note',
+      unticked?.emailed === false && unticked?.emailedAt === null && unticked?.note === NOTE2,
+      JSON.stringify(unticked));
+
+    // A tick with NO note is legitimate: "emailed them, nothing to write down".
+    await platformAdmin.call('setUserNote', { uid: OWNER, note: '', emailed: true });
+    const rosterTickOnly = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const rowTickOnly = (rosterTickOnly?.users ?? []).find((r) => r.uid === OWNER);
+    check('outreach: a tick survives an empty note rather than being deleted with it',
+      rowTickOnly?.emailed === true && (rowTickOnly?.note ?? '') === '',
+      JSON.stringify({ e: rowTickOnly?.emailed, n: rowTickOnly?.note }));
+
+    // And clearing BOTH removes the record entirely.
+    await platformAdmin.call('setUserNote', { uid: OWNER, note: '', emailed: false });
+    const rosterGone = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const rowGone = (rosterGone?.users ?? []).find((r) => r.uid === OWNER);
+    check('outreach: clearing both the note and the tick leaves no residual record',
+      (rowGone?.note ?? '') === '' && rowGone?.emailed === false && rowGone?.emailedAt === null,
+      JSON.stringify({ n: rowGone?.note, e: rowGone?.emailed, at: rowGone?.emailedAt }));
   });
 
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════

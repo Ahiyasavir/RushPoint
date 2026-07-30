@@ -15,7 +15,7 @@
 // so they are excluded server-side.
 import { useEffect, useMemo, useState } from 'react';
 import { auth } from '../services/firebase';
-import { listPlatformUsers } from '../services/calls';
+import { listPlatformUsers, setUserNote } from '../services/calls';
 import {
   summarizePlatform, activationStage, engagementParts,
   type AdminUserSummary, type ActivationStage,
@@ -23,7 +23,7 @@ import {
 import { isAdminClaim } from '../lib/adminGate';
 import { buildAdminUsersCsv, filterUsers, sortUsers, type AdminUserSort } from '../lib/adminUsersExport';
 import { formatTxDate } from '../lib/formatTxDate';
-import { EmptyState, Skeleton, Badge, Button, Input } from '../components/ui';
+import { EmptyState, Skeleton, Badge, Button, Input, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { useT } from '../components/LanguageContext';
 
@@ -47,6 +47,9 @@ export default function AdminUsersPage() {
   const [failed, setFailed] = useState(false);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<AdminUserSort>('lastActive');
+  // The tick only earns its place if it can filter: its whole purpose is answering
+  // "who have I still not written to".
+  const [outreach, setOutreach] = useState<'all' | 'emailed' | 'notEmailed'>('all');
 
   async function load() {
     setFailed(false);
@@ -79,11 +82,18 @@ export default function AdminUsersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Patch one row in place after a note save, so the list does not flicker or lose the
+   *  current search and sort just because a note was written. */
+  function applyNote(uid: string, patch: Partial<AdminUserSummary>) {
+    setUsers((prev) => (prev ?? []).map((u) => (u.uid === uid ? { ...u, ...patch } : u)));
+  }
+
   const summary = useMemo(() => summarizePlatform(users ?? []), [users]);
-  const visible = useMemo(
-    () => sortUsers(filterUsers(users ?? [], query), sort),
-    [users, query, sort],
-  );
+  const visible = useMemo(() => {
+    const byOutreach = (users ?? []).filter((u) =>
+      outreach === 'all' ? true : outreach === 'emailed' ? u.emailed : !u.emailed);
+    return sortUsers(filterUsers(byOutreach, query), sort);
+  }, [users, query, sort, outreach]);
 
   const duration = (ms: number) => {
     const { hours, minutes } = engagementParts(ms);
@@ -189,6 +199,16 @@ export default function AdminUsersPage() {
           <option value="runs">{ta.sortRuns}</option>
           <option value="players">{ta.sortPlayers}</option>
         </select>
+        <select
+          value={outreach}
+          onChange={(e) => setOutreach(e.target.value as 'all' | 'emailed' | 'notEmailed')}
+          aria-label={ta.outreachLabel}
+          className="h-10 rounded-xl border border-[--rp-border] bg-[--surface-2] px-3 text-sm text-[--ink-1]"
+        >
+          <option value="all">{ta.outreachAll}</option>
+          <option value="notEmailed">{ta.outreachNotEmailed}</option>
+          <option value="emailed">{ta.outreachEmailed}</option>
+        </select>
         <div className="flex gap-2 sm:ms-auto">
           <Button onClick={() => void load()}>{ta.refreshBtn}</Button>
           <Button onClick={downloadCsv}>{ta.exportBtn}</Button>
@@ -216,7 +236,12 @@ export default function AdminUsersPage() {
                       <div className="font-medium text-[--ink-1] truncate" dir="auto">{u.displayName || ta.unnamed}</div>
                       {u.email && <div className="text-xs text-[--ink-3] truncate" dir="auto">{u.email}</div>}
                     </div>
-                    <Badge color={STAGE_COLOR[stage]}>{ta.stage[stage]}</Badge>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <Badge color={STAGE_COLOR[stage]}>{ta.stage[stage]}</Badge>
+                      {/* So an annotated creator is identifiable without opening each card. */}
+                      {u.note && <span className="text-[11px] text-[--ink-3]" title={u.note}>📝 {ta.hasNote}</span>}
+                      {u.emailed && <span className="text-[11px] text-[--ink-3]">✉️ {ta.emailedShort}</span>}
+                    </div>
                   </div>
                   <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-[--ink-3]">
                     <div className="flex justify-between"><dt>{ta.colGames}</dt><dd className="text-[--ink-1]">{u.gamesCreatedCount}</dd></div>
@@ -239,7 +264,7 @@ export default function AdminUsersPage() {
                       {open ? ta.hideDetail : ta.showDetail}
                     </button>
                   </div>
-                  {open && <Detail user={u} ta={ta} />}
+                  {open && <Detail user={u} ta={ta} onNoteSaved={applyNote} />}
                 </li>
               );
             })}
@@ -296,7 +321,7 @@ export default function AdminUsersPage() {
             {visible.filter((u) => expanded[u.uid]).map((u) => (
               <div key={`${u.uid}-d`} className="border-t border-[--rp-border] p-3">
                 <div className="text-xs uppercase text-[--ink-3] mb-1" dir="auto">{u.displayName || u.email || u.uid}</div>
-                <Detail user={u} ta={ta} />
+                <Detail user={u} ta={ta} onNoteSaved={applyNote} />
               </div>
             ))}
           </div>
@@ -306,10 +331,104 @@ export default function AdminUsersPage() {
   );
 }
 
-/** The per creator drill down: which games, which runs. Shared by both layouts so the
- *  phone and the desktop can never drift apart. */
-function Detail({ user, ta }: { user: AdminUserSummary; ta: ReturnType<typeof useT>['adminUsers'] }) {
+/** The private operator note for one creator. Saves explicitly rather than on every
+ *  keystroke: a note is written on a phone, often on a bad connection, and a per keystroke
+ *  write would be both expensive and lossy. Local state is the draft; the row is patched
+ *  only once the server confirms. */
+function NoteEditor({ user, ta, onSaved }: {
+  user: AdminUserSummary;
+  ta: ReturnType<typeof useT>['adminUsers'];
+  onSaved: (uid: string, patch: Partial<AdminUserSummary>) => void;
+}) {
+  const [draft, setDraft] = useState(user.note ?? '');
+  const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+  const [ticking, setTicking] = useState(false);
+  const dirty = draft.trim() !== (user.note ?? '').trim();
+
+  async function save() {
+    setState('saving');
+    try {
+      // `emailed` omitted: saving the text must never disturb the tick.
+      const res = await setUserNote({ uid: user.uid, note: draft });
+      onSaved(user.uid, { note: res.note, noteUpdatedAt: res.noteUpdatedAt });
+      setState('saved');
+    } catch (e) {
+      console.error('[adminUsers] setUserNote failed:', e);
+      // Never silently drop what was typed: keep the draft and say it did not save.
+      setState('failed');
+    }
+  }
+
+  /** The tick saves IMMEDIATELY on toggle, unlike the note text. A checkbox that needed a
+   *  separate save press would be ticked and lost constantly. The current draft text is
+   *  sent along so an unsaved note is not clobbered by the tick's own write. */
+  async function toggleEmailed(next: boolean) {
+    setTicking(true);
+    try {
+      const res = await setUserNote({ uid: user.uid, note: draft, emailed: next });
+      onSaved(user.uid, {
+        note: res.note, noteUpdatedAt: res.noteUpdatedAt,
+        emailed: res.emailed, emailedAt: res.emailedAt,
+      });
+    } catch (e) {
+      console.error('[adminUsers] setUserNote(emailed) failed:', e);
+      setState('failed');
+    } finally {
+      setTicking(false);
+    }
+  }
+
   return (
+    <div className="mt-3">
+      {/* Manual, never inferred: nothing here can see an email leave a personal mailbox. */}
+      <label className="flex items-center gap-2 mb-2 text-sm text-[--ink-1] cursor-pointer">
+        <input
+          type="checkbox"
+          checked={user.emailed}
+          disabled={ticking}
+          onChange={(e) => void toggleEmailed(e.target.checked)}
+          className="w-5 h-5 rounded accent-rp-fire"
+        />
+        <span>{ta.emailedLabel}</span>
+        {user.emailed && user.emailedAt && (
+          <span className="text-xs text-[--ink-3]">{ta.emailedOn(formatTxDate(user.emailedAt))}</span>
+        )}
+      </label>
+      <label className="text-xs uppercase text-[--ink-3] block mb-1" htmlFor={`note-${user.uid}`}>
+        {ta.noteLabel}
+      </label>
+      <Textarea
+        id={`note-${user.uid}`}
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setState('idle'); }}
+        placeholder={ta.notePlaceholder}
+        rows={3}
+        dir="auto"
+      />
+      <div className="flex items-center gap-2 mt-1 flex-wrap">
+        <Button onClick={() => void save()} disabled={!dirty || state === 'saving'}>
+          {state === 'saving' ? ta.noteSaving : ta.noteSave}
+        </Button>
+        {state === 'saved' && <span className="text-xs text-[--ink-3]">{ta.noteSaved}</span>}
+        {state === 'failed' && <span className="text-xs text-rp-alert" role="alert">{ta.noteFailed}</span>}
+        {user.noteUpdatedAt && state !== 'failed' && (
+          <span className="text-xs text-[--ink-3]">{ta.noteUpdated(formatTxDate(user.noteUpdatedAt))}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The per creator drill down: which games, which runs, and the private note. Shared by
+ *  both layouts so the phone and the desktop can never drift apart. */
+function Detail({ user, ta, onNoteSaved }: {
+  user: AdminUserSummary;
+  ta: ReturnType<typeof useT>['adminUsers'];
+  onNoteSaved: (uid: string, patch: Partial<AdminUserSummary>) => void;
+}) {
+  return (
+    <>
+    <NoteEditor user={user} ta={ta} onSaved={onNoteSaved} />
     <div className="mt-2 grid gap-3 sm:grid-cols-2">
       <div>
         <div className="text-xs uppercase text-[--ink-3] mb-1">{ta.colGames}</div>
@@ -341,5 +460,6 @@ function Detail({ user, ta }: { user: AdminUserSummary; ta: ReturnType<typeof us
         )}
       </div>
     </div>
+    </>
   );
 }

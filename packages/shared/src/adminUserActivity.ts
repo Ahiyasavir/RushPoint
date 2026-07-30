@@ -77,6 +77,20 @@ export interface AdminUserSummary {
    *  actually reached, which is the number that says whether a creator matters to the
    *  platform, as opposed to how many drafts they made. */
   participantsReached: number;
+  /** Private operator note about this creator (change: admin-user-notes): who was
+   *  emailed, what they replied. Admin written, never shown to the creator, and deleted
+   *  with the account. Empty string means no note. */
+  note: string;
+  /** When the note was last written, so a stale note is visibly stale. */
+  noteUpdatedAt: string | null;
+  /** Manually ticked by the operator: "I have emailed this person"
+   *  (change: admin-user-notes). Deliberately NOT inferred from anything — no system
+   *  here can observe an email leaving a personal mailbox, so a derived value would be
+   *  a guess presented as a fact. It is a human's own record of a human's own action. */
+  emailed: boolean;
+  /** When the flag was last changed, so "emailed" carries a date rather than being a
+   *  bare tick of unknown age. */
+  emailedAt: string | null;
 }
 
 /** How far a creator got. Ordered: each stage implies the ones before it. */
@@ -169,6 +183,12 @@ export function buildAdminUserSummary(
   /** Stored engagement total, if any. Defaults to 0 so every caller predating
    *  admin-engagement-and-outreach keeps compiling and reads as "not measured yet". */
   engagementMs = 0,
+  /** Stored operator note, if any (change: admin-user-notes). */
+  note = '',
+  noteUpdatedAt: string | null = null,
+  /** Operator ticked "I emailed them" (change: admin-user-notes). */
+  emailed = false,
+  emailedAt: string | null = null,
 ): AdminUserSummary {
   let lastActiveAt: string | null = authUser.lastSignInAt ?? null;
   const gameSummaries: AdminUserGameSummary[] = games.map((g) => {
@@ -201,6 +221,10 @@ export function buildAdminUserSummary(
     lastActiveAt,
     engagementMs: typeof engagementMs === 'number' && Number.isFinite(engagementMs) && engagementMs > 0
       ? engagementMs : 0,
+    note: typeof note === 'string' ? note : '',
+    noteUpdatedAt: typeof noteUpdatedAt === 'string' ? noteUpdatedAt : null,
+    emailed: emailed === true,
+    emailedAt: typeof emailedAt === 'string' ? emailedAt : null,
     participantsReached: runSummaries.reduce(
       (n, r) => n + (Number.isFinite(r.participantCount) ? r.participantCount : 0), 0),
   };

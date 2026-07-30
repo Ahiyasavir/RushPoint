@@ -99,7 +99,7 @@ fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin`
 real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
 run: it introspects the callables the emulator serves and fails if any was never invoked (bar an
 explicit `EXEMPT` list, itself checked for stale entries), so a **new callable ships RED until it
-has a test** — add a scenario, don't just add the callable. The table below lists **98** callables
+has a test** — add a scenario, don't just add the callable. The table below lists **99** callables
 (plus `stripeWebhook`, the `pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which
 are not callables). Keep it green; extend the relevant scenario (not just the lifecycle).
 `functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
@@ -287,7 +287,7 @@ helpers are **internal** (not triggers) — never re-export them.
 | `payments/index.ts` | getWallet · getWalletStatus · purchaseCredits · subscribePro · claimReferral · stripeWebhook (onRequest) |
 | `users/index.ts` | updateMyProfile · exportMyData · deleteMyAccount |
 | `maintenance/index.ts` | pruneExpiredRunDataNow · purgeDeletedGamesNow · **backfillPublicTaskCoordinatesNow** · pruneRunNow · pruneExpiredRunData (pubsub schedule, not a callable) |
-| `admin/index.ts` | **listPlatformUsers** (admin-only creator activity rollup: games created, runs launched, derived last-active, time on site, activation stage — see `apps/creator-web` `/admin/users`) · **recordEngagement** (NOT admin-only: every creator flushes their OWN engaged time; uid from the token, value clamped by `clampEngagementDelta`, stored in the server-only `userEngagement/{uid}`) |
+| `admin/index.ts` | **listPlatformUsers** (admin-only creator activity rollup: games created, runs launched, derived last-active, time on site, activation stage — see `apps/creator-web` `/admin/users`) · **recordEngagement** (NOT admin-only: every creator flushes their OWN engaged time; uid from the token, value clamped by `clampEngagementDelta`, stored in the server-only `userEngagement/{uid}`) · **setUserNote** (admin-only private note ABOUT a creator, server-only `userNotes/{uid}`; empty CLEARS the doc. Both collections are deleted by `deleteMyAccount` — they live OUTSIDE `users/{uid}` so the recursiveDelete does not reach them) |
 | `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · **sendTeamChatMessage** · acknowledgeAlert · **clearTeamOutOfBounds** · pushAnnouncement · deactivateAnnouncement · pushFlashMission · **reactToFeedItem** · **reportFeedItem** · **hideFeedItem** · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore ·
 **setRunTaskStatus** (pause/close/resume ONE task for ONE run) · listAuditLogs |
 | `routing/assignNextTask.ts` | (internal) `assignTask` · `buildRecommendations` · `computeSkillRatio` · `releaseTask` |

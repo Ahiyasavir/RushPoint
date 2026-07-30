@@ -121,6 +121,9 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // Admin roster read: expensive (2 Firestore reads per creator) and used by one person
   // clicking refresh, so it never needs a generous budget.
   listPlatformUsers: { max: 20, windowMs: MIN },
+  // One small doc write per save, driven by a human typing. Generous enough for rapid
+  // edits across several creators, tight enough to bound a stuck client.
+  setUserNote: { max: 30, windowMs: MIN },
   getRunHeatmap: { max: 30, windowMs: MIN }, // aggregates every location ping in a run
   getRunSurveyResults: { max: 30, windowMs: MIN },
   getRunTrackables: { max: 60, windowMs: MIN }, // poll

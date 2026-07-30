@@ -152,6 +152,21 @@ export const deleteMyAccount = loggedCallable('deleteMyAccount', async (data, co
   await db.recursiveDelete(db.doc(`wallets/${uid}`)).catch((e) => logBestEffort('wallet.recursiveDelete', { uid }, e));
   await db.recursiveDelete(db.doc(`users/${uid}`));
 
+  // 3b) Admin-side records ABOUT this person, which live OUTSIDE users/{uid} and so are
+  // not swept by the recursiveDelete above (changes: admin-engagement-and-outreach,
+  // admin-user-notes):
+  //   • userEngagement/{uid} — their measured time on site
+  //   • userNotes/{uid}      — free text an operator wrote about them
+  // Both are personal data and both must go, or erasure would leave a named record of
+  // someone who asked to be forgotten. They are separate top level collections precisely
+  // because clients must not be able to write them, which is exactly what makes it easy
+  // to forget them here — so they are deleted explicitly and named in the comment above
+  // the callable. Best effort: a missing document is the normal case.
+  await Promise.all([
+    db.doc(`userEngagement/${uid}`).delete().catch((e) => logBestEffort('userEngagement.delete', { uid }, e)),
+    db.doc(`userNotes/${uid}`).delete().catch((e) => logBestEffort('userNotes.delete', { uid }, e)),
+  ]);
+
   // 4) The Auth identity itself — done last so data is gone before the login is.
   await auth.deleteUser(uid).catch((e) => {
     // If the auth record is already gone, treat as success; otherwise surface it.

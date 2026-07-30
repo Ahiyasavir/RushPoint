@@ -220,6 +220,8 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 **זמן שימוש בקונסולת היוצרים.** אם יש לך חשבון יוצר, אנו מודדים כמה זמן הקונסולה פתוחה ופעילה מולך, ושומרים את הסכום המצטבר בלבד מול מזהה החשבון שלך. הדפדפן מדווח את הזמן רק כשהלשונית גלויה, כך שלשונית שנשכחה פתוחה אינה נספרת. איננו שומרים היסטוריית ביקורים, שעות כניסה או אילו מסכים פתחת, אלא מספר אחד. הנתון משמש אותנו כדי להבין אילו חלקים במוצר דורשים עבודה, והוא נמחק יחד עם החשבון שלך.
 
+**הערות פנימיות.** אם פנית אלינו או שדיברנו איתך, ייתכן שנשמור הערה פנימית קצרה מול החשבון שלך (למשל שנשלח אליך מייל ומה ענית), כדי שנוכל להמשיך את השיחה בלי לבקש ממך לחזור על עצמך. ההערות גלויות רק לצוות שלנו, אינן מוצגות לך באתר, ונמחקות יחד עם החשבון שלך. באפשרותך לבקש לראות או למחוק אותן.
+
 **כיצד לבטל את ההסכמה:** ניתן לחסום או למחוק עוגיות בהגדרות הדפדפן, להשתמש באמצעי ההגנה מפני מעקב של הדפדפן, או להתקין את תוסף ההסרה הרשמי של Google מהכתובת https://tools.google.com/dlpage/gaoptout — ביטול ההסכמה אינו פוגע ביכולת לשחק או להפעיל משחק.
 
 ## 10. מסרים שיווקיים ותקשורת
@@ -468,6 +470,8 @@ To exercise these rights: **privacy@rushpoint.app** · spendora.tracker@gmail.co
 We configure Google Analytics restrictively: **IP anonymization is enabled**, and **Google Signals and advertising personalization are disabled**. We do not use retargeting or advertising network pixels, we do not run ads, and we do not sell or share this data with advertisers.
 
 **Time spent in the creator console.** If you hold a creator account, we measure how long the console is actually open and in front of you, and store only the running total against your account id. Your browser reports time only while the tab is visible, so a tab left open and forgotten is not counted. We do not keep a visit history, session timestamps, or a record of which screens you opened, only that single number. We use it to understand which parts of the product need work, and it is deleted together with your account.
+
+**Internal notes.** If you contact us or we speak with you, we may keep a short internal note against your account (for example that we emailed you and what you replied) so we can continue the conversation without asking you to repeat yourself. Notes are visible only to our team, are not shown to you in the app, and are deleted together with your account. You can ask to see or delete them.
 
 **How to opt out:** you may block or delete cookies in your browser settings, use your browser's tracking-protection features, or install Google's official opt-out add-on from https://tools.google.com/dlpage/gaoptout — opting out does not affect your ability to play or to run a game.
 

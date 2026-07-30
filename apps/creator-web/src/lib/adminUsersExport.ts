@@ -6,7 +6,7 @@ import { engagementParts, type AdminUserSummary } from '@rushpoint/shared';
 
 const HEADERS = [
   'email', 'name', 'signed_up', 'last_active', 'games_created',
-  'runs_launched', 'players_reached', 'minutes_on_site', 'uid',
+  'runs_launched', 'players_reached', 'minutes_on_site', 'emailed', 'note', 'uid',
 ] as const;
 
 /**
@@ -35,7 +35,7 @@ export function buildAdminUsersCsv(users: AdminUserSummary[]): string {
     return [
       u.email, u.displayName, u.createdAt, u.lastActiveAt,
       u.gamesCreatedCount, u.runsLaunchedCount, u.participantsReached,
-      hours * 60 + minutes, u.uid,
+      hours * 60 + minutes, u.emailed ? 'yes' : 'no', u.note, u.uid,
     ].map(csvField).join(',');
   });
   return [HEADERS.join(','), ...rows].join('\n') + '\n';

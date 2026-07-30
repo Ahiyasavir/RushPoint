@@ -28,7 +28,7 @@ export {
   pruneExpiredRunData, pruneExpiredRunDataNow, pruneRunNow, purgeDeletedGamesNow,
   backfillPublicTaskCoordinatesNow,
 } from './maintenance/index';
-export { listPlatformUsers, recordEngagement } from './admin/index';
+export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index';
 export {
   getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
 } from './payments/index';

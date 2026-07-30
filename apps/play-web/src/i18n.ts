@@ -431,7 +431,7 @@ const HE = {
     noActiveStageTitle: 'אין כרגע שלב פעיל',
     noActiveStageBody: 'יכול להיות שהמארגן עדיין מכין את השלב הבא. נסו לרענן בעוד רגע.',
     actionFailed: 'הפעולה נכשלה. נסו שוב.',
-    locationNotReady: 'עדיין אין מיקום מדויק. חכו רגע שה־GPS יתייצב.',
+    locationNotReady: 'עדיין אין מיקום מדויק. חכו רגע עד שהGPS יתייצב.',
     lockedTaskLabel: 'נעולה',
     lockedCompleteFirst: ({ names }: { names: string }) => `קודם השלימו את: ${names}`,
     nextDropTitle: 'השלב הבא נפתח בקרוב',

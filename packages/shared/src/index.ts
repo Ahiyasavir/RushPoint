@@ -107,6 +107,8 @@ export * from './liveTaskStatus';
 export * from './galleryFilter';
 // Time on site accounting (change: admin-engagement-and-outreach).
 export * from './engagement';
+// Operator notes on a creator (change: admin-user-notes).
+export * from './adminNotes';
 // Admin-only creator activity rollup — pure aggregation, no Firestore/Auth I/O
 // (change: admin-user-activity-dashboard).
 export * from './adminUserActivity';

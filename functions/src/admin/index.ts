@@ -15,7 +15,7 @@ import { loggedCallable } from '../obs/log';
 import { db, auth } from '../firebase';
 import { assertAdmin, requireAuth } from '../auth';
 import { enforceRateLimit } from '../rateLimitStore';
-import { clampEngagementDelta } from '@rushpoint/shared';
+import { clampEngagementDelta, normalizeUserNote } from '@rushpoint/shared';
 import { isCreatorAccount, pageVerdict } from './authRoster';
 import {
   buildAdminUserSummary,
@@ -36,6 +36,11 @@ const MAX_LIMIT = 300;
 // This collection matches no rule, so the default `match /{document=**} { allow read,
 // write: if false }` denies every client; only the Admin SDK reaches it.
 const ENGAGEMENT_COL = 'userEngagement';
+// Operator notes (change: admin-user-notes). Same reasoning as above: a top level,
+// server only collection that matches no rule, so the default deny covers it. Notes are
+// written BY an admin ABOUT a creator and must never be readable by that creator, which
+// rules out anything under `users/{uid}` (owner readable).
+const NOTES_COL = 'userNotes';
 // Hard bound on Auth pages per invocation. RushPoint mints ONE ANONYMOUS ACCOUNT PER
 // PLAY-WEB SESSION (uid == teamId), so the Auth pool is dominated by participants and
 // grows with every run ever played, while the creators we actually want stay few. An
@@ -140,7 +145,7 @@ export const listPlatformUsers = loggedCallable('listPlatformUsers', async (data
 
   const users: AdminUserSummary[] = await Promise.all(
     kept.map(async (authUser) => {
-      const [games, runs, engagement] = await Promise.all([
+      const [games, runs, engagement, noteDoc] = await Promise.all([
         gamesFor(authUser.uid),
         runsFor(authUser.uid),
         // Best effort: a missing or unreadable engagement document must degrade to
@@ -148,11 +153,17 @@ export const listPlatformUsers = loggedCallable('listPlatformUsers', async (data
         db.doc(`${ENGAGEMENT_COL}/${authUser.uid}`).get()
           .then((s) => (s.data() as { totalMs?: number } | undefined)?.totalMs ?? 0)
           .catch(() => 0),
+        db.doc(`${NOTES_COL}/${authUser.uid}`).get()
+          .then((s) => s.data() as
+            { note?: string; updatedAt?: string; emailed?: boolean; emailedAt?: string } | undefined)
+          .catch(() => undefined),
       ]);
       // Fill in real game titles for runs whose game still exists (runsFor only has gameId).
       const titleByGameId = new Map(games.map((g) => [g.id, g.title]));
       const runsWithTitles = runs.map((r) => ({ ...r, gameTitle: titleByGameId.get(r.gameId) ?? r.gameId }));
-      return buildAdminUserSummary(authUser, games, runsWithTitles, engagement);
+      return buildAdminUserSummary(authUser, games, runsWithTitles, engagement,
+        noteDoc?.note ?? '', noteDoc?.updatedAt ?? null,
+        noteDoc?.emailed === true, noteDoc?.emailedAt ?? null);
     }),
   );
 
@@ -191,4 +202,68 @@ export const recordEngagement = loggedCallable('recordEngagement', async (data, 
   }, { merge: true });
 
   return { ok: true, applied: deltaMs };
+});
+
+
+// ─── setUserNote (change: admin-user-notes) ─────────────────────────────────────
+// Writes the private operator note for ONE creator. Admin only, same gate as the roster
+// itself: the note is written BY an admin ABOUT someone else, so it is not the subject's
+// own data to edit and must not be reachable by them.
+//
+// An EMPTY note deletes the document rather than storing a blank one, so clearing a note
+// leaves no residual record of a person an operator decided not to keep notes about.
+//
+// Not in PRIVILEGED_CALLABLES: that list is for irreversible or override actions
+// (destroying a game, overriding a score). Editing a note is neither, and the same
+// reasoning already applies to listPlatformUsers.
+export const setUserNote = loggedCallable('setUserNote', async (data, context) => {
+  const adminUid = assertAdmin(context);
+  await enforceRateLimit(adminUid, 'setUserNote');
+
+  const { uid, note, emailed } = (data ?? {}) as
+    { uid?: unknown; note?: unknown; emailed?: unknown };
+  if (typeof uid !== 'string' || !uid.trim()) {
+    throw new functions.https.HttpsError('invalid-argument', 'uid required');
+  }
+
+  const clean = normalizeUserNote(note);
+  const ref = db.doc(`${NOTES_COL}/${uid}`);
+  const now = new Date().toISOString();
+
+  // `emailed` is OPTIONAL and tri-state on the wire: absent means "leave it alone", so a
+  // note save never silently clears a tick and a tick never wipes the note text. Only an
+  // explicit boolean changes it.
+  const touchesEmailed = typeof emailed === 'boolean';
+
+  // Nothing left to keep: no note text AND either no tick or an explicit untick. Delete
+  // the whole document rather than leaving an empty husk, so clearing really clears.
+  if (!clean && (!touchesEmailed ? true : emailed === false)) {
+    const prev = await ref.get().catch(() => null);
+    const prevEmailed = (prev?.data() as { emailed?: boolean } | undefined)?.emailed === true;
+    // Guard the "note cleared but the tick should stay" case: only delete when the tick
+    // is not set, or is being explicitly turned off.
+    if (!prevEmailed || emailed === false) {
+      await ref.delete().catch(() => { /* already absent — clearing an absent note is a no-op */ });
+      return { ok: true, note: '', noteUpdatedAt: null, emailed: false, emailedAt: null, cleared: true };
+    }
+  }
+
+  // `updatedBy` so a second admin later can tell whose note this is. Not surfaced in the
+  // UI yet; recorded now because it cannot be reconstructed afterwards.
+  const patch: Record<string, unknown> = { updatedBy: adminUid };
+  if (clean) { patch.note = clean; patch.updatedAt = now; }
+  else { patch.note = ''; patch.updatedAt = null; }
+  if (touchesEmailed) { patch.emailed = emailed; patch.emailedAt = emailed ? now : null; }
+
+  await ref.set(patch, { merge: true });
+  const after = (await ref.get()).data() as
+    { note?: string; updatedAt?: string; emailed?: boolean; emailedAt?: string } | undefined;
+  return {
+    ok: true,
+    note: after?.note ?? '',
+    noteUpdatedAt: after?.updatedAt ?? null,
+    emailed: after?.emailed === true,
+    emailedAt: after?.emailedAt ?? null,
+    cleared: false,
+  };
 });

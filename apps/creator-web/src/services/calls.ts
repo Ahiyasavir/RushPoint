@@ -270,3 +270,15 @@ export const recordEngagement = callable<
   { deltaMs: number },
   { ok: boolean; applied: number }
 >('recordEngagement');
+
+// Private operator note about one creator (change: admin-user-notes). Admin only.
+// An empty `note` CLEARS it (the server deletes the document rather than storing a blank).
+// `emailed` is OPTIONAL on purpose: omitting it leaves the tick untouched, so saving a
+// note never clears the tick and ticking never wipes the note.
+export const setUserNote = callable<
+  { uid: string; note: string; emailed?: boolean },
+  {
+    ok: boolean; note: string; noteUpdatedAt: string | null;
+    emailed: boolean; emailedAt: string | null; cleared: boolean;
+  }
+>('setUserNote');

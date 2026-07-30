@@ -14,6 +14,8 @@ const user = (over: Partial<AdminUserSummary> = {}): AdminUserSummary => ({
   uid: 'u1', email: 'a@b.com', displayName: null, createdAt: null, lastSignInAt: null,
   gamesCreatedCount: 0, games: [], runsLaunchedCount: 0, runs: [],
   lastActiveAt: null, engagementMs: 0, participantsReached: 0,
+  note: '', noteUpdatedAt: null,
+  emailed: false, emailedAt: null,
   ...over,
 });
 

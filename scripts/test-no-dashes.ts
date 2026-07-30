@@ -39,7 +39,11 @@ function check(label: string, cond: boolean, detail = ''): void {
 }
 
 // Every dash/hyphen EXCEPT the true minus sign U+2212.
-const BANNED_DASH = /[-‐‑‒–—―]/;
+// U+05BE HEBREW PUNCTUATION MAQAF is banned too. The rule always SAID so
+// (CLAUDE.md: "not a Hebrew prefix maqaf"), but it was missing from this class, so
+// four maqafs sat in shipped Hebrew copy while the gate stayed green. It renders as a
+// dash to a reader, which is the whole point of the standard.
+const BANNED_DASH = /[-‐‑‒–—―־]/;
 
 // Render a function-valued i18n entry to its string. Entries take either
 // positional primitives or a single options object; try both shapes and take the
