@@ -10,7 +10,7 @@
 // Pure: no React, no Firebase.
 import type { LiveRunSummary } from '@rushpoint/shared';
 
-export type NavDestinationId = 'myGames' | 'gallery' | 'wallet' | 'settings';
+export type NavDestinationId = 'myGames' | 'gallery' | 'wallet' | 'settings' | 'admin';
 
 export interface NavDestination {
   id: NavDestinationId;
@@ -27,13 +27,26 @@ export interface NavDestination {
  * registered in App.tsx — the bar's "+N more" navigates there and bookmarks must
  * keep resolving.
  */
-export function buildNavDestinations({ paymentsEnabled }: { paymentsEnabled: boolean }): NavDestination[] {
+export function buildNavDestinations(
+  { paymentsEnabled, isAdmin = false }: { paymentsEnabled: boolean; isAdmin?: boolean },
+): NavDestination[] {
   return [
     { id: 'myGames', to: '/', end: true },
     { id: 'gallery', to: '/gallery' },
     // Free mode hides the wallet surface entirely, matching the hidden route.
     ...(paymentsEnabled ? [{ id: 'wallet' as const, to: '/wallet' }] : []),
     { id: 'settings', to: '/settings' },
+    // Platform admin dashboard (change: admin-user-activity-dashboard). LAST, so it never
+    // displaces an everyday destination, and only for an admin.
+    //
+    // `isAdmin` DEFAULTS TO FALSE on purpose: a caller that forgets to pass it must not
+    // leak an admin entry into every creator's menu. Fail closed.
+    //
+    // This is cosmetic only. Hiding the link is not what protects the page — the route
+    // stays registered for anyone who types the URL, the page re-checks the claim, and
+    // `listPlatformUsers` re-checks it server side. The menu just stops showing a door
+    // that would not open.
+    ...(isAdmin ? [{ id: 'admin' as const, to: '/admin/users' }] : []),
   ];
 }
 

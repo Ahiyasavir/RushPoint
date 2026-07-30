@@ -25,6 +25,34 @@ describe('creatorNav — primary navigation destinations', () => {
     }
   });
 
+  it('hides the admin dashboard from an ordinary creator', () => {
+    for (const paymentsEnabled of [true, false]) {
+      const ids = buildNavDestinations({ paymentsEnabled, isAdmin: false }).map((d) => d.id);
+      expect(ids).not.toContain('admin');
+    }
+  });
+
+  it('defaults to hiding the admin destination when adminness is not stated', () => {
+    // Fail CLOSED. A caller that forgets to pass the flag must not leak an admin entry
+    // into every creator's menu; the omission has to read as "not an admin".
+    expect(buildNavDestinations({ paymentsEnabled: true }).map((d) => d.id)).not.toContain('admin');
+  });
+
+  it('offers the admin dashboard to an admin, pointing at a REGISTERED route', () => {
+    const dests = buildNavDestinations({ paymentsEnabled: true, isAdmin: true });
+    const adminDest = dests.find((d) => d.id === 'admin');
+    expect(adminDest).toBeDefined();
+    expect(adminDest!.to).toBe('/admin/users');
+    // The whole point of reading App.tsx above: a menu entry to a route that does not
+    // exist is a dead link shipped to the one person who would use it.
+    expect(REGISTERED_ROUTES).toContain(adminDest!.to);
+  });
+
+  it('puts the admin entry last, so it never displaces the everyday destinations', () => {
+    const dests = buildNavDestinations({ paymentsEnabled: true, isAdmin: true });
+    expect(dests[dests.length - 1].id).toBe('admin');
+  });
+
   it('gates the wallet destination on payments being enabled', () => {
     expect(buildNavDestinations({ paymentsEnabled: false }).map((d) => d.id)).not.toContain('wallet');
     expect(buildNavDestinations({ paymentsEnabled: true }).map((d) => d.id)).toContain('wallet');

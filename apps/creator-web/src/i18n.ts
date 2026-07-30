@@ -9,6 +9,7 @@ const HE = {
     gallery:  'גלריה',
     wallet:   'ארנק',
     settings: 'הגדרות',
+    admin:    'משתמשי הפלטפורמה',
   },
   liveRuns: {
     title: 'ריצות חיות',
@@ -1730,6 +1731,7 @@ const EN: typeof HE = {
     gallery:  'Gallery',
     wallet:   'Wallet',
     settings: 'Settings',
+    admin:    'Platform users',
   },
   liveRuns: {
     title: 'Live Runs',

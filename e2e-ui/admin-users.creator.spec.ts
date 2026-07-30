@@ -36,6 +36,7 @@ const PASSWORD = 'test1234';
 const TITLE = 'משתמשי הפלטפורמה';          // adminUsers.title
 const DENIED = 'הדף הזה מוגבל למנהלי הפלטפורמה'; // adminUsers.deniedTitle
 const COL_GAMES = 'משחקים שנוצרו';           // adminUsers.colGames
+const NAV_ADMIN = 'משתמשי הפלטפורמה';        // nav.admin (same words as the page title)
 
 async function post(url: string, body: unknown, token?: string) {
   const res = await fetch(url, {
@@ -166,6 +167,38 @@ test.describe('Admin platform-users dashboard', () => {
       document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, 'no horizontal overflow on a phone viewport').toBeLessThanOrEqual(1);
 
+    expect(pageErrors, 'no uncaught render errors').toEqual([]);
+  });
+
+  test('the admin dashboard link is in the menu for an admin and absent for everyone else', async ({ page, pageErrors }) => {
+    // Cosmetic only — the page and the callable both re-check the claim — but a menu that
+    // offers a door which will not open is its own bug, and so is a menu that hides the
+    // one destination this account exists to reach.
+    await page.setViewportSize({ width: 375, height: 812 });
+
+    await signInThroughUi(page, PLAIN_EMAIL);
+    await page.getByRole('button', { name: /תפריט|☰/ }).click().catch(async () => {
+      await page.locator('header button').first().click();
+    });
+    await page.waitForTimeout(500);
+    await expect(page.getByRole('link', { name: NAV_ADMIN })).toHaveCount(0);
+    expect(pageErrors, 'no uncaught render errors').toEqual([]);
+
+    // Same viewport, same drawer, different account: now the entry must be there and must
+    // actually navigate.
+    await page.goto('/');
+    await page.getByRole('button', { name: 'יציאה' }).click();
+    await page.waitForTimeout(1500);
+    await signInThroughUi(page, ADMIN_EMAIL);
+    await page.getByRole('button', { name: /תפריט|☰/ }).click().catch(async () => {
+      await page.locator('header button').first().click();
+    });
+    await page.waitForTimeout(800);
+    const link = page.getByRole('link', { name: NAV_ADMIN });
+    await expect(link).toHaveCount(1);
+    await link.click();
+    await expect(page).toHaveURL(/\/admin\/users$/);
+    await assertNoCrash(page);
     expect(pageErrors, 'no uncaught render errors').toEqual([]);
   });
 });
