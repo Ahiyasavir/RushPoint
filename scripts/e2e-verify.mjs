@@ -1157,6 +1157,14 @@ async function main() {
     state?.team?.status);
 
   // ── 10. Finalize the run ────────────────────────────────────────────────────
+  // The summary email is scoped to runs owned by an IDENTIFIABLE creator — one
+  // with an email on their profile (change: run-email-scope-and-digest). That rule
+  // is what excludes simulations, which (like this suite) create their creator
+  // with signInAnonymously. Stamp an email here so the `summaryEmailSent` claim
+  // asserted below still exercises the POSITIVE path; without it that assertion
+  // would silently degrade into "the email correctly didn't send".
+  await adminSdk.firestore().doc(`users/${creatorCred.user.uid}`).set(
+    { email: 'e2e-lifecycle-creator@example.test' }, { merge: true });
   const fin = await creator.call('finalizeRun', { gameId, runId });
   check('finalizeRun returns rankings', Array.isArray(fin?.rankings) && fin.rankings.length === 1);
   check('our team is ranked #1', fin?.rankings?.[0]?.teamId === playerCred.user.uid, JSON.stringify(fin?.rankings?.[0]));
