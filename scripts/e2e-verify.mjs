@@ -6753,8 +6753,8 @@ async function main() {
     // ── admin-user-activity-dashboard: the ADMIN side of listPlatformUsers ─────
     // The denial matrix above proves owner/participant are rejected; this proves
     // the admin token gets back an honest rollup for the creator this scenario
-    // just drove real activity through (games created above via createGame, and
-    // `ar`/`ar2` launched via launchRun).
+    // just drove real activity through (2 games created above via createGame,
+    // and `ar`/`ar2` launched via launchRun).
     //
     // The suite's `creator` identity is signed in ANONYMOUSLY (a test-harness
     // shortcut — real creator-web never offers anonymous sign-in, only email or
@@ -8964,8 +8964,11 @@ async function main() {
     // the path that would have delivered. That makes this a real assertion about
     // eligibility without a single network call.
     const OWNER = creatorCred.user.uid;
+    // `adminDb` is a local of the test-drive section, not in scope here — take our
+    // own handle off the module-level SDK.
+    const aDb = adminSdk.firestore();
     const claimOf = async (gid, rid) =>
-      (await adminDb.doc(`users/${OWNER}/games/${gid}/runs/${rid}`).get()).data()?.summaryEmailSent;
+      (await aDb.doc(`users/${OWNER}/games/${gid}/runs/${rid}`).get()).data()?.summaryEmailSent;
 
     const mkGame = async (title, extra = {}) => {
       const { gameId } = await creator.call('createGame', { title, mode: 'individual' });
@@ -8979,10 +8982,14 @@ async function main() {
       return gameId;
     };
 
-    // (a) NEGATIVE — anonymous owner. The e2e creator is signInAnonymously, so its
-    // users/{uid} doc has no email: the synthetic-run rule must suppress the email
-    // even though the run is otherwise a perfectly normal organizer run. This is
-    // the rule that keeps a simulation pointed at production from mailing.
+    // (a) NEGATIVE — unidentifiable owner. The synthetic-run rule must suppress the
+    // email even though the run is otherwise a perfectly normal organizer run. This
+    // is the rule that keeps a simulation pointed at production from mailing.
+    // The creator is shared across scenarios and the core lifecycle stamps an email
+    // on it, so clear that first — otherwise this case silently stops being
+    // synthetic and passes for the wrong reason.
+    await aDb.doc(`users/${OWNER}`).set(
+      { email: adminSdk.firestore.FieldValue.delete() }, { merge: true });
     const gSyn = await mkGame('Email Scope Synthetic');
     const { runId: rSyn } = await creator.call('launchRun', { gameId: gSyn });
     await creator.call('finalizeRun', { gameId: gSyn, runId: rSyn });
@@ -8991,7 +8998,7 @@ async function main() {
 
     // Make the creator identifiable for the remaining cases. Written with the
     // Admin SDK because users/{uid} is server-write-only.
-    await adminDb.doc(`users/${OWNER}`).set(
+    await aDb.doc(`users/${OWNER}`).set(
       { email: 'e2e-creator@example.test', displayName: 'E2E Creator' }, { merge: true });
 
     // (b) POSITIVE — real organizer run, identifiable owner ⇒ the claim is set.
@@ -9016,14 +9023,14 @@ async function main() {
     await signInAnonymously(demoPlayer.auth);
     const ip = await demoPlayer.call('startInstantPlay', { gameId: gDemo, displayName: 'Demo Player' });
     if (ip?.runId) {
-      const demoRun = (await adminDb.doc(`users/${OWNER}/games/${gDemo}/runs/${ip.runId}`).get()).data();
+      const demoRun = (await aDb.doc(`users/${OWNER}/games/${gDemo}/runs/${ip.runId}`).get()).data();
       check('startInstantPlay produced a selfGuided run', demoRun?.selfGuided === true,
         JSON.stringify(demoRun?.selfGuided));
       // MUST finalize before asserting, or the check is vacuous: an unfinalized run
       // has no claim regardless of eligibility, so it would "pass" for the wrong
       // reason and keep passing if the demo exclusion were later removed.
       await creator.call('finalizeRun', { gameId: gDemo, runId: ip.runId });
-      const demoFinal = (await adminDb.doc(`users/${OWNER}/games/${gDemo}/runs/${ip.runId}`).get()).data();
+      const demoFinal = (await aDb.doc(`users/${OWNER}/games/${gDemo}/runs/${ip.runId}`).get()).data();
       check('the demo run really did finalize (so the next check is not vacuous)',
         demoFinal?.status === 'finished', demoFinal?.status);
       check('a FINALIZED self-guided demo run does NOT claim the email',
