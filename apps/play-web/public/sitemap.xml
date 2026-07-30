@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The stable public URLs only. Per game teasers (?game=<id>) and public leaderboards
+     (?board=<code>) are deliberately absent: they are generated per event and would go
+     stale in the index faster than they could be crawled. They stay indexable via
+     robots.txt, they are just not advertised here. Must exist as a real file or
+     Firebase's SPA rewrite serves index.html in its place. -->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://rush-point.com/</loc>
+    <lastmod>2026-07-30</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://rush-point.com/privacy</loc>
+    <lastmod>2026-07-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://rush-point.com/terms</loc>
+    <lastmod>2026-07-30</lastmod>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>

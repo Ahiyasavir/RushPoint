@@ -167,5 +167,79 @@ for (const dir of SCAN_DIRS) {
 check('B · no hyphen or dash in hardcoded UI strings', sourceOffenders.length === 0,
   sourceOffenders.slice(0, 20).join(' | '));
 
+// ── PART C — SHIPPED PAGE METADATA (index.html + manifest.webmanifest) ────────
+// The copy with the widest reach was the ONLY copy nobody checked. PART A scans the
+// t.* dictionaries and PART B scans component source, but a <title> and a
+// <meta name="description"> live in index.html, which is in neither — so an em dash
+// sat in the Google result for both sites ("RushPoint — build your own field game",
+// "Join the game — RushPoint") while `npm test` stayed green. The manifest's `name`
+// and `description` are the same class of miss: they surface on the installed-app
+// icon and the Android install prompt.
+//
+// Only human-facing VALUES are scanned. A URL, a hash, a mime type and an asset path
+// legitimately contain hyphens (`rush-point.com`, `image/svg+xml`, `/icon-192.png`),
+// so this checks the specific metadata fields that render as prose to a person, never
+// whole attributes or whole files.
+const HTML_TEXT_META = new Set([
+  'description', 'twitter:title', 'twitter:description', 'twitter:image:alt',
+  'og:title', 'og:description', 'og:image:alt', 'og:site_name', 'apple-mobile-web-app-title',
+]);
+const MANIFEST_TEXT_KEYS = new Set(['name', 'short_name', 'description']);
+
+const metaOffenders: string[] = [];
+
+// HTML comments are stripped before scanning. Two reasons, and the first one bit
+// immediately: these files carry long explanatory comments that MENTION the tags they
+// describe (`a <title> lives in neither`), so a naive non-greedy match ran from the
+// comment's `<title>` to the real `</title>` and reported the comment as the title. And
+// substantively, a comment is not shipped copy — a hyphen in prose explaining the rule
+// must not fail the rule, nor should a commented-out <meta> tag count as live metadata.
+const stripComments = (s: string) => s.replace(/<!--[\s\S]*?-->/g, '');
+
+for (const app of ['creator-web', 'play-web']) {
+  // index.html — <title> plus the prose <meta> fields listed above.
+  const htmlRel = `apps/${app}/index.html`;
+  const html = stripComments(readFileSync(join(ROOT, htmlRel), 'utf8'));
+
+  const title = /<title>([\s\S]*?)<\/title>/.exec(html);
+  if (title && BANNED_DASH.test(title[1])) {
+    metaOffenders.push(`${htmlRel} <title> → "${title[1].trim()}"`);
+  }
+
+  const metaRe = /<meta\s+(?:name|property)=["']([^"']+)["']\s+content=["']([^"']*)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = metaRe.exec(html))) {
+    const [, key, value] = m;
+    if (!HTML_TEXT_META.has(key)) continue;
+    if (BANNED_DASH.test(value)) metaOffenders.push(`${htmlRel} ${key} → "${value.trim()}"`);
+  }
+
+  // manifest.webmanifest — the installed-app name/description.
+  const manRel = `apps/${app}/public/manifest.webmanifest`;
+  const manifest = JSON.parse(readFileSync(join(ROOT, manRel), 'utf8')) as Record<string, unknown>;
+  for (const key of MANIFEST_TEXT_KEYS) {
+    const v = manifest[key];
+    if (typeof v === 'string' && BANNED_DASH.test(v)) {
+      metaOffenders.push(`${manRel} ${key} → "${v}"`);
+    }
+  }
+}
+
+check('C · no hyphen or dash in shipped page metadata (title/description/OG/manifest)',
+  metaOffenders.length === 0, metaOffenders.join(' | '));
+
+// The gate is only worth as much as its reach: assert it actually FOUND the fields it
+// claims to police, so a future markup reshuffle that makes every regex miss shows up
+// as a failure instead of a silent pass over zero fields.
+let scanned = 0;
+for (const app of ['creator-web', 'play-web']) {
+  const html = stripComments(readFileSync(join(ROOT, `apps/${app}/index.html`), 'utf8'));
+  if (/<title>[\s\S]*?<\/title>/.test(html)) scanned++;
+  const metaRe = /<meta\s+(?:name|property)=["']([^"']+)["']\s+content=["']([^"']*)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = metaRe.exec(html))) if (HTML_TEXT_META.has(m[1])) scanned++;
+}
+check('C · the metadata scan actually reached the fields it polices', scanned >= 14, `${scanned} field(s)`);
+
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- lang/dir describe the DEFAULT UI, which is Hebrew (LanguageContext overwrites both
+     at runtime once a language is chosen). They read "en"/ltr before this, which was
+     wrong on first paint for every visitor and told crawlers the wrong content
+     language. -->
+<html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
     <!-- Canonical host redirect (change: canonical-host-redirect).
@@ -72,6 +76,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Favicons. `/favicon.ico` is listed FIRST and must exist as a real file:
+         crawlers (Google included) request that exact path by convention before
+         reading any <link>, and Firebase's `"source": "**"` SPA rewrite was answering
+         it with index.html — a text/html body where an image was expected, which reads
+         as "this site has no favicon" and is why the console showed a blank globe in
+         search results while the assets themselves were served fine. A static file in
+         public/ wins over the rewrite, so adding it is the whole fix.
+         The .ico carries 16/32/48 (48 is Google's documented minimum). -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
@@ -79,23 +92,61 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
-    <title>RushPoint — build your own field game</title>
-    <meta name="description" content="Design a real-world scavenger-hunt / amazing-race game, launch a live run, and score teams automatically. No code." />
+    <!-- NO HYPHEN OR DASH may appear in any of the copy below. This is the product's
+         UI text standard (change: ui-no-dashes), and page metadata is the copy with
+         the WIDEST reach: it is what Google prints. It shipped with em dashes anyway,
+         because the standard's gate only scanned the t.* dictionaries and component
+         source, and a <title> lives in neither. PART C of scripts/test-no-dashes.ts now
+         scans this file plus the manifest, so a dash here fails `npm test`. -->
+    <title>RushPoint: build your own real world field game</title>
+    <meta name="description" content="Design a scavenger hunt or amazing race anywhere in your city, launch a live run, and let RushPoint route every team and score them automatically. No code required." />
+    <!-- Canonical URL. Firebase serves this console at its *.web.app and
+         *.firebaseapp.com defaults too; the inline redirect above sends humans to the
+         custom domain, but a crawler that reaches a default host needs this tag to
+         attribute the page (and its ranking signals) to one address instead of
+         splitting them across three. -->
+    <link rel="canonical" href="https://creator.rush-point.com/" />
     <!-- Rich link previews (Open Graph / Twitter) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RushPoint" />
     <meta property="og:url" content="https://creator.rush-point.com/" />
-    <meta property="og:title" content="RushPoint — build your own field game" />
-    <meta property="og:description" content="Design a real-world team field game, launch a live run, score teams automatically. No code." />
+    <meta property="og:locale" content="he_IL" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:title" content="RushPoint: build your own real world field game" />
+    <meta property="og:description" content="Build a real world team game, share one join code, and watch the live leaderboard score itself." />
     <meta property="og:image" content="https://creator.rush-point.com/og.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="RushPoint — build your own field game" />
+    <meta property="og:image:alt" content="The RushPoint field game builder" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="RushPoint — build your own field game" />
-    <meta name="twitter:description" content="Design a real-world team field game, launch a live run, score teams automatically. No code." />
+    <meta name="twitter:title" content="RushPoint: build your own real world field game" />
+    <meta name="twitter:description" content="Build a real world team game, share one join code, and watch the live leaderboard score itself." />
     <meta name="twitter:image" content="https://creator.rush-point.com/og.jpg" />
+    <!-- Structured data. Tells Google WHAT this is (a web application, free to start,
+         for organising real world team games) rather than leaving it to infer from prose
+         it shares a brand name with an unrelated Roblox shooter. `inLanguage` is Hebrew
+         because that is the console's default UI. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "RushPoint",
+        "url": "https://creator.rush-point.com/",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Any",
+        "inLanguage": ["he", "en"],
+        "description": "Build and run real world team field games: scavenger hunts, amazing race style routes and geolocated missions, scored automatically with a live leaderboard.",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "ILS" },
+        "featureList": [
+          "Visual game builder with staged missions",
+          "Live run console with automatic scoring",
+          "Join by access code, no install for players",
+          "Geolocated tasks, photo and quiz missions",
+          "Live leaderboard and shareable results"
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

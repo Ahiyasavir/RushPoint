@@ -1,7 +1,7 @@
 {
-  "name": "RushPoint — Build a Field Game",
+  "name": "RushPoint Field Game Builder",
   "short_name": "RushPoint",
-  "description": "Design real-world field games, launch live runs, and score teams automatically. No code.",
+  "description": "Design real world field games, launch live runs, and score teams automatically. No code.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

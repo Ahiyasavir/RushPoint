@@ -1,0 +1,28 @@
+# RushPoint creator console — crawl rules.
+#
+# This file has to EXIST as a real file: Firebase Hosting's `"source": "**"` SPA rewrite
+# answers any missing path with index.html, so /robots.txt was returning a text/html web
+# page. A crawler asking for crawl rules and receiving HTML gets no rules at all.
+#
+# Only the logged out landing page and the two legal documents are worth crawling. Every
+# other route is behind authentication, so a crawler reaches nothing but the sign in
+# screen there, and indexing it would put duplicate empty pages in the index.
+
+User-agent: *
+Allow: /$
+Allow: /privacy
+Allow: /terms
+
+# Authenticated surfaces: no crawlable content, and /admin is a platform admin tool that
+# must never appear in a search result. (It is also server gated on an admin custom
+# claim, so this is defence in depth, not the control.)
+Disallow: /admin
+Disallow: /build
+Disallow: /run
+Disallow: /live
+Disallow: /settings
+Disallow: /trash
+Disallow: /wallet
+Disallow: /gallery
+
+Sitemap: https://creator.rush-point.com/sitemap.xml
