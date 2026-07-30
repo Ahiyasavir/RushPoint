@@ -246,9 +246,21 @@ Pure-logic lane first (RED before any implementation), then e2e:
    run triggers and so cannot distinguish inline from triggered.
 3. **`scripts/e2e-verify.mjs`**: extend the existing lifecycle + test-drive scenarios to assert the
    run doc's `summaryEmailSent` claim is set after finalizing a **normal** run, and **not** set
-   after finalizing a `testDrive:true` run or a `startInstantPlay` (`selfGuided`) run. With no
-   `RESEND_API_KEY` in the emulator env the claim plus the log breadcrumb are the observable — no
-   network call is made, which is itself the assertion that tests never email.
+   after finalizing a `testDrive:true` run or a `startInstantPlay` (`selfGuided`) run. The claim on
+   the run doc plus the log breadcrumb are the observable.
+
+   ⚠️ **Corrected after running it: the emulator DOES have a `RESEND_API_KEY`.** `functions/.env`
+   carries one (currently stale — the provider returns 401), and the functions emulator loads that
+   file, so an eligible run in e2e really does open a socket to Resend. The earlier claim here that
+   "no network call is made, which is itself the assertion that tests never email" was simply false.
+   Today it fails closed only because the key is invalid; a VALID key in `functions/.env` would make
+   the test suite send real email. Worth fixing separately — either drop `RESEND_API_KEY` from
+   `functions/.env` or have the emulator env set `RUN_SUMMARY_EMAIL_ENABLED=false`.
+
+   Second correction: the e2e creator is shared across scenarios, and the core lifecycle scenario now
+   stamps an email onto it (so the positive path stays covered). Any later scenario asserting the
+   *unidentifiable owner* case must clear that field first, or the case stops being synthetic and
+   passes for the wrong reason. It did exactly that on the first run.
 4. **Guard the build wiring**: assert `functions/package.json`'s `build:cron` emits both
    `prune-cron.js` and `digest-cron.js` (a pure string assertion in the new test file), so the
    digest timer can never point at a bundle the build doesn't produce.
