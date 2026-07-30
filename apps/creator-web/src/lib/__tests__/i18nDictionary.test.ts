@@ -37,6 +37,9 @@ const HEBREW = /[֐-׿]/;
 // Kept in sync with scripts/check-i18n.ts (the authoritative gate).
 const LATIN_WHITELIST = [
   'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
+  // A file format acronym, same class as QR/GPS: Hebrew speakers read and write "CSV",
+  // and translating it would make the export button less clear, not more.
+  'CSV',
   'English', 'rtl', 'ltr', '₪',
 ];
 // Hebrew allowed inside English copy: a language's own name in the toggle.

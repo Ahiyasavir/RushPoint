@@ -38,6 +38,9 @@ export const DIGIT_CODE_RE = /[A-Za-z]*\d[A-Za-z\d]*/g;
  */
 export const LATIN_WHITELIST = [
   'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
+  // A file format acronym, same class as QR/GPS above: Hebrew speakers read and write
+  // "CSV", and translating it would make the export button LESS clear, not more.
+  'CSV',
   'English', 'rtl', 'ltr', '₪',
 ];
 

@@ -112,6 +112,15 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // Values follow the existing split: polls generous, doc-writing actions tight.
   listLiveRuns: { max: 60, windowMs: MIN }, // dashboard poll
   getMyProfile: { max: 60, windowMs: MIN },
+  // Time on site flush (change: admin-engagement-and-outreach). The client flushes on a
+  // multi-minute cadence and on tab hide, so a legitimate session sends only a handful an
+  // hour; 20/min is far above that and still bounds a client stuck in a write loop. Each
+  // call is one small increment, and the VALUE is clamped separately
+  // (clampEngagementDelta), so the budget bounds cost while the clamp bounds the number.
+  recordEngagement: { max: 20, windowMs: MIN },
+  // Admin roster read: expensive (2 Firestore reads per creator) and used by one person
+  // clicking refresh, so it never needs a generous budget.
+  listPlatformUsers: { max: 20, windowMs: MIN },
   getRunHeatmap: { max: 30, windowMs: MIN }, // aggregates every location ping in a run
   getRunSurveyResults: { max: 30, windowMs: MIN },
   getRunTrackables: { max: 60, windowMs: MIN }, // poll

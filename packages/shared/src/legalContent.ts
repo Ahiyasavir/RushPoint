@@ -218,6 +218,8 @@ RushPoint ("החברה", "אנחנו", "אנו") מפעילה פלטפורמת S
 
 אנו מגדירים את Google Analytics באופן מצומצם: **אנונימיזציה של כתובת ה-IP מופעלת**, ו**אותות Google Signals והתאמה אישית של פרסום מושבתים**. אין שימוש בריטרגטינג או בפיקסלים של רשתות פרסום, איננו מציגים פרסומות, ואיננו מוכרים או משתפים מידע זה עם מפרסמים.
 
+**זמן שימוש בקונסולת היוצרים.** אם יש לך חשבון יוצר, אנו מודדים כמה זמן הקונסולה פתוחה ופעילה מולך, ושומרים את הסכום המצטבר בלבד מול מזהה החשבון שלך. הדפדפן מדווח את הזמן רק כשהלשונית גלויה, כך שלשונית שנשכחה פתוחה אינה נספרת. איננו שומרים היסטוריית ביקורים, שעות כניסה או אילו מסכים פתחת, אלא מספר אחד. הנתון משמש אותנו כדי להבין אילו חלקים במוצר דורשים עבודה, והוא נמחק יחד עם החשבון שלך.
+
 **כיצד לבטל את ההסכמה:** ניתן לחסום או למחוק עוגיות בהגדרות הדפדפן, להשתמש באמצעי ההגנה מפני מעקב של הדפדפן, או להתקין את תוסף ההסרה הרשמי של Google מהכתובת https://tools.google.com/dlpage/gaoptout — ביטול ההסכמה אינו פוגע ביכולת לשחק או להפעיל משחק.
 
 ## 10. מסרים שיווקיים ותקשורת
@@ -464,6 +466,8 @@ To exercise these rights: **privacy@rushpoint.app** · spendora.tracker@gmail.co
 **Analytics cookies.** We use **Google Analytics** (Google Ireland Limited) to measure aggregate usage of the Service — how many people open a join link, which screens are reached, and where people drop off. This helps us fix what is confusing and decide what to build next. Google Analytics sets its own cookies in your browser, named _ga and _ga_G-89TM5X68RR, which distinguish one browser from another for up to two years.
 
 We configure Google Analytics restrictively: **IP anonymization is enabled**, and **Google Signals and advertising personalization are disabled**. We do not use retargeting or advertising network pixels, we do not run ads, and we do not sell or share this data with advertisers.
+
+**Time spent in the creator console.** If you hold a creator account, we measure how long the console is actually open and in front of you, and store only the running total against your account id. Your browser reports time only while the tab is visible, so a tab left open and forgotten is not counted. We do not keep a visit history, session timestamps, or a record of which screens you opened, only that single number. We use it to understand which parts of the product need work, and it is deleted together with your account.
 
 **How to opt out:** you may block or delete cookies in your browser settings, use your browser's tracking-protection features, or install Google's official opt-out add-on from https://tools.google.com/dlpage/gaoptout — opting out does not affect your ability to play or to run a game.
 

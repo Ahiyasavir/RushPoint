@@ -128,10 +128,44 @@ test.describe('Admin platform-users dashboard', () => {
 
     const table = page.locator('table');
     await expect(table).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(COL_GAMES)).toBeVisible();
+    // Scoped to the table's own header. A bare getByText would match ~125 nodes: the
+    // phone card layout renders the same label as a <dt> per creator and is present in
+    // the DOM at every width, merely hidden by CSS below md.
+    await expect(table.getByRole('columnheader', { name: COL_GAMES })).toBeVisible();
     // The admin account is itself a real creator account, so it must be listed —
     // proving rows actually rendered rather than just the empty-state shell.
     await expect(table.getByText(ADMIN_EMAIL)).toBeVisible();
+    expect(pageErrors, 'no uncaught render errors').toEqual([]);
+  });
+
+  test('the phone layout renders cards, tiles and a mailto link, not a table', async ({ page, pageErrors }) => {
+    // The person reading this dashboard is usually on their phone, so the small screen
+    // layout is the primary one, not a degraded fallback. A five column table at 375px
+    // is a horizontal scroll nobody performs — assert the table is genuinely absent and
+    // the card list is what renders.
+    await page.setViewportSize({ width: 375, height: 812 });
+    await signInThroughUi(page, ADMIN_EMAIL);
+    await page.goto('/admin/users');
+    await assertNoCrash(page);
+
+    await expect(page.getByRole('heading', { name: TITLE })).toBeVisible();
+    // The desktop table is hidden below md.
+    await expect(page.locator('table')).toBeHidden();
+    // One card per creator. Scope to the card that actually carries this creator's
+    // mailto link: the account email ALSO appears in the page header, which is itself
+    // hidden on a phone, so a bare getByText(...).first() resolves to the wrong node
+    // and reports "hidden" for a card that is in fact on screen.
+    const card = page.locator('li').filter({ has: page.locator(`a[href="mailto:${ADMIN_EMAIL}"]`) });
+    await expect(card).toHaveCount(1);
+    await expect(card).toBeVisible();
+    // The quick outreach affordance: a real mailto link for that creator.
+    await expect(card.locator(`a[href="mailto:${ADMIN_EMAIL}"]`)).toBeVisible();
+
+    // And the page must not scroll sideways — the actual phone failure mode.
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow, 'no horizontal overflow on a phone viewport').toBeLessThanOrEqual(1);
+
     expect(pageErrors, 'no uncaught render errors').toEqual([]);
   });
 });

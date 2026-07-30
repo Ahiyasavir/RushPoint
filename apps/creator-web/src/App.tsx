@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { PAYMENTS_ENABLED } from '@rushpoint/shared';
 import { useAuth } from './components/AuthGate';
+import { useEngagementTracker } from './hooks/useEngagementTracker';
 import { useT } from './components/LanguageContext';
 import { Spinner } from './components/ui';
 import { DialogHost } from './components/dialog';
@@ -51,6 +52,9 @@ export default function App() {
   const { user, signOut } = useAuth();
   const [dark, setDark] = useDarkMode();
   const t = useT();
+  // Time on site (change: admin-engagement-and-outreach). Gated on `user` so nothing is
+  // measured and no call is made for a logged out visitor on the landing page.
+  useEngagementTracker(!!user);
   // The Builder is a full-width workspace (3-pane shell); every other route reads
   // best as a centred column. Widen the main container only on /build/*.
   const pathname = useLocation().pathname;

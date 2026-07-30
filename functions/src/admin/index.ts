@@ -10,9 +10,12 @@
 // entirely rather than fabricated into a row. See design.md §D1.
 
 import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
 import { loggedCallable } from '../obs/log';
 import { db, auth } from '../firebase';
-import { assertAdmin } from '../auth';
+import { assertAdmin, requireAuth } from '../auth';
+import { enforceRateLimit } from '../rateLimitStore';
+import { clampEngagementDelta } from '@rushpoint/shared';
 import { isCreatorAccount, pageVerdict } from './authRoster';
 import {
   buildAdminUserSummary,
@@ -25,6 +28,14 @@ import {
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 300;
+
+// Where time on site is stored. A TOP LEVEL, server only collection on purpose:
+// `users/{uid}` is `allow write: if isOwner(uid)` in firestore.rules, so a creator can
+// write their own profile document directly — storing the total there would let anyone
+// hand themselves a thousand hours with one console call, defeating the clamp entirely.
+// This collection matches no rule, so the default `match /{document=**} { allow read,
+// write: if false }` denies every client; only the Admin SDK reaches it.
+const ENGAGEMENT_COL = 'userEngagement';
 // Hard bound on Auth pages per invocation. RushPoint mints ONE ANONYMOUS ACCOUNT PER
 // PLAY-WEB SESSION (uid == teamId), so the Auth pool is dominated by participants and
 // grows with every run ever played, while the creators we actually want stay few. An
@@ -85,9 +96,12 @@ async function gamesFor(uid: string): Promise<AdminUserGameFacts[]> {
 }
 
 async function runsFor(uid: string): Promise<AdminUserRunFacts[]> {
-  // Served by the existing (ownerUid ASC, status ASC) collection-group index on `runs`
-  // — a leading-field equality filter is a covered prefix of that composite index, so
-  // no new index is required (design.md §D2).
+  // Needs the runs.ownerUid COLLECTION_GROUP field override in firestore.indexes.json.
+  // The original claim here — that the (ownerUid, status) composite covers this as a
+  // prefix — was WRONG, and production proved it: this exact query answered
+  // `9 FAILED_PRECONDITION: requires a COLLECTION_GROUP_ASC index for runs.ownerUid`.
+  // Firestore auto-maintains single field indexes at COLLECTION scope only, never at
+  // COLLECTION_GROUP scope. Deploy indexes before deploying this function.
   const snap = await db.collectionGroup('runs').where('ownerUid', '==', uid).get();
   return snap.docs.map((d) => {
     const r = d.data() as {
@@ -110,7 +124,8 @@ async function runsFor(uid: string): Promise<AdminUserRunFacts[]> {
 // 100, hard cap 300 — lower than audit logs' 500 because each row costs 2 extra
 // Firestore reads, not a single doc read) and sets `truncated` when more existed.
 export const listPlatformUsers = loggedCallable('listPlatformUsers', async (data, context) => {
-  assertAdmin(context);
+  const adminUid = assertAdmin(context);
+  await enforceRateLimit(adminUid, 'listPlatformUsers');
   const { limit: rawLimit } = (data ?? {}) as { limit?: number };
   const limit = Math.max(1, Math.min(rawLimit ?? DEFAULT_LIMIT, MAX_LIMIT));
 
@@ -125,13 +140,55 @@ export const listPlatformUsers = loggedCallable('listPlatformUsers', async (data
 
   const users: AdminUserSummary[] = await Promise.all(
     kept.map(async (authUser) => {
-      const [games, runs] = await Promise.all([gamesFor(authUser.uid), runsFor(authUser.uid)]);
+      const [games, runs, engagement] = await Promise.all([
+        gamesFor(authUser.uid),
+        runsFor(authUser.uid),
+        // Best effort: a missing or unreadable engagement document must degrade to
+        // "not measured yet" (0), never fail the whole roster for one row.
+        db.doc(`${ENGAGEMENT_COL}/${authUser.uid}`).get()
+          .then((s) => (s.data() as { totalMs?: number } | undefined)?.totalMs ?? 0)
+          .catch(() => 0),
+      ]);
       // Fill in real game titles for runs whose game still exists (runsFor only has gameId).
       const titleByGameId = new Map(games.map((g) => [g.id, g.title]));
       const runsWithTitles = runs.map((r) => ({ ...r, gameTitle: titleByGameId.get(r.gameId) ?? r.gameId }));
-      return buildAdminUserSummary(authUser, games, runsWithTitles);
+      return buildAdminUserSummary(authUser, games, runsWithTitles, engagement);
     }),
   );
 
   return { users, truncated };
+});
+
+
+// ─── recordEngagement (change: admin-engagement-and-outreach) ───────────────────
+// Accumulates a signed in creator's ENGAGED time in the console. Called by every
+// creator for themselves, not by an admin: the caller can only ever move their OWN
+// total, and only forward.
+//
+// The reported number is untrusted by construction — only the browser can observe that a
+// tab was actually in front of a person, so only the browser can measure it. Three things
+// make that safe enough to store:
+//   1. the uid comes from the verified token, never from the payload, so nobody can add
+//      time to someone else's row;
+//   2. the VALUE is clamped (clampEngagementDelta) so one call cannot claim more than a
+//      plausible flush, whatever the client sends;
+//   3. the rate limit bounds how many calls can be made per minute, so the two together
+//      bound the total inflation available to a hostile client to roughly real time.
+// It is a metric, not an entitlement — nothing is granted or charged from it, so this
+// level of hardening is proportionate.
+export const recordEngagement = loggedCallable('recordEngagement', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'recordEngagement');
+
+  const deltaMs = clampEngagementDelta((data as { deltaMs?: unknown } | undefined)?.deltaMs);
+  if (deltaMs <= 0) return { ok: true, applied: 0 };
+
+  // increment() rather than read-modify-write: two tabs open in the same account are the
+  // normal case, and a transaction here would serialise them for no benefit.
+  await db.doc(`${ENGAGEMENT_COL}/${uid}`).set({
+    totalMs: admin.firestore.FieldValue.increment(deltaMs),
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+
+  return { ok: true, applied: deltaMs };
 });

@@ -105,6 +105,8 @@ export * from './liveTaskStatus';
 // In-memory gallery FACET filters applied after the tags DB query + ranking,
 // before the page slice (change: gallery-facet-filters).
 export * from './galleryFilter';
+// Time on site accounting (change: admin-engagement-and-outreach).
+export * from './engagement';
 // Admin-only creator activity rollup — pure aggregation, no Firestore/Auth I/O
 // (change: admin-user-activity-dashboard).
 export * from './adminUserActivity';

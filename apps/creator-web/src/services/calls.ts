@@ -262,3 +262,11 @@ export const listPlatformUsers = callable<
   { limit?: number },
   { users: AdminUserSummary[]; truncated: boolean }
 >('listPlatformUsers');
+
+// Time on site flush (change: admin-engagement-and-outreach). Every signed in creator
+// calls this for THEMSELVES; the server takes the uid from the token and clamps the value,
+// so the payload can only ever move the caller's own total, forward, by a bounded amount.
+export const recordEngagement = callable<
+  { deltaMs: number },
+  { ok: boolean; applied: number }
+>('recordEngagement');

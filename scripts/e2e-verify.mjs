@@ -6778,6 +6778,59 @@ async function main() {
     check('admin: anonymous participant/player uids never appear as a row',
       !userRows.some((r) => r.uid === plUid || r.uid === (str.auth.currentUser?.uid)),
       JSON.stringify(userRows.map((r) => r.uid)));
+
+    // ── admin-engagement-and-outreach: time on site ───────────────────────────
+    // recordEngagement is NOT admin-only — every creator flushes their own total —
+    // so the properties worth proving are that the uid comes from the TOKEN and the
+    // value is CLAMPED. A participant calling it must therefore SUCCEED (it is their
+    // own row) while being unable to touch anyone else's, which is why it is absent
+    // from the denial matrix above.
+    await creator.call('recordEngagement', { deltaMs: 60_000 });
+    await creator.call('recordEngagement', { deltaMs: 60_000 });
+    const afterTwo = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const meAfterTwo = (afterTwo?.users ?? []).find((r) => r.uid === OWNER);
+    check('engagement: two flushes accumulate onto the creator row',
+      (meAfterTwo?.engagementMs ?? 0) >= 120_000, JSON.stringify(meAfterTwo?.engagementMs));
+
+    // A single absurd claim must be clamped, not stored. 30 days would otherwise land
+    // verbatim and make the metric meaningless for that account forever.
+    const before = meAfterTwo?.engagementMs ?? 0;
+    await creator.call('recordEngagement', { deltaMs: 30 * 24 * 60 * 60 * 1000 });
+    const afterHuge = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const meAfterHuge = (afterHuge?.users ?? []).find((r) => r.uid === OWNER);
+    const applied = (meAfterHuge?.engagementMs ?? 0) - before;
+    check('engagement: an absurd flush is clamped to at most 15 minutes',
+      applied > 0 && applied <= 15 * 60 * 1000, `applied ${applied}ms`);
+
+    // Garbage and negatives are absorbed silently rather than throwing or subtracting.
+    // NaN is deliberately ABSENT from this list: the callable protocol is JSON, and the
+    // client SDK refuses to encode it ("Data cannot be encoded in JSON: NaN") before a
+    // request is ever made. So no client can deliver a NaN here — the server's NaN guard
+    // in clampEngagementDelta is defence against a non client caller (a script, a future
+    // server to server path), and is covered at the unit level in engagement.test.ts.
+    const beforeJunk = meAfterHuge?.engagementMs ?? 0;
+    for (const junk of [-5000, 'abc', null, undefined]) {
+      await creator.call('recordEngagement', { deltaMs: junk });
+    }
+    const afterJunk = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    const meAfterJunk = (afterJunk?.users ?? []).find((r) => r.uid === OWNER);
+    check('engagement: junk and negative flushes change nothing and never subtract',
+      (meAfterJunk?.engagementMs ?? 0) === beforeJunk,
+      `${beforeJunk} -> ${meAfterJunk?.engagementMs}`);
+
+    // A participant's own flush must land on THEIR uid, never on the creator's.
+    await pl.call('recordEngagement', { deltaMs: 30_000 });
+    const afterPl = await platformAdmin.call('listPlatformUsers', { limit: 300 });
+    check('engagement: a participant flush never moves another account\'s total',
+      ((afterPl?.users ?? []).find((r) => r.uid === OWNER)?.engagementMs ?? 0)
+        === (meAfterJunk?.engagementMs ?? 0));
+
+    // The activation funnel is what the dashboard is actually FOR: this creator built
+    // games and launched runs, so it must not report them as merely signed up.
+    check('admin: a creator with games and runs is not reported as signed_up only',
+      (meAfterJunk?.gamesCreatedCount ?? 0) > 0 && (meAfterJunk?.runsLaunchedCount ?? 0) > 0);
+    check('admin: participantsReached is derived, not absent',
+      typeof meAfterJunk?.participantsReached === 'number');
   });
 
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════
