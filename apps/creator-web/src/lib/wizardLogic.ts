@@ -1,12 +1,16 @@
 // Pure navigation + metadata for the 3-step task wizard
-// (change: v2.1-builder-shell-redesign; reordered by builder-first-task-flow).
+// (change: v2.1-builder-shell-redesign; reordered again by
+// task-editor-progressive-disclosure).
 // Extracted so the step-gating rules are unit-testable without rendering.
 //
-// Steps are ordered the way a creator thinks (change: builder-first-task-flow):
-//   1 Details → 2 Interaction → 3 Placement.
-// Naming is the first thing asked and the ONLY forward gate; placement is last
-// and never blocks navigation. An unplaced task is reported by the readiness
-// surface (lib/gameReadiness) instead, which also refuses the launch.
+// Steps (change: task-editor-progressive-disclosure):
+//   1 Location → 2 Details & type → 3 Execution & enhancements.
+//
+// Location leads because it owns the interactive map, which needs the whole panel
+// rather than a share of a scroll; it asks one question with two answers and never
+// blocks. Naming remains the ONLY forward gate, so it now guards the 2 → 3
+// transition instead of 1 → 2. An unplaced task is still reported by the readiness
+// surface (lib/gameReadiness), which also refuses the launch.
 import type { Game, Task, TaskType } from '@rushpoint/shared';
 import { validateOrderItems, defaultEstimatedMinutes } from '@rushpoint/shared';
 
@@ -16,8 +20,8 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 
 // The declared step sequence. The tabs, the bodies and the labels all read this
 // one array, so a tab and the body under it can never disagree.
-export type WizardStepKey = 'details' | 'interaction' | 'placement';
-export const WIZARD_STEP_ORDER: readonly WizardStepKey[] = ['details', 'interaction', 'placement'];
+export type WizardStepKey = 'location' | 'details' | 'execution';
+export const WIZARD_STEP_ORDER: readonly WizardStepKey[] = ['location', 'details', 'execution'];
 
 /** The key of the step at a 1 based position (clamped to the declared order). */
 export function stepKeyAt(position: number): WizardStepKey {
@@ -65,9 +69,9 @@ export function blankTask(id: string = genId()): Task {
 
 // Developer-facing fallback labels (the UI reads t.builder.step*).
 export const STEP_LABELS: Record<WizardStepKey, string> = {
-  details: 'Details',
-  interaction: 'Interaction',
-  placement: 'Placement',
+  location: 'Location',
+  details: 'Details & type',
+  execution: 'Execution & extras',
 };
 
 // Placement has THREE states, not two (change: builder-first-task-flow):
@@ -90,9 +94,11 @@ export function isTaskLocationValid(task: Task): boolean {
   return taskPlacementState(task) !== 'unplaced';
 }
 
-// Naming is the wizard's ONLY forward gate. Interaction and placement never
-// block: an unpinned or answer-key-less task is reported by the readiness
-// surface, not by a disabled control (change: builder-first-task-flow).
+// Naming is the wizard's ONLY forward gate. It lives on the DETAILS step, which
+// is now step 2, so the gate guards 2 → 3 (change:
+// task-editor-progressive-disclosure). Location and execution never block: an
+// unpinned or answer-key-less task is reported by the readiness surface, not by a
+// disabled control (change: builder-first-task-flow).
 export function canGoNext(step: WizardStepKey, task: Task): boolean {
   if (step === 'details') return task.title.trim() !== '';
   return true;

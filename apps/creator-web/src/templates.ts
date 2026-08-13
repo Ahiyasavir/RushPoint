@@ -57,7 +57,18 @@ export interface GameTemplate {
 }
 
 export const TEMPLATES: GameTemplate[] = [
-  // ── Launch-wedge niche templates (shown first) ──────────────────────────────
+  // ── Start from nothing (FIRST on purpose) ──────────────────────────────────
+  // The picker renders this array with a bare `.map()` — no sort — so position 0
+  // is literally the first card a brand-new creator sees. "Build my own" is the
+  // platform's core promise, so it must not sit behind eight themed templates.
+  // Pinned by scripts/test-template-picker-order.ts.
+  {
+    key: 'blank', emoji: '📄',
+    mode: 'team', scoringPreset: 'smart_weighted',
+    build: () => [stage('שלב 1', [task({ title: '' })])],
+  },
+
+  // ── Launch-wedge niche templates ───────────────────────────────────────────
   {
     key: 'bar_mitzvah', emoji: '🕎',
     mode: 'team', scoringPreset: 'smart_weighted',
@@ -312,11 +323,6 @@ export const TEMPLATES: GameTemplate[] = [
   },
 
   // ── Generic starters ────────────────────────────────────────────────────────
-  {
-    key: 'blank', emoji: '📄',
-    mode: 'team', scoringPreset: 'smart_weighted',
-    build: () => [stage('שלב 1', [task({ title: '' })])],
-  },
   {
     key: 'riddle', emoji: '🗝️',
     mode: 'team', scoringPreset: 'smart_weighted',

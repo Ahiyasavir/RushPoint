@@ -301,9 +301,29 @@ export const TOUR_VERSION = 1;
 export const TOUR_SEEN_KEY_PREFIX = 'rp-tour-seen';
 /**
  * Last known first game id, remembered by the dashboard so a Builder step can
- * offer "take me there" without the tour holding a data subscription of its own.
+ * reach the Builder without the tour holding a data subscription of its own.
+ *
+ * The bare constant is the LEGACY global key, kept only so the stale entry it
+ * wrote can still be identified and removed. Read and write through
+ * `firstGameIdKey(uid)` instead — see below.
  */
 export const TOUR_FIRST_GAME_KEY = 'rp-first-game-id';
+
+/**
+ * Per-creator key, so two accounts on one browser never share a game id.
+ *
+ * Its siblings (`knownGameCountKey`, `tourStorageKey`) were scoped from the
+ * start; this one was not, and once the tour began NAVIGATING on its own
+ * (change: tour-auto-navigate) that gap became a wall: a brand-new creator
+ * signing up in a browser that had held another account was driven straight into
+ * `/build/<the other account's game>` and met "Game not found". While the step
+ * was only an optional "take me there" link the same staleness was merely a dead
+ * link, which is why it survived this long.
+ */
+export function firstGameIdKey(uid: string | null | undefined): string {
+  const clean = typeof uid === 'string' ? uid.trim() : '';
+  return `${TOUR_FIRST_GAME_KEY}:${clean || 'anon'}`;
+}
 
 export interface TourRecord {
   version: number;
@@ -362,23 +382,97 @@ export function tourRecordFor(state: TourState, steps: readonly TourStep[]): Tou
 /**
  * Whether the tour may greet this creator unprompted.
  *
- * ALWAYS false: the deep 15-step walkthrough is now **on-demand only** (the
- * header "?" help button, via `restartCreatorTour`). Auto-firing it on a brand
- * new creator's EMPTY dashboard pointed seven Builder steps at screens that did
- * not exist yet — "take me there" was dead and every anchored step degraded to a
- * centred card over the (now clickable) first-run checklist. The Wave-A
- * onboarding checklist is the first-run guide; the tour explains "what IS this?"
- * whenever the creator asks for it (change: onboarding-overload-fix).
+ * Auto-start is scoped to a FIRST-EVER SIGNUP and nothing else
+ * (change: post-signup-redirect). Every other visit keeps the on-demand-only rule
+ * that `onboarding-overload-fix` established: auto-firing the deep 15-step
+ * walkthrough on a brand-new creator's EMPTY dashboard pointed seven Builder steps
+ * at screens that did not exist yet — "take me there" was dead and every anchored
+ * step degraded to a centred card over the (now clickable) first-run checklist.
  *
- * The parameters are retained so the seen-record / established plumbing around it
- * stays intact and the predicate can be tightened again without a signature
- * churn, but neither can make the tour interrupt a creator any more.
+ * `justSignedUp` is what makes the narrow case different: the creator has just
+ * finished signing up and has been sent to the dashboard deliberately, so a welcome
+ * is expected rather than an interruption. It is a POSITIVE, explicit opt-in — an
+ * omitted flag reads as `false`, so no existing call site can start firing the tour
+ * by accident.
+ *
+ * Still false for anyone who already has a tour record (seen or dismissed) or who is
+ * an established creator, so a returning creator is never interrupted.
  */
-export function shouldAutoStartTour(_args: {
+export function shouldAutoStartTour(args: {
   record: TourRecord | null;
   established: boolean;
+  justSignedUp?: boolean;
 }): boolean {
-  return false;
+  if (!args?.justSignedUp) return false;
+  if (args.established) return false;
+  return args.record == null;
+}
+
+// ── Post-signup landing (change: post-signup-redirect) ──────────────────────
+
+/** How long to let the dashboard settle before offering the tour. */
+export const POST_SIGNUP_TOUR_DELAY_MS = 2000;
+
+/**
+ * Should the app move this creator to the dashboard now that auth succeeded?
+ *
+ * AuthGate never navigated after a successful sign-in, and creator-web is
+ * URL-driven — so whatever path was in the address bar when auth flipped is what
+ * rendered. Signing up while sitting on /settings therefore "redirected to
+ * settings", which is what creators reported.
+ *
+ * Only a genuinely NEW account is moved. FAIL-SAFE by design: anything other than a
+ * confirmed `true` means stay put. A missed redirect costs a new creator one click;
+ * a wrong redirect yanks a returning creator off a page they deliberately opened,
+ * which is a worse bug than the one being fixed. Total and non-throwing — it runs on
+ * the auth path, where a throw would surface as a failed sign-in.
+ */
+export function shouldRedirectAfterSignup(args: { isNewUser: boolean }): boolean {
+  return args?.isNewUser === true;
+}
+
+/**
+ * One-shot hand-off from AuthGate (which knows a signup just happened) to
+ * CreatorTour (which is mounted elsewhere and decides whether to greet).
+ *
+ * sessionStorage, not a module variable: the two components are in different
+ * subtrees and the navigation to the dashboard happens in between. It is
+ * deliberately SESSION scoped and consumed on read, so a welcome fires exactly once
+ * and never resurrects on a later reload. Storage can throw (private mode, disabled
+ * cookies) — both helpers swallow it, because failing to show a tour must never
+ * break signing up.
+ */
+const JUST_SIGNED_UP_KEY = 'rp-just-signed-up';
+
+/**
+ * Fired the moment the flag is written, because WRITING IT IS A RACE.
+ *
+ * `markJustSignedUp()` runs after `await signUpWithEmail(...)` — but auth flips as
+ * soon as that promise resolves, so AuthProvider swaps in the app tree and
+ * CreatorTour mounts and reads the flag BEFORE this function has run. Polling
+ * once at mount therefore always lost the race and no creator ever saw the tour.
+ * Listening to this event makes the hand-off order-independent: whichever happens
+ * first, the tour still learns about the signup.
+ */
+export const JUST_SIGNED_UP_EVENT = 'rp-just-signed-up-event';
+
+export function markJustSignedUp(): void {
+  try { sessionStorage.setItem(JUST_SIGNED_UP_KEY, '1'); } catch { /* storage unavailable */ }
+  try { window.dispatchEvent(new Event(JUST_SIGNED_UP_EVENT)); } catch { /* no window */ }
+}
+
+/** Undo the mark — used when the signup that set it then failed. */
+export function clearJustSignedUp(): void {
+  try { sessionStorage.removeItem(JUST_SIGNED_UP_KEY); } catch { /* storage unavailable */ }
+}
+
+/** True at most once per signup: reading it clears it. */
+export function consumeJustSignedUp(): boolean {
+  try {
+    const hit = sessionStorage.getItem(JUST_SIGNED_UP_KEY) === '1';
+    if (hit) sessionStorage.removeItem(JUST_SIGNED_UP_KEY);
+    return hit;
+  } catch { return false; }
 }
 
 // ── Presentation decisions (still pure) ────────────────────────────────────
@@ -398,19 +492,94 @@ export interface TourTargetContext {
 }
 
 /**
- * The optional "take me there" destination, or null when it cannot be resolved
- * (no game yet, no live run). The tour never navigates on its own.
+ * The step's destination, or null when it cannot be resolved (no game yet, no
+ * live run). Read through `tourNavIntent` below, which decides what to DO about
+ * it — this only answers "where does this step live".
  */
 export function tourStepTarget(step: TourStep, ctx: TourTargetContext): string | null {
   switch (step.surface) {
     case 'dashboard': return '/';
-    case 'builder':   return ctx.firstGameId ? `/build/${ctx.firstGameId}` : null;
-    case 'run':       return ctx.liveRunPath || null;
+    case 'builder':   return ctx?.firstGameId ? `/build/${ctx.firstGameId}` : null;
+    case 'run':       return ctx?.liveRunPath || null;
     case 'gallery':   return '/gallery';
     case 'wallet':    return '/wallet';
     case 'settings':  return '/settings';
     default:          return null;
   }
+}
+
+// ── Driving the creator (change: tour-auto-navigate) ─────────────────────────
+//
+// The tour used to refuse to navigate: a step only OFFERED its destination behind
+// a "take me there" link. That produced the reported failure — "you are not able
+// to get inside a game and see it visually" — because reaching the screen a step
+// described was a manual click, and for the case the tour now auto-starts in (a
+// brand-new creator with ZERO games) the Builder steps had no destination at all.
+// Seven of fourteen steps narrated screens that could not be reached.
+//
+// A step now resolves to one of three intents. The important one is the third:
+// when a destination cannot exist YET because the creator has to do something
+// first, point at the control that does it instead of describing a screen they
+// cannot open.
+
+/** `data-tour` anchors of the controls the tour can ask a creator to press. */
+export const TOUR_ACTION_ANCHORS = {
+  createGame: 'new-game',
+  launchRun: 'builder-launch',
+} as const;
+
+export type TourNavIntent =
+  /** Already on a surface that teaches this step, or the step is placeless. */
+  | { kind: 'stay' }
+  /** Go here now, without asking. */
+  | { kind: 'navigate'; to: string }
+  /** The destination needs an action first: spotlight `anchor`, found at `at`. */
+  | { kind: 'awaitAction'; anchor: string; at: string };
+
+/** Is `pathname` already a Builder screen? Any game's builder teaches a Builder step. */
+function isBuilderPath(pathname: string): boolean {
+  return typeof pathname === 'string' && pathname.startsWith('/build/');
+}
+
+/**
+ * What should the tour DO for this step, given what the creator actually has?
+ *
+ * Total by construction: unknown surfaces, a missing context and a missing
+ * pathname all resolve to `stay`, because the one thing a tour must never do is
+ * throw inside the console it is explaining.
+ */
+export function tourNavIntent(
+  step: TourStep,
+  ctx: TourTargetContext,
+  pathname: string,
+): TourNavIntent {
+  const here = typeof pathname === 'string' ? pathname : '';
+  const target = tourStepTarget(step, ctx ?? {});
+
+  if (target) {
+    // A Builder step is satisfied by ANY builder: a creator already editing a
+    // different game is looking at exactly what the step is about, and yanking
+    // them to their first game would lose their place for nothing.
+    if (step?.surface === 'builder' && isBuilderPath(here)) return { kind: 'stay' };
+    return target === here ? { kind: 'stay' } : { kind: 'navigate', to: target };
+  }
+
+  // No destination. For the two surfaces that depend on state the creator has to
+  // create, ask them to create it — the prompt has to be issued where the control
+  // actually lives, so anyone standing elsewhere is walked there first.
+  if (step?.surface === 'builder') {
+    if (isBuilderPath(here)) return { kind: 'stay' };
+    return here === '/'
+      ? { kind: 'awaitAction', anchor: TOUR_ACTION_ANCHORS.createGame, at: '/' }
+      : { kind: 'navigate', to: '/' };
+  }
+  if (step?.surface === 'run') {
+    return here === '/'
+      ? { kind: 'awaitAction', anchor: TOUR_ACTION_ANCHORS.launchRun, at: '/' }
+      : { kind: 'navigate', to: '/' };
+  }
+
+  return { kind: 'stay' };
 }
 
 export interface TourRect { top: number; left: number; width: number; height: number }

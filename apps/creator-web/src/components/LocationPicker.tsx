@@ -1,7 +1,7 @@
 // Map-based location picker for the Builder (§13ב — "מיקום על מפה").
 // Search a place by name/address, OR click anywhere to place the task; drag the
 // marker to fine-tune. Numeric lat/lng stay available alongside for precision.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
@@ -46,13 +46,22 @@ async function geocode(query: string): Promise<GeoResult[]> {
 }
 
 export default function LocationPicker({
-  lat, lng, onChange, className = '', fill = false,
+  lat, lng, onChange, className = '', fill = false, cornerControl,
 }: {
   lat: number;
   lng: number;
   onChange: (lat: number, lng: number) => void;
   className?: string;
   fill?: boolean;
+  /**
+   * Rendered at the map's bottom-END corner, in the SAME coordinate space as
+   * MapModeToggle (change: builder-ux-round-2). A caller cannot position this
+   * itself: this component puts a place-SEARCH row above the tiles, and the
+   * caller's own wrapper also holds the coordinates field below them — so anything
+   * the caller anchors lands on the search button or on the coordinates input, both
+   * of which happened. Only in here does "the corner of the map" mean the map.
+   */
+  cornerControl?: ReactNode;
 }) {
   const b = useT().builder;
   const ref = useRef<HTMLDivElement>(null);
@@ -204,6 +213,7 @@ export default function LocationPicker({
         ? 'flex-1 min-h-0 rounded-lg overflow-hidden border border-glass-border'
         : `rounded-lg overflow-hidden border border-glass-border ${className}`} />
       <MapModeToggle mode={mode} onChange={setMode} />
+      {cornerControl && <div className="absolute bottom-2 end-2 z-10">{cornerControl}</div>}
       {!hasCoord && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none pb-3">
           <span className="bg-app-bg/80 text-zinc-300 text-xs px-3 py-1.5 rounded-full">

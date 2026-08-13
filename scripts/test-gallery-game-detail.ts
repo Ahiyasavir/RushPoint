@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   buildGalleryGameDetail,
+  buildGalleryGameMissions,
   SECRET_GAME_FIELD_NAMES,
   type GalleryGameDetail,
 } from '../apps/creator-web/src/lib/galleryGameDetail';
@@ -176,6 +177,53 @@ for (const junk of [null, undefined, 42, 'x', [], {}, true, NaN, () => 0]) {
     Array.isArray(d.tags));
 }
 
+// ─── 5b. Quick play + the mission list (change: gallery-missions-quick-play) ──
+// The modal showed COUNTS and nothing else — "12 missions" with no way to see what
+// any of them were, which is what creators meant by "the preview didn't work, I saw
+// nothing". Every task IS already published individually to
+// publicTasks/{gameId}_{taskId} carrying `sourceGameId`, and publicTasks is
+// world-readable, so the list needs no new callable and no new backend.
+
+// allowInstantPlay decides whether the "play" button shows at all, so it must be
+// STRICTLY boolean — a truthy string from a malformed doc must not open a run.
+check('allowInstantPlay passes through when true',
+  buildGalleryGameDetail({ id: 'g', allowInstantPlay: true }).allowInstantPlay === true);
+check('allowInstantPlay is false when absent',
+  buildGalleryGameDetail({ id: 'g' }).allowInstantPlay === false);
+check('allowInstantPlay is false when explicitly false',
+  buildGalleryGameDetail({ id: 'g', allowInstantPlay: false }).allowInstantPlay === false);
+for (const junk of ['yes', 1, {}, [], null]) {
+  check(`allowInstantPlay is false for a non-boolean (${JSON.stringify(junk)})`,
+    buildGalleryGameDetail({ id: 'g', allowInstantPlay: junk }).allowInstantPlay === false);
+}
+
+// The mission rows: same copy-out discipline as the rest of this module.
+const ROWS_INPUT = [
+  { id: 'g_t2', title: 'Second', type: 'quiz', estimatedMinutes: 5, order: 1,
+    answers: ['secret'], hint: 'leak', smart: { secretCode: 'X' }, numericAnswer: 42 },
+  { id: 'g_t1', title: 'First', type: 'field', estimatedMinutes: 3, order: 0 },
+];
+const rows = buildGalleryGameMissions(ROWS_INPUT);
+check('mission rows are built for every task', rows.length === 2, String(rows.length));
+check('mission rows carry the title', rows.some((r) => r.title === 'First'));
+check('mission rows carry a normalized type', rows.every((r) => typeof r.type === 'string'));
+check('an unknown mission type degrades rather than throwing',
+  buildGalleryGameMissions([{ id: 'x', type: 'not-a-type' }])[0]?.type === 'unknown');
+
+// A world-readable doc is UNTRUSTED input reaching a modal — a throw there blanks
+// the whole Gallery behind the ErrorBoundary.
+check('garbage input yields no rows instead of throwing',
+  buildGalleryGameMissions(undefined as never).length === 0
+  && buildGalleryGameMissions([null, 5, 'x'] as never).length === 3);
+
+// THE SECRECY SWEEP: no answer key may ride along into a public preview.
+const rowsJson = JSON.stringify(rows);
+for (const secret of ['answers', 'hint', 'secretCode', 'smart', 'numericAnswer', 'steps', 'coordinates']) {
+  check(`mission rows never carry '${secret}'`, !rowsJson.includes(secret), rowsJson.slice(0, 120));
+}
+check('mission rows never carry the leaked VALUES either',
+  !rowsJson.includes('secret') && !rowsJson.includes('leak') && !rowsJson.includes('42'));
+
 // ─── 6. Wiring guards (source scans) ──────────────────────────────────────────
 const modal = read('apps', 'creator-web', 'src', 'components', 'GalleryGameDetailModal.tsx');
 // The game detail carries only a coarse LABEL, so it must NOT drag in the map.
@@ -195,8 +243,23 @@ check('the Copy button stops propagation so it does not also open the detail',
 check('the game detail is a SEPARATE component from the mission detail',
   galleryPage.includes('GalleryTaskDetailModal') && galleryPage.includes('GalleryGameDetailModal'));
 
+// Mission list + quick play wiring (change: gallery-missions-quick-play).
+check('the modal lists missions from the view model', modal.includes('buildGalleryGameMissions'));
+check('the mission list is sourced from the world-readable publicTasks collection',
+  modal.includes('COLLECTIONS.PUBLIC_TASKS') && modal.includes("'sourceGameId'"));
+// The whole point of reusing publicTasks is that it needs NO backend work.
+check('the mission list adds no callable', !/services\/calls/.test(modal));
+check('the public mission query is bounded', modal.includes('limit(MISSION_LIST_CAP)'));
+// A failed public read must not blank the Gallery behind the ErrorBoundary.
+check('a failed mission read degrades instead of throwing', /catch\s*\{/.test(modal));
+check('quick play is gated on the game opting in', modal.includes('detail.allowInstantPlay &&'));
+check('quick play reuses the existing ?game= promo route', modal.includes('?game='));
+check('quick play opens safely in a new tab',
+  modal.includes('rel="noopener noreferrer"') && modal.includes('target="_blank"'));
+
 const i18n = read('apps', 'creator-web', 'src', 'i18n.ts');
-const NEW_KEYS = ['gameDetailTitle', 'detailMode', 'detailLength', 'detailRequirement', 'detailLocation', 'reqGps', 'reqAnywhere'];
+const NEW_KEYS = ['gameDetailTitle', 'detailMode', 'detailLength', 'detailRequirement', 'detailLocation', 'reqGps', 'reqAnywhere',
+  'detailMissions', 'detailMissionsLoading', 'detailMissionsEmpty', 'detailMissionsFailed', 'detailMissionUntitled', 'detailPlay'];
 for (const key of NEW_KEYS) {
   const hits = i18n.split(`${key}:`).length - 1;
   check(`creator-web i18n defines ${key} in BOTH languages`, hits >= 2, `${hits} occurrence(s)`);

@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useState, Suspense, type ReactNode } from 'react';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { User } from 'firebase/auth';
+import { getAdditionalUserInfo } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+import { markJustSignedUp, shouldRedirectAfterSignup } from '../lib/creatorOnboarding';
 import { doc, setDoc } from 'firebase/firestore';
 import {
   watchAuth,
@@ -107,6 +110,12 @@ const GOOGLE_SVG = (
 
 function LoginScreen() {
   const t = useT();
+  // creator-web is URL-driven and this screen never navigated after a successful
+  // sign-in, so whatever path was in the address bar when auth flipped is what
+  // rendered — which is why signing up from /settings "redirected to settings"
+  // (change: post-signup-redirect). AuthProvider is mounted INSIDE BrowserRouter
+  // (main.tsx), so a navigate here is safe.
+  const nav = useNavigate();
   const [mode, setMode] = useState<'in' | 'up'>('in');
 
   const [email, setEmail]       = useState('');
@@ -147,6 +156,8 @@ function LoginScreen() {
           email: cred.user.email,
           createdAt: new Date().toISOString(),
         }, { merge: true });
+        // The email/password SIGN-UP branch is a new account by construction.
+        landAfterAuth(true);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.signInFailed);
@@ -155,9 +166,25 @@ function LoginScreen() {
     }
   }
 
+  // Send a genuinely NEW creator to the dashboard, and leave everyone else exactly
+  // where they were: yanking a returning creator off a page they deliberately
+  // opened would be a worse bug than the one this fixes. `replace` so Back does not
+  // return to the (now dead) login screen.
+  function landAfterAuth(isNewUser: boolean) {
+    if (!shouldRedirectAfterSignup({ isNewUser })) return;
+    markJustSignedUp();
+    nav('/', { replace: true });
+  }
+
   async function google() {
     setErr(''); setBusy(true);
-    try { await signInWithGoogle(); }
+    try {
+      const cred = await signInWithGoogle();
+      // Google covers BOTH signup and sign-in through one button, so "new" has to
+      // come from the credential itself. If the metadata is missing, isNewUser is
+      // undefined → treated as returning → no redirect (fail-safe).
+      landAfterAuth(getAdditionalUserInfo(cred)?.isNewUser === true);
+    }
     catch (e) {
       const msg = e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.googleSignInFailed;
       if (!/popup-closed-by-user|cancelled-popup-request|popup-blocked/.test(msg)) setErr(msg);

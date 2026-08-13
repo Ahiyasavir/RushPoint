@@ -166,7 +166,14 @@ function sanitizeStagesText(stages: Stage[] | undefined, gameTags?: string[]): S
  */
 function stagesProblems(stages: Stage[] | undefined): string[] {
   const problems: string[] = [];
-  problems.push(...gameStructureProblems(stages));
+  // AUTHORING phase (change: builder-draft-save-tolerance): this helper serves the
+  // two SAVE doors (updateGame + importGameFile), so an answer key that is not filled
+  // in yet is a draft, not a rejection — the Builder autosaves every 1.5 s and used to
+  // have every save refused from the moment a creator picked "quiz" as a task type.
+  // The go-live doors keep the strict form: publishGame calls gameStructureProblems
+  // directly (default 'golive') and launchRun runs its own taskCompletabilityError
+  // loop. Every other structural guard below is unchanged and still blocks a save.
+  problems.push(...gameStructureProblems(stages, { phase: 'authoring' }));
   for (const stage of stages ?? []) {
     problems.push(...validateUnlockGraph(stage).errors);
     // Stage winnability (change: stage-winnability). Exclusive groups yield ONE
@@ -729,6 +736,23 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
   assertGameNotDeleted(game);
   const now = new Date().toISOString();
 
+  // Instant play defaults ON at publish (change: gallery-missions-quick-play).
+  // Publishing to the gallery IS the act of inviting strangers to look, so the
+  // gallery's "play" entry point should work by default rather than requiring a
+  // second, separate opt-in the creator has to go find.
+  //
+  // Only an ABSENT field is defaulted. An explicit `false` is a real decision and is
+  // preserved, and an already-published game is untouched until it is re-published —
+  // so nothing flips under a creator who never asked for it.
+  //
+  // Declared out here (not inside the publish branch) because the resolved value is
+  // written back to the PRIVATE game doc after the branch: `startInstantPlay`
+  // authorizes against that doc (functions/src/runs/index.ts:2648), so setting only
+  // the public copy would put a Play button on the gallery card that the server then
+  // refuses — the exact broken state this default exists to remove.
+  const instantPlayDefaulted = game.allowInstantPlay === undefined;
+  const instantPlayOnPublish = game.allowInstantPlay ?? true;
+
   if (visibility === 'public') {
     // Winnability guard (wave-j J2): publishing indexes the game into the public
     // gallery where it can be duplicated and (with allowInstantPlay) played from a
@@ -790,7 +814,7 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
       estimatedTotalMinutes,
       // Marketplace instant play (marketplace-instant-play): surfaced so the public
       // promo can show a "Play now" entry point. Never carries the webhook secret.
-      allowInstantPlay: game.allowInstantPlay ?? false,
+      allowInstantPlay: instantPlayOnPublish,
       // Accurate GPS requirement derived from task trigger modes at publish time,
       // so the welcome screen never trusts free-text "no GPS" claims in copy.
       requirement: describeGameRequirements(game),
@@ -886,7 +910,15 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
     await bumpTagStats([], priorTags);
   }
 
-  await ref.update({ visibility, updatedAt: now });
+  // Persist the publish-time instant-play default onto the game itself, so the
+  // authorization `startInstantPlay` performs against this doc agrees with the
+  // button the gallery renders from the public copy. Only written when the field
+  // was absent, and only on the publish branch — unpublishing changes nothing.
+  await ref.update({
+    visibility,
+    updatedAt: now,
+    ...(visibility === 'public' && instantPlayDefaulted ? { allowInstantPlay: true } : {}),
+  });
   return { ok: true, visibility };
 });
 

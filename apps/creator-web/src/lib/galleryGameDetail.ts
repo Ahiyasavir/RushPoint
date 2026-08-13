@@ -48,6 +48,23 @@ export interface GalleryGameDetail {
   /** ONLY the coarse human label — never the exact `approxLocation` coordinates. */
   locationLabel: string | null;
   tags: string[];
+  /**
+   * Whether this game offers a no-signup instant run (change:
+   * gallery-missions-quick-play). Gates whether the quick-play button renders at
+   * all, so it is STRICTLY boolean: a truthy string on a malformed public doc must
+   * not be able to advertise a run that does not exist.
+   */
+  allowInstantPlay: boolean;
+}
+
+/** One row of the game's mission list. Deliberately small — a preview, not a copy. */
+export interface GalleryGameMission {
+  id: string;
+  title: string;
+  /** Normalized task type; anything unrecognized becomes 'unknown'. */
+  type: string;
+  /** null when unauthored, so the view can omit rather than print a fake 0. */
+  estimatedMinutes: number | null;
 }
 
 // ─── Normalizers ──────────────────────────────────────────────────────────────
@@ -105,5 +122,57 @@ export function buildGalleryGameDetail(input: unknown): GalleryGameDetail {
     tags: Array.isArray(g.tags)
       ? g.tags.map((x) => text(x)).filter((x): x is string => x !== null)
       : [],
+    // `=== true`, not a truthy coercion: this gates a button that starts a real run.
+    allowInstantPlay: g.allowInstantPlay === true,
   };
+}
+
+// ─── Mission list (change: gallery-missions-quick-play) ───────────────────────
+// The modal used to show COUNTS only — "12 missions" with no way to see what any of
+// them were, which is what creators meant by "the preview didn't work, I saw
+// nothing". Every task is already published individually to
+// publicTasks/{gameId}_{taskId} carrying `sourceGameId`, and publicTasks is
+// world-readable, so the rows come from a single-field equality query (no composite
+// index) — no new callable, no new backend, no widening of what is public.
+//
+// SAME COPY-OUT DISCIPLINE as the rest of this module: four fields are read BY NAME
+// onto a fresh object and nothing is spread, so a `publicTasks` doc that still
+// carries a legacy answer key cannot leak it into a public preview. Forgetting a
+// field costs a missing row value (visible); spreading one would cost a silent leak.
+
+/** Task types a mission row may report. Anything else degrades to 'unknown'. */
+const KNOWN_MISSION_TYPES: readonly string[] = [
+  'field', 'self_report', 'smart_station', 'photo', 'quiz',
+  'numeric', 'geofence', 'sequence', 'survey',
+];
+
+/**
+ * Build the mission rows for a public game's detail view.
+ *
+ * Accepts `unknown` and NEVER throws: the input is world-readable data rendered
+ * inside a modal, and a throw there blanks the whole Gallery behind the
+ * ErrorBoundary. A non-array yields `[]`; a garbage element yields a blank row
+ * rather than an exception.
+ *
+ * Order is the caller's (the query's), not re-sorted here — `publicTasks` docs carry
+ * no reliable cross-stage ordering, and inventing one would misrepresent the route.
+ */
+export function buildGalleryGameMissions(input: unknown): GalleryGameMission[] {
+  if (!Array.isArray(input)) return [];
+  return input.map((raw) => {
+    const t = asRecord(raw);
+    const type = typeof t.type === 'string' && KNOWN_MISSION_TYPES.includes(t.type)
+      ? t.type
+      : 'unknown';
+    const minutes = typeof t.estimatedMinutes === 'number' && Number.isFinite(t.estimatedMinutes)
+      && t.estimatedMinutes > 0
+      ? Math.floor(t.estimatedMinutes)
+      : null;
+    return {
+      id: text(t.id) ?? '',
+      title: text(t.title) ?? '',
+      type,
+      estimatedMinutes: minutes,
+    };
+  });
 }

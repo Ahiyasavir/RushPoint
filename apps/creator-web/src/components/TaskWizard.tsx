@@ -10,9 +10,9 @@
 // control, so a brand new task is never greeted by its own errors.
 import { useEffect, useState, type ReactNode, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { Task, TaskStep, TaskType, TriggerMode, TaskMedia } from '@rushpoint/shared';
+import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
 import {
-  normalizeTriggerMode, defaultRadiusFor, parseYouTubeId, youTubeEmbedUrl,
+  normalizeTriggerMode, parseYouTubeId, youTubeEmbedUrl,
   validateUnlockGraph, validateAvailabilityWindow,
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
@@ -23,7 +23,7 @@ import {
   defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
   normalizeTags,
 } from '@rushpoint/shared';
-import { Advanced, Button, Input, Label, TagChips, Textarea } from './ui';
+import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
@@ -37,9 +37,12 @@ import {
   type WizardStep, type WizardStepKey, WIZARD_STEP_ORDER, TYPE_PICKER_ORDER,
   stepKeyAt, stepIndexOf, canGoNext, canGoBack, taskPlacementState, isTaskInteractionValid,
 } from '../lib/wizardLogic';
+// The modular opt-in groups that replaced the five collapsible sections
+// (change: task-editor-progressive-disclosure).
 import {
-  type SectionKey, defaultOpenSections, sectionApplies, sectionSummary,
-} from '../lib/wizardSections';
+  type OptInGroupKey, OPT_IN_GROUP_KEYS,
+  defaultActiveGroups, groupApplies, groupHasContent, groupSummary, clearGroupPatch,
+} from '../lib/taskOptInGroups';
 import {
   type RevealState, type ValidationField,
   initialRevealState, markTouched, shouldReveal, nextFinishAction, taskRevealBlockers,
@@ -47,6 +50,11 @@ import {
 import {
   type TaskSample, type SampleOverwriteField, applySample, samplesForType, sampleWouldOverwrite,
 } from '../lib/taskTemplates';
+// The 2-option location picker's pure decisions (change: task-location-mode-consolidation).
+import {
+  type LocationChoice, TIGHT_RADIUS_M, DEFAULT_RADIUS_M, CHOICE_ICON_MODE,
+  locationChoiceOf, skipsGpsCheck, locationChoicePatch, radiusPatch, skipGpsPatch,
+} from '../lib/locationPicker';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -96,27 +104,32 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
   useEffect(() => { if (revealAll) setReveal((s) => (s.revealAll ? s : { ...s, revealAll: true })); }, [revealAll]);
   const touch = (f: ValidationField) => setReveal((s) => markTouched(s, f));
   const revealed = (f: ValidationField) => shouldReveal(reveal, f);
-  // Which optional sections are expanded. Held here (not per step body) so the
-  // disclosure state survives hopping between steps 2 and 3. A section starts
-  // open only when the task already carries content for it — see wizardSections.
-  const [open, setOpen] = useState<Record<SectionKey, boolean>>(() => defaultOpenSections(task));
-  const toggle = (k: SectionKey) => setOpen((o) => ({ ...o, [k]: !o[k] }));
-  const sections = { open, toggle };
-
   const set = (p: Partial<Task>) => onChange({ ...task, ...p });
   const setSmart = (p: Record<string, unknown>) =>
     onChange({ ...task, smart: { enabled: true, verificationType: task.smart?.verificationType ?? 'code_verification', ...task.smart, ...p } });
 
-  const mode = normalizeTriggerMode(task);
-  const located = mode === 'radius' || mode === 'exact';
-  const setMode = (m: TriggerMode) => set({
-    triggerMode: m,
-    locationless: m === 'locationless',
-    geofenceRadiusMeters: (m === 'radius' || m === 'exact') ? (task.geofenceRadiusMeters ?? defaultRadiusFor(m)) : task.geofenceRadiusMeters,
-  });
+  // Which optional field GROUPS are mounted (change:
+  // task-editor-progressive-disclosure). Held here rather than in the step body so
+  // the state survives hopping between steps. A group is mounted on load exactly
+  // when the task already carries content for it, so an existing hint can never
+  // hide behind an unclicked chip — see lib/taskOptInGroups.
+  const [active, setActive] = useState<Record<OptInGroupKey, boolean>>(() => defaultActiveGroups(task));
+  const openGroup = (k: OptInGroupKey) => setActive((a) => ({ ...a, [k]: true }));
+  // Remove (×) both clears the group's fields and folds it back to a chip, so the
+  // control's visible effect and the stored task can't disagree.
+  const removeGroup = (k: OptInGroupKey) => {
+    set(clearGroupPatch(k));
+    setActive((a) => ({ ...a, [k]: false }));
+  };
+  const groups = { active, openGroup, removeGroup };
+
+  // Each step body derives the location state it needs for itself: the Location
+  // step reasons in the creator's two choices (lib/locationPicker), the
+  // interaction step in "does this task have a GPS gate" (for the pause-clock
+  // warning). Nothing at this level needs either, so nothing is computed here.
 
   const STEP_LABEL: Record<WizardStepKey, string> = {
-    details: b.stepDetails, interaction: b.stepInteraction, placement: b.stepLocation,
+    location: b.stepLocation, details: b.stepDetails, execution: b.stepExecution,
   };
   const stepKey = stepKeyAt(step);
   const lastStep = WIZARD_STEP_ORDER.length;
@@ -128,7 +141,7 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
       setReveal((s) => blockers.reduce((acc, f) => markTouched(acc, f), s));
       // Every reveal-gated message lives on the interaction step, so landing
       // there IS landing on the first offender.
-      setStep(stepIndexOf('interaction') as WizardStep);
+      setStep(stepIndexOf('execution') as WizardStep);
       return;
     }
     onDone();
@@ -161,18 +174,18 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
         </button>
       </div>
 
-      {/* Step body. Pure flexbox column (no height:100% hops) so the placement
-          step's map can grow to fill; the other steps scroll only inside
-          themselves if ever needed. */}
+      {/* Step body. Pure flexbox column (no height:100% hops) so step 1's map can
+          grow to fill; the other steps scroll only inside themselves if ever
+          needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
-        {stepKey === 'placement' && <LocationStepBody task={task} mode={mode} located={located} setMode={setMode} set={set} b={b} />}
-        {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} gameId={gameId} siblings={siblings} sections={sections} /></div>}
-        {stepKey === 'interaction' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><InteractionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} sections={sections} revealed={revealed} touch={touch} siblings={siblings} /></div>}
+        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} />}
+        {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} /></div>}
+        {stepKey === 'execution' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} gameId={gameId} /></div>}
       </div>
 
       {/* Footer. The "this task cannot be completed" line is a response to an
           edit or to a finish attempt, never a greeting on a brand new task. */}
-      {stepKey === 'interaction' && !isTaskInteractionValid(task) && blockers.some(revealed) && (
+      {stepKey === 'execution' && !isTaskInteractionValid(task) && blockers.some(revealed) && (
         <p className="text-[11px] text-rp-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
       )}
       <div className="flex items-center gap-2 pt-2 shrink-0 border-t border-[--rp-border] mt-2">
@@ -196,102 +209,291 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
 
 type B = ReturnType<typeof useT>['builder'];
 
-// Disclosure state shared by steps 2 and 3.
-type Sections = { open: Record<SectionKey, boolean>; toggle: (k: SectionKey) => void };
+// Opt-in group state, owned by the wizard and shared with step 3.
+type Groups = {
+  active: Record<OptInGroupKey, boolean>;
+  openGroup: (k: OptInGroupKey) => void;
+  removeGroup: (k: OptInGroupKey) => void;
+};
 
-// One collapsible optional block of the task editor. Nothing is ever removed by
-// folding: the header carries a count badge whenever the section holds authored
-// content, and `defaultOpenSections` pre-expands exactly those.
-function Section({ k, title, task, sections, b, children }: {
-  k: SectionKey; title: string; task: Task; sections: Sections; b: B; children: ReactNode;
+// ── The modular opt-in primitive (change: task-editor-progressive-disclosure) ──
+// Deliberately NOT the ui-kit `Advanced` accordion. An accordion is one trigger
+// over one panel, so folding every optional field behind it just relocates the
+// wall of controls one click away. Here each group is either a small CHIP or the
+// real fields with their own Remove control, so a creator only ever sees the
+// groups they asked for.
+//
+// A group is mounted on load whenever it already holds content
+// (lib/taskOptInGroups) — an authored hint is never hidden behind a chip.
+function OptInChip({ label, count, onClick, b }: {
+  label: string; count: number; onClick: () => void; b: B;
 }) {
-  const n = sectionSummary(k, task);
   return (
-    <Advanced
-      dense
-      title={title}
-      open={sections.open[k]}
-      onToggle={() => sections.toggle(k)}
-      meta={n > 0
-        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(n)}</span>
-        : undefined}
-    >
+    <button type="button" onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] px-3 py-1.5 text-[12px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors">
+      <span aria-hidden className="text-[--ink-3]">+</span>
+      <span>{label}</span>
+      {count > 0 && (
+        <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(count)}</span>
+      )}
+    </button>
+  );
+}
+
+// An opted-in group: a titled block with a Remove control that both clears the
+// group's fields and folds it back to a chip.
+function OptInGroup({ title, onRemove, removeLabel, children }: {
+  title: string; onRemove: () => void; removeLabel: string; children: ReactNode;
+}) {
+  return (
+    <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-[--ink-3] uppercase tracking-wider">{title}</span>
+        <button type="button" onClick={onRemove} aria-label={removeLabel} title={removeLabel}
+          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-neon-red hover:bg-[--surface-2] leading-none">
+          ✕
+        </button>
+      </div>
       {children}
-    </Advanced>
+    </div>
+  );
+}
+
+// "Hide location" + its clue (change: hidden-location-task), lifted out of the old
+// `rules` section so it can live inside the Location step's Advanced panel — it
+// only ever applied to a located task (types/index.ts: "layers on any located
+// task"), so it belongs beside the control that governs location, not three
+// sections away.
+//
+// Guard: a hidden spot with no GPS check could never be verified as found, so the
+// control is withheld (with a reason) while "skip the GPS check" is on rather than
+// offering a combination that produces an unfindable task.
+// ⚠ This is a CLIENT-ONLY rule. `checkHiddenLocationTask` (packages/shared/src/geo.ts)
+// encodes it, but nothing under `functions/src` calls it — only test-hidden-location.ts
+// does. A direct `updateGame` call CAN still persist hidden + instant today. Do not
+// describe this as server-enforced until a save/launch door actually calls it.
+function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
+  if (skipsGpsCheck(task)) {
+    return <p className="text-[11px] text-[--ink-3] leading-snug">{b.locHideNeedsGps}</p>;
+  }
+  return (
+    <div>
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input type="checkbox" className="mt-0.5" checked={!!task.hideLocation}
+          onChange={(e) => set(e.target.checked
+            ? { hideLocation: true }
+            : { hideLocation: undefined, locationClue: undefined, locationClueHe: undefined })} />
+        <span>
+          <span className="text-[13px] font-medium text-[--ink-1]">{b.hideLocation}</span>
+          <span className="block text-[11px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
+        </span>
+      </label>
+      {task.hideLocation && (
+        <div className="mt-1.5">
+          <Label dense>{b.locationClueField}</Label>
+          <Textarea dense value={task.locationClue ?? ''} onChange={(e) => set({ locationClue: e.target.value })}
+            placeholder={b.locationCluePlaceholder} rows={2} dir="auto" />
+          {taskPlacementState(task) === 'unplaced' ? (
+            // A hidden task is still a located task — the placement step's
+            // "not placed yet" state and the readiness surface are what
+            // guarantee real coordinates exist before the run launches.
+            <p className="text-[11px] text-rp-fire mt-1">{b.hideLocationNeedsCoords}</p>
+          ) : !task.locationClue?.trim() && (
+            <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
+          )}
+          {/* Leak guard (change: hidden-location-leak-guard): title/description
+              still ship to players, so warn if they name the place. Advisory only. */}
+          {(() => {
+            const leaks = locationLeakWarnings(task);
+            if (leaks.length === 0) return null;
+            return (
+              <p className="text-[11px] text-rp-fire mt-1">
+                {leaks.length === 2 ? b.hideLocationLeakBoth
+                  : leaks[0] === 'title' ? b.hideLocationLeakTitle
+                  : b.hideLocationLeakDesc}
+              </p>
+            );
+          })()}
+        </div>
+      )}
+    </div>
   );
 }
 
 // ── Step 1: Location ──
-function LocationStepBody({ task, mode, located, setMode, set, b }: {
-  task: Task; mode: TriggerMode; located: boolean; setMode: (m: TriggerMode) => void; set: (p: Partial<Task>) => void; b: B;
+// TWO top-level choices only (change: task-location-mode-consolidation):
+// Anywhere / Specific location. Every technical control — the radius number,
+// "skip the GPS check" and "hide location" — lives in ONE Advanced panel nested
+// under Specific location, so a creator who touches nothing still gets today's
+// 40 m arrival check. The four stored `TriggerMode` values are unchanged: see
+// lib/locationPicker for why 'instant' stays a LOCATED task rather than being
+// folded into 'anywhere'.
+function LocationStepBody({ task, set, b }: {
+  task: Task; set: (p: Partial<Task>) => void; b: B;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const MODES: { mode: TriggerMode; label: string }[] = [
-    { mode: 'radius', label: b.fireRadius },
-    { mode: 'exact', label: b.fireExact },
-    { mode: 'instant', label: b.fireInstant },
-    { mode: 'locationless', label: b.fireAnywhere },
+  const [advOpen, setAdvOpen] = useState(false);
+  const choice = locationChoiceOf(task);
+  const CHOICES: { choice: LocationChoice; label: string; sub: string; desc: string }[] = [
+    { choice: 'anywhere', label: b.locAnywhere, sub: b.locAnywhereSub, desc: b.locAnywhereDesc },
+    { choice: 'specific', label: b.locSpecific, sub: b.locSpecificSub, desc: b.locSpecificDesc },
   ];
-  const MODE_DESC: Record<TriggerMode, string> = {
-    radius: b.fireRadiusDesc, exact: b.fireExactDesc, instant: b.fireInstantDesc, locationless: b.fireAnywhereDesc,
-  };
+  const radius = task.geofenceRadiusMeters ?? DEFAULT_RADIUS_M;
+  const skipGps = skipsGpsCheck(task);
   const onChange = (lat: number, lng: number) => set({ coordinates: { lat, lng } });
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-2">
+    // `overflow-y-auto` is the SAFETY VALVE for the map's min-height floor, not the
+    // layout strategy: on any normal panel everything fits and no scrollbar appears.
+    // It only engages on a viewport too short for a usable map, where scrolling to a
+    // real map beats staring at a clipped one.
+    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
       <div className="shrink-0">
-        <Label>{b.fireQuestion}</Label>
-        {/* Four options in one row: icon + label. The active mode's explanation
-            shows below — keeps the chooser tight while keeping the guidance. */}
-        <div className="grid grid-cols-4 gap-1.5">
-          {MODES.map((tm) => {
-            const active = mode === tm.mode;
+        {/* The question row carries the settings gear on its end (change:
+            builder-step1-full-height-map, revised). Collapsed it costs ZERO extra
+            height — it rides a row that already exists — and, unlike the floating
+            chip it replaces, it never covers the map. Overlaying controls on a small
+            map traded a squeezed map for a hidden one, which is worse: the map is
+            the thing the creator came to this step to use. */}
+        <div className="flex items-center justify-between gap-2">
+          <Label>{b.fireQuestion}</Label>
+          {/* One short word plus the gear. A bare ⚙ read as decoration and went
+              unnoticed; the full "הגדרות מתקדמות למיקום" was so long it wrapped and
+              clipped against the question beside it. `locAdvancedShort` is the label
+              for this spot — the long form still titles the panel it opens, so
+              nothing is lost, and `title` carries it on hover. */}
+          {choice === 'specific' && (
+            <button type="button" onClick={() => setAdvOpen((o) => !o)} aria-expanded={advOpen}
+              title={b.locAdvanced}
+              className={`shrink-0 flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors ${
+                advOpen
+                  ? 'border-rp-fire bg-rp-fire/10 text-rp-fire'
+                  : 'border-[--rp-border] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}>
+              <span aria-hidden>⚙</span>
+              {b.locAdvancedShort}
+            </button>
+          )}
+        </div>
+        {/* Two options, side by side. The active choice's explanation shows below. */}
+        <div className="grid grid-cols-2 gap-2">
+          {CHOICES.map((c) => {
+            const active = choice === c.choice;
             return (
-              <button key={tm.mode} type="button" onClick={() => setMode(tm.mode)}
-                className={`flex flex-col items-center justify-center gap-1 rounded-lg border py-1.5 px-1 transition-colors ${
+              <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
+                className={`flex flex-col items-center justify-center gap-1 rounded-lg border py-2.5 px-2 transition-colors ${
                   active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
-                <BuilderIcon name={TRIGGER_ICON_NAME[tm.mode]} className="w-[18px] h-[18px]" />
-                <span className="text-[10px] font-medium leading-tight text-center">{tm.label}</span>
+                <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-5 h-5" />
+                <span className="text-[12px] font-medium leading-tight text-center">{c.label}</span>
+                <span className="text-[10px] leading-tight text-center opacity-70">{c.sub}</span>
               </button>
             );
           })}
         </div>
-        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">{MODE_DESC[mode]}</p>
+        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">
+          {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
+        </p>
       </div>
+
+      {/* Advanced settings: in flow, but ONLY while open (change:
+          builder-step1-full-height-map, revised). Collapsed it is not here at all —
+          its trigger is the gear on the question row above, so the old always-present
+          accordion header is gone. Opening it is a deliberate act, so briefly trading
+          map height for the settings the creator just asked for is the expected
+          behaviour; capped and scrollable so it can never eat the whole step. The
+          previous attempt floated this over the map and made the map unreadable. */}
+      {choice === 'specific' && advOpen && (
+        <div className="shrink-0 max-h-[45%] overflow-y-auto rounded-lg border border-[--rp-border] bg-[--surface-2] p-2.5">
+          <div className="space-y-3">
+              <div>
+                <Label dense>{b.locRadiusLabel}</Label>
+                <div className="flex items-center gap-1.5">
+                  <Input dense type="number" min={1} className="w-24" value={radius}
+                    onChange={(e) => set(radiusPatch(task, Math.max(1, parseInt(e.target.value) || DEFAULT_RADIUS_M)))} />
+                  <span className="text-[11px] text-[--ink-3]">{b.metersShort}</span>
+                  {/* The two old top-level buttons, demoted to one-tap presets. */}
+                  <div className="flex gap-1 ms-auto">
+                    <Button variant="ghost" className="text-[11px] px-2 py-1"
+                      onClick={() => set(radiusPatch(task, TIGHT_RADIUS_M))}>{b.locRadiusPresetTight}</Button>
+                    <Button variant="ghost" className="text-[11px] px-2 py-1"
+                      onClick={() => set(radiusPatch(task, DEFAULT_RADIUS_M))}>{b.locRadiusPresetDefault}</Button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
+              </div>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" className="mt-0.5" checked={skipGps}
+                  onChange={(e) => set(skipGpsPatch(task, e.target.checked))} />
+                <span>
+                  <span className="text-[13px] font-medium text-[--ink-1]">{b.locSkipGps}</span>
+                  <span className="block text-[11px] text-[--ink-3] leading-snug">{b.locSkipGpsDesc}</span>
+                </span>
+              </label>
+
+            {/* Hide location moved here from the old, disconnected `rules`
+                section: it only ever applied to a located task. */}
+            <HideLocationField task={task} set={set} b={b} />
+          </div>
+        </div>
+      )}
 
       {/* "Not placed yet" (change: builder-first-task-flow). A located task that
           still carries the {0,0} sentinel says so plainly, in the same calm
           informational register the mode explanation uses. Deliberately NOT the
-          rp-fire error styling: at this point in the flow it is an unfinished
-          step, not a mistake. The launch refusal lives on the readiness surface. */}
-      {taskPlacementState(task) === 'unplaced' && (
-        <div className="shrink-0 flex items-start gap-2 rounded-lg bg-[--surface-2] px-3 py-2">
-          <span aria-hidden className="text-sm leading-none mt-0.5">📍</span>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-[--ink-2]">{b.notPlacedTitle}</p>
-            <p className="text-[11px] text-[--ink-3] leading-snug">{b.notPlacedBody}</p>
-          </div>
-          <Button variant="ghost" className="text-[11px] shrink-0" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
+          rp-fire error styling: at this point in the flow it is an unfinished step,
+          not a mistake. The launch refusal lives on the readiness surface.
+
+          ONE LINE, and no body copy: the explanatory paragraph turned this into a
+          card that covered the map when it was floated there, and stole three lines
+          when it sat in flow. The title states the situation and the button acts on
+          it, which is all this moment needs. */}
+      {choice === 'specific' && taskPlacementState(task) === 'unplaced' && (
+        <div className="shrink-0 flex items-center gap-2 rounded-lg bg-[--surface-2] px-2.5 py-1.5">
+          <span aria-hidden className="text-xs leading-none">📍</span>
+          <p className="text-[11px] text-[--ink-2] min-w-0 flex-1 truncate">{b.notPlacedTitle}</p>
+          <Button variant="ghost" className="text-[11px] shrink-0 px-2 py-0.5" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
         </div>
       )}
 
-      {located ? (
-        // Map fills the remaining height; an "enlarge" control opens a big modal map.
-        <div className="flex-1 min-h-0 flex flex-col relative">
-          <button type="button" onClick={() => setExpanded(true)}
-            className="absolute z-10 top-12 end-2 flex items-center gap-1 rounded-lg border border-[--rp-border] bg-[--surface-1]/90 backdrop-blur px-2 py-1 text-[11px] text-[--ink-2] hover:text-[--ink-1] shadow-soft">
-            <span className="text-sm leading-none">⛶</span> {b.enlargeMap}
-          </button>
-          <LocationStep coordinates={task.coordinates} onChange={onChange} fill />
+      {/* The map shows for EVERY Specific location task, including one that skips
+          the GPS check — such a task still has a pin and is still routed to, which
+          is exactly why 'instant' lives on this side of the picker.
+
+          The map is the ONLY flex-1 element here, and the single control floating on
+          it is "enlarge" — deliberately one, at a corner. The previous revision put a
+          settings chip and a multi-line "not placed" card on top of the map too, and
+          on a map this size that hid the very thing the step exists for. */}
+      {/* min-h floor: `flex-1` alone let the map shrink to whatever was left after
+          the question, the two choice buttons and LocationPicker's own search row —
+          on a short panel that was a ~200px strip nobody can place a pin on. A map
+          below this size is not a smaller map, it is a broken control, so it holds
+          280px and the step scrolls in the rare case that does not fit. Everything
+          else on this step was already cut to earn this space. */}
+      {choice === 'specific' ? (
+        <div className="flex-1 min-h-[280px] flex flex-col relative">
+          {/* Handed to the MAP rather than positioned here (change:
+              builder-ux-round-2). This wrapper spans LocationPicker's search row AND
+              the coordinates field below the tiles, so anchoring to it put the
+              button on the search button (top) and then on the coordinates input
+              (bottom) — two bugs from the same wrong assumption. `cornerControl`
+              places it in the map's own coordinate space, beside MapModeToggle. */}
+          <LocationStep coordinates={task.coordinates} onChange={onChange} fill
+            cornerControl={(
+              <button type="button" onClick={() => setExpanded(true)}
+                aria-label={b.enlargeMap} title={b.enlargeMap}
+                className="w-7 h-7 flex items-center justify-center rounded-lg border border-[--rp-border] bg-[--surface-1]/90 backdrop-blur text-[--ink-2] hover:text-[--ink-1] shadow-soft">
+                <span className="text-sm leading-none">⛶</span>
+              </button>
+            )} />
         </div>
       ) : (
         <p className="text-xs text-[--ink-3] bg-[--surface-2] rounded-lg px-3 py-2 shrink-0">
-          {mode === 'instant' ? b.instantInfo : b.anywhereInfo}
+          {b.anywhereInfo}
         </p>
       )}
 
       {/* Rendered via a portal to document.body: an ancestor's `transform`
           (the sliding panel) would otherwise trap this `position: fixed` modal. */}
-      {expanded && located && createPortal(
+      {expanded && choice === 'specific' && createPortal(
         <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4 sm:p-8" onClick={() => setExpanded(false)}>
           <div className="bg-[--surface-1] rounded-2xl border border-[--rp-border] shadow-soft w-[92vw] h-[86vh] max-w-5xl flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-[--rp-border]">
@@ -500,12 +702,67 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
   );
 }
 
-// ── Step 2: Details ──
-function DetailsStepBody({ task, set, b, gameId, siblings, sections }: {
-  task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string; siblings?: Task[]; sections: Sections;
+// The nine task types' label + one-line description, read by both the picker
+// (step 2) and the "nothing to configure" note (step 3).
+// THREE strings per type, and the difference matters (change: builder-ux-round-2):
+//   label — the button
+//   short — the CAPTION under the type grid. A caption is glanced at, not read, so
+//           it names the interaction in two or three words.
+//   desc  — the full sentence, kept for the RichTooltip body and Step 3's
+//           `noConfigNote`, where the creator has deliberately asked for detail.
+// The caption used to reuse `desc`, which is why one verbose sentence had to serve
+// three surfaces at once and read as clutter in the one that needed brevity.
+function typeMetaOf(b: B): Record<TaskType, { label: string; short: string; desc: string }> {
+  return {
+    smart_station: { label: b.typeStation, short: b.typeStationShort, desc: b.typeStationDesc },
+    photo: { label: b.typePhoto, short: b.typePhotoShort, desc: b.typePhotoDesc },
+    quiz: { label: b.typeQuiz, short: b.typeQuizShort, desc: b.typeQuizDesc },
+    numeric: { label: b.typeNumeric, short: b.typeNumericShort, desc: b.typeNumericDesc },
+    field: { label: b.typeField, short: b.typeFieldShort, desc: b.typeFieldDesc },
+    self_report: { label: b.typeSelfReport, short: b.typeSelfReportShort, desc: b.typeSelfReportDesc },
+    geofence: { label: b.typeGeofence, short: b.typeGeofenceShort, desc: b.typeGeofenceDesc },
+    sequence: { label: b.typeSequence, short: b.typeSequenceShort, desc: b.typeSequenceDesc },
+    survey: { label: b.typeSurvey, short: b.typeSurveyShort, desc: b.typeSurveyDesc },
+  };
+}
+
+// ── Step 2: Details & type ──
+// EXACTLY three controls (change: task-editor-progressive-disclosure): title,
+// description, task type. Difficulty moved to the "timer / points" opt-in group
+// on step 3, beside the point value it actually interacts with; every other
+// optional field became a chip there too. This step is the one a creator must
+// answer, so it asks nothing else.
+function DetailsStepBody({ task, set, b, replace }: {
+  task: Task; set: (p: Partial<Task>) => void; b: B; replace: (t: Task) => void;
 }) {
-  const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
-  const siblingCount = siblings?.length ?? 1;
+  // Which type's sample list is open (only for a type that offers more than one).
+  const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
+  const TYPE_META = typeMetaOf(b);
+
+  // ── Inspiration Mode (change: builder-first-task-flow) ──
+  // One click turns an empty task into a working, completable example of any
+  // type, which the creator then edits instead of authoring from nothing.
+  const OVERWRITE_LABEL: Record<SampleOverwriteField, string> = {
+    title: b.sampleFieldTitle, description: b.sampleFieldDescription, answerKey: b.sampleFieldAnswerKey,
+  };
+  const applyTypeSample = async (ty: TaskType, sample: TaskSample) => {
+    setSamplePickerFor(null);
+    const overwrites = sampleWouldOverwrite(task, sample);
+    if (overwrites.length > 0) {
+      const names = overwrites.map((f) => OVERWRITE_LABEL[f]).join(', ');
+      if (!(await dialog.confirm(b.sampleOverwriteConfirm(names)))) return;
+    }
+    // Applying a sample marks NOTHING touched: a sample always produces a
+    // completable task, so there is no message to reveal.
+    replace(applySample({ ...task, type: ty }, sample));
+  };
+  const onSampleClick = (ty: TaskType) => {
+    const samples = samplesForType(ty);
+    if (samples.length === 0) return;
+    if (samples.length === 1) { void applyTypeSample(ty, samples[0]); return; }
+    setSamplePickerFor((cur) => (cur === ty ? null : ty));
+  };
+
   return (
     <>
       <div>
@@ -521,78 +778,60 @@ function DetailsStepBody({ task, set, b, gameId, siblings, sections }: {
         <Label dense>{b.descriptionField}</Label>
         <Textarea dense value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
       </div>
-      {/* Difficulty on ONE line: the label sits beside its chips instead of above
-          them, the same compact strip idiom the stage settings row uses. */}
-      <div className="flex items-center gap-2">
-        <div className="flex items-center gap-1 shrink-0">
-          <InlineLabel>{b.difficulty}</InlineLabel>
-          <RichTooltip concept="difficulty" />
-        </div>
-        <div className="flex gap-1.5 flex-1 min-w-0">
-          {DIFF_BANDS.map((d) => {
-            const active = d.test(task.difficulty);
+
+      <div>
+        <Label dense>{b.howComplete}</Label>
+        {/* Compact type picker: icon + label grid, with a one-line description for
+            the active type below. */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {TYPE_PICKER_ORDER.map((ty) => {
+            const active = task.type === ty;
             return (
-              <button key={d.key} onClick={() => set({ difficulty: d.value })}
-                className={`flex-1 min-w-0 rounded-lg border py-1 text-[13px] transition-colors ${
-                  active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
-                {DIFF_LABEL[d.key]}
-              </button>
+              <div key={ty} className="relative">
+                <button onClick={() => set(
+                    // survey (change: survey-tasks): pure data collection defaults
+                    // to 0 points (only when leaving the blank-task default of 100).
+                    ty === 'survey' && task.type !== 'survey' && task.pointValue === 100
+                      ? { type: ty, pointValue: 0 }
+                      : { type: ty },
+                  )}
+                  className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-11 py-1.5 text-start transition-colors ${
+                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+                  <BuilderIcon name={TYPE_ICON_NAME[ty]} className="w-4 h-4 shrink-0" />
+                  <span className="text-[11px] font-medium truncate">{TYPE_META[ty].label}</span>
+                </button>
+                <span className="absolute top-1/2 -translate-y-1/2 end-1 z-10 flex items-center gap-0.5">
+                  {/* Load an authored, immediately completable example of this
+                      type. The accessible name says which type it loads. */}
+                  <button type="button" onClick={() => onSampleClick(ty)}
+                    aria-label={b.loadSampleFor(TYPE_META[ty].label)} title={b.loadSampleFor(TYPE_META[ty].label)}
+                    aria-expanded={samplePickerFor === ty}
+                    className="w-4 h-4 rounded-full bg-[--surface-2] text-[--ink-3] text-[10px] leading-none flex items-center justify-center hover:text-rp-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
+                    ✨
+                  </button>
+                  <RichTooltip title={TYPE_META[ty].label} body={TYPE_META[ty].desc} svg={TYPE_ANIM[ty]} />
+                </span>
+                {/* A type with several samples offers its labelled list. */}
+                {samplePickerFor === ty && (
+                  <div className="absolute z-20 top-full mt-1 start-0 min-w-full w-max max-w-[15rem] rounded-lg border border-[--rp-border] bg-[--surface-1] shadow-soft p-1">
+                    <p className="px-1.5 py-1 text-[10px] text-[--ink-3]">{b.samplePickTitle(TYPE_META[ty].label)}</p>
+                    {samplesForType(ty).map((sample) => (
+                      <button key={sample.label} type="button" dir="auto"
+                        onClick={() => void applyTypeSample(ty, sample)}
+                        className="w-full text-start rounded px-1.5 py-1 text-[11px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] truncate">
+                        {sample.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
+        {/* The CAPTION takes the short form; the tooltip above and Step 3's note
+            keep the full sentence (change: builder-ux-round-2). */}
+        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].short}</p>
       </div>
-
-      <Section k="hint" title={b.hintField} task={task} sections={sections} b={b}>
-        <div className="flex items-center justify-between gap-2">
-          <RichTooltip concept="hint" />
-          <button className="text-[11px] text-[--ink-3] hover:text-neon-red"
-            onClick={() => set({
-              hint: undefined, hintPenalty: undefined, hintAutoRevealMinutes: undefined, hintAutoRevealAttempts: undefined,
-            })}>
-            {b.removeHint}
-          </button>
-        </div>
-        <Textarea dense value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
-        <div className="flex items-center gap-2">
-          <InlineLabel>{b.hintCost}</InlineLabel>
-          <Input dense type="number" min={0} className="w-20" value={task.hintPenalty ?? 25}
-            onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
-        </div>
-        {/* Hint auto escalation (change: hint-auto-escalation): optional free
-            thresholds — the hint stops costing points once the team has held
-            the task N minutes OR burned N wrong attempts. 0/empty = off. The
-            long explanation is demoted to a tooltip on the row. */}
-        <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5" title={b.hintEscalationLead}>
-          <div className="flex items-center gap-1.5">
-            <Input dense type="number" min={0} step="0.5" className="w-16" value={task.hintAutoRevealMinutes ?? ''}
-              aria-label={b.hintFreeAfterMinutes}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                set({ hintAutoRevealMinutes: Number.isFinite(v) && v > 0 ? v : undefined });
-              }} />
-            <InlineLabel>{b.hintFreeAfterMinutes}</InlineLabel>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Input dense type="number" min={0} className="w-16" value={task.hintAutoRevealAttempts ?? ''}
-              aria-label={b.hintFreeAfterAttempts}
-              onChange={(e) => {
-                const v = parseInt(e.target.value);
-                set({ hintAutoRevealAttempts: Number.isInteger(v) && v > 0 ? v : undefined });
-              }} />
-            <InlineLabel>{b.hintFreeAfterAttempts}</InlineLabel>
-          </div>
-        </div>
-      </Section>
-
-      {sectionApplies('unlock', task, siblingCount) && (
-        <Section k="unlock" title={b.unlockAfterLead} task={task} sections={sections} b={b}>
-          <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
-        </Section>
-      )}
-
-      <Section k="media" title={b.mediaField} task={task} sections={sections} b={b}>
-        <MediaSection task={task} set={set} b={b} gameId={gameId} />
-      </Section>
     </>
   );
 }
@@ -890,112 +1129,42 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
   ),
 };
 
-// ── Step 3: Interaction ──
-function InteractionStepBody({ task, set, setSmart, replace, b, sections, revealed, touch, siblings }: {
+// ── Step 3: Execution, verification & enhancements ──
+// The REQUIRED, type-conditional verification fields come first and are never
+// hideable — a quiz with no answers or a sequence with no steps is not a task,
+// so putting either behind a chip would let a creator save something unplayable.
+// Everything optional follows as a row of opt-in chips (change:
+// task-editor-progressive-disclosure).
+function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, touch, siblings, gameId }: {
   task: Task; set: (p: Partial<Task>) => void; setSmart: (p: Record<string, unknown>) => void;
   // visible-time-estimates: the other tasks of the SAME stage. Only used to measure
   // the median walking leg behind the suggested estimate.
   siblings?: Task[];
-  // The whole-task setter, so loading a sample changes the type AND the content
-  // in ONE onChange (the auto-save debounce then sees one coherent task).
+  // The whole-task setter, kept for the editors below that rewrite a task wholesale.
   replace: (t: Task) => void;
-  b: B; sections: Sections;
+  b: B; groups: Groups; gameId?: string;
   revealed: (f: ValidationField) => boolean; touch: (f: ValidationField) => void;
 }) {
-  // Which type's sample list is open (only for a type that offers more than one).
-  const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
   const located = (() => { const m = normalizeTriggerMode(task); return m === 'radius' || m === 'exact'; })();
   const isAnswerTask = task.type === 'quiz' || task.type === 'numeric' || task.type === 'survey';
-  const TYPE_META: Record<TaskType, { label: string; desc: string }> = {
-    smart_station: { label: b.typeStation, desc: b.typeStationDesc },
-    photo: { label: b.typePhoto, desc: b.typePhotoDesc },
-    quiz: { label: b.typeQuiz, desc: b.typeQuizDesc },
-    numeric: { label: b.typeNumeric, desc: b.typeNumericDesc },
-    field: { label: b.typeField, desc: b.typeFieldDesc },
-    self_report: { label: b.typeSelfReport, desc: b.typeSelfReportDesc },
-    geofence: { label: b.typeGeofence, desc: b.typeGeofenceDesc },
-    sequence: { label: b.typeSequence, desc: b.typeSequenceDesc },
-    survey: { label: b.typeSurvey, desc: b.typeSurveyDesc },
-  };
+  const TYPE_META = typeMetaOf(b);
+  const siblingCount = siblings?.length ?? 1;
+  const DIFF_LABEL: Record<string, string> = { easy: b.easy, mid: b.mid, hard: b.hard };
+  void replace;
 
-  // ── Inspiration Mode (change: builder-first-task-flow) ──
-  // One click turns an empty task into a working, completable example of any
-  // type, which the creator then edits instead of authoring from nothing.
-  const OVERWRITE_LABEL: Record<SampleOverwriteField, string> = {
-    title: b.sampleFieldTitle, description: b.sampleFieldDescription, answerKey: b.sampleFieldAnswerKey,
+  const GROUP_TITLE: Record<OptInGroupKey, string> = {
+    hint: b.hintField, timerPoints: b.groupTimerPoints, media: b.mediaField, rules: b.groupRules,
   };
-  const applyTypeSample = async (ty: TaskType, sample: TaskSample) => {
-    setSamplePickerFor(null);
-    const overwrites = sampleWouldOverwrite(task, sample);
-    if (overwrites.length > 0) {
-      const names = overwrites.map((f) => OVERWRITE_LABEL[f]).join(', ');
-      if (!(await dialog.confirm(b.sampleOverwriteConfirm(names)))) return;
-    }
-    // Applying a sample marks NOTHING touched: a sample always produces a
-    // completable task, so there is no message to reveal.
-    replace(applySample({ ...task, type: ty }, sample));
+  const CHIP_LABEL: Record<OptInGroupKey, string> = {
+    hint: b.chipAddHint, timerPoints: b.chipSetTimerPoints, media: b.chipAttachMedia, rules: b.chipRules,
   };
-  const onSampleClick = (ty: TaskType) => {
-    const samples = samplesForType(ty);
-    if (samples.length === 0) return;
-    if (samples.length === 1) { void applyTypeSample(ty, samples[0]); return; }
-    setSamplePickerFor((cur) => (cur === ty ? null : ty));
-  };
+  // A group is shown when the creator opted in OR the task already carries its
+  // data — the second half is what stops an authored hint hiding behind a chip.
+  const shown = (k: OptInGroupKey) => groups.active[k] || groupHasContent(k, task);
+  const chips = OPT_IN_GROUP_KEYS.filter((k) => groupApplies(k, task, siblingCount) && !shown(k));
 
   return (
     <>
-      <div>
-        <Label dense>{b.howComplete}</Label>
-        {/* Compact type picker: original icon + label grid, with a one-line
-            description for the active type below — keeps the step short. */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {TYPE_PICKER_ORDER.map((ty) => {
-            const active = task.type === ty;
-            return (
-              <div key={ty} className="relative">
-                <button onClick={() => set(
-                    // survey (change: survey-tasks): pure data collection defaults
-                    // to 0 points (only when leaving the blank-task default of 100).
-                    ty === 'survey' && task.type !== 'survey' && task.pointValue === 100
-                      ? { type: ty, pointValue: 0 }
-                      : { type: ty },
-                  )}
-                  className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-11 py-1.5 text-start transition-colors ${
-                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
-                  <BuilderIcon name={TYPE_ICON_NAME[ty]} className="w-4 h-4 shrink-0" />
-                  <span className="text-[11px] font-medium truncate">{TYPE_META[ty].label}</span>
-                </button>
-                <span className="absolute top-1/2 -translate-y-1/2 end-1 z-10 flex items-center gap-0.5">
-                  {/* Load an authored, immediately completable example of this
-                      type. The accessible name says which type it loads. */}
-                  <button type="button" onClick={() => onSampleClick(ty)}
-                    aria-label={b.loadSampleFor(TYPE_META[ty].label)} title={b.loadSampleFor(TYPE_META[ty].label)}
-                    aria-expanded={samplePickerFor === ty}
-                    className="w-4 h-4 rounded-full bg-[--surface-2] text-[--ink-3] text-[10px] leading-none flex items-center justify-center hover:text-rp-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
-                    ✨
-                  </button>
-                  <RichTooltip title={TYPE_META[ty].label} body={TYPE_META[ty].desc} svg={TYPE_ANIM[ty]} />
-                </span>
-                {/* A type with several samples offers its labelled list. */}
-                {samplePickerFor === ty && (
-                  <div className="absolute z-20 top-full mt-1 start-0 min-w-full w-max max-w-[15rem] rounded-lg border border-[--rp-border] bg-[--surface-1] shadow-soft p-1">
-                    <p className="px-1.5 py-1 text-[10px] text-[--ink-3]">{b.samplePickTitle(TYPE_META[ty].label)}</p>
-                    {samplesForType(ty).map((sample) => (
-                      <button key={sample.label} type="button" dir="auto"
-                        onClick={() => void applyTypeSample(ty, sample)}
-                        className="w-full text-start rounded px-1.5 py-1 text-[11px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] truncate">
-                        {sample.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].desc}</p>
-      </div>
-
       <div className="space-y-2">
         {task.type === 'smart_station' && (
           <div>
@@ -1078,32 +1247,66 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
         )}
       </div>
 
-      {/* Player rules — the two opt-in restrictions, folded into ONE collapsed
-          section instead of two always-open boxes. Nothing is removed: the
-          presence gate (change: quiz-location-verification, answer tasks only)
-          and the hidden-location clue (located tasks only) each still render
-          exactly where they applied, and the section auto expands whenever
-          either is already on. */}
-      {sectionApplies('rules', task, 1) && (
-        <Section k="rules" title={b.sectionRules} task={task} sections={sections} b={b}>
-          {/* Pause-clock tasks (change: pause-clock-tasks): offered on EVERY task
-              type, off by default. Written as `true` / `undefined` and never
-              `false`, so a game that never touched this control stays byte
-              identical. On a located task the excluded span also covers the walk
-              to the spot, so say so instead of hiding the interaction. */}
-          <div>
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input type="checkbox" className="mt-0.5" checked={!!task.pausesTimer}
-                onChange={(e) => set({ pausesTimer: e.target.checked || undefined })} />
-              <span>
-                <span className="text-[13px] font-medium text-[--ink-1]">{b.pauseClock}</span>
-                <span className="block text-[11px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
-              </span>
-            </label>
-            {task.pausesTimer && located && (
-              <p className="text-[11px] text-rp-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
-            )}
+      {/* ── The modular opt-in groups ──────────────────────────────────────
+          Each optional field group is either a chip or its real fields with a
+          Remove control. A group whose data already exists renders expanded
+          regardless of what the creator has clicked, so nothing authored is ever
+          hidden. */}
+
+      {shown('hint') && (
+        <OptInGroup title={GROUP_TITLE.hint} removeLabel={b.removeHint} onRemove={() => groups.removeGroup('hint')}>
+          <div className="flex items-center gap-2">
+            <RichTooltip concept="hint" />
           </div>
+          <Textarea dense value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
+          <div className="flex items-center gap-2">
+            <InlineLabel>{b.hintCost}</InlineLabel>
+            <Input dense type="number" min={0} className="w-20" value={task.hintPenalty ?? 25}
+              onChange={(e) => set({ hintPenalty: Math.max(0, parseInt(e.target.value) || 0) })} />
+          </div>
+          {/* Hint auto escalation (change: hint-auto-escalation): optional free
+              thresholds — the hint stops costing points once the team has held
+              the task N minutes OR burned N wrong attempts. 0/empty = off. The
+              long explanation is demoted to a tooltip on the row. */}
+          <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5" title={b.hintEscalationLead}>
+            <div className="flex items-center gap-1.5">
+              <Input dense type="number" min={0} step="0.5" className="w-16" value={task.hintAutoRevealMinutes ?? ''}
+                aria-label={b.hintFreeAfterMinutes}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  set({ hintAutoRevealMinutes: Number.isFinite(v) && v > 0 ? v : undefined });
+                }} />
+              <InlineLabel>{b.hintFreeAfterMinutes}</InlineLabel>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Input dense type="number" min={0} className="w-16" value={task.hintAutoRevealAttempts ?? ''}
+                aria-label={b.hintFreeAfterAttempts}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value);
+                  set({ hintAutoRevealAttempts: Number.isInteger(v) && v > 0 ? v : undefined });
+                }} />
+              <InlineLabel>{b.hintFreeAfterAttempts}</InlineLabel>
+            </div>
+          </div>
+        </OptInGroup>
+      )}
+
+      {shown('media') && (
+        <OptInGroup title={GROUP_TITLE.media} removeLabel={b.removeItem} onRemove={() => groups.removeGroup('media')}>
+          <MediaSection task={task} set={set} b={b} gameId={gameId} />
+        </OptInGroup>
+      )}
+
+      {shown('rules') && (
+        <OptInGroup title={GROUP_TITLE.rules} removeLabel={b.removeItem} onRemove={() => groups.removeGroup('rules')}>
+          {/* Prerequisites need siblings to point at, so a one-task stage is
+              offered the rest of the group without them. */}
+          {siblingCount > 1 && (
+            <div>
+              <InlineLabel>{b.unlockAfterLead}</InlineLabel>
+              <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
+            </div>
+          )}
           {isAnswerTask && (
             <label className="flex items-start gap-2 cursor-pointer">
               <input type="checkbox" className="mt-0.5" checked={!!task.requirePresence}
@@ -1114,52 +1317,51 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
               </span>
             </label>
           )}
-          {located && (
-            <div>
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input type="checkbox" className="mt-0.5" checked={!!task.hideLocation}
-                  onChange={(e) => set(e.target.checked
-                    ? { hideLocation: true }
-                    : { hideLocation: undefined, locationClue: undefined, locationClueHe: undefined })} />
-                <span>
-                  <span className="text-[13px] font-medium text-[--ink-1]">{b.hideLocation}</span>
-                  <span className="block text-[11px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
-                </span>
-              </label>
-              {task.hideLocation && (
-                <div className="mt-1.5">
-                  <Label dense>{b.locationClueField}</Label>
-                  <Textarea dense value={task.locationClue ?? ''} onChange={(e) => set({ locationClue: e.target.value })}
-                    placeholder={b.locationCluePlaceholder} rows={2} dir="auto" />
-                  {taskPlacementState(task) === 'unplaced' ? (
-                    // A hidden task is still a located task — the placement step's
-                    // "not placed yet" state and the readiness surface are what
-                    // guarantee real coordinates exist before the run launches.
-                    <p className="text-[11px] text-rp-fire mt-1">{b.hideLocationNeedsCoords}</p>
-                  ) : !task.locationClue?.trim() && (
-                    <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
-                  )}
-                  {/* Leak guard (change: hidden-location-leak-guard): title/description
-                      still ship to players, so warn if they name the place. Advisory only. */}
-                  {(() => {
-                    const leaks = locationLeakWarnings(task);
-                    if (leaks.length === 0) return null;
-                    return (
-                      <p className="text-[11px] text-rp-fire mt-1">
-                        {leaks.length === 2 ? b.hideLocationLeakBoth
-                          : leaks[0] === 'title' ? b.hideLocationLeakTitle
-                          : b.hideLocationLeakDesc}
-                      </p>
-                    );
-                  })()}
-                </div>
-              )}
+          <div>
+            <div className="flex items-center gap-1 mb-0.5">
+              <InlineLabel>{b.maxTeams}</InlineLabel>
+              <RichTooltip concept="concurrent" />
             </div>
-          )}
-        </Section>
+            <Input dense type="number" min={1} value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: Math.max(1, parseInt(e.target.value) || 1) })} />
+          </div>
+          {/* Task tags (change: game-task-tags). `Task.tags` existed and was already
+              denormalized into publicTasks and returned by searchTaskLibrary — but the
+              ONLY code path that ever wrote it was copying a task OUT of the library,
+              so a creator could never tag their own mission. */}
+          <div>
+            <InlineLabel>{b.advGroupTags}</InlineLabel>
+            <TaskTagsField task={task} set={set} b={b} />
+          </div>
+          {/* "Hide location" used to live here. It moved into the Location step's
+              Advanced panel (change: task-location-mode-consolidation), beside the
+              radius and skip-GPS controls it belongs with. */}
+        </OptInGroup>
       )}
 
-      <Section k="advanced" title={b.advanced} task={task} sections={sections} b={b}>
+      {shown('timerPoints') && (
+        <OptInGroup title={GROUP_TITLE.timerPoints} removeLabel={b.removeItem} onRemove={() => groups.removeGroup('timerPoints')}>
+        {/* Difficulty on ONE line: the label sits beside its chips instead of above
+            them, the same compact strip idiom the stage settings row uses. It lives
+            here rather than on the details step because it only means anything next
+            to the point value it scales. */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 shrink-0">
+            <InlineLabel>{b.difficulty}</InlineLabel>
+            <RichTooltip concept="difficulty" />
+          </div>
+          <div className="flex gap-1.5 flex-1 min-w-0">
+            {DIFF_BANDS.map((d) => {
+              const active = d.test(task.difficulty);
+              return (
+                <button key={d.key} onClick={() => set({ difficulty: d.value })}
+                  className={`flex-1 min-w-0 rounded-lg border py-1 text-[13px] transition-colors ${
+                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+                  {DIFF_LABEL[d.key]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
         <div>
           <Label dense>{b.points}</Label>
           <Input dense type="number" min={0} value={task.pointValue} onChange={(e) => set({ pointValue: Math.max(0, parseInt(e.target.value) || 0) })} />
@@ -1280,36 +1482,37 @@ function InteractionStepBody({ task, set, setSmart, replace, b, sections, reveal
           )}
         </div>
 
-        <AdvGroup>{b.advGroupLimits}</AdvGroup>
-        <div className="grid grid-cols-2 gap-2">
-          <div>
-            <div className="flex items-center gap-1 mb-0.5">
-              <InlineLabel>{b.maxTeams}</InlineLabel>
-              <RichTooltip concept="concurrent" />
-            </div>
-            <Input dense type="number" min={1} value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: Math.max(1, parseInt(e.target.value) || 1) })} />
-          </div>
-          {located && (
-            <div>
-              <div className="flex items-center gap-1 mb-0.5">
-                <InlineLabel>{b.triggerRadius}</InlineLabel>
-                <RichTooltip concept="geofence" />
-              </div>
-              <Input dense type="number" min={1} value={task.geofenceRadiusMeters ?? defaultRadiusFor(normalizeTriggerMode(task))}
-                onChange={(e) => set({
-                  geofenceRadiusMeters: Math.max(1, parseInt(e.target.value) || defaultRadiusFor(normalizeTriggerMode(task))),
-                })} />
-            </div>
+        {/* The pause-clock toggle belongs with the timing it changes (change:
+            pause-clock-tasks): offered on EVERY task type, off by default. Written
+            as `true` / `undefined` and never `false`, so a game that never touched
+            this control stays byte identical. On a located task the excluded span
+            also covers the walk to the spot, so say so instead of hiding it. */}
+        <div>
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={!!task.pausesTimer}
+              onChange={(e) => set({ pausesTimer: e.target.checked || undefined })} />
+            <span>
+              <span className="text-[13px] font-medium text-[--ink-1]">{b.pauseClock}</span>
+              <span className="block text-[11px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
+            </span>
+          </label>
+          {task.pausesTimer && located && (
+            <p className="text-[11px] text-rp-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
           )}
         </div>
+        </OptInGroup>
+      )}
 
-        <AdvGroup>{b.advGroupTags}</AdvGroup>
-        {/* Task tags (change: game-task-tags). `Task.tags` existed and was already
-            denormalized into publicTasks and returned by searchTaskLibrary — but the
-            ONLY code path that ever wrote it was copying a task OUT of the library,
-            so a creator could never tag their own mission. */}
-        <TaskTagsField task={task} set={set} b={b} />
-      </Section>
+      {/* The chip row: one chip per group the creator has NOT opted into and that
+          holds no data. An empty row means everything is already on screen. */}
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {chips.map((k) => (
+            <OptInChip key={k} label={CHIP_LABEL[k]} count={groupSummary(k, task)} b={b}
+              onClick={() => groups.openGroup(k)} />
+          ))}
+        </div>
+      )}
     </>
   );
 }

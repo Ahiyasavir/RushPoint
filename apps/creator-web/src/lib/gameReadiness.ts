@@ -111,3 +111,30 @@ export function canLaunchGame(game: ReadableGame): boolean {
 export function firstLaunchBlocker(game: ReadableGame): ReadinessIssue | null {
   return computeGameReadiness(game)[0] ?? null;
 }
+
+// ── Auto-open decision (change: builder-readiness-autoopen) ──────────────────
+
+/** Why the Builder is considering forcing the readiness panel open. */
+export type ReadinessAutoOpenTrigger = 'saveRejected' | 'launchBlocked';
+
+/**
+ * Should the readiness panel force itself open for this trigger?
+ *
+ * The popover INTERRUPTS the creator, so opening it is a deliberate decision and
+ * belongs in one testable predicate rather than in scattered inline
+ * `setReadinessOpen(true)` calls (BuilderPage's save catch + launch guard).
+ *
+ * It opens only when the creator cannot otherwise see WHY something was refused:
+ * a structural save rejection or a blocked launch both name a specific stage/task
+ * that only this panel lists. Transient or self-explanatory states — offline, a
+ * retryable failure, a merely-unsaved buffer — must never open it; that is the
+ * flicker creators reported back when every autosave of an unfinished answer key
+ * was being rejected (see builder-draft-save-tolerance).
+ *
+ * TOTAL and non-throwing on purpose: it runs inside the save path's catch block,
+ * where a throw would replace a save error with a crash. An unrecognized trigger
+ * is inert (stays shut) rather than an error.
+ */
+export function shouldAutoOpenReadiness(trigger: ReadinessAutoOpenTrigger): boolean {
+  return trigger === 'saveRejected' || trigger === 'launchBlocked';
+}

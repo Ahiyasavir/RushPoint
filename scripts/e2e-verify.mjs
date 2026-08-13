@@ -2078,20 +2078,35 @@ async function main() {
 
   // Unwinnable-task guard: a task with no usable answer key can never be
   // completed by any participant (matchesTaskAnswer/verifyStationCode/
-  // submitSequenceStep all reject an empty answer). updateGame must refuse to
-  // persist one — bypassing the Wizard's client-side guard directly.
-  await expectError('updateGame rejects a quiz with no answers',
-    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz' }) }),
-    { codeIn: ['functions/invalid-argument'] });
-  await expectError('updateGame rejects a numeric task with no numericAnswer',
-    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'numeric' }) }),
-    { codeIn: ['functions/invalid-argument'] });
-  await expectError('updateGame rejects a smart_station with no secretCode',
-    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'smart_station' }) }),
-    { codeIn: ['functions/invalid-argument'] });
-  await expectError('updateGame rejects a sequence with no steps',
-    creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'sequence' }) }),
-    { codeIn: ['functions/invalid-argument'] });
+  // submitSequenceStep all reject an empty answer).
+  //
+  // WHERE IT IS ENFORCED CHANGED (change: builder-draft-save-tolerance). These four
+  // used to assert `updateGame` REFUSED such a task. It no longer does, on purpose:
+  // the Builder autosaves 1.5 s after every edit, so refusing the save meant that
+  // picking "quiz" as a task type rejected every autosave until the answer key was
+  // finished, and the creator's authoring was silently not persisted. An unfinished
+  // answer key is a DRAFT, so it now saves and is refused at the go-live doors
+  // instead — asserted immediately below and, end to end, by the
+  // 'draft save tolerance' scenario. This is a deliberate contract change, not a
+  // relaxation of the invariant: no unwinnable task can still reach participants.
+  await creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'quiz' }) });
+  check('draft: updateGame ACCEPTS a quiz with no answers (go-live door enforces it)', true);
+  await creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'numeric' }) });
+  check('draft: updateGame ACCEPTS a numeric task with no numericAnswer', true);
+  await creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'smart_station' }) });
+  check('draft: updateGame ACCEPTS a smart_station with no secretCode', true);
+  await creator.call('updateGame', { gameId: gO, stages: badStage({ ...baseBad, type: 'sequence' }) });
+  check('draft: updateGame ACCEPTS a sequence with no steps', true);
+
+  // ...and the go-live door refuses the very game those saves just produced, which
+  // is what makes accepting them safe.
+  // The message is pinned, not just the code: this game already had a run, and a
+  // generic failed-precondition would otherwise let an unrelated refusal (an
+  // already-live guard, say) pass this check for the wrong reason. The last save
+  // above left a `sequence` task with no steps, so that is the refusal expected.
+  await expectError('launchRun refuses the key-less draft that updateGame accepted',
+    creator.call('launchRun', { gameId: gO }),
+    { codeIn: ['functions/failed-precondition'], match: /at least one step/i });
 
   // Defense in depth: a game saved BEFORE this guard existed (or written by any
   // other path) could still carry an unwinnable task. launchRun must catch it
@@ -3673,12 +3688,23 @@ async function main() {
       (soloBoard?.run?.leaderboard ?? null) !== null && soloBoard?.run?.leaderboard?.published === true,
       JSON.stringify(soloBoard?.run?.leaderboard ?? null));
 
-    // A published game that did NOT opt in refuses instant play.
-    const { gameId: gN2 } = await creator.call('createGame', { title: 'No Instant', mode: 'individual' });
+    // Publishing IS the opt-in (change: gallery-missions-quick-play). A game that
+    // never expressed a preference gets instant play switched ON by publishGame, so
+    // the gallery's Play button always matches what the server will actually allow.
+    // Before this, publishing left the flag absent and the button could never appear.
+    const { gameId: gN2 } = await creator.call('createGame', { title: 'Default Instant', mode: 'individual' });
     await creator.call('updateGame', { gameId: gN2, stages: oneStage('n2-s') });
     await creator.call('publishGame', { gameId: gN2, visibility: 'public' });
-    await expectError('instant: a non-opted-in game is refused',
-      pI.call('startInstantPlay', { gameId: gN2 }), { codeIn: ['functions/failed-precondition'] });
+    const defaultedRun = await pI.call('startInstantPlay', { gameId: gN2 });
+    check('instant: publishing defaults an unset game to allow instant play',
+      !!defaultedRun?.runId, JSON.stringify(defaultedRun ?? null));
+
+    // …but an EXPLICIT opt-out is a real decision and survives publish untouched.
+    const { gameId: gNo } = await creator.call('createGame', { title: 'No Instant', mode: 'individual' });
+    await creator.call('updateGame', { gameId: gNo, allowInstantPlay: false, stages: oneStage('no-s') });
+    await creator.call('publishGame', { gameId: gNo, visibility: 'public' });
+    await expectError('instant: an explicitly opted-OUT game is still refused',
+      pI.call('startInstantPlay', { gameId: gNo }), { codeIn: ['functions/failed-precondition'] });
 
     // J1 (wave-J privacy): a game that requires guardian consent CANNOT be started
     // via instant play — the consent gate only existed in startTeams, letting a
@@ -4699,6 +4725,74 @@ async function main() {
     check('duration: a refused save left the previous authored value intact',
       durAfter?.stages?.[0]?.tasks?.[0]?.expectedDurationMinutes === 4,
       String(durAfter?.stages?.[0]?.tasks?.[0]?.expectedDurationMinutes));
+  });
+
+  // ── Draft save tolerance (change: builder-draft-save-tolerance) ─────────────
+  // THE BUG: the Builder autosaves 1.5 s after any edit, and updateGame ran the
+  // full structural guard including taskCompletabilityError — so from the moment a
+  // creator picked "quiz" as a task type, EVERY autosave was refused with
+  // invalid-argument until the answer key was finished. The creator's authoring was
+  // silently not persisted (and the readiness popover force-reopened each time).
+  // The rule now: an unfinished answer key SAVES but never GOES LIVE. This scenario
+  // pins both halves, because relaxing the save without the go-live refusal would be
+  // strictly worse than the bug — an unwinnable game would reach real participants.
+  await scenario('draft save tolerance (unfinished answer key saves, never launches)', async () => {
+    const { gameId: gDraft } = await creator.call('createGame', { title: 'Draft Door', mode: 'individual' });
+    // Every answer-key-bearing type, each mid-authoring with its key not filled in —
+    // exactly the shape the Builder holds between "I picked quiz" and "I typed the
+    // answer". `answers: []` is what blankTask + a type switch actually produces.
+    const draftStages = (over = {}) => [{
+      id: 'dr-s', order: 0, title: 'One', isFinal: true, tasks: [{
+        id: 'dr-t', title: 'Riddle', type: 'quiz', triggerMode: 'locationless', locationless: true,
+        coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10,
+        maxConcurrentTeams: 9, prompt: 'Where?', answers: [], ...over,
+      }],
+    }];
+
+    // 1. The save door ACCEPTS the unfinished draft (this is the regression).
+    await creator.call('updateGame', { gameId: gDraft, stages: draftStages() });
+    const { game: draftGame } = await creator.call('getGame', { gameId: gDraft });
+    check('draft: an answer-key-less quiz is persisted, not refused',
+      draftGame?.stages?.[0]?.tasks?.[0]?.id === 'dr-t'
+      && (draftGame?.stages?.[0]?.tasks?.[0]?.answers?.length ?? 0) === 0,
+      JSON.stringify(draftGame?.stages?.[0]?.tasks?.[0]?.answers));
+
+    // Same tolerance for the other three answer-key types — a save door that only
+    // forgave quizzes would still strand a creator authoring a station or sequence.
+    for (const [label, over] of [
+      ['numeric without numericAnswer', { type: 'numeric', answers: undefined }],
+      ['smart_station without secretCode', { type: 'smart_station', answers: undefined }],
+      ['sequence without steps', { type: 'sequence', answers: undefined, steps: [] }],
+    ]) {
+      let saved = true;
+      await creator.call('updateGame', { gameId: gDraft, stages: draftStages(over) })
+        .catch((e) => { saved = false; check(`draft: ${label} saves`, false, `${e.code} :: ${e.message}`); });
+      if (saved) check(`draft: ${label} saves`, true);
+    }
+
+    // 2. The GO-LIVE doors still refuse it. This is what makes (1) safe.
+    await creator.call('updateGame', { gameId: gDraft, stages: draftStages() });
+    await expectError('draft: launchRun REFUSES an unfinished answer key',
+      creator.call('launchRun', { gameId: gDraft }),
+      { codeIn: ['functions/failed-precondition'], match: /accepted answer|ordering items/i });
+    await expectError('draft: publishGame REFUSES an unfinished answer key',
+      creator.call('publishGame', { gameId: gDraft, visibility: 'public' }),
+      { codeIn: ['functions/failed-precondition'], match: /accepted answer|ordering items/i });
+
+    // 3. Control: finishing the key makes the SAME game launchable — proving the
+    // refusal above was about the answer key and not some unrelated precondition.
+    await creator.call('updateGame', { gameId: gDraft, stages: draftStages({ answers: ['ירושלים'] }) });
+    const { runId: rDraft } = await creator.call('launchRun', { gameId: gDraft });
+    check('draft: the same game launches once the answer key is filled in', !!rDraft, String(rDraft));
+
+    // 4. Real CORRUPTION is still refused at the save door — the relaxation is
+    // scoped to unfinished answer keys, not to structural validation as a whole.
+    await expectError('draft: a negative pointValue is still refused at save',
+      creator.call('updateGame', { gameId: gDraft, stages: draftStages({ answers: ['x'], pointValue: -50 }) }),
+      { codeIn: ['functions/invalid-argument'], match: /point value/i });
+    await expectError('draft: a 0-task stage is still refused at save',
+      creator.call('updateGame', { gameId: gDraft, stages: [{ id: 'dr-s', order: 0, title: 'One', isFinal: true, tasks: [] }] }),
+      { codeIn: ['functions/invalid-argument'], match: /at least one task/i });
   });
 
   // ── Run recap (getRunRecap) ─────────────────────────────────────────────────
@@ -8481,14 +8575,24 @@ async function main() {
         ] },
       ] } } }),
       { codeIn: ['functions/invalid-argument'] });
-    await expectError('import: a quiz task with no answer key is refused',
-      creator.call('importGameFile', { file: { ...file, game: { ...file.game, stages: [
-        { id: 'nq0', order: 0, title: 'No key', isFinal: true, tasks: [
-          { id: 'nq-a', title: 'Unanswerable', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
-            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, question: 'What?', answers: [] },
-        ] },
-      ] } } }),
-      { codeIn: ['functions/invalid-argument'] });
+    // An answer-key-less quiz is ACCEPTED by import (change:
+    // builder-draft-save-tolerance) — it used to be refused here. `importGameFile`
+    // deliberately shares `stagesProblems` with `updateGame` so the Builder save
+    // path and the file-restore path can never drift, and now that a DRAFT may
+    // legitimately contain an unfinished answer key, a strict import would break the
+    // export→import round trip of any such draft: exportGameFile would happily write
+    // a file its own importer refused. The invariant is preserved where it matters —
+    // the imported game still cannot LAUNCH, asserted immediately below.
+    const { gameId: gImportedDraft } = await creator.call('importGameFile', { file: { ...file, game: { ...file.game, stages: [
+      { id: 'nq0', order: 0, title: 'No key', isFinal: true, tasks: [
+        { id: 'nq-a', title: 'Unanswerable', type: 'quiz', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9, question: 'What?', answers: [] },
+      ] },
+    ] } } });
+    check('import: a quiz with no answer key is accepted as a DRAFT', !!gImportedDraft, String(gImportedDraft));
+    await expectError('import: the imported key-less draft still cannot launch',
+      creator.call('launchRun', { gameId: gImportedDraft }),
+      { codeIn: ['functions/failed-precondition'], match: /accepted answer|ordering items/i });
     // ── (8b) Hostile files (change: game-import-hardening) ───────────────────
     // A hand-edited file is untrusted input. Each of these used to be either an
     // opaque `internal` (a TypeError deeper in the pipeline) or an ACCEPT, and
@@ -8575,8 +8679,15 @@ async function main() {
       creator.call('importGameFile', { file: withGameOverride({ requiresGuardianConsent: true }) }),
       { codeIn: ['functions/failed-precondition'], match: /consent/i });
 
-    check('import: no half-game was written by any refusal', (await countGames()) === beforeBad,
-      `${beforeBad} → ${await countGames()}`);
+    // Exactly ONE game was created between `beforeBad` and here — the key-less
+    // DRAFT that import now legitimately accepts (change:
+    // builder-draft-save-tolerance). Every genuine refusal above must still have
+    // written nothing, so the expected delta is 1 and not "1 or more": an off-by-one
+    // here would mean a rejected file had left a half-game behind, which is the
+    // regression this check exists to catch.
+    check('import: no half-game was written by any refusal (only the accepted draft)',
+      (await countGames()) === beforeBad + 1,
+      `${beforeBad} → ${await countGames()} (expected ${beforeBad + 1})`);
 
     // ── (8d) An ACCEPTED boundary is stored NORMALIZED, never as the file's own
     //         object — the game doc is spread wholesale below, so without the

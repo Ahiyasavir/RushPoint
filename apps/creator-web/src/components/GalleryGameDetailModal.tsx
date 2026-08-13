@@ -9,11 +9,25 @@
 //
 // Nothing is fetched on open: `searchGallery` already returned the whole sanitized
 // game, so the detail is built from data the caller is holding.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
+import { COLLECTIONS, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
+import { db } from '../services/firebase';
 import { Badge, Button, TagChips } from './ui';
 import { useT } from './LanguageContext';
-import { buildGalleryGameDetail } from '../lib/galleryGameDetail';
+import { buildGalleryGameDetail, buildGalleryGameMissions, type GalleryGameMission } from '../lib/galleryGameDetail';
+
+/** Never render an unbounded public list inside a modal. */
+const MISSION_LIST_CAP = 60;
+
+// Same resolution AuthGate already uses for its demo link: in dev the participant
+// app is a sibling port, in production it is the canonical play host. Duplicated
+// deliberately rather than exported from AuthGate — a modal importing the auth
+// module for a URL constant is a worse coupling than two lines of the same rule.
+const PLAY_URL = import.meta.env.DEV
+  ? resolvePlayOrigin(window.location.origin)
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
 
 export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy }: {
   /** The sanitized public game the caller already holds. */
@@ -47,7 +61,53 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
     };
   }, [onClose]);
 
+  // ── The mission list (change: gallery-missions-quick-play) ──────────────────
+  // The modal showed COUNTS and nothing else — "12 missions" with no way to see
+  // what any of them were, which is what creators meant by "the preview didn't
+  // work, I saw nothing". Every task is ALREADY published individually to
+  // publicTasks/{gameId}_{taskId} carrying `sourceGameId`, and publicTasks is
+  // world-readable, so this is a single-field equality query needing no composite
+  // index, no new callable and no widening of what is public.
+  //
+  // Fetched on OPEN rather than with the game: `searchGallery` returns counts only,
+  // and pre-fetching missions for every card in the grid would be N queries for
+  // data almost none of them will show.
+  const [missions, setMissions] = useState<GalleryGameMission[] | null>(null);
+  const [missionsFailed, setMissionsFailed] = useState(false);
+  useEffect(() => {
+    if (!detail.id) { setMissions([]); return; }
+    let live = true;
+    void (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, COLLECTIONS.PUBLIC_TASKS),
+          where('sourceGameId', '==', detail.id),
+          limit(MISSION_LIST_CAP),
+        ));
+        if (!live) return;
+        setMissions(buildGalleryGameMissions(snap.docs.map((d) => d.data())));
+      } catch {
+        // A failed read must degrade to "we couldn't list these", never to a blank
+        // Gallery behind the ErrorBoundary. The rest of the detail still renders.
+        if (live) { setMissions([]); setMissionsFailed(true); }
+      }
+    })();
+    return () => { live = false; };
+  }, [detail.id]);
+
+  // Quick play (change: gallery-missions-quick-play): reuses the EXISTING
+  // startInstantPlay path end to end — play-web's `?game=<id>` promo route already
+  // calls it. Shown only when the game actually opted in, so the button can never
+  // advertise a run the server would refuse.
+  const playHref = `${PLAY_URL}/?game=${encodeURIComponent(detail.id)}`;
+
   const MODE_LABEL: Record<string, string> = { individual: b.modeIndividual, team: b.modeTeam };
+  const MISSION_TYPE_LABEL: Record<string, string> = {
+    field: b.typeField, self_report: b.typeSelfReport, smart_station: b.typeStation,
+    photo: b.typePhoto, quiz: b.typeQuiz, numeric: b.typeNumeric,
+    geofence: b.typeGeofence, sequence: b.typeSequence, survey: b.typeSurvey,
+    unknown: gl.rowTypeUnknown,
+  };
   const REQUIREMENT_LABEL: Record<'gps' | 'anywhere', string> = { gps: gl.reqGps, anywhere: gl.reqAnywhere };
 
   // Labelled meta rows, suppressed when they carry nothing to say. Values become
@@ -129,10 +189,53 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
             </dl>
 
             {detail.tags.length > 0 && <TagChips tags={detail.tags} max={12} more={gl.moreTags} />}
+
+            {/* The missions themselves — the whole point of opening a game. */}
+            <section>
+              <h4 className="text-[11px] uppercase tracking-wide text-[--ink-3] font-semibold mb-1.5">
+                {gl.detailMissions}
+              </h4>
+              {missions === null ? (
+                <p className="text-xs text-[--ink-3]">{gl.detailMissionsLoading}</p>
+              ) : missions.length === 0 ? (
+                <p className="text-xs text-[--ink-3]">
+                  {missionsFailed ? gl.detailMissionsFailed : gl.detailMissionsEmpty}
+                </p>
+              ) : (
+                <ol className="flex flex-col gap-1">
+                  {missions.map((m, i) => (
+                    <li key={m.id || i}
+                      className="flex items-baseline gap-2 rounded-lg bg-[--surface-2] px-2.5 py-1.5">
+                      <span className="text-[11px] text-[--ink-3] tabular-nums shrink-0">{i + 1}</span>
+                      <span className="text-sm text-[--ink-1] min-w-0 flex-1 truncate" dir="auto">
+                        {m.title || gl.detailMissionUntitled}
+                      </span>
+                      <span className="text-[11px] text-[--ink-3] shrink-0">
+                        {MISSION_TYPE_LABEL[m.type] ?? gl.rowTypeUnknown}
+                      </span>
+                      {m.estimatedMinutes !== null && (
+                        <span className="text-[11px] text-[--ink-3] shrink-0">{gl.valMinutes(m.estimatedMinutes)}</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </section>
           </div>
 
-          <div className="mt-3 pt-3 border-t border-[--rp-border] flex items-center gap-3 shrink-0">
+          <div className="mt-3 pt-3 border-t border-[--rp-border] flex flex-wrap items-center gap-3 shrink-0">
             <Button loading={copyBusy} onClick={onCopy} className="!py-2 !text-xs !font-semibold">{gl.copyBtn}</Button>
+            {/* A real anchor, not a scripted window.open: it survives a popup
+                blocker and offers the normal open-in-new-tab affordances. */}
+            {detail.allowInstantPlay && detail.id && (
+              <a
+                href={playHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg border border-[--rp-border] px-3 py-2 text-xs font-semibold text-[--ink-1]
+                  hover:bg-[--surface-2] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+              >{gl.detailPlay}</a>
+            )}
             <Button variant="ghost" onClick={onClose} className="ms-auto !py-2 !text-xs">{gl.detailClose}</Button>
           </div>
         </div>

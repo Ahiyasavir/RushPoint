@@ -25,7 +25,7 @@ import {
   TASK_SAMPLES, applySample, samplesForType, sampleWouldOverwrite,
 } from '../taskTemplates';
 import { computeGameReadiness, canLaunchGame, firstLaunchBlocker } from '../gameReadiness';
-import { defaultOpenSections, sectionSummary } from '../wizardSections';
+import { defaultActiveGroups, groupSummary } from '../taskOptInGroups';
 
 function task(p: Partial<Task> = {}): Task {
   return { ...blankTask('t1'), ...p };
@@ -47,15 +47,18 @@ function readyTask(p: Partial<Task> = {}): Task {
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Step order + placement classification
 // ─────────────────────────────────────────────────────────────────────────────
-describe('wizard step order is declared data, and naming comes first', () => {
-  it('orders the steps details, interaction, placement', () => {
-    expect([...WIZARD_STEP_ORDER]).toEqual(['details', 'interaction', 'placement']);
+describe('wizard step order is declared data, and naming still gates forward', () => {
+  // Reordered by task-editor-progressive-disclosure: location leads because it
+  // owns the map, which needs the whole panel. Naming remains the ONLY forward
+  // gate, so it now guards 2 → 3 instead of 1 → 2.
+  it('orders the steps location, details, execution', () => {
+    expect([...WIZARD_STEP_ORDER]).toEqual(['location', 'details', 'execution']);
   });
 
   it('maps every 1 based position to its key and back', () => {
-    expect(stepKeyAt(1)).toBe('details');
-    expect(stepKeyAt(2)).toBe('interaction');
-    expect(stepKeyAt(3)).toBe('placement');
+    expect(stepKeyAt(1)).toBe('location');
+    expect(stepKeyAt(2)).toBe('details');
+    expect(stepKeyAt(3)).toBe('execution');
     for (const key of WIZARD_STEP_ORDER) {
       expect(stepKeyAt(stepIndexOf(key))).toBe(key);
     }
@@ -68,8 +71,9 @@ describe('wizard step order is declared data, and naming comes first', () => {
   });
 
   // The regression test for the removed placement gate: an unplaced, answer key
-  // free task could not advance before this change.
-  it('never gates interaction or placement on coordinates, trigger mode or answer key', () => {
+  // free task could not advance before this change. Location is now step 1 and
+  // must be even less willing to block — a creator has not typed anything yet.
+  it('never gates location or execution on coordinates, trigger mode or answer key', () => {
     const cases: Task[] = [
       task(),
       task({ title: 'x', type: 'quiz' }),
@@ -79,13 +83,19 @@ describe('wizard step order is declared data, and naming comes first', () => {
       task({ title: 'x', type: 'smart_station' }),
     ];
     for (const t of cases) {
-      expect(canGoNext('interaction', t)).toBe(true);
-      expect(canGoNext('placement', t)).toBe(true);
+      expect(canGoNext('location', t)).toBe(true);
+      expect(canGoNext('execution', t)).toBe(true);
     }
   });
 
+  // Step 1 must never block on the empty title a brand new task carries: the
+  // creator reaches naming on step 2, so gating step 1 would strand them.
+  it('lets an untitled task leave the location step', () => {
+    expect(canGoNext('location', task())).toBe(true);
+  });
+
   it('is total over the step keys', () => {
-    const keys: WizardStepKey[] = ['details', 'interaction', 'placement'];
+    const keys: WizardStepKey[] = ['location', 'details', 'execution'];
     for (const k of keys) expect(typeof canGoNext(k, task({ title: 'x' }))).toBe('boolean');
     expect(canGoBack(1)).toBe(false);
     expect(canGoBack(2)).toBe(true);
@@ -566,37 +576,47 @@ describe('canLaunchGame is identical to the four legacy launch guards', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. Honest advanced badge (D6)
+// 5. Honest opt-in badge (D6, carried over to the chip model by
+//    task-editor-progressive-disclosure — the "advanced section" this block used
+//    to describe was replaced by the timer/points opt-in group)
 // ─────────────────────────────────────────────────────────────────────────────
-describe('the advanced section reports what a task actually carries', () => {
+describe('the timer/points group reports what a task actually carries', () => {
   const fresh = blankTask('t1');
 
-  it('counts an expiry and opens the section', () => {
+  it('counts an expiry and mounts the group', () => {
     const t = { ...fresh, expiresAfterMinutes: 30 };
-    expect(sectionSummary('advanced', t)).toBe(1);
-    expect(defaultOpenSections(t).advanced).toBe(true);
+    expect(groupSummary('timerPoints', t)).toBe(1);
+    expect(defaultActiveGroups(t).timerPoints).toBe(true);
   });
 
   it('counts an expiry plus a scheduled release as two', () => {
     const t = { ...fresh, expiresAfterMinutes: 30, releaseAt: '2026-01-01T10:00:00.000Z' };
-    expect(sectionSummary('advanced', t)).toBe(2);
+    expect(groupSummary('timerPoints', t)).toBe(2);
   });
 
   it('counts a delayed release', () => {
-    expect(sectionSummary('advanced', { ...fresh, releaseAfterMinutes: 15 })).toBe(1);
+    expect(groupSummary('timerPoints', { ...fresh, releaseAfterMinutes: 15 })).toBe(1);
   });
 
-  it('shows no badge for a fresh task and keeps the section closed', () => {
-    expect(sectionSummary('advanced', fresh)).toBe(0);
-    expect(defaultOpenSections(fresh).advanced).toBe(false);
+  it('shows no badge for a fresh task and leaves the group as a chip', () => {
+    expect(groupSummary('timerPoints', fresh)).toBe(0);
+    expect(defaultActiveGroups(fresh).timerPoints).toBe(false);
   });
 
-  it('does not count the defaults every task ships with', () => {
-    const t = { ...fresh, pointValue: 250, estimatedMinutes: 40, maxConcurrentTeams: 9, geofenceRadiusMeters: 80 };
-    expect(sectionSummary('advanced', t)).toBe(0);
+  it('does not count the derived estimate every task ships with', () => {
+    // `estimatedMinutes` is seeded on every task, so it can never signal
+    // authorship — counting it would mount the group for every task ever made.
+    expect(groupSummary('timerPoints', { ...fresh, estimatedMinutes: 40 })).toBe(0);
   });
 
-  it('derives the auto open flag from the same count', () => {
+  it('DOES count a point value the creator actually chose', () => {
+    // A deliberate change from the old advanced badge, which ignored points: a
+    // creator who set 250 must see that where they set it, not behind a chip.
+    expect(groupSummary('timerPoints', { ...fresh, pointValue: 250 })).toBe(1);
+    expect(defaultActiveGroups({ ...fresh, pointValue: 250 }).timerPoints).toBe(true);
+  });
+
+  it('derives the mounted flag from the same count', () => {
     const table: Task[] = [
       fresh,
       { ...fresh, expiresAfterMinutes: 30 },
@@ -605,7 +625,7 @@ describe('the advanced section reports what a task actually carries', () => {
       { ...fresh, pointValue: 500 },
     ];
     for (const t of table) {
-      expect(defaultOpenSections(t).advanced).toBe(sectionSummary('advanced', t) > 0);
+      expect(defaultActiveGroups(t).timerPoints).toBe(groupSummary('timerPoints', t) > 0);
     }
   });
 });

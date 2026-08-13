@@ -101,6 +101,11 @@ function buildGame(now) {
       { id: 'teamName', label: 'השם שלך', type: 'text', required: true, level: 'team' },
     ],
     visibility: 'public',
+    // Publishing IS the instant-play opt-in (change: gallery-missions-quick-play),
+    // and this seed writes the gallery docs DIRECTLY rather than going through
+    // publishGame — so it has to apply that default itself or the demo game shows a
+    // gallery card with no Play button, which is the state creators reported.
+    allowInstantPlay: true,
     tags: ['demo', 'מכל-מקום', 'דוגמה'],
     approxLocation: { lat: 32.0853, lng: 34.7818, label: 'משחק לדוגמה' },
     playCount: 0,
@@ -181,6 +186,10 @@ async function seedDemo(now) {
     scoringPreset: game.scoringPreset, tags: game.tags, approxLocation: game.approxLocation,
     playCount: 0, stageCount: game.stages.length, taskCount: allTasks.length,
     estimatedTotalMinutes: allTasks.reduce((s, t) => s + t.estimatedMinutes, 0),
+    // Must MIRROR the private game doc above: the gallery renders its Play button
+    // from this copy, but startInstantPlay authorizes against the private one. If
+    // only this side said true the button would appear and then be refused.
+    allowInstantPlay: true,
     // The demo's tasks are all locationless/instant → playable anywhere. Mirrors
     // describeGameRequirements() so the welcome badge renders for the seed game.
     requirement: 'anywhere',

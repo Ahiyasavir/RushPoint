@@ -144,15 +144,37 @@ export function stripUnsafeDisplayChars(value: string): string {
 //     difficulty / estimatedMinutes skews smart_weighted routing & scoring.
 // Pure (no Firebase) → shared by updateGame (save) + publishGame (gallery) and
 // unit-tested directly. An empty `stages` array is fine (a game still being built).
-export function gameStructureProblems(stages: Stage[] | undefined): string[] {
+//
+// PHASE (change: builder-draft-save-tolerance) — an unfinished ANSWER KEY is the one
+// problem here that is a DRAFT state rather than a corrupt one, so it is the one
+// problem that belongs to the go-live gate instead of the save gate:
+//   • 'authoring' (updateGame / importGameFile) — skips `taskCompletabilityError`.
+//     The Builder autosaves 1.5 s after every edit, so enforcing it on save meant
+//     that picking "quiz" as a task type refused EVERY autosave until the answer key
+//     was finished — the creator's authoring was silently not persisted. This is the
+//     same rule wizardLogic.ts already documents for placement: an incomplete task is
+//     reported by the readiness surface (lib/gameReadiness), which also refuses launch.
+//   • 'golive' (publishGame) — enforces it, and is the DEFAULT so no caller can
+//     relax the rule by forgetting the argument.
+// Everything else stays save-blocking in BOTH phases: a negative point value or a
+// 0-task stage is corruption, and no amount of further authoring makes it legitimate.
+// Relaxing the save path is only safe because launchRun runs its OWN independent
+// `taskCompletabilityError` loop (functions/src/runs/index.ts) — do not remove it.
+export function gameStructureProblems(
+  stages: Stage[] | undefined,
+  opts: { phase?: 'authoring' | 'golive' } = {},
+): string[] {
+  const enforceCompletability = (opts.phase ?? 'golive') === 'golive';
   const problems: string[] = [];
   for (const stage of stages ?? []) {
     if ((stage.tasks?.length ?? 0) === 0) {
       problems.push(`Stage "${stage.title || stage.id}" needs at least one task`);
     }
     for (const task of stage.tasks ?? []) {
-      const completabilityError = taskCompletabilityError(task);
-      if (completabilityError) problems.push(completabilityError);
+      if (enforceCompletability) {
+        const completabilityError = taskCompletabilityError(task);
+        if (completabilityError) problems.push(completabilityError);
+      }
       const label = `Task "${task.title || task.id}"`;
       if (typeof task.pointValue === 'number' && !(task.pointValue >= 0)) {
         problems.push(`${label}: point value cannot be negative`);

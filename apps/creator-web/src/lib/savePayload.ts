@@ -87,5 +87,41 @@ export function buildSavePayload(game: Game): UpdateGamePayload {
       payload.stages as Parameters<typeof propagateGameTagsToTasks>[1],
     );
   }
+  // Drop `undefined` INSIDE stages so "unset" reaches the server as ABSENT
+  // (change: builder-clear-optional-field). Clearing an opt-in group sets its fields
+  // to `undefined`, but the callable serializer encodes `undefined` as `null`, and
+  // the server's optional-field guards read `value !== undefined && typeof value !==
+  // 'number'` — so a cleared duration arrived as `null` and was REFUSED as malformed.
+  // Closing the "time and scoring" group therefore broke every autosave until a value
+  // was put back. Absent is a state every one of those guards already accepts.
+  //
+  // Only `stages` is cleaned. Several TOP-LEVEL fields use an explicit `null` as a
+  // documented "clear this" signal (safeZone), and `undefined` there means "not sent"
+  // — conflating the two would silently resurrect a boundary a creator removed.
+  payload.stages = dropUndefinedDeep(payload.stages);
   return payload as unknown as UpdateGamePayload;
+}
+
+/**
+ * Recursively remove object keys whose value is `undefined`.
+ *
+ * `null` is KEPT: it is a deliberate value elsewhere in this payload, and only
+ * `undefined` carries the "never set / just cleared" meaning. `0`, `false` and `''`
+ * are kept too — they are authored values, and dropping them would discard the very
+ * setting a creator chose. Arrays keep their length so no index shifts underneath a
+ * task id. Non-plain values (Date, class instances) are returned as-is rather than
+ * rebuilt, so this can never quietly flatten something it does not understand.
+ */
+function dropUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((v) => dropUndefinedDeep(v)) as unknown as T;
+  }
+  if (value === null || typeof value !== 'object') return value;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (v === undefined) continue;
+    out[k] = dropUndefinedDeep(v);
+  }
+  return out as unknown as T;
 }

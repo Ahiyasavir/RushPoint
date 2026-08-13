@@ -21,7 +21,7 @@ import { useT } from '../components/LanguageContext';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { liveRunForGame } from '../lib/creatorNav';
 import {
-  KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY, TOUR_FIRST_GAME_KEY,
+  KNOWN_GAME_COUNT_KEY, ONBOARDING_DISMISSED_KEY, PREVIEWED_STORAGE_KEY, TOUR_FIRST_GAME_KEY, firstGameIdKey,
   buildOnboardingChecklist, knownGameCountKey, readKnownGameCount, readPreviewedGames,
   skeletonCardCount,
   type OnboardingStepId,
@@ -236,11 +236,17 @@ export default function DashboardPage() {
         localStorage.setItem(knownGameCountKey(user?.uid), String(games.length));
         localStorage.removeItem(KNOWN_GAME_COUNT_KEY);
       } catch { /* storage unavailable */ }
-      // Remember one game id so the guided tour's Builder step can offer a real
-      // destination without holding a data subscription of its own.
+      // Remember one game id so the guided tour's Builder step has a real
+      // destination without holding a data subscription of its own. Scoped PER
+      // CREATOR: the tour now navigates on its own, so a stale id left by another
+      // account on this browser would drive a new creator into a game they do not
+      // own ("Game not found"). The legacy global entry is swept for the same
+      // reason (change: tour-auto-navigate).
       try {
-        if (games[0]?.id) localStorage.setItem(TOUR_FIRST_GAME_KEY, games[0].id);
-        else localStorage.removeItem(TOUR_FIRST_GAME_KEY);
+        const key = firstGameIdKey(user?.uid);
+        if (games[0]?.id) localStorage.setItem(key, games[0].id);
+        else localStorage.removeItem(key);
+        localStorage.removeItem(TOUR_FIRST_GAME_KEY);
       } catch { /* storage unavailable */ }
       setGames(games);
     } catch (e) {

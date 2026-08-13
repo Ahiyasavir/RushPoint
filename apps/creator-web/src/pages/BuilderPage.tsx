@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -46,7 +46,7 @@ import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/t
 import { blankTask, shouldAutoOpenFirstTask } from '../lib/wizardLogic';
 // ONE readiness computation, shared by the persistent panel and the launch guard
 // (change: builder-first-task-flow), so the two can never drift.
-import { computeGameReadiness, canLaunchGame, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
+import { computeGameReadiness, canLaunchGame, shouldAutoOpenReadiness, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
 import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
@@ -323,7 +323,12 @@ export default function BuilderPage() {
         // A validation rejection points at a specific stage/task. Open the
         // readiness panel so the creator sees WHICH one, instead of just a
         // generic "save failed" (no new copy — reuses the readiness surface).
-        if (failure.key === 'rejected') setReadinessOpen(true);
+        // The decision is one testable predicate rather than an inline condition
+        // (change: builder-readiness-autoopen). It now fires only on a GENUINE
+        // structural refusal: the save door no longer rejects an unfinished answer
+        // key at all (change: builder-draft-save-tolerance), which is what used to
+        // make this reopen on every autosave the moment a quiz was picked.
+        if (failure.key === 'rejected' && shouldAutoOpenReadiness('saveRejected')) setReadinessOpen(true);
       }
       return false;
     }
@@ -478,7 +483,7 @@ export default function BuilderPage() {
       // readiness panel, so the guard and the panel cannot disagree. A refused
       // launch points at the panel instead of naming one offender.
       if (!canLaunchGame(game)) {
-        setReadinessOpen(true);
+        if (shouldAutoOpenReadiness('launchBlocked')) setReadinessOpen(true);
         await dialog.alert(b.launchBlockedSeeReadiness); return;
       }
       try {
@@ -503,6 +508,19 @@ export default function BuilderPage() {
       setLaunching(false);
     }
   }
+
+  // Readiness, computed ONCE per game change (change: builder-readiness-autoopen).
+  // It used to be recomputed twice per render — once for the ready nudge below and
+  // again inside ReadinessPanel — walking every stage and task both times, which is
+  // what made the blocker count visibly flicker while typing. The panel now receives
+  // this array as a prop instead of re-deriving it, so the nudge and the panel are
+  // literally the same value and cannot disagree mid-render.
+  //
+  // MUST stay above the early returns below: a hook after a conditional return runs
+  // a different number of times between renders (React #300 — see CLAUDE.md).
+  // `game` is null until the load resolves, so the null case yields no issues rather
+  // than pretending an unloaded game is broken.
+  const readiness = useMemo(() => (game ? computeGameReadiness(game) : []), [game]);
 
   if (error && !game) return (
     <Card className="p-8 text-center space-y-4">
@@ -638,7 +656,7 @@ export default function BuilderPage() {
         {/* Readiness, beside the launch controls: everything that would refuse a
             launch, listed at once, before a launch is attempted. */}
         <ReadinessPanel
-          game={game}
+          issues={readiness}
           open={readinessOpen}
           onToggle={() => setReadinessOpen((o) => !o)}
           onActivate={(issue) => {
@@ -685,7 +703,7 @@ export default function BuilderPage() {
           dismissible, right under the launch controls. It reuses the readiness
           ready title and never shows once the game has a run or the creator
           dismisses it. */}
-      {!readyNudgeDismissed && computeGameReadiness(game).length === 0 && (game.playCount ?? 0) === 0 && (
+      {!readyNudgeDismissed && readiness.length === 0 && (game.playCount ?? 0) === 0 && (
         <div
           role="status"
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-go/40 bg-rp-go/10 px-4 py-2 text-xs text-[--ink-1]"
@@ -728,11 +746,13 @@ export default function BuilderPage() {
 // blocking issue at once (`computeGameReadiness` is also the launch guard), it
 // is reachable without attempting a launch, and each entry navigates to the
 // thing to fix. An empty result is the ready-to-launch state.
-function ReadinessPanel({ game, open, onToggle, onActivate }: {
-  game: Game; open: boolean; onToggle: () => void; onActivate: (issue: ReadinessIssue) => void;
+// `issues` is a PROP, not re-derived here (change: builder-readiness-autoopen):
+// the parent already computed it under a useMemo, and computing it again made the
+// same walk run twice per render for no gain.
+function ReadinessPanel({ issues, open, onToggle, onActivate }: {
+  issues: ReadinessIssue[]; open: boolean; onToggle: () => void; onActivate: (issue: ReadinessIssue) => void;
 }) {
   const b = useT().builder;
-  const issues = computeGameReadiness(game);
   const ISSUE_LABEL: Record<ReadinessCode, string> = {
     stageHasNoTask: b.issueStageHasNoTask,
     taskNotCompletable: b.issueTaskNotCompletable,

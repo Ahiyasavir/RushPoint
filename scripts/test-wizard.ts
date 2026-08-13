@@ -32,9 +32,9 @@ ok(blankTask('fixed').id === 'fixed', 'blankTask accepts an explicit id');
 ok(canGoNext('details', fresh) === false, 'details blocked with a blank title');
 ok(canGoNext('details', { ...fresh, title: 'My task' }) === true, 'details passable once titled');
 ok(canGoNext('details', { ...fresh, title: '   ' }) === false, 'details blocked for whitespace-only title');
-ok(canGoNext('interaction', fresh) === true, 'interaction never gates forward');
-ok(canGoNext('placement', fresh) === true, 'placement never gates forward (even at 0,0)');
-ok(canGoNext('placement', { ...fresh, coordinates: { lat: 31.7, lng: 35.1 } }) === true, 'placement passable with real coords too');
+ok(canGoNext('execution', fresh) === true, 'execution never gates forward');
+ok(canGoNext('location', fresh) === true, 'location never gates forward (even at 0,0, even untitled)');
+ok(canGoNext('location', { ...fresh, coordinates: { lat: 31.7, lng: 35.1 } }) === true, 'location passable with real coords too');
 
 // ── canGoBack ────────────────────────────────────────────────────────────────
 ok(canGoBack(1) === false, 'cannot go back from step 1');
@@ -78,7 +78,10 @@ ok(TYPE_PICKER_ORDER.every((t) => t in TASK_TYPE_META), 'every picker-order type
 // ── steps / labels ───────────────────────────────────────────────────────────
 ok(WIZARD_STEPS.length === 3, 'three wizard steps');
 ok(WIZARD_STEP_ORDER.every((k) => STEP_LABELS[k]?.trim()), 'every step has a label');
-ok(WIZARD_STEP_ORDER[2] === 'placement', 'placement is the last step');
+// Reordered by task-editor-progressive-disclosure: location leads (it owns the
+// map), execution closes (verification + the opt-in chips).
+ok(WIZARD_STEP_ORDER[0] === 'location', 'location is the FIRST step');
+ok(WIZARD_STEP_ORDER[2] === 'execution', 'execution is the last step');
 
 console.log(failed === 0
   ? `\n✅ ALL WIZARD TESTS PASSED (${passed})`
