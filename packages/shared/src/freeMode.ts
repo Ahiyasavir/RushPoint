@@ -16,8 +16,19 @@ import {
 /** Master switch. Default false for launch; set true to restore billing. */
 export const PAYMENTS_ENABLED = false;
 
-/** Per-run participant ceiling while the whole app is free. */
-export const FREE_MODE_MAX_PARTICIPANTS = 50;
+/**
+ * Per-run participant ceiling while the whole app is free.
+ *
+ * ⚠️ This counts TEAMS (`run.participantCount`), not phones — in individual mode
+ * one player is one team, so this is the effective player limit. It is checked
+ * BEFORE the phone ceiling in `joinRun`, so it must never sit below
+ * `MAX_RUN_DEVICES` (packages/shared/src/runCapacity.ts) or the phone ceiling
+ * becomes unreachable in individual mode. Kept in step at 100.
+ *
+ * Stamped onto `run.maxParticipants` at launch, so a change only affects runs
+ * launched afterwards — already-live runs keep the ceiling they launched with.
+ */
+export const FREE_MODE_MAX_PARTICIPANTS = 100;
 
 /**
  * Participant ceiling for a test-drive (rehearsal) run: the creator plus one

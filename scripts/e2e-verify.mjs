@@ -29,7 +29,7 @@ import adminSdk from 'firebase-admin';
 // GAME_FILE_FORMAT/CURRENT_GAME_FILE_VERSION come along so the export/import
 // scenario asserts against the SAME envelope the server writes (a version bump
 // can never silently pass an outdated assertion).
-import { popularityScore, GAME_FILE_FORMAT, CURRENT_GAME_FILE_VERSION } from '@rushpoint/shared';
+import { popularityScore, GAME_FILE_FORMAT, CURRENT_GAME_FILE_VERSION, MAX_RUN_DEVICES } from '@rushpoint/shared';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -3485,14 +3485,22 @@ async function main() {
     check('gm: owner isolation — outsider sees none of these runs', !strangerIds.includes(rB), JSON.stringify(strangerIds));
   }); // scenario: multi-run GM overview
 
-  await scenario('global per-run device cap (16 phones max, both join paths)', async () => {
-    // A hard global ceiling on total phones in one run (MAX_RUN_DEVICES = 16),
-    // layered on top of the billing participant cap (free mode = 50) and the
-    // per-team device cap (3). Free mode gives maxParticipants 50, so we can reach
-    // 16 phones via joinRun before the billing cap fires. The run.deviceCount
-    // counter grows on BOTH joinRun (a founding phone) and joinTeamAsDevice (an
-    // attached phone); the 17th phone is refused from either entry point.
-    const RUN_DEVICE_CAP = 16;
+  await scenario(`global per-run device cap (${MAX_RUN_DEVICES} phones max, both join paths)`, async () => {
+    // A hard global ceiling on total phones in one run (MAX_RUN_DEVICES),
+    // layered on top of the billing participant cap (free mode = 50 TEAMS) and the
+    // per-team device cap (3). The two caps count different things, so neither
+    // subsumes the other. The run.deviceCount counter grows on BOTH joinRun (a
+    // founding phone) and joinTeamAsDevice (an attached phone); one phone past the
+    // ceiling is refused from either entry point.
+    //
+    // The cap is read from @rushpoint/shared, never hardcoded here — raising the
+    // constant must not require editing this scenario. The low end asserts the
+    // counter really accumulates on both paths; the boundary is then reached by
+    // stamping deviceCount server-side rather than by signing in MAX_RUN_DEVICES
+    // real phones (which at cap=100 would also trip the 50-TEAM billing cap long
+    // before the ceiling, testing the wrong guard).
+    const RUN_DEVICE_CAP = MAX_RUN_DEVICES;
+    const adminDbDC = adminSdk.firestore();
     const { gameId: gDC } = await creator.call('createGame', { title: 'Device Cap Game', mode: 'team' });
     await creator.call('updateGame', { gameId: gDC, stages: [{ id: 'dc-s', order: 0, title: 'S', isFinal: true, tasks: [{
       id: 'dc-t', title: 'Go', type: 'field', triggerMode: 'instant',
@@ -3517,32 +3525,34 @@ async function main() {
     check('device-cap: attach grew deviceCount to 2',
       (await creator.getDocAt(runDocPath)).data?.deviceCount === 2);
 
-    // Phones 3..16: fourteen more founding devices (joinRun path) → reach the cap.
-    for (let i = 1; i <= RUN_DEVICE_CAP - 2; i++) {
-      const p = makeParty(`rdc-f${i}`);
-      await signInAnonymously(p.auth);
-      await p.call('joinRun', { code: cDC, displayName: `Cap Team ${i}` });
-    }
-    check('device-cap: run holds exactly MAX_RUN_DEVICES phones',
+    // Jump the counter to one below the ceiling, then let a REAL join take the
+    // last slot — so the admitting side of the boundary is exercised by the
+    // callable's own transaction, not by the stamp.
+    await adminDbDC.doc(runDocPath).update({ deviceCount: RUN_DEVICE_CAP - 1 });
+    const pLast = makeParty('rdc-last');
+    await signInAnonymously(pLast.auth);
+    await pLast.call('joinRun', { code: cDC, displayName: 'Cap Team Last' });
+    check('device-cap: the last admitted phone fills the run to MAX_RUN_DEVICES',
       (await creator.getDocAt(runDocPath)).data?.deviceCount === RUN_DEVICE_CAP,
       String((await creator.getDocAt(runDocPath)).data?.deviceCount));
 
-    // The 17th phone via joinRun is refused (run full) even though billing (50) allows it.
+    // One past the ceiling via joinRun is refused (run full) even though the
+    // billing cap (50 teams) still has room — this run holds only a handful.
     const pOver = makeParty('rdc-over');
     await signInAnonymously(pOver.auth);
-    await expectError('device-cap: 17th phone via joinRun is refused',
+    await expectError('device-cap: one phone past the ceiling via joinRun is refused',
       pOver.call('joinRun', { code: cDC, displayName: 'Cap Team Over' }),
-      { codeIn: ['functions/resource-exhausted'], match: /16 devices/ });
+      { codeIn: ['functions/resource-exhausted'], match: new RegExp(`${RUN_DEVICE_CAP} devices`) });
 
-    // The 17th phone via joinTeamAsDevice is ALSO refused — team 0 still has room
+    // Same phone count via joinTeamAsDevice is ALSO refused — team 0 still has room
     // (2/3), so this exercises the ceiling on the device path, not the per-team cap.
     const pOverDev = makeParty('rdc-over-dev');
     await signInAnonymously(pOverDev.auth);
-    await expectError('device-cap: 17th phone via joinTeamAsDevice is refused',
+    await expectError('device-cap: one phone past the ceiling via joinTeamAsDevice is refused',
       pOverDev.call('joinTeamAsDevice', { code: cDC, teamCode, memberName: 'Phone Over' }),
       { codeIn: ['functions/resource-exhausted'] });
 
-    check('device-cap: counter unchanged after both rejections (still 16)',
+    check(`device-cap: counter unchanged after both rejections (still ${RUN_DEVICE_CAP})`,
       (await creator.getDocAt(runDocPath)).data?.deviceCount === RUN_DEVICE_CAP);
   }); // scenario: global per-run device cap
 
@@ -7752,13 +7762,13 @@ async function main() {
   // fast — a regression back to the serial loop would blow well past this
   // budget locally, long before it ever got near a real 60s ceiling.
   await scenario('startTeams scales with team count', async () => {
-    // Capped at 12, NOT ~24: MAX_RUN_DEVICES is a hard global ceiling of 16
-    // phones per run regardless of billing tier (see the dedicated "global
-    // per-run device cap (16 phones max)" scenario) — this scenario found that
-    // the hard way (a real bug in the TEST, not the fix: 24 joins tripped
-    // "This run is full (16 devices max)" before startTeams was even called).
-    // 12 teams still exercises 2 full chunks of the bounded-concurrency fan-out
-    // (chunk size 8) without touching either cap.
+    // 12 teams, deliberately modest: this scenario measures startTeams fan-out,
+    // not capacity, and it must stay clear of BOTH per-run ceilings — the billing
+    // participant cap (free mode = 50 teams) and MAX_RUN_DEVICES (see the
+    // dedicated device-cap scenario). It found that the hard way when the device
+    // ceiling was 16 and 24 joins tripped "This run is full" before startTeams was
+    // even called — a bug in the TEST, not the code. 12 still exercises 2 full
+    // chunks of the bounded-concurrency fan-out (chunk size 8).
     const N = 12;
     const { gameId: gSc } = await creator.call('createGame', { title: 'Scale Game', mode: 'individual' });
     await creator.call('updateGame', {

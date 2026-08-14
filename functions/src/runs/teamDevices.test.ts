@@ -159,13 +159,15 @@ describe('canAttachDevice', () => {
 });
 
 describe('canAddRunDevice (global per-run phone ceiling)', () => {
-  test('MAX_RUN_DEVICES is 16', () => {
-    expect(MAX_RUN_DEVICES).toBe(16);
+  // Pinned on purpose: the ceiling is a capacity claim about the server, so
+  // moving it must be a deliberate edit here too, never a silent drift.
+  test('MAX_RUN_DEVICES is 100', () => {
+    expect(MAX_RUN_DEVICES).toBe(100);
   });
 
   test('admits a phone while the run is below the ceiling', () => {
     expect(canAddRunDevice(0)).toEqual({ ok: true });
-    expect(canAddRunDevice(15)).toEqual({ ok: true });
+    expect(canAddRunDevice(MAX_RUN_DEVICES - 1)).toEqual({ ok: true });
   });
 
   test('refuses once the run already holds MAX_RUN_DEVICES phones', () => {

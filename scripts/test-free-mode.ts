@@ -12,6 +12,7 @@ import {
   isFeatureUnlocked,
   FREE_RUNS_LIFETIME,
   PRO_DEFAULT_MAX_PARTICIPANTS,
+  MAX_RUN_DEVICES,
 } from '../packages/shared/src/index';
 
 let failures = 0;
@@ -26,6 +27,13 @@ function check(label: string, cond: boolean, detail = ''): void {
     `value=${PAYMENTS_ENABLED}`);
   check('FREE_MODE_MAX_PARTICIPANTS is a positive number', typeof FREE_MODE_MAX_PARTICIPANTS === 'number' && FREE_MODE_MAX_PARTICIPANTS > 0,
     `value=${FREE_MODE_MAX_PARTICIPANTS}`);
+  // The two per-run ceilings count different things (teams vs phones) but joinRun
+  // checks the participant cap FIRST — so if it ever drops below the phone
+  // ceiling, MAX_RUN_DEVICES becomes unreachable in individual mode (1 player ==
+  // 1 team) and raising it would silently do nothing. Pin the ordering.
+  check('FREE_MODE_MAX_PARTICIPANTS does not sit below MAX_RUN_DEVICES',
+    FREE_MODE_MAX_PARTICIPANTS >= MAX_RUN_DEVICES,
+    `participants=${FREE_MODE_MAX_PARTICIPANTS} devices=${MAX_RUN_DEVICES}`);
 }
 
 // ── resolveLaunchBilling — payments OFF → always a free launch, no consume ────
