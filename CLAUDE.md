@@ -26,8 +26,8 @@ logic/callable change is *write a failing test*, then minimum code to green, the
 
 **Gates before any change is done:** `npm run typecheck` · `npm run lint` · `npm test` ·
 `npm run creator:build` · `npm run play:build` · `npm run bundle:budget` · `npm run base:check` ·
-`npm run i18n:check:strict` ·
-`npm run e2e` — all green (the first eight are exactly `npm run verify`). Project context +
+`npm run origin:check` · `npm run i18n:check:strict` ·
+`npm run e2e` — all green (the first nine are exactly `npm run verify`). Project context +
 per-artifact rules that drive proposals/designs/tasks live in
 [openspec/config.yaml](openspec/config.yaml).
 
@@ -83,6 +83,7 @@ npm run creator:build    # production build of creator-web — must pass
 npm run play:build       # production build of play-web — must pass (don't let a play-web break slip through)
 npm run bundle:budget    # play-web first-load byte budget + "heavy dep must stay lazy" (needs play:build first)
 npm run base:check       # built index.html asset base == the path that dist is served from (needs the builds first)
+npm run origin:check     # deployed bundles really carry VITE_API_ORIGIN + no .env.local exists (needs the builds first)
 npm run e2e              # node scripts/e2e-verify.mjs — full lifecycle vs the emulator
 npm run i18n:check:strict # ⚠ MANDATORY AFTER ANY UI CHANGE — Hebrew↔English correctness, PART B regressions fail
 ```
@@ -108,7 +109,7 @@ are not callables). Keep it green; extend the relevant scenario (not just the li
 teams play a real game at once, then it audits leaderboard invariants + that every station
 counter returns to 0. (`simulate:v1` is the archived v1 tournament script.)
 **One-command gauntlets for agents:** `npm run verify`
-(typecheck·lint·test·creator:build·play:build·**bundle:budget**·**base:check**·**i18n:check:strict**,
+(typecheck·lint·test·creator:build·play:build·**bundle:budget**·**base:check**·**origin:check**·**i18n:check:strict**,
 no emulator)
 and `npm run verify:emulator` (builds → e2e → **Firestore rules** → **Storage rules** → 8-team
 simulate → adversarial simulate, each under its own self-booted suite — no long-running emulator
@@ -148,6 +149,13 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   directory is skipped, never failed. Decisions are pure in `scripts/lib/buildArtifactGuard.mjs`
   (which also asserts the `package.json` build/serve wiring), unit-tested by
   `scripts/test-build-artifact-guard.ts`. See the gate-vs-playtest gotcha below.
+- **`scripts/check-backend-origin.mjs`** (`npm run origin:check`) — asserts each DEPLOYED bundle
+  (`apps/<app>/dist`) actually contains the `VITE_API_ORIGIN` its own `.env` declares, and that no
+  app carries a `.env.local`. Both halves exist because of a real outage (see the env-override
+  gotcha below): every other gate stayed green while creator.rush-point.com could not load a
+  single game. `dist-playtest` is deliberately NOT covered — it is emulator-bound by design.
+  An unbuilt directory is skipped, never failed. Decisions are pure in
+  `scripts/lib/backendOriginGuard.mjs`, unit-tested by `scripts/test-backend-origin-guard.ts`.
 - **`scripts/backfill-public-tasks.mjs`** (`npm run backfill:public-tasks`) — operator entry point
   that drives the admin callable `backfillPublicTaskCoordinatesNow` to completion, repairing
   legacy `publicTasks` docs that still carry exact `coordinates`. **DRY-RUN by default**; a real
@@ -524,6 +532,38 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `npm run play:build`; live playtest ⇒ `npm run playtest:build`** — never mix them. `npm run
   base:check` (in `verify`) + `scripts/test-build-artifact-guard.ts` (in `npm test`) make a
   regression loud. `bundle:budget` and `firebase.json` hosting still read `dist`, unchanged.
+- **A `.env.local` is loaded by Vite in EVERY mode — including a production build — so a
+  local-only override ships to real users.** `apps/creator-web/.env` sets
+  `VITE_API_ORIGIN=https://api.rush-point.com` (the self-hosted VPS every callable goes to). A
+  gitignored `apps/creator-web/.env.local` overrode it with an EMPTY value so a LOCAL dev server
+  could not autosave into real creator data — correct, and genuinely wanted, because the Builder
+  saves 1.5 s after any edit. But `npm run deploy:hosting` compiled that empty value into the real
+  bundle, and creator.rush-point.com shipped with every callable pointing nowhere: the console
+  showed *"טעינת המשחקים נכשלה"* and nothing else was wrong. **Every existing signal stayed
+  green** — the build succeeded, `base:check` passed (the asset base WAS correct),
+  `bundle:budget` passed, `firebase deploy` reported success, the served asset hash matched the
+  local build byte for byte, and the site answered 200. All true, all measuring something else: a
+  hash match proves you deployed the file you built, never that the file was built against the
+  right backend. Fixed structurally — a dev-only override lives in **`.env.development.local`**
+  (dev mode ONLY, so a production build cannot inherit it), and `npm run origin:check` (in
+  `verify`) refuses a `.env.local` outright AND asserts each deployed bundle really contains its
+  declared origin. When a deploy "succeeds" but the app loads with no data, check the bundle's
+  CONTENT, not its hash: `grep -o api.rush-point.com apps/creator-web/dist/assets/*.js`.
+- **The callable transport encodes `undefined` as `null`, so "clear this optional field" arrives as
+  a malformed value.** The Builder's opt-in groups clear by patching their fields to `undefined`
+  (the correct way to express "unset" in local state), but the Firebase callable serializer maps
+  BOTH `undefined` and `null` to `null` on the wire. Server guards are written
+  `value !== undefined && (typeof value !== 'number' || …)`, and `null` is not `undefined` — so
+  closing the Builder's "time and scoring" group sent `expectedDurationMinutes: null` and
+  `updateGame` refused EVERY autosave until a value was put back. The creator was rejected for
+  clearing an optional field, with no way to comply. Fixed at the payload, not the server:
+  `buildSavePayload` (`apps/creator-web/src/lib/savePayload.ts`) drops `undefined` keys inside
+  `stages` so "unset" arrives ABSENT — which every optional guard already accepts — while a
+  top-level explicit `null` is left alone (`safeZone: null` is a documented "clear this" signal, a
+  different meaning that must not be conflated). `0`/`false`/`''` are kept: they are authored
+  values. Pinned by `scripts/test-save-payload-undefined.ts`. **Adding an optional task field ⇒
+  make sure clearing it sends ABSENT, not `null`.** (The same transport quirk is why NaN reaches
+  the server as `null` in `scripts/e2e-verify.mjs` — there the refusal is correct.)
 - **`npm run lint` is `turbo run lint` — a workspace with no `lint` SCRIPT is silently NOT linted,
   and turbo still reports "Tasks: N successful".** play-web had neither `.eslintrc.cjs` nor a `lint`
   script, so the app players actually hold was the ONE app never linted — while `verify` and CI both

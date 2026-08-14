@@ -2,6 +2,10 @@ node_modules/
 .env
 .env.local
 *.env
+# Vite mode-scoped local overrides. `.env.local` applies to EVERY mode incl.
+# production builds (see CLAUDE.md); `.env.development.local` is the safe home
+# for a dev-only override. Both are machine-local secrets — never commit either.
+.env.*.local
 
 # Expo
 apps/mobile/.expo/
