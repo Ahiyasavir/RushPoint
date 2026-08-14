@@ -64,22 +64,78 @@ fi
 # ── 4. Caddy (TLS + Cloudflare real-IP) ──────────────────────────────────────
 say "Installing the Caddy site config"
 if command -v caddy >/dev/null 2>&1; then
-  if grep -q "api.example.com" "$REPO_DIR/deploy/Caddyfile"; then
-    warn "deploy/Caddyfile still says api.example.com — edit the hostname + tls cert paths before reloading."
-  fi
-  if [ -f /etc/caddy/Caddyfile ] && ! cmp -s "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile; then
-    cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%s 2>/dev/null || echo old)"
-    warn "backed up your existing /etc/caddy/Caddyfile"
-  fi
-  cp "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
-  if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
-    systemctl reload caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-    ok "Caddy config installed and reloaded"
+  # NEVER clobber a configured live site with the repo's TEMPLATE.
+  #
+  # This block used to `cp` deploy/Caddyfile over /etc/caddy/Caddyfile
+  # unconditionally. deploy/Caddyfile still carries the `api.example.com`
+  # placeholder, and a placeholder hostname is perfectly VALID Caddy syntax — so
+  # `caddy validate` passed, the reload succeeded, and the script reported success
+  # while the live site no longer matched api.rush-point.com. Nothing then answered
+  # for the real hostname: Cloudflare returned an empty HTTP 200 for every request,
+  # the creator console showed "loading games failed", and photo upload died, all
+  # with a HEALTHY api container and "100 callables mounted" in its log. That is
+  # what made it so hard to find — every layer reported fine except the one nobody
+  # was looking at. Re-running the "safe to re-run" deploy caused a production
+  # outage EVERY time (2026-08-14).
+  #
+  # Rule: the template is installed only when it is actually configured, or when
+  # there is no live config yet (a genuine first install). A configured live file
+  # is left exactly alone.
+  template_is_placeholder=false
+  grep -q "api.example.com" "$REPO_DIR/deploy/Caddyfile" && template_is_placeholder=true
+
+  if [ "$template_is_placeholder" = true ] && [ -f /etc/caddy/Caddyfile ]; then
+    warn "deploy/Caddyfile still says api.example.com — KEEPING your existing /etc/caddy/Caddyfile untouched."
+    warn "(Installing the template here would point Caddy at a placeholder hostname and take the API offline.)"
+    ok "Caddy left as configured — nothing to do"
   else
-    warn "Caddy config did NOT validate (probably the hostname/cert paths still need editing). Fix /etc/caddy/Caddyfile, then: systemctl reload caddy"
+    if [ "$template_is_placeholder" = true ]; then
+      warn "deploy/Caddyfile still says api.example.com — edit the hostname + tls cert paths, then reload Caddy."
+    fi
+    if [ -f /etc/caddy/Caddyfile ] && ! cmp -s "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile; then
+      cp /etc/caddy/Caddyfile "/etc/caddy/Caddyfile.bak.$(date +%s 2>/dev/null || echo old)"
+      warn "backed up your existing /etc/caddy/Caddyfile"
+    fi
+    cp "$REPO_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
+    if caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+      systemctl reload caddy 2>/dev/null || caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+      ok "Caddy config installed and reloaded"
+    else
+      warn "Caddy config did NOT validate (probably the hostname/cert paths still need editing). Fix /etc/caddy/Caddyfile, then: systemctl reload caddy"
+    fi
+  fi
+
+  # Whatever path was taken, say out loud which hostname Caddy will actually serve.
+  # A silent mismatch here is invisible from every other vantage point.
+  if [ -f /etc/caddy/Caddyfile ]; then
+    say "Caddy is serving: $(grep -oE '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' /etc/caddy/Caddyfile | head -1 || echo '(could not parse a hostname)')"
   fi
 else
   warn "caddy not installed — install it (https://caddyserver.com/docs/install), then copy deploy/Caddyfile to /etc/caddy/Caddyfile and reload."
+fi
+
+# ── 5. Post-deploy smoke test (PUBLIC path, not localhost) ───────────────────
+# A container that is "Up (healthy)" with "100 callables mounted" proves the app
+# started. It says NOTHING about whether the public hostname reaches it — the whole
+# 2026-08-14 outage lived in exactly that gap. So ask the real origin, the way a
+# phone does, before declaring the deploy done.
+PUBLIC_HOST="$(grep -oE '^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' /etc/caddy/Caddyfile 2>/dev/null | head -1)"
+if [ -n "$PUBLIC_HOST" ] && command -v curl >/dev/null 2>&1; then
+  say "Smoke-testing https://$PUBLIC_HOST"
+  # An UNAUTHENTICATED callable must be refused with 401. A 200 here means the
+  # request never reached the API (an unmatched host answered instead) — the exact
+  # signature of the placeholder-hostname outage.
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 \
+    -X POST "https://$PUBLIC_HOST/listGames" \
+    -H 'Content-Type: application/json' -d '{"data":{}}' 2>/dev/null || echo 000)"
+  case "$code" in
+    401) ok "public callable path reaches the API (401 as expected for no auth)" ;;
+    000) warn "could not reach https://$PUBLIC_HOST at all — check DNS/Cloudflare/firewall." ;;
+    200) warn "https://$PUBLIC_HOST/listGames returned 200 for an UNAUTHENTICATED call."
+         warn "The API would have refused it, so something else answered — check that the"
+         warn "Caddyfile hostname matches this domain, then: systemctl reload caddy" ;;
+    *)   warn "https://$PUBLIC_HOST/listGames returned $code (expected 401) — investigate before relying on this deploy." ;;
+  esac
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────

@@ -251,6 +251,32 @@ work exactly once.
 
 ## 9. Re-deploying later
 
+> ⚠️ **VERIFY THE PUBLIC PATH AFTER EVERY BACKEND DEPLOY — a healthy container proves nothing.**
+> On 2026-08-14 `sudo bash deploy/bootstrap.sh` overwrote the live `/etc/caddy/Caddyfile` with the
+> repo TEMPLATE, whose hostname is still the `api.example.com` placeholder. A placeholder hostname
+> is valid Caddy syntax, so `caddy validate` passed and the reload "succeeded" — while nothing
+> matched `api.rush-point.com` any more. Cloudflare answered every request with an **empty HTTP
+> 200**: the creator console showed "loading games failed" and photo upload died, with the API
+> container **Up (healthy)** and `100 callables mounted` in its log. Every layer reported fine
+> except the one nobody was looking at. `bootstrap.sh` now refuses to install a placeholder
+> template over an existing config and smoke-tests the public host itself, but run these two
+> anyway — they take 30 seconds and they check what users actually traverse:
+>
+> ```bash
+> # 1. An UNAUTHENTICATED callable must be refused. A 200 means the request never reached the API.
+> curl -s -o /dev/null -w '%{http_code}
+' -X POST https://api.rush-point.com/listGames >   -H 'Content-Type: application/json' -d '{"data":{}}'      # expect 401
+>
+> # 2. The whole upload chain a phone walks (sign-in -> PUT -> readback -> abuse guards).
+> npm run upload:check                                        # expect 22 checks passed
+> ```
+>
+> And after any **frontend** deploy, confirm the shipped bundle really points at the backend —
+> `npm run origin:check` locally before deploying, plus:
+> `curl -s https://creator.rush-point.com/ | grep -o 'assets/index-[^"]*\.js'` then fetch that
+> file and grep it for `api.rush-point.com`. A matching asset hash only proves you deployed the
+> file you built, never that the file was built correctly.
+
 Just run `npm run deploy:all` (or only `:backend` / `:hosting`). Before deploying, it's worth
 running the gates locally:
 
