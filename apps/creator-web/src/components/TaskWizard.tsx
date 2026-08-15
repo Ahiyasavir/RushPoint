@@ -41,7 +41,7 @@ import {
 // (change: task-editor-progressive-disclosure).
 import {
   type OptInGroupKey, OPT_IN_GROUP_KEYS,
-  defaultActiveGroups, groupApplies, groupHasContent, groupSummary, foldGroupAway,
+  defaultActiveGroups, groupApplies, groupSummary, foldGroupAway,
 } from '../lib/taskOptInGroups';
 import {
   type RevealState, type ValidationField,
@@ -1197,9 +1197,14 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
   const CHIP_LABEL: Record<OptInGroupKey, string> = {
     hint: b.chipAddHint, timerPoints: b.chipSetTimerPoints, rules: b.chipRules,
   };
-  // A group is shown when the creator opted in OR the task already carries its
-  // data — the second half is what stops an authored hint hiding behind a chip.
-  const shown = (k: OptInGroupKey) => groups.active[k] || groupHasContent(k, task);
+  // A group is shown ONLY when the creator opted in (change:
+  // builder-nondestructive-disclosure). This used to also open whenever the task
+  // already carried data for the group — the render-time twin of the mount-time
+  // rule `defaultActiveGroups` fixes, and the one that actually decides what
+  // renders each pass. Content is still discoverable while folded: its chip
+  // carries a count badge (`groupSummary`, via `OptInChip` below), same guarantee,
+  // one click away instead of forced open.
+  const shown = (k: OptInGroupKey) => groups.active[k];
   const chips = OPT_IN_GROUP_KEYS.filter((k) => groupApplies(k, task, siblingCount) && !shown(k));
 
   return (
