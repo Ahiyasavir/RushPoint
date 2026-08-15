@@ -1259,6 +1259,15 @@ const HE = {
     interactionIncomplete: 'חסר פרט חובה (תשובה, קוד סודי או שלבים). בלעדיו המשתתפים לא יוכלו להשלים את המשימה.',
     deleteTask: 'מחק משימה',
     removeItem: 'הסר',
+    // Folds an optional section back to a chip WITHOUT clearing it (change:
+    // builder-nondestructive-disclosure). Must not say "הסר" — it removes nothing.
+    hideSection: 'הסתר',
+    // The stage ✕ really does destroy the stage and everything in it, so it says so
+    // and asks first (change: builder-nondestructive-disclosure).
+    deleteStage: 'מחיקת השלב',
+    deleteStageConfirm: (title: string, tasks: number) =>
+      `למחוק את השלב "${title}" ואת ${tasks} המשימות שבו? אי אפשר לשחזר.`,
+    deleteStageCta: 'מחיקת השלב',
     fireQuestion: 'איפה אפשר לבצע את המשימה?',
     // task-location-mode-consolidation: שתי אפשרויות בלבד. כל הפרטים הטכניים
     // (רדיוס, דילוג על בדיקת GPS, הסתרת מיקום) נמצאים בפאנל "מתקדם" מתחת ל"מיקום מסוים".
@@ -3037,6 +3046,15 @@ const EN: typeof HE = {
     interactionIncomplete: 'A required detail is missing (answer, secret code or steps). Without it participants can never complete this task.',
     deleteTask: 'Delete task',
     removeItem: 'Remove',
+    // Folds an optional section back to a chip WITHOUT clearing it (change:
+    // builder-nondestructive-disclosure). Must not say "Remove" — it removes nothing.
+    hideSection: 'Hide',
+    // The stage ✕ really does destroy the stage and everything in it, so it says so
+    // and asks first (change: builder-nondestructive-disclosure).
+    deleteStage: 'Delete stage',
+    deleteStageConfirm: (title: string, tasks: number) =>
+      `Delete the stage "${title}" and the ${tasks} missions inside it? This cannot be undone.`,
+    deleteStageCta: 'Delete stage',
     fireQuestion: 'Where can players do this task?',
     // task-location-mode-consolidation: exactly two choices. Every technical detail
     // (radius, skip-GPS-check, hide-location) lives in the Advanced panel nested

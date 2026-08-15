@@ -48,9 +48,32 @@ describe('creatorNav — primary navigation destinations', () => {
     expect(REGISTERED_ROUTES).toContain(adminDest!.to);
   });
 
-  it('puts the admin entry last, so it never displaces the everyday destinations', () => {
+  it('offers the admin templates console to an admin, pointing at a REGISTERED route', () => {
     const dests = buildNavDestinations({ paymentsEnabled: true, isAdmin: true });
-    expect(dests[dests.length - 1].id).toBe('admin');
+    const templatesDest = dests.find((d) => d.id === 'adminTemplates');
+    expect(templatesDest).toBeDefined();
+    expect(templatesDest!.to).toBe('/admin/templates');
+    expect(REGISTERED_ROUTES).toContain(templatesDest!.to);
+  });
+
+  it('hides the admin templates console from an ordinary creator, and by default', () => {
+    // Same fail-closed rule as the users dashboard: forgetting the flag must not
+    // leak an admin-only entry into every creator's menu.
+    for (const opts of [{ paymentsEnabled: true, isAdmin: false }, { paymentsEnabled: true }]) {
+      expect(buildNavDestinations(opts).map((d) => d.id)).not.toContain('adminTemplates');
+    }
+  });
+
+  it('keeps EVERY admin entry at the tail, so none displaces an everyday destination', () => {
+    // Generalised from "the admin entry is last" when a second admin destination
+    // (game templates) was added: the guarantee was never about one specific id,
+    // it was that admin-only entries sit behind the destinations every creator uses.
+    const ADMIN_IDS = ['admin', 'adminTemplates'];
+    const ids = buildNavDestinations({ paymentsEnabled: true, isAdmin: true }).map((d) => d.id);
+    const firstAdminAt = ids.findIndex((id) => ADMIN_IDS.includes(id));
+    expect(firstAdminAt).toBeGreaterThan(-1);
+    // Nothing after the first admin entry may be an everyday destination.
+    expect(ids.slice(firstAdminAt).every((id) => ADMIN_IDS.includes(id))).toBe(true);
   });
 
   it('gates the wallet destination on payments being enabled', () => {

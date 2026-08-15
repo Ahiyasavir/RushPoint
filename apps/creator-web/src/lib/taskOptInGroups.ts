@@ -2,28 +2,49 @@
 // (change: task-editor-progressive-disclosure).
 //
 // The editor shows the core fields plus a row of CHIPS — + Add hint,
-// + Set timer / points, + Attach media, + Prerequisites / rules. Clicking a chip
+// + Set timer / points, + Prerequisites / rules. Clicking a chip
 // mounts just that group; a Remove control clears it and puts the chip back.
 // This replaces the five always-listed collapsible sections, which presented the
 // whole product's surface on every task however simple.
 //
-// ─── The rule that must never break ──────────────────────────────────────────
-// A group that ALREADY HAS DATA renders EXPANDED, never behind a chip. A creator
-// editing an existing task must never have to guess which chip is hiding their
-// hint. `groupHasContent` is therefore a data-visibility guarantee, and
-// `defaultActiveGroups` is defined in terms of it so the two can't drift.
+// ─── The rules that must never break ─────────────────────────────────────────
+// (revised by change: builder-nondestructive-disclosure)
 //
-// That is also why "is this field authored?" compares against the DEFAULT for the
-// fields a `blankTask()` ships (difficulty, points, station capacity) rather than
-// against undefined: every task carries those, so an undefined-test would report
-// every group as authored, open all four on load, and the chips would never
-// appear at all — the redesign would silently undo itself.
+// 1. EVERY group opens COLLAPSED. Expansion is NOT coupled to content.
+// 2. A folded group still ADVERTISES what it holds, via its chip's count badge
+//    (`groupSummary`). That badge — not auto-expansion — is what keeps authored
+//    data discoverable, so `groupHasContent` stays load-bearing even though it no
+//    longer decides what opens.
+// 3. FOLDING a group writes NOTHING to the task (`foldGroupAway`). Clearing is a
+//    separate, explicit act (`clearGroupPatch`).
+//
+// WHY RULE 1 REPLACED "a group with data renders expanded". That older rule tried
+// to guarantee an authored hint could never hide behind an unclicked chip, and
+// leaned on comparing against the defaults `blankTask()` ships rather than against
+// undefined. It still failed in practice, because the DEFAULTS THEMSELVES
+// DISAGREE: `blankTask()` (lib/wizardLogic.ts) seeds maxConcurrentTeams 3 — the
+// value TASK_FIELD_DEFAULTS mirrors — while the template seeder
+// (apps/creator-web/src/templates.ts `task()`) seeds 5. So every task in every
+// template-derived game read as "authored" and opened its rules group, and the
+// per-task difficulty/pointValue overrides those templates apply opened the timer
+// group too. The editor greeted a creator with three or four unfolded sections of
+// settings they never chose. Rule 2 keeps the original guarantee without that cost.
+//
+// "Is this field authored?" still compares against the DEFAULT rather than against
+// undefined — that logic feeds the badge now instead of the expansion, and an
+// undefined-test would light every badge on every task.
 //
 // Unit-tested by scripts/test-task-opt-in-groups.ts (in `npm test`).
 import type { Task } from '@rushpoint/shared';
 import { defaultExpectedDurationMinutes } from '@rushpoint/shared';
 
-export const OPT_IN_GROUP_KEYS = ['hint', 'timerPoints', 'media', 'rules'] as const;
+// `media` is deliberately NOT here (change: task-media-durability). A picture is part of
+// describing a mission, so it is authored beside the description in the details step and
+// is always visible — it is not an optional extra a creator must first discover behind a
+// chip on the last step. Removing it from the registry (rather than just rendering it
+// elsewhere) keeps `clearGroupPatch('media')` from being reachable through a control that
+// no longer exists, and keeps this list an honest description of the UI.
+export const OPT_IN_GROUP_KEYS = ['hint', 'timerPoints', 'rules'] as const;
 export type OptInGroupKey = (typeof OPT_IN_GROUP_KEYS)[number];
 
 /**
@@ -51,8 +72,6 @@ export function groupHasContent(key: OptInGroupKey, task: Task): boolean {
   switch (key) {
     case 'hint':
       return filled(task.hint);
-    case 'media':
-      return (task.media?.length ?? 0) > 0;
     case 'timerPoints':
       return !!task.pausesTimer
         || positive(task.expiresAfterMinutes)
@@ -84,14 +103,39 @@ export function groupHasContent(key: OptInGroupKey, task: Task): boolean {
 }
 
 /**
- * Which groups are mounted when the editor opens. ONE rule, expressed once: a
- * group is open exactly when it has content.
+ * Which groups are mounted when the editor opens: NONE, always (rule 1 above).
+ *
+ * The `task` parameter is deliberately retained and deliberately unused. It keeps
+ * the call site honest — the answer is a property of the editor's disclosure
+ * policy, not of the task — and it means re-coupling expansion to content would
+ * be a visible edit here rather than a quiet change of caller.
  */
-export function defaultActiveGroups(task: Task): Record<OptInGroupKey, boolean> {
+export function defaultActiveGroups(_task: Task): Record<OptInGroupKey, boolean> {
   return OPT_IN_GROUP_KEYS.reduce((acc, k) => {
-    acc[k] = groupHasContent(k, task);
+    acc[k] = false;
     return acc;
   }, {} as Record<OptInGroupKey, boolean>);
+}
+
+/** The editor's per-group open/closed map. */
+export type ActiveGroups = Record<OptInGroupKey, boolean>;
+
+/**
+ * Fold a group away: a DISPLAY decision and nothing else (rule 3 above).
+ *
+ * Returns the task BY THE SAME REFERENCE it was given — no copy, no patch — so
+ * "hiding never edits the task" is provable by identity rather than by inspecting
+ * fields. The predecessor of this function ran `clearGroupPatch` first and then
+ * collapsed, which meant a control the creator read as "hide this section" wiped
+ * the fields underneath it and the wipe rode the Builder's autosave into
+ * `updateGame`. Clearing is still available, explicitly, via `clearGroupPatch`.
+ */
+export function foldGroupAway(
+  task: Task,
+  active: ActiveGroups,
+  key: OptInGroupKey,
+): { task: Task; active: ActiveGroups } {
+  return { task, active: { ...active, [key]: false } };
 }
 
 /**
@@ -109,8 +153,6 @@ export function groupSummary(key: OptInGroupKey, task: Task): number {
   switch (key) {
     case 'hint':
       return filled(task.hint) ? 1 : 0;
-    case 'media':
-      return task.media?.length ?? 0;
     case 'timerPoints':
       return (task.pausesTimer ? 1 : 0)
         + (positive(task.expiresAfterMinutes) ? 1 : 0)
@@ -145,8 +187,6 @@ export function clearGroupPatch(key: OptInGroupKey): Partial<Task> {
         hint: undefined, hintPenalty: undefined,
         hintAutoRevealMinutes: undefined, hintAutoRevealAttempts: undefined,
       };
-    case 'media':
-      return { media: [] };
     case 'timerPoints':
       return {
         difficulty: TASK_FIELD_DEFAULTS.difficulty,

@@ -583,10 +583,12 @@ describe('canLaunchGame is identical to the four legacy launch guards', () => {
 describe('the timer/points group reports what a task actually carries', () => {
   const fresh = blankTask('t1');
 
-  it('counts an expiry and mounts the group', () => {
+  it('counts an expiry on the badge, but still opens collapsed', () => {
     const t = { ...fresh, expiresAfterMinutes: 30 };
     expect(groupSummary('timerPoints', t)).toBe(1);
-    expect(defaultActiveGroups(t).timerPoints).toBe(true);
+    // (change: builder-nondestructive-disclosure) Expansion is no longer derived
+    // from content — the badge above is what advertises it while folded.
+    expect(defaultActiveGroups(t).timerPoints).toBe(false);
   });
 
   it('counts an expiry plus a scheduled release as two', () => {
@@ -611,12 +613,20 @@ describe('the timer/points group reports what a task actually carries', () => {
 
   it('DOES count a point value the creator actually chose', () => {
     // A deliberate change from the old advanced badge, which ignored points: a
-    // creator who set 250 must see that where they set it, not behind a chip.
+    // creator who set 250 must see that where they set it. Since
+    // builder-nondestructive-disclosure that surfacing is the CHIP BADGE rather
+    // than an auto-opened section.
     expect(groupSummary('timerPoints', { ...fresh, pointValue: 250 })).toBe(1);
-    expect(defaultActiveGroups({ ...fresh, pointValue: 250 }).timerPoints).toBe(true);
+    expect(defaultActiveGroups({ ...fresh, pointValue: 250 }).timerPoints).toBe(false);
   });
 
-  it('derives the mounted flag from the same count', () => {
+  it('opens collapsed whatever the count says', () => {
+    // The mounted flag USED to be derived from the count. It no longer is
+    // (change: builder-nondestructive-disclosure): coupling them meant a
+    // template-seeded game unfolded three sections on every task, because the
+    // template seeder and blankTask disagree on the field defaults. The count
+    // still drives the badge — asserted alongside, so a regression that silences
+    // the badge can't hide behind this.
     const table: Task[] = [
       fresh,
       { ...fresh, expiresAfterMinutes: 30 },
@@ -625,7 +635,11 @@ describe('the timer/points group reports what a task actually carries', () => {
       { ...fresh, pointValue: 500 },
     ];
     for (const t of table) {
-      expect(defaultActiveGroups(t).timerPoints).toBe(groupSummary('timerPoints', t) > 0);
+      expect(defaultActiveGroups(t).timerPoints).toBe(false);
+    }
+    // …and everything except the untouched `fresh` task still advertises itself.
+    for (const t of table.slice(1)) {
+      expect(groupSummary('timerPoints', t)).toBeGreaterThan(0);
     }
   });
 });

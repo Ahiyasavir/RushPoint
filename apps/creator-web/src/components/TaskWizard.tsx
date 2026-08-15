@@ -8,11 +8,11 @@
 // gate, placement is last and never blocks. Validation messages are withheld
 // until the creator dirties the field group they concern or presses the finish
 // control, so a brand new task is never greeted by its own errors.
-import { useEffect, useState, type ReactNode, type ChangeEvent } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Task, TaskStep, TaskType, TaskMedia } from '@rushpoint/shared';
 import {
-  normalizeTriggerMode, parseYouTubeId, youTubeEmbedUrl,
+  normalizeTriggerMode, parseYouTubeId, youTubeEmbedUrl, isTaskMediaValid,
   validateUnlockGraph, validateAvailabilityWindow,
   validateOrderItems, ORDER_ITEMS_MIN, ORDER_ITEMS_MAX,
   validateSurveyChoices, SURVEY_CHOICES_MIN, SURVEY_CHOICES_MAX,
@@ -41,7 +41,7 @@ import {
 // (change: task-editor-progressive-disclosure).
 import {
   type OptInGroupKey, OPT_IN_GROUP_KEYS,
-  defaultActiveGroups, groupApplies, groupHasContent, groupSummary, clearGroupPatch,
+  defaultActiveGroups, groupApplies, groupHasContent, groupSummary, foldGroupAway,
 } from '../lib/taskOptInGroups';
 import {
   type RevealState, type ValidationField,
@@ -109,19 +109,20 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
     onChange({ ...task, smart: { enabled: true, verificationType: task.smart?.verificationType ?? 'code_verification', ...task.smart, ...p } });
 
   // Which optional field GROUPS are mounted (change:
-  // task-editor-progressive-disclosure). Held here rather than in the step body so
-  // the state survives hopping between steps. A group is mounted on load exactly
-  // when the task already carries content for it, so an existing hint can never
-  // hide behind an unclicked chip — see lib/taskOptInGroups.
+  // task-editor-progressive-disclosure, revised by
+  // builder-nondestructive-disclosure). Held here rather than in the step body so
+  // the state survives hopping between steps. Every group mounts COLLAPSED; a
+  // populated one advertises itself through its chip's count badge rather than by
+  // unfolding — see lib/taskOptInGroups.
   const [active, setActive] = useState<Record<OptInGroupKey, boolean>>(() => defaultActiveGroups(task));
   const openGroup = (k: OptInGroupKey) => setActive((a) => ({ ...a, [k]: true }));
-  // Remove (×) both clears the group's fields and folds it back to a chip, so the
-  // control's visible effect and the stored task can't disagree.
-  const removeGroup = (k: OptInGroupKey) => {
-    set(clearGroupPatch(k));
-    setActive((a) => ({ ...a, [k]: false }));
-  };
-  const groups = { active, openGroup, removeGroup };
+  // Hide folds the group back to a chip and writes NOTHING to the task. The
+  // decision lives in lib/taskOptInGroups so "hiding never edits" is unit-tested
+  // rather than reviewed by eye; this used to clear the group's fields first,
+  // which turned "hide this section" into silent data loss via the autosave.
+  const hideGroup = (k: OptInGroupKey) =>
+    setActive((a) => foldGroupAway(task, a, k).active);
+  const groups = { active, openGroup, hideGroup };
 
   // Each step body derives the location state it needs for itself: the Location
   // step reasons in the creator's two choices (lib/locationPicker), the
@@ -179,8 +180,8 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
           needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
         {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} />}
-        {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} /></div>}
-        {stepKey === 'execution' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} gameId={gameId} /></div>}
+        {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} /></div>}
+        {stepKey === 'execution' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
       </div>
 
       {/* Footer. The "this task cannot be completed" line is a response to an
@@ -213,7 +214,7 @@ type B = ReturnType<typeof useT>['builder'];
 type Groups = {
   active: Record<OptInGroupKey, boolean>;
   openGroup: (k: OptInGroupKey) => void;
-  removeGroup: (k: OptInGroupKey) => void;
+  hideGroup: (k: OptInGroupKey) => void;
 };
 
 // ── The modular opt-in primitive (change: task-editor-progressive-disclosure) ──
@@ -240,17 +241,21 @@ function OptInChip({ label, count, onClick, b }: {
   );
 }
 
-// An opted-in group: a titled block with a Remove control that both clears the
-// group's fields and folds it back to a chip.
-function OptInGroup({ title, onRemove, removeLabel, children }: {
-  title: string; onRemove: () => void; removeLabel: string; children: ReactNode;
+// An opted-in group: a titled block whose control folds it back to a chip.
+// The control HIDES ONLY — it never clears the fields (change:
+// builder-nondestructive-disclosure). Whatever is set here survives the fold and
+// keeps showing on the chip's count badge, so a creator can put a section away
+// without losing what they typed. Styling is neutral, not `hover:text-neon-red`:
+// a danger colour on a non-destructive control is the same lie in reverse.
+function OptInGroup({ title, onHide, hideLabel, children }: {
+  title: string; onHide: () => void; hideLabel: string; children: ReactNode;
 }) {
   return (
     <div className="rounded-lg border border-[--rp-border] p-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-semibold text-[--ink-3] uppercase tracking-wider">{title}</span>
-        <button type="button" onClick={onRemove} aria-label={removeLabel} title={removeLabel}
-          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-neon-red hover:bg-[--surface-2] leading-none">
+        <button type="button" onClick={onHide} aria-label={hideLabel} title={hideLabel}
+          className="shrink-0 w-6 h-6 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] leading-none">
           ✕
         </button>
       </div>
@@ -732,8 +737,11 @@ function typeMetaOf(b: B): Record<TaskType, { label: string; short: string; desc
 // on step 3, beside the point value it actually interacts with; every other
 // optional field became a chip there too. This step is the one a creator must
 // answer, so it asks nothing else.
-function DetailsStepBody({ task, set, b, replace }: {
+function DetailsStepBody({ task, set, b, replace, gameId }: {
   task: Task; set: (p: Partial<Task>) => void; b: B; replace: (t: Task) => void;
+  // Media is authored here now (change: task-media-durability), and the upload path
+  // needs the game id to build its storage prefix.
+  gameId?: string;
 }) {
   // Which type's sample list is open (only for a type that offers more than one).
   const [samplePickerFor, setSamplePickerFor] = useState<TaskType | null>(null);
@@ -777,6 +785,16 @@ function DetailsStepBody({ task, set, b, replace }: {
       <div>
         <Label dense>{b.descriptionField}</Label>
         <Textarea dense value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
+      </div>
+
+      {/* A picture belongs WITH the mission description, not three clicks away
+          (change: task-media-durability). This used to live at the bottom of step 3
+          behind an opt-in chip, so a creator had to reach the last step and then guess
+          which chip hid the file picker. It is part of describing the mission, so it
+          sits here, always visible, exactly like the description it illustrates. */}
+      <div>
+        <Label dense>{b.mediaField}</Label>
+        <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
       </div>
 
       <div>
@@ -895,7 +913,12 @@ function UnlockSection({ task, siblings, set, b }: {
 // Upload image/video files from the computer (→ Firebase Storage) or paste a
 // YouTube link (→ canonical embed). Each entry has an optional caption and can be
 // reordered / removed. Client-side validation mirrors the server (normalizeTaskMedia).
-function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string }) {
+function MediaSection({ task, set, b, gameId, replace }: {
+  task: Task; set: (p: Partial<Task>) => void; b: B; gameId?: string;
+  // Needed for the post-upload commit: `set` patches the task captured by THIS render,
+  // which is stale by the time a multi-second upload resolves. See `latest` below.
+  replace?: (t: Task) => void;
+}) {
   const media = task.media ?? [];
   const [ytUrl, setYtUrl] = useState('');
   const [ytError, setYtError] = useState(false);
@@ -903,6 +926,14 @@ function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<T
   const [uploadError, setUploadError] = useState(false);
 
   const commit = (next: TaskMedia[]) => set({ media: next.length ? next : undefined });
+
+  // The latest task, readable from an async callback (change: task-media-durability).
+  // `set`/`commit` build `{...task, ...patch}` from the render closure, so an upload that
+  // takes eight seconds committed a task snapshot from BEFORE it started — silently
+  // reverting every edit made while the file was going up, and losing the first of two
+  // parallel uploads. A ref is the only thing here that is current at await-resolution.
+  const latest = useRef(task);
+  latest.current = task;
 
   const onPickFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -912,7 +943,15 @@ function MediaSection({ task, set, b, gameId }: { task: Task; set: (p: Partial<T
     setUploadPct(0);
     try {
       const { url, kind } = await uploadTaskMedia(file, { gameId: gameId ?? 'draft', taskId: task.id }, setUploadPct);
-      commit([...media, { id: uuid(), kind, url }]);
+      // The SAME predicate the server enforces. An upload that returns a url the server
+      // will not accept used to look like a success and then quietly vanish on the next
+      // autosave; the creator finds out now instead.
+      if (!isTaskMediaValid({ kind, url })) { setUploadError(true); return; }
+      const entry: TaskMedia = { id: uuid(), kind, url };
+      const current = latest.current;
+      const next = [...(current.media ?? []), entry];
+      if (replace) replace({ ...current, media: next });
+      else commit(next);
     } catch {
       setUploadError(true);
     } finally {
@@ -1135,14 +1174,14 @@ const TYPE_ANIM: Record<TaskType, ReactNode> = {
 // so putting either behind a chip would let a creator save something unplayable.
 // Everything optional follows as a row of opt-in chips (change:
 // task-editor-progressive-disclosure).
-function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, touch, siblings, gameId }: {
+function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, touch, siblings }: {
   task: Task; set: (p: Partial<Task>) => void; setSmart: (p: Record<string, unknown>) => void;
   // visible-time-estimates: the other tasks of the SAME stage. Only used to measure
   // the median walking leg behind the suggested estimate.
   siblings?: Task[];
   // The whole-task setter, kept for the editors below that rewrite a task wholesale.
   replace: (t: Task) => void;
-  b: B; groups: Groups; gameId?: string;
+  b: B; groups: Groups;
   revealed: (f: ValidationField) => boolean; touch: (f: ValidationField) => void;
 }) {
   const located = (() => { const m = normalizeTriggerMode(task); return m === 'radius' || m === 'exact'; })();
@@ -1153,10 +1192,10 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
   void replace;
 
   const GROUP_TITLE: Record<OptInGroupKey, string> = {
-    hint: b.hintField, timerPoints: b.groupTimerPoints, media: b.mediaField, rules: b.groupRules,
+    hint: b.hintField, timerPoints: b.groupTimerPoints, rules: b.groupRules,
   };
   const CHIP_LABEL: Record<OptInGroupKey, string> = {
-    hint: b.chipAddHint, timerPoints: b.chipSetTimerPoints, media: b.chipAttachMedia, rules: b.chipRules,
+    hint: b.chipAddHint, timerPoints: b.chipSetTimerPoints, rules: b.chipRules,
   };
   // A group is shown when the creator opted in OR the task already carries its
   // data — the second half is what stops an authored hint hiding behind a chip.
@@ -1254,7 +1293,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           hidden. */}
 
       {shown('hint') && (
-        <OptInGroup title={GROUP_TITLE.hint} removeLabel={b.removeHint} onRemove={() => groups.removeGroup('hint')}>
+        <OptInGroup title={GROUP_TITLE.hint} hideLabel={b.hideSection} onHide={() => groups.hideGroup('hint')}>
           <div className="flex items-center gap-2">
             <RichTooltip concept="hint" />
           </div>
@@ -1291,14 +1330,10 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
         </OptInGroup>
       )}
 
-      {shown('media') && (
-        <OptInGroup title={GROUP_TITLE.media} removeLabel={b.removeItem} onRemove={() => groups.removeGroup('media')}>
-          <MediaSection task={task} set={set} b={b} gameId={gameId} />
-        </OptInGroup>
-      )}
-
+      {/* Media moved to the DETAILS step, beside the description it illustrates
+          (change: task-media-durability) — it is no longer an opt-in group here. */}
       {shown('rules') && (
-        <OptInGroup title={GROUP_TITLE.rules} removeLabel={b.removeItem} onRemove={() => groups.removeGroup('rules')}>
+        <OptInGroup title={GROUP_TITLE.rules} hideLabel={b.hideSection} onHide={() => groups.hideGroup('rules')}>
           {/* Prerequisites need siblings to point at, so a one-task stage is
               offered the rest of the group without them. */}
           {siblingCount > 1 && (
@@ -1339,7 +1374,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
       )}
 
       {shown('timerPoints') && (
-        <OptInGroup title={GROUP_TITLE.timerPoints} removeLabel={b.removeItem} onRemove={() => groups.removeGroup('timerPoints')}>
+        <OptInGroup title={GROUP_TITLE.timerPoints} hideLabel={b.hideSection} onHide={() => groups.hideGroup('timerPoints')}>
         {/* Difficulty on ONE line: the label sits beside its chips instead of above
             them, the same compact strip idiom the stage settings row uses. It lives
             here rather than on the details step because it only means anything next

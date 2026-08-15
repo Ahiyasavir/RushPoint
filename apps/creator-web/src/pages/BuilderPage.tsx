@@ -1463,6 +1463,20 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     setStages(remaining);
     if (activeStageId === id) setActiveStageId(remaining[0]?.id ?? '');
   }
+  /** Deleting a stage destroys every task inside it and there is no undo once the
+   *  Builder's autosave lands, so it ASKS FIRST and names what it will take
+   *  (change: builder-nondestructive-disclosure). The control used to be labelled
+   *  "close" and fired straight into removeStage — one misread click from losing a
+   *  whole stage. Matches the confirmation posture of deleteGame / skipTaskForTeam. */
+  async function confirmRemoveStage(stage: Stage) {
+    const taskCount = stage.tasks?.length ?? 0;
+    const ok = await dialog.confirm(
+      b.deleteStageConfirm(stage.title?.trim() || b.stageTitlePlaceholder, taskCount),
+      b.deleteStageCta,
+      true,
+    );
+    if (ok) removeStage(stage.id);
+  }
   // The stage shown in the centre canvas (default to the first).
   const activeStage = game.stages.find((s) => s.id === activeStageId) ?? game.stages[0];
   function insertFromLibrary(stageId: string, task: Task) {
@@ -1686,7 +1700,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 </label>
               )}
               {game.stages.length > 1 && (
-                <button className="text-neon-red text-sm shrink-0" aria-label={b.exclusiveClose} onClick={() => removeStage(activeStage.id)}>✕</button>
+                <button className="text-neon-red text-sm shrink-0" aria-label={b.deleteStage} title={b.deleteStage}
+                  onClick={() => void confirmRemoveStage(activeStage)}>✕</button>
               )}
             </div>
 
