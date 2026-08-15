@@ -114,6 +114,14 @@
         { "order": "ASCENDING", "queryScope": "COLLECTION" },
         { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
       ]
+    },
+    {
+      "_comment": "listGameTemplates / createGameFromTemplate (change: admin-manage-game-templates) run an EQUALITY-ONLY collection-group query: collectionGroup('games').where('isTemplate','==',true). Same reasoning as runs.ownerUid above — grouping/sorting happens in application code, so only the equality filter needs an index, not a composite with templateOrder. Deploy BEFORE the functions that use it.",
+      "collectionGroup": "games",
+      "fieldPath": "isTemplate",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
     }
   ]
 }

@@ -14,6 +14,7 @@
 // SCOPE: creators only. Anonymous participants have no email and no link to a creator uid,
 // so they are excluded server-side.
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
 import { listPlatformUsers, setUserNote } from '../services/calls';
 import {
@@ -39,6 +40,7 @@ const STAGE_COLOR: Record<ActivationStage, 'zinc' | 'gold' | 'cyan' | 'green'> =
 export default function AdminUsersPage() {
   const t = useT();
   const ta = t.adminUsers;
+  const nav = useNavigate();
 
   const [gate, setGate] = useState<GateState>('checking');
   const [users, setUsers] = useState<AdminUserSummary[] | null>(null);
@@ -151,6 +153,13 @@ export default function AdminUsersPage() {
         <h1 className="text-xl font-semibold text-[--ink-1]">{ta.title}</h1>
         <p className="text-sm text-[--ink-3]">{ta.subtitle}</p>
       </div>
+
+      <button
+        onClick={() => nav('/admin/templates')}
+        className="text-xs font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2"
+      >
+        {ta.toTemplatesLink}
+      </button>
 
       {/* Summary tiles: 2 across on a phone, 6 across on a desktop. */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-2">

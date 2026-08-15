@@ -32,6 +32,9 @@ const LegalPage      = lazyWithRetry('legal', () => import('./pages/LegalPage'))
 // Admin-only platform user activity report (change: admin-user-activity-dashboard).
 // Not in buildNavDestinations — reachable only by direct URL, same treatment as /live.
 const AdminUsersPage = lazyWithRetry('adminUsers', () => import('./pages/AdminUsersPage'));
+// Admin-managed game templates (change: admin-manage-game-templates). Same
+// treatment: not in buildNavDestinations, reachable only by direct URL.
+const AdminTemplatesPage = lazyWithRetry('adminTemplates', () => import('./pages/AdminTemplatesPage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -198,6 +201,7 @@ export default function App() {
             {/* Admin-only, not in buildNavDestinations — reachable only by direct
                 URL (bookmark it); the page itself gates on the admin claim. */}
             <Route path="/admin/users"         element={<AdminUsersPage />} />
+            <Route path="/admin/templates"     element={<AdminTemplatesPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>

@@ -10,7 +10,7 @@
 // Pure: no React, no Firebase.
 import type { LiveRunSummary } from '@rushpoint/shared';
 
-export type NavDestinationId = 'myGames' | 'gallery' | 'wallet' | 'settings' | 'admin';
+export type NavDestinationId = 'myGames' | 'gallery' | 'wallet' | 'settings' | 'admin' | 'adminTemplates';
 
 export interface NavDestination {
   id: NavDestinationId;
@@ -46,7 +46,14 @@ export function buildNavDestinations(
     // stays registered for anyone who types the URL, the page re-checks the claim, and
     // `listPlatformUsers` re-checks it server side. The menu just stops showing a door
     // that would not open.
-    ...(isAdmin ? [{ id: 'admin' as const, to: '/admin/users' }] : []),
+    ...(isAdmin ? [
+      { id: 'admin' as const, to: '/admin/users' },
+      // Admin-managed game templates (change: admin-manage-game-templates). Same
+      // cosmetic-only reasoning as the admin entry above — hiding it is not the
+      // security boundary, AdminTemplatesPage and setGameTemplateFlag both
+      // re-check the claim themselves.
+      { id: 'adminTemplates' as const, to: '/admin/templates' },
+    ] : []),
   ];
 }
 

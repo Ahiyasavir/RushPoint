@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import type { Game, ScoringPreset } from '@rushpoint/shared';
+import type { Game, GameMode, ScoringPreset, Stage } from '@rushpoint/shared';
 import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
-import { createGame, updateGame, listGames, launchRun, deleteGame, publishGame } from '../services/calls';
+import {
+  createGame, updateGame, listGames, launchRun, deleteGame, publishGame,
+  listGameTemplates, createGameFromTemplate, type TemplateGroupEntry,
+} from '../services/calls';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { LoadingState } from '../components/LoadingState';
@@ -13,11 +16,12 @@ import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
 import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { ShareSheet } from '../components/ShareSheet';
-import { TEMPLATES, type GameTemplate } from '../templates';
+import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
 import { firstLaunchBlocker, type ReadinessIssue } from '../lib/gameReadiness';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
+import { useLanguage } from '../components/LanguageContext';
 import { useLiveRuns } from '../hooks/useLiveRuns';
 import { liveRunForGame } from '../lib/creatorNav';
 import {
@@ -30,6 +34,26 @@ import {
   describeGameSettings,
   templateDescription, templateLabel,
 } from '../lib/templateLabels';
+
+// "Blank" stays a hardcoded, always-first, client-side special case — NOT a real
+// admin-editable template (design decision, admin-manage-game-templates). One
+// empty stage with one empty-titled task, matching the old templates.ts build().
+function blankStage(): Stage {
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+  return {
+    id: uuid(), order: 0, title: 'שלב 1', requiredTaskCount: 1,
+    tasks: [{
+      id: uuid(), title: '', type: 'field', coordinates: { lat: 0, lng: 0 },
+      locationless: true, triggerMode: 'locationless',
+      difficulty: 5, estimatedMinutes: 10, pointValue: 100, maxConcurrentTeams: 5,
+    }],
+  };
+}
+const BLANK_MODE: GameMode = 'team';
+
+/** The creator's picker choice: the hardcoded Blank option, or a resolved
+ *  (language-picked) Firestore-backed template. */
+type PickerChoice = { kind: 'blank' } | { kind: 'template'; resolved: ResolvedTemplate };
 
 // Module-level cache so navigating back to dashboard is instant (no spinner).
 // Scoped to the owner uid: sign-out doesn't reload the page, so without the uid
@@ -180,8 +204,13 @@ export default function DashboardPage() {
   const [picking, setPicking] = useState(false);
   // The template the creator selected but has not confirmed yet — the moment the
   // play mode and scoring style are DISCLOSED instead of silently assigned.
-  const [chosen, setChosen] = useState<GameTemplate | null>(null);
+  const [chosen, setChosen] = useState<PickerChoice | null>(null);
   const [chosenPreset, setChosenPreset] = useState<ScoringPreset>('smart_weighted');
+  // Firestore-backed templates (change: admin-manage-game-templates), fetched once
+  // the picker opens. null = still loading; [] + failed = the fetch errored.
+  const [templateGroups, setTemplateGroups] = useState<TemplateGroupEntry[] | null>(null);
+  const [templatesFailed, setTemplatesFailed] = useState(false);
+  const { lang } = useLanguage();
   // Scoring is an easy-wizard default: Create proceeds on the template's own
   // preset unless the creator opens this disclosure to change it.
   const [showScoring, setShowScoring] = useState(false);
@@ -215,7 +244,7 @@ export default function DashboardPage() {
   // callable. These hold for the whole duration of the promise instead.
   // launch/publish/delete are keyed by game id so acting on one card never
   // blocks another.
-  const newGameAction = useAsyncAction<[GameTemplate, ScoringPreset?], void>(newGame);
+  const newGameAction = useAsyncAction<[PickerChoice, ScoringPreset?], void>(newGame);
   const launchAction = useAsyncAction<[Game, { testDrive?: boolean }?], void>(launch, (g) => g.id);
   const publishAction = useAsyncAction(togglePublish, (g: Game) => g.id);
   const removeAction = useAsyncAction(remove, (g: Game) => g.id);
@@ -271,29 +300,53 @@ export default function DashboardPage() {
     return () => { document.body.style.overflow = prev; };
   }, [picking]);
 
-  async function newGame(tpl: GameTemplate, preset: ScoringPreset = tpl.scoringPreset) {
+  // Fetch the Firestore-backed templates once the picker first opens (cached for
+  // the session — templates change rarely enough that a stale list for the rest
+  // of this visit is an acceptable trade for not refetching on every open).
+  useEffect(() => {
+    if (!picking || templateGroups !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { templates } = await listGameTemplates();
+        if (!cancelled) setTemplateGroups(templates);
+      } catch (e) {
+        console.error('[dashboard] listGameTemplates failed:', e);
+        if (!cancelled) { setTemplateGroups([]); setTemplatesFailed(true); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [picking, templateGroups]);
+
+  async function newGame(choice: PickerChoice, preset?: ScoringPreset) {
     setPicking(false);
     setChosen(null);
-    // The title follows the interface language now that the name is translated.
-    const title = tpl.key === 'blank' ? d.untitledGame : templateLabel(tpl.key, t);
-    // Tracks the doc created by createGame so a FAILURE in the follow-up seeding
-    // step can clean up the orphan. Undefined while createGame itself is still
-    // in flight, so the catch never deletes a game that was never created.
-    let createdGameId: string | undefined;
+
+    if (choice.kind === 'blank') {
+      try {
+        const { gameId } = await createGame({ title: d.untitledGame, mode: BLANK_MODE, tags: [] });
+        // Wrong-answer cost (change: wrong-answer-cost): NEW games are seeded at
+        // the default level so brute forcing a quiz is no longer free.
+        await updateGame({
+          gameId, stages: [blankStage()], scoringPreset: preset ?? 'smart_weighted',
+          scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
+        });
+        _gamesCache = null;
+        nav(`/build/${gameId}`);
+      } catch (e) {
+        console.error('[dashboard] create blank game failed:', e);
+        await dialog.alert(d.templateFailed);
+        setPicking(true);
+        setChosen(choice);
+      }
+      return;
+    }
+
+    const { variant } = choice.resolved;
+    const finalPreset = preset ?? variant.scoringPreset;
     try {
-      const { gameId } = await createGame({ title, mode: tpl.mode, tags: [] });
-      createdGameId = gameId;
-      const stages = tpl.build().map((s, i) => ({ ...s, order: i }));
-      // Same callable, same fields — but with the scoring style the creator saw
-      // and could change, rather than one assigned invisibly.
-      // Wrong-answer cost (change: wrong-answer-cost): NEW games are seeded at the
-      // default level so brute forcing a quiz is no longer free. It is written
-      // explicitly (never inferred from an absent field) so the Builder's selector
-      // shows the creator what they got, and so no PRE-EXISTING game is ever
-      // changed underneath a live run.
-      await updateGame({
-        gameId, stages, scoringPreset: preset,
-        scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
+      const { gameId } = await createGameFromTemplate({
+        templateGameId: variant.id, title: variant.title, scoringPreset: finalPreset,
       });
       // Invalidate the games cache — otherwise returning to the dashboard within
       // the TTL serves a stale list that's missing this just-created game.
@@ -303,24 +356,14 @@ export default function DashboardPage() {
       // The picker closes FIRST, so a failure here used to leave the creator on
       // an unchanged dashboard with no game, no navigation and no error at all
       // (change: play-no-silent-failures). Re-open the picker so the choice the
-      // creator already made is not lost.
+      // creator already made is not lost. createGameFromTemplate is a single
+      // atomic server call (unlike the old create+seed two-step), so there is no
+      // orphaned game doc to clean up on failure.
       console.error('[dashboard] create from template failed:', e);
-      // If createGame SUCCEEDED but the seeding updateGame threw, the empty game
-      // doc is already on the dashboard and every retry would add another. Soft-
-      // delete (tombstone) the orphan before re-opening the picker. Best-effort:
-      // a cleanup failure must not mask the original template-failed error.
-      if (createdGameId) {
-        try {
-          await deleteGame({ gameId: createdGameId });
-          _gamesCache = null;
-        } catch (cleanupErr) {
-          console.error('[dashboard] failed to clean up orphaned game:', cleanupErr);
-        }
-      }
       await dialog.alert(d.templateFailed);
       setPicking(true);
-      setChosen(tpl);
-      setChosenPreset(preset);
+      setChosen(choice);
+      setChosenPreset(finalPreset);
     }
   }
 
@@ -727,27 +770,51 @@ export default function DashboardPage() {
                 a very short viewport. */}
             <div className="overflow-y-auto p-5 pt-4">
               <div className="grid sm:grid-cols-2 gap-2.5">
-                {TEMPLATES.map((tpl) => {
-                  const selected = chosen?.key === tpl.key;
-                  // Preview what the card yields. `build()` is pure; called once per
-                  // card render just to count its stages and tasks.
-                  const built = tpl.build();
-                  const tplTasks = built.reduce((sum, st) => sum + st.tasks.length, 0);
+                {/* "Blank" is hardcoded, always first — not a real admin-editable
+                    template (design decision, admin-manage-game-templates). */}
+                {(() => {
+                  const selected = chosen?.kind === 'blank';
                   return (
-                  <button key={tpl.key} disabled={busy}
-                    onClick={() => { setChosen(tpl); setChosenPreset(tpl.scoringPreset); }}
-                    aria-pressed={selected}
-                    className={`flex items-start gap-3 text-start rounded-xl border bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group ${
-                      selected ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}>
-                    <div className="text-2xl leading-none shrink-0 mt-0.5">{tpl.emoji}</div>
-                    <div className="min-w-0">
-                      <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{templateLabel(tpl.key, t)}</div>
-                      <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{templateDescription(tpl.key, t)}</div>
-                      <div className="text-[10px] text-[--ink-3] mt-1 font-medium tabular-nums">{d.templateMeta(built.length, tplTasks)}</div>
-                    </div>
-                  </button>
+                    <button disabled={busy}
+                      onClick={() => { setChosen({ kind: 'blank' }); setChosenPreset('smart_weighted'); }}
+                      aria-pressed={selected}
+                      className={`flex items-start gap-3 text-start rounded-xl border bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group ${
+                        selected ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}>
+                      <div className="text-2xl leading-none shrink-0 mt-0.5">📄</div>
+                      <div className="min-w-0">
+                        <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{templateLabel('blank', t)}</div>
+                        <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{templateDescription('blank', t)}</div>
+                      </div>
+                    </button>
                   );
-                })}
+                })()}
+
+                {templateGroups === null ? (
+                  <div className="col-span-2 flex items-center gap-2 text-sm text-[--ink-3] p-3">
+                    <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
+                    {d.templatesLoading}
+                  </div>
+                ) : templatesFailed ? (
+                  <p className="col-span-2 text-sm text-rp-alert p-3" role="alert">{d.templatesLoadFailed}</p>
+                ) : (
+                  orderTemplatesForPicker(templateGroups, lang).map((resolved) => {
+                    const selected = chosen?.kind === 'template' && chosen.resolved.groupKey === resolved.groupKey;
+                    return (
+                      <button key={resolved.groupKey} disabled={busy}
+                        onClick={() => { setChosen({ kind: 'template', resolved }); setChosenPreset(resolved.variant.scoringPreset); }}
+                        aria-pressed={selected}
+                        className={`flex items-start gap-3 text-start rounded-xl border bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group ${
+                          selected ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}>
+                        <div className="text-2xl leading-none shrink-0 mt-0.5">{resolved.templateEmoji || '🧩'}</div>
+                        <div className="min-w-0">
+                          <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors" dir="auto">{resolved.variant.title}</div>
+                          <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2" dir="auto">{resolved.variant.description || d.templateFallbackDesc}</div>
+                          <div className="text-[10px] text-[--ink-3] mt-1 font-medium tabular-nums">{d.templateMeta(resolved.variant.stageCount, resolved.variant.taskCount)}</div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
 
               {/* Nothing that shapes the game is assigned invisibly: the play mode
@@ -758,7 +825,9 @@ export default function DashboardPage() {
                   <p className="text-[11px] text-[--ink-3] mb-3">{d.settingsIntro}</p>
                   <div className="mb-3">
                     <Label>{d.modeLabel}</Label>
-                    <p className="text-sm text-[--ink-2]">{describeGameSettings(chosen.mode, chosenPreset, t).mode}</p>
+                    <p className="text-sm text-[--ink-2]">
+                      {describeGameSettings(chosen.kind === 'blank' ? BLANK_MODE : chosen.resolved.variant.mode, chosenPreset, t).mode}
+                    </p>
                   </div>
                   {/* The template sets a sensible scoring preset; Create uses it as
                       is. Scoring only surfaces on demand, with its one-line

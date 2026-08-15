@@ -29,6 +29,8 @@ export {
   backfillPublicTaskCoordinatesNow,
 } from './maintenance/index';
 export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index';
+// Admin-managed game templates (change: admin-manage-game-templates).
+export { setGameTemplateFlag, listGameTemplates, createGameFromTemplate } from './admin/templates';
 export {
   getWallet, getWalletStatus, purchaseCredits, subscribePro, claimReferral, stripeWebhook,
 } from './payments/index';

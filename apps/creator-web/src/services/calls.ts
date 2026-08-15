@@ -282,3 +282,42 @@ export const setUserNote = callable<
     emailed: boolean; emailedAt: string | null; cleared: boolean;
   }
 >('setUserNote');
+
+// ── Admin-managed game templates (change: admin-manage-game-templates) ──
+// A template is an ordinary Game flagged isTemplate: true, owned by whichever
+// admin authored it. setGameTemplateFlag is admin-gated server-side (assertAdmin);
+// listGameTemplates/createGameFromTemplate are any-authenticated-user — see
+// AdminTemplatesPage (management) and DashboardPage (the creator-facing picker).
+export const setGameTemplateFlag = callable<
+  {
+    gameId: string; isTemplate: boolean; templateEmoji?: string;
+    templateOrder?: number; templateGroupKey?: string; templateLang?: string;
+  },
+  { ok: boolean; gameId: string; isTemplate: boolean }
+>('setGameTemplateFlag');
+
+export interface TemplateVariant {
+  id: string;
+  ownerUid: string;
+  title: string;
+  description?: string;
+  mode: Game['mode'];
+  scoringPreset: Game['scoringPreset'];
+  stageCount: number;
+  taskCount: number;
+}
+export interface TemplateGroupEntry {
+  groupKey: string;
+  templateEmoji?: string;
+  templateOrder?: number;
+  variants: Record<string, TemplateVariant>;
+}
+export const listGameTemplates = callable<
+  Record<string, never>,
+  { templates: TemplateGroupEntry[] }
+>('listGameTemplates');
+
+export const createGameFromTemplate = callable<
+  { templateGameId: string; title: string; scoringPreset?: Game['scoringPreset'] },
+  { gameId: string }
+>('createGameFromTemplate');

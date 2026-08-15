@@ -6824,6 +6824,11 @@ async function main() {
       ['participant', pl, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['stranger', str, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['other-run staff', staffB, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // admin-manage-game-templates: setGameTemplateFlag is platform-admin-only,
+      // same trust level as listPlatformUsers/setUserNote above — a mere game
+      // owner (even flagging their OWN game) and a participant must both be denied.
+      ['owner', creator, 'setGameTemplateFlag', { gameId: ag, isTemplate: true }],
+      ['participant', pl, 'setGameTemplateFlag', { gameId: ag, isTemplate: true }],
     ];
     for (const [who, party, fn, payload] of rows) {
       await expectError(`authz: ${who} is denied ${fn}`, party.call(fn, payload), { codeIn: DENY });
@@ -7018,6 +7023,111 @@ async function main() {
     check('outreach: clearing both the note and the tick leaves no residual record',
       (rowGone?.note ?? '') === '' && rowGone?.emailed === false && rowGone?.emailedAt === null,
       JSON.stringify({ n: rowGone?.note, e: rowGone?.emailed, at: rowGone?.emailedAt }));
+  });
+
+  // ═══ Admin-managed game templates (change: admin-manage-game-templates) ════
+  // A template is an ordinary Game flagged isTemplate: true, owned by whichever
+  // admin authored it — the admin edits it with the same updateGame every
+  // creator uses. These callables project/instantiate it for everyone else.
+  await scenario('game templates', async () => {
+    const unlockTask = (id, over = {}) => ({
+      id, title: id, type: 'self_report', triggerMode: 'locationless', locationless: true,
+      coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10,
+      maxConcurrentTeams: 9, ...over,
+    });
+
+    // 1. Admin authors a template (Hebrew variant) with an unlock graph + an
+    //    exclusive group, exactly like any other game, then flags it.
+    const { gameId: tHe } = await platformAdmin.call('createGame', { title: 'Template HE', mode: 'team' });
+    await platformAdmin.call('updateGame', {
+      gameId: tHe, scoringPreset: 'time_only',
+      stages: [{
+        id: 'tpl-s1', order: 0, title: 'Stage 1', isFinal: true,
+        tasks: [
+          unlockTask('tpl-t1'),
+          unlockTask('tpl-t2', { unlockAfterTaskIds: ['tpl-t1'] }),
+        ],
+        exclusiveGroups: [{ id: 'tpl-g1', taskIds: ['tpl-t1', 'tpl-t2'] }],
+      }],
+    });
+    const flagged = await platformAdmin.call('setGameTemplateFlag', {
+      gameId: tHe, isTemplate: true, templateEmoji: '🧪', templateOrder: 1,
+      templateGroupKey: tHe, templateLang: 'he',
+    });
+    check('setGameTemplateFlag: admin flags own game', flagged?.isTemplate === true, JSON.stringify(flagged));
+
+    // 2. A mismatched sibling (different emoji/order) is rejected.
+    const { gameId: tEn } = await platformAdmin.call('createGame', { title: 'Template EN', mode: 'team' });
+    await expectError('setGameTemplateFlag: mismatched sibling rejected',
+      platformAdmin.call('setGameTemplateFlag', {
+        gameId: tEn, isTemplate: true, templateEmoji: '🚫', templateOrder: 99,
+        templateGroupKey: tHe, templateLang: 'en',
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // 3. A matching sibling is accepted and links as the English variant.
+    const flaggedEn = await platformAdmin.call('setGameTemplateFlag', {
+      gameId: tEn, isTemplate: true, templateEmoji: '🧪', templateOrder: 1,
+      templateGroupKey: tHe, templateLang: 'en',
+    });
+    check('setGameTemplateFlag: matching sibling accepted', flaggedEn?.isTemplate === true, JSON.stringify(flaggedEn));
+
+    // 4. listGameTemplates groups both variants under one entry and leaks no content.
+    const list1 = await creator.call('listGameTemplates', {});
+    const group = (list1?.templates ?? []).find((g) => g.groupKey === tHe);
+    check('listGameTemplates: grouped entry has both he/en variants',
+      !!group?.variants?.he && !!group?.variants?.en, JSON.stringify(group));
+    check('listGameTemplates: no stages/tasks leaked into the projection',
+      !('stages' in (group?.variants?.he ?? {})) && !('tasks' in (group?.variants?.he ?? {})),
+      JSON.stringify(group?.variants?.he));
+    check('listGameTemplates: stage/task counts are correct',
+      group?.variants?.he?.stageCount === 1 && group?.variants?.he?.taskCount === 2,
+      JSON.stringify(group?.variants?.he));
+
+    // 5. A solo (ungrouped) template appears with exactly one variant.
+    const { gameId: tSolo } = await platformAdmin.call('createGame', { title: 'Solo Template', mode: 'team' });
+    await platformAdmin.call('setGameTemplateFlag', { gameId: tSolo, isTemplate: true, templateEmoji: '🎯', templateOrder: 5 });
+    const list2 = await creator.call('listGameTemplates', {});
+    const soloGroup = (list2?.templates ?? []).find((g) => g.groupKey === tSolo);
+    check('listGameTemplates: solo template has exactly one (he-default) variant',
+      Object.keys(soloGroup?.variants ?? {}).length === 1, JSON.stringify(soloGroup));
+
+    // 6. createGameFromTemplate clones with NEW ids, preserving the unlock graph
+    //    and exclusive group; the source template is left untouched.
+    const created = await creator.call('createGameFromTemplate', { templateGameId: tHe, title: 'From Template' });
+    check('createGameFromTemplate: returns a gameId', !!created?.gameId, JSON.stringify(created));
+    const clonedGame = (await creator.call('getGame', { gameId: created.gameId }))?.game;
+    const clonedStage = clonedGame?.stages?.[0];
+    const [c1, c2] = clonedStage?.tasks ?? [];
+    check('createGameFromTemplate: cloned task ids differ from the source template',
+      !!c1 && !!c2 && c1.id !== 'tpl-t1' && c2.id !== 'tpl-t2', JSON.stringify({ c1: c1?.id, c2: c2?.id }));
+    check('createGameFromTemplate: unlockAfterTaskIds remapped to the clone\'s own id',
+      c2?.unlockAfterTaskIds?.[0] === c1?.id, JSON.stringify(c2?.unlockAfterTaskIds));
+    check('createGameFromTemplate: exclusiveGroups taskIds remapped to the clone\'s own ids',
+      JSON.stringify([...(clonedStage?.exclusiveGroups?.[0]?.taskIds ?? [])].sort())
+        === JSON.stringify([c1?.id, c2?.id].sort()),
+      JSON.stringify(clonedStage?.exclusiveGroups));
+
+    const sourceAfter = (await platformAdmin.call('getGame', { gameId: tHe }))?.game;
+    const sourceTaskIds = (sourceAfter?.stages?.[0]?.tasks ?? []).map((t) => t.id);
+    check('createGameFromTemplate: source template is unchanged',
+      JSON.stringify(sourceTaskIds) === JSON.stringify(['tpl-t1', 'tpl-t2']), JSON.stringify(sourceTaskIds));
+
+    // 7. Unknown / non-template ids are rejected.
+    await expectError('createGameFromTemplate: unknown templateGameId rejected',
+      creator.call('createGameFromTemplate', { templateGameId: 'no-such-template-xyz', title: 'nope' }),
+      { codeIn: ['functions/invalid-argument'] });
+    const { gameId: plainGame } = await creator.call('createGame', { title: 'Not A Template', mode: 'team' });
+    await expectError('createGameFromTemplate: non-template gameId rejected',
+      creator.call('createGameFromTemplate', { templateGameId: plainGame, title: 'nope' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // 8. A soft-deleted template drops out of the picker.
+    await platformAdmin.call('deleteGame', { gameId: tSolo });
+    const list3 = await creator.call('listGameTemplates', {});
+    check('listGameTemplates: soft-deleted template excluded',
+      !(list3?.templates ?? []).some((g) => g.groupKey === tSolo),
+      JSON.stringify((list3?.templates ?? []).map((g) => g.groupKey)));
   });
 
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════

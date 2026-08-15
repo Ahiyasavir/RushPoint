@@ -36,6 +36,7 @@ function check(label: string, cond: boolean, detail = ''): void {
 const MODULES = [
   'games/index.ts', 'gallery/index.ts', 'runs/index.ts',
   'payments/index.ts', 'users/index.ts', 'maintenance/index.ts', 'admin/index.ts',
+  'admin/templates.ts',
 ];
 
 // Internal helpers that must NEVER be re-exported as a Cloud Function trigger.

@@ -586,6 +586,22 @@ export interface Game {
   deletedBy?: string;
   createdAt: string;
   updatedAt: string;
+  // Admin-managed game templates (change: admin-manage-game-templates). A template
+  // is an ordinary Game, owned by whichever admin authored it, flagged so it shows
+  // up in the creator-facing "new game" picker instead of that admin's own
+  // dashboard-only games list. Admin-only-writable: setGameTemplateFlag is the only
+  // path that sets these fields (never part of Builder's autosave field allowlist).
+  isTemplate?: boolean;
+  templateEmoji?: string;
+  // Sort position in the picker; the MINIMUM across a templateGroupKey's siblings
+  // is authoritative (see templateGroupKey below).
+  templateOrder?: number;
+  // Links this template to its translated siblings (produced via the existing
+  // translateGame callable, then each flagged with the SAME templateGroupKey). A
+  // template with no siblings is its own group of one. Undefined ⇒ not grouped.
+  templateGroupKey?: string;
+  // Which language THIS document's stage/task content is authored in, e.g. 'he' | 'en'.
+  templateLang?: string;
 }
 
 
