@@ -54,6 +54,8 @@ import { parseTagsInput } from '../lib/tags';
 import { buildSavePayload } from '../lib/savePayload';
 import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib/gamePresentation';
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
+// Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
+import { builderBreadcrumbState } from '../lib/builderBreadcrumb';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
@@ -1607,6 +1609,22 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   const editingStage = editing && game.stages.find((s) => s.id === editing.stageId);
   const editingTask = editingStage?.tasks.find((t) => t.id === editing?.taskId);
 
+  // Builder header breadcrumb (change: builder-clarity-mission-hierarchy): the
+  // wizard's open task only counts toward the breadcrumb while it belongs to the
+  // currently active stage, so a stale (stageId, taskId) pair from a just-completed
+  // cross-stage move never shows a mission from the wrong stage.
+  const breadcrumbState = builderBreadcrumbState(
+    game.stages,
+    activeStage?.id,
+    editing?.stageId === activeStage?.id ? editing?.taskId : undefined,
+    { untitledStage: b.untitledStage, untitledMission: b.untitledTask },
+  );
+  const breadcrumbText = breadcrumbState && (
+    breadcrumbState.mission
+      ? `${b.breadcrumbStage(breadcrumbState.stageNumber, breadcrumbState.stageName)} → ${b.breadcrumbMission(breadcrumbState.mission.number, breadcrumbState.mission.name)}`
+      : b.breadcrumbStage(breadcrumbState.stageNumber, breadcrumbState.stageName)
+  );
+
   const m = activeStage ? activeStage.tasks.length : 0;
   const isLastStage = !!activeStage && game.stages[game.stages.length - 1]?.id === activeStage.id;
   // Scheduled-release: the first stage opens at run start, so timed release only
@@ -1656,6 +1674,22 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
+    <div className="h-full min-h-0 flex flex-col gap-1.5">
+      {/* ── Stage/mission breadcrumb (change: builder-clarity-mission-hierarchy) ──
+          The hierarchy was never labelled on screen — a creator inferred which
+          stage was open and which mission they were editing purely from
+          rail-vs-canvas layout position. Live-derived off state the Builder
+          already holds; no new Firestore read. */}
+      {breadcrumbText && (
+        <div
+          className="shrink-0 px-1 text-xs font-medium text-[--ink-3] truncate"
+          data-tour="builder-breadcrumb"
+          title={breadcrumbText}
+        >
+          {breadcrumbText}
+        </div>
+      )}
+      <div className="flex-1 min-h-0">
     <DndContext
       sensors={sensors}
       // Type-aware (R1): the rail's two co-located droppables would otherwise
@@ -1930,6 +1964,8 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
       </DragOverlay>
     </div>
     </DndContext>
+      </div>
+    </div>
   );
 }
 

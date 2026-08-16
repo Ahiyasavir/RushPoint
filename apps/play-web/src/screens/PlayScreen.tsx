@@ -528,7 +528,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           if (content?.arrivalPending) return null;
           const coords = content?.smart?.stationCoords ?? content?.coordinates;
           return coords && (coords.lat !== 0 || coords.lng !== 0)
-            ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Task', active: rec.status === 'assigned' }
+            ? { id: rec.taskId, lat: coords.lat, lng: coords.lng, title: content?.title ?? 'Mission', active: rec.status === 'assigned' }
             : null;
         })
         .filter((t): t is NavTarget => t !== null)
