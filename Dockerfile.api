@@ -47,6 +47,10 @@ COPY --from=build /repo/functions/package.runtime.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /repo/functions/lib ./lib
 COPY --from=build /repo/functions/server.js ./server.js
+# server.js requires this directly (streaming-upload-write) — it is plain Node,
+# never bundled by esbuild, so it must be copied into the runtime image alongside
+# server.js or the container crash-loops on boot with MODULE_NOT_FOUND.
+COPY --from=build /repo/functions/uploadRoute.js ./uploadRoute.js
 # Upload storage. This mkdir only matters when NO volume is mounted (a bind mount
 # at the same path replaces the image's directory entirely, ownership included) —
 # it keeps the server writable in a bare `docker run` rather than 500ing on the
