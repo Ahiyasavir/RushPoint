@@ -60,13 +60,17 @@
 
 ## 6. Final gate sweep
 
-- [ ] 6.1 Run `npm run typecheck` — all workspaces pass.
-- [ ] 6.2 Run `npm run lint` — 0 errors.
-- [ ] 6.3 Run `npm test` — full aggregator + vitest pass (including the new
+- [x] 6.1 Run `npm run typecheck` — all workspaces pass.
+- [x] 6.2 Run `npm run lint` — 0 errors.
+- [x] 6.3 Run `npm test` — full aggregator + vitest pass (including the new
       `test-no-task-copy.ts` and any new breadcrumb test).
-- [ ] 6.4 Run `npm run creator:build` and `npm run play:build` — both pass.
-- [ ] 6.5 Run `npm run i18n:check:strict` — clean, zero new PART B warnings, PART A green.
-- [ ] 6.6 Run `npm run e2e` — unaffected callables still green (this change makes no callable
-      changes, so this is a regression check only).
-- [ ] 6.7 Run the full `npm run verify` gauntlet and confirm all green before considering the
-      change done.
+- [x] 6.4 Run `npm run creator:build` and `npm run play:build` — both pass.
+- [x] 6.5 Run `npm run i18n:check:strict` — clean, zero new PART B warnings, PART A green.
+- [x] 6.6 Run `npm run e2e` — unaffected callables still green (this change makes no callable
+      changes, so this is a regression check only). Ran via
+      `RUSHPOINT_EMULATOR_PORT_OFFSET=1000 node scripts/emulator-exec.mjs "node scripts/e2e-verify.mjs"`
+      to run beside another session's live default-port dev stack; a stale offset-block Java
+      process from a prior run was squatting the offset ports and had to be killed first.
+      Real exit 0, "✅ ALL PASS".
+- [x] 6.7 Run the full `npm run verify` gauntlet and confirm all green before considering the
+      change done. Real exit 0, all 4 tasks successful.
