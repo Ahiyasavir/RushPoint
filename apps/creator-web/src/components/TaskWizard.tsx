@@ -353,45 +353,46 @@ function LocationStepBody({ task, set, b }: {
     // real map beats staring at a clipped one.
     <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
       <div className="shrink-0">
-        {/* The question row carries the settings gear on its end (change:
-            builder-step1-full-height-map, revised). Collapsed it costs ZERO extra
-            height — it rides a row that already exists — and, unlike the floating
-            chip it replaces, it never covers the map. Overlaying controls on a small
-            map traded a squeezed map for a hidden one, which is worse: the map is
-            the thing the creator came to this step to use. */}
-        <div className="flex items-center justify-between gap-2">
-          <Label>{b.fireQuestion}</Label>
-          {/* One short word plus the gear. A bare ⚙ read as decoration and went
-              unnoticed; the full "הגדרות מתקדמות למיקום" was so long it wrapped and
-              clipped against the question beside it. `locAdvancedShort` is the label
-              for this spot — the long form still titles the panel it opens, so
-              nothing is lost, and `title` carries it on hover. */}
+        <Label>{b.fireQuestion}</Label>
+        {/* The two location choices lead (bigger, primary — this is the actual
+            decision), with "Advanced options" as a square toggle trailing them
+            (change: builder-location-step-polish). It used to be a small gear pill
+            squeezed onto the question row, easy to miss and cramped against the
+            question text; a full-height square with its own icon and label is both
+            more visible and reads as what it is — a secondary, optional control
+            beside the primary choice, not a peer of it. `items-stretch` (the flex
+            default) makes it match the choice row's height with no fixed number to
+            keep in sync. DOM order, not left/right classes, decides which SIDE it
+            lands on: RTL puts the first child on the right, so this naturally
+            mirrors correctly in LTR too. */}
+        <div className="flex items-stretch gap-2 mt-1.5">
+          <div className="flex-1 grid grid-cols-2 gap-2">
+            {CHOICES.map((c) => {
+              const active = choice === c.choice;
+              return (
+                <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
+                  className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
+                    active
+                      ? 'border-rp-fire bg-rp-fire/10 text-rp-fire shadow-soft'
+                      : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
+                  <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
+                  <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
+                  <span className="text-[11px] leading-tight text-center opacity-70">{c.sub}</span>
+                </button>
+              );
+            })}
+          </div>
           {choice === 'specific' && (
             <button type="button" onClick={() => setAdvOpen((o) => !o)} aria-expanded={advOpen}
               title={b.locAdvanced}
-              className={`shrink-0 flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors ${
+              className={`shrink-0 w-20 sm:w-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 px-1.5 transition-colors ${
                 advOpen
-                  ? 'border-rp-fire bg-rp-fire/10 text-rp-fire'
-                  : 'border-[--rp-border] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}>
-              <span aria-hidden>⚙</span>
-              {b.locAdvancedShort}
+                  ? 'border-rp-fire bg-rp-fire/10 text-rp-fire shadow-soft'
+                  : 'border-[--rp-border] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
+              <span aria-hidden className="text-xl leading-none">⚙</span>
+              <span className="text-[11px] font-medium leading-tight text-center">{b.locAdvancedShort}</span>
             </button>
           )}
-        </div>
-        {/* Two options, side by side. The active choice's explanation shows below. */}
-        <div className="grid grid-cols-2 gap-2">
-          {CHOICES.map((c) => {
-            const active = choice === c.choice;
-            return (
-              <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
-                className={`flex flex-col items-center justify-center gap-1 rounded-lg border py-2.5 px-2 transition-colors ${
-                  active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
-                <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-5 h-5" />
-                <span className="text-[12px] font-medium leading-tight text-center">{c.label}</span>
-                <span className="text-[10px] leading-tight text-center opacity-70">{c.sub}</span>
-              </button>
-            );
-          })}
         </div>
         <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">
           {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
