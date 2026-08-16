@@ -82,6 +82,9 @@ async function main() {
       { teamId: TEAM, deviceUids: [TEAM, DEVICE], messages: [], updatedAt: '2020-01-01T00:00:00Z' });
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/chat/${TEAM2}`),
       { teamId: TEAM2, deviceUids: [TEAM2], messages: [], updatedAt: '2020-01-01T00:00:00Z' });
+    // staff-console-field-ops: the ONE staff↔admin thread doc for the run.
+    await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/staffChannel/thread`),
+      { runId: RUN, messages: [], updatedAt: '2020-01-01T00:00:00Z' });
     // Live-ops content (fix-i18n-leaks-and-feed-authz): feed carries participant
     // PII (photoUrl + teamName); reads are run-scoped, not any-authed.
     await setDoc(doc(db, `users/${OWNER}/games/${GAME}/runs/${RUN}/feedItems/f1`),
@@ -251,6 +254,21 @@ async function main() {
   await check('client CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(team, chatPath), { messages: [] })));
   await check('owner CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(owner, chatPath), { messages: [] })));
   await check('staff CANNOT write a chat doc (CF-only)', assertFails(setDoc(doc(staff, chatPath), { messages: [] })));
+
+  console.log('\n── Staff ↔ admin channel: narrower than team chat — participants excluded entirely ──');
+  const staffChannelPath = `${runPath}/staffChannel/thread`;
+  await check('owner CAN read the staff channel', assertSucceeds(getDoc(doc(owner, staffChannelPath))));
+  await check('scoped staff CAN read the staff channel', assertSucceeds(getDoc(doc(staff, staffChannelPath))));
+  await check('staff for a DIFFERENT run CANNOT read the staff channel', assertFails(getDoc(doc(wrongStaff, staffChannelPath))));
+  await check('staff of a DIFFERENT OWNER CANNOT read the staff channel', assertFails(getDoc(doc(foreignStaff, staffChannelPath))));
+  // The one rule that actually differs from team chat: a participant (even the
+  // team that owns the run's chat threads) must not read the marshals' channel —
+  // that is exactly the operational content this thread exists to keep from teams.
+  await check('a run participant CANNOT read the staff channel', assertFails(getDoc(doc(team, staffChannelPath))));
+  await check('an attached device CANNOT read the staff channel', assertFails(getDoc(doc(device, staffChannelPath))));
+  await check('stranger CANNOT read the staff channel', assertFails(getDoc(doc(other, staffChannelPath))));
+  await check('client CANNOT write the staff channel (CF-only)', assertFails(setDoc(doc(owner, staffChannelPath), { messages: [] })));
+  await check('staff CANNOT write the staff channel (CF-only)', assertFails(setDoc(doc(staff, staffChannelPath), { messages: [] })));
 
   console.log('\n── Live-ops feed & broadcasts: run-scoped reads only (feed carries participant PII) ──');
   const feedDoc = `${runPath}/feedItems/f1`;
