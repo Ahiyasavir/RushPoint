@@ -56,11 +56,21 @@ import { normalizeBrandColor, normalizeHttpsUrl, hasBrandingValue } from '../lib
 import { PREVIEWED_STORAGE_KEY, readPreviewedGames, writePreviewedGames } from '../lib/creatorOnboarding';
 // Builder header stage/mission breadcrumb (change: builder-clarity-mission-hierarchy).
 import { builderBreadcrumbState } from '../lib/builderBreadcrumb';
+// Responsive Builder header (change: builder-simplification-round-3): below the
+// Tailwind `sm` boundary the header's secondary controls collapse into ONE
+// OverflowMenu. Branching on the hook (rather than rendering both rows and hiding
+// one with CSS) keeps a single menu instance, so the two copies cannot drift.
+import { useIsMobile } from '../hooks/useMediaQuery';
 
 // MapLibre is heavy (~500KB). The located-task map lives in lazy LocationStep
 // (fetched only when a located task editor opens); the preview route map is split
 // the same way here so it stays out of the main builder bundle.
 const RoutePreviewMap = lazyWithRetry('routePreviewMap', () => import('../components/RoutePreviewMap'));
+
+// One styling for every header menu item, so the File menu and the phone-width
+// overflow menu can never drift apart (change: builder-simplification-round-3).
+const HEADER_MENU_ITEM_CLASS =
+  'w-full justify-start text-start min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-medium text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50';
 
 // Lightweight placeholder while a map chunk + engine load.
 function MapSkeleton({ className = 'h-44' }: { className?: string }) {
@@ -196,7 +206,7 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
         if (v && v !== title) onCommit(v);
         else e.currentTarget.textContent = title || fallback;
       }}
-      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[40ch] whitespace-nowrap overflow-hidden text-ellipsis"
+      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[12ch] sm:max-w-[40ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
       {title || fallback}
     </h2>
@@ -273,6 +283,8 @@ export default function BuilderPage() {
   const saveSeq = useRef(0);
   // Hidden file picker behind the Builder's "load a copy" action.
   const importInput = useRef<HTMLInputElement>(null);
+  // Phone-class viewport ⇒ the header's secondary controls live in one menu.
+  const isMobile = useIsMobile();
   useEffect(() => { gameRef.current = game; }, [game]);
 
   useEffect(() => {
@@ -555,9 +567,13 @@ export default function BuilderPage() {
       {/* ── Persistent shell header bar: logo · back · title · save · tabs · launch.
           This is the only header in the Builder (the global app nav is hidden),
           so the workspace gets the full viewport height. ── */}
-      <header className="shrink-0 flex items-center gap-3 px-4 h-14 border-b border-[--rp-border] bg-[--surface-1]">
-        <button onClick={() => { void leaveToGames(); }} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
-          <span className="text-sm leading-none">←</span> {b.backToGames}
+      {/* Below `sm` the bar wraps: the controls stay on the first line and the tab
+          strip drops to its own full-width line (`order-last basis-full`) instead
+          of being squeezed to zero. At `sm` and up every class below restores
+          today's exact single-row geometry. */}
+      <header className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:gap-x-3 sm:px-4 sm:py-0 min-h-14 sm:h-14 border-b border-[--rp-border] bg-[--surface-1]">
+        <button onClick={() => { void leaveToGames(); }} aria-label={b.backToGames} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
+          <span className="text-sm leading-none">←</span> <span className="hidden sm:inline">{b.backToGames}</span>
         </button>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
         {/* A FAILED save gets its own colour and its own word — it can never be
@@ -574,7 +590,10 @@ export default function BuilderPage() {
             : b.saved}
         </span>
 
-        {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z */}
+        {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.
+            Desktop only: at phone width these live in the header overflow menu
+            below (change: builder-simplification-round-3). */}
+        {!isMobile && (
         <div className="flex items-center gap-0.5 shrink-0">
           <button
             onClick={undo}
@@ -595,12 +614,15 @@ export default function BuilderPage() {
             ↷
           </button>
         </div>
+        )}
 
         {/* Creator-owned portability: save this game to a file you keep, or build
             a new game from one. Import always creates a NEW game. One clearly
             labelled "File" menu (change: builder-file-menu). The actions used to
             be two bare arrow glyphs whose meaning only a hover revealed. Same
-            handlers, same hidden file input. */}
+            handlers, same hidden file input. Desktop only — at phone width the
+            same two actions are items in the header overflow menu. */}
+        {!isMobile && (
         <div className="shrink-0">
           <OverflowMenu
             label={b.fileMenu}
@@ -611,7 +633,7 @@ export default function BuilderPage() {
               role="menuitem"
               onClick={() => { void exportToFile(); }}
               title={b.exportFileHint}
-              className="w-full justify-start text-start min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-medium text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              className={HEADER_MENU_ITEM_CLASS}
             >
               {b.exportFile}
             </button>
@@ -619,26 +641,30 @@ export default function BuilderPage() {
               role="menuitem"
               onClick={() => importInput.current?.click()}
               title={b.importFileHint}
-              className="w-full justify-start text-start min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-medium text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              className={HEADER_MENU_ITEM_CLASS}
             >
               {b.importFile}
             </button>
           </OverflowMenu>
-          <input
-            ref={importInput}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (f) void importFromFile(f);
-            }}
-          />
         </div>
+        )}
+
+        {/* The hidden picker backing "load a copy" stays mounted at EVERY width —
+            only its trigger moves into the overflow menu on a phone. */}
+        <input
+          ref={importInput}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (f) void importFromFile(f);
+          }}
+        />
 
         {/* Centered tab strip */}
-        <nav role="tablist" data-tour="builder-tabs" className="flex-1 flex items-center justify-center gap-1">
+        <nav role="tablist" data-tour="builder-tabs" className="flex-1 basis-full sm:basis-0 order-last sm:order-none min-w-0 flex items-center justify-center gap-1 overflow-x-auto">
           {visibleTabIds.map((id) => (
             <button
               key={id}
@@ -670,8 +696,67 @@ export default function BuilderPage() {
           }}
         />
 
-        <Button variant="ghost" loading={launching} onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
+        {/* The SECONDARY launch (a rehearsal run) collapses into the menu on a
+            phone; the PRIMARY launch always stays on the bar. */}
+        {!isMobile && (
+          <Button variant="ghost" loading={launching} onClick={() => saveAndLaunch(true)} className="shrink-0" title={b.launchTestRunHint}>{b.launchTestRun}</Button>
+        )}
         <Button onClick={() => saveAndLaunch(false)} loading={launching} data-tour="builder-launch" className="shrink-0">{b.launchRun}</Button>
+
+        {/* Phone width: ONE menu holding every secondary header control. Back,
+            title, save status, tabs, readiness and the primary launch stay on the
+            bar — save status is a safety signal and readiness gates launching, so
+            neither may hide behind a tap. */}
+        {isMobile && (
+          <div className="shrink-0">
+            <OverflowMenu
+              label={b.headerMoreMenu}
+              ariaLabel={b.headerMoreMenuAria}
+              triggerClassName="min-h-[44px] px-3 rounded-lg text-sm gap-1"
+            >
+              <button
+                role="menuitem"
+                onClick={undo}
+                disabled={!canUndo}
+                className={`${HEADER_MENU_ITEM_CLASS} disabled:opacity-30 disabled:pointer-events-none`}
+              >
+                ↶ {b.undo}
+              </button>
+              <button
+                role="menuitem"
+                onClick={redo}
+                disabled={!canRedo}
+                className={`${HEADER_MENU_ITEM_CLASS} disabled:opacity-30 disabled:pointer-events-none`}
+              >
+                ↷ {b.redo}
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => { void exportToFile(); }}
+                title={b.exportFileHint}
+                className={HEADER_MENU_ITEM_CLASS}
+              >
+                {b.exportFile}
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => importInput.current?.click()}
+                title={b.importFileHint}
+                className={HEADER_MENU_ITEM_CLASS}
+              >
+                {b.importFile}
+              </button>
+              <button
+                role="menuitem"
+                onClick={() => { void saveAndLaunch(true); }}
+                title={b.launchTestRunHint}
+                className={HEADER_MENU_ITEM_CLASS}
+              >
+                {b.launchTestRun}
+              </button>
+            </OverflowMenu>
+          </div>
+        )}
       </header>
 
       {/* ── Persistent failed-save banner ──────────────────────────────────

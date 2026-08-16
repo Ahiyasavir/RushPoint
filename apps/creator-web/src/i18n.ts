@@ -1120,6 +1120,9 @@ const HE = {
     // Labelled "File" menu grouping export + import (change: builder-file-menu).
     fileMenu: 'קובץ',
     fileMenuAria: 'פעולות קובץ המשחק',
+    // תפריט הפעולות הנוספות בכותרת במסך צר (change: builder-simplification-round-3).
+    headerMoreMenu: 'עוד',
+    headerMoreMenuAria: 'פעולות נוספות בעורך',
     exportFile: 'שמירת עותק',
     exportFileHint: 'הורידו קובץ של המשחק הזה למחשב שלכם. הקובץ מכיל את כל התוכן שכתבתם, כולל התשובות והרמזים, אך לא את תוצאות הריצות.',
     exportFailed: 'ההורדה נכשלה. נסו שוב.',
@@ -1233,12 +1236,12 @@ const HE = {
     stepInteraction: 'אופן ביצוע',
     // task-editor-progressive-disclosure: שלב 3 + שורת הצ׳יפים של השדות האופציונליים.
     stepExecution: 'ביצוע ותוספות',
-    groupTimerPoints: 'זמן וניקוד',
-    groupRules: 'תנאים',
+    groupTimerPoints: 'ניקוד ותזמון',
+    groupRules: 'פתיחה ומגבלות',
     chipAddHint: 'הוספת רמז',
-    chipSetTimerPoints: 'הגדרת זמן וניקוד',
+    chipSetTimerPoints: 'ניקוד ותזמון',
     chipAttachMedia: 'הוספת מדיה',
-    chipRules: 'תנאים',
+    chipRules: 'פתיחה ומגבלות',
     // ── שם קודם, נקודה אחר כך (change: builder-first-task-flow) ──
     titleRequiredHint: 'תנו למשימה שם כדי להמשיך',
     notPlacedTitle: 'עדיין בלי נקודה על המפה',
@@ -2915,6 +2918,9 @@ const EN: typeof HE = {
     // Labelled "File" menu grouping export + import (change: builder-file-menu).
     fileMenu: 'File',
     fileMenuAria: 'Game file actions',
+    // Phone-width header overflow menu (change: builder-simplification-round-3).
+    headerMoreMenu: 'More',
+    headerMoreMenuAria: 'More builder actions',
     exportFile: 'Save a copy',
     exportFileHint: 'Download a file of this game to your own computer. The file holds everything you authored, including answers and hints, but not the results of any run.',
     exportFailed: 'The download failed. Please try again.',
@@ -3028,12 +3034,12 @@ const EN: typeof HE = {
     stepInteraction: 'Interaction',
     // task-editor-progressive-disclosure: step 3 + the optional-field chip row.
     stepExecution: 'Execution & extras',
-    groupTimerPoints: 'Timer & points',
-    groupRules: 'Rules',
+    groupTimerPoints: 'Points & timing',
+    groupRules: 'Unlocking & limits',
     chipAddHint: 'Add hint',
-    chipSetTimerPoints: 'Set timer / points',
+    chipSetTimerPoints: 'Points & timing',
     chipAttachMedia: 'Attach media',
-    chipRules: 'Rules',
+    chipRules: 'Unlocking & limits',
     // ── Name first, pin later (change: builder-first-task-flow) ──
     titleRequiredHint: 'Give the mission a name to continue',
     notPlacedTitle: 'No point on the map yet',
