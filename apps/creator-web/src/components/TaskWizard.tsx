@@ -790,12 +790,11 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
       {/* A picture belongs WITH the mission description, not three clicks away
           (change: task-media-durability). This used to live at the bottom of step 3
           behind an opt-in chip, so a creator had to reach the last step and then guess
-          which chip hid the file picker. It is part of describing the mission, so it
-          sits here, always visible, exactly like the description it illustrates. */}
-      <div>
-        <Label dense>{b.mediaField}</Label>
-        <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
-      </div>
+          which chip hid the file picker. It now lives here instead — but folded to a
+          single small chip by default (same footprint the step-3 opt-in chip had), so
+          a task with no media doesn't pay for a whole upload section's worth of
+          vertical space. MediaSection owns its own fold state; see the note there. */}
+      <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
 
       <div>
         <Label dense>{b.howComplete}</Label>
@@ -920,6 +919,14 @@ function MediaSection({ task, set, b, gameId, replace }: {
   replace?: (t: Task) => void;
 }) {
   const media = task.media ?? [];
+  // Folded to a small chip by default — the SAME footprint the old step-3 opt-in chip
+  // had — so a task with no media doesn't pay for a whole upload section's worth of
+  // space in the details step. Open whenever the task already carries media: an
+  // authored attachment must never hide behind an unclicked chip (same doctrine as
+  // `defaultActiveGroups` in taskOptInGroups.ts). This is local, per-mount state —
+  // media is no longer a registered opt-in group (change: task-media-durability), so
+  // there is no shared `groups.active` to read; the section owns its own fold.
+  const [open, setOpen] = useState(media.length > 0);
   const [ytUrl, setYtUrl] = useState('');
   const [ytError, setYtError] = useState(false);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
@@ -978,8 +985,12 @@ function MediaSection({ task, set, b, gameId, replace }: {
   const setCaption = (i: number, caption: string) =>
     commit(media.map((m, idx) => (idx === i ? { ...m, caption: caption || undefined } : m)));
 
+  if (!open) {
+    return <OptInChip label={b.chipAttachMedia} count={media.length} onClick={() => setOpen(true)} b={b} />;
+  }
+
   return (
-    <div className="space-y-2">
+    <OptInGroup title={b.mediaField} hideLabel={b.hideSection} onHide={() => setOpen(false)}>
       {media.length > 0 && (
         <ul className="space-y-2">
           {media.map((m, i) => (
@@ -1030,7 +1041,7 @@ function MediaSection({ task, set, b, gameId, replace }: {
         </div>
         {ytError && <span className="text-[11px] text-neon-red">{b.mediaYouTubeError}</span>}
       </div>
-    </div>
+    </OptInGroup>
   );
 }
 
