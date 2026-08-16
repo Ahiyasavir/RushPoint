@@ -1250,7 +1250,9 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                   return (
                     <button key={k} type="button"
                       onClick={() => setSmart({ verificationType: 'photo_upload', captureKind: k })}
-                      className={`px-3 py-1.5 rounded-lg text-sm border ${active ? 'bg-[--accent] text-white border-transparent' : 'border-[--line] text-[--ink-2]'}`}>
+                      className={`px-3 py-1.5 rounded-lg text-sm border ${active
+                        ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                        : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                       {label}
                     </button>
                   );
