@@ -3,7 +3,7 @@
 .git
 **/dist
 **/dist-playtest
-**/lib
+functions/lib
 .firebase
 **/.turbo
 **/*.log
