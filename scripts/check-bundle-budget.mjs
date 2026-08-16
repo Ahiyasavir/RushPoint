@@ -74,7 +74,14 @@ function countMarkers(assets, policy) {
   const entry = assets.find((a) => policy.entryJs.test(a.file));
   const counts = {};
   if (!entry) return counts; // leave them UNMEASURED → the pure logic fails them
-  const text = fs.readFileSync(entry.abs, 'utf8').toLowerCase();
+  // Vite injects a `__vite__mapDeps` array into the entry chunk listing every
+  // dynamic-import chunk's filename (for modulepreload hints). Once two lazy
+  // consumers share a heavy chunk (e.g. NavMap + StaffTeamMap both importing
+  // maplibre-gl), that chunk's hashed filename — "maplibre-gl-<hash>.js" —
+  // appears in this manifest as a plain string, tripping the marker check even
+  // though the actual dependency code stays in its own separate chunk. Strip
+  // the manifest's filename array before scanning so only real code matches.
+  const text = fs.readFileSync(entry.abs, 'utf8').toLowerCase().replace(/m\.f=\[[^\]]*\]/g, 'm.f=[]');
   for (const m of policy.forbiddenMarkers) {
     let n = 0;
     let i = text.indexOf(m.toLowerCase());
