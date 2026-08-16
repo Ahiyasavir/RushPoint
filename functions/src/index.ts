@@ -1470,9 +1470,20 @@ export const adjustTeamScore = loggedCallable('adjustTeamScore', async (data, co
   const { prev, newPenalty } = await db.runTransaction(async (tx) => {
     const teamSnap = await tx.get(teamRef);
     if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
-    const p = (teamSnap.data() as { bonusPenalty?: number }).bonusPenalty ?? 0;
+    const teamData = teamSnap.data() as { bonusPenalty?: number; score?: number };
+    const p = teamData.bonusPenalty ?? 0;
     const np = nextBonusPenalty(p, delta);
-    tx.update(teamRef, { bonusPenalty: np, updatedAt: new Date().toISOString() });
+    tx.update(teamRef, {
+      bonusPenalty: np,
+      // DISPLAY channel: team.score is what the participant's own PlayScreen
+      // header + StaffConsole show DIRECTLY (getMyTeamState returns the raw
+      // team doc, not a ranking). buildRankings ignores team.score and derives
+      // the ranked score from bonusPenalty instead, so bumping both here can't
+      // double-count on the leaderboard/final board — it only keeps the
+      // player's own live score badge from silently freezing until finalizeRun.
+      score: (teamData.score ?? 0) + delta,
+      updatedAt: new Date().toISOString(),
+    });
     return { prev: p, newPenalty: np };
   });
 

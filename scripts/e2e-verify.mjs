@@ -879,6 +879,13 @@ async function main() {
   const rowBeforeAdj = (await creator.call('listRunTeams', { gameId, runId }))
     ?.teams?.find((t) => t.id === playerCred.user.uid);
   const lbScoreBeforeAdj = lbShown?.rankings?.find((r) => r.teamId === playerCred.user.uid)?.score ?? 0;
+  // team.score is the DISPLAY channel the participant's own PlayScreen header
+  // reads DIRECTLY from getMyTeamState (not from the ranked leaderboard) — a
+  // real bug shipped where adjustTeamScore updated only bonusPenalty, so the
+  // ranking board moved instantly but a player's own score badge stayed frozen
+  // until finalizeRun. Capture it before the adjustment so a regression here
+  // (adjustTeamScore stops writing team.score) fails loud, not silently.
+  const ownScoreBeforeAdj = (await player.call('getMyTeamState', { code: accessCode }))?.team?.score ?? 0;
   // Deltas stay small: applyPenalties clamps the ranked score at 0, so the
   // team's live score (one ~43-pt task at this point) must stay positive for
   // the relative assertions to hold.
@@ -893,6 +900,13 @@ async function main() {
     JSON.stringify({ before: lbScoreBeforeAdj, after: lbAdjEntry?.score }));
   check('adjustment auto-refresh preserves the published flag',
     lbAfterAdj?.published === true, String(lbAfterAdj?.published));
+  // The actual bug: the participant's OWN mid-run score (getMyTeamState →
+  // team.score, what PlayScreen's header renders) must move by the same delta
+  // in the SAME poll — not just the organizer-facing ranked leaderboard.
+  const ownScoreAfterAdj = (await player.call('getMyTeamState', { code: accessCode }))?.team?.score ?? 0;
+  check('adjustTeamScore updates the participant\'s own live score badge (−20), not just the leaderboard',
+    ownScoreAfterAdj === ownScoreBeforeAdj - 20,
+    JSON.stringify({ before: ownScoreBeforeAdj, after: ownScoreAfterAdj }));
   const teamsAfterAdj = (await creator.call('listRunTeams', { gameId, runId }))?.teams ?? [];
   const rowAfterAdj = teamsAfterAdj.find((t) => t.id === playerCred.user.uid);
   check('listRunTeams exposes bonusPenalty (+20 after a −20 adjustment)',
