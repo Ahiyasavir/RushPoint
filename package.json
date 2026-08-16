@@ -90,6 +90,7 @@
         "qa:simulate": "node scripts/qa-game.mjs --simulate",
         "e2e": "node scripts/e2e-verify.mjs",
         "backfill:public-tasks": "node scripts/backfill-public-tasks.mjs",
+        "diagnose:task-media": "node scripts/diagnose-task-media.mjs",
         "backfill:seed-templates": "tsx scripts/backfill-seed-templates.mjs",
         "i18n:check": "npx tsx scripts/check-i18n.ts",
         "i18n:check:strict": "npx tsx scripts/check-i18n.ts --strict",

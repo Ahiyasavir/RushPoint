@@ -232,6 +232,9 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   `test-task-duration-defaults` · `test-build-artifact-guard` (asset base vs. serve path + the
   playtest build/serve wiring) · `test-emulator-ports` (the offset resolver + the generated config) ·
   `test-emulator-gate-isolation` (private hub locator + the free-ports sweep verdicts) ·
+  `test-task-media-durability` (stored media survives a runtime whose accept-set refuses it) ·
+  `test-task-media-repair` (the orphan-recovery planner) · `test-upload-origin-parity` (the
+  canonical upload origin is declared identically in shared and functions/server.js) ·
   `test-hidden-search-area` (the coarse sealed-task circle + the play-web selector) ·
   `test-map-recenter` (the play map's recentre verdict) · `test-skip-single-task` (`planTaskSkip`) ·
   `test-gallery-task-detail` (the gallery mission detail view-model + its secrecy sweep) ·
@@ -549,6 +552,44 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `verify`) refuses a `.env.local` outright AND asserts each deployed bundle really contains its
   declared origin. When a deploy "succeeds" but the app loads with no data, check the bundle's
   CONTENT, not its hash: `grep -o api.rush-point.com apps/creator-web/dist/assets/*.js`.
+- **A validator that FILTERS is a data-destroyer when the same call site also sees already-stored
+  data.** `normalizeTaskMedia` (`packages/shared/src/validation.ts`) dropped any `image`/`video`
+  entry whose URL failed the origin accept-set, and `normalizeStagesMedia`
+  (`functions/src/games/index.ts`) then deleted the `media` field outright. Correct for input a
+  client just invented — catastrophic for input the server accepted last week, and **the same call
+  site sees both**, because the Builder autosaves the WHOLE `stages` array ~1.5 s after every edit.
+  So a stored picture was re-judged on every keystroke-triggered save against
+  `process.env.VPS_UPLOAD_ORIGIN`, `updates.stages` was written as a whole new array, and the
+  callable returned **success**. A creator attached a photo to a mission, saw it, and later found it
+  gone — no error, no log, nothing to notice. The accept-set is a property of the SAVING RUNTIME,
+  not of the data: a URL minted in production is refused by a playtest/emulator save and vice versa,
+  and one missing env var refused *everything*. Fixed structurally: the canonical upload origins are
+  **compiled in** (`RUSHPOINT_UPLOAD_ORIGINS`, merely unioned with the env var by
+  `storageOriginOpts()`), and validation now governs only what may be newly **introduced** —
+  `normalizeStagesMedia(stages, storedStages)` grandfathers a URL already persisted on that task
+  (logging the drift) and refuses a NEW bad one **loudly** with `invalid-argument`. Refusing
+  everything unrecognised instead would brick autosave for every game already holding a drifted URL,
+  which is the cleared-optional-field trap below. `scripts/test-task-media-durability.ts` +
+  `scripts/test-upload-origin-parity.ts` pin it; `npm run diagnose:task-media` recovers the files
+  (the object always survived — only the Firestore reference was eaten). **Adding any allow-list over
+  a stored field ⇒ decide what happens to values that were already accepted, and never let the answer
+  be "silently deleted".**
+- **A game copied by spreading its document does NOT own its uploaded media.** Media objects are
+  keyed on the owning game id (`gameMedia/{ownerUid}/games/{gameId}/…`,
+  `functions/src/storagePaths.ts`), so `duplicateGame`/`translateGame` spreading the source `Game`
+  left the copy addressing the SOURCE's folder. It rendered fine right up until the original was
+  purged, at which point `purgeGameTree` → `deleteGameMedia` prefix-deleted that folder and every
+  picture in the "duplicate" broke. `copyGameMedia` (`functions/src/storageUtil.ts`) copies the bytes
+  and `rewriteStagesMedia` re-points the urls — copy first, rewrite second, write the doc last, so a
+  failed copy degrades to "still points at the original" rather than "points at nothing". Same helper
+  migrates media uploaded before the game had an id (`gameMedia/{uid}/games/draft/…`) on the first
+  stages-carrying save. **Any new "this game becomes a new game" path must go through
+  `rehostGameMedia`.**
+- **An `async` handler that commits `{...task, ...patch}` reverts every edit made while it was
+  awaiting.** `MediaSection.onPickFile` awaited a multi-second upload and then committed the `task`
+  captured by the render that STARTED it, silently undoing concurrent edits and losing the first of
+  two parallel uploads. A ref holding the latest task is the only thing current at await-resolution
+  (`apps/creator-web/src/components/TaskWizard.tsx`). Applies to every await-then-commit handler.
 - **The callable transport encodes `undefined` as `null`, so "clear this optional field" arrives as
   a malformed value.** The Builder's opt-in groups clear by patching their fields to `undefined`
   (the correct way to express "unset" in local state), but the Firebase callable serializer maps

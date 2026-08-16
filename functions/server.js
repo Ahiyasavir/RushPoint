@@ -33,6 +33,15 @@ const fsPath = require('path');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
 const VPS_UPLOAD_ORIGIN = process.env.VPS_UPLOAD_ORIGIN || '';
+// The origin the callables accept unconditionally. Minting URLs here means a missing
+// VPS_UPLOAD_ORIGIN can no longer produce a URL our own validator refuses — which is how
+// stored task media got deleted (change: task-media-durability).
+//
+// MUST equal RUSHPOINT_UPLOAD_ORIGINS[0] in packages/shared/src/validation.ts. It is
+// duplicated rather than imported because this file is plain CJS loaded before the
+// bundle, and requiring the bundle here would run it ahead of admin.initializeApp().
+// scripts/test-upload-origin-parity.ts fails if the two ever drift.
+const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 
 // Content-type allowlist — mirrors storage.rules exactly.
 const ALLOWED_CONTENT_TYPES = /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|audio\/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr))$/;
@@ -177,8 +186,18 @@ app.put('/upload',
       await fs.promises.mkdir(fsPath.dirname(fullPath), { recursive: true });
       await fs.promises.writeFile(fullPath, req.body);
 
-      // 7. Return download URL
-      const origin = VPS_UPLOAD_ORIGIN || `${req.protocol}://${req.get('host')}`;
+      // 7. Return download URL.
+      //
+      // The request-derived form is the LAST resort (change: task-media-durability).
+      // Express has no `trust proxy` here, so behind Caddy `req.protocol` reads 'http'
+      // — and an http:// URL is both mixed content in the browser AND unrecognised by
+      // every accept-set mode, which meant the next autosave silently deleted the
+      // creator's picture from Firestore. Prefer the configured origin, then the
+      // compiled-in canonical one, and read x-forwarded-proto if we ever get that far.
+      const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+      const origin = VPS_UPLOAD_ORIGIN
+        || CANONICAL_UPLOAD_ORIGIN
+        || `${fwdProto || req.protocol}://${req.get('host')}`;
       const url = `${origin}/uploads/${encodeURI(uploadPath)}`;
       reflectCors(req, res);
       res.json({ url });

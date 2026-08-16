@@ -4216,29 +4216,69 @@ async function main() {
   // rewritten to the canonical /embed/<id> form, and off-origin image/video URLs are
   // dropped. The sanitizer passes `media` through to the participant (it is not secret),
   // and the payload stays allowlisted (the `media` key was just added to ALLOWED_TASK_KEYS).
-  const STORAGE = 'https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/gameMedia%2Fx.jpg?alt=media&token=t';
+  const STORAGE = `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent('gameMedia/owner/games/gm/m-1-1755300000000.jpg')}?alt=media&token=t`;
   const { gameId: gM } = await creator.call('createGame', { title: 'Media Game', mode: 'individual' });
+  const mediaStages = (media) => ([{
+    id: 's-media', order: 0, title: 'Look here', isFinal: true,
+    tasks: [{
+      id: 'm-1', title: 'Watch then find', type: 'field', triggerMode: 'radius',
+      coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40,
+      difficulty: 2, estimatedMinutes: 4, pointValue: 60, maxConcurrentTeams: 9,
+      media,
+    }],
+  }]);
+
+  // An off-origin image is REFUSED, not silently dropped (change: task-media-durability).
+  // It used to be quietly shed and the save reported success — which is exactly how a
+  // creator's real mission photo disappeared: on drift, the same code path shed a URL
+  // the server itself had minted. A save that cannot keep what it was given must say so.
+  let mediaRefused = '';
+  try {
+    await creator.call('updateGame', {
+      gameId: gM,
+      scoringPreset: 'fixed_points_speed',
+      stages: mediaStages([
+        { id: 'ma', kind: 'image', url: STORAGE, caption: 'the spot' },
+        { id: 'mc', kind: 'image', url: 'https://evil.example.com/x.jpg' },
+      ]),
+    });
+  } catch (e) { mediaRefused = e.message; }
+  check('media: a NEW off-origin image URL is refused, not silently dropped',
+    /evil\.example\.com/.test(mediaRefused), mediaRefused || '(save succeeded)');
+
   await creator.call('updateGame', {
     gameId: gM,
     scoringPreset: 'fixed_points_speed',
-    stages: [{
-      id: 's-media', order: 0, title: 'Look here', isFinal: true,
-      tasks: [{
-        id: 'm-1', title: 'Watch then find', type: 'field', triggerMode: 'radius',
-        coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40,
-        difficulty: 2, estimatedMinutes: 4, pointValue: 60, maxConcurrentTeams: 9,
-        media: [
-          { id: 'ma', kind: 'image', url: STORAGE, caption: 'the spot' },
-          { id: 'mb', kind: 'youtube', url: 'https://youtu.be/dQw4w9WgXcQ' },
-          { id: 'mc', kind: 'image', url: 'https://evil.example.com/x.jpg' }, // dropped
-        ],
-      }],
-    }],
+    stages: mediaStages([
+      { id: 'ma', kind: 'image', url: STORAGE, caption: 'the spot' },
+      { id: 'mb', kind: 'youtube', url: 'https://youtu.be/dQw4w9WgXcQ' },
+    ]),
   });
-  // Server-side persistence: external image dropped, youtube canonicalized.
   const persisted = await creator.call('getGame', { gameId: gM });
   const savedMedia = persisted?.game?.stages?.[0]?.tasks?.[0]?.media ?? [];
-  check('media: external image URL dropped server-side', savedMedia.length === 2 && !savedMedia.some((m) => /evil\.example/.test(m.url)), JSON.stringify(savedMedia));
+  check('media: valid entries persisted', savedMedia.length === 2, JSON.stringify(savedMedia));
+
+  // THE REGRESSION GUARD for the reported bug: the Builder autosaves the whole stages
+  // array every ~1.5s, and each save re-validates every stored URL. Media must survive
+  // an arbitrary number of them. Re-saving what getGame just returned is exactly what
+  // the Builder does.
+  for (let i = 0; i < 3; i++) {
+    await creator.call('updateGame', { gameId: gM, stages: persisted.game.stages });
+  }
+  const afterSaves = await creator.call('getGame', { gameId: gM });
+  check('media: survives repeated autosaves (the reported disappearing-photo bug)',
+    (afterSaves?.game?.stages?.[0]?.tasks?.[0]?.media?.length ?? 0) === 2,
+    JSON.stringify(afterSaves?.game?.stages?.[0]?.tasks?.[0]?.media));
+
+  // Duplicating carries the media. It used to carry the URL but not the bytes, so the
+  // copy pointed into the ORIGINAL game's storage folder and broke when that was purged.
+  const { gameId: gDup } = await creator.call('duplicateGame', { gameId: gM });
+  const dup = await creator.call('getGame', { gameId: gDup });
+  const dupMedia = dup?.game?.stages?.[0]?.tasks?.[0]?.media ?? [];
+  check('media: a duplicated game keeps its attachments', dupMedia.length === 2, JSON.stringify(dupMedia));
+  check('media: the duplicate keeps its YouTube entry byte-identical',
+    dupMedia.find((m) => m.kind === 'youtube')?.url === 'https://www.youtube.com/embed/dQw4w9WgXcQ',
+    JSON.stringify(dupMedia));
   check('media: YouTube link canonicalized to /embed/<id>',
     savedMedia.find((m) => m.kind === 'youtube')?.url === 'https://www.youtube.com/embed/dQw4w9WgXcQ',
     JSON.stringify(savedMedia));

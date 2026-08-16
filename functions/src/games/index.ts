@@ -23,6 +23,9 @@ import {
   collectTranslatableFields,
   applyTranslations,
   normalizeTaskMedia,
+  normalizeTaskMediaDetailed,
+  rewriteStagesMedia,
+  buildMediaUrlMapping,
   type TaskMedia,
   isAllowedWebhookUrl,
   detectPlatform,
@@ -73,7 +76,7 @@ import {
 // transactional writer, so a counter can never move without its score.
 import { bumpPublicSignals, scoreFor } from '../gallery/popularityStore';
 import { bumpTagStats } from '../gallery/tagStats';
-import { deleteRunsPhotos, deleteGameMedia } from '../storageUtil';
+import { deleteRunsPhotos, deleteGameMedia, copyGameMedia } from '../storageUtil';
 import { deleteDocsInChunks } from '../batchUtil';
 
 const APP_ID = process.env.RUSHPOINT_APP_ID ?? 'rushpoint-pwa-7daaa';
@@ -88,13 +91,49 @@ function gamePath(uid: string, gameId: string) {
 import { requireAuth } from '../auth';
 import { storageOriginOpts } from '../storageOriginOpts';
 
-// Enforce the task-media trust boundary on every write: run each task's `media`
-// through normalizeTaskMedia so a client can never persist an off-origin image/video
-// URL or an unparseable YouTube link, and YouTube URLs are stored canonically. Returns
-// a NEW stages array (never dotted-update an array element — coerces it to a map).
-function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined {
+/**
+ * Enforce the task-media trust boundary on every write: run each task's `media` through
+ * the shared normalizer so a client can never persist an off-origin image/video URL or an
+ * unparseable YouTube link, and YouTube URLs are stored canonically. Returns a NEW stages
+ * array (never dotted-update an array element — coerces it to a map).
+ *
+ * ─── Why `storedStages` (change: task-media-durability) ─────────────────────────
+ * This ran on EVERY Builder autosave — the Builder re-sends the whole `stages` array
+ * ~1.5 s after any edit — and it used to DROP any entry the current process env did not
+ * recognise, then delete the `media` field outright when nothing survived. `updates.stages`
+ * is written as a whole new array, so the entry was gone from Firestore for good, and the
+ * callable returned success. A creator attached a photo to a mission, saw it, and later
+ * found it missing, with no error anywhere.
+ *
+ * The accept-set is a property of the SAVING RUNTIME, not of the data: a URL minted in
+ * production is refused by a playtest/emulator save and vice versa, and `VPS_UPLOAD_ORIGIN`
+ * going missing refused everything. So validation now governs only what may be newly
+ * INTRODUCED: a URL already persisted on that task is kept regardless of origin, and a URL
+ * that is new AND fails makes the whole save fail LOUDLY instead of quietly shedding it.
+ *
+ * Deliberately not "refuse anything unrecognised, stored or not": every game already
+ * holding a drifted URL would have every autosave rejected with no way for its creator to
+ * comply — the same trap as the cleared-optional-field regression.
+ */
+function normalizeStagesMedia(
+  stages: Stage[] | undefined,
+  storedStages?: Stage[],
+  logContext?: { gameId: string },
+): Stage[] | undefined {
   if (!Array.isArray(stages)) return stages;
-  return stages.map((stage) => ({
+  // Stored urls per task id. Keyed on the raw url STRING, not the object path: the whole
+  // failure mode is that path extraction fails for a drifted url.
+  const storedByTask = new Map<string, Set<string>>();
+  for (const stage of storedStages ?? []) {
+    for (const task of stage.tasks ?? []) {
+      if (!Array.isArray(task.media)) continue;
+      const urls = storedByTask.get(task.id) ?? new Set<string>();
+      for (const m of task.media) if (typeof m?.url === 'string') urls.add(m.url);
+      storedByTask.set(task.id, urls);
+    }
+  }
+  const refused: string[] = [];
+  const next = stages.map((stage) => ({
     ...stage,
     tasks: (stage.tasks ?? []).map((task) => {
       if (task.media === undefined) return task;
@@ -102,7 +141,18 @@ function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined 
       // creator-uploaded image/video gets an emulator-hosted download URL, which the
       // production-origin gate silently DROPPED on every save. FUNCTIONS_EMULATOR is
       // absent in deployed functions, so production behaviour is unchanged.
-      const media = normalizeTaskMedia(task.media, storageOriginOpts()) as TaskMedia[];
+      const result = normalizeTaskMediaDetailed(
+        task.media, storageOriginOpts(), storedByTask.get(task.id),
+      );
+      refused.push(...result.rejected);
+      // Origin drift that we absorbed rather than destroyed. Logged so it is visible in
+      // the API logs — the previous behaviour left no trace of the loss anywhere.
+      for (const url of result.retained) {
+        functions.logger.warn('task media: kept a stored URL the current accept-set refuses', {
+          gameId: logContext?.gameId, taskId: task.id, url,
+        });
+      }
+      const media = result.media as TaskMedia[];
       // Drop the field entirely when it normalizes to empty (avoid persisting []).
       if (media.length === 0) {
         const { media: _omit, ...rest } = task;
@@ -111,7 +161,78 @@ function normalizeStagesMedia(stages: Stage[] | undefined): Stage[] | undefined 
       return { ...task, media };
     }),
   }));
+  if (refused.length > 0) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      `Unsupported media URL: ${refused.join(', ')}`,
+    );
+  }
+  return next;
 }
+
+/**
+ * Copy a game's uploaded media into a new game's storage prefix and return the stages
+ * with their urls re-pointed there (change: task-media-durability).
+ *
+ * The single door for every "this game becomes a new game" path — duplicate, translate,
+ * and the first save of media uploaded before the game had an id. They all used to carry
+ * the url and not the bytes, which silently coupled the new game's pictures to the old
+ * game's lifetime.
+ *
+ * Total and best-effort: no media, nothing to copy, or a failed copy all return the
+ * stages unchanged, so a storage hiccup degrades the copy's independence rather than
+ * failing the duplication a creator asked for.
+ */
+async function rehostGameMedia(
+  stages: Stage[] | undefined,
+  srcOwnerUid: string,
+  srcGameId: string,
+  destOwnerUid: string,
+  destGameId: string,
+): Promise<Stage[] | undefined> {
+  if (!Array.isArray(stages)) return stages;
+  // Only the urls that actually live in the SOURCE game's folder. This is what makes the
+  // same helper safe for the draft-migration call, which runs on every stages-carrying
+  // save: a game with no draft media matches nothing and returns before touching Storage.
+  const segments = encodedForms(`/games/${srcGameId}/`);
+  const urls = new Set<string>();
+  for (const stage of stages) {
+    for (const task of stage.tasks ?? []) {
+      for (const m of task.media ?? []) {
+        if (m?.kind === 'youtube' || typeof m?.url !== 'string') continue;
+        if (segments.some((seg) => m.url.includes(seg))) urls.add(m.url);
+      }
+    }
+  }
+  if (urls.size === 0) return stages;
+  try {
+    // Copy only the objects these urls name — a draft folder can hold media from other
+    // games in progress, and those must not be duplicated into this one.
+    const pathMapping = await copyGameMedia(
+      srcOwnerUid, srcGameId, destOwnerUid, destGameId,
+      (objectName) => encodedForms(objectName).some(
+        (form) => [...urls].some((u) => u.includes(form)),
+      ),
+    );
+    if (pathMapping.size === 0) return stages;
+    return rewriteStagesMedia(stages, buildMediaUrlMapping(urls, pathMapping)) as Stage[];
+  } catch (e) {
+    logBestEffort('game.media.rehost', { srcGameId, destGameId }, e);
+    return stages;
+  }
+}
+
+/** The forms an object path can take inside a stored url (raw / encodeURI / component). */
+function encodedForms(s: string): string[] {
+  return [...new Set([s, encodeURI(s), encodeURIComponent(s)])];
+}
+
+/**
+ * The pseudo game id the Builder uploads under before a game has one
+ * (apps/creator-web TaskWizard passes `gameId ?? 'draft'`). Declared here because the
+ * server is what migrates those objects onto the real game on the first stages save.
+ */
+const DRAFT_GAME_ID = 'draft';
 
 // Strip control / bidi-override / zero-width spoofing chars from every authored
 // stage + task title/description (wave-j J6) before persisting. Returns a NEW
@@ -305,7 +426,21 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     // renaming the tags in the same save propagates the NEW set. Normalized here so the
     // union is against the same bounded list the game itself stores.
     const effectiveTags = normalizeTags(tags ?? (snap.data() as Game).tags);
-    updates.stages = normalizeStagesMedia(sanitizeStagesText(stages, effectiveTags));
+    // Media uploaded BEFORE the game had an id lands under the `draft` pseudo-game
+    // (TaskWizard passes `gameId ?? 'draft'`), and nothing used to move it — so it was
+    // orphaned from the game forever, unreachable by purge and unrelated to any real
+    // gameId. `createGame` can't do this: it always writes `stages: []`, so draft media
+    // first reaches the server on the save that carries the stages
+    // (change: task-media-durability).
+    const migrated = await rehostGameMedia(stages, uid, DRAFT_GAME_ID, uid, gameId);
+    // The STORED stages are passed so already-persisted media urls are grandfathered.
+    // Without this every autosave re-judged a stored picture against the saving
+    // runtime's env and deleted it when they disagreed.
+    updates.stages = normalizeStagesMedia(
+      sanitizeStagesText(migrated, effectiveTags),
+      (snap.data() as Game).stages,
+      { gameId },
+    );
   }
   if (scoringPreset !== undefined)      updates.scoringPreset = scoringPreset;
   if (scoringOptions !== undefined)     updates.scoringOptions = scoringOptions;
@@ -685,8 +820,18 @@ export const duplicateGame = loggedCallable('duplicateGame', async (data, contex
   // marketplace opt-in so a copy isn't silently exposed. (change: chat-integrations /
   // marketplace-instant-play).
   const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeSource } = sourceGame;
+  // Re-host the creator-authored media (change: task-media-durability). Copying the
+  // DOCUMENT alone left the copy's tasks addressing `gameMedia/{srcOwner}/games/{srcGame}/…`
+  // — the SOURCE game's folder. It rendered fine until the source was purged, at which
+  // point purgeGameTree prefix-deleted that folder and every picture in the "duplicate"
+  // broke. Copy first, rewrite second, write the document last: a failed copy then leaves
+  // the url addressing the original (degraded but working) rather than addressing nothing.
+  const copiedStages = await rehostGameMedia(
+    safeSource.stages, ownerUid, gameId, uid, newRef.id,
+  );
   const copy: Game = {
     ...safeSource,
+    ...(copiedStages ? { stages: copiedStages } : {}),
     id: newRef.id,
     ownerUid: uid,
     title: `${sourceGame.title} (copy)`,
@@ -1059,8 +1204,13 @@ export const translateGame = loggedCallable('translateGame', async (data, contex
   // translated copy isn't silently instant-playable/published. (Own-game-only today,
   // but keeps translateGame consistent with duplicateGame's security posture.)
   const { integrationWebhookUrl: _wh, integrationPlatform: _wp, ...safeNewGame } = newGame;
+  // Re-host the media too (change: task-media-durability) — same reasoning as
+  // duplicateGame: a translated copy that borrows the source's storage folder loses
+  // every picture the day the source is purged.
+  const translatedStages = await rehostGameMedia(safeNewGame.stages, uid, gameId, uid, newRef.id);
   const copy: Game = {
     ...safeNewGame,
+    ...(translatedStages ? { stages: translatedStages } : {}),
     id: newRef.id,
     ownerUid: uid,
     visibility: 'private',
@@ -1159,10 +1309,15 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   }
 
   // Layer 4 — the same normalizers/trust boundaries: display-char stripping on
-  // authored titles/descriptions, and the task-media origin gate (a media
-  // reference whose Storage object is gone is dropped here rather than persisted
-  // as a dead pointer). Both return NEW arrays — never dotted-update an array
-  // element, it coerces the array to a map.
+  // authored titles/descriptions, and the task-media origin gate. Both return NEW
+  // arrays — never dotted-update an array element, it coerces the array to a map.
+  //
+  // No stored stages to grandfather: this creates a brand-new game, so every media url
+  // is NEW and must pass the accept-set. Since change: task-media-durability that is a
+  // LOUD refusal naming the url rather than a silent drop — importing a file whose media
+  // was minted by another runtime now tells the creator, instead of quietly handing back
+  // a game with the pictures missing. Same rule the Builder save door applies to a new
+  // url, which is the point: the two doors must never differ.
   // The imported game's own tags are unioned into every task (feature:
   // game-tags-propagate), using the SAME normalized list the game will store below.
   const importedTags = normalizeTags(parsed.tags);

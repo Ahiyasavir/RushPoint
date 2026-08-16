@@ -105,7 +105,20 @@ check('rejects a non-string', rejected(() => requireStorageUrl(undefined as unkn
   const vpsOpts = { vpsOrigin: VPS };
   const ownVps = `${VPS}/uploads/runs/run123/teams/uidABC/photo-1.jpg`;
   check('requireStorageUrl accepts VPS URL with vpsOrigin', requireStorageUrl(ownVps, RUN, UID, vpsOpts) === ownVps);
-  check('requireStorageUrl rejects VPS URL without vpsOrigin', rejected(() => requireStorageUrl(ownVps, RUN, UID)));
+  // FLIPPED by change: task-media-durability. This used to assert that our OWN upload
+  // origin is refused when the env var happens to be unset — encoding as a requirement
+  // the exact behaviour that deleted a creator's mission photo: `normalizeTaskMedia` is
+  // a filter, so "unrecognised" meant "silently dropped from Firestore on the next
+  // autosave". `api.rush-point.com` is now a compiled-in canonical origin
+  // (RUSHPOINT_UPLOAD_ORIGINS), so a missing env var can no longer make this platform's
+  // own URLs foreign. The real IDOR guard is unchanged and still does the work — see the
+  // "another team" and traversal assertions below, which run in exactly this mode.
+  check('requireStorageUrl accepts the canonical VPS origin with NO configured origin',
+    requireStorageUrl(ownVps, RUN, UID) === ownVps);
+  check('requireStorageUrl still rejects another team on the canonical origin, unconfigured',
+    rejected(() => requireStorageUrl(`${VPS}/uploads/runs/run123/teams/OTHER/x.jpg`, RUN, UID)));
+  check('requireStorageUrl still rejects an UNKNOWN upload origin',
+    rejected(() => requireStorageUrl('https://evil.example/uploads/runs/run123/teams/uidABC/p.jpg', RUN, UID)));
   check('requireStorageUrl rejects another team on VPS', rejected(() => requireStorageUrl(`${VPS}/uploads/runs/run123/teams/OTHER/x.jpg`, RUN, UID, vpsOpts)));
   check('isFirebaseStorageUrl accepts VPS URL with vpsOrigin', isFirebaseStorageUrl(ownVps, vpsOpts));
   check('normalizeTaskMedia keeps VPS task media with vpsOrigin',

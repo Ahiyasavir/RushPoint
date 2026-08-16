@@ -329,6 +329,23 @@ export const FIREBASE_STORAGE_ORIGINS = FIREBASE_STORAGE_BUCKETS.map(
 export const FIREBASE_STORAGE_ORIGIN = `${FIREBASE_STORAGE_HTTPS_PREFIX}rushpoint-pwa-7daaa.appspot.com/`;
 
 /**
+ * The upload origins this platform mints URLs on, COMPILED IN rather than configured
+ * (change: task-media-durability).
+ *
+ * There is no Firebase Storage bucket in production — uploads are served by the
+ * self-hosted API (`functions/server.js`), and the accepted-origin set used to be
+ * assembled from `process.env.VPS_UPLOAD_ORIGIN` ALONE. That made a single env var
+ * load-bearing for data retention: with it absent or renamed, `normalizeTaskMedia`
+ * stopped recognising the URLs this very platform had minted, and — because it was
+ * written as a filter — DELETED every creator's stored picture on the next autosave,
+ * while the callable returned success. A constant cannot go missing on a redeploy.
+ *
+ * `storageOriginOpts()` (functions/src/storageOriginOpts.ts) unions this with the env
+ * var, so an extra/staging origin is still configurable; it just isn't load-bearing.
+ */
+export const RUSHPOINT_UPLOAD_ORIGINS = ['https://api.rush-point.com'];
+
+/**
  * Opt-in relaxation for local/playtest environments. See `extractStorageObjectPath`.
  * ALWAYS decided by the CALLER (this module is pure — it never reads process.env),
  * defaults to `false`, so every existing call site keeps production behaviour.
@@ -336,8 +353,18 @@ export const FIREBASE_STORAGE_ORIGIN = `${FIREBASE_STORAGE_HTTPS_PREFIX}rushpoin
 export interface StorageOriginOptions {
   /** Also accept an emulator-hosted / tunnel-proxied Storage URL. */
   allowLocalEmulator?: boolean;
-  /** Also accept a VPS-hosted upload URL (e.g. 'https://api.rush-point.com'). */
+  /** Additional VPS-hosted upload origins, unioned with RUSHPOINT_UPLOAD_ORIGINS. */
+  vpsOrigins?: string[];
+  /** @deprecated single-origin form, kept so no existing caller changes meaning. */
   vpsOrigin?: string;
+}
+
+/** Every upload origin to accept: the compiled-in canonical set plus anything configured. */
+function uploadOrigins(opts?: StorageOriginOptions): string[] {
+  const extra = [...(opts?.vpsOrigins ?? []), ...(opts?.vpsOrigin ? [opts.vpsOrigin] : [])];
+  return [...RUSHPOINT_UPLOAD_ORIGINS, ...extra]
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
 }
 
 // The Firebase Storage download REST shape, host-agnostic: <origin>/v0/b/<bucket>/o/<encodedPath>.
@@ -371,10 +398,17 @@ function extractStorageObjectPath(s: string, opts?: StorageOriginOptions): strin
     if (out.split(/[/\\]/).some((seg) => seg === '..')) return null;
     return out;
   };
-  if (opts?.vpsOrigin) {
-    const prefix = `${opts.vpsOrigin}/uploads/`;
-    if (s.startsWith(prefix)) {
-      return decode(s.slice(prefix.length));
+  for (const origin of uploadOrigins(opts)) {
+    const prefix = `${origin}/uploads/`;
+    if (s.startsWith(prefix)) return decode(s.slice(prefix.length));
+    // The `http://` form of a KNOWN host, for path extraction only. Not a widening of
+    // trust — the host set is compiled in, and anyone able to serve that host already
+    // owns the origin. It exists because `server.js` fell back to
+    // `${req.protocol}://${host}` with no `trust proxy` set, so a proxied upload minted
+    // an http:// URL that every mode then refused — and therefore deleted.
+    if (prefix.startsWith('https://')) {
+      const httpPrefix = `http://${prefix.slice('https://'.length)}`;
+      if (s.startsWith(httpPrefix)) return decode(s.slice(httpPrefix.length));
     }
   }
   if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
@@ -473,8 +507,54 @@ export function isTaskMediaValid(m: unknown, opts?: StorageOriginOptions): boole
  * This is the server-side enforcement boundary in createGame/updateGame.
  */
 export function normalizeTaskMedia(input: unknown, opts?: StorageOriginOptions): TaskMediaLike[] {
-  if (!Array.isArray(input)) return [];
-  const out: TaskMediaLike[] = [];
+  return normalizeTaskMediaDetailed(input, opts).media;
+}
+
+/** What `normalizeTaskMediaDetailed` decided about each entry it was given. */
+export interface TaskMediaNormalizeResult {
+  /** The entries that survive, cleaned and canonicalized. */
+  media: TaskMediaLike[];
+  /** URLs refused because they are NEW and off-origin (or an unusable kind/link). */
+  rejected: string[];
+  /** URLs kept ONLY because they were already stored — i.e. observed origin drift. */
+  retained: string[];
+}
+
+/**
+ * The same normalization as `normalizeTaskMedia`, but it REPORTS what it did and can
+ * grandfather URLs the server already persisted (change: task-media-durability).
+ *
+ * ─── Why this exists ────────────────────────────────────────────────────────────
+ * `normalizeTaskMedia` is a filter: given arbitrary client input, keep what passes.
+ * That is right for a URL the client just invented and WRONG for one this server
+ * accepted and stored weeks ago — and the same call site sees both, because every
+ * Builder autosave re-sends the whole `stages` array. So a stored picture was re-judged
+ * against whatever the saving runtime's env happened to accept, and when the two
+ * disagreed the filter deleted it and the callable reported success. A creator lost a
+ * mission photo with no error anywhere.
+ *
+ * `keepUrls` is the set of URLs already persisted on THIS task. An entry whose URL is in
+ * it is kept regardless of origin; anything else must pass the accept-set or it lands in
+ * `rejected` for the caller to refuse the save over. Validation governs what may be newly
+ * INTRODUCED; it must never retroactively destroy what was already accepted.
+ *
+ * Grandfathering covers the ORIGIN check only — shape is still enforced (a non-string
+ * url, an unknown kind and an unparseable YouTube link are still refused), and stored
+ * entries are still cleaned: id preserved, caption trimmed, YouTube canonicalized.
+ *
+ * A `Set` of raw url STRINGS, deliberately — not object paths. The whole failure mode is
+ * that path extraction fails for a drifted URL, so a key that needs extraction to succeed
+ * cannot recognise the entries that need protecting.
+ */
+export function normalizeTaskMediaDetailed(
+  input: unknown,
+  opts?: StorageOriginOptions,
+  keepUrls?: ReadonlySet<string>,
+): TaskMediaNormalizeResult {
+  const media: TaskMediaLike[] = [];
+  const rejected: string[] = [];
+  const retained: string[] = [];
+  if (!Array.isArray(input)) return { media, rejected, retained };
   input.forEach((raw, i) => {
     if (!raw || typeof raw !== 'object') return;
     const { id, kind, url, caption } = raw as {
@@ -484,22 +564,97 @@ export function normalizeTaskMedia(input: unknown, opts?: StorageOriginOptions):
     let finalUrl = url;
     if (kind === 'youtube') {
       const ytId = parseYouTubeId(url);
-      if (!ytId) return;
+      if (!ytId) { rejected.push(url); return; }
       finalUrl = youTubeEmbedUrl(ytId);
     } else if (kind === 'image' || kind === 'video') {
-      if (!isFirebaseStorageUrl(url, opts)) return;
+      if (!isFirebaseStorageUrl(url, opts)) {
+        if (!keepUrls?.has(url)) { rejected.push(url); return; }
+        retained.push(url);
+      }
     } else {
-      return; // unknown kind
+      rejected.push(url); // unknown kind
+      return;
     }
     const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
-    out.push({
+    media.push({
       id: typeof id === 'string' && id.trim() ? id.trim() : `m${i}-${finalUrl.length}`,
       kind: kind as TaskMediaKind,
       url: finalUrl,
       ...(trimmedCaption ? { caption: trimmedCaption } : {}),
     });
   });
+  return { media, rejected, retained };
+}
+
+/**
+ * Turn an object-path mapping (what a Storage copy produces) into a URL mapping (what
+ * `rewriteStagesMedia` consumes), for the media urls actually present on a game.
+ *
+ * The same object path appears in a url in one of three encodings depending on who minted
+ * it — raw on the VPS upload route (`/uploads/gameMedia/u/games/g/x.jpg`), `encodeURI`'d
+ * there for exotic names, and `encodeURIComponent`'d in a Firebase download url
+ * (`/o/gameMedia%2Fu%2Fgames%2Fg%2Fx.jpg`). All three are tried, so this works for every
+ * shape the platform has ever stored without parsing the url. A url whose path is not in
+ * the mapping is simply absent from the result, which `rewriteStagesMedia` reads as
+ * "leave it alone".
+ */
+export function buildMediaUrlMapping(
+  urls: Iterable<string>,
+  pathMapping: ReadonlyMap<string, string>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const forms = (p: string): string[] => {
+    const set = new Set([p, encodeURI(p), encodeURIComponent(p)]);
+    return [...set];
+  };
+  for (const url of urls) {
+    for (const [oldPath, newPath] of pathMapping) {
+      const oldForms = forms(oldPath);
+      const newForms = forms(newPath);
+      const hit = oldForms.findIndex((f) => url.includes(f));
+      if (hit >= 0) {
+        out.set(url, url.replace(oldForms[hit], newForms[hit]));
+        break;
+      }
+    }
+  }
   return out;
+}
+
+/**
+ * Rewrite every uploaded (`image`/`video`) media URL through `mapping`, returning a NEW
+ * stages array (change: task-media-durability).
+ *
+ * The pure half of re-hosting media when a game is duplicated, translated, or saved for
+ * the first time out of the `draft` prefix. Media objects are keyed on the owning game id
+ * (`gameMedia/{ownerUid}/games/{gameId}/…`), so a game copied by spreading its document
+ * keeps pointing into the SOURCE game's storage folder — it renders until that game is
+ * purged, then breaks. The bytes are copied server-side; this rewrites the references.
+ *
+ * `youtube` entries are carried over untouched (there is no object to copy), and a URL
+ * absent from `mapping` is left exactly as it was — a copy that failed must degrade to
+ * "still points at the original", never to "points at nothing".
+ */
+export function rewriteStagesMedia<St extends { tasks?: unknown[] }>(
+  stages: St[] | undefined,
+  mapping: ReadonlyMap<string, string>,
+): St[] | undefined {
+  if (!Array.isArray(stages)) return stages;
+  return stages.map((stage) => ({
+    ...stage,
+    tasks: (stage.tasks ?? []).map((raw) => {
+      const task = raw as { media?: TaskMediaLike[] };
+      if (!Array.isArray(task.media) || task.media.length === 0) return raw;
+      return {
+        ...task,
+        media: task.media.map((m) => {
+          if (m.kind === 'youtube') return m;
+          const next = mapping.get(m.url);
+          return next ? { ...m, url: next } : m;
+        }),
+      };
+    }),
+  })) as St[];
 }
 
 // ─── Caller-scoped photo URL (change: auth-anticheat-hardening, row 41) ───────
