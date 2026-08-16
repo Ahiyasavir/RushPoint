@@ -6907,6 +6907,100 @@ async function main() {
       { codeIn: ['functions/failed-precondition'] });
   });
 
+  await scenario('staff ↔ admin channel (send · role derivation · authz · validation)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: sg } = await creator.call('createGame', { title: 'Staff Channel Game', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: sg, scoringPreset: 'time_only',
+      stages: [{ id: 'sc-s', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'sc-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: sr, accessCode: scAccessCode } = await creator.call('launchRun', { gameId: sg });
+    const SCTX = { ownerUid: OWNER, gameId: sg, runId: sr };
+    const channelPath = `users/${OWNER}/games/${sg}/runs/${sr}/staffChannel/thread`;
+
+    // 1. A marshal sends → thread holds 1 msg, role derived as 'staff' (never
+    //    trusted from the client), senderName from the token's staffName claim.
+    const { pin: scPin } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: sg, runId: sr, name: 'Field Marshal', permissions: ['review_photos'],
+    });
+    const marshal = makeParty('scMarshal');
+    await signInAnonymously(marshal.auth);
+    const scTok = await marshal.call('staffSignIn', { ownerUid: OWNER, gameId: sg, runId: sr, pin: scPin });
+    await signInWithCustomToken(marshal.auth, scTok.customToken);
+    const scSent = await marshal.call('sendStaffChannelMessage', { ...SCTX, text: 'Team 3 needs a ride back' });
+    check('staffChannel: staff send returns a messageId', !!scSent?.messageId, JSON.stringify(scSent));
+    let thread = (await creator.getDocAt(channelPath)).data;
+    check('staffChannel: doc holds 1 message after staff send', thread?.messages?.length === 1, JSON.stringify(thread?.messages?.length));
+    check('staffChannel: staff message is from:staff', thread?.messages?.[0]?.from === 'staff', thread?.messages?.[0]?.from);
+    check('staffChannel: staff message senderName == token staffName', thread?.messages?.[0]?.senderName === 'Field Marshal', thread?.messages?.[0]?.senderName);
+    check('staffChannel: staff message carries senderId', thread?.messages?.[0]?.senderId, thread?.messages?.[0]?.senderId);
+
+    // 2. The owner replies → role derived as 'admin' purely from uid === ownerUid.
+    await creator.call('sendStaffChannelMessage', { ...SCTX, text: 'Sending a car now' });
+    thread = (await creator.getDocAt(channelPath)).data;
+    check('staffChannel: doc holds 2 messages after owner reply', thread?.messages?.length === 2, JSON.stringify(thread?.messages?.length));
+    check('staffChannel: owner message is from:admin', thread?.messages?.[1]?.from === 'admin', thread?.messages?.[1]?.from);
+    check('staffChannel: owner senderId differs from the marshal', thread?.messages?.[1]?.senderId !== thread?.messages?.[0]?.senderId,
+      JSON.stringify([thread?.messages?.[0]?.senderId, thread?.messages?.[1]?.senderId]));
+
+    // 3. Client-supplied `from` is ignored — role always comes from the server.
+    await marshal.call('sendStaffChannelMessage', { ...SCTX, text: 'forge attempt', from: 'admin' });
+    thread = (await creator.getDocAt(channelPath)).data;
+    const scForged = thread?.messages?.[thread.messages.length - 1];
+    check('staffChannel: client-supplied from is ignored (still from:staff)', scForged?.from === 'staff', scForged?.from);
+
+    // 4. Validation: 501-char and whitespace-only text rejected.
+    await expectError('staffChannel: 501-char text rejected',
+      marshal.call('sendStaffChannelMessage', { ...SCTX, text: 'x'.repeat(501) }),
+      { codeIn: ['functions/invalid-argument'] });
+    await expectError('staffChannel: whitespace-only text rejected',
+      marshal.call('sendStaffChannelMessage', { ...SCTX, text: '   ' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // 5. Authz: a participant, a stranger, and staff scoped to a DIFFERENT run
+    //    must all be denied — this is a staff/owner-only coordination thread.
+    const DENY = ['functions/permission-denied', 'functions/not-found'];
+    const scPlayer = makeParty('scPlayer');
+    await signInAnonymously(scPlayer.auth);
+    await scPlayer.call('joinRun', { code: scAccessCode, displayName: 'Bystander' });
+    await expectError('staffChannel: participant is denied',
+      scPlayer.call('sendStaffChannelMessage', { ...SCTX, text: 'sneak in' }),
+      { codeIn: DENY });
+    const scStranger = makeParty('scStranger');
+    await signInAnonymously(scStranger.auth);
+    await expectError('staffChannel: stranger is denied',
+      scStranger.call('sendStaffChannelMessage', { ...SCTX, text: 'sneak in' }),
+      { codeIn: DENY });
+    const { gameId: sg2 } = await creator.call('createGame', { title: 'Other Game', mode: 'team' });
+    await creator.call('updateGame', {
+      gameId: sg2, scoringPreset: 'time_only',
+      stages: [{ id: 'sc2-s', order: 0, title: 'S', isFinal: true, tasks: [
+        { id: 'sc2-t', title: 'T', type: 'self_report', triggerMode: 'locationless', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: sr2 } = await creator.call('launchRun', { gameId: sg2 });
+    const { pin: scPin2 } = await creator.call('inviteStaff', {
+      ownerUid: OWNER, gameId: sg2, runId: sr2, name: 'Other Run Marshal', permissions: ['review_photos'],
+    });
+    const otherRunStaff = makeParty('scOtherStaff');
+    await signInAnonymously(otherRunStaff.auth);
+    const scTok2 = await otherRunStaff.call('staffSignIn', { ownerUid: OWNER, gameId: sg2, runId: sr2, pin: scPin2 });
+    await signInWithCustomToken(otherRunStaff.auth, scTok2.customToken);
+    await expectError('staffChannel: staff scoped to a different run is denied',
+      otherRunStaff.call('sendStaffChannelMessage', { ...SCTX, text: 'not my run' }),
+      { codeIn: DENY });
+
+    // 6. Finished run: after finalize, any send is rejected.
+    await creator.call('finalizeRun', { gameId: sg, runId: sr });
+    await expectError('staffChannel: send into a finished run is rejected',
+      creator.call('sendStaffChannelMessage', { ...SCTX, text: 'too late' }),
+      { codeIn: ['functions/failed-precondition'] });
+  });
+
   // ═══ Authorization denial matrix ════════════════════════════════════════════
   // Data-driven: wrong-role identities × privileged callables → typed denial.
   // Every row runs even if one fails; extend the table when adding a callable.
