@@ -1153,6 +1153,10 @@ const HE = {
     addStage: 'הוסף שלב',
     untitledStage: 'שלב ללא שם',
     addTask: 'הוסף משימה',
+    // builder-simplification-round-2: הכוונה כשאין עדיין אף משימה בשלב
+    emptyStageHint: 'הוסיפו כמה משימות לשלב הזה כדי להתחיל.',
+    // builder-simplification-round-2: תגית "מתקדם" קטנה על שדות מתקדמים (למשל עצירת שעון)
+    advancedTag: 'מתקדם',
     fromLibrary: 'מהספרייה',
     newTask: 'משימה חדשה',
     closePanel: 'סגירה',
@@ -2944,6 +2948,10 @@ const EN: typeof HE = {
     addStage: 'Add stage',
     untitledStage: 'Untitled stage',
     addTask: 'Add mission',
+    // builder-simplification-round-2: guidance shown when a stage has zero missions yet
+    emptyStageHint: 'Add a few missions to this stage to get started.',
+    // builder-simplification-round-2: small "advanced" marker on advanced-weight controls (e.g. pause-clock)
+    advancedTag: 'Advanced',
     fromLibrary: 'From library',
     newTask: 'New mission',
     closePanel: 'Close',

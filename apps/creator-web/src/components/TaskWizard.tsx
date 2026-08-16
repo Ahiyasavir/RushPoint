@@ -1545,6 +1545,14 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               onChange={(e) => set({ pausesTimer: e.target.checked || undefined })} />
             <span>
               <span className="text-[13px] font-medium text-[--ink-1]">{b.pauseClock}</span>
+              {/* Small "advanced" marker (change: builder-simplification-round-2):
+                  the control already sits below the AdvGroup "Advanced timing"
+                  divider, but a scrolled/short group can hide that divider from
+                  view, so the control also self-identifies. Reuses InlineLabel's
+                  muted/uppercase styling at a smaller size — not a new component. */}
+              <span className="ms-1.5 align-middle text-[9px] font-semibold text-[--ink-3] uppercase tracking-wider">
+                {b.advancedTag}
+              </span>
               <span className="block text-[11px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
             </span>
           </label>

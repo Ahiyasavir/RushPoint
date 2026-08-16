@@ -23,6 +23,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { SortableContext, useSortable, rectSortingStrategy, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Task } from '@rushpoint/shared';
+import { useT } from './LanguageContext';
 import TaskCard, { type MoveTarget, type TaskGroupBadge } from './TaskCard';
 
 const ROW = 64; // estimated card height + gap (measured precisely at runtime)
@@ -77,6 +78,7 @@ export default function TaskCanvas({
    *  server enforces (including "a 1-member group does nothing"). */
   groupOf?: (taskId: string) => TaskGroupBadge | undefined;
 }) {
+  const t = useT();
   const parentRef = useRef<HTMLDivElement>(null);
   const rv = useVirtualizer({
     count: tasks.length,
@@ -97,6 +99,18 @@ export default function TaskCanvas({
       onClick={() => onSelect(t.id)}
     />
   );
+
+  // Empty-stage guidance (change: builder-simplification-round-2): a stage with
+  // zero missions rendered a bare scroll div with nothing in it — no onboarding
+  // signal at all. This is a pure additional branch; the grid/virtualized
+  // rendering below is completely unchanged for the tasks.length > 0 case.
+  if (tasks.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-center px-4">
+        <p className="text-sm text-[--ink-2] max-w-xs">{t.builder.emptyStageHint}</p>
+      </div>
+    );
+  }
 
   // The canvas fills its parent's height and is the ONLY scroll container in the
   // Builder centre column (the parent no longer scrolls — no nested double

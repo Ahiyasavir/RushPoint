@@ -1821,13 +1821,25 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 docs/wave-b/mutually-exclusive-tasks.md §2.2). Non-blocking. */}
             {typeof activeStage.requiredTaskCount === 'number'
               && activeStage.requiredTaskCount > maxCompletableTasks(activeStage) && (
-              <p className="text-xs text-amber-400">⚠ {b.exclusiveUnwinnableWarn}</p>
+              <button
+                type="button"
+                onClick={() => { setEditing(null); setSettingsOpen(true); }}
+                className="text-xs text-amber-400 underline decoration-dotted cursor-pointer hover:text-amber-300 text-start"
+              >
+                ⚠ {b.exclusiveUnwinnableWarn}
+              </button>
             )}
 
             {/* Unlockable tasks (change: unlockable-tasks): warn when the required
                 completion count exceeds the tasks that can actually complete. */}
             {validateUnlockGraph(activeStage).warnings.length > 0 && (
-              <p className="text-xs text-amber-400">⚠ {b.unlockRequiredCountWarn}</p>
+              <button
+                type="button"
+                onClick={() => { setEditing(null); setSettingsOpen(true); }}
+                className="text-xs text-amber-400 underline decoration-dotted cursor-pointer hover:text-amber-300 text-start"
+              >
+                ⚠ {b.unlockRequiredCountWarn}
+              </button>
             )}
 
             {/* Unreachable branch (change: unreachable-task-strand): a task gated
@@ -1848,7 +1860,13 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                 locationless + located tasks routes locationless first, so a
                 physical station may never be visited. Non-blocking warning. */}
             {partialStageStarvationWarning(activeStage) && (
-              <p className="text-xs text-amber-400">⚠ {b.partialStarvationWarn}</p>
+              <button
+                type="button"
+                onClick={() => { setEditing(null); setSettingsOpen(true); }}
+                className="text-xs text-amber-400 underline decoration-dotted cursor-pointer hover:text-amber-300 text-start"
+              >
+                ⚠ {b.partialStarvationWarn}
+              </button>
             )}
             </div>
 
