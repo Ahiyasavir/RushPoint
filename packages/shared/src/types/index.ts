@@ -105,6 +105,13 @@ export const FIRESTORE_PATHS = {
   runChatCol: (ownerUid: string, gameId: string, runId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/chat`,
 
+  // Staff ↔ admin channel (change: staff-console-field-ops): ONE shared thread per
+  // run — a singleton doc, not a collection, because there is exactly one channel
+  // (unlike runChat, which is one thread per team). Server-write only; the owner and
+  // any token carrying this run's staff claims may read it. Participants may not.
+  runStaffChannel: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/staffChannel/thread`,
+
   // Device-membership reverse index (fix: shared-team-devices live-ops read).
   // A secondary phone attached via joinTeamAsDevice has NO team doc of its own —
   // its uid only lives inside the FOUNDER's `deviceUids` array. firestore.rules
@@ -179,7 +186,13 @@ export type FieldType       = 'text' | 'number' | 'phone' | 'checkbox' | 'select
 export type FieldLevel      = 'team' | 'member';
 export type Visibility      = 'private' | 'public';
 export type AccessCodeStatus = 'unused' | 'used' | 'revoked';
-export type StaffPermission = 'announce' | 'review_photos' | 'track_locations';
+// `manage_teams` (change: staff-console-field-ops) covers the four actions that can
+// materially change a team's outcome from the field console: hold/resume, an
+// arbitrary-amount score adjustment, clearing out-of-bounds, and force-assigning a
+// task. Deliberately ONE coarse flag rather than four — the desktop run console
+// already trusts any authenticated staffer with the three that predate this change,
+// so a single new permission is a net tightening, not a new axis of restriction.
+export type StaffPermission = 'announce' | 'review_photos' | 'track_locations' | 'manage_teams';
 export type AlertType       = 'sos' | 'technical' | 'stationary';
 export type AnnouncementLevel = 'info' | 'warning' | 'critical';
 export type VerificationType  = 'code_verification' | 'photo_upload';
@@ -233,11 +246,16 @@ export interface SmartStationConfig {
   canSkip?: boolean;
   autoCompleteOnSuccess?: boolean;
   autoApprove?: boolean;   // photo_upload: approve without staff review (staffless events)
-  // audio-tasks: on a photo-type task, capture an audio clip instead of a photo
-  // (rides the same ingest/review pipeline). Default absent = 'photo'; only
-  // meaningful on photo-type tasks. NOT secret — the client needs it to render the
-  // right capture widget, so the sanitizer must pass it through.
-  captureKind?: 'photo' | 'audio';
+  // audio-tasks / video-submission-task: on a photo-type task, capture an audio or
+  // video clip instead of a photo (rides the same ingest/review pipeline). Default
+  // absent = 'photo'; only meaningful on photo-type tasks. NOT secret — the client
+  // needs it to render the right capture widget, so the sanitizer must pass it through.
+  captureKind?: 'photo' | 'audio' | 'video';
+  // captureKind 'video' only: the creator's clip-length range, bounded by
+  // VIDEO_DURATION_LIMITS (packages/shared/src/videoDuration.ts). Participant-visible
+  // by necessity — the recorder cannot enforce a limit it cannot see.
+  videoMinSeconds?: number;
+  videoMaxSeconds?: number;
 
   geofenceRadiusMeters?: number;
   stationCoords?: GeoPoint;  // injected by assignTask; never authored
@@ -929,6 +947,25 @@ export interface RunTeam {
   // document written before this change evaluates as "unknown", which fails OPEN.
   outOfBoundsAt?: string;
   outOfBoundsOverrideUntil?: string;
+  // Staff-initiated per-team hold (change: staff-console-field-ops). A marshal parks
+  // ONE team (injury, dispute, waiting on staff) without touching the run or any other
+  // team. Lives here, not on the Run doc, because a hold is inherently per-team — the
+  // same place every other per-team operational latch (outOfBounds above) already lives,
+  // and therefore immune to template edits, duplication and export.
+  //
+  // While `held` is true every progress-advancing callable refuses (assertTeamNotHeld);
+  // reads are deliberately NOT gated, so the participant app can explain the pause
+  // instead of showing an opaque failure.
+  held?: boolean;
+  heldAt?: string;        // ISO — start of the CURRENT hold; cleared on resume
+  heldReason?: string;    // optional staff free text, shown to the team
+  heldBy?: string;        // staffName claim of whoever held them (attribution)
+  // ACCUMULATED held milliseconds across every past hold in this run, stamped on each
+  // resume (and at finalization for a still-open hold). Summed by buildRankings via
+  // teamHeldExclusionMs so held time never counts against a team's race clock — the
+  // team-level analogue of RunTaskRecord.excludedMs. Absent on every pre-change doc
+  // and read as 0.
+  heldMs?: number;
   /** Cooldown marker so an active override can't mint a breach alert every ping. */
   lastBreachAlertAt?: string;
   // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.

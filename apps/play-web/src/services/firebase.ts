@@ -395,6 +395,24 @@ export async function uploadTaskAudio(
   return { url: await uploadResilient(path, blob, contentType), contentType };
 }
 
+// Upload a video-mission clip (video-submission-task). Identical in shape to
+// uploadTaskAudio — same path scheme, same normalization — so the IDOR scoping and
+// the server's content-type gate behave the same for all three capture kinds.
+// The upload route applies a larger cap for these content-types
+// (MAX_PARTICIPANT_VIDEO_BYTES); photo/audio keep the tighter one.
+export async function uploadTaskVideo(
+  blob: Blob | File,
+  p: { runId: string; teamId: string; taskId: string; contentType: string },
+): Promise<{ url: string; contentType: string }> {
+  const contentType = normalizeContentType(p.contentType || blob.type || 'video/webm');
+  const ext = contentType === 'video/mp4' ? 'mp4'
+    : contentType === 'video/quicktime' ? 'mov'
+    : 'webm';
+  const safeTask = p.taskId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const path = `runs/${p.runId}/teams/${p.teamId}/${safeTask}-${Date.now()}.${ext}`;
+  return { url: await uploadResilient(path, blob, contentType), contentType };
+}
+
 // Under a ~20-player run over an ngrok tunnel, a momentary backend contention or
 // tunnel blip can reject a write straight to the player. These are the transient,
 // retry-SAFE Firebase callable error codes; our privileged mutations are

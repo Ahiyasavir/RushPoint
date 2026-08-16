@@ -296,9 +296,11 @@ const ALLOWED_SMART_KEYS = new Set([
   'extraInfo', 'mediaUrl', 'imageUrl', 'codeInputLabel', 'hasCode',
   'geofenceRadiusMeters', 'stationCoords', 'timeLimitSeconds', 'autoApprove',
   'attemptLimit',
-  // audio-tasks: which capture widget the client renders (photo vs audio) — not
-  // a secret, so it passes through the sanitizer.
-  'captureKind',
+  // audio-tasks / video-submission-task: which capture widget the client renders
+  // (photo vs audio vs video) — not a secret, so it passes through the sanitizer.
+  // The video clip-length range passes for the same reason: a recorder cannot
+  // enforce a limit it cannot see.
+  'captureKind', 'videoMinSeconds', 'videoMaxSeconds',
 ]);
 
 function assertTaskPayloadAllowlisted(label, task) {
@@ -514,6 +516,7 @@ async function main() {
   const CODE_TASK_ID = 'task-code-1';
   const PHOTO_TASK_ID = 'task-photo-1';
   const AUDIO_TASK_ID = 'task-audio-1'; // audio-tasks: photo pipeline, captureKind:'audio'
+  const VIDEO_TASK_ID = 'task-video-1'; // video-submission-task: same pipeline, captureKind:'video'
   const PLAIN_TASK_ID = 'task-plain-1';
   const stages = [
     {
@@ -587,6 +590,29 @@ async function main() {
             enabled: true,
             verificationType: 'photo_upload',
             captureKind: 'audio',
+            autoApprove: false, // requires a staff approval
+          },
+        },
+        {
+          // video-submission-task: the third capture kind on the SAME photo
+          // pipeline. Deliberately LOCATED (not locationless) so the audio task
+          // stays the one routing assigns — this scenario's captureKind sanitizer
+          // assertion above depends on that, and a second locationless task would
+          // make the assignment a coin flip.
+          id: VIDEO_TASK_ID,
+          title: 'Film your team handshake',
+          type: 'photo',
+          coordinates: { lat: 31.7955, lng: 35.1655 },
+          difficulty: 2,
+          estimatedMinutes: 4,
+          pointValue: 60,
+          maxConcurrentTeams: 3,
+          smart: {
+            enabled: true,
+            verificationType: 'photo_upload',
+            captureKind: 'video',
+            videoMinSeconds: 10,
+            videoMaxSeconds: 30,
             autoApprove: false, // requires a staff approval
           },
         },
@@ -1157,6 +1183,74 @@ async function main() {
   ).catch(() => []);
   check('no photo-feed item was written for the audio submission',
     !feedItems.some((f) => f?.taskId === AUDIO_TASK_ID), JSON.stringify(feedItems.map((f) => f?.taskId)));
+
+  // ── 8e. Video task (video-submission-task): same pipeline, captureKind:'video' ─
+  const videoObjectPath = `runs/${runId}/teams/${playerCred.user.uid}/handshake-1.webm`;
+  const VIDEO_URL =
+    `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(videoObjectPath)}?alt=media`;
+  let videoUploadOk = false;
+  try {
+    await player.uploadBytesAt(videoObjectPath, new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 4, 5, 6, 7]), 'video/webm');
+    videoUploadOk = true;
+  } catch (e) { videoUploadOk = false; console.log('  video upload err ::', e.message); }
+  check('storage.rules accept a video/webm upload to the team folder', videoUploadOk);
+
+  const submitVideo = (contentType, taskId = VIDEO_TASK_ID, photoUrl = VIDEO_URL) =>
+    player.call('submitStationPhoto', {
+      ownerUid: creatorCred.user.uid, gameId, runId,
+      teamId: playerCred.user.uid, taskId, photoUrl, contentType,
+    });
+
+  // Negatives: the kind gate must reject in EVERY direction, not just the obvious
+  // one — a video type on a photo/audio task and a photo/audio type on the video
+  // task. The server derives the kind from the game snapshot, never from the client.
+  let videoImageRejected = false;
+  try { await submitVideo('image/jpeg'); } catch (e) { videoImageRejected = isInvalidArg(e); }
+  check('video task rejects an image content-type', videoImageRejected);
+
+  let videoAudioRejected = false;
+  try { await submitVideo('audio/webm'); } catch (e) { videoAudioRejected = isInvalidArg(e); }
+  check('video task rejects an audio content-type', videoAudioRejected);
+
+  let videoMissingRejected = false;
+  try { await submitVideo(undefined); } catch (e) { videoMissingRejected = isInvalidArg(e); }
+  check('video task rejects a missing content-type', videoMissingRejected);
+
+  let photoVideoRejected = false;
+  try {
+    await submitVideo('video/webm', PHOTO_TASK_ID, STORAGE_PHOTO_URL);
+  } catch (e) { photoVideoRejected = isInvalidArg(e); }
+  check('photo task rejects a video content-type', photoVideoRejected);
+
+  // Happy path: a proper video/webm submission → pending + mediaKind 'video'.
+  const videoSubmit = await submitVideo('video/webm');
+  check('submitStationPhoto accepts a video submission (pending)',
+    videoSubmit?.submitted === true && videoSubmit?.autoApproved === false, JSON.stringify(videoSubmit));
+
+  state = await player.call('getMyTeamState', { code: accessCode });
+  check('video submission records mediaKind === "video" (server-derived)',
+    state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.mediaKind === 'video',
+    JSON.stringify(state?.team?.taskSubmissions?.[VIDEO_TASK_ID] ?? {}));
+
+  const videoReview = await staff.call('reviewStationSubmission', {
+    ownerUid: creatorCred.user.uid, gameId, runId,
+    teamId: playerCred.user.uid, taskId: VIDEO_TASK_ID, approved: true,
+  });
+  check('reviewStationSubmission approves the video submission',
+    videoReview?.ok === true && videoReview?.approved === true);
+
+  state = await player.call('getMyTeamState', { code: accessCode });
+  check('video submission marked approved after review',
+    state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status === 'approved',
+    state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status);
+
+  // Non-goal: video submissions never enter the live photo feed either.
+  const feedItemsAfterVideo = await player.getColAt(
+    `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/feedItems`,
+  ).catch(() => []);
+  check('no photo-feed item was written for the video submission',
+    !feedItemsAfterVideo.some((f) => f?.taskId === VIDEO_TASK_ID),
+    JSON.stringify(feedItemsAfterVideo.map((f) => f?.taskId)));
 
   // ── 9. Complete the final plain task ────────────────────────────────────────
   const completeRes = await player.call('completeTask', {
@@ -3325,6 +3419,56 @@ async function main() {
       Array.isArray(ls2?.run?.leaderboard?.rankings) && ls2.run.leaderboard.rankings.length > 0,
       JSON.stringify(ls2?.run?.leaderboard?.rankings?.length));
   }); // scenario: manual leaderboard reveal
+
+  await scenario('video mission duration range (server refuses what the Builder refuses)', async () => {
+    // The Builder validates the range inline, but inline validation is a courtesy —
+    // a stale tab, a hand-edited game file or a direct callable call bypasses it.
+    // Both save doors read the SAME shared videoDurationProblem(), so a range the
+    // Builder rejects cannot be smuggled in through updateGame.
+    const { gameId: gV } = await creator.call('createGame', { title: 'Video Range Game', mode: 'individual' });
+    const stagesWith = (smartExtra) => ([
+      { id: 'vs0', order: 0, title: 'Film it', isFinal: true, tasks: [
+        { id: 'v-1', title: 'Team handshake', type: 'photo', triggerMode: 'instant',
+          coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: 50, maxConcurrentTeams: 9,
+          smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', ...smartExtra } },
+      ] },
+    ]);
+    const save = (smartExtra) => creator.call('updateGame', { gameId: gV, stages: stagesWith(smartExtra) });
+    const rejects = async (label, smartExtra) => {
+      let refused = false;
+      try { await save(smartExtra); } catch (e) { refused = e.code === 'functions/invalid-argument'; }
+      check(`updateGame refuses ${label}`, refused);
+    };
+
+    await rejects('an inverted range (min > max)', { videoMinSeconds: 40, videoMaxSeconds: 20 });
+    await rejects('min === max', { videoMinSeconds: 20, videoMaxSeconds: 20 });
+    await rejects('a max above the platform ceiling', { videoMinSeconds: 0, videoMaxSeconds: 600 });
+    await rejects('a max below the platform floor', { videoMinSeconds: 0, videoMaxSeconds: 2 });
+    await rejects('a nonzero min below the platform floor', { videoMinSeconds: 2, videoMaxSeconds: 40 });
+    await rejects('too little spread between min and max', { videoMinSeconds: 38, videoMaxSeconds: 40 });
+
+    let validAccepted = false;
+    try { await save({ videoMinSeconds: 10, videoMaxSeconds: 30 }); validAccepted = true; } catch (e) {
+      console.log('  valid range err ::', e.message);
+    }
+    check('updateGame accepts a valid range', validAccepted);
+
+    // Absent values mean "platform defaults", not "invalid" — a creator who never
+    // touches the duration controls must not have their autosave refused.
+    let defaultsAccepted = false;
+    try { await save({}); defaultsAccepted = true; } catch (e) { console.log('  defaults err ::', e.message); }
+    check('updateGame accepts a video task with no authored range', defaultsAccepted);
+
+    // The callable transport encodes `undefined` as `null`, so "clear this field"
+    // arrives as null. That is a CLEAR, not a malformed value — refusing it would
+    // trap a creator who emptied the input with no way to comply.
+    let clearedAccepted = false;
+    try {
+      await save({ videoMinSeconds: null, videoMaxSeconds: null });
+      clearedAccepted = true;
+    } catch (e) { console.log('  cleared err ::', e.message); }
+    check('updateGame accepts a cleared range (null === absent over the wire)', clearedAccepted);
+  }); // scenario: video mission duration range
 
   await scenario('task expiry (timed close + in-flight auto-skip)', async () => {
     // A 2-task stage where E expires 12s after launch (fractional minutes are

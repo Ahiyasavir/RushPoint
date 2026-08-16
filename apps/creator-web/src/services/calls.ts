@@ -232,6 +232,10 @@ export const inviteStaff           = callable<{ ownerUid: string; gameId: string
 export const pushAnnouncement      = callable<{ ownerUid: string; gameId: string; runId: string; message: string; messageHe?: string; teamId?: string }, { announcementId: string }>('pushAnnouncement');
 // Team ↔ HQ chat (change: team-hq-chat): HQ replies into one team's thread as from:'hq'.
 export const sendTeamChatMessage   = callable<{ ownerUid: string; gameId: string; runId: string; teamId: string; text: string; senderName?: string }, { messageId: string }>('sendTeamChatMessage');
+// The run's ONE shared staff↔admin thread (change: staff-console-field-ops). No
+// teamId: it is run-scoped, not per team. The server stamps this side as 'admin'
+// because the caller is the owner.
+export const sendStaffChannelMessage = callable<{ ownerUid: string; gameId: string; runId: string; text: string; senderName?: string }, { messageId: string }>('sendStaffChannelMessage');
 export const pushFlashMission      = callable<{ ownerUid: string; gameId: string; runId: string; title: string; description?: string; bonusPoints: number; ttlSeconds: number }, { id: string; expiresAt: string }>('pushFlashMission');
 export const acknowledgeAlert      = callable<{ ownerUid: string; gameId: string; runId: string; alertId: string }, { ok: boolean }>('acknowledgeAlert');
 // Out-of-bounds recovery: release a team the safe-zone latch is holding. The server

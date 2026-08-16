@@ -410,6 +410,63 @@ export async function assignTask(
 }
 
 
+// ─── Staff-directed claim of ONE specific task (staff-console-field-ops) ──────
+//
+// The force-assign counterpart to assignTask. Same transaction, same cap check,
+// same counter — the ONLY difference is that the task is named by a marshal
+// instead of chosen by priorityScore. Sharing the transaction shape is the whole
+// point: station capacity is a physical constraint (only so much room at a real
+// location) and the concurrent-claim invariant is guarded by the e2e
+// station-contention scenario, so force-assign must not get its own weaker path.
+//
+// `override` relaxes ONLY the soft sequencing gates — unlock, scheduled release,
+// expiry — which is precisely the "bypass a sequential blocker for this one team"
+// the feature exists for. It deliberately does NOT relax:
+//   • the capacity cap (physical, not authored), or
+//   • paused/closed status (isTaskAssignable) — an operator took that stop out of
+//     play for this run on purpose, and a second operator overriding it from the
+//     field would silently undo a deliberate live-ops decision.
+export async function claimSpecificTask(
+  task: Task,
+  completedTaskIds: string[],
+  ownerUid: string,
+  gameId: string,
+  runId: string,
+  override: boolean,
+  launchedAt: string | undefined,
+): Promise<{ ok: boolean; reason?: NoAssignmentReason }> {
+  const runRef = db.doc(runPath(ownerUid, gameId, runId));
+
+  return withLockRetry(() => db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    const runData = snap.data() as {
+      taskCounts?: Record<string, number>;
+      taskStatusOverrides?: TaskStatusOverrides;
+    } | undefined;
+    const taskCounts = runData?.taskCounts ?? {};
+    const nowMs = Date.now();
+
+    if (completedTaskIds.includes(task.id)) return { ok: false, reason: 'none' as const };
+    // Never overridable — see the header.
+    if (!isTaskAssignable(task, runData?.taskStatusOverrides)) return { ok: false, reason: 'none' as const };
+    if (!override) {
+      if (!isReleased(task, launchedAt, nowMs)) return { ok: false, reason: 'allLocked' as const };
+      if (isExpired(task, launchedAt, nowMs)) return { ok: false, reason: 'expired' as const };
+      if (!isUnlocked(task, completedTaskIds)) return { ok: false, reason: 'allLocked' as const };
+    }
+    // The cap check and the increment are in ONE transaction, exactly as in
+    // assignTask — a check-then-increment split here would let two concurrent
+    // force-assigns both pass a cap of 1.
+    if (!task.locationless && (taskCounts[task.id] ?? 0) >= (task.maxConcurrentTeams ?? 3)) {
+      return { ok: false, reason: 'stationsFull' as const };
+    }
+
+    tx.update(runRef, { [`taskCounts.${task.id}`]: FieldValue.increment(1) });
+    return { ok: true };
+  }));
+}
+
+
 // ─── Task release ─────────────────────────────────────────────────────────────
 // Transactional for the same reason as assignTask: concurrent releases must not
 // double-decrement past zero (a negative counter would free phantom slots).

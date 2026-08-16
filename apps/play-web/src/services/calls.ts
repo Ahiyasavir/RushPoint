@@ -123,8 +123,14 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
     codeInputLabel?: string;
     hasCode?: boolean;
     autoApprove?: boolean;
-    // audio-tasks: on a photo task, capture an audio clip instead of a photo.
-    captureKind?: 'photo' | 'audio';
+    // audio-tasks / video-submission-task: on a photo task, capture an audio or
+    // video clip instead of a photo.
+    captureKind?: 'photo' | 'audio' | 'video';
+    // The video mission's clip-length range. Participant-visible by necessity —
+    // the recorder cannot enforce a limit it cannot see. Resolved through the
+    // shared resolveVideoDuration() so a garbage value can never break a recorder.
+    videoMinSeconds?: number;
+    videoMaxSeconds?: number;
     stationCoords?: { lat: number; lng: number };
     // How many wrong answers this task allows before submitTaskAnswer refuses
     // with 'resource-exhausted'. Already shipped by sanitizeTaskForParticipant;
@@ -378,3 +384,47 @@ export const adjustTeamScore = callable<
   Ctx & { teamId: string; delta: number; reason?: string },
   { ok: boolean; newBonusPenalty: number }
 >('adjustTeamScore');
+
+// ── Staff field-ops (change: staff-console-field-ops) ──
+// All four are authorized by the same assertStaffOrOwner the console's existing
+// actions use; the staff custom token is scoped to one run, so none of them can
+// reach another organizer's event.
+
+// Park / release ONE team. While held the team's clock stops and every
+// progress-advancing callable refuses; `heldMsAdded` is what the resume settled.
+export const setTeamHold = callable<
+  Ctx & { teamId: string; held: boolean; reason?: string },
+  { ok: boolean; held: boolean; heldMsAdded: number }
+>('setTeamHold');
+
+// Send ONE team to a SPECIFIC mission in its current stage. `override` bypasses
+// only the unlock / scheduled-release / expiry gates — never a station's capacity.
+export const forceAssignTask = callable<
+  Ctx & { teamId: string; taskId: string; override?: boolean; reason?: string },
+  { ok: boolean; taskId: string; displacedTaskId: string | null; override: boolean }
+>('forceAssignTask');
+
+// Release a team from the safety-zone latch — previously reachable only from the
+// desktop run console, which meant a marshal had to find a laptop to unstick a team.
+export const clearTeamOutOfBounds = callable<
+  Ctx & { teamId: string },
+  { ok: boolean }
+>('clearTeamOutOfBounds');
+
+// Skip ONE mission for ONE team, keeping them in the same stage. Same callable the
+// desktop console uses; `taskId` omitted means "whatever they're holding now".
+export const skipTaskForTeam = callable<
+  Ctx & { teamId: string; taskId?: string; reason?: string },
+  {
+    ok: boolean; taskId: string; stageCompleted: boolean;
+    requiredTaskCount: number; requirementLowered: boolean;
+    nextTaskId: string | null; nextReason: string | null;
+  }
+>('skipTaskForTeam');
+
+// The run's ONE shared staff↔admin thread. The server decides whether this lands
+// as 'staff' or 'admin' from the caller's identity.
+export const sendStaffChannelMessage = callable<
+  Ctx & { text: string; senderName?: string },
+  { messageId: string }
+>('sendStaffChannelMessage');

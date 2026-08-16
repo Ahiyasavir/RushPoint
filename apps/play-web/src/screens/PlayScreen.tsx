@@ -573,7 +573,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         </div>
       )}
       <div className="mt-4 mb-2"><Progress done={completedStages} total={team.stages.length} /></div>
-      <InRunAlerts hotZone={state.run.hotZone} outOfBounds={team.outOfBounds} />
+      <InRunAlerts
+        hotZone={state.run.hotZone}
+        outOfBounds={team.outOfBounds}
+        held={team.held}
+        heldReason={team.heldReason}
+      />
       {streak >= 2 && (
         <div
           key={milestone ?? streak}

@@ -94,10 +94,11 @@ describe('buildRunConsolePlan — catalogue totality', () => {
     expect([...ALL_PANEL_IDS].sort()).toEqual([
       'alerts', 'analytics', 'broadcast', 'chat', 'feed', 'feedback', 'finalStandings',
       'flashMission', 'heatmap', 'hotZone', 'joinShare', 'liveMap', 'liveStandings',
-      'photoReview', 'runSummary', 'shareScreens', 'staffInvite', 'startTeams',
-      'stationQr', 'survey', 'taskAvailability', 'teams', 'trackables', 'zones',
+      'photoReview', 'runSummary', 'shareScreens', 'staffChannel', 'staffInvite',
+      'startTeams', 'stationQr', 'survey', 'taskAvailability', 'teams', 'trackables',
+      'zones',
     ]);
-    expect(ALL_PANEL_IDS.length).toBe(24);
+    expect(ALL_PANEL_IDS.length).toBe(25);
   });
 
   it('renders every catalogued panel somewhere across the three run statuses', () => {

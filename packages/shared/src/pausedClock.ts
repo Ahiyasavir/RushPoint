@@ -78,6 +78,34 @@ export function teamExcludedMs(stages: ExcludedStageRecord[]): number {
   return total;
 }
 
+/** The only field of a team document the hold rule reads. Server-written. */
+export interface HeldTimingRecord {
+  heldMs?: number;
+}
+
+/**
+ * How much of the team's clock a staff-initiated HOLD excludes — the team-level
+ * analogue of `teamExcludedMs` above.
+ *
+ * A hold is not tied to any one task (a marshal parks a team mid-transit, mid-
+ * deliberation, or between stages), so its accumulated total rides the team
+ * document instead of a RunTaskRecord. Same immutability argument as the task
+ * stamps: the server writes `heldMs` at resume from its OWN clock, and
+ * buildRankings reads only that number — never `heldAt` against `now` — so a team
+ * released ten minutes ago cannot keep accruing exclusion, and the live board and
+ * the final board read the same value.
+ *
+ * Total and fail-safe by construction: a missing, negative, non-finite or
+ * non-numeric stamp yields 0. This value is SUBTRACTED from every time-derived
+ * scoring term, so one corrupt team document must never be able to NaN or invert
+ * a whole leaderboard.
+ */
+export function teamHeldExclusionMs(team: HeldTimingRecord): number {
+  const ms = team?.heldMs;
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return 0;
+  return ms;
+}
+
 /**
  * The team's adjusted elapsed time: `max(0, raw - excluded)`.
  *

@@ -13,6 +13,7 @@ import { loggedCallable, logBestEffort } from '../obs/log';
 import { enforceRateLimit } from '../rateLimitStore';
 import { db } from '../firebase';
 import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 import {
   type Game,
   type Task,
@@ -117,13 +118,13 @@ import {
   FIRESTORE_PATHS,
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
-import { taskExcludedMs, teamExcludedMs, adjustedElapsedSeconds } from '@rushpoint/shared';
+import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds } from '@rushpoint/shared';
 import { shouldEmailRunSummary } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
 // Gallery ranking signals (change: gallery-popularity-ranking).
 import { bumpPublicSignals } from '../gallery/popularityStore';
-import { assignTask, releaseTask, computeSkillRatio, buildRecommendations, withLockRetry } from '../routing/assignNextTask';
+import { assignTask, claimSpecificTask, releaseTask, computeSkillRatio, buildRecommendations, withLockRetry } from '../routing/assignNextTask';
 import type { NoAssignmentReason } from '../routing/assignNextTask';
 import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
@@ -148,7 +149,11 @@ import { applyStageCompletion } from './helpers';
 // Skipping ONE mission for ONE team (change: skip-single-task): the pure decision
 // plus the durable trail every privileged override leaves.
 import { planTaskSkip } from '@rushpoint/shared';
-import { writeAuditLog, AUDIT_TASK_SKIPPED } from '../obs/audit';
+import {
+  writeAuditLog, AUDIT_TASK_SKIPPED,
+  AUDIT_TEAM_HELD, AUDIT_TEAM_RESUMED,
+  AUDIT_TASK_FORCE_ASSIGNED, AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE,
+} from '../obs/audit';
 // Game trash / tombstone (change: recoverable-game-deletion): a soft-deleted game
 // must be invisible on every run-facing path too — launch, join, instant play, the
 // shareable board, the recap, and the GM overview.
@@ -1481,6 +1486,362 @@ export const skipTaskForTeam = loggedCallable('skipTaskForTeam', async (data, co
 });
 
 
+// ─── Per-team hold (change: staff-console-field-ops) ─────────────────────────
+//
+// A marshal parks ONE team — injury, dispute, a bathroom break, waiting on staff —
+// without touching the run or any other team. Nothing in the product could do this
+// before: `setRunTaskStatus` pauses a TASK for the whole run, and `outOfBounds` is
+// system-detected, not staff-initiated.
+//
+// Three properties make it safe to hand to a volunteer with a phone:
+//   1. The team's clock stops. Held time accumulates into `RunTeam.heldMs` and is
+//      subtracted by buildRankings (see teamHeldExclusionMs), so a hold can never
+//      cost a team its standing — otherwise no marshal would dare use it.
+//   2. Progress is blocked, but READS are not. Every write path refuses via
+//      assertTeamNotHeld; getMyTeamState deliberately does not, so the participant
+//      app can explain the pause instead of showing seven opaque failures.
+//   3. It is reversible and audited, and it cannot outlive the run (finalizeRun
+//      settles any still-open hold).
+
+/**
+ * Refuse a progress-advancing action while the team is on a staff hold.
+ *
+ * Called at the TOP of every write path a team can advance through, before any
+ * state is read that assumes the team may act — so a held team causes zero side
+ * effects (no station slot reserved, no stage sweep persisted).
+ *
+ * Deliberately NOT applied to read paths. A held team must still be able to load
+ * its own state; that is the only way the app can say "staff paused you" instead
+ * of failing silently, and a read grants nothing a hold is meant to prevent.
+ */
+export function assertTeamNotHeld(team: Pick<RunTeam, 'held' | 'heldReason'>): void {
+  if (team?.held !== true) return;
+  // `failed-precondition` (not permission-denied): the caller is legitimate, the
+  // STATE is temporarily wrong. describeCallFailure maps this to a non-retryable
+  // 'rejected' on the client, which is exactly right — retrying changes nothing
+  // until staff resume the team.
+  throw new functions.https.HttpsError(
+    'failed-precondition',
+    'TEAM_HELD', // stable code — clients localize it, never render this string
+    { reason: team.heldReason ?? '' },
+  );
+}
+
+export const setTeamHold = loggedCallable('setTeamHold', async (data, context) => {
+  const {
+    ownerUid: ownerUidIn, gameId, runId, teamId, held, reason,
+  } = data as {
+    ownerUid?: string; gameId: string; runId: string; teamId: string;
+    held?: unknown; reason?: string;
+  };
+  const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
+  const operatorId = assertStaffOrOwner(context, ownerUid, runId);
+  await enforceRateLimit(operatorId, 'setTeamHold');
+
+  if (typeof held !== 'boolean') {
+    throw new functions.https.HttpsError('invalid-argument', 'held must be a boolean');
+  }
+  const ids = validate(() => ({
+    gameId: requireString(gameId, 'gameId', MAX_ID_LEN),
+    runId: requireString(runId, 'runId', MAX_ID_LEN),
+    teamId: requireString(teamId, 'teamId', MAX_ID_LEN),
+  }));
+  const cleanReason = typeof reason === 'string' ? reason.slice(0, 200) : '';
+  // Attribution comes from the token claim, never the payload — same rule the chat
+  // and audit paths already follow.
+  const heldBy = (context.auth?.token as { staffName?: string } | undefined)?.staffName
+    ?? (operatorId === ownerUid ? 'Admin' : 'Staff');
+
+  const runSnap = await db.doc(runPath(ownerUid, ids.gameId, ids.runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  // A finalized run's board is frozen; nothing may still move a team's clock.
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
+
+  const teamRef = db.doc(teamPath(ownerUid, ids.gameId, ids.runId, ids.teamId));
+  const now = new Date().toISOString();
+  let addedMs = 0;
+
+  // Transactional read-modify-write: `heldMs` is an accumulator, so a concurrent
+  // resume must not read a stale total and lose an interval.
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+    const team = snap.data() as RunTeam;
+    const currentlyHeld = team.held === true;
+
+    // Idempotence guard, both directions. A double-tapped resume must not add a
+    // second interval to heldMs (which would hand the team free time), and a
+    // double-tapped hold must not restamp heldAt (which would DISCARD the elapsed
+    // interval). Refusing is safer than silently no-op'ing: the marshal sees that
+    // the state was already what they wanted rather than assuming their tap landed.
+    if (held === currentlyHeld) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        held ? 'This team is already on hold' : 'This team is not on hold',
+      );
+    }
+
+    if (held) {
+      tx.update(teamRef, {
+        held: true,
+        heldAt: now,
+        heldReason: cleanReason,
+        heldBy,
+        updatedAt: now,
+      });
+    } else {
+      // Settle the interval from the SERVER's own stamps. A missing/garbled heldAt
+      // (a doc hand-edited, or written by an older build) contributes 0 rather than
+      // NaN — the fail-safe direction, since this number is subtracted from the
+      // team's race clock.
+      const startedMs = Date.parse(team.heldAt ?? '');
+      const elapsed = Number.isFinite(startedMs) ? Date.now() - startedMs : 0;
+      addedMs = Math.max(0, elapsed);
+      tx.update(teamRef, {
+        held: false,
+        heldAt: FieldValue.delete(),
+        heldReason: FieldValue.delete(),
+        heldMs: (Number.isFinite(team.heldMs) ? (team.heldMs as number) : 0) + addedMs,
+        updatedAt: now,
+      });
+    }
+  });
+
+  await writeAuditLog({
+    ownerUid,
+    gameId: ids.gameId,
+    runId: ids.runId,
+    teamId: ids.teamId,
+    operatorId,
+    actionType: held ? AUDIT_TEAM_HELD : AUDIT_TEAM_RESUMED,
+    previousValue: held ? 'active' : 'held',
+    newValue: held ? 'held' : 'active',
+    reason: cleanReason,
+    heldMsAdded: addedMs,
+  });
+
+  // The board's durations change the moment a hold is settled, so refresh it now
+  // (forced, best-effort — a frozen board still wins, like every other caller).
+  if (!held) {
+    await maybeRefreshLeaderboardSnapshot(ownerUid, ids.gameId, ids.runId, { force: true });
+  }
+
+  return { ok: true, held, heldMsAdded: addedMs };
+});
+
+
+// ─── forceAssignTask (change: staff-console-field-ops) ────────────────────────
+//
+// Send ONE team to a SPECIFIC task, instead of waiting for smart routing to pick.
+// The field reasons are crowd flow (a station is empty while another has a queue),
+// and unblocking a team that routing has left circling.
+//
+// What it may NOT do, and why:
+//   • Never exceed a station's capacity. `maxConcurrentTeams` models physical room
+//     at a real location, and the concurrent-claim invariant is guarded by the e2e
+//     station-contention scenario. This claims the slot inside the SAME transaction
+//     that checks the cap — the identical shape assignTask uses — so a full station
+//     refuses a force-assign exactly as it refuses a routed one.
+//   • Never leave the team's current active stage. Stage sequencing (required task
+//     counts, exclusive groups, the final-stage trigger) is not written to tolerate
+//     an out-of-sequence claim, so a task from a locked future stage, a completed
+//     stage, or another game is refused outright.
+//
+// `override` bypasses ONLY the soft sequencing gates (unlock / scheduled release /
+// expiry) — the ones a marshal legitimately needs to open early for one team. It is
+// off by default and audited under its own action type, so an organizer reading the
+// trail can see exactly when an authored rule was deliberately set aside.
+export const forceAssignTask = loggedCallable('forceAssignTask', async (data, context) => {
+  const {
+    ownerUid: ownerUidIn, gameId, runId, teamId, taskId, override, reason,
+  } = data as {
+    ownerUid?: string; gameId: string; runId: string; teamId: string;
+    taskId: string; override?: unknown; reason?: string;
+  };
+  const ownerUid = ownerUidIn ?? context.auth?.uid ?? '';
+  const operatorId = assertStaffOrOwner(context, ownerUid, runId);
+  await enforceRateLimit(operatorId, 'forceAssignTask');
+
+  const ids = validate(() => ({
+    gameId: requireString(gameId, 'gameId', MAX_ID_LEN),
+    runId: requireString(runId, 'runId', MAX_ID_LEN),
+    teamId: requireString(teamId, 'teamId', MAX_ID_LEN),
+    taskId: requireString(taskId, 'taskId', MAX_ID_LEN),
+  }));
+  const useOverride = override === true;
+  const cleanReason = typeof reason === 'string' ? reason.slice(0, 200) : '';
+
+  const [runSnap, gameSnap] = await Promise.all([
+    db.doc(runPath(ownerUid, ids.gameId, ids.runId)).get(),
+    db.doc(gamePath(ownerUid, ids.gameId)).get(),
+  ]);
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== ownerUid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+  if (run.status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This run has already finished');
+  }
+  const game = gameSnap.data() as Game;
+
+  const teamRef = db.doc(teamPath(ownerUid, ids.gameId, ids.runId, ids.teamId));
+  const teamSnap = await teamRef.get();
+  if (!teamSnap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+  const team = teamSnap.data() as RunTeam;
+
+  // A held team is parked on purpose — routing it somewhere would defeat the hold.
+  assertTeamNotHeld(team);
+
+  const stageIdx = team.stages.findIndex((s) => s.status === 'active');
+  if (stageIdx < 0) {
+    throw new functions.https.HttpsError('failed-precondition', 'This team has no active stage');
+  }
+  const stageRec = team.stages[stageIdx];
+  const targetRec = stageRec.tasks.find((t) => t.taskId === ids.taskId);
+  // Stage scope. Refusing here (rather than letting the claim through) is what
+  // keeps every stage-completion invariant intact — see the header.
+  if (!targetRec) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'That mission is not in this team\'s current stage',
+    );
+  }
+  if (targetRec.status === 'assigned') {
+    // Already there. Refuse rather than release-and-reclaim, which would briefly
+    // free the slot and let another team take it out from under this one.
+    throw new functions.https.HttpsError('failed-precondition', 'This team is already on that mission');
+  }
+  if (targetRec.status === 'completed' || targetRec.status === 'skipped') {
+    throw new functions.https.HttpsError('failed-precondition', 'That mission is already completed or skipped');
+  }
+
+  const gameStage = game.stages?.find((s) => s.id === stageRec.stageId);
+  const gameTask = gameStage?.tasks.find((t) => t.id === ids.taskId);
+  if (!gameTask) {
+    throw new functions.https.HttpsError('not-found', 'Mission not found in the game');
+  }
+
+  const now = new Date().toISOString();
+  const completedTaskIds = team.stages
+    .flatMap((s) => s.tasks)
+    .filter((t) => t.status === 'completed')
+    .map((t) => t.taskId);
+
+  // Claim the chosen task with the SAME atomic cap check assignTask performs, then
+  // (only on success) release whatever the team was holding. Order matters: claiming
+  // first means a refused claim leaves the team exactly as it was, still holding its
+  // original task, rather than stranded with nothing.
+  const claim = await claimSpecificTask(
+    gameTask, completedTaskIds, ownerUid, ids.gameId, ids.runId, useOverride, run.launchedAt,
+  );
+  if (!claim.ok) {
+    throw new functions.https.HttpsError(
+      'failed-precondition',
+      claim.reason === 'stationsFull'
+        ? 'That station is already full'
+        : 'That mission is not open right now',
+    );
+  }
+
+  let displacedTaskId: string | null = null;
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(teamRef);
+      if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
+      const fresh = snap.data() as RunTeam;
+      const stages = fresh.stages.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t })) }));
+      const idx = stages.findIndex((s) => s.status === 'active');
+      if (idx < 0) throw new functions.https.HttpsError('failed-precondition', 'This team has no active stage');
+      const rec = stages[idx].tasks.find((t) => t.taskId === ids.taskId);
+      if (!rec) throw new functions.https.HttpsError('invalid-argument', 'That mission is not in this team\'s current stage');
+      if (rec.status !== 'unassigned') {
+        // Re-checked inside the transaction: the team may have been routed onto this
+        // very task between our read and this write.
+        throw new functions.https.HttpsError('failed-precondition', 'This team is already on that mission');
+      }
+
+      // Displace whatever else is in flight in this stage. It goes back to
+      // `unassigned` (NOT skipped): the team never had a chance to fail it, so it
+      // must stay winnable — and leaving it unassigned means requiredTaskCount needs
+      // no adjustment, unlike skipTaskForTeam.
+      const inFlight = stages[idx].tasks.find((t) => t.status === 'assigned');
+      if (inFlight) {
+        inFlight.status = 'unassigned';
+        delete inFlight.startedAt;
+        displacedTaskId = inFlight.taskId;
+      }
+
+      rec.status = 'assigned';
+      rec.startedAt = now;
+
+      tx.update(teamRef, {
+        stages,
+        activeTaskId: ids.taskId,
+        updatedAt: now,
+      });
+    });
+  } catch (e) {
+    // The slot was claimed before the team write; if the write failed, give it back
+    // rather than leaking capacity at that station for the rest of the run.
+    await releaseTask(ids.taskId, ownerUid, ids.gameId, ids.runId).catch(() => undefined);
+    throw e;
+  }
+
+  if (displacedTaskId) {
+    await releaseTask(displacedTaskId, ownerUid, ids.gameId, ids.runId);
+  }
+
+  await writeAuditLog({
+    ownerUid,
+    gameId: ids.gameId,
+    runId: ids.runId,
+    teamId: ids.teamId,
+    operatorId,
+    actionType: useOverride ? AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE : AUDIT_TASK_FORCE_ASSIGNED,
+    previousValue: displacedTaskId ?? '',
+    newValue: ids.taskId,
+    reason: cleanReason,
+    taskId: ids.taskId,
+    taskTitle: gameTask.title ?? '',
+    override: useOverride,
+  });
+
+  // Tell the team WHY their mission changed. Best-effort and after the commit, the
+  // same shape adjustTeamScore's score notice uses — a silent task swap mid-run
+  // reads as a bug to the player holding the phone.
+  try {
+    const noticeRef = db
+      .collection(`users/${ownerUid}/games/${ids.gameId}/runs/${ids.runId}/announcements`)
+      .doc();
+    await noticeRef.set({
+      id: noticeRef.id,
+      kind: 'forceAssign',
+      teamId: ids.teamId,
+      taskId: ids.taskId,
+      message: `Staff sent you to: ${gameTask.title ?? ''}`,
+      messageHe: `הצוות שלח אתכם אל: ${gameTask.title ?? ''}`,
+      active: true,
+      createdAt: now,
+      createdBy: operatorId,
+    });
+  } catch (e) {
+    functions.logger.warn('forceAssignTask notice write failed', {
+      ownerUid, gameId: ids.gameId, runId: ids.runId, teamId: ids.teamId, err: String(e),
+    });
+  }
+
+  return { ok: true, taskId: ids.taskId, displacedTaskId, override: useOverride };
+});
+
+
 // ─── finalizeRun ─────────────────────────────────────────────────────────────
 // Owner ends the run. Scores all teams, applies Z-Score if preset ≠ time_only,
 // writes the leaderboard onto the Run doc.
@@ -1503,7 +1864,16 @@ export function buildRankings(game: Game, teams: RunTeam[], now: string): Leader
     // of the stored team document — not of `now`, not of the template, not of any
     // client input — finalizeRun and refreshLeaderboard compute the same value, so
     // live and final standings cannot drift.
-    const excludedMs = teamExcludedMs(team.stages);
+    //
+    // staff-console-field-ops: a staff-initiated HOLD is excluded by the same rule
+    // and at the same single site. It is added here rather than anywhere downstream
+    // so every time-derived term below (speed bonus, emitted duration, the time_only
+    // ordering and the Z-Score's durationMin) subtracts it exactly once. Same
+    // immutability argument as the task stamps: `heldMs` is an accumulated total the
+    // server wrote at resume from its own clock — never `heldAt` measured against
+    // `now` — so a team released an hour ago cannot keep accruing exclusion, and the
+    // live board and the final board still read the identical number.
+    const excludedMs = teamExcludedMs(team.stages) + teamHeldExclusionMs(team);
 
     switch (game.scoringPreset) {
       case 'time_only':
@@ -1882,6 +2252,41 @@ async function finalizeRunCore(
   const teams = parseTeamsQuarantining(teamsSnap.docs);
 
   const now = new Date().toISOString();
+
+  // Settle any STILL-OPEN staff hold before scoring (staff-console-field-ops).
+  // A hold must not outlive the run: a team left held at finalize would otherwise
+  // (a) keep `held: true` forever on a finished run, and (b) lose the exclusion for
+  // the interval between "held" and "run ended" — the very stretch the marshal
+  // parked them for. Settled from the SERVER's own stamps, in memory FIRST so the
+  // rankings below already see the corrected total, then persisted best-effort:
+  // the authoritative board write must not fail because one team-doc update did.
+  const nowMs = Date.parse(now);
+  const settledHolds: { teamId: string; heldMs: number }[] = [];
+  for (const team of teams) {
+    if (team.held !== true) continue;
+    const startedMs = Date.parse(team.heldAt ?? '');
+    const extra = Number.isFinite(startedMs) && Number.isFinite(nowMs)
+      ? Math.max(0, nowMs - startedMs)
+      : 0;
+    const total = (Number.isFinite(team.heldMs) ? (team.heldMs as number) : 0) + extra;
+    // Mutating the in-memory copy is what makes buildRankings below correct; the
+    // persisted write right after keeps the stored doc consistent with the board.
+    team.heldMs = total;
+    team.held = false;
+    settledHolds.push({ teamId: team.id, heldMs: total });
+  }
+  for (const s of settledHolds) {
+    await db.doc(teamPath(ownerUid, gameId, runId, s.teamId))
+      .update({
+        held: false,
+        heldAt: FieldValue.delete(),
+        heldReason: FieldValue.delete(),
+        heldMs: s.heldMs,
+        updatedAt: now,
+      })
+      .catch((e) => logBestEffort('finalizeRunCore.settleHold', { runId, teamId: s.teamId }, e));
+  }
+
   const rankings = buildRankings(game, teams, now);
 
   // Finalizing publishes the final standings to participants UNLESS the creator
@@ -3552,7 +3957,8 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   // player never sees a 500 AFTER a successful check-in.
   assertCoordIfPresent(lat, lng);
 
-  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  assertTeamNotHeld(team); // staff-console-field-ops — no check-in while held
   const now = new Date().toISOString();
 
   // Trigger-mode gate: radius/exact tasks validate GPS proximity server-side so
@@ -3651,6 +4057,9 @@ export const requestNextTask = loggedCallable('requestNextTask', async (data, co
   };
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  // Staff hold (staff-console-field-ops) — before every other read/write, so a held
+  // team causes zero side effects: no station slot reserved, no stage sweep persisted.
+  assertTeamNotHeld(team);
   // Soft-pause (safe-zone-boundary): no new task while the team is out of bounds.
   // Test-run bypass (wave-J): a desk rehearsal must never dead-end on the safe-zone
   // latch. The run-doc read happens ONLY when already flagged out of bounds (an
@@ -3690,6 +4099,7 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  assertTeamNotHeld(team); // staff-console-field-ops — no charged action while held
   // Same stage-scope guard as every answer/interaction callable (submitTaskAnswer,
   // submitSequenceStep, verifyStationCode, reportArrival): a hint may only be
   // revealed for a task in the team's ACTIVE (or already-completed) stage. Without
@@ -3776,6 +4186,7 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(
     uid, { ownerUid, gameId, runId, code }, { requireController: true },
   );
+  assertTeamNotHeld(team); // staff-console-field-ops — a held team cannot unseal
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -3980,6 +4391,7 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   }
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  assertTeamNotHeld(team); // staff-console-field-ops — no scoring action while held
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -4259,6 +4671,7 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   }
   assertCoordIfPresent(lat, lng); // WO-5: bad coords → clean invalid-argument, not 500
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  assertTeamNotHeld(team); // staff-console-field-ops — no step progress while held
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
@@ -4674,7 +5087,8 @@ export const checkOutTask = loggedCallable('checkOutTask', async (data, context)
     ownerUid?: string; gameId?: string; runId?: string; code?: string;
   };
   if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
-  const { ctx, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  const { ctx, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+  assertTeamNotHeld(team); // staff-console-field-ops — no abandoning a task while held
 
   // Only release a slot this team actually holds, and clear our own record —
   // otherwise a replayed / cross-team call drains run.taskCounts for a slot it

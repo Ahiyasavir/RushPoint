@@ -138,3 +138,22 @@ export function saveChatSeen(runId: string, teamId: string, marker: ChatSeenMark
     localStorage.setItem(chatSeenStorageKey(runId, teamId), serializeChatSeen(marker));
   } catch { /* best-effort */ }
 }
+
+// ── Generic seen-marker storage (change: staff-console-field-ops) ──
+// The staff↔admin channel is RUN-scoped, not team-scoped, so it needs the same
+// marker persistence against a different key shape. Same failure direction as the
+// pair above: blocked storage reads as "nothing seen", which shows a badge that
+// shouldn't be there rather than hiding a message that should.
+export function readSeenMarker(key: string): ChatSeenMarker {
+  try {
+    return parseChatSeen(localStorage.getItem(key));
+  } catch {
+    return {};
+  }
+}
+
+export function writeSeenMarker(key: string, marker: ChatSeenMarker) {
+  try {
+    localStorage.setItem(key, serializeChatSeen(marker));
+  } catch { /* best-effort */ }
+}

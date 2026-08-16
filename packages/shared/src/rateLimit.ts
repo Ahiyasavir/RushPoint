@@ -76,6 +76,15 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   joinRun: { max: 10, windowMs: MIN },
   triggerSOS: { max: 5, windowMs: MIN },
   sendTeamChatMessage: { max: 10, windowMs: MIN }, // per-sender uid; one spammer can't starve teammates/HQ
+  // Staff↔admin channel (staff-console-field-ops). Roomier than team chat: this is
+  // the operational back-channel during an incident, when a marshal legitimately
+  // fires several short lines in a row, and every sender is already an authorized
+  // staffer or the owner — not an anonymous participant.
+  sendStaffChannelMessage: { max: 20, windowMs: MIN },
+  // Staff team-management actions (staff-console-field-ops). Bounded because each
+  // writes an audit row, but high enough for a marshal working a queue of teams.
+  setTeamHold: { max: 30, windowMs: MIN },
+  forceAssignTask: { max: 30, windowMs: MIN },
   requestGuardianConsent: { max: 10, windowMs: MIN }, // writes a doc per call — bound token spam
   submitRunFeedback: { max: 3, windowMs: MIN }, // one real response per run; retries have headroom
   reactToFeedItem: { max: 60, windowMs: MIN }, // taps on the live photo feed (live-photo-feed)

@@ -102,6 +102,32 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(smart?.adminNotes).toBeUndefined();
   });
 
+  // video-submission-task: 'video' is a third captureKind, and its clip-length
+  // range must reach the participant too — the recorder cannot enforce a limit it
+  // cannot see. Neither field carries secret information.
+  test('smart.captureKind video + its duration range survive sanitization', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'photo',
+        smart: {
+          enabled: true,
+          verificationType: 'photo_upload',
+          captureKind: 'video',
+          videoMinSeconds: 10,
+          videoMaxSeconds: 30,
+          secretCode: 'OPEN-SESAME',
+          adminNotes: 'internal only',
+        },
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    const smart = out.smart as Record<string, unknown> | undefined;
+    expect(smart?.captureKind).toBe('video');
+    expect(smart?.videoMinSeconds).toBe(10);
+    expect(smart?.videoMaxSeconds).toBe(30);
+    expect(smart?.secretCode).toBeUndefined();
+    expect(smart?.adminNotes).toBeUndefined();
+  });
+
   // task-media-attachments: general media is participant-visible (no secret) and
   // must survive the sanitizer intact so the TaskRunner can render it.
   test('task media (image + youtube) passes through to the participant unchanged', () => {

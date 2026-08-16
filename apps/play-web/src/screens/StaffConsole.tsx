@@ -1,5 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
 import { db, signInStaff, uid } from '../services/firebase';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
 // Live photo feed moderation (live-photo-feed): lazy, loads on first open.
@@ -12,11 +12,21 @@ import {
   pushAnnouncement,
   adjustTeamScore,
   sendTeamChatMessage,
+  setTeamHold,
+  forceAssignTask,
+  clearTeamOutOfBounds,
+  skipTaskForTeam,
+  sendStaffChannelMessage,
 } from '../services/calls';
 import {
   FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, chatMessageSide, chatSeenMarker, countUnreadChatMessages,
-  type ChatMessage, type ChatSeenMarker,
+  staffChannelMessageSide, staffChannelSeenStorageKey,
+  type ChatMessage, type ChatSeenMarker, type StaffChannelMessage,
 } from '@rushpoint/shared';
+import {
+  OTHER_REASON, reasonsForDelta, resolveReason, parseAdjustAmount, type ScoreReasonId,
+} from '../lib/scoreReasons';
+import { filterTeamsByName } from '../lib/staffTeamFilter';
 import type { StaffCtx } from '../lib/playRoute';
 import {
   loadStaffSession,
@@ -24,6 +34,8 @@ import {
   clearStaffSession,
   loadChatSeen,
   saveChatSeen,
+  readSeenMarker,
+  writeSeenMarker,
   type StaffSession,
 } from '../store';
 import { Button, Card, Collapsible, Input, Screen } from '../components/ui';
@@ -41,7 +53,7 @@ interface PendingSubmission {
   photoUrl: string;
   submittedAt: string;
   // audio-tasks: how to render the submission (absent ⇒ 'photo' for legacy rows).
-  mediaKind?: 'photo' | 'audio';
+  mediaKind?: 'photo' | 'audio' | 'video';
 }
 
 interface Alert {
@@ -55,10 +67,19 @@ interface Alert {
 }
 
 // ── A team row for the manual bonus/deduction panel ──
+// The field-ops fields (staff-console-field-ops) ride the SAME live snapshot that
+// already feeds this panel, so search, the hold toggle, the out-of-bounds release
+// and force-assign all cost zero extra reads.
 interface TeamRow {
   id: string;
   displayName: string;
   score: number;
+  held?: boolean;
+  heldReason?: string;
+  outOfBounds?: boolean;
+  activeTaskId?: string | null;
+  /** Task ids still open in this team's ACTIVE stage — the force-assign menu. */
+  assignableTaskIds?: string[];
 }
 
 export default function StaffConsole({ ctx, onExit }: { ctx: StaffCtx | null; onExit: () => void }) {
@@ -199,6 +220,9 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // a volunteer awards points dozens of times a run and a modal per tap is
   // unusable), so a wrong one is visible and correctable with its opposite.
   const [adjustAck, setAdjustAck] = useState<Record<string, string>>({});
+  // Team search (staff-console-field-ops). Purely local: the whole roster is already
+  // in this snapshot and is bounded by Run.maxParticipants, so no query is needed.
+  const [teamQuery, setTeamQuery] = useState('');
   const ackTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   useEffect(() => {
     const timers = ackTimers.current;
@@ -217,9 +241,34 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
         const td = doc.data() as {
           displayName?: string;
           score?: number;
-          taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' }>;
+          held?: boolean;
+          heldReason?: string;
+          outOfBounds?: boolean;
+          activeTaskId?: string | null;
+          stages?: { status?: string; tasks?: { taskId?: string; status?: string }[] }[];
+          taskSubmissions?: Record<string, { photoUrl?: string; submittedAt?: string; status?: string; mediaKind?: 'photo' | 'audio' | 'video' }>;
         };
-        teamRows.push({ id: doc.id, displayName: td.displayName ?? doc.id, score: td.score ?? 0 });
+        // Which missions force-assign may offer: the still-unassigned ones in the
+        // team's ACTIVE stage. Derived here (not in the row component) because the
+        // server refuses anything outside that stage anyway — offering more would
+        // just be a menu of guaranteed rejections. Defensive at every hop: a team
+        // mid-transition can have no active stage, and the console must still render.
+        const activeStage = Array.isArray(td.stages)
+          ? td.stages.find((s) => s?.status === 'active')
+          : undefined;
+        const assignableTaskIds = (activeStage?.tasks ?? [])
+          .filter((t) => t?.status === 'unassigned' && typeof t?.taskId === 'string')
+          .map((t) => t.taskId as string);
+        teamRows.push({
+          id: doc.id,
+          displayName: td.displayName ?? doc.id,
+          score: td.score ?? 0,
+          held: td.held === true,
+          heldReason: td.heldReason,
+          outOfBounds: td.outOfBounds === true,
+          activeTaskId: td.activeTaskId ?? null,
+          assignableTaskIds,
+        });
         const subs = td.taskSubmissions ?? {};
         for (const [taskId, sub] of Object.entries(subs)) {
           if (sub?.status === 'pending') {
@@ -298,15 +347,52 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
 
   // Manual bonus / deduction. Positive delta = bonus, negative = fine. The team
   // score updates live via the open snapshot; no manual refresh needed.
-  async function adjust(team: TeamRow, delta: number) {
+  //
+  // `reason` (staff-console-field-ops) replaces the hardcoded 'staff' this used to
+  // send: adjustTeamScore has always written the reason into auditLogs, so the trail
+  // existed but said nothing. Still OPTIONAL — a marshal fixing a score mid-event
+  // must never be blocked by an empty text box.
+  async function adjust(team: TeamRow, delta: number, reason?: string) {
     try {
-      await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: 'staff' });
+      await adjustTeamScore({ ...ctx, teamId: team.id, delta, reason: reason || undefined });
       const label = t.staff.adjustApplied({ delta: delta > 0 ? `+${delta}` : String(delta) });
       setAdjustAck((a) => ({ ...a, [team.id]: label }));
       clearTimeout(ackTimers.current[team.id]);
       ackTimers.current[team.id] = setTimeout(() => {
         setAdjustAck((a) => { const next = { ...a }; delete next[team.id]; return next; });
       }, 3000);
+    } catch (e) {
+      setReadErr(classifyStaffError(e));
+    }
+  }
+
+  // Every non-scoring per-team action, behind ONE in-flight key per team
+  // (staff-console-field-ops). Routed through a single function so a team row can
+  // never have two field actions in flight at once — holding a team while
+  // force-assigning it is exactly the kind of race a live event produces.
+  type TeamOp =
+    | { kind: 'hold'; held: boolean; reason?: string }
+    | { kind: 'clearOob' }
+    | { kind: 'skipTask' }
+    | { kind: 'forceAssign'; taskId: string; override: boolean };
+
+  async function runTeamOp(team: TeamRow, op: TeamOp) {
+    try {
+      if (op.kind === 'hold') {
+        await setTeamHold({ ...ctx, teamId: team.id, held: op.held, reason: op.reason });
+      } else if (op.kind === 'clearOob') {
+        await clearTeamOutOfBounds({ ...ctx, teamId: team.id });
+      } else if (op.kind === 'skipTask') {
+        if (!(await dialog.confirm(t.staff.skipTaskConfirm))) return;
+        await skipTaskForTeam({ ...ctx, teamId: team.id });
+      } else {
+        await forceAssignTask({
+          ...ctx, teamId: team.id, taskId: op.taskId, override: op.override,
+        });
+      }
+      // No optimistic local mutation anywhere above: the open snapshot is the single
+      // source of truth for these flags, so the row re-renders from the server's
+      // verdict rather than from what we hoped happened.
     } catch (e) {
       setReadErr(classifyStaffError(e));
     }
@@ -319,9 +405,13 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
   // row can still act while this one is in flight.
   const reviewAction = useAsyncAction<[PendingSubmission, boolean], void>(review, (s) => `${s.teamId}:${s.taskId}`);
   const ackAction = useAsyncAction<[Alert], void>(ack, (a) => a.id);
-  const adjustAction = useAsyncAction<[TeamRow, number], void>(adjust, (team) => team.id);
+  const adjustAction = useAsyncAction<[TeamRow, number, string?], void>(adjust, (team) => team.id);
+  const opsAction = useAsyncAction<[TeamRow, TeamOp], void>(runTeamOp, (team) => team.id);
 
   const nameFor = (teamId: string) => teams.find((tm) => tm.id === teamId)?.displayName ?? teamId.slice(0, 8);
+  // Filtered in one place so the empty-search and no-match states stay distinct:
+  // "no teams yet" and "no team by that name" are different problems for a marshal.
+  const visibleTeams = useMemo(() => filterTeamsByName(teams, teamQuery), [teams, teamQuery]);
 
   return (
     <div className="min-h-screen max-w-md mx-auto w-full px-5 py-6 flex flex-col">
@@ -399,6 +489,7 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
             // missing/malformed mediaKind on an AUDIO doc then routes to <audio> (by
             // kind) or, failing that, to the 📎 fallback below — never a broken <img>.
             const isAudio = s.mediaKind === 'audio';
+            const isVideo = s.mediaKind === 'video';
             const looksLikeImage = /\.(jpe?g|png|gif|webp|heic|heif|avif|bmp)(\b|\?|%|$)/i.test(s.photoUrl);
             const isImage = s.mediaKind === 'photo' || (s.mediaKind === undefined && looksLikeImage);
             return (
@@ -407,6 +498,8 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
                 <div className="text-xs text-zinc-500 mb-2">{t.staff.taskLabel} {s.taskId.slice(0, 10)}</div>
                 {hasUrl && isAudio
                   ? <audio controls src={s.photoUrl} className="w-full mb-2" aria-label={t.staff.audioSubmission} />
+                  : hasUrl && isVideo
+                  ? <video controls src={s.photoUrl} className="w-full rounded-lg mb-2 max-h-64" aria-label={t.staff.videoSubmission} />
                   : hasUrl && isImage
                   ? <img src={s.photoUrl} alt={t.staff.submissionAlt} className="w-full rounded-lg mb-2 max-h-64 object-contain" />
                   : <div className="text-xs text-zinc-500 italic mb-2 break-all">📎 {s.photoUrl || t.staff.noPhoto}</div>}
@@ -431,49 +524,50 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
           })}
       </section>
 
-      {/* ── Manual bonus / deduction ── */}
+      {/* ── Teams: scores + every per-team field action ──────────────────────
+          One row per team carrying everything a marshal can do to that team, so
+          they never have to find a laptop mid-event (change: staff-console-field-ops).
+          The search box exists because this list is a flat scroll — at 20+ teams,
+          finding one by thumb is the slowest part of the job. */}
       <section className="mb-6">
         <h2 className="text-sm font-semibold text-zinc-300 mb-2">
           ⚖️ {t.staff.teamsScores} {teams.length > 0 && <span className="text-zinc-500">({teams.length})</span>}
         </h2>
+        {teams.length > 0 && (
+          <Input
+            value={teamQuery}
+            onChange={(e) => setTeamQuery(e.target.value)}
+            placeholder={t.staff.searchTeams}
+            dir="auto"
+            className="mb-2"
+            aria-label={t.staff.searchTeams}
+          />
+        )}
         {teams.length === 0
           ? <p className="text-zinc-500 text-sm">{t.staff.noTeams}</p>
-          : teams.map((tm) => (
-            <Card key={tm.id} className="p-3 mb-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{tm.displayName}</div>
-                  <div className="text-xs text-zinc-500">{t.staff.scoreLabel} {tm.score}</div>
-                  {adjustAck[tm.id] && (
-                    <div role="status" aria-live="polite" className="text-xs font-semibold text-ink-fire">
-                      ✓ {adjustAck[tm.id]}
-                    </div>
-                  )}
-                </div>
-                {/* Two groups with a wide separator: -5 and +5 used to sit ~4px
-                    apart, so the deduct and the award were one thumb-width from
-                    each other on a control with no undo. */}
-                <div className="flex items-center gap-4 shrink-0">
-                  {[[-10, -5], [5, 10]].map((group) => (
-                    <div key={group[0]} className="flex items-center gap-2">
-                      {group.map((d) => (
-                        <button
-                          key={d}
-                          className={`w-11 h-11 rounded-lg text-sm font-bold border disabled:opacity-40 ${
-                            d > 0 ? 'bg-accent/15 text-ink-fire border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
-                          }`}
-                          disabled={adjustAction.isBusy(tm.id)}
-                          aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
-                          onClick={() => void adjustAction.run(tm, d)}
-                        >{d > 0 ? `+${d}` : d}</button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
+          : visibleTeams.length === 0
+          ? <p className="text-zinc-500 text-sm">{t.staff.noTeamsMatch}</p>
+          : visibleTeams.map((tm) => (
+            <TeamOpsCard
+              key={tm.id}
+              team={tm}
+              ack={adjustAck[tm.id]}
+              busy={adjustAction.isBusy(tm.id) || opsAction.isBusy(tm.id)}
+              onAdjust={(delta, reason) => void adjustAction.run(tm, delta, reason)}
+              onHold={(held, reason) => void opsAction.run(tm, { kind: 'hold', held, reason })}
+              onClearOob={() => void opsAction.run(tm, { kind: 'clearOob' })}
+              onSkipTask={() => void opsAction.run(tm, { kind: 'skipTask' })}
+              onForceAssign={(taskId, override) =>
+                void opsAction.run(tm, { kind: 'forceAssign', taskId, override })}
+            />
           ))}
       </section>
+
+      {/* ── Live map of every team's last known position ── */}
+      <StaffTeamMapSection ctx={ctx} teams={teams} />
+
+      {/* ── Staff ↔ admin channel ── */}
+      <StaffAdminChannelSection ctx={ctx} senderName={staff.name} />
 
       {/* ── Team ↔ HQ chat threads ── */}
       <StaffChatSection ctx={ctx} teams={teams} senderName={staff.name} />
@@ -484,6 +578,320 @@ function StaffDashboard({ staff, onSignOut }: { staff: StaffSession; onSignOut: 
       {/* ── Announcement composer ── */}
       <AnnouncementComposer ctx={ctx} />
     </div>
+  );
+}
+
+// ─── One team's row: score + every field action (staff-console-field-ops) ─────
+//
+// Extracted from StaffDashboard's inline map because it owns real local state (the
+// custom-amount draft, the reason picker, which sub-panel is open) and inlining
+// that would re-create it for every team on every snapshot — mid-typing, at an
+// event, on a phone.
+//
+// Layout rule throughout: the row shows the SAFE, frequent actions (±5/±10) at
+// rest, and everything that is rarer or harder to undo (custom amount, hold,
+// force-assign, skip) only after a deliberate tap on "more". A marshal awards
+// points dozens of times a run and holds a team maybe twice.
+function TeamOpsCard({
+  team, ack, busy, onAdjust, onHold, onClearOob, onSkipTask, onForceAssign,
+}: {
+  team: TeamRow;
+  ack?: string;
+  busy: boolean;
+  onAdjust: (delta: number, reason?: string) => void;
+  onHold: (held: boolean, reason?: string) => void;
+  onClearOob: () => void;
+  onSkipTask: () => void;
+  onForceAssign: (taskId: string, override: boolean) => void;
+}) {
+  const { t } = useT();
+  const [openPanel, setOpenPanel] = useState<null | 'amount' | 'assign' | 'hold'>(null);
+  const [amountDraft, setAmountDraft] = useState('');
+  const [reasonId, setReasonId] = useState<ScoreReasonId | null>(null);
+  const [reasonText, setReasonText] = useState('');
+  const [holdReason, setHoldReason] = useState('');
+
+  const parsedAmount = parseAdjustAmount(amountDraft);
+  // The reason vocabulary follows the SIGN of the amount being entered, so a
+  // marshal typing -20 is never offered "creativity bonus".
+  const presets = reasonsForDelta(parsedAmount ?? 1);
+
+  function closeAmount() {
+    setOpenPanel(null);
+    setAmountDraft('');
+    setReasonId(null);
+    setReasonText('');
+  }
+
+  function submitAmount() {
+    if (parsedAmount === null) return;
+    onAdjust(parsedAmount, resolveReason(reasonId, reasonText));
+    closeAmount();
+  }
+
+  // The preset ids ARE i18n keys (see lib/scoreReasons — an id is language-neutral
+  // for the audit log, the label is localized for the marshal). Resolved through an
+  // unknown cast because t.staff also holds function-valued entries.
+  const label = (id: ScoreReasonId) =>
+    (t.staff as unknown as Record<string, string>)[id] ?? id;
+
+  return (
+    <Card className={`p-3 mb-2 ${team.held ? 'border-accent/50' : ''}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{team.displayName}</div>
+          <div className="text-xs text-zinc-500">{t.staff.scoreLabel} {team.score}</div>
+          {/* State badges. Both mean "someone must act", so they sit next to the
+              name rather than inside the collapsed actions. */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            {team.held && (
+              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">
+                ⏸ {t.staff.heldBadge}
+              </span>
+            )}
+            {team.outOfBounds && (
+              <span className="inline-flex items-center rounded-full bg-danger/20 border border-danger/50 px-2 py-0.5 text-[11px] font-semibold text-danger">
+                {t.staff.outOfBoundsBadge}
+              </span>
+            )}
+          </div>
+          {team.held && team.heldReason && (
+            <div dir="auto" className="text-xs text-zinc-500 mt-0.5">{team.heldReason}</div>
+          )}
+          {ack && (
+            <div role="status" aria-live="polite" className="text-xs font-semibold text-ink-fire">
+              ✓ {ack}
+            </div>
+          )}
+        </div>
+        {/* Two groups with a wide separator: -5 and +5 used to sit ~4px
+            apart, so the deduct and the award were one thumb-width from
+            each other on a control with no undo. */}
+        <div className="flex items-center gap-4 shrink-0">
+          {[[-10, -5], [5, 10]].map((group) => (
+            <div key={group[0]} className="flex items-center gap-2">
+              {group.map((d) => (
+                <button
+                  key={d}
+                  className={`w-11 h-11 rounded-lg text-sm font-bold border disabled:opacity-40 ${
+                    d > 0 ? 'bg-accent/15 text-ink-fire border-accent/30' : 'bg-app-raised text-zinc-200 border-glass-border'
+                  }`}
+                  disabled={busy}
+                  aria-label={`${d > 0 ? t.staff.bonus : t.staff.deduct} ${Math.abs(d)}`}
+                  onClick={() => onAdjust(d)}
+                >{d > 0 ? `+${d}` : d}</button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Secondary actions ── */}
+      <div className="flex flex-wrap items-center gap-2 mt-2.5">
+        <button
+          className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
+          disabled={busy}
+          onClick={() => setOpenPanel((p) => (p === 'amount' ? null : 'amount'))}
+        >
+          {t.staff.customAmount}
+        </button>
+        {/* Hold is the one action that changes whether the team can play at all,
+            so it is styled as the standout and never hidden behind another tap. */}
+        <button
+          className={`min-h-[44px] px-3 rounded-lg text-xs font-semibold border disabled:opacity-40 ${
+            team.held
+              ? 'bg-accent text-black border-accent'
+              : 'bg-app-raised text-zinc-200 border-glass-border'
+          }`}
+          disabled={busy}
+          onClick={() => {
+            // Releasing is immediate — a marshal standing with a team that is ready
+            // to go must not be made to fill anything in.
+            if (team.held) { onHold(false); return; }
+            // Holding opens an inline reason panel (not a modal, not window.prompt:
+            // same reasoning as the custom-amount control — a phone keyboard reflows
+            // the page and a viewport-anchored modal jumps away from its own row).
+            setOpenPanel((p) => (p === 'hold' ? null : 'hold'));
+          }}
+        >
+          {team.held ? t.staff.resumeTeam : t.staff.holdTeam}
+        </button>
+        {team.outOfBounds && (
+          <button
+            className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-danger/50 text-danger disabled:opacity-40"
+            disabled={busy}
+            onClick={onClearOob}
+          >
+            {t.staff.clearOutOfBounds}
+          </button>
+        )}
+        {(team.assignableTaskIds?.length ?? 0) > 0 && (
+          <button
+            className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-200 disabled:opacity-40"
+            disabled={busy}
+            onClick={() => setOpenPanel((p) => (p === 'assign' ? null : 'assign'))}
+          >
+            {t.staff.forceAssign}
+          </button>
+        )}
+        {team.activeTaskId && (
+          <button
+            className="min-h-[44px] px-3 rounded-lg text-xs font-semibold bg-app-raised border border-glass-border text-zinc-400 disabled:opacity-40"
+            disabled={busy}
+            onClick={onSkipTask}
+          >
+            {t.staff.skipTask}
+          </button>
+        )}
+      </div>
+
+      {/* ── Custom amount + reason ──────────────────────────────────────────
+          An inline expand, NOT a modal and NOT window.prompt(): a phone keyboard
+          opening reflows the page, and a modal anchored to the viewport jumps out
+          from under the row it belongs to. Confirm stays disabled until the amount
+          parses, so the "is this submittable?" question has exactly one answer
+          (parseAdjustAmount) rather than one per control. */}
+      {openPanel === 'amount' && (
+        <div className="mt-2.5 pt-2.5 border-t border-glass-border">
+          <Input
+            value={amountDraft}
+            onChange={(e) => setAmountDraft(e.target.value)}
+            placeholder={t.staff.customAmountPlaceholder}
+            inputMode="numeric"
+            dir="ltr"
+            autoFocus
+            aria-label={t.staff.customAmount}
+            className="text-center text-lg"
+          />
+          <div className="text-[11px] text-zinc-500 mt-2 mb-1">{t.staff.reasonLabel}</div>
+          <div className="flex flex-wrap gap-1.5">
+            {[...presets, OTHER_REASON].map((id) => (
+              <button
+                key={id}
+                onClick={() => setReasonId((cur) => (cur === id ? null : id))}
+                className={`min-h-[44px] px-3 rounded-lg text-xs font-medium border ${
+                  reasonId === id
+                    ? 'bg-accent/20 text-ink-fire border-accent/50'
+                    : 'bg-app-raised text-zinc-300 border-glass-border'
+                }`}
+              >
+                {label(id)}
+              </button>
+            ))}
+          </div>
+          {reasonId === OTHER_REASON && (
+            <Input
+              value={reasonText}
+              onChange={(e) => setReasonText(e.target.value)}
+              placeholder={t.staff.reasonOtherPlaceholder}
+              dir="auto"
+              maxLength={200}
+              className="mt-2"
+              aria-label={t.staff.reasonOther}
+            />
+          )}
+          <div className="flex gap-2 mt-2.5">
+            <button
+              className="flex-1 min-h-[44px] rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
+              disabled={busy || parsedAmount === null}
+              onClick={submitAmount}
+            >
+              {t.staff.customAmountApply}
+            </button>
+            <button
+              className="flex-1 min-h-[44px] rounded-lg bg-app-raised border border-glass-border text-zinc-300 font-semibold text-sm"
+              onClick={closeAmount}
+            >
+              {t.staff.customAmountCancel}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Hold reason ─────────────────────────────────────────────────────
+          Optional by design: the reason is shown to the TEAM on their own screen,
+          which is the whole point (a player stopped with no explanation assumes the
+          app broke), but a marshal dealing with an actual incident must be able to
+          stop a team in one tap without composing a sentence first. */}
+      {openPanel === 'hold' && (
+        <div className="mt-2.5 pt-2.5 border-t border-glass-border">
+          <div className="text-[11px] text-zinc-500 mb-1.5">{t.staff.holdReasonPrompt}</div>
+          <Input
+            value={holdReason}
+            onChange={(e) => setHoldReason(e.target.value)}
+            placeholder={t.staff.reasonOtherPlaceholder}
+            dir="auto"
+            maxLength={200}
+            autoFocus
+            aria-label={t.staff.holdReasonPrompt}
+          />
+          <div className="flex gap-2 mt-2.5">
+            <button
+              className="flex-1 min-h-[44px] rounded-lg bg-accent text-black font-semibold text-sm disabled:opacity-40"
+              disabled={busy}
+              onClick={() => {
+                onHold(true, holdReason.trim());
+                setHoldReason('');
+                setOpenPanel(null);
+              }}
+            >
+              {t.staff.holdTeam}
+            </button>
+            <button
+              className="flex-1 min-h-[44px] rounded-lg bg-app-raised border border-glass-border text-zinc-300 font-semibold text-sm"
+              onClick={() => { setHoldReason(''); setOpenPanel(null); }}
+            >
+              {t.staff.customAmountCancel}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Force assign ────────────────────────────────────────────────────
+          Only the team's own current-stage missions are offered: the server
+          refuses anything else, so a longer menu would just be a list of
+          guaranteed failures. The override is a SEPARATE, differently-styled
+          button per mission rather than a global toggle — a toggle left on from
+          the previous team is exactly how an authored rule gets broken by
+          accident. */}
+      {openPanel === 'assign' && (
+        <div className="mt-2.5 pt-2.5 border-t border-glass-border">
+          <div className="text-[11px] text-zinc-500 mb-1.5">{t.staff.forceAssignPick}</div>
+          {(team.assignableTaskIds ?? []).length === 0 ? (
+            <p className="text-zinc-500 text-xs">{t.staff.forceAssignNoTasks}</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {(team.assignableTaskIds ?? []).map((taskId) => (
+                <div key={taskId} className="flex items-center gap-1.5">
+                  <button
+                    className="flex-1 min-h-[44px] px-3 rounded-lg text-xs font-medium bg-app-raised border border-glass-border text-zinc-200 text-start truncate disabled:opacity-40"
+                    disabled={busy}
+                    onClick={() => { onForceAssign(taskId, false); setOpenPanel(null); }}
+                  >
+                    {taskId.slice(0, 18)}
+                  </button>
+                  <button
+                    className="shrink-0 min-h-[44px] px-2.5 rounded-lg text-[11px] font-semibold bg-transparent border border-danger/50 text-danger disabled:opacity-40"
+                    disabled={busy}
+                    title={t.staff.forceAssignOverrideWarn}
+                    onClick={() => {
+                      void dialog.confirm(t.staff.forceAssignOverrideWarn, { danger: true })
+                        .then((okToOverride) => {
+                          if (!okToOverride) return;
+                          onForceAssign(taskId, true);
+                          setOpenPanel(null);
+                        });
+                    }}
+                  >
+                    {t.staff.forceAssignOverride}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -646,6 +1054,164 @@ function StaffChatSection({
             );
           })
         )}
+      </Collapsible>
+    </section>
+  );
+}
+
+// ─── Staff ↔ admin channel (staff-console-field-ops) ─────────────────────────
+//
+// ONE shared thread per run: any marshal ↔ the organizer. Distinct from the team
+// chat above (which is per team, and which participants can read) — this is where
+// staff report problems and ask for exceptions, so it must not be readable by the
+// teams it concerns. firestore.rules enforces that independently of this UI.
+function StaffAdminChannelSection({
+  ctx, senderName,
+}: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  senderName: string;
+}) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [messages, setMessages] = useState<StaffChannelMessage[]>([]);
+  const [seen, setSeen] = useState<ChatSeenMarker | null>(null);
+  const [draft, setDraft] = useState('');
+  const myUid = uid();
+
+  // Seen marker persists per RUN (no team component — there is one thread), so a
+  // console reload does not re-flag messages this device already read.
+  const storageKey = staffChannelSeenStorageKey(ctx.runId);
+  const marker = seen ?? readSeenMarker(storageKey);
+
+  useEffect(() => {
+    const ref = doc(db, FIRESTORE_PATHS.runStaffChannel(ctx.ownerUid, ctx.gameId, ctx.runId));
+    return onSnapshot(ref, (snap) => {
+      const data = snap.data() as { messages?: StaffChannelMessage[] } | undefined;
+      setMessages(data?.messages ?? []);
+      // A read failure here is NOT surfaced as a console-wide error: a staff token
+      // minted before this feature shipped may legitimately fail the new rule, and
+      // that must degrade to an empty channel, never to a red banner over a
+      // working console mid-event.
+    }, () => setMessages([]));
+  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  const unread = countUnreadChatMessages(messages, marker, myUid);
+
+  // While the section is open, arrivals are being read — keep the marker in step so
+  // sending a message doesn't immediately re-flag the thread as unread.
+  useEffect(() => {
+    if (!open || messages.length === 0) return;
+    if (countUnreadChatMessages(messages, marker, myUid) === 0) return;
+    const next = chatSeenMarker(messages);
+    writeSeenMarker(storageKey, next);
+    setSeen(next);
+  }, [open, messages, marker, myUid, storageKey]);
+
+  async function send() {
+    const clean = draft.trim();
+    if (!clean) return;
+    try {
+      await sendStaffChannelMessage({ ...ctx, text: clean, senderName });
+      setDraft('');
+    } catch {
+      // Keep the draft: retyping a field report on a phone, in the field, is the
+      // worst possible failure recovery.
+    }
+  }
+  const sendAction = useAsyncAction(send);
+
+  return (
+    <section className="mb-6">
+      <Collapsible
+        open={open}
+        onToggle={() => setOpen((o) => !o)}
+        header={(
+          <>
+            📻 {t.staff.channelTitle}
+            {unread > 0 && (
+              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{unread}</span>
+            )}
+          </>
+        )}
+      >
+        <div className="flex flex-col gap-2">
+          {messages.length === 0 ? (
+            <p className="text-zinc-500 text-sm">{t.staff.channelEmpty}</p>
+          ) : (
+            <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
+              {messages.map((m) => {
+                const side = staffChannelMessageSide(m, myUid);
+                const mine = side === 'me';
+                return (
+                  <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[11px] text-zinc-500">
+                      {mine ? t.devices.youTag : side === 'admin' ? t.staff.channelAdmin : m.senderName}
+                    </span>
+                    <div
+                      dir="auto"
+                      className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${
+                        mine
+                          ? 'bg-accent/15 border border-accent/40 text-zinc-100'
+                          : side === 'admin'
+                          ? 'bg-ink-fire/10 border border-ink-fire/40 text-zinc-100'
+                          : 'bg-app-raised border border-glass-border text-zinc-200'
+                      }`}
+                    >{m.text}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void sendAction.run(); } }}
+              maxLength={CHAT_TEXT_MAX_LEN}
+              dir="auto"
+              disabled={sendAction.busy}
+              placeholder={t.staff.channelPlaceholder}
+              className="flex-1 min-w-0 rounded-full bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-accent/50 disabled:opacity-50"
+            />
+            <button
+              onClick={() => void sendAction.run()}
+              disabled={sendAction.busy || !draft.trim()}
+              className="shrink-0 min-h-[44px] rounded-full bg-accent px-4 text-sm font-semibold text-black disabled:opacity-50"
+            >
+              {t.staff.channelSend}
+            </button>
+          </div>
+        </div>
+      </Collapsible>
+    </section>
+  );
+}
+
+// ─── Live team map (staff-console-field-ops) ─────────────────────────────────
+//
+// Collapsed by default and mounted through lazyWithRetry, so MapLibre is never in
+// play-web's entry chunk (npm run bundle:budget asserts exactly this) and a stale
+// shell after a redeploy self-heals instead of crashing the console.
+const StaffTeamMap = lazyWithRetry('staff-team-map', () => import('../components/StaffTeamMap'));
+
+function StaffTeamMapSection({
+  ctx, teams,
+}: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  teams: TeamRow[];
+}) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="mb-6">
+      <Collapsible
+        open={open}
+        onToggle={() => setOpen((o) => !o)}
+        header={<span>🗺️ {t.staff.teamMap}</span>}
+      >
+        <Suspense fallback={<div className="h-56 rounded-xl bg-app-card border border-glass-border animate-pulse" />}>
+          <StaffTeamMap ctx={ctx} teams={teams} />
+        </Suspense>
       </Collapsible>
     </section>
   );

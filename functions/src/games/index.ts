@@ -31,6 +31,7 @@ import {
   detectPlatform,
   validateUnlockGraph,
   requiredTaskCountProblem,
+  videoDurationProblem,
   validateAvailabilityWindow,
   validateOrderItems,
   validateSurveyChoices,
@@ -324,6 +325,15 @@ function stagesProblems(stages: Stage[] | undefined): string[] {
       if (task.surveyChoices !== undefined) {
         const choiceError = validateSurveyChoices(task.surveyChoices);
         if (choiceError) problems.push(`Task "${task.title || task.id}": ${choiceError}`);
+      }
+      // video-submission-task: the clip-length range is refused where the creator
+      // can still fix it, rather than silently clamped at play time — the same
+      // reasoning as requiredTaskCount above. Gated on captureKind so a stale range
+      // left behind by switching the task back to photo cannot brick every
+      // subsequent autosave (the cleared-optional-field trap).
+      if (task.smart?.captureKind === 'video') {
+        const durationError = videoDurationProblem(task.smart.videoMinSeconds, task.smart.videoMaxSeconds);
+        if (durationError) problems.push(`Task "${task.title || task.id}": ${durationError}`);
       }
     }
   }

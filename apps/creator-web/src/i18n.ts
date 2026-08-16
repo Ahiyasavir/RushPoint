@@ -1060,6 +1060,11 @@ const HE = {
         help: 'שיחות בין הקבוצות לביניכם. כאן עונים לשאלות מהשטח.',
         empty: 'אף קבוצה לא כתבה לכם עדיין.',
       },
+      staffChannel: {
+        title: 'קשר עם הצוות',
+        help: 'ערוץ פנימי בינכם לבין אנשי הצוות בשטח. המשתתפים לא רואים אותו.',
+        empty: 'אף איש צוות לא כתב לכם עדיין.',
+      },
       shareScreens: {
         title: 'קישורים ומסכים',
         help: 'כל הקישורים של הריצה במקום אחד, לכל אחד כתוב למי הוא מיועד.',
@@ -1372,6 +1377,14 @@ const HE = {
     captureKindPhoto: 'תמונה',
     captureKindAudio: 'הקלטת קול',
     captureKindAudioHint: 'השחקנים יקליטו קליפ קול קצר במקום לצלם תמונה.',
+    captureKindVideo: 'סרטון',
+    captureKindVideoHint: 'השחקנים יצלמו סרטון קצר במקום תמונה.',
+    videoMinSecondsLabel: 'אורך מינימלי (שניות)',
+    videoMaxSecondsLabel: 'אורך מקסימלי (שניות)',
+    videoDurationRangeHint: ({ floor, ceiling }: { floor: number; ceiling: number }) =>
+      `אפשר לבחור אורך מקסימלי בין ${floor} שניות ל${ceiling} שניות. השאירו ריק כדי להשתמש בברירת המחדל.`,
+    videoDurationProblem: ({ floor, ceiling }: { floor: number; ceiling: number }) =>
+      `טווח האורך לא תקין: המינימום חייב להיות קצר מהמקסימום, והמקסימום בין ${floor} שניות ל${ceiling} שניות.`,
     extendedInstructions: 'הוראות מורחבות (מוצגות במסך המשימה)',
     extendedPlaceholder: 'פירוט נוסף מעבר לתיאור הקצר',
     answerChoices: 'אפשרויות תשובה',
@@ -1588,6 +1601,8 @@ const HE = {
     saveFailedShort:  'השמירה נכשלה',
     saveFailedBanner: 'השינויים האחרונים לא נשמרו',
     saveFailedRetry:  'נסו לשמור שוב',
+    saveNow: 'שמירה',
+    saveNowHint: 'שמרו את המשחק עכשיו, בכל מצב שהוא',
     noRouteYet: 'אין עדיין משימות עם מיקום. הוסיפו מיקום במפה כדי לראות את המסלול.',
     pacingAriaLabel: (n: number) => `קצב קושי לאורך ${n} ${n === 1 ? 'משימה' : 'משימות'}`,
     pacingTitle: (title: string, difficulty: number) => `${title}, רמת קושי ${difficulty}`,
@@ -2858,6 +2873,11 @@ const EN: typeof HE = {
         help: 'Conversations between the teams and you. Answer questions from the field here.',
         empty: 'No team has written to you yet.',
       },
+      staffChannel: {
+        title: 'Staff channel',
+        help: 'A private channel between you and your staff in the field. Participants never see it.',
+        empty: 'No staff member has written to you yet.',
+      },
       shareScreens: {
         title: 'Links and screens',
         help: 'Every link for this run in one place, each one saying who it is for.',
@@ -3172,6 +3192,14 @@ const EN: typeof HE = {
     captureKindPhoto: 'Photo',
     captureKindAudio: 'Audio',
     captureKindAudioHint: 'Players record a short audio clip instead of taking a photo.',
+    captureKindVideo: 'Video',
+    captureKindVideoHint: 'Players film a short video clip instead of taking a photo.',
+    videoMinSecondsLabel: 'Minimum length (seconds)',
+    videoMaxSecondsLabel: 'Maximum length (seconds)',
+    videoDurationRangeHint: ({ floor, ceiling }: { floor: number; ceiling: number }) =>
+      `The maximum can be between ${floor} and ${ceiling} seconds. Leave blank to use the default.`,
+    videoDurationProblem: ({ floor, ceiling }: { floor: number; ceiling: number }) =>
+      `That length range will not save: the minimum must be shorter than the maximum, and the maximum between ${floor} and ${ceiling} seconds.`,
     extendedInstructions: 'Extended instructions (shown on the mission screen)',
     extendedPlaceholder: 'Optional step by step detail beyond the short description',
     answerChoices: 'Answer choices',
@@ -3387,6 +3415,8 @@ const EN: typeof HE = {
     saveFailedShort:  'Save failed',
     saveFailedBanner: 'Your latest changes were not saved',
     saveFailedRetry:  'Try saving again',
+    saveNow: 'Save',
+    saveNowHint: 'Save the game right now, whatever state it is in',
     noRouteYet: 'No located missions yet. Add a map location to see the route.',
     pacingAriaLabel: (n: number) => `Difficulty pacing across ${n} mission${n === 1 ? '' : 's'}`,
     pacingTitle: (title: string, difficulty: number) => `${title}, difficulty ${difficulty}`,

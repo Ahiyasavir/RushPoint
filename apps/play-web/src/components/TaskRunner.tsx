@@ -1,12 +1,12 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds } from '@rushpoint/shared';
+import { haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSeconds, resolveVideoDuration } from '@rushpoint/shared';
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, triggerSOS,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
-import { uploadTaskPhoto, uploadTaskAudio } from '../services/firebase';
+import { uploadTaskPhoto, uploadTaskAudio, uploadTaskVideo } from '../services/firebase';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
   getUploadProgress, subscribeUploadProgress,
@@ -29,6 +29,9 @@ import {
   gpsRetryDelayMs, offlineSubmitGate, helpAlreadySent, blockedGuidance, BLOCKED_HELP_KEY,
   canCompleteWithoutLocation,
 } from '../lib/stuckGuards';
+import {
+  VIDEO_BITS_PER_SECOND, AUDIO_BITS_PER_SECOND, videoTypeFromName, pickedClipVerdict,
+} from '../lib/videoCapture';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
 // lazyWithRetry so a stale-shell chunk 404 self-heals instead of hanging the
@@ -648,6 +651,26 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     } finally { end(); }
   }
 
+  // video-submission-task: a recorded clip rides the SAME pipeline as photo/audio.
+  async function video(blob: Blob | File, contentType: string) {
+    if (blockedOffline()) return;
+    if (!begin()) return;
+    clearMsg();
+    try {
+      showProgress(t.task.uploadingVideo);
+      const up = await uploadTaskVideo(blob, {
+        runId: session.runId, teamId: state.team.id, taskId: task!.id, contentType,
+      });
+      const res = await submitStationPhoto({
+        ...ctx, teamId: state.team.id, taskId: task!.id, photoUrl: up.url, contentType: up.contentType,
+      });
+      showProgress(res.autoApproved ? t.task.approved : t.task.pendingReview);
+      onChanged();
+    } catch (e) {
+      setMsg(submitError(e, t.task.uploadFailed));
+    } finally { end(); }
+  }
+
   // Presence-gated answer tasks (change: quiz-location-verification): when the
   // creator required the team to be at the spot, the server gate needs GPS on the
   // submit. Fetch it via withLocation and pass lat/lng; a GPS-denied device gets
@@ -939,6 +962,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <SurveyEntry task={task} busy={frozen} onSubmit={answer} />
         ) : task.smart?.captureKind === 'audio' ? (
           <AudioEntry busy={frozen} onSubmit={audio} />
+        ) : task.smart?.captureKind === 'video' ? (
+          <VideoEntry smart={task.smart} busy={frozen} onSubmit={video} />
         ) : (
           <PhotoEntry busy={frozen} onSubmit={photo} />
         )}
@@ -1718,6 +1743,268 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
         </div>
       ) : (
         <Button disabled={busy} onClick={start}>{t.task.startRecording}</Button>
+      )}
+    </div>
+  );
+}
+
+// video-submission-task: record a short clip with MediaRecorder — record / stop /
+// re-record, live countdown, auto-stop at the task's configured maximum, submit
+// gated on its configured minimum, <video> playback before submit. Mirrors
+// AudioEntry throughout, including the native-picker fallback for browsers whose
+// MediaRecorder cannot record video (iOS Safari, in-app webviews).
+//
+// The clip-length range comes from the TASK, resolved through the shared contract
+// so the Builder, the server and this recorder can never disagree about it.
+const MAX_VIDEO_BYTES = 20 * 1024 * 1024; // mirrors MAX_PARTICIPANT_VIDEO_BYTES
+
+function pickVideoMimeType(): string | null {
+  const rec = (typeof window !== 'undefined' ? window.MediaRecorder : undefined) as
+    | (typeof MediaRecorder & { isTypeSupported?: (t: string) => boolean }) | undefined;
+  if (!rec) return null;
+  const supports = (t: string) => typeof rec.isTypeSupported === 'function' && rec.isTypeSupported(t);
+  if (supports('video/webm;codecs=vp8,opus')) return 'video/webm;codecs=vp8,opus';
+  if (supports('video/webm')) return 'video/webm';
+  if (supports('video/mp4')) return 'video/mp4'; // Safari, where supported at all
+  return null;
+}
+
+// Read a picked file's duration without rendering it. Resolves `undefined` when the
+// browser cannot determine it — the caller must treat that as "allow", never as
+// "too short" (see pickedClipVerdict).
+function readVideoDuration(url: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const el = document.createElement('video');
+    el.preload = 'metadata';
+    const done = (v: number | undefined) => { el.src = ''; resolve(v); };
+    el.onloadedmetadata = () => done(el.duration);
+    el.onerror = () => done(undefined);
+    // Some containers never fire either event; never leave the caller hanging.
+    setTimeout(() => done(undefined), 4000);
+    el.src = url;
+  });
+}
+
+function VideoEntry({ smart, busy, onSubmit }: {
+  smart: { videoMinSeconds?: number; videoMaxSeconds?: number } | undefined;
+  busy: boolean;
+  onSubmit: (blob: Blob | File, contentType: string) => void;
+}) {
+  const { t } = useT();
+  const { minSeconds, maxSeconds } = useMemo(() => resolveVideoDuration(smart), [smart]);
+
+  const [recording, setRecording] = useState(false);
+  const [remaining, setRemaining] = useState(maxSeconds);
+  const [elapsed, setElapsed] = useState(0);
+  const [blob, setBlob] = useState<Blob | File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [err, setErr] = useState('');
+  const [unsupported, setUnsupported] = useState(false);
+
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const mimeRef = useRef<string>('video/webm');
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevPreviewRef = useRef<string | null>(null);
+  // The recorded length at the moment the recorder stopped. Read inside onstop,
+  // which closes over the render that STARTED the recording — a state read there
+  // would be stale, so the running count lives in a ref as well.
+  const elapsedRef = useRef(0);
+
+  function setPreview(next: string | null) {
+    if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current);
+    prevPreviewRef.current = next;
+    setPreviewUrl(next);
+  }
+
+  function stopTracks() {
+    streamRef.current?.getTracks().forEach((tr) => tr.stop());
+    streamRef.current = null;
+  }
+  function clearTimers() {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (stopTimeoutRef.current) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
+  }
+
+  // Release the camera + mic on unmount so the device's recording indicator clears.
+  useEffect(() => () => {
+    clearTimers();
+    try { recorderRef.current?.stop(); } catch { /* already stopped */ }
+    stopTracks();
+    if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current);
+  }, []);
+
+  function stop() {
+    clearTimers();
+    try { recorderRef.current?.stop(); } catch { /* already stopped */ }
+  }
+
+  async function start() {
+    setErr('');
+    const mime = pickVideoMimeType();
+    if (!mime || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setUnsupported(true);
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    } catch {
+      // Denied, or an embedded webview that refuses camera access outright. Either
+      // way the player is stuck on a mission they cannot complete, so route them to
+      // the phone's own camera app instead of leaving them there.
+      setErr(t.task.videoCameraDenied);
+      setUnsupported(true);
+      return;
+    }
+    streamRef.current = stream;
+    mimeRef.current = mime;
+    chunksRef.current = [];
+    setBlob(null);
+    setPreview(null);
+
+    // Same hazard as AudioEntry: the constructor and .start() throw on some
+    // Android/in-app webviews even after isTypeSupported() said yes. This function
+    // is wired straight to onClick, so an uncaught throw becomes a floating
+    // rejection and the tap silently does nothing. Fail into the picker instead.
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, {
+        mimeType: mime,
+        videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+        audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+      });
+    } catch {
+      stopTracks();
+      setErr(t.task.videoUnsupported);
+      setUnsupported(true);
+      return;
+    }
+    recorderRef.current = recorder;
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+    recorder.onstop = () => {
+      clearTimers();
+      stopTracks();
+      setRecording(false);
+      const out = new Blob(chunksRef.current, { type: mimeRef.current });
+      if (out.size > MAX_VIDEO_BYTES) {
+        setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+        return;
+      }
+      setBlob(out);
+      setPreview(URL.createObjectURL(out));
+    };
+
+    setRecording(true);
+    setRemaining(maxSeconds);
+    setElapsed(0);
+    elapsedRef.current = 0;
+    try {
+      recorder.start();
+    } catch {
+      stopTracks();
+      setRecording(false);
+      setErr(t.task.videoUnsupported);
+      setUnsupported(true);
+      return;
+    }
+    timerRef.current = setInterval(() => {
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+      setRemaining((r) => (r > 0 ? r - 1 : 0));
+    }, 1000);
+    stopTimeoutRef.current = setTimeout(() => stop(), maxSeconds * 1000);
+  }
+
+  // Fallback: hand off to the phone's own camera app. `accept="video/*" capture`
+  // opens the camera directly on Android and iOS and works inside in-app webviews
+  // where getUserMedia/MediaRecorder do not.
+  async function pickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be re-picked after an error
+    if (!file) return;
+    // The byte check is exact and matches the server's own cap, so refusing here
+    // is strictly kinder than letting a 100MB camera clip upload and be rejected.
+    // (Unlike the duration read below, there is nothing uncertain to fail open on.)
+    if (file.size > MAX_VIDEO_BYTES) {
+      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    // This path cannot enforce the minimum DURING capture, so check afterwards —
+    // fail open when the duration is unreadable rather than blocking a participant
+    // for their phone's container format.
+    const duration = await readVideoDuration(url);
+    if (pickedClipVerdict(duration, minSeconds) === 'too-short') {
+      URL.revokeObjectURL(url);
+      setErr(t.task.videoTooShort({ sec: minSeconds }));
+      return;
+    }
+    setErr('');
+    // Some Android pickers hand back a File with an EMPTY type; guessing one fixed
+    // value would mislabel a .mov as mp4 and the server would refuse it after a
+    // successful upload.
+    mimeRef.current = file.type || videoTypeFromName(file.name);
+    setBlob(file);
+    setPreview(url);
+  }
+
+  const tooShort = elapsed > 0 && minSeconds > 0 && elapsed < minSeconds;
+  const canSubmit = !!blob && !busy;
+
+  if (unsupported && !blob) {
+    return (
+      <div className="space-y-3">
+        {err && <p className="text-ink-alert text-sm">{err}</p>}
+        <p className="text-sm text-zinc-400">{t.task.videoUnsupported}</p>
+        {minSeconds > 0 && <p className="text-sm text-zinc-400">{t.task.videoMinHint({ sec: minSeconds })}</p>}
+        <label className={`${TAP_TARGET} inline-flex items-center justify-center gap-2 rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-bold text-ink-fire cursor-pointer hover:bg-white transition-colors`}>
+          <input type="file" accept="video/*" capture="environment" className="sr-only" onChange={pickFile} />
+          {t.task.videoPickFile}
+        </label>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {err && <p className="text-ink-alert text-sm">{err}</p>}
+      {recording ? (
+        <div className="space-y-2">
+          <p className="text-sm text-zinc-300">{t.task.recording({ sec: remaining })}</p>
+          {tooShort
+            ? <p className="text-sm text-zinc-400">{t.task.videoKeepRecording({ sec: minSeconds - elapsed })}</p>
+            : null}
+          <Button variant="ghost" disabled={tooShort} onClick={stop}>{t.task.stopRecording}</Button>
+        </div>
+      ) : blob && previewUrl ? (
+        <div className="space-y-2">
+          <video controls src={previewUrl} className="w-full rounded-xl" />
+          <div className="flex gap-2">
+            {unsupported ? (
+              <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>
+                <input type="file" accept="video/*" capture="environment" className="sr-only" onChange={pickFile} />
+                {t.task.reRecord}
+              </label>
+            ) : (
+              <Button variant="ghost" disabled={busy} onClick={start}>{t.task.reRecord}</Button>
+            )}
+            <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current)}>
+              {busy ? t.task.working : t.task.submitVideo}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-sm text-zinc-400">
+            {minSeconds > 0
+              ? t.task.videoRangeHint({ min: minSeconds, max: maxSeconds })
+              : t.task.videoMaxHint({ sec: maxSeconds })}
+          </p>
+          <Button disabled={busy} onClick={start}>{t.task.startRecording}</Button>
+        </div>
       )}
     </div>
   );

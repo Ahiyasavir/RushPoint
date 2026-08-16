@@ -9,6 +9,7 @@ import { describe, test, expect } from 'vitest';
 import {
   taskExcludedMs,
   teamExcludedMs,
+  teamHeldExclusionMs,
   adjustedElapsedMs,
   adjustedElapsedSeconds,
 } from './pausedClock';
@@ -141,6 +142,39 @@ describe('adjustedElapsedMs — the subtraction rule', () => {
 
   test('a negative excluded amount can never ADD time', () => {
     expect(adjustedElapsedMs(60 * MIN, -60 * MIN)).toBe(60 * MIN);
+  });
+});
+
+// Staff-initiated per-team hold (change: staff-console-field-ops). Same sign
+// convention and same fail-safe direction as taskExcludedMs: a stamp can only ever
+// SUBTRACT, and anything unusable reads as zero rather than poisoning a leaderboard.
+describe('teamHeldExclusionMs — staff-initiated hold, team level', () => {
+  test('a team that was never held excludes nothing', () => {
+    expect(teamHeldExclusionMs({})).toBe(0);
+    expect(teamHeldExclusionMs({ heldMs: undefined })).toBe(0);
+  });
+
+  test('an accumulated hold is excluded in full', () => {
+    expect(teamHeldExclusionMs({ heldMs: 7 * MIN })).toBe(7 * MIN);
+  });
+
+  test('a zero stamp is a no-op', () => {
+    expect(teamHeldExclusionMs({ heldMs: 0 })).toBe(0);
+  });
+
+  test('a negative stamp can never ADD time to a team', () => {
+    expect(teamHeldExclusionMs({ heldMs: -5 * MIN })).toBe(0);
+  });
+
+  test('a non-finite stamp is ignored rather than propagated into the ranking', () => {
+    expect(teamHeldExclusionMs({ heldMs: NaN })).toBe(0);
+    expect(teamHeldExclusionMs({ heldMs: Infinity })).toBe(0);
+  });
+
+  test('a malformed team object never throws — the ranking path must stay total', () => {
+    expect(teamHeldExclusionMs(null as never)).toBe(0);
+    expect(teamHeldExclusionMs(undefined as never)).toBe(0);
+    expect(teamHeldExclusionMs({ heldMs: '600000' } as never)).toBe(0);
   });
 });
 

@@ -53,6 +53,71 @@ export function chatMessageSide(
   return msg.from === 'hq' ? 'hq' : 'other';
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Staff ↔ admin channel (change: staff-console-field-ops)
+//
+// ONE shared thread per RUN between the field marshals and the run's owner —
+// distinct from the per-team threads above, and never readable by participants.
+//
+// WHY A PARALLEL TYPE INSTEAD OF WIDENING ChatMessage['from']
+// `chatMessageSide` and every one of its call sites are typed against exactly
+// 'team' | 'hq'. Widening that union would force each of them to newly handle two
+// values that can never occur there — a silent-footgun risk across the whole chat
+// surface for zero benefit. One small duplicated interface is the cheaper trade,
+// and the same one this codebase already makes for lazyWithRetry (behaviourally
+// matched, deliberately duplicated rather than shared).
+//
+// The BEHAVIOUR is genuinely shared: sanitizeChatText, appendCapped and the whole
+// seen-marker family below operate on these messages unchanged, so the cap, the
+// text trust boundary and the unread rule cannot drift between the two channels.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One line in the run's staff↔admin thread. `from` is set by the SERVER from the
+ *  caller's identity (uid === ownerUid ⇒ 'admin'), never trusted from a client. */
+export interface StaffChannelMessage {
+  id: string;
+  from: 'staff' | 'admin';
+  senderId?: string;   // caller uid (server-set) — see staffChannelMessageSide
+  senderName: string;  // staffName token claim, or the owner's display name
+  text: string;        // sanitized, 1..MAX_MESSAGE_LEN
+  at: string;          // ISO timestamp (server clock)
+}
+
+/** Viewer-relative side of a staff-channel line. 'admin' is the organizer's side. */
+export type StaffChannelSide = 'me' | 'admin' | 'other';
+
+/** One thread doc per RUN (singleton). Server-write-only. */
+export interface StaffChannelDoc {
+  runId: string;
+  messages: StaffChannelMessage[];  // append order; capped at CHAT_MAX_MESSAGES
+  updatedAt: string;
+}
+
+/**
+ * Pure sender-attribution for the staff channel — the exact rule `chatMessageSide`
+ * uses, with the two role strings swapped.
+ *
+ * The server-stamped `senderId` WINS over `from` for the same reason it does in team
+ * chat: an owner may also hold a staff PIN (and a marshal may be the owner), so
+ * labelling purely by role would show a viewer their own instructions as if someone
+ * else had written them. Legacy/defensive messages with no `senderId` fall back to
+ * `from` and can never be claimed as the viewer's own.
+ */
+export function staffChannelMessageSide(
+  msg: { senderId?: string; from: 'staff' | 'admin' },
+  myUid: string | null | undefined,
+): StaffChannelSide {
+  if (myUid && msg.senderId === myUid) return 'me';
+  return msg.from === 'admin' ? 'admin' : 'other';
+}
+
+/** Seen-marker storage namespace for the staff channel. RUN-scoped with no team
+ *  component — there is exactly one thread per run — so two runs open on the same
+ *  device cannot clobber each other's unread state. */
+export function staffChannelSeenStorageKey(runId: string): string {
+  return `rushpoint.staffChannelSeen.${runId}`;
+}
+
 /** One thread doc per team. `deviceUids` is MIRRORED from the team doc on every
  *  server write so firestore.rules can reuse isAttachedDevice() verbatim (a free
  *  resource.data check, no rules get()). */
@@ -82,8 +147,12 @@ export function sanitizeChatText(raw: unknown): string | null {
 /**
  * Pure append-and-cap: returns a NEW array of the most recent CHAT_MAX_MESSAGES
  * (append then slice(-N)). Never mutates its input.
+ *
+ * Generic over the message shape so the staff↔admin channel
+ * (`StaffChannelMessage`) shares this exact cap rather than re-deriving it — the
+ * two channels must not be able to drift on how much history a doc retains.
  */
-export function appendCapped(messages: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+export function appendCapped<T>(messages: readonly T[], msg: T): T[] {
   return [...messages, msg].slice(-CHAT_MAX_MESSAGES);
 }
 
@@ -116,8 +185,18 @@ export interface ChatSeenMarker {
   count?: number | null;
 }
 
+/** The minimum a message must expose for the unread rule to work. Both
+ *  `ChatMessage` and `StaffChannelMessage` satisfy it structurally, so the two
+ *  channels share one unread implementation. */
+interface SeenTrackableMessage {
+  id: string;
+  senderId?: string;
+}
+
 /** The marker to persist once `messages` has been shown to the viewer. */
-export function chatSeenMarker(messages: readonly ChatMessage[] | null | undefined): ChatSeenMarker {
+export function chatSeenMarker(
+  messages: readonly SeenTrackableMessage[] | null | undefined,
+): ChatSeenMarker {
   const list = Array.isArray(messages) ? messages : [];
   const last = list[list.length - 1];
   return { lastSeenId: last?.id ?? null, count: list.length };
@@ -126,7 +205,7 @@ export function chatSeenMarker(messages: readonly ChatMessage[] | null | undefin
 /** True when `msg` was written by this viewer. Mirrors chatMessageSide's rule:
  *  the server-stamped `senderId` wins over `from` (an owner playing their own
  *  game is stamped from:'hq' yet must still read as themselves). */
-function isOwnChatMessage(msg: ChatMessage, selfUid: string | null | undefined): boolean {
+function isOwnChatMessage(msg: SeenTrackableMessage, selfUid: string | null | undefined): boolean {
   return !!selfUid && msg.senderId === selfUid;
 }
 
@@ -141,7 +220,7 @@ function isOwnChatMessage(msg: ChatMessage, selfUid: string | null | undefined):
  *   newer than the anchor: cut at 0.
  */
 export function countUnreadChatMessages(
-  messages: readonly ChatMessage[] | null | undefined,
+  messages: readonly SeenTrackableMessage[] | null | undefined,
   marker: ChatSeenMarker | null | undefined,
   selfUid: string | null | undefined,
 ): number {

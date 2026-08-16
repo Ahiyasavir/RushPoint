@@ -14,7 +14,7 @@ export type PanelId =
   | 'joinShare' | 'stationQr' | 'startTeams' | 'alerts' | 'broadcast' | 'liveMap'
   | 'teams' | 'liveStandings' | 'finalStandings'
   | 'hotZone' | 'flashMission' | 'trackables' | 'zones' | 'taskAvailability'
-  | 'photoReview' | 'feed' | 'chat'
+  | 'photoReview' | 'feed' | 'chat' | 'staffChannel'
   | 'shareScreens' | 'staffInvite'
   | 'runSummary' | 'analytics' | 'heatmap' | 'feedback' | 'survey';
 
@@ -104,6 +104,13 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
   photoReview: 'moderation',
   feed: 'moderation',
   chat: 'moderation',
+  // The organizer's half of the staff↔admin channel (staff-console-field-ops).
+  // Grouped with the other live conversations, NOT with staffInvite: inviting a
+  // marshal is a setup task done once, while this is read repeatedly during a run.
+  // Its URGENCY is expressed in PANEL_PRIORITY (it outranks the team chat), which
+  // is what actually drives ordering — the group only decides which rail it lives
+  // under, and "primary" is a closed set meaning the always-on incident surface.
+  staffChannel: 'moderation',
 
   shareScreens: 'shareAndScreens',
   staffInvite: 'shareAndScreens',
@@ -167,6 +174,9 @@ function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
     // present for the whole live run and say "nothing waiting" out loud instead.
     case 'photoReview': return live || s.photoQueueCount > 0;
     case 'chat': return live;
+    // Same reasoning as `chat`: present for the whole live run so the rail cannot
+    // change shape under the organizer, and a quiet channel says so out loud.
+    case 'staffChannel': return live;
     // The feed stays count gated on purpose: it is a wall of photographs, not a
     // work queue, and an empty one is not a state anybody has to act on.
     case 'feed': return s.feedItemCount > 0;
@@ -408,8 +418,10 @@ export type ColumnCount = 1 | 2 | 3;
 export const PANEL_PRIORITY: PanelId[] = [
   // Incident response.
   'alerts', 'startTeams', 'teams', 'liveStandings', 'broadcast', 'liveMap',
-  // Work queues with a human in the loop.
-  'photoReview', 'chat',
+  // Work queues with a human in the loop. The staff channel ranks ABOVE the team
+  // chat: a marshal writing here is a staff member reporting a problem or asking
+  // for a decision, which is a higher-urgency signal than a participant question.
+  'photoReview', 'staffChannel', 'chat',
   // Operator overrides and optional game systems.
   'taskAvailability', 'hotZone', 'flashMission', 'zones', 'trackables', 'feed',
   // Setup artifacts: needed intensely for five minutes, then reference material.
@@ -422,7 +434,7 @@ export const PANEL_PRIORITY: PanelId[] = [
 const PANEL_WEIGHT: Partial<Record<PanelId, number>> = {
   startTeams: 1,
   liveMap: 4, teams: 4,
-  liveStandings: 3, finalStandings: 3, joinShare: 3, photoReview: 3, chat: 3,
+  liveStandings: 3, finalStandings: 3, joinShare: 3, photoReview: 3, chat: 3, staffChannel: 3,
   feed: 3, analytics: 3, heatmap: 3,
 };
 const DEFAULT_PANEL_WEIGHT = 2;

@@ -122,14 +122,16 @@ ok(
 // the callable then refuses it — the player records, waits, and is told no. That
 // is strictly worse than not offering the fallback at all, so pin them together.
 const shared = readFileSync(join(repo, 'packages/shared/src/mediaKinds.ts'), 'utf8');
-const serverSrc = readFileSync(join(repo, 'functions/server.js'), 'utf8');
+// The VPS allow-list moved out of server.js into uploadRoute.js when the upload
+// handler became streaming (change: stream-upload-write).
+const serverSrc = readFileSync(join(repo, 'functions/uploadRoute.js'), 'utf8');
 const rules = readFileSync(join(repo, 'storage.rules'), 'utf8');
 
 const sharedList = (shared.match(/AUDIO_CONTENT_TYPES\s*=\s*\[([\s\S]*?)\]/) || [])[1] ?? '';
 const sharedTypes = [...sharedList.matchAll(/'audio\/([a-z0-9-]+)'/g)].map((m) => m[1]).sort();
 ok(sharedTypes.length >= 4, 'AUDIO_CONTENT_TYPES must be parseable from shared');
 
-for (const [label, src2] of [['functions/server.js', serverSrc], ['storage.rules', rules]] as const) {
+for (const [label, src2] of [['functions/uploadRoute.js', serverSrc], ['storage.rules', rules]] as const) {
   // Both express the set as an `audio/(a|b|c)` alternation.
   const alt = (src2.match(/audio\\?\/\(([a-z0-9|x\-]+)\)/) || [])[1] ?? '';
   const got = alt.split('|').filter(Boolean).sort();

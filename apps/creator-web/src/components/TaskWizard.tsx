@@ -22,6 +22,8 @@ import {
   // visible-time-estimates: the WALK INCLUSIVE estimate the scoring sigmoid reads.
   defaultEstimatedMinutes, TASK_ESTIMATE_MAX_MINUTES,
   normalizeTags,
+  // video-submission-task: the SAME range verdict the server's save guard reads.
+  VIDEO_DURATION_LIMITS, videoDurationProblem,
 } from '@rushpoint/shared';
 import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
@@ -1234,24 +1236,76 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
         )}
         {task.type === 'photo' && (
           <div className="space-y-2">
-            {/* audio-tasks: capture a photo (default) or an audio clip. Writes to
-                task.smart.captureKind (never top-level). */}
+            {/* audio-tasks / video-submission-task: capture a photo (default), an
+                audio clip or a short video. Writes to task.smart.captureKind
+                (never top-level). */}
             <div>
               <Label dense>{b.captureKindLabel}</Label>
               <div className="flex gap-2">
-                {(['photo', 'audio'] as const).map((k) => {
+                {(['photo', 'audio', 'video'] as const).map((k) => {
                   const active = (task.smart?.captureKind ?? 'photo') === k;
+                  const label = k === 'photo' ? `📷 ${b.captureKindPhoto}`
+                    : k === 'audio' ? `🎙️ ${b.captureKindAudio}`
+                    : `🎥 ${b.captureKindVideo}`;
                   return (
                     <button key={k} type="button"
                       onClick={() => setSmart({ verificationType: 'photo_upload', captureKind: k })}
                       className={`px-3 py-1.5 rounded-lg text-sm border ${active ? 'bg-[--accent] text-white border-transparent' : 'border-[--line] text-[--ink-2]'}`}>
-                      {k === 'photo' ? `📷 ${b.captureKindPhoto}` : `🎙️ ${b.captureKindAudio}`}
+                      {label}
                     </button>
                   );
                 })}
               </div>
               {(task.smart?.captureKind ?? 'photo') === 'audio' && (
                 <p className="text-xs text-[--ink-3] mt-1">{b.captureKindAudioHint}</p>
+              )}
+              {task.smart?.captureKind === 'video' && (
+                <div className="mt-2 space-y-2">
+                  <p className="text-xs text-[--ink-3]">{b.captureKindVideoHint}</p>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <Label dense>{b.videoMinSecondsLabel}</Label>
+                      <Input dense type="number" inputMode="numeric"
+                        value={task.smart?.videoMinSeconds ?? ''}
+                        placeholder={String(VIDEO_DURATION_LIMITS.defaultMinSeconds)}
+                        onChange={(e) => setSmart({
+                          verificationType: 'photo_upload',
+                          // Cleared ⇒ undefined, never null or 0. buildSavePayload
+                          // drops undefined keys inside `stages`, so "unset" arrives
+                          // ABSENT — which every optional server guard accepts. A
+                          // null would arrive as a malformed value and be refused.
+                          videoMinSeconds: e.target.value === '' ? undefined : Number(e.target.value),
+                        })} />
+                    </div>
+                    <div className="flex-1">
+                      <Label dense>{b.videoMaxSecondsLabel}</Label>
+                      <Input dense type="number" inputMode="numeric"
+                        value={task.smart?.videoMaxSeconds ?? ''}
+                        placeholder={String(VIDEO_DURATION_LIMITS.defaultMaxSeconds)}
+                        onChange={(e) => setSmart({
+                          verificationType: 'photo_upload',
+                          videoMaxSeconds: e.target.value === '' ? undefined : Number(e.target.value),
+                        })} />
+                    </div>
+                  </div>
+                  <p className="text-xs text-[--ink-3]">
+                    {b.videoDurationRangeHint({
+                      floor: VIDEO_DURATION_LIMITS.floorSeconds,
+                      ceiling: VIDEO_DURATION_LIMITS.ceilingSeconds,
+                    })}
+                  </p>
+                  {/* Inline validation from the SAME function the server's save
+                      guard reads, so the Builder can never show green on a range
+                      updateGame will refuse. */}
+                  {videoDurationProblem(task.smart?.videoMinSeconds, task.smart?.videoMaxSeconds) && (
+                    <p className="text-xs text-[--danger]">
+                      {b.videoDurationProblem({
+                        floor: VIDEO_DURATION_LIMITS.floorSeconds,
+                        ceiling: VIDEO_DURATION_LIMITS.ceilingSeconds,
+                      })}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
             <label className="flex items-center gap-2 text-xs text-[--ink-2]">

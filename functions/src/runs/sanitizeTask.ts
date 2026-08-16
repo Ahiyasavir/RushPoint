@@ -136,9 +136,13 @@ export function sanitizeTaskForParticipant(
           stationCoords: smart.stationCoords,
           timeLimitSeconds: smart.timeLimitSeconds,
           autoApprove: smart.autoApprove,
-          // audio-tasks: which capture widget the client must render (photo vs
-          // audio recorder). Not a secret — the client needs it.
+          // audio-tasks / video-submission-task: which capture widget the client
+          // must render (photo vs audio vs video recorder). Not a secret — the
+          // client needs it. The video clip-length range rides along for the same
+          // reason: a recorder cannot enforce a limit it cannot see.
           captureKind: smart.captureKind,
+          videoMinSeconds: smart.videoMinSeconds,
+          videoMaxSeconds: smart.videoMaxSeconds,
           attemptLimit: smart.attemptLimit,
           // secretCode intentionally omitted
         }

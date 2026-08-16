@@ -4,7 +4,7 @@ import { collection, doc, getDocs, limit, onSnapshot, orderBy, query, where } fr
 import type { Query, DocumentData, QuerySnapshot } from 'firebase/firestore';
 import QRCode from 'qrcode';
 import type { Run, HotZone, StationStatus, RunFeedback, RunFeedbackSummary, RunSummary, FeedbackRatingKey, FeedbackIssue, Trackable, CaptureZone } from '@rushpoint/shared';
-import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, type ChatMessage, type ChatSeenMarker } from '@rushpoint/shared';
+import { hotZoneMultiplier, effectiveTaskStatus, FEEDBACK_ISSUES, buildStationQrPayload, FIRESTORE_PATHS, CHAT_TEXT_MAX_LEN, resolvePlayOrigin, CANONICAL_PLAY_URL, MAX_RUN_DEVICES, isRunDeviceCapActive, chatSeenMarker, countUnreadChatMessages, parseChatSeen, serializeChatSeen, chatSeenStorageKey, staffChannelMessageSide, type ChatMessage, type ChatSeenMarker, type StaffChannelMessage } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useAuth } from '../components/AuthGate';
 import {
@@ -12,7 +12,7 @@ import {
   inviteStaff, skipStage, skipTaskForTeam, adjustTeamScore, acknowledgeAlert, clearTeamOutOfBounds, activateHotZone, deactivateHotZone,
   getRunAnalytics, getRunSummary, getRunHeatmap, getRunFeedbackSummary, createTrackable, getRunTrackables,
   createZone, deleteZone, getRunZones, hideFeedItem, getRunSurveyResults, getGame,
-  sendTeamChatMessage, reviewStationSubmission, setRunTaskStatus,
+  sendTeamChatMessage, sendStaffChannelMessage, reviewStationSubmission, setRunTaskStatus,
   type RunTeamRow, type RunAnalyticsResult, type RunHeatmapResult, type SurveyResultRow,
 } from '../services/calls';
 // Photo approval queue (wave-e task 13) — pure queue logic shared with the
@@ -1160,6 +1160,8 @@ export default function RunConsolePage() {
             onRead={markChatRead}
           />
         );
+      case 'staffChannel':
+        return <StaffChannelConsole ctx={ctx} selfUid={ownerUid} />;
 
       case 'shareScreens':
         return (
@@ -2523,6 +2525,93 @@ function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
             </div>
           );
         })}
+      </div>
+    </PanelShell>
+  );
+}
+
+// ─── Staff ↔ admin channel, organizer side (staff-console-field-ops) ─────────
+//
+// The counterpart to the section in play-web's StaffConsole. ONE shared thread per
+// run, so unlike ChatConsole above there is no per-team list and no thread picker —
+// the whole panel is the conversation.
+//
+// Kept separate from the team chat on purpose: this is where marshals report field
+// problems and ask for exceptions, and firestore.rules deliberately excludes
+// participants from it. Merging the two surfaces would make that boundary a
+// rendering detail rather than a rule.
+function StaffChannelConsole({ ctx, selfUid }: {
+  ctx: { ownerUid: string; gameId: string; runId: string };
+  selfUid: string;
+}) {
+  const rc = useT().runConsole;
+  const [messages, setMessages] = useState<StaffChannelMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const reportFailure = useCallFailureToast();
+
+  useEffect(() => {
+    const ref = doc(db, FIRESTORE_PATHS.runStaffChannel(ctx.ownerUid, ctx.gameId, ctx.runId));
+    return onSnapshot(ref, (snap) => {
+      const data = snap.data() as { messages?: StaffChannelMessage[] } | undefined;
+      setMessages(data?.messages ?? []);
+    }, () => setMessages([]));
+  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
+
+  async function send() {
+    const clean = draft.trim();
+    if (!clean || busy) return;
+    setBusy(true);
+    try {
+      await sendStaffChannelMessage({ ...ctx, text: clean });
+      setDraft('');
+    }
+    // Same rule as the team chat: keep the draft, but say why it is still there.
+    catch (e) { reportFailure(e, 'sendStaffChannelMessage'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <PanelShell panel="staffChannel">
+      {messages.length === 0 && <PanelEmpty panel="staffChannel" />}
+      <div className="space-y-2">
+        {messages.length > 0 && (
+          <div className="max-h-64 overflow-y-auto flex flex-col gap-1.5">
+            {messages.map((m) => {
+              // The organizer reading this panel IS the admin, so their own lines
+              // sit right and everything else (every marshal) sits left.
+              const mine = staffChannelMessageSide(m, selfUid) === 'me';
+              return (
+                <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                  <span className="text-[11px] text-[--ink-3]">{mine ? rc.chatHq : m.senderName}</span>
+                  <div
+                    dir="auto"
+                    className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${
+                      mine
+                        ? 'bg-neon-blue/15 border border-neon-blue/40 text-[--ink-1]'
+                        : 'bg-app-card border border-[--rp-border] text-[--ink-2]'
+                    }`}
+                  >{m.text}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <Input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void send(); } }}
+            maxLength={CHAT_TEXT_MAX_LEN}
+            dir="auto"
+            disabled={busy}
+            placeholder={rc.chatReplyPlaceholder}
+            className="flex-1"
+          />
+          <Button variant={runActionVariant('sendChatReply')} onClick={() => void send()} disabled={busy || !draft.trim()}>
+            {rc.chatSend}
+          </Button>
+        </div>
       </div>
     </PanelShell>
   );

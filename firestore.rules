@@ -129,14 +129,32 @@ service cloud.firestore {
             allow write: if false;
           }
 
+          // ── STAFF ↔ ADMIN CHANNEL (staff-console-field-ops) ────────────────
+          //    ONE shared thread per run (the singleton doc `thread`) between the
+          //    field marshals and the run's owner. Deliberately NARROWER than the
+          //    team chat above: participants are excluded entirely, because this is
+          //    where staff report problems and request exceptions — operational
+          //    talk that must not be readable by the teams it concerns.
+          //    Writes are CF-only (sendStaffChannelMessage), like every other
+          //    run-scoped doc.
+          match /staffChannel/{docId} {
+            allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
+            allow write: if false;
+          }
+
           // ── OPERATIONAL (alerts, locations, staffInvites) ──────────────────
           //    Owner reads; all writes + staff/participant reads go through CFs.
           match /alerts/{docId} {
             allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
             allow write: if false;
           }
+          // Live team positions. Staff read was added with the mobile staff console's
+          // live map (staff-console-field-ops): a marshal in the field needs to see
+          // where every team is, which is the same data the owner's desktop map has
+          // always shown. Scoped by isStaffForRun, so a staff token still only ever
+          // reaches the ONE run it was minted for. Writes stay CF-only (updateLocation).
           match /teamLocations/{docId} {
-            allow read:  if isOwner(uid);
+            allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
             allow write: if false;
           }
           // Retained GPS track for the post-run movement heatmap (movement-heatmap).

@@ -29,10 +29,19 @@ service firebase.storage {
       // audio-tasks: a photo task may capture an audio clip instead (same path,
       // same 10MB cap). The client normalizes the blob type (strips codec params)
       // before upload, so the allowed audio types stay exact-match.
+      // video-submission-task: a photo task may also capture a short video clip.
+      // Video gets its own larger cap rather than a blanket raise — a 20MB "photo"
+      // is never legitimate. Both numbers mirror MAX_PARTICIPANT_BYTES /
+      // MAX_PARTICIPANT_VIDEO_BYTES in functions/uploadRoute.js, which is the cap
+      // that actually runs in production (uploads go to the VPS, not Storage).
       allow write: if request.auth != null && request.auth.uid == teamId
-        && request.resource.size < 10 * 1024 * 1024  // 10MB max
+        && request.resource.size < (
+             request.resource.contentType.matches('video/(webm|mp4|quicktime)')
+               ? 20 * 1024 * 1024   // 20MB max — video
+               : 10 * 1024 * 1024   // 10MB max — photo/audio
+           )
         && request.resource.contentType.matches(
-             'image/(jpeg|jpg|png|webp|heic|heif|gif)|audio/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr)'
+             'image/(jpeg|jpg|png|webp|heic|heif|gif)|audio/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr)|video/(webm|mp4|quicktime)'
            );
     }
 

@@ -590,6 +590,20 @@ export default function BuilderPage() {
             : b.saved}
         </span>
 
+        {/* A manual, always-clickable save — independent of the autosave debounce
+            and of whatever the current tab/focus state is. `save()` itself is a
+            safe no-op when nothing changed, so this can never do harm; it exists
+            purely so a creator who is unsure whether autosave "caught up" has one
+            button that unconditionally tries again right now. */}
+        <button
+          onClick={() => { void save(); }}
+          disabled={status === 'saving'}
+          title={b.saveNowHint}
+          className="shrink-0 min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-medium border border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] disabled:opacity-50 disabled:pointer-events-none transition-colors"
+        >
+          {b.saveNow}
+        </button>
+
         {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.
             Desktop only: at phone width these live in the header overflow menu
             below (change: builder-simplification-round-3). */}
@@ -714,6 +728,15 @@ export default function BuilderPage() {
               ariaLabel={b.headerMoreMenuAria}
               triggerClassName="min-h-[44px] px-3 rounded-lg text-sm gap-1"
             >
+              <button
+                role="menuitem"
+                onClick={() => { void save(); }}
+                disabled={status === 'saving'}
+                title={b.saveNowHint}
+                className={`${HEADER_MENU_ITEM_CLASS} disabled:opacity-50 disabled:pointer-events-none`}
+              >
+                {b.saveNow}
+              </button>
               <button
                 role="menuitem"
                 onClick={undo}

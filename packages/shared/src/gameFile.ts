@@ -169,7 +169,8 @@ export const DELIBERATELY_EXCLUDED_TASK_KEYS = [
 export const EXPORTED_SMART_KEYS = [
   'enabled', 'verificationType', 'longInstructions', 'longInstructionsHe',
   'extraInfo', 'mediaUrl', 'imageUrl', 'adminNotes', 'timeLimitSeconds', 'canSkip',
-  'autoCompleteOnSuccess', 'autoApprove', 'captureKind', 'geofenceRadiusMeters',
+  'autoCompleteOnSuccess', 'autoApprove', 'captureKind',
+  'videoMinSeconds', 'videoMaxSeconds', 'geofenceRadiusMeters',
   'codeInputLabel', 'hasCode', 'secretCode', 'attemptLimit', 'hintCount',
   'photoReviewRequired', 'allowRetry', 'showIntroScreen', 'showSuccessScreen',
   'showFailureScreen', 'showPendingReviewScreen', 'showHintsOverTime',

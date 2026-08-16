@@ -43,13 +43,10 @@ const VPS_UPLOAD_ORIGIN = process.env.VPS_UPLOAD_ORIGIN || '';
 // scripts/test-upload-origin-parity.ts fails if the two ever drift.
 const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 
-// Content-type allowlist — mirrors storage.rules exactly.
-const ALLOWED_CONTENT_TYPES = /^(image\/(jpeg|jpg|png|webp|heic|heif|gif)|audio\/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr))$/;
-// Creator media also allows video types (SVG stays excluded for images).
-const ALLOWED_CREATOR_TYPES = /^(image\/(?!svg)(jpeg|jpg|png|webp|heic|heif|gif)|video\/.+|audio\/(webm|mp4|mpeg|ogg|aac|x-m4a|3gpp|amr))$/;
-
-const MAX_PARTICIPANT_BYTES = 10 * 1024 * 1024;  // 10MB
-const MAX_CREATOR_BYTES = 50 * 1024 * 1024;      // 50MB
+// The upload route (content-type allowlists, size caps and the streaming write)
+// lives in uploadRoute.js so it can be tested without this file's built-bundle
+// and Admin-SDK dependencies.
+const { createUploadHandler, sweepStaleTempUploads } = require('./uploadRoute.js');
 
 // Initialise the Admin SDK ONCE. With GOOGLE_APPLICATION_CREDENTIALS set it uses
 // that service account; GCLOUD_PROJECT (or the credential's project) picks the
@@ -108,9 +105,10 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }));
 // and gameMedia/{ownerUid}/…). The download URL is just a static-serve path
 // on this origin.
 
-// Raw body parser for uploads — separate from the JSON parser (which stays at 1mb
-// for callables). Cross-origin PUT with Authorization preflights here (callables
-// handle their own CORS; this route is custom).
+// Cross-origin PUT with Authorization preflights here (callables handle their own
+// CORS; this route is custom). The upload body is NOT parsed by middleware — the
+// handler streams it to disk itself (change: stream-upload-write); see
+// uploadRoute.js for why buffering it was a memory hazard.
 app.options('/upload', (req, res) => {
   reflectCors(req, res);
   res.set('Access-Control-Allow-Methods', 'PUT, OPTIONS');
@@ -119,94 +117,23 @@ app.options('/upload', (req, res) => {
   res.sendStatus(204);
 });
 
-app.put('/upload',
-  express.raw({ type: '*/*', limit: '50mb' }),
-  async (req, res) => {
-    try {
-      // 1. Auth: verify Firebase ID token
-      const authHeader = req.headers.authorization || '';
-      const match = authHeader.match(/^Bearer\s+(.+)$/i);
-      if (!match) return res.status(401).json({ error: { status: 'UNAUTHENTICATED', message: 'Missing auth token' } });
-      let uid;
-      try {
-        const decoded = await admin.auth().verifyIdToken(match[1]);
-        uid = decoded.uid;
-      } catch {
-        return res.status(401).json({ error: { status: 'UNAUTHENTICATED', message: 'Invalid auth token' } });
-      }
-
-      // 2. Validate path
-      const uploadPath = req.query.path;
-      if (typeof uploadPath !== 'string' || !uploadPath) {
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Missing path query parameter' } });
-      }
-      if (uploadPath.includes('..') || uploadPath.startsWith('/') || uploadPath.startsWith('\\')) {
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Invalid path' } });
-      }
-      const isParticipant = uploadPath.startsWith('runs/');
-      const isCreator = uploadPath.startsWith('gameMedia/');
-      if (!isParticipant && !isCreator) {
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Path must start with runs/ or gameMedia/' } });
-      }
-
-      // 3. Validate content type
-      const contentType = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-      const typeAllowed = isCreator ? ALLOWED_CREATOR_TYPES.test(contentType) : ALLOWED_CONTENT_TYPES.test(contentType);
-      if (!typeAllowed) {
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: `Content type not allowed: ${contentType}` } });
-      }
-
-      // 4. Validate size
-      const maxBytes = isCreator ? MAX_CREATOR_BYTES : MAX_PARTICIPANT_BYTES;
-      if (!Buffer.isBuffer(req.body) || req.body.length > maxBytes) {
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: `File too large (max ${maxBytes / 1024 / 1024}MB)` } });
-      }
-      if (req.body.length === 0) {
-        return res.status(400).json({ error: { status: 'INVALID_ARGUMENT', message: 'Empty file' } });
-      }
-
-      // 5. IDOR guard: participant uploads must be under runs/{runId}/teams/{uid}/
-      if (isParticipant) {
-        const parts = uploadPath.split('/');
-        // Expected: runs/{runId}/teams/{teamId}/{filename}
-        if (parts.length < 5 || parts[2] !== 'teams' || parts[3] !== uid) {
-          return res.status(403).json({ error: { status: 'PERMISSION_DENIED', message: 'Cannot upload to another team folder' } });
-        }
-      }
-      // Creator uploads must be under gameMedia/{uid}/
-      if (isCreator) {
-        const parts = uploadPath.split('/');
-        if (parts.length < 3 || parts[1] !== uid) {
-          return res.status(403).json({ error: { status: 'PERMISSION_DENIED', message: 'Cannot upload to another creator folder' } });
-        }
-      }
-
-      // 6. Save to disk
-      const fullPath = fsPath.join(UPLOAD_DIR, uploadPath);
-      await fs.promises.mkdir(fsPath.dirname(fullPath), { recursive: true });
-      await fs.promises.writeFile(fullPath, req.body);
-
-      // 7. Return download URL.
-      //
-      // The request-derived form is the LAST resort (change: task-media-durability).
-      // Express has no `trust proxy` here, so behind Caddy `req.protocol` reads 'http'
-      // — and an http:// URL is both mixed content in the browser AND unrecognised by
-      // every accept-set mode, which meant the next autosave silently deleted the
-      // creator's picture from Firestore. Prefer the configured origin, then the
-      // compiled-in canonical one, and read x-forwarded-proto if we ever get that far.
-      const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
-      const origin = VPS_UPLOAD_ORIGIN
-        || CANONICAL_UPLOAD_ORIGIN
-        || `${fwdProto || req.protocol}://${req.get('host')}`;
-      const url = `${origin}/uploads/${encodeURI(uploadPath)}`;
-      reflectCors(req, res);
-      res.json({ url });
-    } catch (e) {
-      console.error('Upload error:', e);
-      res.status(500).json({ error: { status: 'INTERNAL', message: 'Upload failed' } });
-    }
-  }
-);
+app.put('/upload', createUploadHandler({
+  verifyIdToken: (token) => admin.auth().verifyIdToken(token),
+  uploadDir: UPLOAD_DIR,
+  // The request-derived form is the LAST resort (change: task-media-durability).
+  // Express has no `trust proxy` here, so behind Caddy `req.protocol` reads 'http'
+  // — and an http:// URL is both mixed content in the browser AND unrecognised by
+  // every accept-set mode, which meant the next autosave silently deleted the
+  // creator's picture from Firestore. Prefer the configured origin, then the
+  // compiled-in canonical one, and read x-forwarded-proto if we ever get that far.
+  resolveOrigin: (req) => {
+    const fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    return VPS_UPLOAD_ORIGIN
+      || CANONICAL_UPLOAD_ORIGIN
+      || `${fwdProto || req.protocol}://${req.get('host')}`;
+  },
+  onResponse: reflectCors,
+}));
 
 // Serve uploaded files. Content-Type is derived from the extension.
 // These URLs are the "download URLs" — equivalent to Firebase's getDownloadURL().
@@ -305,6 +232,16 @@ for (const name of Object.keys(fns)) {
 if (typeof fns.stripeWebhook === 'function') {
   app.post('/stripeWebhook', (req, res) => fns.stripeWebhook(req, res));
 }
+
+// Clear temp files orphaned by a process that died mid-upload (change:
+// stream-upload-write). Best-effort and non-blocking — a failure here must never
+// stop the API from booting.
+sweepStaleTempUploads(UPLOAD_DIR)
+  .then((n) => {
+    // eslint-disable-next-line no-console
+    if (n > 0) console.log(`Swept ${n} stale upload temp file(s)`);
+  })
+  .catch(() => {});
 
 const port = Number(process.env.PORT || 8080);
 const host = process.env.HOST || '0.0.0.0';

@@ -69,6 +69,15 @@ export const PRIVILEGED_CALLABLES = {
     + 'run, and can lower that team\'s stage requirement. "Who skipped this, for whom, and why" '
     + 'must stay answerable after the event, exactly like adjustTeamScore.',
   clearTeamOutOfBounds: 'Staff override that releases a team from a safety-zone block.',
+  setTeamHold:
+    'Staff override that stops ONE identified team from advancing at all and pauses its race '
+    + 'clock. Both directions change that team\'s standing (held time is excluded from scoring), '
+    + 'so "who parked this team, when, and why" must stay answerable after the event.',
+  forceAssignTask:
+    'Staff override that sends ONE identified team to a SPECIFIC mission, displacing whatever it '
+    + 'was on. The override variant additionally bypasses an unlock / scheduled-release / expiry '
+    + 'gate the game\'s designer authored, so the trail is the only way an organizer can later '
+    + 'tell a routine redirect from a deliberately broken sequencing rule.',
   pruneRunNow:
     'Irreversibly destroys one run\'s participant data — six subcollections, uploaded '
     + 'Storage objects, guardian-consent PII. Nothing is recoverable.',

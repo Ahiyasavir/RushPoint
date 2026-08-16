@@ -73,6 +73,21 @@ export const AUDIT_SYSTEM_OPERATOR = 'system:purge-sweep';
 // after the event — the same rule as adjustTeamScore.
 export const AUDIT_TASK_SKIPPED = 'task_skipped';
 
+// ── Staff field-ops overrides (change: staff-console-field-ops) ───────────────
+// All three change one identified team's run from the field console, so "who did
+// this, to whom, and why" must outlive the event — same rule as adjustTeamScore.
+//
+// FORCE-ASSIGN IS TWO TYPES ON PURPOSE. An ordinary force-assign only re-picks
+// among tasks the team could already have been routed to; the OVERRIDE variant
+// deliberately bypasses a sequencing gate (unlock / scheduled-release / expiry)
+// the game's designer authored. An organizer reviewing the trail must be able to
+// see the difference at a glance, so it is a distinct action type rather than a
+// flag buried in the record.
+export const AUDIT_TEAM_HELD          = 'team_held';
+export const AUDIT_TEAM_RESUMED       = 'team_resumed';
+export const AUDIT_TASK_FORCE_ASSIGNED = 'task_force_assigned';
+export const AUDIT_TASK_FORCE_ASSIGNED_OVERRIDE = 'task_force_assigned_override';
+
 export const AUDIT_RUN_PII_PRUNED      = 'run_pii_pruned';
 export const AUDIT_RUN_PII_SWEEP       = 'run_pii_sweep';
 export const AUDIT_GAME_PURGE_SWEEP    = 'game_purge_sweep';

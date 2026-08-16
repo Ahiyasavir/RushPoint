@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rateLimitStore';
 import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
-import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
 
@@ -16,7 +16,7 @@ import { storageOriginOpts } from './storageOriginOpts';
 function generatePin(): string {
   return String(randomInt(100000, 1000000));
 }
-import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask } from './runs/index';
+import { completeTaskForTeam, resolveCallerTeam, maybeRefreshLeaderboardSnapshot, assignNextInActiveStage, assertStageActiveForTask, assertTeamNotHeld } from './runs/index';
 import { nextBonusPenalty } from './scoring/bonusPenalty';
 import { shouldFeedTask, type FeedTaskVisibilityInput } from './feedVisibility';
 
@@ -38,8 +38,12 @@ export {
 // helper, not a Cloud Function, so it must NOT be re-exported as a trigger).
 // skipStage ends the whole stage; skipTaskForTeam removes ONE mission from ONE
 // team and keeps them in the same stage (change: skip-single-task).
+// setTeamHold parks/resumes ONE team (its clock stops and it cannot advance);
+// forceAssignTask sends ONE team to a SPECIFIC task in its current stage
+// (change: staff-console-field-ops).
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
+  setTeamHold, forceAssignTask,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
@@ -512,6 +516,86 @@ export const sendTeamChatMessage = loggedCallable('sendTeamChatMessage', async (
     tx.set(chatRef, {
       teamId: resolvedTeamId,
       deviceUids: mirroredDeviceUids,
+      messages: appendCapped(prev, msg),
+      updatedAt: at,
+    });
+  });
+
+  return { messageId };
+});
+
+
+// ─── sendStaffChannelMessage (change: staff-console-field-ops) ────────────────
+//
+// ONE shared thread per run between the field marshals and the run's owner. A
+// marshal reports a problem or asks for an exception; the organizer answers from
+// the desktop console or their own phone. Deliberately NOT a per-marshal DM system
+// and NOT a ticketing workflow — it is coordination, and an SOS-severity issue
+// still belongs on the existing triggerSOS/alerts path (which has an audio cue).
+//
+// The SENDER ROLE is decided here, never accepted from the client: uid === ownerUid
+// ⇒ 'admin', otherwise 'staff'. `assertStaffOrOwner` is the actual authorization —
+// exactly the guard adjustTeamScore and acknowledgeAlert already use — so a
+// participant, a stranger, or another run's staff token cannot reach this thread at
+// all, and firestore.rules independently denies them the read.
+export const sendStaffChannelMessage = loggedCallable('sendStaffChannelMessage', async (data, context) => {
+  requireAuth(context);
+  const uid = context.auth!.uid;
+  await enforceRateLimit(uid, 'sendStaffChannelMessage');
+
+  const { ownerUid, gameId, runId, senderName: rawSenderName } = data as {
+    ownerUid: string;
+    gameId: string;
+    runId: string;
+    senderName?: string;
+    text?: string;
+  };
+  if (!ownerUid || !gameId || !runId) {
+    throw new functions.https.HttpsError('invalid-argument', 'ownerUid, gameId, runId required');
+  }
+  // Authorization FIRST — before any read, so an unauthorized caller learns nothing
+  // about whether the run exists.
+  assertStaffOrOwner(context, ownerUid, runId);
+
+  const text = sanitizeChatText((data as { text?: unknown }).text);
+  if (text === null) {
+    throw new functions.https.HttpsError('invalid-argument', 'Message must be 1 to 500 characters.');
+  }
+
+  // Role is derived from the authenticated identity, never from the payload. A
+  // platform admin acting on someone else's run reads as 'admin' too — they are
+  // acting in the organizer's seat, which is what a marshal needs to know.
+  const token = context.auth!.token as { admin?: boolean; staffName?: string };
+  const from: 'staff' | 'admin' = uid === ownerUid || token.admin === true ? 'admin' : 'staff';
+  // Attribution mirrors sendTeamChatMessage: the token's own staffName claim is the
+  // trustworthy label; the client-supplied name is only a fallback for the owner,
+  // whose token carries no staffName. Display-only either way — authz is the claims
+  // check above, so a wrong label can never widen access.
+  const senderName = token.staffName
+    ?? validate(() => optionalString(rawSenderName, 'senderName', 64))
+    ?? (from === 'admin' ? 'Admin' : 'Staff');
+
+  // Run gate — same rule as team chat: no coordination thread on a finished run.
+  const runSnap = await db.doc(FIRESTORE_PATHS.run(ownerUid, gameId, runId)).get();
+  if (!runSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Run not found');
+  }
+  if ((runSnap.data() as { status?: string }).status === 'finished') {
+    throw new functions.https.HttpsError('failed-precondition', 'This race has already finished.');
+  }
+
+  // Transactional append for the same reason team chat is: two marshals sending at
+  // once must not lose a message. Whole-doc set — this doc IS the thread.
+  const channelRef = db.doc(FIRESTORE_PATHS.runStaffChannel(ownerUid, gameId, runId));
+  const messageId = db.collection('_').doc().id;
+  const at = new Date().toISOString();
+  const msg: StaffChannelMessage = { id: messageId, from, senderId: uid, senderName, text, at };
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(channelRef);
+    const prev = (snap.data() as StaffChannelDoc | undefined)?.messages ?? [];
+    tx.set(channelRef, {
+      runId,
       messages: appendCapped(prev, msg),
       updatedAt: at,
     });
@@ -1071,6 +1155,9 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   const { teamId: resolvedTeamId, team } = await resolveCallerTeam(
     uid, { ownerUid, gameId, runId }, { requireController: true },
   );
+  // Staff hold (staff-console-field-ops) — before the code comparison, so a held
+  // team cannot use this path as a code oracle while parked.
+  assertTeamNotHeld(team);
   // IDOR guard (auth-anticheat row 38): a participant may only verify for their
   // OWN team. A payload teamId that isn't the caller's team is rejected.
   if (teamId && teamId !== resolvedTeamId) {
@@ -1198,6 +1285,8 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
   const { teamId: resolvedTeamId, team } = await resolveCallerTeam(
     uid, { ownerUid, gameId, runId }, { requireController: true },
   );
+  // Staff hold (staff-console-field-ops) — a parked team cannot bank a submission.
+  assertTeamNotHeld(team);
   // IDOR guard (auth-anticheat row 38): a participant may only submit for their
   // OWN team. A payload teamId that isn't the caller's team is rejected.
   if (teamId && teamId !== resolvedTeamId) {
@@ -1242,7 +1331,9 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
         autoApprove = task.smart?.autoApprove === true;
         taskTitle = task.title ?? '';
         feedTask = { hideLocation: task.hideLocation };
-        kind = task.smart?.captureKind === 'audio' ? 'audio' : 'photo';
+        kind = task.smart?.captureKind === 'audio' || task.smart?.captureKind === 'video'
+          ? task.smart.captureKind
+          : 'photo';
         scheduleGate = { releaseAt: task.releaseAt, releaseAfterMinutes: task.releaseAfterMinutes, expiresAfterMinutes: task.expiresAfterMinutes };
         break;
       }
@@ -1324,13 +1415,15 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // siblings), so no post-commit releaseTask is needed here.
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
-    // audio-tasks non-goal: audio submissions never enter the photo feed.
+    // audio-tasks / video-submission-task non-goal: only PHOTO submissions enter
+    // the photo feed. Tested as an allowlist, not a deny-list, so a fourth capture
+    // kind cannot leak into the feed by simply not being named here.
     // WO Fix 4: gated on `completed` (like the sibling releaseTask) so a duplicate
     // autoApprove submission — which returns completed:false — cannot flood the feed.
     // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely — its
     // photo (taken AT the secret spot) would leak the location to teams still
     // hunting it, defeating the wave-D hidden-task gating.
-    if (completed && feedEnabled && kind !== 'audio' && shouldFeedTask(feedTask)) {
+    if (completed && feedEnabled && kind === 'photo' && shouldFeedTask(feedTask)) {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
@@ -1416,12 +1509,15 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         } | undefined;
         const submission = teamData?.taskSubmissions?.[taskId];
         const submittedPhotoUrl = submission?.photoUrl;
-        // audio-tasks non-goal: audio submissions never enter the photo feed.
+        // audio-tasks / video-submission-task non-goal: only PHOTO submissions
+        // enter the feed. An absent mediaKind is a pre-audio-tasks record, which
+        // could only have been a photo.
         // WO Fix 4: gated on `completed` — a re-approval of an already-completed
         // task returns completed:false and must not re-emit a feed item.
         // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely
         // (photo would leak the secret spot to teams still hunting it).
-        if (completed && submittedPhotoUrl && submission?.mediaKind !== 'audio' && shouldFeedTask(feedTask)) {
+        const submissionKind = submission?.mediaKind ?? 'photo';
+        if (completed && submittedPhotoUrl && submissionKind === 'photo' && shouldFeedTask(feedTask)) {
           await writeFeedItem(ownerUid, gameId, runId, {
             taskId,
             taskTitle,

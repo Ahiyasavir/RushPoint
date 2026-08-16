@@ -50,6 +50,8 @@ export const PANEL_COPY: Record<PanelId, PanelCopy> = {
   photoReview: { icon: '📷', hasHelp: true, hasEmpty: true },
   feed: { icon: '📸', hasHelp: true, hasEmpty: true },
   chat: { icon: '💬', hasHelp: true, hasEmpty: true },
+  // The organizer's end of the staff↔admin channel (staff-console-field-ops).
+  staffChannel: { icon: '📻', hasHelp: true, hasEmpty: true },
 
   // ── Share and screens ──
   shareScreens: { icon: '🔗', hasHelp: true, hasEmpty: false },
