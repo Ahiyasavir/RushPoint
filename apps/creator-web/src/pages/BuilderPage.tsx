@@ -1024,6 +1024,15 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
             onChange={(e) => patch({ manualLeaderboardReveal: e.target.checked })} />
           {b.manualRevealLabel}
         </label>
+
+        {/* Task-library priority (change: task-library-priority-boost): default OFF
+            (absent = normal popularity ranking). When ON, every task published from
+            this game sorts to the top of every creator's task library search. */}
+        <label title={b.pinnedFirstHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.pinnedFirst}
+            onChange={(e) => patch({ pinnedFirst: e.target.checked })} />
+          {b.pinnedFirstLabel}
+        </label>
       </Advanced>
 
       <Advanced title={b.advRegistration} open={advReg} onToggle={() => setAdvReg(!advReg)}>

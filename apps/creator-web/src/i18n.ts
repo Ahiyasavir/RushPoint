@@ -1508,6 +1508,8 @@ const HE = {
     powerUpsHint: 'סיכוי של בערך 25% בכל משימה שהושלמה לזכות בכוח מיוחד: פי 2 נקודות במשימה הבאה או 15 נקודות בונוס.',
     manualRevealLabel: 'חשיפה ידנית של טבלת הדירוג',
     manualRevealHint: 'בסיום המשחק הדירוג יישאר מוסתר מהמשתתפים עד שתחשפו אותו מלוח הבקרה של ההרצה.',
+    pinnedFirstLabel: 'תעדוף במאגר המשימות',
+    pinnedFirstHint: 'המשימות של המשחק הזה יופיעו ראשונות במאגר המשימות של כל היוצרים, לפני משימות פופולריות יותר.',
     // Group the four feature toggles under one collapsed section (change: builder-settings-grouping).
     featuresSection: 'יכולות משחק',
     featuresOnBadge: (n: number) => `${n} פעילות`,
@@ -3325,6 +3327,8 @@ const EN: typeof HE = {
     powerUpsHint: 'About a 25% chance on each completed mission to win a power up: 2x points on the next mission, or 15 bonus points.',
     manualRevealLabel: 'Manual leaderboard reveal',
     manualRevealHint: 'When the game ends the standings stay hidden from players until you reveal them from the run console.',
+    pinnedFirstLabel: 'Priority in the task library',
+    pinnedFirstHint: 'This game’s missions show up first in every creator’s task library, ahead of more popular ones.',
     // Group the four feature toggles under one collapsed section (change: builder-settings-grouping).
     featuresSection: 'Game features',
     featuresOnBadge: (n: number) => `${n} on`,

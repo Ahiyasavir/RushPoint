@@ -331,6 +331,8 @@ export const searchTaskLibrary = loggedCallable('searchTaskLibrary', async (data
     uses: t.copyCount,
     likes: t.likeCount,
     pinnedLast: t.pinnedLast,
+    // Task-library priority (change: task-library-priority-boost).
+    pinnedFirst: t.pinnedFirst,
   }));
 
   // FACET pass (change: gallery-facet-filters): type/difficulty(≥)/hasLocation

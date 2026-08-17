@@ -63,7 +63,23 @@ export interface PopularitySignals {
   likes?: number;
   /** Epoch ms the item was first published. */
   createdAtMs?: number;
+  /**
+   * Task-library priority (change: task-library-priority-boost). Firestore's
+   * `fetchRankedWindow` orders by this STORED field and only fetches the top
+   * `fetchSize` docs — `comparePopularity`'s in-memory pinnedFirst check can't
+   * rescue a boosted task that never made it into that window. So the boost has
+   * to live in the stored score itself, not just the in-memory comparator.
+   */
+  pinnedFirst?: boolean;
 }
+
+/**
+ * Added to a pinnedFirst item's stored score — orders of magnitude above any
+ * realistic engagement + newness total (which tops out well under 100), so a
+ * pinnedFirst task always sorts into (and stays atop) Firestore's
+ * `orderBy('popularity','desc')` window, not merely the in-memory re-rank.
+ */
+const PINNED_FIRST_BONUS = 1_000_000;
 
 /**
  * A count that reaches the ordering field must never be NaN — an unorderable
@@ -104,7 +120,8 @@ export function popularityScore(signals: PopularitySignals): number {
   // engagement instead of going negative.
   const newnessDays = Math.max(0, created - POPULARITY_EPOCH_MS) / DAY_MS;
 
-  return round(engagement + POPULARITY_DAY_BONUS * newnessDays);
+  const bonus = signals.pinnedFirst ? PINNED_FIRST_BONUS : 0;
+  return round(bonus + engagement + POPULARITY_DAY_BONUS * newnessDays);
 }
 
 /** The fields ranking needs from any gallery-shaped item. */
@@ -118,6 +135,8 @@ export interface RankFields {
   likes?: number;
   /** See PublicGame.pinnedLast (change: gallery-pin-last). */
   pinnedLast?: boolean;
+  /** See PublicTask.pinnedFirst (change: task-library-priority-boost). */
+  pinnedFirst?: boolean;
 }
 
 /**
@@ -129,12 +148,18 @@ export interface RankFields {
  * guarantees two callers ranking the same set always produce the same sequence.
  * A missing score counts as 0, so a legacy document ranks last rather than NaN.
  *
- * `pinnedLast` is checked FIRST and outranks every other signal: a pinned item
- * sorts after every non-pinned item no matter how much popularity/uses/likes it
- * has, and two pinned items still fall through to the normal order between
- * themselves (so pinning is a floor, not a black hole).
+ * `pinnedFirst` is checked before EVERYTHING, including `pinnedLast`: a
+ * task-library-priority item sorts before every other item no matter how much
+ * popularity/uses/likes it has (change: task-library-priority-boost). `pinnedLast`
+ * is checked next and outranks every remaining signal: a pinned item sorts after
+ * every non-pinned item no matter how much popularity/uses/likes it has, and two
+ * pinned items still fall through to the normal order between themselves (so
+ * pinning is a floor, not a black hole). An item flagged BOTH — nonsensical, but
+ * not rejected here — resolves to pinnedFirst, since that check runs first.
  */
 export function comparePopularity(a: RankFields, b: RankFields): number {
+  const byPinnedFirst = (b.pinnedFirst ? 1 : 0) - (a.pinnedFirst ? 1 : 0);
+  if (byPinnedFirst !== 0) return byPinnedFirst;
   const byPinned = (a.pinnedLast ? 1 : 0) - (b.pinnedLast ? 1 : 0);
   if (byPinned !== 0) return byPinned;
   const byScore = clampCount(b.popularity) - clampCount(a.popularity);

@@ -7116,6 +7116,17 @@ async function main() {
       ['participant', pl, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['stranger', str, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['other-run staff', staffB, 'skipTaskForTeam', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // staff-console-field-ops: setTeamHold pauses a team's race clock and
+      // forceAssignTask overrides routing for ONE team — both change what a team
+      // scores, same owner/run-staff-only trust level as setRunTaskStatus above.
+      // The ALLOWED side (owner) is proven in the 'staff field ops' scenario;
+      // only denials belong here.
+      ['participant', pl, 'setTeamHold', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, held: true }],
+      ['stranger', str, 'setTeamHold', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, held: true }],
+      ['other-run staff', staffB, 'setTeamHold', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, held: true }],
+      ['participant', pl, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      ['stranger', str, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      ['other-run staff', staffB, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       // admin-manage-game-templates: setGameTemplateFlag is platform-admin-only,
       // same trust level as listPlatformUsers/setUserNote above — a mere game
       // owner (even flagging their OWN game) and a participant must both be denied.
@@ -8296,6 +8307,66 @@ async function main() {
     check('searchTaskLibrary tolerates null facets (client undefined→null) and returns the missions',
       Array.isArray(libNull?.tasks) && (libNull.tasks ?? []).some((t) => t.id === `${gR}_gr-loc`),
       JSON.stringify((libNull?.tasks ?? []).map((t) => t.id).slice(0, 8)));
+  });
+
+  // Task-library priority boost (change: task-library-priority-boost). A creator
+  // can flag a game as `pinnedFirst`; every task it publishes must then outrank
+  // even a heavily-engaged, unrelated task in searchTaskLibrary, and clearing the
+  // flag + re-publishing must actually revert it (batch.set REPLACES the whole
+  // publicTasks doc, so a stale `pinnedFirst:true` would otherwise survive).
+  await scenario('task-library priority boost (pinnedFirst)', async () => {
+    const stamp = Date.now();
+    const TAG = `libpriority${stamp}`;
+    const mkStages = (prefix, title) => ([{
+      id: `${prefix}-s`, order: 0, title: 'Only stage', isFinal: true,
+      tasks: [{ id: `${prefix}-t`, title, type: 'self_report', locationless: true,
+        coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 }],
+    }]);
+
+    // POPULAR: an ordinary game, heavily engaged, no boost.
+    const { gameId: gPopular } = await creator.call('createGame', { title: `Popular ${stamp}`, mode: 'individual' });
+    await creator.call('updateGame', { gameId: gPopular, scoringPreset: 'fixed_points_speed', tags: [TAG], stages: mkStages('pop', `Popular mission ${stamp}`) });
+    await creator.call('publishGame', { gameId: gPopular, visibility: 'public' });
+    const popularTaskId = `${gPopular}_pop-t`;
+    for (let i = 0; i < 15; i++) await creator.call('incrementTaskCopyCount', { publicTaskId: popularTaskId });
+
+    // BOOSTED: a brand-new, zero-engagement game explicitly flagged pinnedFirst.
+    const { gameId: gBoosted } = await creator.call('createGame', { title: `Boosted ${stamp}`, mode: 'individual' });
+    await creator.call('updateGame', { gameId: gBoosted, scoringPreset: 'fixed_points_speed', tags: [TAG], pinnedFirst: true, stages: mkStages('bst', `Boosted mission ${stamp}`) });
+    await creator.call('publishGame', { gameId: gBoosted, visibility: 'public' });
+    const boostedTaskId = `${gBoosted}_bst-t`;
+
+    const boostedDoc = (await creator.getDocAt(`publicTasks/${boostedTaskId}`)).data ?? {};
+    check('publishGame writes pinnedFirst:true onto the boosted task',
+      boostedDoc.pinnedFirst === true, JSON.stringify(boostedDoc.pinnedFirst));
+    check('the boosted task\'s stored popularity carries the pinnedFirst bonus (Firestore orderBy needs it stored)',
+      typeof boostedDoc.popularity === 'number' && boostedDoc.popularity > 1000,
+      `popularity=${boostedDoc.popularity}`);
+
+    const lib = await creator.call('searchTaskLibrary', { query: '', tags: [TAG], limit: 100 });
+    const ids = (lib?.tasks ?? []).map((t) => t.id);
+    check('searchTaskLibrary puts the zero-engagement boosted task BEFORE the heavily-engaged one',
+      ids.indexOf(boostedTaskId) >= 0 && ids.indexOf(popularTaskId) >= 0
+      && ids.indexOf(boostedTaskId) < ids.indexOf(popularTaskId),
+      `boosted@${ids.indexOf(boostedTaskId)} popular@${ids.indexOf(popularTaskId)} ids=${JSON.stringify(ids.slice(0, 6))}`);
+
+    // Turning the toggle off and re-publishing must actually clear it — batch.set
+    // replaces the whole doc, but only a live regression test proves that.
+    await creator.call('updateGame', { gameId: gBoosted, pinnedFirst: false });
+    await creator.call('publishGame', { gameId: gBoosted, visibility: 'public' });
+    const afterOff = (await creator.getDocAt(`publicTasks/${boostedTaskId}`)).data ?? {};
+    check('clearing pinnedFirst + re-publishing removes the flag from the public task',
+      afterOff.pinnedFirst === undefined, JSON.stringify(afterOff.pinnedFirst));
+    check('clearing pinnedFirst removes the stored score bonus too',
+      typeof afterOff.popularity === 'number' && afterOff.popularity < 1000,
+      `popularity=${afterOff.popularity}`);
+
+    const libAfter = await creator.call('searchTaskLibrary', { query: '', tags: [TAG], limit: 100 });
+    const idsAfter = (libAfter?.tasks ?? []).map((t) => t.id);
+    check('after clearing the boost, the heavily-engaged task outranks the now-unboosted one',
+      idsAfter.indexOf(popularTaskId) >= 0 && idsAfter.indexOf(boostedTaskId) >= 0
+      && idsAfter.indexOf(popularTaskId) < idsAfter.indexOf(boostedTaskId),
+      `popular@${idsAfter.indexOf(popularTaskId)} boosted@${idsAfter.indexOf(boostedTaskId)}`);
   });
 
   await scenario('gallery popularity + likes', async () => {
@@ -9614,6 +9685,101 @@ async function main() {
     check('audit: the record states whether the stage ended and whether the requirement dropped',
       entry?.stageCompleted === false && entry?.requirementLowered === true,
       JSON.stringify({ stageCompleted: entry?.stageCompleted, requirementLowered: entry?.requirementLowered }));
+  });
+
+  // staff-console-field-ops: setTeamHold (pause/resume a team's race clock) and
+  // forceAssignTask (send ONE team to a specific mission instead of waiting on
+  // routing). Denials live in the authz matrix above; this is the ALLOWED path.
+  await scenario('staff field ops (setTeamHold · forceAssignTask)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: fg } = await creator.call('createGame', { title: 'Field Ops Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: fg, scoringPreset: 'fixed_points_speed',
+      // requiredTaskCount 1 of 2, both locationless: the team auto-assigns to ONE
+      // of them and the other sits unassigned, exactly the shape forceAssignTask
+      // needs to prove it can move a team onto the task routing did NOT pick.
+      stages: [{ id: 'fo-s', order: 0, title: 'Stops', isFinal: true, requiredTaskCount: 1, tasks: [
+        { id: 'fo-a', title: 'Stop A', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9 },
+        { id: 'fo-b', title: 'Stop B', type: 'self_report', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20, maxConcurrentTeams: 9 },
+      ] }],
+    });
+    const { runId: fr, accessCode: fc } = await creator.call('launchRun', { gameId: fg });
+    const F = { ownerUid: OWNER, gameId: fg, runId: fr };
+    const fTeamPathFor = (uid) => `users/${OWNER}/games/${fg}/runs/${fr}/teams/${uid}`;
+
+    const fp = makeParty('fieldOpsPlayer');
+    await signInAnonymously(fp.auth);
+    await fp.call('joinRun', { code: fc, displayName: 'Fielder' });
+    await creator.call('startTeams', { gameId: fg, runId: fr });
+    const fpUid = fp.auth.currentUser.uid;
+
+    // ── setTeamHold: pause the race clock, then resume it ─────────────────────
+    const hold = await creator.call('setTeamHold', { ...F, teamId: fpUid, held: true, reason: 'medical check' });
+    check('hold: the response reports held true with zero elapsed ms',
+      hold?.ok === true && hold?.held === true && hold?.heldMsAdded === 0, JSON.stringify(hold));
+    const heldTeam = (await creator.getDocAt(fTeamPathFor(fpUid))).data ?? {};
+    check('hold: the team document carries held:true, an audit reason and a stamp',
+      heldTeam.held === true && heldTeam.heldReason === 'medical check' && !!heldTeam.heldAt,
+      JSON.stringify({ held: heldTeam.held, heldReason: heldTeam.heldReason, heldAt: heldTeam.heldAt }));
+
+    await expectError('hold: holding an already-held team is refused, not silently no-op\'d',
+      creator.call('setTeamHold', { ...F, teamId: fpUid, held: true }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    // forceAssignTask must refuse a held team — routing it would defeat the hold.
+    await expectError('hold: forceAssignTask refuses a held team',
+      creator.call('forceAssignTask', { ...F, teamId: fpUid, taskId: 'fo-a' }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    await new Promise((r) => setTimeout(r, 50)); // ensure heldMs has something nonzero to accumulate
+    const resume = await creator.call('setTeamHold', { ...F, teamId: fpUid, held: false });
+    check('resume: the response reports held false with a positive elapsed ms',
+      resume?.ok === true && resume?.held === false && resume?.heldMsAdded > 0, JSON.stringify(resume));
+    const resumedTeam = (await creator.getDocAt(fTeamPathFor(fpUid))).data ?? {};
+    check('resume: held + heldAt + heldReason are cleared and heldMs accumulated',
+      resumedTeam.held === false && resumedTeam.heldAt === undefined && resumedTeam.heldReason === undefined
+      && resumedTeam.heldMs > 0,
+      JSON.stringify({ held: resumedTeam.held, heldAt: resumedTeam.heldAt, heldMs: resumedTeam.heldMs }));
+
+    await expectError('resume: unholding an already-active team is refused',
+      creator.call('setTeamHold', { ...F, teamId: fpUid, held: false }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    // ── forceAssignTask: send the team to the mission routing did NOT pick ────
+    const before = (await fp.call('getMyTeamState', { code: fc }))?.team?.activeTaskId ?? null;
+    check('force-assign: the team is holding exactly one of the two missions before the override',
+      before === 'fo-a' || before === 'fo-b', String(before));
+    const other = before === 'fo-a' ? 'fo-b' : 'fo-a';
+
+    const forced = await creator.call('forceAssignTask', { ...F, teamId: fpUid, taskId: other });
+    check('force-assign: the response reports the new task and displaces the old one',
+      forced?.ok === true && forced?.taskId === other && forced?.displacedTaskId === before,
+      JSON.stringify(forced));
+    const afterForce = (await fp.call('getMyTeamState', { code: fc }))?.team?.activeTaskId ?? null;
+    check('force-assign: the team\'s activeTaskId now IS the forced mission',
+      afterForce === other, String(afterForce));
+
+    await expectError('force-assign: forcing the team onto the mission it already holds is refused',
+      creator.call('forceAssignTask', { ...F, teamId: fpUid, taskId: other }),
+      { codeIn: ['functions/failed-precondition'] });
+
+    await expectError('force-assign: a taskId outside this team\'s current stage is refused',
+      creator.call('forceAssignTask', { ...F, teamId: fpUid, taskId: 'no-such-task' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // ── The durable trail ──────────────────────────────────────────────────────
+    const fieldLogs = await platformAdmin.call('listAuditLogs', { limit: 500 });
+    const holdEntry = (fieldLogs?.logs ?? []).find((l) => l.runId === fr && l.actionType === 'team_held');
+    check('audit: the hold is recorded with the team, the reason and the operator',
+      !!holdEntry && holdEntry.teamId === fpUid && holdEntry.reason === 'medical check' && !!holdEntry.operatorId,
+      JSON.stringify(holdEntry));
+    const forceEntry = (fieldLogs?.logs ?? [])
+      .find((l) => l.runId === fr && l.teamId === fpUid && String(l.actionType ?? '').includes('force_assign'));
+    check('audit: the force-assign is recorded with the displaced task as the previous value',
+      !!forceEntry && forceEntry.newValue === other && forceEntry.previousValue === before,
+      JSON.stringify(forceEntry));
   });
 
   await scenario('run-summary email scope (real runs only; demo/sim/synthetic excluded)', async () => {

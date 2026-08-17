@@ -822,6 +822,8 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <p className="text-[11px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
         </div>
 
+        {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
+
         <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}

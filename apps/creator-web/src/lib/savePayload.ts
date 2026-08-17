@@ -59,6 +59,10 @@ export const BUILDER_EDITABLE_FIELDS = [
   // Game intro primer (change: game-intro-instructions). Undefined when unset
   // (skipped server-side); an empty/whitespace-only primer clears it on save.
   'instructions',
+  // Task-library priority (change: task-library-priority-boost). Undefined
+  // means off (default); when on, every task this game publishes sorts to the
+  // top of the task library, regardless of popularity.
+  'pinnedFirst',
 ] as const satisfies ReadonlyArray<keyof Game & keyof UpdateGamePayload>;
 
 export type BuilderEditableField = typeof BUILDER_EDITABLE_FIELDS[number];

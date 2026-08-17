@@ -417,7 +417,7 @@ describe('sanitizeTaskForParticipant — hidden location', () => {
 describe('sanitizeTaskForParticipant — hidden location: sealed until arrival', () => {
   const SEALED_KEYS = [
     'arrivalPending', 'difficulty', 'estimatedMinutes', 'hasHint', 'hintPenalty',
-    'id', 'locationClue', 'locationClueHe', 'locationHidden', 'pointValue',
+    'id', 'locationClue', 'locationClueHe', 'locationHidden', 'media', 'pointValue',
     // change: hidden-mission-search-area — the coarse, containing search circle.
     // It is the ONLY locational key a sealed payload may carry; the exact spot
     // and everything that could reconstruct it are still absent from this list.
@@ -447,13 +447,26 @@ describe('sanitizeTaskForParticipant — hidden location: sealed until arrival',
     expect('title' in out).toBe(false);
   });
 
-  test('sealed: no description / type / media / smart / choices / steps / tolerance / tags', () => {
+  test('sealed: no description / type / smart / choices / steps / tolerance / tags', () => {
     const out = sanitizeTaskForParticipant(treasure(), { shuffleSeed: 't:1' }) as Record<string, unknown>;
-    for (const k of ['description', 'type', 'media', 'smart', 'choices', 'steps',
+    for (const k of ['description', 'type', 'smart', 'choices', 'steps',
       'numericTolerance', 'tags', 'coordinates', 'geofenceRadiusMeters', 'triggerMode',
       'surveyChoices', 'orderItems', 'unlockAfterTaskIds', 'hideLocation']) {
       expect([k, k in out]).toEqual([k, false]);
     }
+  });
+
+  // change: sealed-mission-media — a mission photo/video doesn't reveal WHERE the
+  // task is, only WHAT it is, so it's safe to show while the location is still
+  // sealed (unlike title/description/type, which are withheld until arrival).
+  test('sealed: media IS shown pre-arrival (it carries no location secret)', () => {
+    const out = sanitizeTaskForParticipant(treasure()) as Record<string, unknown>;
+    expect(out.media).toEqual([{ id: 'm1', kind: 'image', url: 'https://firebasestorage.googleapis.com/x.jpg' }]);
+  });
+
+  test('sealed: no media key at all when the task has none', () => {
+    const out = sanitizeTaskForParticipant(treasure({ media: [] } as Partial<Task>)) as Record<string, unknown>;
+    expect('media' in out).toBe(false);
   });
 
   test('sealed: emits arrivalPending + locationHidden + the clue (EN + HE) + hint affordance', () => {

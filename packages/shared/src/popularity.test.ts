@@ -46,6 +46,25 @@ describe('popularityScore — signal weighting', () => {
   });
 });
 
+describe('popularityScore — task-library priority boost', () => {
+  it('a pinnedFirst item outscores an extremely popular ordinary item', () => {
+    const boosted = popularityScore({ uses: 0, likes: 0, createdAtMs: POPULARITY_EPOCH_MS, pinnedFirst: true });
+    const ordinary = popularityScore({ uses: 10_000_000, likes: 10_000_000, createdAtMs: at(1000) });
+    expect(boosted).toBeGreaterThan(ordinary);
+  });
+
+  it('two pinnedFirst items still rank by their own engagement + newness underneath the bonus', () => {
+    const lo = popularityScore({ uses: 1, likes: 0, createdAtMs: POPULARITY_EPOCH_MS, pinnedFirst: true });
+    const hi = popularityScore({ uses: 1000, likes: 0, createdAtMs: POPULARITY_EPOCH_MS, pinnedFirst: true });
+    expect(hi).toBeGreaterThan(lo);
+  });
+
+  it('pinnedFirst absent/false is a pure no-op on the score', () => {
+    const base = popularityScore({ uses: 5, likes: 5, createdAtMs: at(10) });
+    expect(popularityScore({ uses: 5, likes: 5, createdAtMs: at(10), pinnedFirst: false })).toBe(base);
+  });
+});
+
 describe('popularityScore — logarithmic compression', () => {
   it('adds exactly 1.0 per ten-fold increase in weighted engagement', () => {
     const lo = popularityScore({ uses: 10, likes: 0, createdAtMs: POPULARITY_EPOCH_MS });
@@ -159,6 +178,25 @@ describe('comparePopularity — deterministic total order', () => {
     const a = { ...item('a', 2), pinnedLast: true };
     const b = { ...item('b', 1), pinnedLast: true };
     expect(comparePopularity(a, b)).toBeLessThan(0);
+  });
+
+  it('pinnedFirst always ranks before a non-pinned item, regardless of popularity', () => {
+    const boosted = item('boosted', 0, 0, 0);
+    const popular = { ...item('popular', 999, 999, 999), pinnedFirst: true };
+    expect(comparePopularity(popular, boosted)).toBeLessThan(0);
+    expect(comparePopularity(boosted, popular)).toBeGreaterThan(0);
+  });
+
+  it('two pinnedFirst items still order between themselves normally', () => {
+    const a = { ...item('a', 2), pinnedFirst: true };
+    const b = { ...item('b', 1), pinnedFirst: true };
+    expect(comparePopularity(a, b)).toBeLessThan(0);
+  });
+
+  it('pinnedFirst outranks pinnedLast when a single item is (nonsensically) flagged both', () => {
+    const both = { ...item('both', 0), pinnedFirst: true, pinnedLast: true };
+    const ordinary = item('ordinary', 999);
+    expect(comparePopularity(both, ordinary)).toBeLessThan(0);
   });
 
   it('is antisymmetric, transitive, and never zero for distinct ids', () => {

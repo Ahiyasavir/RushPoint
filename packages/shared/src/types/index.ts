@@ -620,6 +620,11 @@ export interface Game {
   templateGroupKey?: string;
   // Which language THIS document's stage/task content is authored in, e.g. 'he' | 'en'.
   templateLang?: string;
+  // Task-library priority (change: task-library-priority-boost). Creator-settable
+  // (unlike PublicGame/PublicTask.pinnedLast, which is admin-only and set directly
+  // in Firestore). When true, every task this game publishes carries
+  // PublicTask.pinnedFirst — see that field for the ranking contract.
+  pinnedFirst?: boolean;
 }
 
 
@@ -706,6 +711,13 @@ export interface PublicTask {
   popularity?: number;
   // See PublicGame.pinnedLast (change: gallery-pin-last) — same contract.
   pinnedLast?: boolean;
+  // Task-library priority (change: task-library-priority-boost): the OPPOSITE of
+  // pinnedLast — sorts BEFORE every non-pinned item in comparePopularity,
+  // regardless of score/uses/likes. Set at publish time from the source game's
+  // OWN `Game.pinnedFirst` toggle (creator-settable in the Builder), never
+  // written directly. If a task is somehow flagged both `pinnedFirst` and
+  // `pinnedLast`, `pinnedFirst` wins — see comparePopularity.
+  pinnedFirst?: boolean;
   createdAt: string;
 }
 
@@ -1419,6 +1431,9 @@ export interface UpdateGamePayload {
   // Game intro primer (change: game-intro-instructions). Empty/whitespace-only ⇒
   // the field is cleared server-side; a non-https image is dropped on clean.
   instructions?: GameInstructions | null;
+  // Task-library priority (change: task-library-priority-boost). Default false
+  // when absent.
+  pinnedFirst?: boolean;
 }
 
 // Run management

@@ -389,7 +389,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
-    instructions,
+    instructions, pinnedFirst,
   } = data as UpdateGamePayload;
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
   // raw payload with a narrow cast rather than the UpdateGamePayload destructure
@@ -491,6 +491,10 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (allowInstantPlay !== undefined)   updates.allowInstantPlay = allowInstantPlay;
   if (photoFeedEnabled !== undefined)   updates.photoFeedEnabled = photoFeedEnabled;
   if (powerUpsEnabled !== undefined)    updates.powerUpsEnabled = powerUpsEnabled;
+  // Task-library priority (change: task-library-priority-boost). Cascades into
+  // every published task's PublicTask.pinnedFirst on the next publishGame call —
+  // this write alone has no gallery effect until the game is (re-)published.
+  if (pinnedFirst !== undefined)        updates.pinnedFirst = pinnedFirst;
   // Organizer-only control: gates whether finalizeRun publishes the final board to
   // participants. Deliberately NOT mirrored into publicGames (below) — it is a run
   // control, not gallery data.
@@ -1020,6 +1024,12 @@ export const publishGame = loggedCallable('publishGame', async (data, context) =
         copyCount: prior.copyCount ?? 0,
         likeCount: prior.likeCount ?? 0,
         createdAt: prior.createdAt ?? now,
+        // Task-library priority (change: task-library-priority-boost): cascades
+        // from the source game's OWN creator-settable toggle. Recomputed on every
+        // publish (not preserved from `prior`) so turning the game's toggle off
+        // and re-publishing actually clears it on every task — this whole object
+        // is `batch.set()`, not merged, so an omitted key here really erases it.
+        ...(game.pinnedFirst ? { pinnedFirst: true as const } : {}),
       };
       publicTask.popularity = scoreFor('task', publicTask);
       batch.set(publicTaskRef, publicTask);

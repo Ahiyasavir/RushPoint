@@ -65,6 +65,10 @@ export function sanitizeTaskForParticipant(
       // helps you FIND the spot is exactly what a treasure-hunt hint is for.
       hasHint: !!task.hint && task.hint.trim().length > 0,
       hintPenalty: task.hintPenalty ?? 25,
+      // Creator-authored media (image/video/YouTube) carries no location secret —
+      // a photo of the mission itself doesn't reveal WHERE it is, so it rides
+      // along with the sealed stub instead of waiting for arrival.
+      ...(task.media != null && task.media.length > 0 ? { media: task.media } : {}),
       // Non-revealing card chrome (how much it's worth / how hard / how long).
       ...(task.pointValue != null ? { pointValue: task.pointValue } : {}),
       ...(task.difficulty != null ? { difficulty: task.difficulty } : {}),

@@ -17,6 +17,7 @@ export interface GameFeatureToggleState {
   photoFeedEnabled: boolean; // default ON: absent ⇒ true
   powerUpsEnabled: boolean;
   manualLeaderboardReveal: boolean;
+  pinnedFirst: boolean;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -36,6 +37,7 @@ export function gameFeatureToggleState(
       photoFeedEnabled: false,
       powerUpsEnabled: false,
       manualLeaderboardReveal: false,
+      pinnedFirst: false,
     };
   }
   const g = game as Record<string, unknown>;
@@ -49,10 +51,12 @@ export function gameFeatureToggleState(
     powerUpsEnabled: g.powerUpsEnabled === true,
     // Mirror `!!game.manualLeaderboardReveal`
     manualLeaderboardReveal: g.manualLeaderboardReveal === true,
+    // Mirror `!!game.pinnedFirst` (change: task-library-priority-boost)
+    pinnedFirst: g.pinnedFirst === true,
   };
 }
 
-/** How many of the four features are on. 0..4. */
+/** How many of the five features are on. 0..5. */
 export function enabledGameFeatureCount(
   game: Partial<Game> | null | undefined,
 ): number {
@@ -61,6 +65,7 @@ export function enabledGameFeatureCount(
     (s.allowInstantPlay ? 1 : 0) +
     (s.photoFeedEnabled ? 1 : 0) +
     (s.powerUpsEnabled ? 1 : 0) +
-    (s.manualLeaderboardReveal ? 1 : 0)
+    (s.manualLeaderboardReveal ? 1 : 0) +
+    (s.pinnedFirst ? 1 : 0)
   );
 }

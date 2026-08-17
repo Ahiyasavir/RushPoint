@@ -38,12 +38,18 @@ export function publicItemPath(kind: PublicLikeKind, itemId: string): string {
  */
 export function scoreFor(
   kind: PublicLikeKind,
-  data: { playCount?: number; copyCount?: number; likeCount?: number; createdAt?: string },
+  data: {
+    playCount?: number; copyCount?: number; likeCount?: number; createdAt?: string;
+    // Task-library priority (change: task-library-priority-boost) — games don't
+    // carry this field, so it is simply absent/undefined for kind: 'game'.
+    pinnedFirst?: boolean;
+  },
 ): number {
   return popularityScore({
     uses: data[USE_FIELD[kind]],
     likes: data.likeCount,
     createdAtMs: data.createdAt ? Date.parse(data.createdAt) : undefined,
+    pinnedFirst: data.pinnedFirst,
   });
 }
 
