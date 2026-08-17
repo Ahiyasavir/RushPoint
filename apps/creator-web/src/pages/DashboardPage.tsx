@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import type { Game, GameMode, ScoringPreset, Stage } from '@rushpoint/shared';
-import { GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL, DEFAULT_WRONG_ANSWER_LEVEL } from '@rushpoint/shared';
+import type { Game, GameMode, ScoringPreset, Stage, GameFile } from '@rushpoint/shared';
+import {
+  GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL,
+  DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile,
+} from '@rushpoint/shared';
 import {
   createGame, updateGame, listGames, launchRun, deleteGame, publishGame,
-  listGameTemplates, createGameFromTemplate, type TemplateGroupEntry,
+  listGameTemplates, createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
@@ -237,6 +240,12 @@ export default function DashboardPage() {
   // until now (change: creator-launch-liftoff). While it is in flight we show the
   // <LaunchLiftoff> overlay (the per-card button loading state is separate).
   const [launching, setLaunching] = useState(false);
+  // Import-from-file (change: dashboard-import-entry-point). The Builder already
+  // let a creator load a copy from a file, but only from inside an ALREADY-open
+  // game's File menu — there was no way to bring a file in before any game
+  // existed, or without knowing that menu was there. Same hidden-input + parse
+  // pattern as BuilderPage.importFromFile, just reachable from the dashboard.
+  const importInput = useRef<HTMLInputElement | null>(null);
 
   // Double-click / re-entrancy guards (change: wave-b/async-action-guard). A
   // `useState` busy flag can't stop a second click in the SAME React batch —
@@ -460,6 +469,28 @@ export default function DashboardPage() {
     }
   }
 
+  async function importFromFile(file: File) {
+    let doc: unknown;
+    try {
+      doc = JSON.parse(await file.text());
+    } catch {
+      await dialog.alert(b.importNotAFile);
+      return;
+    }
+    // Same pure parser the server runs, so an obviously bad file fails instantly
+    // with the real reason instead of a round trip (mirrors BuilderPage.importFromFile).
+    const pre = parseGameFile(doc);
+    if (pre.errors.length > 0) { await dialog.alert(pre.errors.join(' · ')); return; }
+    try {
+      const { gameId } = await importGameFile({ file: doc as GameFile });
+      _gamesCache = null;
+      nav(`/build/${gameId}`);
+    } catch (e) {
+      console.error('[dashboard] importGameFile failed:', e);
+      await dialog.alert(e instanceof Error ? e.message : b.importFailed);
+    }
+  }
+
   async function togglePublish(g: Game) {
     try {
       await publishGame({ gameId: g.id, visibility: g.visibility === 'public' ? 'private' : 'public' });
@@ -520,14 +551,41 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
-            <Button
-              disabled={busy}
-              onClick={() => setPicking(true)}
-              data-tour="new-game"
-              className="!px-6 !py-2.5 !text-sm flex items-center gap-2"
-            >
-              {d.newGame}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                disabled={busy}
+                onClick={() => setPicking(true)}
+                data-tour="new-game"
+                className="!px-6 !py-2.5 !text-sm flex items-center gap-2"
+              >
+                {d.newGame}
+              </Button>
+              {/* Import-from-file (change: dashboard-import-entry-point): the
+                  only other place this action lived was buried in an already-open
+                  game's File menu — a creator with a saved .rushpoint.json file
+                  had nowhere on this page to bring it in. */}
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() => importInput.current?.click()}
+                title={d.importGameHint}
+                aria-label={d.importGameAria}
+                className="!px-4 !py-2.5 !text-sm"
+              >
+                {d.importGame}
+              </Button>
+              <input
+                ref={importInput}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (f) void importFromFile(f);
+                }}
+              />
+            </div>
             {/* Recently deleted (change: recoverable-game-deletion). A rarely
                 opened recovery surface, so it lives here rather than competing
                 with Build/Gallery/Wallet in the top nav. */}

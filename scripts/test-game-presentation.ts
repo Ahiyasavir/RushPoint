@@ -63,6 +63,7 @@ const fullGame = {
   powerUpsEnabled: true,
   manualLeaderboardReveal: true,
   instructions: { title: 'How to play', body: 'Walk.', bodyHe: 'ללכת.' },
+  pinnedFirst: true,
   deletedAt: '2026-07-01T00:00:00.000Z',
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-07-20T00:00:00.000Z',
