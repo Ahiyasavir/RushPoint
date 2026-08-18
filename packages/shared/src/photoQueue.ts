@@ -121,8 +121,11 @@ function toRow(team: SubmissionTeamDoc, taskId: string, sub: RawSubmission): Sub
     taskId,
     photoUrl: typeof sub.photoUrl === 'string' ? sub.photoUrl : '',
     submittedAt: typeof sub.submittedAt === 'string' ? sub.submittedAt : '',
-    // audio-tasks: server derived. Absent ⇒ photo (every pre audio submission).
-    mediaKind: sub.mediaKind === 'audio' ? 'audio' : 'photo',
+    // Server derived. Absent ⇒ photo (every submission that predates audio).
+    // Every non-photo kind must be listed explicitly: collapsing an unknown kind
+    // to 'photo' is what sent a VIDEO submission to the reviewer's <img> tag,
+    // where it rendered as nothing but its link (change: video-submission-task).
+    mediaKind: sub.mediaKind === 'audio' ? 'audio' : sub.mediaKind === 'video' ? 'video' : 'photo',
     status: normalizeStatus(sub.status),
     reviewedAt: typeof sub.reviewedAt === 'string' ? sub.reviewedAt : '',
     reviewNote: typeof sub.reviewNote === 'string' ? sub.reviewNote : '',
@@ -206,7 +209,7 @@ export function buildSubmissionQueues(
 }
 
 /** Renderable media: the URL must look like a real http(s) URL before it is fed
- *  to <img>/<audio>. Anything else falls back to plain text in the UI. */
+ *  to <img>/<audio>/<video>. Anything else falls back to plain text in the UI. */
 export function isRenderableMedia(photoUrl: string): boolean {
   return /^https?:\/\//.test(photoUrl);
 }

@@ -132,6 +132,12 @@ const team = (id: string, subs: Record<string, RawSubmission>, displayName?: str
   ok(q[0].mediaKind === 'audio', 'an audio submission keeps its mediaKind (it must not render as an <img>)');
 }
 {
+  // The mapper used to collapse every non-audio kind to 'photo', so a reviewer
+  // got a video submission inside an <img> — i.e. a bare link and no picture.
+  const q = buildPendingQueue([team('t1', { a: sub({ mediaKind: 'video' }) })]);
+  ok(q[0].mediaKind === 'video', 'a video submission keeps its mediaKind (it must not render as an <img>)');
+}
+{
   // A whitespace-only displayName is as useless as none.
   const q = buildPendingQueue([team('t1', { a: sub() }, '   ')]);
   ok(q[0].displayName === 't1', 'a blank displayName falls back to the doc id');

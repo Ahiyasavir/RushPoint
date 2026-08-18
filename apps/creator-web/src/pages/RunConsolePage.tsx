@@ -2195,6 +2195,21 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
     if (row.mediaKind === 'audio') {
       return <audio controls preload="none" src={row.photoUrl} className="w-full" aria-label={rc.photoReviewAudio} />;
     }
+    // A video submission fed to <img> renders as nothing at all — the reviewer saw
+    // a bare link and had to leave the console to judge it. `preload="metadata"`
+    // gives the poster frame without pulling every clip in the queue.
+    if (row.mediaKind === 'video') {
+      return (
+        <video
+          controls
+          playsInline
+          preload="metadata"
+          src={row.photoUrl}
+          aria-label={rc.photoReviewVideo}
+          className="w-full h-32 object-cover rounded-md bg-black"
+        />
+      );
+    }
     return (
       <a href={row.photoUrl} target="_blank" rel="noreferrer">
         <img src={row.photoUrl} alt={rc.photoReviewAlt} loading="lazy" className="w-full h-32 object-cover rounded-md" />

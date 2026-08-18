@@ -1581,6 +1581,12 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevPreviewRef = useRef<string | null>(null);
+  // `onstop` is the ONLY thing that used to leave the recording state, so any
+  // browser that swallows it (several Android/in-app webviews do) left the player
+  // holding a live mic behind a Stop button that visibly did nothing. Finalizing
+  // is now idempotent and watchdog-backed, so stopping always ends the recording.
+  const finalizedRef = useRef(true);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function setPreview(next: string | null) {
     if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current);
@@ -1595,6 +1601,31 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
   function clearTimers() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (stopTimeoutRef.current) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+  }
+
+  // Runs exactly once per recording, from whichever path gets there first:
+  // `onstop`, or the watchdog when `onstop` never fires. Releases the mic and
+  // leaves the recording state unconditionally — an empty capture routes to the
+  // phone-recorder fallback rather than stranding the player.
+  function finalize() {
+    if (finalizedRef.current) return;
+    finalizedRef.current = true;
+    clearTimers();
+    stopTracks();
+    setRecording(false);
+    const out = new Blob(chunksRef.current, { type: mimeRef.current });
+    if (out.size === 0) {
+      setErr(t.task.audioUnsupported);
+      setUnsupported(true);
+      return;
+    }
+    if (out.size > MAX_AUDIO_BYTES) {
+      setErr(t.task.audioTooLarge({ mb: Math.round(MAX_AUDIO_BYTES / 1024 / 1024) }));
+      return;
+    }
+    setBlob(out);
+    setPreview(URL.createObjectURL(out));
   }
 
   // Clean up mic + timers + blob URL on unmount.
@@ -1607,7 +1638,17 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
 
   function stop() {
     clearTimers();
-    try { recorderRef.current?.stop(); } catch { /* already stopped */ }
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === 'inactive') { finalize(); return; }
+    try {
+      recorder.stop();
+    } catch {
+      finalize();
+      return;
+    }
+    // `stop()` returned, but the final `dataavailable` + `onstop` are queued and
+    // some webviews never deliver them. Give them a moment, then finalize anyway.
+    watchdogRef.current = setTimeout(() => finalize(), 1500);
   }
 
   async function start() {
@@ -1651,19 +1692,11 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
     }
     recorderRef.current = recorder;
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    recorder.onstop = () => {
-      clearTimers();
-      stopTracks();
-      setRecording(false);
-      const out = new Blob(chunksRef.current, { type: mimeRef.current });
-      if (out.size > MAX_AUDIO_BYTES) {
-        setErr(t.task.audioTooLarge({ mb: Math.round(MAX_AUDIO_BYTES / 1024 / 1024) }));
-        return;
-      }
-      setBlob(out);
-      setPreview(URL.createObjectURL(out));
-    };
+    recorder.onstop = () => finalize();
+    // A recorder that errors mid-capture never reaches `onstop` on some browsers.
+    recorder.onerror = () => finalize();
 
+    finalizedRef.current = false;
     setRecording(true);
     setRemaining(MAX_AUDIO_SECONDS);
     try {
@@ -1671,6 +1704,7 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
     } catch {
       // Same class as the constructor throw above — must not escape as a
       // rejected promise, or the button silently does nothing.
+      finalizedRef.current = true;
       stopTracks();
       setRecording(false);
       setErr(t.task.audioUnsupported);
@@ -1810,9 +1844,17 @@ function VideoEntry({ smart, busy, onSubmit }: {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevPreviewRef = useRef<string | null>(null);
-  // The recorded length at the moment the recorder stopped. Read inside onstop,
-  // which closes over the render that STARTED the recording — a state read there
-  // would be stale, so the running count lives in a ref as well.
+  // Live viewfinder. Filming blind — no picture until playback — is how a player
+  // ends up with 30s of their own pocket, so the camera stream is mirrored into a
+  // <video> for the whole take.
+  const liveVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Same watchdog contract as AudioEntry: `onstop` is not guaranteed to fire, so
+  // finalizing is idempotent and stopping never depends on it alone.
+  const finalizedRef = useRef(true);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The running count lives in a ref as well as state: the interval callback
+  // closes over the render that STARTED the recording, so a state read there
+  // would be stale.
   const elapsedRef = useRef(0);
 
   function setPreview(next: string | null) {
@@ -1828,7 +1870,43 @@ function VideoEntry({ smart, busy, onSubmit }: {
   function clearTimers() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (stopTimeoutRef.current) { clearTimeout(stopTimeoutRef.current); stopTimeoutRef.current = null; }
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
   }
+
+  function finalize() {
+    if (finalizedRef.current) return;
+    finalizedRef.current = true;
+    clearTimers();
+    stopTracks();
+    setRecording(false);
+    const out = new Blob(chunksRef.current, { type: mimeRef.current });
+    if (out.size === 0) {
+      setErr(t.task.videoUnsupported);
+      setUnsupported(true);
+      return;
+    }
+    if (out.size > MAX_VIDEO_BYTES) {
+      setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+      return;
+    }
+    setBlob(out);
+    setPreview(URL.createObjectURL(out));
+  }
+
+  // The viewfinder element only exists while recording, so the stream is attached
+  // after that render — not in start(). `play()` is best-effort: the element is
+  // muted + playsInline, so autoplay is allowed, but a rejected promise here must
+  // never break the take.
+  useEffect(() => {
+    const el = liveVideoRef.current;
+    if (!el) return;
+    if (recording && streamRef.current) {
+      el.srcObject = streamRef.current;
+      void el.play().catch(() => { /* viewfinder only — recording is unaffected */ });
+    } else {
+      el.srcObject = null;
+    }
+  }, [recording]);
 
   // Release the camera + mic on unmount so the device's recording indicator clears.
   useEffect(() => () => {
@@ -1840,7 +1918,15 @@ function VideoEntry({ smart, busy, onSubmit }: {
 
   function stop() {
     clearTimers();
-    try { recorderRef.current?.stop(); } catch { /* already stopped */ }
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === 'inactive') { finalize(); return; }
+    try {
+      recorder.stop();
+    } catch {
+      finalize();
+      return;
+    }
+    watchdogRef.current = setTimeout(() => finalize(), 1500);
   }
 
   async function start() {
@@ -1886,19 +1972,10 @@ function VideoEntry({ smart, busy, onSubmit }: {
     }
     recorderRef.current = recorder;
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
-    recorder.onstop = () => {
-      clearTimers();
-      stopTracks();
-      setRecording(false);
-      const out = new Blob(chunksRef.current, { type: mimeRef.current });
-      if (out.size > MAX_VIDEO_BYTES) {
-        setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
-        return;
-      }
-      setBlob(out);
-      setPreview(URL.createObjectURL(out));
-    };
+    recorder.onstop = () => finalize();
+    recorder.onerror = () => finalize();
 
+    finalizedRef.current = false;
     setRecording(true);
     setRemaining(maxSeconds);
     setElapsed(0);
@@ -1906,6 +1983,7 @@ function VideoEntry({ smart, busy, onSubmit }: {
     try {
       recorder.start();
     } catch {
+      finalizedRef.current = true;
       stopTracks();
       setRecording(false);
       setErr(t.task.videoUnsupported);
@@ -1975,7 +2053,19 @@ function VideoEntry({ smart, busy, onSubmit }: {
       {err && <p className="text-ink-alert text-sm">{err}</p>}
       {recording ? (
         <div className="space-y-2">
-          <p className="text-sm text-zinc-300">{t.task.recording({ sec: remaining })}</p>
+          <div className="relative">
+            <video
+              ref={liveVideoRef}
+              muted
+              playsInline
+              autoPlay
+              className="w-full rounded-xl bg-black aspect-video object-cover"
+            />
+            <span className="absolute top-2 end-2 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-xs font-bold text-white">
+              <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+              {t.task.recording({ sec: remaining })}
+            </span>
+          </div>
           {tooShort
             ? <p className="text-sm text-zinc-400">{t.task.videoKeepRecording({ sec: minSeconds - elapsed })}</p>
             : null}
