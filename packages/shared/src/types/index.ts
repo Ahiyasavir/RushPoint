@@ -1,3 +1,5 @@
+import type { MediaKind } from '../mediaKinds';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // @rushpoint/shared — v2 Platform types
 //
@@ -625,6 +627,14 @@ export interface Game {
   // in Firestore). When true, every task this game publishes carries
   // PublicTask.pinnedFirst — see that field for the ranking contract.
   pinnedFirst?: boolean;
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). The creator-facing
+  // setup instructions a TEMPLATE carries, each one a POINTER at the single field
+  // it is about — so the instruction stops living inside the player-facing prose it
+  // describes. Creator-only: never sanitized into a task payload (it never reaches
+  // one) and never denormalized into publicGames/publicTasks. Absent ⇒ this game has
+  // no quick setup, which is every game that predates the feature.
+  // See packages/shared/src/templateWizard.ts.
+  wizardSteps?: import('../templateWizard').TemplateWizardStep[];
 }
 
 
@@ -1257,6 +1267,9 @@ export interface FlashMission {
 // photo-approval paths (submitStationPhoto autoApprove + reviewStationSubmission
 // approve); read by any authed participant of the run (announcements pattern).
 // Contains ONLY celebratory, non-secret data — no task config, no answer keys.
+// Video submissions ride the same two write sites (change:
+// run-media-gallery-and-video-feed) — see `mediaKind` below. Audio never reaches
+// the feed.
 export interface FeedItem {
   id: string;
   taskId: string;
@@ -1267,6 +1280,13 @@ export interface FeedItem {
   teamName: string;
   /** Already Storage-validated by requireStorageUrl at submit time. */
   photoUrl: string;
+  /**
+   * What `photoUrl` actually is (change: run-media-gallery-and-video-feed). Absent
+   * on every item written before this change — those are all photos, so renderers
+   * must treat a missing value as `'photo'`, never as unknown. Audio never reaches
+   * the feed, so this is only ever `'photo'` or `'video'` in practice.
+   */
+  mediaKind?: MediaKind;
   /** emoji → count, e.g. { '🔥': 3 }. Zero-count keys are dropped. */
   reactions: Record<string, number>;
   /** uid → emoji: dedup/switch source of truth (one reaction per uid). */
@@ -1434,6 +1454,10 @@ export interface UpdateGamePayload {
   // Task-library priority (change: task-library-priority-boost). Default false
   // when absent.
   pinnedFirst?: boolean;
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). `null` is an explicit
+  // clear; absent means "not sent" and leaves the stored steps alone. Steps whose
+  // stage/mission no longer exists are DROPPED on save, never a refusal.
+  wizardSteps?: import('../templateWizard').TemplateWizardStep[] | null;
 }
 
 // Run management

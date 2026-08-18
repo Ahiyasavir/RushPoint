@@ -27,6 +27,10 @@ import {
   buildReviewQueueView, decideReview, moveFocus, recordFailure, clearFailure,
   type ReviewFailures,
 } from '../lib/photoReviewQueue';
+// Run media gallery (change: run-media-gallery-and-video-feed): every renderable
+// submission, any review status — reuses the same flatten the review queue uses
+// so the two views can never disagree about what counts as "this team's media".
+import { buildRunMediaGallery } from '../lib/runMediaGallery';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
 import { OverflowMenu } from '../components/OverflowMenu';
@@ -326,6 +330,10 @@ export default function RunConsolePage() {
     });
   }, [gameId, runId, ownerUid, runLive]);
   const photoQueues = useMemo(() => buildSubmissionQueues(teamDocs), [teamDocs]);
+  // Everything the review queue's pending/reviewed split does NOT show on its
+  // own: an autoApproved item, an already-rejected one — same source snapshot,
+  // no extra listener.
+  const mediaGalleryRows = useMemo(() => buildRunMediaGallery(teamDocs), [teamDocs]);
   // A finished team's submission still scores, but nobody is blocked on it, so
   // the review queue must not let it sit in front of a team still in the street.
   const finishedTeamIds = useMemo(() => teams.filter((t) => t.finished).map((t) => t.id), [teams]);
@@ -679,6 +687,7 @@ export default function RunConsolePage() {
     pendingPhotoCount: photoQueues.pendingCount,
     photoQueueCount: photoQueues.pending.length + photoQueues.reviewed.length + (photoLoadError ? 1 : 0),
     feedItemCount: feedItems.length,
+    mediaGalleryCount: mediaGalleryRows.length,
     chatThreadCount: chatThreads.length,
     unreadChatThreads,
     hotZoneActive: !!run.hotZone && hotZoneMultiplier(run.hotZone, run.hotZone.center, Date.now()) > 1,
@@ -1149,6 +1158,7 @@ export default function RunConsolePage() {
           />
         );
       case 'feed': return <FeedConsole ownerUid={ownerUid} gameId={gameId!} runId={runId!} items={feedItems} />;
+      case 'mediaGallery': return <RunMediaGalleryConsole rows={mediaGalleryRows} taskTitles={taskTitles} />;
       case 'chat':
         return (
           <ChatConsole
@@ -2377,7 +2387,11 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
 // (owner reads the collection directly; server writes only) with a hide action.
 // The feed listener moved to the page so a FOLDED moderation group can report
 // its contents; this panel renders what it is given.
-type FeedItemRow = { id: string; taskTitle: string; teamName: string; photoUrl: string; reactions?: Record<string, number>; createdAt?: string };
+type FeedItemRow = {
+  id: string; taskTitle: string; teamName: string; photoUrl: string;
+  mediaKind?: 'photo' | 'audio' | 'video';
+  reactions?: Record<string, number>; createdAt?: string;
+};
 
 function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gameId: string; runId: string; items: FeedItemRow[] }) {
   const rc = useT().runConsole;
@@ -2401,7 +2415,17 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         {items.map((item) => (
           <div key={item.id} className="rounded-lg bg-[--surface-2] overflow-hidden">
-            <img src={item.photoUrl} alt="" loading="lazy" className="w-full h-28 object-cover" />
+            {item.mediaKind === 'video' ? (
+              <video
+                controls
+                playsInline
+                preload="metadata"
+                src={item.photoUrl}
+                className="w-full h-28 object-cover bg-black"
+              />
+            ) : (
+              <img src={item.photoUrl} alt="" loading="lazy" className="w-full h-28 object-cover" />
+            )}
             <div className="p-2">
               <div dir="auto" className="text-xs text-[--ink-2] truncate">{item.teamName}</div>
               <div dir="auto" className="text-[11px] text-[--ink-3] truncate">{item.taskTitle}</div>
@@ -2424,6 +2448,126 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
           </div>
         ))}
       </div>
+    </PanelShell>
+  );
+}
+
+// Run media gallery (change: run-media-gallery-and-video-feed): every renderable
+// photo/video submission for the run, ANY review status — the thing the photo
+// review queue's pending/reviewed split structurally cannot show (an
+// autoApproved item never enters `pending`; `reviewed` is capped and text-only).
+// A manager tool, not a work queue: no approve/reject here, that stays in
+// PhotoReviewConsole. This panel only shows what exists and lets it be
+// downloaded.
+const MEDIA_DOWNLOAD_DELAY_MS = 250;
+
+function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; taskTitles: ReadonlyMap<string, string> }) {
+  const rc = useT().runConsole;
+  const [downloading, setDownloading] = useState(false);
+  const taskLabel = (taskId: string) => resolveTaskLabel(taskId, taskTitles, (id) => rc.unknownTask({ id }));
+
+  const STATUS_LABEL: Record<SubmissionRow['status'], string> = {
+    pending: rc.mediaGalleryStatusPending,
+    approved: rc.mediaGalleryStatusApproved,
+    rejected: rc.mediaGalleryStatusRejected,
+  };
+  const STATUS_TONE: Record<SubmissionRow['status'], string> = {
+    pending: 'text-rp-amber',
+    approved: 'text-rp-fire',
+    rejected: 'text-rp-alert',
+  };
+
+  // One file at a time, spaced out: a burst of same-tick downloads reads to some
+  // browsers as a popup flood and gets throttled to fewer files than were asked
+  // for. This is a manager power tool run occasionally, not a hot path, so a
+  // small delay per file costs nothing anyone will notice.
+  async function downloadAll() {
+    if (downloading || rows.length === 0) return;
+    setDownloading(true);
+    try {
+      for (const row of rows) {
+        const link = document.createElement('a');
+        link.href = row.photoUrl;
+        link.download = `${row.teamId}-${row.taskId}`;
+        link.rel = 'noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        await new Promise((resolve) => setTimeout(resolve, MEDIA_DOWNLOAD_DELAY_MS));
+      }
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function Media({ row }: { row: SubmissionRow }) {
+    if (!isRenderableMedia(row.photoUrl)) {
+      return <div className="text-[11px] text-[--ink-3]">{rc.mediaGalleryNoMedia}</div>;
+    }
+    if (row.mediaKind === 'audio') {
+      return <audio controls preload="none" src={row.photoUrl} className="w-full" />;
+    }
+    if (row.mediaKind === 'video') {
+      return (
+        <video
+          controls
+          playsInline
+          preload="metadata"
+          src={row.photoUrl}
+          aria-label={rc.mediaGalleryVideoAria}
+          className="w-full h-32 object-cover rounded-md bg-black"
+        />
+      );
+    }
+    return <img src={row.photoUrl} alt={rc.mediaGalleryAlt} loading="lazy" className="w-full h-32 object-cover rounded-md" />;
+  }
+
+  return (
+    <PanelShell
+      panel="mediaGallery"
+      badge={rows.length > 0 ? <Badge>{rc.mediaGalleryCount({ n: rows.length })}</Badge> : undefined}
+      actions={rows.length > 0 ? (
+        <Button
+          variant="subtle"
+          className="min-h-0 px-3 py-1.5 text-xs rounded-lg"
+          disabled={downloading}
+          onClick={() => void downloadAll()}
+        >
+          {rc.mediaGalleryDownloadAll({ n: rows.length })}
+        </Button>
+      ) : undefined}
+    >
+      {rows.length === 0
+        ? <PanelEmpty panel="mediaGallery" />
+        : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {rows.map((row) => {
+              const key = submissionKey(row);
+              return (
+                <div key={key} className="rounded-lg bg-[--surface-2] p-2">
+                  <Media row={row} />
+                  <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
+                  <div dir="auto" className="text-[11px] text-[--ink-3] truncate">
+                    {rc.mediaGalleryTaskLine({ name: taskLabel(row.taskId) })}
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className={`text-[11px] ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                    {isRenderableMedia(row.photoUrl) && (
+                      <a
+                        href={row.photoUrl}
+                        download={`${row.teamId}-${row.taskId}`}
+                        rel="noreferrer"
+                        className="text-[11px] font-semibold text-ink-fire hover:underline"
+                      >
+                        {rc.mediaGalleryDownloadOne}
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
     </PanelShell>
   );
 }

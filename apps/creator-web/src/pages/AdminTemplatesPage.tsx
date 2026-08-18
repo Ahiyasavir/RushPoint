@@ -11,11 +11,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
-import { createGame, listAdminTemplates, setGameTemplateFlag, deleteGame, importGameFile } from '../services/calls';
+import { createGame, listAdminTemplates, setGameTemplateFlag, deleteGame, importGameFile, updateGame } from '../services/calls';
 import type { Game, GameFile } from '@rushpoint/shared';
 // The SAME pure parser the server runs, so an obviously bad file fails instantly
 // with the real reason instead of a round trip (mirrors BuilderPage/DashboardPage).
-import { parseGameFile } from '@rushpoint/shared';
+import { parseGameFile, extractQuickSetupSteps } from '@rushpoint/shared';
 import { isAdminClaim } from '../lib/adminGate';
 import { EmptyState, Skeleton, Button, Input } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
@@ -28,6 +28,7 @@ type GateState = 'checking' | 'denied' | 'allowed';
 export default function AdminTemplatesPage() {
   const t = useT();
   const at = t.adminTemplates;
+  const q = t.quickSetup;
   const nav = useNavigate();
 
   const [gate, setGate] = useState<GateState>('checking');
@@ -43,6 +44,9 @@ export default function AdminTemplatesPage() {
   const [orderDraft, setOrderDraft] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Which template's setup instructions are being lifted into הקמה מהירה
+  // (change: quick-setup-wizard).
+  const [extractingId, setExtractingId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importInput = useRef<HTMLInputElement | null>(null);
 
@@ -169,6 +173,49 @@ export default function AdminTemplatesPage() {
     }
   }
 
+  /**
+   * Lift this template's setup instructions OUT of the prose participants read and
+   * into הקמה מהירה (change: quick-setup-wizard).
+   *
+   * The instructions in a real template are written into the very fields they talk
+   * about — "[הערת מפעיל - למחוק]: הגדירו את המיקום…" sits in the DESCRIPTION a
+   * player reads, and a quiz whose answer key is "(ערכו את התשובה)" grades an
+   * honest answer wrong. This is the one action that fixes an already-authored
+   * template rather than only the ones shipped from source.
+   *
+   * It CONFIRMS before it writes, quoting the counts, because it rewrites authored
+   * prose. Nothing is destroyed either way: whatever is stripped becomes a step's
+   * instruction, and re-running is a no-op (the extraction merges by mission +
+   * field, existing steps winning).
+   */
+  async function extractSetup(g: Game) {
+    const result = extractQuickSetupSteps(g);
+    const added = result.wizardSteps.length - (g.wizardSteps?.length ?? 0);
+    if (added <= 0) { toast.info(q.extractNone); return; }
+    const cleaned = result.stages.reduce((n, stage, i) => n + stage.tasks.filter(
+      (task, j) => task.description !== g.stages[i]?.tasks[j]?.description
+        || task.title !== g.stages[i]?.tasks[j]?.title,
+    ).length, 0);
+    const ok = await dialog.confirm(q.extractSummary({ steps: added, cleaned }), q.extractCta);
+    if (!ok) return;
+    setExtractingId(g.id);
+    try {
+      await updateGame({
+        gameId: g.id,
+        stages: result.stages,
+        ...(result.instructions ? { instructions: result.instructions } : {}),
+        wizardSteps: result.wizardSteps,
+      });
+      toast.success(q.extractDone(added));
+      void load();
+    } catch (e) {
+      console.error('[adminTemplates] extractQuickSetupSteps failed:', e);
+      toast.error(q.extractFailed);
+    } finally {
+      setExtractingId(null);
+    }
+  }
+
   async function removeTemplate(g: Game) {
     const ok = await dialog.confirm(at.deleteConfirmBody(g.title), at.deleteConfirmCta, true);
     if (!ok) return;
@@ -284,6 +331,14 @@ export default function AdminTemplatesPage() {
                     </button>
                     <button onClick={() => openMetaEditor(g)} className="text-xs px-2 py-1 rounded-lg border border-[--rp-border] text-[--ink-1]">
                       {at.editMetaBtn}
+                    </button>
+                    <button
+                      onClick={() => void extractSetup(g)}
+                      disabled={extractingId === g.id}
+                      title={q.extractCta}
+                      className="text-xs px-2 py-1 rounded-lg border border-[--rp-border] text-[--ink-1] disabled:opacity-40"
+                    >
+                      {extractingId === g.id ? q.extractBusy : q.extractCta}
                     </button>
                     <button
                       onClick={() => void removeTemplate(g)}

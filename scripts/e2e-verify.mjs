@@ -1244,11 +1244,19 @@ async function main() {
     state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status === 'approved',
     state?.team?.taskSubmissions?.[VIDEO_TASK_ID]?.status);
 
-  // Non-goal: video submissions never enter the live photo feed either.
+  // NOTE: this stage has requiredTaskCount:1 and PHOTO_TASK_ID already satisfied
+  // it above, so AUDIO_TASK_ID/VIDEO_TASK_ID were auto-skipped as the stage
+  // completed — completeTaskForTeam is a no-op (completed:false) for both, so
+  // NEITHER can ever reach the feed here regardless of kind. That is a property
+  // of this shared fixture's partial-stage setup, not evidence about video's
+  // feed eligibility — see the dedicated "video submissions enter the live photo
+  // feed (mediaKind)" scenario below for real coverage of the autoApprove path,
+  // the staff-review path, the hidden-location exclusion, and the mediaKind
+  // field (change: run-media-gallery-and-video-feed).
   const feedItemsAfterVideo = await player.getColAt(
     `users/${creatorCred.user.uid}/games/${gameId}/runs/${runId}/feedItems`,
   ).catch(() => []);
-  check('no photo-feed item was written for the video submission',
+  check('no feed item for the video submission on an already-satisfied requiredTaskCount stage',
     !feedItemsAfterVideo.some((f) => f?.taskId === VIDEO_TASK_ID),
     JSON.stringify(feedItemsAfterVideo.map((f) => f?.taskId)));
 
@@ -2937,6 +2945,89 @@ async function main() {
     check('hidden-feed(review): the NORMAL task feeds on the staff path (guard does not over-suppress)',
       feedAfterNormal.some((d) => d.taskId === 'hr-normal'), JSON.stringify(feedAfterNormal.map((d) => d.taskId)));
   }); // scenario: hidden-location feed secrecy
+
+  // video-submission-task fix (change: run-media-gallery-and-video-feed): the feed
+  // write sites used to allowlist ONLY kind === 'photo', so a video submission —
+  // however it was approved — could never reach feedItems, and both feed
+  // renderers only knew how to draw an <img>. This proves BOTH write sites now
+  // accept video (mirroring the "live photo feed" scenario's autoApprove +
+  // staff-review paths above), that the item carries mediaKind:'video', that a
+  // hidden-location video is still excluded exactly like a hidden photo, and
+  // that audio is still excluded (the allowlist gained one value, it did not
+  // become an accept-everything default).
+  await scenario('video submissions enter the live photo feed (mediaKind)', async () => {
+    const OWNER = creatorCred.user.uid;
+    const feedPhotoUrl = (rid, uid, name) =>
+      `https://firebasestorage.googleapis.com/v0/b/rushpoint-pwa-7daaa.appspot.com/o/${encodeURIComponent(`runs/${rid}/teams/${uid}/${name}`)}?alt=media`;
+    const videoTask = (id, title, order, autoApprove, hideLocation = false) => ({
+      id, title, type: 'photo',
+      ...(hideLocation
+        ? { triggerMode: 'radius', hideLocation: true, coordinates: { lat: 31.78, lng: 35.21 }, geofenceRadiusMeters: 40, locationClue: 'Shh' }
+        : { coordinates: { lat: 31.79 + order * 0.005, lng: 35.2 + order * 0.005 } }),
+      difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3,
+      smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'video', autoApprove },
+    });
+    const audioTask = (id, title, order, autoApprove) => ({
+      id, title, type: 'photo',
+      coordinates: { lat: 31.79 + order * 0.005, lng: 35.2 + order * 0.005 },
+      difficulty: 2, estimatedMinutes: 3, pointValue: 40, maxConcurrentTeams: 3,
+      smart: { enabled: true, verificationType: 'photo_upload', captureKind: 'audio', autoApprove },
+    });
+
+    const { gameId: vg } = await creator.call('createGame', { title: 'Video Feed Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: vg, scoringPreset: 'fixed_points_speed',
+      stages: [
+        { id: 'vf-1', order: 0, title: 'Auto video', tasks: [videoTask('vf-auto', 'Auto video clip', 0, true)] },
+        { id: 'vf-2', order: 1, title: 'Reviewed video', tasks: [videoTask('vf-rev', 'Reviewed video clip', 1, false)] },
+        { id: 'vf-3', order: 2, title: 'Hidden video', tasks: [videoTask('vf-hidden', 'Secret video clip', 2, true, true)] },
+        { id: 'vf-4', order: 3, isFinal: true, title: 'Reviewed audio', tasks: [audioTask('vf-audio', 'Reviewed chant', 3, false)] },
+      ],
+    });
+    const { runId: vr, accessCode: vc } = await creator.call('launchRun', { gameId: vg });
+    const vp = makeParty('videoFeedPlayer');
+    const vpCred = await signInAnonymously(vp.auth);
+    const vUid = vpCred.user.uid;
+    await vp.call('joinRun', { code: vc, displayName: 'Video Wolves' });
+    await creator.call('startTeams', { gameId: vg, runId: vr });
+    const VCTX = { ownerUid: OWNER, gameId: vg, runId: vr };
+    const vFeedCol = `users/${OWNER}/games/${vg}/runs/${vr}/feedItems`;
+
+    // 1) autoApprove video → feeds with mediaKind:'video'.
+    const autoVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-auto', photoUrl: feedPhotoUrl(vr, vUid, 'auto.webm'), contentType: 'video/webm' });
+    check('video-feed: autoApprove video is approved', autoVideo?.autoApproved === true, JSON.stringify(autoVideo));
+    const afterAutoVideo = await vp.getColAt(vFeedCol);
+    const autoItem = afterAutoVideo.find((d) => d.taskId === 'vf-auto');
+    check('video-feed: autoApprove video broadcasts a feed item', !!autoItem, JSON.stringify(afterAutoVideo.map((d) => d.taskId)));
+    check('video-feed: the autoApprove feed item carries mediaKind "video"', autoItem?.mediaKind === 'video', JSON.stringify(autoItem));
+
+    // 2) staff-reviewed video → feeds with mediaKind:'video'.
+    await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-rev', photoUrl: feedPhotoUrl(vr, vUid, 'rev.webm'), contentType: 'video/webm' });
+    const revVideo = await creator.call('reviewStationSubmission', { ...VCTX, teamId: vUid, taskId: 'vf-rev', approved: true });
+    check('video-feed: staff approves the video submission', revVideo?.approved === true, JSON.stringify(revVideo));
+    const afterRevVideo = await creator.getColAt(vFeedCol);
+    const revItem = afterRevVideo.find((d) => d.taskId === 'vf-rev');
+    check('video-feed: staff-approved video broadcasts a feed item', !!revItem, JSON.stringify(afterRevVideo.map((d) => d.taskId)));
+    check('video-feed: the staff-approved feed item carries mediaKind "video"', revItem?.mediaKind === 'video', JSON.stringify(revItem));
+
+    // 3) hidden-location video → still excluded, exactly like a hidden photo.
+    const vArr = await vp.call('reportArrival', { ...VCTX, taskId: 'vf-hidden', lat: 31.78, lng: 35.21 });
+    check('video-feed: arrival at the hidden spot latches', vArr?.arrived === true, JSON.stringify(vArr));
+    const autoHiddenVideo = await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-hidden', photoUrl: feedPhotoUrl(vr, vUid, 'hidden.webm'), contentType: 'video/webm' });
+    check('video-feed: hidden video still auto-approves (completion unaffected)', autoHiddenVideo?.autoApproved === true, JSON.stringify(autoHiddenVideo));
+    const afterHiddenVideo = await vp.getColAt(vFeedCol);
+    check('video-feed: the hidden-location video is excluded from the feed',
+      !afterHiddenVideo.some((d) => d.taskId === 'vf-hidden'), JSON.stringify(afterHiddenVideo.map((d) => d.taskId)));
+
+    // 4) audio stays excluded — the allowlist gained a value, it did not become
+    //    accept-everything.
+    await vp.call('submitStationPhoto', { ...VCTX, teamId: vUid, taskId: 'vf-audio', photoUrl: feedPhotoUrl(vr, vUid, 'chant.webm'), contentType: 'audio/webm' });
+    const revAudio = await creator.call('reviewStationSubmission', { ...VCTX, teamId: vUid, taskId: 'vf-audio', approved: true });
+    check('video-feed: staff approves the audio submission', revAudio?.approved === true, JSON.stringify(revAudio));
+    const afterAudio = await creator.getColAt(vFeedCol);
+    check('video-feed: audio submissions still never reach the feed',
+      !afterAudio.some((d) => d.taskId === 'vf-audio'), JSON.stringify(afterAudio.map((d) => d.taskId)));
+  }); // scenario: video enters the live feed
 
   await scenario('task types: quiz · numeric · geofence · sequence · trigger modes', async () => {
 
@@ -9020,6 +9111,32 @@ async function main() {
       ],
     });
 
+    // ── (1b) הקמה מהירה steps ride along (change: quick-setup-wizard) ────────
+    // A template's setup instructions are pointers at fields; a file that drops
+    // them restores a game whose instructions are simply gone, and the creator has
+    // no way to know what the template wanted. Malformed input is refused loud.
+    await creator.call('updateGame', {
+      gameId: gF,
+      wizardSteps: [
+        { id: 'qs-quiz-answers', stageId: 'pf0', taskId: 'pf-quiz', targetFieldPath: 'answers',
+          instructionPrompt: 'עדכנו את התשובה הנכונה', isRequired: true },
+        { id: 'qs-orphan', stageId: 'pf0', taskId: 'no-such-task', targetFieldPath: 'answers',
+          instructionPrompt: 'מצביע על משימה שנמחקה', isRequired: true },
+      ],
+    });
+    const { game: withSteps } = await creator.call('getGame', { gameId: gF });
+    check('wizardSteps: a valid step is stored',
+      withSteps?.wizardSteps?.some((s) => s.id === 'qs-quiz-answers' && s.targetFieldPath === 'answers'),
+      JSON.stringify(withSteps?.wizardSteps));
+    // A pointer at a mission that no longer exists is DROPPED, never a refusal:
+    // refusing would freeze autosave on a pointer the creator never authored.
+    check('wizardSteps: a step naming a missing mission is dropped, not refused',
+      (withSteps?.wizardSteps ?? []).every((s) => s.id !== 'qs-orphan'),
+      JSON.stringify(withSteps?.wizardSteps));
+    await expectError('wizardSteps: a malformed value is refused',
+      creator.call('updateGame', { gameId: gF, wizardSteps: 'not-a-list' }),
+      { codeIn: ['functions/invalid-argument'] });
+
     // ── (2) Owner export: the envelope, the SECRETS, and the exclusions ───────
     const { file } = await creator.call('exportGameFile', { gameId: gF });
     check('export: format envelope', file?.format === GAME_FILE_FORMAT, String(file?.format));
@@ -9076,6 +9193,9 @@ async function main() {
       iTasks.find((t) => t.id === 'pf-quiz')?.answers?.includes('כחול')
       && iTasks.find((t) => t.id === 'pf-num')?.numericAnswer === 42
       && iTasks.find((t) => t.id === 'pf-station')?.smart?.secretCode === 'OPEN-SESAME');
+    check('import: הקמה מהירה steps survived the round trip',
+      imported?.wizardSteps?.some((s) => s.id === 'qs-quiz-answers' && s.taskId === 'pf-quiz'),
+      JSON.stringify(imported?.wizardSteps));
     check('import: requiredTaskCount survived', imported?.stages?.[0]?.requiredTaskCount === 1,
       String(imported?.stages?.[0]?.requiredTaskCount));
     check('import: the new game is private', imported?.visibility === 'private', String(imported?.visibility));

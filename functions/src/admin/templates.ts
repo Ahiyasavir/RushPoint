@@ -15,12 +15,14 @@ import { db } from '../firebase';
 import { requireAuth, assertAdmin } from '../auth';
 import { enforceRateLimit } from '../rateLimitStore';
 import { loadOwnedLiveGame } from '../games/lifecycle';
-import { cloneTemplateStages } from '../lib/cloneTemplateStages';
+import { cloneTemplateStagesWithMap } from '../lib/cloneTemplateStages';
 import {
   FIRESTORE_PATHS,
   isGameDeleted,
   stripUnsafeDisplayChars,
   templateGroupSiblingMatches,
+  remapWizardStepIds,
+  pruneWizardSteps,
   DEFAULT_REGISTRATION_FIELDS,
   DEFAULT_SCORING_PRESET,
   type Game,
@@ -256,7 +258,15 @@ export const createGameFromTemplate = loggedCallable('createGameFromTemplate', a
     throw new functions.https.HttpsError('invalid-argument', 'Unknown or non-template templateGameId');
   }
 
-  const clonedStages = cloneTemplateStages(template.stages ?? []);
+  // The id map is what keeps the template's הקמה מהירה steps pointing at THIS copy
+  // (change: quick-setup-wizard) — every stage and task was just re-idded, so steps
+  // carried over verbatim would resolve to nothing and the whole quick setup would
+  // vanish silently.
+  const { stages: clonedStages, idMap } = cloneTemplateStagesWithMap(template.stages ?? []);
+  const clonedWizardSteps = pruneWizardSteps(
+    remapWizardStepIds(template.wizardSteps ?? [], idMap),
+    clonedStages,
+  );
   const now = new Date().toISOString();
   const ref = db.collection(`users/${uid}/games`).doc();
   const newGame: Game = {
@@ -272,6 +282,7 @@ export const createGameFromTemplate = loggedCallable('createGameFromTemplate', a
     visibility: 'private',
     tags: [],
     playCount: 0,
+    ...(clonedWizardSteps.length > 0 ? { wizardSteps: clonedWizardSteps } : {}),
     createdAt: now,
     updatedAt: now,
   };

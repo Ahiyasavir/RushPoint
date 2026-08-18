@@ -91,6 +91,7 @@ export * from './mutualExclusion';
 // Skipping ONE mission for ONE team (change: skip-single-task) — the decision that
 // keeps the skip inside the stage and keeps the stage winnable afterwards.
 export * from './taskSkip';
+export * from './templateWizard';
 export * from './videoDuration';
 export * from './playStore';
 // Game trash / tombstone lifecycle (change: recoverable-game-deletion).

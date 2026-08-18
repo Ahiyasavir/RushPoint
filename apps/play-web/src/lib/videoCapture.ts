@@ -46,3 +46,27 @@ export function pickedClipVerdict(
   if (typeof durationSeconds !== 'number' || !Number.isFinite(durationSeconds) || durationSeconds <= 0) return 'ok';
   return durationSeconds + 0.5 < minSeconds ? 'too-short' : 'ok';
 }
+
+/**
+ * Whether a clip the recorder itself timed is under the mission's minimum.
+ *
+ * Unlike pickedClipVerdict this input IS trustworthy — the widget counted the
+ * seconds it was recording — so it may be strict. It exists so the minimum gates
+ * the SUBMIT button and nothing else: gating the STOP button (the shape this
+ * replaced) trapped a player inside a live recording they were not allowed to
+ * end, which is the one thing a recorder must never do.
+ *
+ * Total by the same contract as everything else on the participant hot path: a
+ * missing or garbage elapsed value is not evidence of a short clip.
+ */
+export function recordedClipVerdict(
+  elapsedSeconds: number | undefined,
+  minSeconds: number,
+): 'ok' | 'too-short' {
+  if (typeof minSeconds !== 'number' || !Number.isFinite(minSeconds) || minSeconds <= 0) return 'ok';
+  if (typeof elapsedSeconds !== 'number' || !Number.isFinite(elapsedSeconds) || elapsedSeconds < 0) return 'ok';
+  // Half a second of slack: the tick counter and the container's own duration
+  // never agree to the millisecond, and rounding against the player would refuse
+  // a clip they were told was long enough.
+  return elapsedSeconds + 0.5 < minSeconds ? 'too-short' : 'ok';
+}

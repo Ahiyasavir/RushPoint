@@ -63,6 +63,9 @@ import {
   validateSafeZone,
   validateMinAge,
   validateConsentFlag,
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard).
+  normalizeWizardSteps,
+  pruneWizardSteps,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
 // What a PUBLIC GAME may say about where it is (change: surface-invisible-fields).
@@ -427,7 +430,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
     registrationFields, branding, tags, coverImage, approxLocation,
     requiresGuardianConsent, minAge, safeZone, benchmarkOptOut,
     integrationWebhookUrl, allowInstantPlay, photoFeedEnabled, powerUpsEnabled,
-    instructions, pinnedFirst,
+    instructions, pinnedFirst, wizardSteps,
   } = data as UpdateGamePayload;
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Read off the
   // raw payload with a narrow cast rather than the UpdateGamePayload destructure
@@ -533,6 +536,25 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // every published task's PublicTask.pinnedFirst on the next publishGame call —
   // this write alone has no gallery effect until the game is (re-)published.
   if (pinnedFirst !== undefined)        updates.pinnedFirst = pinnedFirst;
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). Malformed is LOUD, a
+  // dangling pointer is QUIET: a client that invents a shape is refused, but a step
+  // naming a mission the creator just deleted is DROPPED. Refusing the second case
+  // would freeze autosave on a pointer the creator never authored — the same trap
+  // that once made one cleared optional field reject every save
+  // (change: builder-clear-optional-field).
+  if (wizardSteps !== undefined) {
+    const normalized = normalizeWizardSteps(wizardSteps);
+    if (normalized === null) {
+      throw new functions.https.HttpsError('invalid-argument', 'wizardSteps must be a list of setup steps');
+    }
+    // Pruned against the stages BEING SAVED when the same call carries them,
+    // otherwise against what is already stored — so deleting a mission and its
+    // step in one autosave does not leave the orphan behind for one round trip.
+    const against = (stages ?? (snap.data() as Game).stages ?? []) as Stage[];
+    updates.wizardSteps = (normalized ?? []).length === 0
+      ? (admin.firestore.FieldValue.delete() as unknown as undefined)
+      : pruneWizardSteps(normalized ?? [], against);
+  }
   // Organizer-only control: gates whether finalizeRun publishes the final board to
   // participants. Deliberately NOT mirrored into publicGames (below) — it is a run
   // control, not gallery data.

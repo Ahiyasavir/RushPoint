@@ -955,7 +955,12 @@ async function writeFeedItem(
   ownerUid: string,
   gameId: string,
   runId: string,
-  entry: { taskId: string; taskTitle: string; teamId: string; teamName: string; photoUrl: string },
+  entry: {
+    taskId: string; taskTitle: string; teamId: string; teamName: string; photoUrl: string;
+    // run-media-gallery-and-video-feed: only ever 'video' in practice (a 'photo'
+    // caller can simply omit it — absent already means photo on read).
+    mediaKind?: MediaKind;
+  },
 ): Promise<void> {
   try {
     const ref = db.collection(FIRESTORE_PATHS.feedItemsCol(ownerUid, gameId, runId)).doc();
@@ -966,6 +971,7 @@ async function writeFeedItem(
       teamId: entry.teamId,
       teamName: entry.teamName,
       photoUrl: entry.photoUrl,
+      ...(entry.mediaKind && entry.mediaKind !== 'photo' ? { mediaKind: entry.mediaKind } : {}),
       reactions: {},
       reactedBy: {},
       active: true,
@@ -1415,21 +1421,24 @@ export const submitStationPhoto = loggedCallable('submitStationPhoto', async (da
     // siblings), so no post-commit releaseTask is needed here.
     // Live photo feed (live-photo-feed): broadcast the approved photo. Skipped
     // when the game disables the feed; best-effort (never fails the submission).
-    // audio-tasks / video-submission-task non-goal: only PHOTO submissions enter
-    // the photo feed. Tested as an allowlist, not a deny-list, so a fourth capture
-    // kind cannot leak into the feed by simply not being named here.
+    // audio-tasks: audio submissions never enter the feed. video-submission-task
+    // (change: run-media-gallery-and-video-feed): video now DOES, on the same
+    // terms as photo — this stays an ALLOWLIST (photo, video), not a deny-list,
+    // so a future capture kind still cannot leak into the feed just by not being
+    // named here.
     // WO Fix 4: gated on `completed` (like the sibling releaseTask) so a duplicate
     // autoApprove submission — which returns completed:false — cannot flood the feed.
     // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely — its
     // photo (taken AT the secret spot) would leak the location to teams still
     // hunting it, defeating the wave-D hidden-task gating.
-    if (completed && feedEnabled && kind === 'photo' && shouldFeedTask(feedTask)) {
+    if (completed && feedEnabled && (kind === 'photo' || kind === 'video') && shouldFeedTask(feedTask)) {
       await writeFeedItem(ownerUid, gameId, runId, {
         taskId,
         taskTitle,
         teamId: resolvedTeamId,
         teamName: team.displayName ?? '',
         photoUrl: photoUrl.trim(),
+        mediaKind: kind,
       });
     }
   }
@@ -1509,21 +1518,23 @@ export const reviewStationSubmission = loggedCallable('reviewStationSubmission',
         } | undefined;
         const submission = teamData?.taskSubmissions?.[taskId];
         const submittedPhotoUrl = submission?.photoUrl;
-        // audio-tasks / video-submission-task non-goal: only PHOTO submissions
-        // enter the feed. An absent mediaKind is a pre-audio-tasks record, which
-        // could only have been a photo.
+        // audio-tasks: audio submissions never enter the feed. video-submission-task
+        // (change: run-media-gallery-and-video-feed): video now DOES, on the same
+        // allowlist as the autoApprove site above. An absent mediaKind is a
+        // pre-audio-tasks record, which could only have been a photo.
         // WO Fix 4: gated on `completed` — a re-approval of an already-completed
         // task returns completed:false and must not re-emit a feed item.
         // wave-f S1: a HIDDEN-LOCATION task is excluded from the feed entirely
         // (photo would leak the secret spot to teams still hunting it).
         const submissionKind = submission?.mediaKind ?? 'photo';
-        if (completed && submittedPhotoUrl && submissionKind === 'photo' && shouldFeedTask(feedTask)) {
+        if (completed && submittedPhotoUrl && (submissionKind === 'photo' || submissionKind === 'video') && shouldFeedTask(feedTask)) {
           await writeFeedItem(ownerUid, gameId, runId, {
             taskId,
             taskTitle,
             teamId,
             teamName: teamData?.displayName ?? '',
             photoUrl: submittedPhotoUrl,
+            mediaKind: submissionKind,
           });
         }
       }

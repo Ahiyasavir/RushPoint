@@ -31,6 +31,7 @@ import {
 } from '../lib/stuckGuards';
 import {
   VIDEO_BITS_PER_SECOND, AUDIO_BITS_PER_SECOND, videoTypeFromName, pickedClipVerdict,
+  recordedClipVerdict,
 } from '../lib/videoCapture';
 
 // Lazy scanner — jsQR + camera code stay out of the main bundle (MapLibre rule).
@@ -1784,11 +1785,19 @@ function AudioEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (blob: Blob, 
   );
 }
 
-// video-submission-task: record a short clip with MediaRecorder — record / stop /
-// re-record, live countdown, auto-stop at the task's configured maximum, submit
-// gated on its configured minimum, <video> playback before submit. Mirrors
-// AudioEntry throughout, including the native-picker fallback for browsers whose
-// MediaRecorder cannot record video (iOS Safari, in-app webviews).
+// video-submission-task: film a short clip with MediaRecorder, in a FULLSCREEN
+// viewfinder with one shutter button that starts the take and ends it — the shape
+// of every phone camera app. Live countdown, auto-stop at the task's configured
+// maximum, <video> playback before submit. Mirrors AudioEntry throughout,
+// including the native-picker fallback for browsers whose MediaRecorder cannot
+// record video (iOS Safari, in-app webviews).
+//
+// ⚠ The mission's MINIMUM length gates the submit button and NOTHING else. It used
+// to disable the stop button until the minimum had elapsed, which meant a player
+// who tapped stop early saw a dead grey control and had no way out of a live
+// recording — a trap, on the one control whose entire job is escape. A too-short
+// clip is now recorded, played back, and refused at submit with a reason and a
+// record-again button.
 //
 // The clip-length range comes from the TASK, resolved through the shared contract
 // so the Builder, the server and this recorder can never disagree about it.
@@ -1829,12 +1838,18 @@ function VideoEntry({ smart, busy, onSubmit }: {
   const { t } = useT();
   const { minSeconds, maxSeconds } = useMemo(() => resolveVideoDuration(smart), [smart]);
 
+  // 'idle' → the mission card's own footprint. 'camera' → the fullscreen viewfinder
+  // (camera live BEFORE the take starts, so the player frames the shot first).
+  // 'review' → the recorded clip, playable, with submit / record-again.
+  const [mode, setMode] = useState<'idle' | 'camera' | 'review'>('idle');
   const [recording, setRecording] = useState(false);
   const [remaining, setRemaining] = useState(maxSeconds);
   const [elapsed, setElapsed] = useState(0);
+  const [clipSeconds, setClipSeconds] = useState<number | undefined>(undefined);
   const [blob, setBlob] = useState<Blob | File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [err, setErr] = useState('');
+  const [opening, setOpening] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -1846,12 +1861,15 @@ function VideoEntry({ smart, busy, onSubmit }: {
   const prevPreviewRef = useRef<string | null>(null);
   // Live viewfinder. Filming blind — no picture until playback — is how a player
   // ends up with 30s of their own pocket, so the camera stream is mirrored into a
-  // <video> for the whole take.
+  // <video> from the moment the camera opens.
   const liveVideoRef = useRef<HTMLVideoElement | null>(null);
   // Same watchdog contract as AudioEntry: `onstop` is not guaranteed to fire, so
   // finalizing is idempotent and stopping never depends on it alone.
   const finalizedRef = useRef(true);
   const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set when the player abandons the take (the X) — finalize then throws the bytes
+  // away instead of dropping them into review.
+  const discardRef = useRef(false);
   // The running count lives in a ref as well as state: the interval callback
   // closes over the render that STARTED the recording, so a state read there
   // would be stale.
@@ -1873,40 +1891,59 @@ function VideoEntry({ smart, busy, onSubmit }: {
     if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
   }
 
+  // Runs exactly once per take, from whichever path gets there first: `onstop`,
+  // `onerror`, or the watchdog. It leaves the recording state unconditionally — an
+  // empty capture routes to the phone-camera fallback rather than stranding the
+  // player mid-take.
   function finalize() {
     if (finalizedRef.current) return;
     finalizedRef.current = true;
     clearTimers();
     stopTracks();
     setRecording(false);
-    const out = new Blob(chunksRef.current, { type: mimeRef.current });
+    const seconds = elapsedRef.current;
+    const parts = chunksRef.current;
+    chunksRef.current = [];
+    if (discardRef.current) {
+      discardRef.current = false;
+      setMode('idle');
+      return;
+    }
+    const out = new Blob(parts, { type: mimeRef.current });
     if (out.size === 0) {
       setErr(t.task.videoUnsupported);
       setUnsupported(true);
+      setMode('idle');
       return;
     }
     if (out.size > MAX_VIDEO_BYTES) {
       setErr(t.task.videoTooLarge({ mb: Math.round(MAX_VIDEO_BYTES / 1024 / 1024) }));
+      setMode('idle');
       return;
     }
+    setClipSeconds(seconds);
+    setErr(recordedClipVerdict(seconds, minSeconds) === 'too-short'
+      ? t.task.videoTooShort({ sec: minSeconds })
+      : '');
     setBlob(out);
     setPreview(URL.createObjectURL(out));
+    setMode('review');
   }
 
-  // The viewfinder element only exists while recording, so the stream is attached
-  // after that render — not in start(). `play()` is best-effort: the element is
-  // muted + playsInline, so autoplay is allowed, but a rejected promise here must
-  // never break the take.
+  // The viewfinder element only exists while the camera is open, so the stream is
+  // attached after that render — not inside openCamera(). `play()` is best-effort:
+  // the element is muted + playsInline, so autoplay is allowed, but a rejected
+  // promise here must never break the take.
   useEffect(() => {
     const el = liveVideoRef.current;
     if (!el) return;
-    if (recording && streamRef.current) {
+    if (mode === 'camera' && streamRef.current) {
       el.srcObject = streamRef.current;
       void el.play().catch(() => { /* viewfinder only — recording is unaffected */ });
     } else {
       el.srcObject = null;
     }
-  }, [recording]);
+  }, [mode]);
 
   // Release the camera + mic on unmount so the device's recording indicator clears.
   useEffect(() => () => {
@@ -1916,6 +1953,10 @@ function VideoEntry({ smart, busy, onSubmit }: {
     if (prevPreviewRef.current) URL.revokeObjectURL(prevPreviewRef.current);
   }, []);
 
+  // Ending a take is the one action that must ALWAYS work: it is wired to the
+  // shutter with no disabled state, it never consults the mission's minimum, and
+  // every failure path falls through to finalize() rather than leaving the player
+  // inside a recording they cannot end.
   function stop() {
     clearTimers();
     const recorder = recorderRef.current;
@@ -1929,29 +1970,62 @@ function VideoEntry({ smart, busy, onSubmit }: {
     watchdogRef.current = setTimeout(() => finalize(), 1500);
   }
 
-  async function start() {
+  // Abandon the take (or just close the viewfinder) without producing a clip.
+  function closeCamera() {
+    if (recording) {
+      discardRef.current = true;
+      stop();
+      return;
+    }
+    clearTimers();
+    stopTracks();
+    setMode(blob && previewUrl ? 'review' : 'idle');
+  }
+
+  async function openCamera() {
     setErr('');
     const mime = pickVideoMimeType();
     if (!mime || typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setUnsupported(true);
       return;
     }
+    setOpening(true);
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        // The rear camera is what a field mission is filmed with; `ideal` so a
+        // laptop or a front-only device still gets a working camera instead of an
+        // OverconstrainedError.
+        video: { facingMode: { ideal: 'environment' } },
+        audio: true,
+      });
     } catch {
       // Denied, or an embedded webview that refuses camera access outright. Either
       // way the player is stuck on a mission they cannot complete, so route them to
       // the phone's own camera app instead of leaving them there.
+      setOpening(false);
       setErr(t.task.videoCameraDenied);
       setUnsupported(true);
       return;
     }
+    setOpening(false);
     streamRef.current = stream;
     mimeRef.current = mime;
+    setRemaining(maxSeconds);
+    setElapsed(0);
+    elapsedRef.current = 0;
+    setMode('camera');
+  }
+
+  function beginRecording() {
+    const stream = streamRef.current;
+    if (!stream) { void openCamera(); return; }
+    setErr('');
     chunksRef.current = [];
+    discardRef.current = false;
     setBlob(null);
     setPreview(null);
+    setClipSeconds(undefined);
 
     // Same hazard as AudioEntry: the constructor and .start() throw on some
     // Android/in-app webviews even after isTypeSupported() said yes. This function
@@ -1960,7 +2034,7 @@ function VideoEntry({ smart, busy, onSubmit }: {
     let recorder: MediaRecorder;
     try {
       recorder = new MediaRecorder(stream, {
-        mimeType: mime,
+        mimeType: mimeRef.current,
         videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
         audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
       });
@@ -1968,11 +2042,13 @@ function VideoEntry({ smart, busy, onSubmit }: {
       stopTracks();
       setErr(t.task.videoUnsupported);
       setUnsupported(true);
+      setMode('idle');
       return;
     }
     recorderRef.current = recorder;
     recorder.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
     recorder.onstop = () => finalize();
+    // A recorder that errors mid-capture never reaches `onstop` on some browsers.
     recorder.onerror = () => finalize();
 
     finalizedRef.current = false;
@@ -1988,6 +2064,7 @@ function VideoEntry({ smart, busy, onSubmit }: {
       setRecording(false);
       setErr(t.task.videoUnsupported);
       setUnsupported(true);
+      setMode('idle');
       return;
     }
     timerRef.current = setInterval(() => {
@@ -2027,12 +2104,18 @@ function VideoEntry({ smart, busy, onSubmit }: {
     // value would mislabel a .mov as mp4 and the server would refuse it after a
     // successful upload.
     mimeRef.current = file.type || videoTypeFromName(file.name);
+    // A picked clip is never re-judged in review — pickedClipVerdict already made
+    // the (fail-open) call on the only duration this path can see.
+    setClipSeconds(undefined);
     setBlob(file);
     setPreview(url);
+    setMode('review');
   }
 
-  const tooShort = elapsed > 0 && minSeconds > 0 && elapsed < minSeconds;
-  const canSubmit = !!blob && !busy;
+  // The minimum gates the SUBMIT button only. It never gates stopping.
+  const clipTooShort = recordedClipVerdict(clipSeconds, minSeconds) === 'too-short';
+  const canSubmit = !!blob && !busy && !clipTooShort;
+  const shortBy = Math.max(0, minSeconds - elapsed);
 
   if (unsupported && !blob) {
     return (
@@ -2048,56 +2131,101 @@ function VideoEntry({ smart, busy, onSubmit }: {
     );
   }
 
+  // Fullscreen viewfinder — a phone camera, not a thumbnail inside a card. Rendered
+  // as a fixed overlay so it escapes the mission card's width and the page scroll.
+  if (mode === 'camera') {
+    return (
+      <div className="fixed inset-0 z-[60] flex flex-col bg-black" role="dialog" aria-modal="true">
+        <video
+          ref={liveVideoRef}
+          muted
+          playsInline
+          autoPlay
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div
+          className="relative flex items-start justify-between gap-3 p-4"
+          style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}
+        >
+          <button
+            type="button"
+            onClick={closeCamera}
+            aria-label={t.common.cancel}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/50 text-2xl leading-none text-white"
+          >
+            ✕
+          </button>
+          {recording ? (
+            <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-3 py-1.5 text-sm font-bold text-white">
+              <span className="h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse" />
+              {t.task.recording({ sec: remaining })}
+            </span>
+          ) : (
+            <span className="rounded-full bg-black/60 px-3 py-1.5 text-sm font-semibold text-white">
+              {minSeconds > 0
+                ? t.task.videoRangeHint({ min: minSeconds, max: maxSeconds })
+                : t.task.videoMaxHint({ sec: maxSeconds })}
+            </span>
+          )}
+        </div>
+
+        <div
+          className="relative mt-auto flex flex-col items-center gap-3 p-6"
+          style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
+        >
+          {recording && shortBy > 0 && (
+            <span className="rounded-full bg-black/60 px-3 py-1.5 text-sm font-semibold text-white">
+              {t.task.videoKeepRecording({ sec: shortBy })}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => (recording ? stop() : beginRecording())}
+            aria-label={recording ? t.task.stopRecording : t.task.startRecording}
+            className="flex h-[72px] w-[72px] items-center justify-center rounded-full border-4 border-white/90 bg-transparent transition-transform active:scale-95"
+          >
+            <span
+              className={recording
+                ? 'h-6 w-6 rounded-[6px] bg-red-600 transition-all'
+                : 'h-14 w-14 rounded-full bg-red-600 transition-all'}
+            />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'review' && blob && previewUrl) {
+    return (
+      <div className="space-y-3">
+        {err && <p className="text-ink-alert text-sm">{err}</p>}
+        <video controls src={previewUrl} className="w-full rounded-xl bg-black" />
+        <div className="flex gap-2">
+          {unsupported ? (
+            <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>
+              <input type="file" accept="video/*" capture="environment" className="sr-only" onChange={pickFile} />
+              {t.task.reRecord}
+            </label>
+          ) : (
+            <Button variant="ghost" disabled={busy || opening} onClick={() => void openCamera()}>{t.task.reRecord}</Button>
+          )}
+          <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current)}>
+            {busy ? t.task.working : t.task.submitVideo}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
       {err && <p className="text-ink-alert text-sm">{err}</p>}
-      {recording ? (
-        <div className="space-y-2">
-          <div className="relative">
-            <video
-              ref={liveVideoRef}
-              muted
-              playsInline
-              autoPlay
-              className="w-full rounded-xl bg-black aspect-video object-cover"
-            />
-            <span className="absolute top-2 end-2 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-xs font-bold text-white">
-              <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-              {t.task.recording({ sec: remaining })}
-            </span>
-          </div>
-          {tooShort
-            ? <p className="text-sm text-zinc-400">{t.task.videoKeepRecording({ sec: minSeconds - elapsed })}</p>
-            : null}
-          <Button variant="ghost" disabled={tooShort} onClick={stop}>{t.task.stopRecording}</Button>
-        </div>
-      ) : blob && previewUrl ? (
-        <div className="space-y-2">
-          <video controls src={previewUrl} className="w-full rounded-xl" />
-          <div className="flex gap-2">
-            {unsupported ? (
-              <label className={`${TAP_TARGET} inline-flex items-center justify-center rounded-2xl border border-glass-border bg-white/70 px-5 text-sm font-semibold text-zinc-400 cursor-pointer hover:bg-white transition-colors`}>
-                <input type="file" accept="video/*" capture="environment" className="sr-only" onChange={pickFile} />
-                {t.task.reRecord}
-              </label>
-            ) : (
-              <Button variant="ghost" disabled={busy} onClick={start}>{t.task.reRecord}</Button>
-            )}
-            <Button disabled={!canSubmit} onClick={() => blob && onSubmit(blob, mimeRef.current)}>
-              {busy ? t.task.working : t.task.submitVideo}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          <p className="text-sm text-zinc-400">
-            {minSeconds > 0
-              ? t.task.videoRangeHint({ min: minSeconds, max: maxSeconds })
-              : t.task.videoMaxHint({ sec: maxSeconds })}
-          </p>
-          <Button disabled={busy} onClick={start}>{t.task.startRecording}</Button>
-        </div>
-      )}
+      <p className="text-sm text-zinc-400">
+        {minSeconds > 0
+          ? t.task.videoRangeHint({ min: minSeconds, max: maxSeconds })
+          : t.task.videoMaxHint({ sec: maxSeconds })}
+      </p>
+      <Button disabled={busy || opening} onClick={() => void openCamera()}>{t.task.startRecording}</Button>
     </div>
   );
 }

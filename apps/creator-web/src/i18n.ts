@@ -660,6 +660,17 @@ const HE = {
     photoReviewRetry: 'לנסות שוב',
     photoReviewKeyboardHint: 'מקלדת: J או K למעבר בין הגשות, A לאישור, R לדחייה',
     photoReviewQueueLabel: 'הגשות שממתינות לבדיקה',
+    // ── גלריית המדיה של הריצה (run-media-gallery-and-video-feed) ──
+    mediaGalleryCount: ({ n }: { n: number }) => `${n} פריטים`,
+    mediaGalleryDownloadAll: ({ n }: { n: number }) => `הורדת הכל (${n})`,
+    mediaGalleryDownloadOne: 'הורדה',
+    mediaGalleryStatusPending: 'ממתין לבדיקה',
+    mediaGalleryStatusApproved: 'אושר',
+    mediaGalleryStatusRejected: 'נדחה',
+    mediaGalleryNoMedia: 'אין מדיה',
+    mediaGalleryAlt: 'הגשה',
+    mediaGalleryVideoAria: 'סרטון שהוגש',
+    mediaGalleryTaskLine: ({ name }: { name: string }) => `משימה: ${name}`,
     chatTitle: 'צ׳אט עם הקבוצות',
     chatHq: 'המטה',
     chatSend: 'שליחה',
@@ -1058,6 +1069,11 @@ const HE = {
         title: 'פיד התמונות',
         help: 'התמונות שהקבוצות שיתפו במהלך המשחק, כפי שכולם רואים אותן.',
         empty: 'עדיין לא שותפו תמונות.',
+      },
+      mediaGallery: {
+        title: 'כל התמונות והסרטונים',
+        help: 'כל תמונה וסרטון שהוגשו בריצה הזו, כולל כאלה שלא אושרו או שנדחו. אפשר להוריד את כולם.',
+        empty: 'עדיין לא הוגשו תמונות או סרטונים.',
       },
       chat: {
         title: 'צ׳אט עם הקבוצות',
@@ -1639,6 +1655,94 @@ const HE = {
     launchFailed: 'ההשקה נכשלה',
     newFieldLabel: 'שדה חדש',
     loadingMapShort: 'טוען מפה…',
+  },
+  // ── הקמה מהירה (change: quick-setup-wizard) ──
+  // הוראות ההקמה של תבנית חיות כשדות נתונים על המשחק, לא בתוך הטקסט שהמשתתפים
+  // קוראים. כאן רק העטיפה: ההוראה עצמה (instructionPrompt) היא תוכן שהתבנית
+  // כותבת, ולכן מוצגת עם dir="auto" ולא יושבת במילון.
+  quickSetup: {
+    title: 'הקמה מהירה',
+    open: 'פתיחת הקמה מהירה',
+    close: 'סגירת הקמה מהירה',
+    next: 'הבא',
+    defer: 'חזור לזה מאוחר יותר',
+    progress: ({ step, total }: { step: number; total: number }) => `שלב ${step} מתוך ${total}`,
+    remaining: (n: number) => (n === 1 ? 'נותר שדה אחד בהקמה מהירה' : `נותרו ${n} שדות בהקמה מהירה`),
+    resume: 'המשך הקמה מהירה',
+    allDoneTitle: 'סיימתם את ההקמה המהירה',
+    allDoneBody: 'כל השדות שהתבנית ביקשה מלאים. אפשר להשיק.',
+    requiredBadge: 'חובה',
+    optionalBadge: 'רשות',
+    doneBadge: 'מולא',
+    stepAria: 'שלב בהקמה מהירה',
+    // חסימת השקה: מודל שמונה כל שדה חובה שעדיין ריק, כל שורה קופצת אליו.
+    blockedTitle: 'עוד רגע לפני ההשקה',
+    blockedBody: 'התבנית מבקשת למלא כמה שדות לפני שמשיקים. לחיצה על שורה תיקח אתכם ישר לשדה.',
+    blockedCta: 'קחו אותי לשדה הראשון',
+    blockedDismiss: 'סגירה',
+    inStage: (stage: string) => `בשלב: ${stage}`,
+    inTask: (task: string) => `במשימה: ${task}`,
+    inGame: 'הגדרות המשחק',
+    // הפעולה של מנהל: שולפת את ההוראות מתוך הטקסט של התבנית אל תוך ההקמה המהירה.
+    extractCta: 'חילוץ הוראות להקמה מהירה',
+    extractBusy: 'מחלץ…',
+    extractNone: 'לא נמצאו הוראות מפעיל בתוך התוכן של התבנית',
+    extractSummary: ({ steps, cleaned }: { steps: number; cleaned: number }) =>
+      `נמצאו ${steps} הוראות בתוך ${cleaned} שדות. לאשר את החילוץ והניקוי?`,
+    extractDone: (n: number) => `${n} הוראות עברו להקמה מהירה, והטקסט שהמשתתפים רואים נוקה`,
+    extractFailed: 'החילוץ נכשל',
+
+    // ── כרטיס הזמנה: נפתח לבד על תבנית טרייה, לא דורש לחיצה כדי להתגלות ──
+    welcomeEyebrow: 'המשחק שלכם כמעט מוכן',
+    welcomeTitle: 'נבנה את זה ביחד, שלב אחר שלב?',
+    welcomeBody: (n: number) => `נשארו ${n} דברים קטנים להשלים. נלווה אתכם לכל אחד מהם, ותראו בדיוק לאן ללחוץ.`,
+    welcomeCta: 'קדימה, בואו נתחיל',
+    welcomeSkip: 'אעשה זאת עצמאית',
+
+    // ── כרטיס מעבר: מוצג לפני שנוגעים בשדה, לא בתוכו ──
+    introEyebrow: (n: number, total: number) => `תחנה ${n} מתוך ${total}`,
+    introCta: 'הבנתי, קדימה',
+    introTaskLabel: (task: string) => `המשימה: ${task}`,
+    introGameLabel: 'הגדרות המשחק',
+    // רדיפה חופשית (fallback) לכרטיס מעבר על שדה שאין לו כותרת ייעודית.
+    introFallback: (task: string) => `בואו נשלים פרט קטן במשימה "${task}".`,
+    introGameFallback: 'בואו נשלים פרט קטן בהגדרות המשחק.',
+
+    // ── שורה ראשונה לכל שדה: קצרה, שיחתית, לא ההוראה הגולמית של התבנית ──
+    copy: {
+      gameTitle: 'איך קוראים למשחק? שם שיגרום למשתתפים לרצות ללחוץ.',
+      gameOverview: 'שתי שורות שמסבירות במה מדובר. זה מה שרואים לפני ההרשמה.',
+      gamePrimer: 'ברוכים הבאים! מה כדאי שהקבוצות ידעו רגע לפני שיוצאים לדרך?',
+      title: 'תנו למשימה הזו שם. משהו שמדבר, לא "משימה 3".',
+      description: 'תארו במשפט או שניים מה השחקנים צריכים לעשות כאן.',
+      media: 'תמונה אחת שווה אלף מילים. צרפו אחת שמראה בדיוק את המקום או האתגר.',
+      answers: 'מה התשובה הנכונה? זו התשובה שתיבדק אוטומטית.',
+      numericAnswer: 'מה המספר הנכון, ובאיזה טווח סטייה עדיין נחשב תשובה טובה?',
+      surveyChoices: 'אילו אפשרויות בחירה תרצו להציע כאן?',
+      steps: 'פרקו את המשימה לצעדים לפי הסדר הנכון.',
+      orderItems: 'באיזה סדר צריך לסדר את הפריטים?',
+      secretCode: 'מה הקוד הסודי שהקבוצה צריכה למצוא ולהקליד?',
+      captureKind: 'איך התחנה מאמתת שהגיעו? תמונה, קוד או משהו אחר?',
+      longInstructions: 'הוראות ההפעלה המלאות של התחנה, למי שמפעיל אותה בשטח.',
+      coordinates: 'עכשיו נסמן איפה זה קורה. הניחו את הסיכה על המפה.',
+      geofence: 'באיזה רדיוס מהסיכה נחשב "הגעתי"?',
+      locationClue: 'רוצים לתת רמז למיקום בלי לחשוף אותו על המפה? כתבו אותו כאן.',
+      locationHidden: 'זו משימה עם מיקום מוסתר. השחקנים יגלו אותו רק כשמתקרבים.',
+      autoApprove: 'אישור אוטומטי, או שאתם רוצים לבדוק כל הגשה בעצמכם?',
+      hint: 'רוצים להציע רמז בתשלום נקודות למי שנתקע?',
+      points: 'כמה נקודות שווה המשימה הזו?',
+      duration: 'כמה זמן בערך לוקח לבצע אותה?',
+      difficulty: 'עד כמה זו משימה קשה, בסולם של הקבוצות שלכם?',
+      capacity: 'כמה קבוצות יכולות להיות בתחנה הזו במקביל?',
+      unlock: 'יש משימה שצריך לסיים קודם כדי לפתוח את זו?',
+      tags: 'תייגו את המשימה כדי שיהיה קל למצוא אותה שוב.',
+      fallback: 'בואו נמלא את הפרט הזה.',
+    },
+
+    // ── חגיגה קטנה בסיום ──
+    celebrateTitle: 'זהו, סיימתם! 🎉',
+    celebrateBody: 'המשחק שלכם מוכן להשקה. כל הכבוד על ההשקעה.',
+    celebrateCta: 'מעולה, נמשיך',
   },
   // ── סיור מודרך לפתיחה (change: creator-guided-tour) ──
   // סדר השלבים והמעברים נמצאים ב-lib/creatorOnboarding.ts; כאן רק הטקסט.
@@ -2483,6 +2587,17 @@ const EN: typeof HE = {
     photoReviewRetry: 'Try again',
     photoReviewKeyboardHint: 'Keyboard: J or K to move between submissions, A to approve, R to reject',
     photoReviewQueueLabel: 'Submissions waiting for review',
+    // ── Run media gallery (run-media-gallery-and-video-feed) ──
+    mediaGalleryCount: ({ n }: { n: number }) => `${n} items`,
+    mediaGalleryDownloadAll: ({ n }: { n: number }) => `Download all (${n})`,
+    mediaGalleryDownloadOne: 'Download',
+    mediaGalleryStatusPending: 'Awaiting review',
+    mediaGalleryStatusApproved: 'Approved',
+    mediaGalleryStatusRejected: 'Rejected',
+    mediaGalleryNoMedia: 'No media',
+    mediaGalleryAlt: 'submission',
+    mediaGalleryVideoAria: 'submitted video',
+    mediaGalleryTaskLine: ({ name }: { name: string }) => `Mission: ${name}`,
     chatTitle: 'Team chat',
     chatHq: 'HQ',
     chatSend: 'Send',
@@ -2884,6 +2999,11 @@ const EN: typeof HE = {
         title: 'Photo feed',
         help: 'The photos teams shared during the game, exactly as everyone else sees them.',
         empty: 'No photos have been shared yet.',
+      },
+      mediaGallery: {
+        title: 'All photos & videos',
+        help: 'Every photo and video submitted this run, including ones never approved or that were rejected. Download them all here.',
+        empty: 'No photos or videos have been submitted yet.',
       },
       chat: {
         title: 'Team chat',
@@ -3466,6 +3586,95 @@ const EN: typeof HE = {
     launchFailed: 'Launch failed',
     newFieldLabel: 'New field',
     loadingMapShort: 'Loading map…',
+  },
+  // ── Quick Setup (change: quick-setup-wizard) ──
+  // A template's setup instructions live as DATA on the game, never inside the
+  // prose participants read. This is only the shell: the instruction itself
+  // (instructionPrompt) is content the template authors, so it renders with
+  // dir="auto" and is not a dictionary key.
+  quickSetup: {
+    title: 'Quick Setup',
+    open: 'Open Quick Setup',
+    close: 'Close Quick Setup',
+    next: 'Next',
+    defer: 'Come back to this later',
+    progress: ({ step, total }: { step: number; total: number }) => `Step ${step} of ${total}`,
+    remaining: (n: number) => (n === 1 ? '1 Quick Setup field left' : `${n} Quick Setup fields left`),
+    resume: 'Resume Quick Setup',
+    allDoneTitle: 'Quick Setup is complete',
+    allDoneBody: 'Every field the template asked for is filled in. You can launch.',
+    requiredBadge: 'Required',
+    optionalBadge: 'Optional',
+    doneBadge: 'Filled in',
+    stepAria: 'Quick Setup step',
+    // Launch guard: a modal naming every required field still empty, each row a
+    // link straight to it.
+    blockedTitle: 'One moment before launch',
+    blockedBody: 'This template asks for a few fields before you launch. Activate a row to go straight to it.',
+    blockedCta: 'Take me to the first field',
+    blockedDismiss: 'Close',
+    inStage: (stage: string) => `Level: ${stage}`,
+    inTask: (task: string) => `Mission: ${task}`,
+    inGame: 'Game settings',
+    // The admin action: lifts instructions out of a template's prose into Quick Setup.
+    extractCta: 'Extract setup instructions',
+    extractBusy: 'Extracting…',
+    extractNone: 'No operator instructions were found inside this template',
+    extractSummary: ({ steps, cleaned }: { steps: number; cleaned: number }) =>
+      `Found ${steps} instructions across ${cleaned} fields. Extract them and clean the text?`,
+    extractDone: (n: number) => `${n} instructions moved into Quick Setup, and the text players read was cleaned`,
+    extractFailed: 'Extraction failed',
+
+    // ── Welcome card: offered on a fresh template, no click needed to discover it ──
+    welcomeEyebrow: 'Your game is almost ready',
+    welcomeTitle: 'Want to build it together, step by step?',
+    welcomeBody: (n: number) => `There are ${n} small things left to finish. We'll walk you to each one, and show you exactly where to click.`,
+    welcomeCta: "Let's get started",
+    welcomeSkip: "I'll do it myself",
+
+    // ── Transition card: shown BEFORE touching a field, never inside one ──
+    introEyebrow: (n: number, total: number) => `Stop ${n} of ${total}`,
+    introCta: "Got it, let's go",
+    introTaskLabel: (task: string) => `Mission: ${task}`,
+    introGameLabel: 'Game settings',
+    introFallback: (task: string) => `Let's fill in a small detail on "${task}".`,
+    introGameFallback: "Let's fill in a small detail in the game settings.",
+
+    // ── The first line for each field: short, conversational, not the raw template note ──
+    copy: {
+      gameTitle: 'What should the game be called? Something that makes people want to click.',
+      gameOverview: 'Two lines explaining what this is about. This is what people see before they sign up.',
+      gamePrimer: 'Welcome! What should teams know right before they head out?',
+      title: 'Give this mission a name that speaks. Not "Mission 3".',
+      description: 'Describe in a sentence or two what players need to do here.',
+      media: 'A picture is worth a thousand words. Attach one that shows the spot or the challenge.',
+      answers: "What's the correct answer? This is what gets checked automatically.",
+      numericAnswer: "What's the right number, and how far off still counts?",
+      surveyChoices: 'What choices would you like to offer here?',
+      steps: 'Break the mission into steps, in the right order.',
+      orderItems: 'What order should the items be arranged in?',
+      secretCode: 'What secret code does the team need to find and enter?',
+      captureKind: 'How does the station confirm arrival? Photo, code, or something else.',
+      longInstructions: 'The full run instructions for this station, for whoever staffs it.',
+      coordinates: "Now let's mark where this happens. Drop the pin on the map.",
+      geofence: 'How close to the pin counts as "arrived"?',
+      locationClue: 'Want to give a location hint without revealing it on the map? Write it here.',
+      locationHidden: "This mission has a hidden location. Players reveal it only as they get close.",
+      autoApprove: 'Approve automatically, or would you rather review every submission yourself?',
+      hint: 'Want to offer a paid hint for teams that get stuck?',
+      points: 'How many points is this mission worth?',
+      duration: 'About how long does it take to complete?',
+      difficulty: "How hard is this mission, on your teams' scale?",
+      capacity: 'How many teams can be at this station at once?',
+      unlock: 'Does another mission need to finish first before this one unlocks?',
+      tags: 'Tag this mission so it is easy to find again.',
+      fallback: "Let's fill in this detail.",
+    },
+
+    // ── A small celebration at the finish ──
+    celebrateTitle: "That's it, you're done! 🎉",
+    celebrateBody: 'Your game is ready to launch. Nice work.',
+    celebrateCta: "Great, let's continue",
   },
   // ── First-run guided tour (change: creator-guided-tour) ──
   // The step order and every transition live in lib/creatorOnboarding.ts; this is

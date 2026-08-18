@@ -14,6 +14,7 @@ import {
   AUDIO_BITS_PER_SECOND,
   videoTypeFromName,
   pickedClipVerdict,
+  recordedClipVerdict,
 } from '../apps/play-web/src/lib/videoCapture';
 import { VIDEO_DURATION_LIMITS } from '../packages/shared/src/videoDuration';
 
@@ -57,7 +58,7 @@ for (const name of ['a.webm', 'a.mp4', 'a.mov', 'a.m4v', 'a.3gp', 'a', 'a.', '.m
 }
 
 // ─── pickedClipVerdict: the native-picker minimum check, FAIL OPEN ────────────
-// The recorder path enforces the minimum live (the submit button stays disabled).
+// The recorder path enforces the minimum on SUBMIT (recordedClipVerdict below).
 // The picker path cannot — the clip already exists — so its duration is read after
 // selection instead.
 check('a clip comfortably over the minimum is ok', pickedClipVerdict(20, 10) === 'ok');
@@ -78,6 +79,30 @@ try {
   pickedClipVerdict(10, undefined as unknown as number);
 } catch { threw = true; }
 check('pickedClipVerdict never throws', threw === false);
+
+// ─── recordedClipVerdict: the recorder's own minimum check ───────────────
+// This one may be strict — the widget counted the seconds itself — but it exists
+// ONLY to gate the SUBMIT button. The stop button must never consult it: gating
+// stop is what trapped a player inside a recording they were not allowed to end
+// (the grey, unpressable "stop" bug).
+check('a take over the minimum is ok', recordedClipVerdict(12, 10) === 'ok');
+check('a take exactly at the minimum is ok', recordedClipVerdict(10, 10) === 'ok');
+check('a take a tick under the minimum is ok (tick/container slack)', recordedClipVerdict(9.6, 10) === 'ok');
+check('a take clearly under the minimum is too-short', recordedClipVerdict(3, 10) === 'too-short');
+check('no minimum configured accepts a 1-second take', recordedClipVerdict(1, 0) === 'ok');
+for (const e of [undefined, NaN, Infinity, -1, 'ten' as unknown as number, null as unknown as number]) {
+  check(`unmeasurable elapsed (${String(e)}) fails OPEN`, recordedClipVerdict(e, 10) === 'ok');
+}
+for (const m of [undefined as unknown as number, NaN, -5, 0]) {
+  check(`a garbage minimum (${String(m)}) gates nothing`, recordedClipVerdict(1, m) === 'ok');
+}
+let recThrew = false;
+try {
+  recordedClipVerdict(undefined, NaN);
+  recordedClipVerdict(NaN, Infinity);
+  recordedClipVerdict(10, undefined as unknown as number);
+} catch { recThrew = true; }
+check('recordedClipVerdict never throws', recThrew === false);
 
 console.log(`\n${failures === 0 ? 'ALL VIDEO-CAPTURE TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

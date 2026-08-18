@@ -14,7 +14,7 @@ export type PanelId =
   | 'joinShare' | 'stationQr' | 'startTeams' | 'alerts' | 'broadcast' | 'liveMap'
   | 'teams' | 'liveStandings' | 'finalStandings'
   | 'hotZone' | 'flashMission' | 'trackables' | 'zones' | 'taskAvailability'
-  | 'photoReview' | 'feed' | 'chat' | 'staffChannel'
+  | 'photoReview' | 'feed' | 'mediaGallery' | 'chat' | 'staffChannel'
   | 'shareScreens' | 'staffInvite'
   | 'runSummary' | 'analytics' | 'heatmap' | 'feedback' | 'survey';
 
@@ -34,6 +34,8 @@ export type RunConsoleState = {
   /** Any row the review queue would render (pending + recently reviewed + a load error). */
   photoQueueCount: number;
   feedItemCount: number;
+  /** Every renderable photo/video submission, any status (run-media-gallery). */
+  mediaGalleryCount: number;
   chatThreadCount: number;
   unreadChatThreads: number;
   hotZoneActive: boolean;
@@ -103,6 +105,10 @@ export const PANEL_GROUP: Record<PanelId, GroupId> = {
 
   photoReview: 'moderation',
   feed: 'moderation',
+  // Every submitted photo/video, any review status (change:
+  // run-media-gallery-and-video-feed) — a manager tool, not a work queue, grouped
+  // with the other "from the field" surfaces rather than a new group.
+  mediaGallery: 'moderation',
   chat: 'moderation',
   // The organizer's half of the staff↔admin channel (staff-console-field-ops).
   // Grouped with the other live conversations, NOT with staffInvite: inviting a
@@ -173,6 +179,9 @@ function isPanelVisible(id: PanelId, s: RunConsoleState): boolean {
     // somewhere else with no explanation (change: run-console-clarity). Both are
     // present for the whole live run and say "nothing waiting" out loud instead.
     case 'photoReview': return live || s.photoQueueCount > 0;
+    // Same reasoning as `photoReview`: a manager tool present for the whole live
+    // run so the rail cannot change shape under the organizer.
+    case 'mediaGallery': return live || s.mediaGalleryCount > 0;
     case 'chat': return live;
     // Same reasoning as `chat`: present for the whole live run so the rail cannot
     // change shape under the organizer, and a quiet channel says so out loud.
@@ -423,7 +432,7 @@ export const PANEL_PRIORITY: PanelId[] = [
   // for a decision, which is a higher-urgency signal than a participant question.
   'photoReview', 'staffChannel', 'chat',
   // Operator overrides and optional game systems.
-  'taskAvailability', 'hotZone', 'flashMission', 'zones', 'trackables', 'feed',
+  'taskAvailability', 'hotZone', 'flashMission', 'zones', 'trackables', 'feed', 'mediaGallery',
   // Setup artifacts: needed intensely for five minutes, then reference material.
   'joinShare', 'stationQr', 'shareScreens', 'staffInvite',
   // Post run reading. By definition nothing is going wrong any more.
@@ -435,7 +444,7 @@ const PANEL_WEIGHT: Partial<Record<PanelId, number>> = {
   startTeams: 1,
   liveMap: 4, teams: 4,
   liveStandings: 3, finalStandings: 3, joinShare: 3, photoReview: 3, chat: 3, staffChannel: 3,
-  feed: 3, analytics: 3, heatmap: 3,
+  feed: 3, mediaGallery: 3, analytics: 3, heatmap: 3,
 };
 const DEFAULT_PANEL_WEIGHT = 2;
 

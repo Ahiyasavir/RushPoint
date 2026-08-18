@@ -82,7 +82,10 @@ const DIFF_BANDS: { key: string; value: number; test: (d: number) => boolean }[]
   { key: 'hard', value: 8, test: (d) => d >= 7 },
 ];
 
-export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll }: {
+export default function TaskWizard({
+  task, onChange, onRemove, onDone, onClose, closeLabel, gameId, siblings, revealAll,
+  focusTab, focusGroup, focusNonce,
+}: {
   task: Task; onChange: (t: Task) => void; onRemove?: () => void; onDone: () => void;
   onClose: () => void; closeLabel: string; gameId?: string;
   // The other tasks of the SAME stage (change: unlockable-tasks) — the
@@ -93,6 +96,14 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
   // task: the creator arrived by clicking the statement of the problem, so the
   // form must not be silent (change: builder-first-task-flow).
   revealAll?: boolean;
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard): a step that targets a
+  // field in THIS mission says which tab owns it and which collapsed group it
+  // hides in. Both are decided by lib/quickSetup's table, never here — this editor
+  // only obeys. `focusNonce` (not the values) is the trigger, so activating the
+  // same step twice navigates twice.
+  focusTab?: 'location' | 'details' | 'execution' | null;
+  focusGroup?: OptInGroupKey | null;
+  focusNonce?: number;
 }) {
   const t = useT();
   const b = t.builder;
@@ -125,6 +136,17 @@ export default function TaskWizard({ task, onChange, onRemove, onDone, onClose, 
   const hideGroup = (k: OptInGroupKey) =>
     setActive((a) => foldGroupAway(task, a, k).active);
   const groups = { active, openGroup, hideGroup };
+
+  // Quick Setup deep navigation. Opening the group is what makes a field that
+  // lives behind a chip reachable at all; the scroll + focus + ring is done by the
+  // Builder's useQuickSetupFocus against the `data-qs-field` anchors below, which
+  // retries for a few frames precisely so it can wait for this tab switch.
+  useEffect(() => {
+    if (!focusNonce) return;
+    if (focusTab) setStep(stepIndexOf(focusTab) as WizardStep);
+    if (focusGroup) setActive((a) => ({ ...a, [focusGroup]: true }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNonce]);
 
   // Each step body derives the location state it needs for itself: the Location
   // step reasons in the creator's two choices (lib/locationPicker), the
@@ -353,7 +375,7 @@ function LocationStepBody({ task, set, b }: {
     // layout strategy: on any normal panel everything fits and no scrollbar appears.
     // It only engages on a viewport too short for a usable map, where scrolling to a
     // real map beats staring at a clipped one.
-    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto">
+    <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-y-auto" data-qs-field="coordinates">
       <div className="shrink-0">
         <Label>{b.fireQuestion}</Label>
         {/* The two location choices lead (bigger, primary — this is the actual
@@ -778,7 +800,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
     <>
       <div>
         <Label dense>{b.titleField}</Label>
-        <Input dense value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder={b.titlePlaceholder} dir="auto" autoFocus />
+        <Input dense data-qs-field="title" value={task.title} onChange={(e) => set({ title: e.target.value })} placeholder={b.titlePlaceholder} dir="auto" autoFocus />
         {/* The naming gate is the wizard's ONLY forward gate, so it states its
             reason beside the field. Calm register: this is a hint, not an error. */}
         {task.title.trim() === '' && (
@@ -787,7 +809,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
       </div>
       <div>
         <Label dense>{b.descriptionField}</Label>
-        <Textarea dense value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
+        <Textarea dense data-qs-field="description" value={task.description ?? ''} onChange={(e) => set({ description: e.target.value })} placeholder={b.descriptionPlaceholder} rows={2} dir="auto" />
       </div>
 
       {/* A picture belongs WITH the mission description, not three clicks away
@@ -797,7 +819,9 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
           single small chip by default (same footprint the step-3 opt-in chip had), so
           a task with no media doesn't pay for a whole upload section's worth of
           vertical space. MediaSection owns its own fold state; see the note there. */}
-      <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
+      <div data-qs-field="media">
+        <MediaSection task={task} set={set} b={b} gameId={gameId} replace={replace} />
+      </div>
 
       <div>
         <Label dense>{b.howComplete}</Label>
@@ -1227,7 +1251,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
         {task.type === 'smart_station' && (
           <div>
             <Label dense>{b.secretCode}</Label>
-            <Input dense value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
+            <Input dense data-qs-field="smart.secretCode" value={task.smart?.secretCode ?? ''} placeholder={b.secretCodePlaceholder} dir="auto"
               onChange={(e) => {
                 touch('stationCode');
                 setSmart({ verificationType: 'code_verification', secretCode: e.target.value, hasCode: true });
@@ -1311,7 +1335,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               )}
             </div>
             <label className="flex items-center gap-2 text-xs text-[--ink-2]">
-              <input type="checkbox" checked={task.smart?.autoApprove ?? false}
+              <input data-qs-field="smart.autoApprove" type="checkbox" checked={task.smart?.autoApprove ?? false}
                 onChange={(e) => setSmart({ verificationType: 'photo_upload', autoApprove: e.target.checked })} />
               {b.autoApprove}
             </label>
@@ -1321,12 +1345,16 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
             <p className="text-xs text-[--ink-3]">{b.autoApproveHint}</p>
           </div>
         )}
-        {task.type === 'quiz' && <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />}
+        {task.type === 'quiz' && (
+          <div data-qs-field="answers">
+            <QuizModeSection task={task} set={set} b={b} revealed={revealed} touch={touch} />
+          </div>
+        )}
         {task.type === 'numeric' && (
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label dense>{b.correctNumber}</Label>
-              <Input dense type="number" value={task.numericAnswer ?? ''}
+              <Input dense data-qs-field="numericAnswer" type="number" value={task.numericAnswer ?? ''}
                 onChange={(e) => {
                   touch('numericAnswer');
                   set({ numericAnswer: e.target.value === '' ? undefined : parseFloat(e.target.value) });
@@ -1340,17 +1368,21 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           </div>
         )}
         {task.type === 'sequence' && (
-          <StepsEditor steps={task.steps ?? []} b={b}
-            onChange={(steps) => { touch('sequenceSteps'); set({ steps }); }} />
+          <div data-qs-field="steps">
+            <StepsEditor steps={task.steps ?? []} b={b}
+              onChange={(steps) => { touch('sequenceSteps'); set({ steps }); }} />
+          </div>
         )}
         {task.type === 'survey' && (
-          <SurveyChoicesSection task={task} set={set} b={b}
-            revealError={revealed('surveyChoices')} touch={() => touch('surveyChoices')} />
+          <div data-qs-field="surveyChoices">
+            <SurveyChoicesSection task={task} set={set} b={b}
+              revealError={revealed('surveyChoices')} touch={() => touch('surveyChoices')} />
+          </div>
         )}
         {(task.type === 'smart_station' || task.type === 'photo') && (
           <div>
             <Label dense>{b.extendedInstructions}</Label>
-            <Textarea dense value={task.smart?.longInstructions ?? ''} rows={2} placeholder={b.extendedPlaceholder} dir="auto"
+            <Textarea dense data-qs-field="smart.longInstructions" value={task.smart?.longInstructions ?? ''} rows={2} placeholder={b.extendedPlaceholder} dir="auto"
               onChange={(e) => setSmart({ longInstructions: e.target.value })} />
           </div>
         )}
@@ -1370,7 +1402,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           <div className="flex items-center gap-2">
             <RichTooltip concept="hint" />
           </div>
-          <Textarea dense value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
+          <Textarea dense data-qs-field="hint" value={task.hint ?? ''} onChange={(e) => set({ hint: e.target.value })} placeholder={b.hintPlaceholder} rows={2} dir="auto" />
           <div className="flex items-center gap-2">
             <InlineLabel>{b.hintCost}</InlineLabel>
             <Input dense type="number" min={0} className="w-20" value={task.hintPenalty ?? 25}
@@ -1412,7 +1444,9 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
           {siblingCount > 1 && (
             <div>
               <InlineLabel>{b.unlockAfterLead}</InlineLabel>
-              <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
+              <div data-qs-field="unlockAfterTaskIds">
+                <UnlockSection task={task} siblings={siblings ?? []} set={set} b={b} />
+              </div>
             </div>
           )}
           {isAnswerTask && (
@@ -1430,7 +1464,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               <InlineLabel>{b.maxTeams}</InlineLabel>
               <RichTooltip concept="concurrent" />
             </div>
-            <Input dense type="number" min={1} value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: Math.max(1, parseInt(e.target.value) || 1) })} />
+            <Input dense data-qs-field="maxConcurrentTeams" type="number" min={1} value={task.maxConcurrentTeams} onChange={(e) => set({ maxConcurrentTeams: Math.max(1, parseInt(e.target.value) || 1) })} />
           </div>
           {/* Task tags (change: game-task-tags). `Task.tags` existed and was already
               denormalized into publicTasks and returned by searchTaskLibrary — but the
@@ -1438,7 +1472,9 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               so a creator could never tag their own mission. */}
           <div>
             <InlineLabel>{b.advGroupTags}</InlineLabel>
-            <TaskTagsField task={task} set={set} b={b} />
+            <div data-qs-field="tags">
+              <TaskTagsField task={task} set={set} b={b} />
+            </div>
           </div>
           {/* "Hide location" used to live here. It moved into the Location step's
               Advanced panel (change: task-location-mode-consolidation), beside the
@@ -1472,7 +1508,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
         </div>
         <div>
           <Label dense>{b.points}</Label>
-          <Input dense type="number" min={0} value={task.pointValue} onChange={(e) => set({ pointValue: Math.max(0, parseInt(e.target.value) || 0) })} />
+          <Input dense data-qs-field="pointValue" type="number" min={0} value={task.pointValue} onChange={(e) => set({ pointValue: Math.max(0, parseInt(e.target.value) || 0) })} />
         </div>
 
         <AdvGroup>{b.advGroupTiming}</AdvGroup>
@@ -1540,6 +1576,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               <div className="flex items-center gap-2 flex-wrap text-xs text-[--ink-3]">
                 <InlineLabel>{b.durationOverride}</InlineLabel>
                 <Input dense type="number" min={0} max={TASK_DURATION_MAX_MINUTES} className="w-20"
+                  data-qs-field="expectedDurationMinutes"
                   value={task.expectedDurationMinutes ?? ''}
                   placeholder={fmt(suggested)} aria-label={b.durationOverride}
                   title={b.durationOverridePlaceholder(fmt(suggested))}

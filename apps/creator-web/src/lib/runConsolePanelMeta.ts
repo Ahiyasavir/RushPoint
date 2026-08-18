@@ -49,6 +49,7 @@ export const PANEL_COPY: Record<PanelId, PanelCopy> = {
   // ── From the field ──
   photoReview: { icon: '📷', hasHelp: true, hasEmpty: true },
   feed: { icon: '📸', hasHelp: true, hasEmpty: true },
+  mediaGallery: { icon: '🖼️', hasHelp: true, hasEmpty: true },
   chat: { icon: '💬', hasHelp: true, hasEmpty: true },
   // The organizer's end of the staff↔admin channel (staff-console-field-ops).
   staffChannel: { icon: '📻', hasHelp: true, hasEmpty: true },

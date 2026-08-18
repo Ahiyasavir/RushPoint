@@ -63,6 +63,13 @@ export const BUILDER_EDITABLE_FIELDS = [
   // means off (default); when on, every task this game publishes sorts to the
   // top of the task library, regardless of popularity.
   'pinnedFirst',
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). The Builder does not
+  // AUTHOR steps (templates do), but it must carry them: without this key the
+  // dirty check would not see them, and the first autosave after opening a
+  // template would post a payload that omits them — which updateGame reads as
+  // "not sent" today, but is one server change away from clearing them. Carrying
+  // it keeps the round trip honest.
+  'wizardSteps',
 ] as const satisfies ReadonlyArray<keyof Game & keyof UpdateGamePayload>;
 
 export type BuilderEditableField = typeof BUILDER_EDITABLE_FIELDS[number];

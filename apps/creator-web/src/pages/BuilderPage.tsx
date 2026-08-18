@@ -20,6 +20,7 @@ import { getGame, updateGame, launchRun, exportGameFile, importGameFile, loadPop
 // Creator-owned portability (change: game-file-export-import): the SAME pure
 // parser the server runs, so the Builder can refuse a bad file instantly.
 import { parseGameFile, gameFileFilename, type GameFile } from '@rushpoint/shared';
+import { resolveWizardTarget, type TemplateWizardStep } from '@rushpoint/shared';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, TagChips, Textarea } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
@@ -38,6 +39,18 @@ import TaskCanvas from '../components/TaskCanvas';
 import TaskCard, { GROUP_STYLES, type TaskGroupBadge } from '../components/TaskCard';
 import ExclusiveGroupsModal from '../components/ExclusiveGroupsModal';
 import TaskWizard from '../components/TaskWizard';
+import {
+  QuickSetupBar, QuickSetupPill, QuickSetupBlocked, QuickSetupWelcome, QuickSetupIntro,
+  QuickSetupCelebration, useQuickSetupFocus,
+} from '../components/QuickSetup';
+import {
+  INITIAL_QUICK_SETUP_STATE, quickSetupReducer, quickSetupSteps, outstandingQuickSetupIds,
+  quickSetupLaunchBlockers, currentQuickSetupStep, quickSetupIntroStep, quickSetupProgress,
+  quickSetupFocusPlan, shouldAutoOpenQuickSetup, missionSummaryLine,
+  quickSetupStorageKey, readQuickSetupRecord, writeQuickSetupRecord,
+  type QuickSetupState, type QuickSetupAction, type TaskEditorTab, type TaskOptInGroup,
+  type QuickSetupCopyKey,
+} from '../lib/quickSetup';
 import {
   moveItem, moveTaskBetweenStages, clampRequiredTaskCount,
   normalizeGroups, setTaskGroup, removeTaskFromGroups, groupIndexOfTask,
@@ -207,6 +220,7 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
         if (v && v !== title) onCommit(v);
         else e.currentTarget.textContent = title || fallback;
       }}
+      data-qs-field="game.title"
       className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[12ch] sm:max-w-[40ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
       {title || fallback}
@@ -256,6 +270,22 @@ export default function BuilderPage() {
   // buried in the collapsed readiness pill; this surfaces a one line, dismissible
   // banner near the launch controls so a first time creator knows they are done.
   const [readyNudgeDismissed, setReadyNudgeDismissed] = useState(false);
+  // ── הקמה מהירה / Quick Setup (change: quick-setup-wizard) ──
+  // A template's setup instructions, as pointers at the fields they are about. The
+  // step list and everything derived from it live in lib/quickSetup; what is held
+  // here is only the flow's own position, the one pending navigation, and the
+  // launch refusal.
+  const [qsState, setQsState] = useState<QuickSetupState>(INITIAL_QUICK_SETUP_STATE);
+  const [qsLoadedFor, setQsLoadedFor] = useState<string | null>(null);
+  const [quickSetupFocus, setQuickSetupFocus] = useState<
+    { stageId: string; taskId: string; tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null
+  >(null);
+  const [qsFocusAnchor, setQsFocusAnchor] = useState<{ anchor: string | null; nonce: number }>({ anchor: null, nonce: 0 });
+  const [qsBlockers, setQsBlockers] = useState<TemplateWizardStep[]>([]);
+  // The finish-line moment fires on the flow's OWN transition into `done`, never on
+  // a load that happens to find an already-finished game — congratulating someone
+  // for something they did last week is worse than saying nothing.
+  const [qsCelebrating, setQsCelebrating] = useState(false);
   // Launch is a save + a single opaque `launchRun` round-trip with no on-screen
   // feedback until now (change: creator-launch-liftoff). While it is in flight we
   // show the <LaunchLiftoff> overlay and disable the launch buttons.
@@ -524,6 +554,14 @@ export default function BuilderPage() {
         if (shouldAutoOpenReadiness('launchBlocked')) setReadinessOpen(true);
         await dialog.alert(b.launchBlockedSeeReadiness); return;
       }
+      // הקמה מהירה (change: quick-setup-wizard). SECOND, deliberately: a structural
+      // readiness blocker still reports first, so the two refusals never interleave
+      // and the creator is never handed two different lists for one press. This one
+      // catches what readiness structurally cannot — a template placeholder is a
+      // perfectly VALID answer key, and a mission whose media was never replaced is
+      // perfectly complete.
+      const missing = quickSetupLaunchBlockers(game);
+      if (missing.length > 0) { setQsBlockers(missing); return; }
       try {
         const { runId } = await launchRun({ gameId: game.id, testDrive });
         // Launch succeeded — now it's safe to burn the one-time first-launch gate.
@@ -560,6 +598,165 @@ export default function BuilderPage() {
   // than pretending an unloaded game is broken.
   const readiness = useMemo(() => (game ? computeGameReadiness(game) : []), [game]);
 
+  // Quick Setup, all DERIVED from the live game on every change: what the pill
+  // counts and what the launch guard refuses can therefore never disagree with what
+  // the creator actually filled in, and no stored flag can outlive an emptied field.
+  const qsSteps = useMemo(() => quickSetupSteps(game), [game]);
+  const qsOutstanding = useMemo(() => outstandingQuickSetupIds(game), [game]);
+  const qsCtx = useMemo(() => ({ steps: qsSteps, outstanding: qsOutstanding }), [qsSteps, qsOutstanding]);
+  // Mutually exclusive by status: the bar shows on `running`, the context card on
+  // `intro`, so the two can never be on screen together.
+  const qsStep = currentQuickSetupStep(qsState, qsSteps);
+  const qsIntro = quickSetupIntroStep(qsState, qsSteps);
+  // Quick Setup FOCUS MODE (change: quick-setup-wizard). While any Quick Setup
+  // surface is up — welcome, a chapter's intro card, or the running bar — the
+  // canvas is a distraction, not help: the creator's whole job right now is one
+  // field, and the stage rail plus the rest of the mission grid competed for
+  // attention against it. `StepStages` hides the rail and scrims the canvas
+  // behind these three statuses; `closed`/`done`/`idle` restore the ordinary view.
+  const qsFocusMode = qsState.status === 'welcome' || qsState.status === 'intro' || qsState.status === 'running';
+
+  // Restore this creator's postponements for THIS game. Per uid and per game, so
+  // two accounts on one browser, or two games of one account, never share them.
+  useEffect(() => {
+    if (!game || qsLoadedFor === game.id) return;
+    setQsLoadedFor(game.id);
+    try {
+      const rec = readQuickSetupRecord(localStorage.getItem(quickSetupStorageKey(user?.uid, game.id)));
+      // AUTO-INVITE. A creator who just cloned a template does not know this flow
+      // exists, and the fields it is about are exactly the ones a template cannot
+      // fill for them — waiting to be discovered is waiting for a half-configured
+      // launch. The invitation is an OVERLAY, never a jump: nothing on the canvas
+      // moves until they say yes, and `shouldAutoOpenQuickSetup` offers it only
+      // once (a stored record of any status is a decision we must not override).
+      if (shouldAutoOpenQuickSetup({
+        hasRecord: rec !== null,
+        outstanding: outstandingQuickSetupIds(game).length,
+        total: quickSetupSteps(game).length,
+      })) {
+        setQsState((prev) => quickSetupReducer(prev, { type: 'invite' }, {
+          steps: quickSetupSteps(game), outstanding: outstandingQuickSetupIds(game),
+        }));
+        return;
+      }
+      setQsState(rec
+        // Never restore INTO the running flow: a bar that reappears on load would
+        // interrupt a creator who came back to do something else entirely.
+        ? { status: rec.status === 'running' || rec.status === 'intro' || rec.status === 'welcome' ? 'closed' : rec.status, index: rec.index, deferred: rec.deferred }
+        : INITIAL_QUICK_SETUP_STATE);
+    } catch { setQsState(INITIAL_QUICK_SETUP_STATE); }
+  }, [game?.id, qsLoadedFor, user?.uid]);
+
+  // Persist. Best-effort: a blocked storage just means postponements are forgotten
+  // between sessions, which is a smaller failure than a Builder that throws.
+  useEffect(() => {
+    if (!game || qsLoadedFor !== game.id) return;
+    try {
+      localStorage.setItem(quickSetupStorageKey(user?.uid, game.id), writeQuickSetupRecord(qsState));
+    } catch { /* storage unavailable */ }
+  }, [qsState, game?.id, qsLoadedFor, user?.uid]);
+
+  // The scroll + focus + ring, against the `data-qs-field` anchors. It retries for a
+  // few frames, which is what lets it wait for the drawer's slide-in and the editor's
+  // tab switch without either of those having to call back.
+  useQuickSetupFocus(qsFocusAnchor.anchor, qsFocusAnchor.nonce);
+
+  /**
+   * Take the creator to a step's field.
+   *
+   * Every hop is decided by data (lib/quickSetup's table), never by a branch per
+   * field: which tab of the console, which stage, which mission, which editor tab,
+   * which collapsed group, which control. A step whose field the Builder has no
+   * anchor for still lands them on the right mission with the instruction on screen
+   * — it degrades, it does not fail.
+   */
+  const goToQuickSetupStep = useCallback((step: TemplateWizardStep) => {
+    if (!game) return;
+    const target = resolveWizardTarget(game, step);
+    if (!target) return;
+    const plan = quickSetupFocusPlan(target);
+    const nonce = Date.now();
+    if (target.scope === 'game') {
+      // The game primer lives on the Settings tab; the title is in the shell header,
+      // which is on screen whatever tab is open.
+      setTab(plan.anchor === 'game.instructions' ? 'settings' : 'build');
+      setQuickSetupFocus(null);
+    } else {
+      setTab('build');
+      setActiveStageId(target.stageId);
+      setQuickSetupFocus({
+        stageId: target.stageId, taskId: target.taskId,
+        tab: plan.wizardStep, group: plan.optInGroup, nonce,
+      });
+    }
+    setQsFocusAnchor({ anchor: plan.anchor, nonce });
+  }, [game]);
+
+  // Navigate whenever the ACTIVE step changes — including when the flow re-enters a
+  // postponed step, so "come back to this later" really does come back to it.
+  //
+  // Gated on `running` alone, which is what makes the flow context-first: while the
+  // welcome or a chapter's intro card is up, NOTHING on the canvas moves. The
+  // creator reads where they are about to be taken, and the drawer, the tab switch
+  // and the scroll all happen after they say go.
+  useEffect(() => {
+    if (!qsStep) return;
+    goToQuickSetupStep(qsStep);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qsStep?.id, qsState.status]);
+
+  // The finish line. Fires on the TRANSITION into `done`, so a creator who reopens
+  // a finished game is not congratulated again for work they did last week.
+  const qsWasDone = useRef(qsState.status === 'done');
+  useEffect(() => {
+    const done = qsState.status === 'done';
+    if (done && !qsWasDone.current) setQsCelebrating(true);
+    qsWasDone.current = done;
+  }, [qsState.status]);
+
+  const dispatchQs = useCallback((action: QuickSetupAction) => {
+    setQsState((prev) => quickSetupReducer(prev, action, qsCtx));
+  }, [qsCtx]);
+
+  /**
+   * What the flow needs to SAY about a step: which copy slot to speak from, and —
+   * for the context card — which mission it is, in the creator's own words.
+   *
+   * Derived rather than stored, exactly like everything else here, so renaming a
+   * mission changes what the card says on the very next render.
+   */
+  const quickSetupPresentation = useCallback((step: TemplateWizardStep | null): {
+    copyKey: QuickSetupCopyKey;
+    taskTitle: string | null;
+    summary: string;
+    scope: 'game' | 'stage' | 'task';
+  } => {
+    if (!game || !step) return { copyKey: 'fallback', taskTitle: null, summary: '', scope: 'game' };
+    const target = resolveWizardTarget(game, step);
+    if (!target) return { copyKey: 'fallback', taskTitle: null, summary: '', scope: 'game' };
+    const { copy } = quickSetupFocusPlan(target);
+    if (target.scope !== 'task') return { copyKey: copy, taskTitle: null, summary: '', scope: target.scope };
+    const task = game.stages.find((s) => s.id === target.stageId)?.tasks.find((x) => x.id === target.taskId);
+    return {
+      copyKey: copy,
+      taskTitle: task?.title?.trim() || b.untitledTask,
+      summary: missionSummaryLine(task?.description),
+      scope: 'task',
+    };
+  }, [game, b]);
+
+  /** Where a step lives, for the launch modal's rows. Never a raw id. */
+  const quickSetupLabel = useCallback((step: TemplateWizardStep): string => {
+    if (!game) return '';
+    const target = resolveWizardTarget(game, step);
+    if (!target || target.scope === 'game') return t.quickSetup.inGame;
+    const stage = game.stages.find((s) => s.id === target.stageId);
+    const task = stage?.tasks.find((x) => x.id === target.taskId);
+    const parts = [stage ? t.quickSetup.inStage(stage.title || b.untitledStage) : '',
+      task ? t.quickSetup.inTask(task.title || b.untitledTask) : ''];
+    return parts.filter(Boolean).join(' · ');
+  }, [game, t, b]);
+
   if (error && !game) return (
     <Card className="p-8 text-center space-y-4">
       <div className="text-3xl">⚠️</div>
@@ -587,6 +784,61 @@ export default function BuilderPage() {
         open={launching}
         title={t.launch.title}
         messages={[t.launch.step1, t.launch.step2, t.launch.step3]}
+      />
+      {/* הקמה מהירה: the floating step bar and the launch refusal
+          (change: quick-setup-wizard). Both are fixed-position, so they stay legible
+          over the mission drawer — which is exactly where the creator is while they
+          follow a step. */}
+      {/* The one-time invitation. Offered on a freshly cloned template rather than
+          waiting to be discovered — and it moves nothing on the canvas until the
+          creator accepts, so declining costs exactly one click. */}
+      {qsState.status === 'welcome' && (
+        <QuickSetupWelcome
+          remaining={qsOutstanding.length}
+          onBegin={() => dispatchQs({ type: 'begin' })}
+          onSkip={() => dispatchQs({ type: 'close' })}
+        />
+      )}
+      {/* Context before controls: the card naming the mission we are about to set
+          up. Only when the flow CROSSES into a new mission — two fields of the same
+          one run straight on, because the creator is already looking at it. */}
+      {qsIntro && (
+        <QuickSetupIntro
+          step={qsIntro}
+          index={quickSetupProgress(qsState, qsSteps).step - 1}
+          total={qsSteps.length}
+          taskTitle={quickSetupPresentation(qsIntro).taskTitle}
+          summary={quickSetupPresentation(qsIntro).summary}
+          scope={quickSetupPresentation(qsIntro).scope}
+          onBegin={() => dispatchQs({ type: 'begin' })}
+          onDefer={() => dispatchQs({ type: 'defer' })}
+          onClose={() => dispatchQs({ type: 'close' })}
+        />
+      )}
+      {qsStep && (
+        <QuickSetupBar
+          step={qsStep}
+          index={quickSetupProgress(qsState, qsSteps).step - 1}
+          total={qsSteps.length}
+          copyKey={quickSetupPresentation(qsStep).copyKey}
+          onNext={() => dispatchQs({ type: 'next' })}
+          onDefer={() => dispatchQs({ type: 'defer' })}
+          onClose={() => dispatchQs({ type: 'close' })}
+        />
+      )}
+      {qsCelebrating && <QuickSetupCelebration onClose={() => setQsCelebrating(false)} />}
+      <QuickSetupBlocked
+        blockers={qsBlockers}
+        labelFor={quickSetupLabel}
+        onClose={() => setQsBlockers([])}
+        onGo={(step) => {
+          setQsBlockers([]);
+          const idx = qsSteps.findIndex((x) => x.id === step.id);
+          // Enter the FLOW at that step rather than merely scrolling to it, so the
+          // instruction travels with the creator and "next" keeps working from there.
+          if (idx >= 0) dispatchQs({ type: 'jump', index: idx });
+          else goToQuickSetupStep(step);
+        }}
       />
       {/* ── Persistent shell header bar: logo · back · title · save · tabs · launch.
           This is the only header in the Builder (the global app nav is hidden),
@@ -734,6 +986,17 @@ export default function BuilderPage() {
           }}
         />
 
+        {/* הקמה מהירה (change: quick-setup-wizard). Sits beside readiness on
+            purpose: the two answer different questions — "is this game structurally
+            launchable?" and "have I filled in what this template asked for?" — and a
+            creator working through a template needs both in one place. Renders
+            nothing at all for a game with no setup steps. */}
+        <QuickSetupPill
+          remaining={qsOutstanding.length}
+          total={qsSteps.length}
+          onResume={() => dispatchQs({ type: 'resume' })}
+        />
+
         {/* The SECONDARY launch (a rehearsal run) collapses into the menu on a
             phone; the PRIMARY launch always stays on the bar. */}
         {!isMobile && (
@@ -859,9 +1122,9 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} autoOpenedGameRef={autoOpenedGameRef} />}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef} />}
         {activeTab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
-        {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} /></div></div>}
+        {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} qsAnchor={qsFocusAnchor} /></div></div>}
         {activeTab === 'analytics' && (
           <Card className="p-10 text-center space-y-3">
             <div className="text-3xl">📊</div>
@@ -949,7 +1212,12 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
 }
 
 // ── Step 1: Details ──
-function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+function StepDetails({ game, patch, qsAnchor }: {
+  game: Game; patch: (p: Partial<Game>) => void;
+  // Passed straight through to the primer editor, which is the one settings control
+  // a הקמה מהירה step can point at (change: quick-setup-wizard).
+  qsAnchor?: { anchor: string | null; nonce: number };
+}) {
   const b = useT().builder;
   const [advReg, setAdvReg] = useState(false);
   const [advScore, setAdvScore] = useState(false);
@@ -1009,7 +1277,7 @@ function StepDetails({ game, patch }: { game: Game; patch: (p: Partial<Game>) =>
 
       <PresentationField game={game} patch={patch} />
 
-      <InstructionsField game={game} patch={patch} />
+      <InstructionsField game={game} patch={patch} qsAnchor={qsAnchor} />
 
       {/* Feature toggles grouped into one collapsed section (change: builder-settings-grouping).
           Presentation-only: each checkbox's checked/onChange is copied verbatim, so what
@@ -1157,16 +1425,27 @@ function PresentationField({ game, patch }: { game: Game; patch: (p: Partial<Gam
 // "How to play" section (title + bilingual body + optional https image). Shown to
 // players before the run starts and behind a "How to play" button in-game. Rides
 // the existing updateGame wrapper; the server cleans/https-guards on save.
-function InstructionsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => void }) {
+function InstructionsField({ game, patch, qsAnchor }: {
+  game: Game; patch: (p: Partial<Game>) => void;
+  // הקמה מהירה (change: quick-setup-wizard): the primer lives behind a collapsed
+  // disclosure, and a step that points at it must not scroll to a control that is
+  // not mounted. The nonce (not a boolean) is what makes a SECOND activation open
+  // it again after the creator collapsed it.
+  qsAnchor?: { anchor: string | null; nonce: number };
+}) {
   const b = useT().builder;
   const [open, setOpen] = useState(false);
   const ins = game.instructions ?? {};
+  useEffect(() => {
+    if (qsAnchor?.anchor === 'game.instructions') setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qsAnchor?.nonce]);
   function set(p: Partial<GameInstructions>) {
     patch({ instructions: { ...ins, ...p } });
   }
   return (
     <Advanced title={b.instructionsSectionTitle} open={open} onToggle={() => setOpen(!open)}>
-      <div className="space-y-3">
+      <div className="space-y-3" data-qs-field="game.instructions">
         <p className="text-xs text-[--ink-3]">{b.instructionsHint}</p>
         <div>
           <Label>{b.instructionsTitleLabel}</Label>
@@ -1536,12 +1815,19 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, autoOpenedGameRef }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
   // An activated readiness entry (change: builder-first-task-flow). The `nonce`
   // makes re-activating the SAME entry a new request.
   focusIssue?: { stageId: string; taskId: string; nonce: number } | null;
+  // An activated הקמה מהירה step (change: quick-setup-wizard). Same nonce trick,
+  // plus WHERE inside the mission editor the target field lives.
+  quickSetupFocus?: { stageId: string; taskId: string; tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null;
+  // Quick Setup FOCUS MODE: hide the stage rail and scrim the canvas so only the
+  // active mission's editor (rendered as a sibling, never dimmed) and the
+  // floating Quick Setup card compete for attention.
+  quickSetupFocusMode?: boolean;
   // Parent-owned auto-open guard (survives this component's tab-switch remounts).
   autoOpenedGameRef: { current: string | null };
 }) {
@@ -1812,6 +2098,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusIssue?.nonce]);
 
+  // Same landing for a הקמה מהירה step, minus `revealAll`: the creator arrived to
+  // FILL a field, not because something is broken, so the editor must not greet
+  // them with every validation message the mission could ever show.
+  useEffect(() => {
+    if (!quickSetupFocus?.taskId) return;
+    setSettingsOpen(false);
+    setEditing({ stageId: quickSetupFocus.stageId, taskId: quickSetupFocus.taskId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickSetupFocus?.nonce]);
+
   return (
     // Fills the shell body; each pane manages its own overflow so the task panel
     // gets the full height and never clips, and the page never scrolls.
@@ -1847,20 +2143,29 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
     <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 h-full min-h-0">
       {/* ── Left rail: stage navigator (also the cross-stage drop target).
           On a phone it stacks on top as a horizontal, scrollable stage strip
-          so the canvas below gets the full width. ── */}
-      <StageRail
-        stages={game.stages}
-        activeStageId={activeStage?.id ?? null}
-        onSelect={setActiveStageId}
-        onAdd={addStage}
-        taskDragging={activeDrag?.type === 'task'}
-      />
+          so the canvas below gets the full width.
+          Hidden entirely in Quick Setup FOCUS MODE (change: quick-setup-wizard):
+          the flow already drives which stage is active, so the rail is one more
+          thing competing for attention with nothing left for it to do. ── */}
+      {!quickSetupFocusMode && (
+        <StageRail
+          stages={game.stages}
+          activeStageId={activeStage?.id ?? null}
+          onSelect={setActiveStageId}
+          onAdd={addStage}
+          taskDragging={activeDrag?.type === 'task'}
+        />
+      )}
 
       {/* ── Centre canvas: the active stage. No wrapping Card — the shell already
           contains it; the task cards provide the structure. A flex column: the
           stage header is fixed, the task canvas flexes and owns the ONLY scroll
-          (no more nested double-scrollbar), the add-tiles stay pinned below. ── */}
-      <div data-tour="builder-canvas" className="flex-1 min-w-0 min-h-0 sm:h-full flex flex-col gap-3 pe-1 pt-0.5">
+          (no more nested double-scrollbar), the add-tiles stay pinned below.
+          `relative` so the focus-mode scrim (below) can cover exactly this
+          region and nothing outside it — the mission editor (`ContextPanel`)
+          renders as this div's OWN sibling in the row below, never inside it,
+          so it is never scrimmed. ── */}
+      <div data-tour="builder-canvas" className="relative flex-1 min-w-0 min-h-0 sm:h-full flex flex-col gap-3 pe-1 pt-0.5">
         {activeStage && (
           <>
             <div className="shrink-0 space-y-2">
@@ -2030,6 +2335,21 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             </div>
           </>
         )}
+        {/* Quick Setup FOCUS MODE scrim (change: quick-setup-wizard). A translucent,
+            blurred layer over the canvas ONLY — never over the mission editor,
+            which is this div's sibling. `pointer-events-auto` deliberately blocks
+            interaction with the dimmed grid: the creator's attention belongs on
+            the floating card, not on a task card they can half-see behind it. */}
+        {quickSetupFocusMode && (
+          <div
+            aria-hidden
+            // `.rp-qs-scrim` (index.css), not `bg-[--surface-1]/75`: Tailwind
+            // cannot apply an opacity modifier to an arbitrary CSS custom
+            // property, so that class compiled to no rule and the "scrim" was
+            // actually fully transparent (blur only, no tint).
+            className="rp-qs-scrim absolute inset-0 z-20 rounded-xl pointer-events-auto transition-opacity duration-300"
+          />
+        )}
       </div>
 
       {libraryFor && (
@@ -2061,6 +2381,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           task={editingTask}
           gameId={game.id}
           revealAll={editing.revealAll}
+          focus={quickSetupFocus && quickSetupFocus.taskId === editingTask.id ? quickSetupFocus : null}
           siblings={editingStage.tasks}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
@@ -2135,11 +2456,14 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
   siblings?: Task[];
   // Opened from a readiness entry: show that task's validation messages at once.
   revealAll?: boolean;
+  // Opened by a הקמה מהירה step (change: quick-setup-wizard): which editor tab owns
+  // the target field and which collapsed group it hides in.
+  focus?: { tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -2186,7 +2510,8 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   return (
     <SlidePanel shown={shown}>
       <div className="flex-1 min-h-0 p-2.5">
-        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll} />
+        <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll}
+          focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce} />
         {/* gameId flows Builder → ContextPanel → TaskWizard for the media upload path */}
       </div>
     </SlidePanel>

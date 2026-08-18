@@ -295,3 +295,96 @@ html.dark .glass-card {
   .print-code { font-family: var(--rp-font-mono); font-size: 16px; font-weight: 700; letter-spacing: 1px; margin-top: 6px; }
   .print-meta { font-size: 11px; color: #333; margin-top: 2px; }
 }
+
+/* ── הקמה מהירה / Quick Setup glass surface + focus-mode scrim
+   (change: quick-setup-wizard) ─────────────────────────────────────────────
+   NOT `bg-[--surface-1]/80` in the component: Tailwind 3's opacity-slash
+   modifier on an ARBITRARY property only works when it can decompose the value
+   into an r/g/b triplet itself, and `--surface-1` is a plain hex custom
+   property — so `bg-[--surface-1]/80` silently compiles to NO RULE AT ALL
+   (verified: `document.styleSheets` has zero rules for it). Every "glass" card
+   was therefore rendering with a genuinely TRANSPARENT background this whole
+   time, riding on `backdrop-blur` alone — which is very likely the real cause
+   behind "the welcome and completion screens are hard to read": it was never
+   only the ink token, the card had no tinted surface under the text at all.
+   `color-mix()` sidesteps Tailwind's opacity engine entirely and is not
+   theme-conditional to write, since it always reads the CURRENT value of
+   `--surface-1` (dark or light) at paint time. */
+.rp-qs-glass {
+  background-color: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+/* The focus-mode scrim over the mission canvas — a lighter tint (creator work
+   underneath should read as "dimmed", not "gone") plus a soft blur. */
+.rp-qs-scrim {
+  background-color: color-mix(in srgb, var(--surface-1) 78%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ── הקמה מהירה / Quick Setup focus pulse (change: quick-setup-wizard) ─────
+   Applied to the TARGET CONTROL itself, never to the mission card around it: the
+   whole point of the flow is "this exact field", and a card-wide highlight puts
+   the creator back to hunting. A static class, never a template string — Tailwind
+   cannot see `ring-${x}` and the class would silently not exist.
+   `prefers-reduced-motion` keeps the ring and drops the animation, so the target
+   is still identifiable without movement. */
+.rp-qs-pulse {
+  border-radius: 10px;
+  outline: 2px solid var(--rp-fire, #ff6b35);
+  outline-offset: 2px;
+  animation: rp-qs-pulse 1.2s ease-out 2;
+}
+@keyframes rp-qs-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(255, 107, 53, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-qs-pulse { animation: none; }
+}
+
+/* הקמה מהירה — the finish-line moment (change: quick-setup-wizard).
+   Purely decorative and purely CSS: no animation library, no canvas, nothing that
+   could add weight to a route that already loads a map. `pointer-events: none` on
+   the field means the burst can never intercept a click meant for the card under
+   it, and `prefers-reduced-motion` removes the whole thing rather than slowing it
+   — falling confetti is exactly the sort of motion that setting exists to stop.
+   The checkmark still scales in under reduced motion, because a 300 ms scale is
+   feedback, not spectacle. */
+.rp-confetti-field {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.rp-confetti-piece {
+  position: absolute;
+  top: -12px;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: rp-confetti-fall;
+  animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1);
+  animation-fill-mode: forwards;
+}
+@keyframes rp-confetti-fall {
+  0%   { opacity: 0; transform: translate3d(0, -10vh, 0) rotate(0deg); }
+  10%  { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--rp-confetti-drift, 0), 105vh, 0) rotate(540deg); }
+}
+.rp-qs-checkmark {
+  animation: rp-qs-checkmark 420ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes rp-qs-checkmark {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-confetti-field { display: none; }
+  .rp-qs-checkmark { animation-duration: 200ms; }
+}

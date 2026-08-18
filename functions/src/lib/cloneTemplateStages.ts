@@ -19,7 +19,25 @@ function generateId(): string {
     : `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+/**
+ * The clone plus the map that produced it.
+ *
+ * The map is returned rather than kept private because references to these ids
+ * live OUTSIDE the stages too: a game's `wizardSteps` point at stage/task ids, and
+ * a clone whose steps still name the template's ids would resolve to nothing and
+ * silently take the whole quick setup with it (change: quick-setup-wizard).
+ */
+export interface ClonedStages {
+  stages: Stage[];
+  /** oldId -> newId, for stages AND tasks. */
+  idMap: Map<string, string>;
+}
+
 export function cloneTemplateStages(stages: Stage[]): Stage[] {
+  return cloneTemplateStagesWithMap(stages).stages;
+}
+
+export function cloneTemplateStagesWithMap(stages: Stage[]): ClonedStages {
   const idMap = new Map<string, string>(); // oldId -> newId, stages AND tasks share one map
 
   // Pass 1 — assign every stage and task a fresh id, recording the mapping.
@@ -37,7 +55,7 @@ export function cloneTemplateStages(stages: Stage[]): Stage[] {
   // Pass 2 — rewrite every field that REFERENCES an id, now that the full map exists.
   // `?? id` fails open on a reference that resolves to nothing (e.g. an already
   // dangling reference in the source template) rather than throwing.
-  return withFreshIds.map((stage) => ({
+  const cloned = withFreshIds.map((stage) => ({
     ...stage,
     tasks: stage.tasks.map((task) => ({
       ...task,
@@ -49,4 +67,6 @@ export function cloneTemplateStages(stages: Stage[]): Stage[] {
       taskIds: group.taskIds.map((id) => idMap.get(id) ?? id),
     })),
   }));
+
+  return { stages: cloned, idMap };
 }

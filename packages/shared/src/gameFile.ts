@@ -112,6 +112,11 @@ export const EXPORTED_GAME_KEYS = [
   'requiresGuardianConsent', 'minAge', 'safeZone', 'benchmarkOptOut',
   'allowInstantPlay', 'photoFeedEnabled', 'powerUpsEnabled', 'instructions',
   'manualLeaderboardReveal',
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). Pure authorship — the
+  // setup instructions a template carries — so it round trips like any other
+  // authored field. It points at stage/task ids, which import preserves verbatim,
+  // so the pointers survive the round trip without a remap.
+  'wizardSteps',
 ] as const satisfies readonly (keyof Game)[];
 
 /**
@@ -394,6 +399,7 @@ const GAME_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   photoFeedEnabled: 'boolean',
   powerUpsEnabled: 'boolean',
   manualLeaderboardReveal: 'boolean',
+  wizardSteps: 'objectList',
 };
 
 /** Every wrongly-typed PRESENT field of `bag`, as `label: field must be …`. */

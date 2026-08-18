@@ -251,7 +251,17 @@ export default function FeedPanel({
               isHidden ? 'border-danger/50 opacity-70' : 'border-glass-border'
             }`}
           >
-            <img src={item.photoUrl} alt="" loading="lazy" className="w-full max-h-64 object-cover" />
+            {item.mediaKind === 'video' ? (
+              <video
+                controls
+                playsInline
+                preload="metadata"
+                src={item.photoUrl}
+                className="w-full max-h-64 object-cover bg-black"
+              />
+            ) : (
+              <img src={item.photoUrl} alt="" loading="lazy" className="w-full max-h-64 object-cover" />
+            )}
             <div className="px-3 py-2">
               <div className="flex items-center gap-2">
                 <p dir="auto" className="flex-1 min-w-0 truncate text-sm text-zinc-200">

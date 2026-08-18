@@ -64,6 +64,14 @@ const fullGame = {
   manualLeaderboardReveal: true,
   instructions: { title: 'How to play', body: 'Walk.', bodyHe: 'ללכת.' },
   pinnedFirst: true,
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). The Builder does not
+  // author steps, but it must CARRY them: a payload that omitted them would leave
+  // the dirty check blind to them, which is the same class of bug that made the
+  // scoringOptions selector a no-op.
+  wizardSteps: [{
+    id: 'qs-t1-coordinates', stageId: 's1', taskId: 't1', targetFieldPath: 'coordinates',
+    instructionPrompt: 'Drop the pin where the mission happens', isRequired: true,
+  }],
   deletedAt: '2026-07-01T00:00:00.000Z',
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-07-20T00:00:00.000Z',

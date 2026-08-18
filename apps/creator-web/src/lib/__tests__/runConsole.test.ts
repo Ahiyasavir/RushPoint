@@ -40,6 +40,7 @@ function fullState(status: RunConsoleState['status']): RunConsoleState {
     pendingPhotoCount: 5,
     photoQueueCount: 7,
     feedItemCount: 3,
+    mediaGalleryCount: 9,
     chatThreadCount: 4,
     unreadChatThreads: 2,
     hotZoneActive: true,
@@ -61,6 +62,7 @@ function emptyState(status: RunConsoleState['status']): RunConsoleState {
     pendingPhotoCount: 0,
     photoQueueCount: 0,
     feedItemCount: 0,
+    mediaGalleryCount: 0,
     chatThreadCount: 0,
     unreadChatThreads: 0,
     hotZoneActive: false,
@@ -94,11 +96,11 @@ describe('buildRunConsolePlan — catalogue totality', () => {
     expect([...ALL_PANEL_IDS].sort()).toEqual([
       'alerts', 'analytics', 'broadcast', 'chat', 'feed', 'feedback', 'finalStandings',
       'flashMission', 'heatmap', 'hotZone', 'joinShare', 'liveMap', 'liveStandings',
-      'photoReview', 'runSummary', 'shareScreens', 'staffChannel', 'staffInvite',
+      'mediaGallery', 'photoReview', 'runSummary', 'shareScreens', 'staffChannel', 'staffInvite',
       'startTeams', 'stationQr', 'survey', 'taskAvailability', 'teams', 'trackables',
       'zones',
     ]);
-    expect(ALL_PANEL_IDS.length).toBe(25);
+    expect(ALL_PANEL_IDS.length).toBe(26);
   });
 
   it('renders every catalogued panel somewhere across the three run statuses', () => {

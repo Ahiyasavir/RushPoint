@@ -13,7 +13,7 @@
 // make an English creator's very first screen Hebrew. The seeded stage/task
 // CONTENT below is authored BILINGUAL demo data ("Hebrew\n\nEnglish" in one
 // string) so it reads correctly whichever language the creator plays in.
-import type { Stage, Task, ScoringPreset, GameMode } from '@rushpoint/shared';
+import type { Stage, Task, ScoringPreset, GameMode, TemplateWizardStep } from '@rushpoint/shared';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
@@ -48,12 +48,70 @@ const survey = (title: string, description: string, surveyChoices: string[], ove
 const sequence = (title: string, description: string, steps: NonNullable<Task['steps']>, over: Partial<Task> = {}): Task =>
   task({ title, description, type: 'sequence', steps, ...over });
 
+/**
+ * One הקמה מהירה / Quick Setup step, declared by POSITION
+ * (change: quick-setup-wizard).
+ *
+ * The instruction a creator has to follow used to be written INTO the seeded
+ * prose — "(ערכו את התשובה)" inside a description a player then read, and, worse,
+ * as the literal answer key of two quizzes, which graded an honest answer wrong.
+ * It lives here instead, as a pointer at the field it is about.
+ *
+ * Indexes, not ids, because `build()` mints fresh ids on every call; they are
+ * resolved to ids by `templateWizardSteps` at the moment the game is created.
+ */
+export interface TemplateSetupStep {
+  /** Index into `build()`'s stages. */
+  stage: number;
+  /** Index into that stage's tasks, or -1 for a step about the stage itself. */
+  task: number;
+  /** The field this step is about, e.g. `answers`, `coordinates`, `numericAnswer`. */
+  field: string;
+  /** Bilingual, like every other seeded string: "Hebrew
+
+English". */
+  prompt: string;
+  /** Blocks the launch while the field is unconfigured. Default false. */
+  required?: boolean;
+}
+
 export interface GameTemplate {
   key: string;
   emoji: string;
   mode: GameMode;
   scoringPreset: ScoringPreset;
   build: () => Stage[];
+  /** The setup this template asks the creator for, if any. */
+  setup?: TemplateSetupStep[];
+}
+
+/**
+ * Resolve a template's positional setup declaration against the stages `build()`
+ * just produced.
+ *
+ * A step whose position does not exist is DROPPED rather than emitted with a
+ * dangling pointer: an inert step is invisible, a dangling one would sit in the
+ * flow pointing at nothing (and `resolveWizardTarget` would have to drop it
+ * anyway, one layer later).
+ */
+export function templateWizardSteps(stages: Stage[], setup?: TemplateSetupStep[]): TemplateWizardStep[] {
+  if (!setup || setup.length === 0) return [];
+  const out: TemplateWizardStep[] = [];
+  setup.forEach((decl, i) => {
+    const stage = stages[decl.stage];
+    if (!stage) return;
+    const task = decl.task >= 0 ? stage.tasks[decl.task] : undefined;
+    if (decl.task >= 0 && !task) return;
+    out.push({
+      id: `qs-${i}-${decl.field}`,
+      stageId: stage.id,
+      taskId: task?.id ?? '',
+      targetFieldPath: decl.field,
+      instructionPrompt: decl.prompt,
+      isRequired: decl.required === true,
+    });
+  });
+  return out;
 }
 
 export const TEMPLATES: GameTemplate[] = [
@@ -85,8 +143,8 @@ export const TEMPLATES: GameTemplate[] = [
         },
       }),
       stage('כמה אתם מכירים? / How well do you know them?', [
-        quiz('שנת לידה / Birth year', 'באיזו שנה נולד/ה חתן/כלת השמחה? (ערכו את התשובה)\n\nWhat year was the guest of honour born? (edit this answer)', ['2013'], undefined, { difficulty: 3, pointValue: 120 }),
-        quiz('תחביב / Hobby', 'מה התחביב האהוב על חתן/כלת השמחה? (ערכו את התשובה)\n\nWhat is the guest of honour’s favourite hobby? (edit this answer)', ['כדורגל', 'football'], undefined, {
+        quiz('שנת לידה / Birth year', 'באיזו שנה נולד/ה חתן/כלת השמחה?\n\nWhat year was the guest of honour born?', ['2013'], undefined, { difficulty: 3, pointValue: 120 }),
+        quiz('תחביב / Hobby', 'מה התחביב האהוב על חתן/כלת השמחה?\n\nWhat is the guest of honour’s favourite hobby?', ['כדורגל', 'football'], undefined, {
           difficulty: 4, pointValue: 130,
           hint: 'שאלו בשקט את ההורים. / Quietly ask the parents.', hintPenalty: 20,
         }),
@@ -107,6 +165,12 @@ export const TEMPLATES: GameTemplate[] = [
           },
         },
       }),
+    ],
+    setup: [
+      { stage: 1, task: 0, field: 'answers', required: true,
+        prompt: 'החליפו את שנת הלידה בשנה האמיתית של חתן/כלת השמחה.\n\nReplace the birth year with the guest of honour’s real one.' },
+      { stage: 1, task: 1, field: 'answers', required: true,
+        prompt: 'החליפו את התחביב בתחביב האמיתי של חתן/כלת השמחה.\n\nReplace the hobby with the guest of honour’s real one.' },
     ],
   },
   {
@@ -140,13 +204,13 @@ export const TEMPLATES: GameTemplate[] = [
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('הרמת מסך / Kickoff', [
-        numeric('כמה אנחנו? / Headcount guess', 'כמה עובדים בחברה? נחשו הכי קרוב. (ערכו את המספר)\n\nHow many people work here? Closest guess wins. (edit this answer)', 50, { numericTolerance: 10, difficulty: 2, pointValue: 100 }),
+        numeric('כמה אנחנו? / Headcount guess', 'כמה עובדים בחברה? נחשו הכי קרוב.\n\nHow many people work here? Closest guess wins.', 50, { numericTolerance: 10, difficulty: 2, pointValue: 100 }),
         selfReport('שובר קרח / Two truths', 'כל אחד אומר שתי אמיתות ושקר.\n\nEach person: two truths and a lie.', { difficulty: 2, pointValue: 100 }),
       ], { requiredTaskCount: 1 }),
       stage('שוד המשרד / The office heist', [
         photo('שלל הצבע / Color loot', 'צלמו 5 חפצים בצבע אחד מהמשרד.\n\nPhoto: 5 office objects, all one color.', { difficulty: 4, pointValue: 130 }),
         photo('מגדל / Tower', 'בנו את המגדל הכי גבוה מציוד משרדי וצלמו.\n\nBuild the tallest tower from office supplies. Snap it.', { difficulty: 5, pointValue: 140 }),
-        quiz('לוגו / Blind logo', 'מה צבע הלוגו של החברה? (ערכו את התשובה)\n\nWhat is the company logo’s main color? (edit this answer)', ['כחול', 'blue'], undefined, {
+        quiz('לוגו / Blind logo', 'מה צבע הלוגו של החברה?\n\nWhat is the company logo’s main color?', ['כחול', 'blue'], undefined, {
           difficulty: 4, pointValue: 130,
           hint: 'הציצו על כרטיס ביקור או על האתר. / Peek at a business card or the website.', hintPenalty: 15,
         }),
@@ -154,10 +218,18 @@ export const TEMPLATES: GameTemplate[] = [
       stage('מרוץ הערכים / Values relay', [
         sequence('שרשרת הערכים / Values chain', 'שלושה צעדים לפי הסדר, כצוות אחד.\n\nThree steps, in order, as one team.', [
           { id: uuid(), prompt: 'צעד 1: הסכימו על שם לצוות והקישו אישור. / Step 1: agree on a team name and tap confirm.' },
-          { id: uuid(), prompt: 'צעד 2: הקלידו את ערך החברה הראשון. (ערכו את התשובה בעורך) / Step 2: type company value #1. (edit this answer)', answer: 'חדשנות' },
+          { id: uuid(), prompt: 'צעד 2: הקלידו את ערך החברה הראשון. / Step 2: type company value #1.', answer: 'חדשנות' },
           { id: uuid(), prompt: 'צעד 3: צעקת צוות אחת גדולה! הקישו לסיום. / Step 3: one big team cheer! Tap to finish.' },
         ], { difficulty: 6, pointValue: 170 }),
       ], { isFinal: true }),
+    ],
+    setup: [
+      { stage: 0, task: 0, field: 'numericAnswer', required: true,
+        prompt: 'עדכנו את מספר העובדים בחברה שלכם.\n\nSet the real headcount of your company.' },
+      { stage: 1, task: 2, field: 'answers', required: true,
+        prompt: 'עדכנו את צבע הלוגו של החברה שלכם.\n\nSet your company logo’s main colour.' },
+      { stage: 2, task: 0, field: 'steps', required: true,
+        prompt: 'בצעד השני, החליפו את התשובה בערך הראשון של החברה שלכם.\n\nIn step two, replace the answer with your company’s first value.' },
     ],
   },
   {
@@ -168,12 +240,18 @@ export const TEMPLATES: GameTemplate[] = [
         photo('פוזת מסיבה / Party pose', 'כל הקבוצה עם כובעי מסיבה!\n\nWhole team in party hats!', { difficulty: 2, pointValue: 100 }),
       ]),
       stage('מכירים את החוגג/ת? / Know the star?', [
-        quiz('צבע אהוב / Favorite color', 'מה הצבע האהוב על החוגג/ת? (ערכו את התשובה)\n\nWhat is the birthday star’s favorite color? (edit this answer)', ['סגול', 'purple'], undefined, { difficulty: 3, pointValue: 120 }),
-        numeric('בן/בת כמה? / How old?', 'בן/בת כמה החוגג/ת היום? (ערכו את המספר)\n\nHow old is the birthday star today? (edit this answer)', 10, { numericTolerance: 0, difficulty: 3, pointValue: 120 }),
+        quiz('צבע אהוב / Favorite color', 'מה הצבע האהוב על החוגג/ת?\n\nWhat is the birthday star’s favorite color?', ['סגול', 'purple'], undefined, { difficulty: 3, pointValue: 120 }),
+        numeric('בן/בת כמה? / How old?', 'בן/בת כמה החוגג/ת היום?\n\nHow old is the birthday star today?', 10, { numericTolerance: 0, difficulty: 3, pointValue: 120 }),
       ], { requiredTaskCount: 2 }),
       stage('ריקוד ניצחון / Victory dance', [
         photo('ריקוד / Dance', 'כל הקבוצה רוקדת 10 שניות. צלמו!\n\nWhole team dances 10 seconds. Snap it!', { difficulty: 4, pointValue: 150 }),
       ], { isFinal: true }),
+    ],
+    setup: [
+      { stage: 1, task: 0, field: 'answers', required: true,
+        prompt: 'עדכנו את הצבע האהוב על החוגג/ת.\n\nSet the birthday star’s real favourite colour.' },
+      { stage: 1, task: 1, field: 'numericAnswer', required: true,
+        prompt: 'עדכנו את הגיל של החוגג/ת.\n\nSet the birthday star’s real age.' },
     ],
   },
   {
@@ -194,11 +272,15 @@ export const TEMPLATES: GameTemplate[] = [
       stage('קו הסיום / Finish line', [
         sequence('אתגר צוות / Teamwork', 'שלושה צעדים לפי הסדר, כל הצוות ביחד.\n\nThree steps, in order, whole team together.', [
           { id: uuid(), prompt: 'צעד 1: הסתדרו בשורה לפי גובה. הקישו אישור. / Step 1: line up by height. Tap confirm.' },
-          { id: uuid(), prompt: 'צעד 2: הקלידו את שם בית הספר. (ערכו את התשובה בעורך) / Step 2: type the school name. (edit this answer)', answer: 'בית הספר' },
+          { id: uuid(), prompt: 'צעד 2: הקלידו את שם בית הספר. / Step 2: type the school name.', answer: 'בית הספר' },
           { id: uuid(), prompt: 'צעד 3: צעקת צוות אחת גדולה! הקישו לסיום. / Step 3: one big team cheer! Tap to finish.' },
         ], { difficulty: 5, pointValue: 150 }),
         photo('צילום סיום / Finish photo', 'כל הצוות בקו הסיום, פוזת ניצחון!\n\nWhole team at the finish, victory pose!', { difficulty: 4, pointValue: 150 }),
       ], { isFinal: true, requiredTaskCount: 2 }),
+    ],
+    setup: [
+      { stage: 2, task: 0, field: 'steps', required: true,
+        prompt: 'בצעד השני, החליפו את התשובה בשם בית הספר שלכם.\n\nIn step two, replace the answer with your school’s name.' },
     ],
   },
   {
@@ -206,11 +288,11 @@ export const TEMPLATES: GameTemplate[] = [
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('מכירים את הזוג? / Know the couple?', [
-        quiz('איפה הם נפגשו? / Where did they meet?', 'איפה הזוג נפגש בפעם הראשונה? (ערכו את התשובה)\n\nWhere did the couple first meet? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, {
+        quiz('איפה הם נפגשו? / Where did they meet?', 'איפה הזוג נפגש בפעם הראשונה?\n\nWhere did the couple first meet?', ['בבית ספר', 'at school'], undefined, {
           difficulty: 3, pointValue: 120,
           hint: 'שאלו בשקט אחד ההורים או השושבינים. / Quietly ask a parent or the best man.', hintPenalty: 20,
         }),
-        numeric('כמה שנים הם יחד? / How many years together?', 'כמה שנים הזוג יחד? נחשו הכי קרוב. (ערכו את המספר)\n\nHow many years has the couple been together? Closest guess wins. (edit this answer)', 5, { numericTolerance: 1, difficulty: 3, pointValue: 120 }),
+        numeric('כמה שנים הם יחד? / How many years together?', 'כמה שנים הזוג יחד? נחשו הכי קרוב.\n\nHow many years has the couple been together? Closest guess wins.', 5, { numericTolerance: 1, difficulty: 3, pointValue: 120 }),
       ], {
         requiredTaskCount: 1,
         narrative: {
@@ -239,6 +321,12 @@ export const TEMPLATES: GameTemplate[] = [
         },
       }),
     ],
+    setup: [
+      { stage: 0, task: 0, field: 'answers', required: true,
+        prompt: 'עדכנו איפה הזוג נפגש בפעם הראשונה.\n\nSet where the couple really first met.' },
+      { stage: 0, task: 1, field: 'numericAnswer', required: true,
+        prompt: 'עדכנו כמה שנים הזוג יחד.\n\nSet how many years the couple has really been together.' },
+    ],
   },
   {
     key: 'conference', emoji: '🎤',
@@ -258,7 +346,7 @@ export const TEMPLATES: GameTemplate[] = [
       }),
       stage('ציד קשרים / Networking hunt', [
         photo('כרטיס ביקור / A business card selfie', 'צלמו סלפי עם כרטיס ביקור של מישהו שהכרתם היום.\n\nSnap a selfie with the business card of someone you met today.', { difficulty: 3, pointValue: 120 }),
-        quiz('מי הדובר הראשי? / Who is the keynote speaker?', 'מי הדובר הראשי של האירוע? (ערכו את התשובה)\n\nWho is the event keynote speaker? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, {
+        quiz('מי הדובר הראשי? / Who is the keynote speaker?', 'מי הדובר הראשי של האירוע?\n\nWho is the event keynote speaker?', ['הדובר הראשי', 'the keynote speaker'], undefined, {
           difficulty: 3, pointValue: 120,
           hint: 'הציצו בלוח הזמנים של האירוע. / Peek at the event agenda.', hintPenalty: 15,
         }),
@@ -282,13 +370,17 @@ export const TEMPLATES: GameTemplate[] = [
         },
       }),
     ],
+    setup: [
+      { stage: 0, task: 0, field: 'answers', required: true,
+        prompt: 'עדכנו את שם הדובר הראשי של האירוע שלכם.\n\nSet your event’s real keynote speaker.' },
+    ],
   },
   {
     key: 'city_tour', emoji: '🏛️',
     mode: 'team', scoringPreset: 'smart_weighted',
     build: () => [
       stage('יוצאים לדרך / Set off', [
-        quiz('איזה מבנה הכי גבוה בעיר? / Which building is the tallest in town?', 'מהו המבנה הגבוה ביותר בעיר? (ערכו את התשובה)\n\nWhich is the tallest building in town? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, {
+        quiz('איזה מבנה הכי גבוה בעיר? / Which building is the tallest in town?', 'מהו המבנה הגבוה ביותר בעיר?\n\nWhich is the tallest building in town?', ['מגדל העיר', 'the town tower'], undefined, {
           difficulty: 3, pointValue: 110,
           hint: 'הרימו מבט למעלה, או שאלו מקומי. / Look up, or ask a local.', hintPenalty: 15,
         }),
@@ -305,7 +397,7 @@ export const TEMPLATES: GameTemplate[] = [
       stage('ציד תרבות / Culture hunt', [
         photo('אמנות ברחוב / Street art', 'מצאו וצלמו יצירת אמנות רחוב שאהבתם.\n\nFind and photograph a piece of street art you love.', { difficulty: 3, pointValue: 120 }),
         photo('פרט אדריכלי / An architectural detail', 'צלמו פרט אדריכלי יפה: קשת, עמוד או חלון מיוחד.\n\nSnap a beautiful architectural detail: an arch, a column or a special window.', { difficulty: 4, pointValue: 130 }),
-        quiz('באיזו שנה נבנה? / What year was it built?', 'באיזו שנה נבנה ציון הדרך המרכזי? (ערכו את התשובה)\n\nWhat year was the main landmark built? (edit this answer)', ['(ערכו את התשובה) / (edit this answer)'], undefined, { difficulty: 4, pointValue: 130 }),
+        quiz('באיזו שנה נבנה? / What year was it built?', 'באיזו שנה נבנה ציון הדרך המרכזי?\n\nWhat year was the main landmark built?', ['1948'], undefined, { difficulty: 4, pointValue: 130 }),
       ], { requiredTaskCount: 2 }),
       stage('התמונה הגדולה / The big picture', [
         photo('כל הקבוצה מול ציון הדרך / Whole team at the landmark', 'כל הקבוצה מצטלמת יחד מול ציון הדרך המרכזי.\n\nThe whole team poses together in front of the main landmark.', { difficulty: 4, pointValue: 150 }),
@@ -319,6 +411,10 @@ export const TEMPLATES: GameTemplate[] = [
           },
         },
       }),
+    ],
+    setup: [
+      { stage: 0, task: 0, field: 'answers', required: true,
+        prompt: 'עדכנו מהו המבנה הגבוה בעיר שלכם.\n\nSet the tallest building in your town.' },
     ],
   },
 
@@ -347,6 +443,10 @@ export const TEMPLATES: GameTemplate[] = [
       stage('הרמז האחרון / The final clue', [quiz(
         'חידה 3 / Riddle 3', 'מה שלך, אבל אחרים משתמשים בו יותר ממך?\n\nIt’s yours, but others use it more than you. What is it?', ['השם שלי', 'שם', 'השם', 'my name', 'name'], undefined, { difficulty: 6 },
       )], { isFinal: true }),
+    ],
+    setup: [
+      { stage: 1, task: 0, field: 'answers', required: true,
+        prompt: 'עדכנו את שנת הבנייה של ציון הדרך שבחרתם.\n\nSet the year your chosen landmark was built.' },
     ],
   },
   {
