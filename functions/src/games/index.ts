@@ -381,6 +381,44 @@ export const createGame = loggedCallable('createGame', async (data, context) => 
 
 // ─── updateGame ───────────────────────────────────────────────────────────────
 
+/**
+ * Keep a PUBLISHED game's gallery summary in sync with an edit to the private
+ * game document, so the public card can't drift from the live Dashboard
+ * (consistency sweep C2). Best-effort and fire-and-forget: never touches
+ * playCount (a live counter maintained by launchRun) or the publicTasks
+ * copyCount, and skips the auth lookup (ownerDisplayName doesn't change on a
+ * content edit). Shared by the two doors that rewrite authored content in place —
+ * updateGame and importGameFile's in-place branch — so a file import can't leave
+ * the gallery describing a layout the game no longer has.
+ */
+function resyncPublicGameSummary(gameId: string, merged: Game, updatedAt: string): void {
+  const allTasks = merged.stages.flatMap((s) => s.tasks);
+  db.doc(`publicGames/${gameId}`).update({
+    title: merged.title,
+    description: merged.description,
+    mode: merged.mode,
+    scoringPreset: merged.scoringPreset,
+    // Already normalized by the caller (or already stored normalized) —
+    // normalizeTags is idempotent, so no second call is needed here.
+    tags: merged.tags,
+    coverImage: merged.coverImage,
+    // Recomputed from the tasks as just saved (change: surface-invisible-fields), so
+    // a published game's map pin can never describe a layout that no longer exists.
+    // An authored area still wins; undefined leaves the stored value untouched.
+    approxLocation: resolveGameArea(merged.approxLocation, merged.stages),
+    stageCount: merged.stages.length,
+    taskCount: allTasks.length,
+    estimatedTotalMinutes: sumEstimatedMinutes(allTasks),
+    allowInstantPlay: merged.allowInstantPlay ?? false,
+    // Game intro primer (change: game-intro-instructions): keep the public teaser
+    // in sync — write the cleaned primer or delete it so it can't drift from the
+    // live game. (merged.instructions is the delete sentinel when this edit cleared it.)
+    instructions: merged.instructions ?? admin.firestore.FieldValue.delete(),
+    requirement: describeGameRequirements(merged),
+    updatedAt,
+  }).catch((e) => logBestEffort('publicGames.resync', { gameId }, e));
+}
+
 export const updateGame = loggedCallable('updateGame', async (data, context) => {
   const uid = requireAuth(context);
   const {
@@ -531,32 +569,7 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // skips the auth lookup (ownerDisplayName doesn't change on a content edit).
   const existing = snap.data() as Game;
   if (existing.visibility === 'public') {
-    const merged = { ...existing, ...updates } as Game;
-    const allTasks = merged.stages.flatMap((s) => s.tasks);
-    db.doc(`publicGames/${gameId}`).update({
-      title: merged.title,
-      description: merged.description,
-      mode: merged.mode,
-      scoringPreset: merged.scoringPreset,
-      // Already normalized by the `updates.tags` line above (or already stored
-      // normalized) — normalizeTags is idempotent, so no second call is needed here.
-      tags: merged.tags,
-      coverImage: merged.coverImage,
-      // Recomputed from the tasks as just saved (change: surface-invisible-fields), so
-      // a published game's map pin can never describe a layout that no longer exists.
-      // An authored area still wins; undefined leaves the stored value untouched.
-      approxLocation: resolveGameArea(merged.approxLocation, merged.stages),
-      stageCount: merged.stages.length,
-      taskCount: allTasks.length,
-      estimatedTotalMinutes: sumEstimatedMinutes(allTasks),
-      allowInstantPlay: merged.allowInstantPlay ?? false,
-      // Game intro primer (change: game-intro-instructions): keep the public teaser
-      // in sync — write the cleaned primer or delete it so it can't drift from the
-      // live game. (merged.instructions is the delete sentinel when this edit cleared it.)
-      instructions: merged.instructions ?? admin.firestore.FieldValue.delete(),
-      requirement: describeGameRequirements(merged),
-      updatedAt: updates.updatedAt,
-    }).catch((e) => logBestEffort('publicGames.resync', { gameId }, e));
+    resyncPublicGameSummary(gameId, { ...existing, ...updates } as Game, updates.updatedAt);
   }
 
   return { ok: true };
@@ -1283,7 +1296,10 @@ export const exportGameFile = loggedCallable('exportGameFile', async (data, cont
 
 export const importGameFile = loggedCallable('importGameFile', async (data, context) => {
   const uid = requireAuth(context);
-  const { file } = (data ?? {}) as { file?: unknown };
+  const { file, targetGameId } = (data ?? {}) as { file?: unknown; targetGameId?: unknown };
+  if (targetGameId !== undefined && (typeof targetGameId !== 'string' || !targetGameId.trim())) {
+    throw new functions.https.HttpsError('invalid-argument', 'targetGameId must be a game id');
+  }
 
   // Layer 1+2 — envelope (format · schema version · size caps) and shape. Pure,
   // never throws, and returns NO game unless every check passed, so a malformed
@@ -1332,8 +1348,9 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // authored titles/descriptions, and the task-media origin gate. Both return NEW
   // arrays — never dotted-update an array element, it coerces the array to a map.
   //
-  // No stored stages to grandfather: this creates a brand-new game, so every media url
-  // is NEW and must pass the accept-set. Since change: task-media-durability that is a
+  // On the NEW-GAME door there are no stored stages to grandfather, so every media url
+  // is NEW and must pass the accept-set (the in-place door below passes the target's
+  // stored stages, exactly like the Builder save door). Since change: task-media-durability that is a
   // LOUD refusal naming the url rather than a silent drop — importing a file whose media
   // was minted by another runtime now tells the creator, instead of quietly handing back
   // a game with the pictures missing. Same rule the Builder save door applies to a new
@@ -1341,8 +1358,72 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // The imported game's own tags are unioned into every task (feature:
   // game-tags-propagate), using the SAME normalized list the game will store below.
   const importedTags = normalizeTags(parsed.tags);
-  const safeStages = normalizeStagesMedia(sanitizeStagesText(stages, importedTags)) ?? [];
+  // In-place import (the Builder's "load a file into THIS game" door): the file
+  // replaces the AUTHORED content of a game the caller already owns, and every
+  // server-owned field — id, ownerUid, createdAt, visibility, playCount and the
+  // admin-only template metadata (isTemplate/templateEmoji/templateOrder/
+  // templateGroupKey/templateLang) — survives untouched, because this is an
+  // `update()` of named fields and never a document overwrite. That is what makes
+  // "update a template from a file" possible at all: the template flag cannot ride
+  // in the file (EXPORTED_GAME_KEYS deliberately excludes it, so a hand-edited file
+  // can never inject one), so the ONLY way a template stays a template across a
+  // file edit is for the target document to keep its own flag.
+  const target = typeof targetGameId === 'string' ? await loadOwnedLiveGame(uid, targetGameId) : null;
+  // A stored url is grandfathered when we are writing back over the SAME game — the
+  // Builder save door's rule, verbatim, so re-importing a game's own export can't be
+  // refused by a runtime whose accept-set has drifted (change: task-media-durability).
+  const safeStages = normalizeStagesMedia(
+    sanitizeStagesText(stages, importedTags),
+    target?.stages,
+    target ? { gameId: target.id } : undefined,
+  ) ?? [];
   const instructions = parsed.instructions ? cleanGameInstructions(parsed.instructions) : undefined;
+
+  if (target) {
+    // Replace = every authored field the file format carries. A field the file does
+    // NOT carry is DELETED, not left behind: "load this file into this game" must
+    // leave the game saying what the file says, or a creator restoring an older file
+    // would silently keep settings they removed. Server-owned fields are simply
+    // never named here.
+    const updates: Record<string, unknown> = {
+      updatedAt: new Date().toISOString(),
+      title: stripUnsafeDisplayChars(parsed.title).trim(),
+      stages: safeStages,
+      mode: parsed.mode ?? 'individual',
+      scoringPreset: parsed.scoringPreset ?? DEFAULT_SCORING_PRESET,
+      registrationFields: parsed.registrationFields ?? DEFAULT_REGISTRATION_FIELDS,
+      tags: importedTags,
+    };
+    const del = admin.firestore.FieldValue.delete();
+    const setOrClear = (key: string, value: unknown) => {
+      updates[key] = value === undefined ? del : value;
+    };
+    setOrClear('description', parsed.description ? stripUnsafeDisplayChars(parsed.description).trim() : undefined);
+    setOrClear('scoringOptions', parsed.scoringOptions);
+    setOrClear('branding', parsed.branding);
+    setOrClear('coverImage', parsed.coverImage);
+    setOrClear('approxLocation', parsed.approxLocation);
+    setOrClear('minAge', parsed.minAge);
+    setOrClear('benchmarkOptOut', parsed.benchmarkOptOut);
+    setOrClear('allowInstantPlay', parsed.allowInstantPlay);
+    setOrClear('photoFeedEnabled', parsed.photoFeedEnabled);
+    setOrClear('powerUpsEnabled', parsed.powerUpsEnabled);
+    setOrClear('manualLeaderboardReveal', (parsed as { manualLeaderboardReveal?: boolean }).manualLeaderboardReveal);
+    setOrClear('instructions', instructions);
+    // requiresGuardianConsent: `true` was already refused above, so this only ever
+    // stores `false` or clears the field.
+    setOrClear('requiresGuardianConsent', parsed.requiresGuardianConsent);
+    setOrClear('safeZone', importedZone.value);
+
+    await db.doc(gamePath(uid, target.id)).update(updates);
+    if (target.visibility === 'public') {
+      // FieldValue.delete() sentinels merge in as "absent" for the summary's
+      // purposes — every field the summary reads is either always written above or
+      // read through a `??` fallback.
+      resyncPublicGameSummary(target.id, { ...target, ...updates } as unknown as Game, updates.updatedAt as string);
+    }
+    return { gameId: target.id, stageCount: safeStages.length, replaced: true };
+  }
 
   const now = new Date().toISOString();
   const ref = db.collection(gamesCol(uid)).doc();

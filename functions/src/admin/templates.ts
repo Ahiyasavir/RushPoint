@@ -112,6 +112,38 @@ export const setGameTemplateFlag = loggedCallable('setGameTemplateFlag', async (
   return { ok: true, gameId, isTemplate };
 });
 
+// ─── listAdminTemplates ─────────────────────────────────────────────────────
+//
+// The admin console's own list of the templates IT can manage. It exists because
+// the console used to build this list client-side from `listGames`, which is
+// `orderBy('updatedAt','desc').limit(200)` — so once an admin held more than 200
+// games, every ordinary edit or import stamped a fresh `updatedAt` on a NON-template
+// game and pushed real templates out of that window. They vanished from the
+// templates tab while still existing and still being served to creators by
+// listGameTemplates (an uncapped collectionGroup query), which reads exactly like
+// "editing a game deleted my template". This query asks for what the page actually
+// wants — `isTemplate == true`, no cap, no client-side filtering of a truncated list.
+//
+// Scoped to the CALLER's own games on purpose: every action on that page
+// (setGameTemplateFlag, deleteGame, the Builder) is owner-scoped, so listing another
+// admin's templates would only render buttons that cannot work.
+
+export const listAdminTemplates = loggedCallable('listAdminTemplates', async (_data, context) => {
+  const adminUid = assertAdmin(context);
+  await enforceRateLimit(adminUid, 'listAdminTemplates');
+
+  const snap = await db.collection(`users/${adminUid}/games`)
+    .where('isTemplate', '==', true)
+    .get();
+  // Tombstones are filtered in memory for the same reason listGames does it:
+  // `where('deletedAt','==',null)` does NOT match documents that lack the field.
+  const games = snap.docs
+    .map((d) => d.data() as Game)
+    .filter((g) => !isGameDeleted(g))
+    .sort((a, b) => (a.templateOrder ?? Infinity) - (b.templateOrder ?? Infinity));
+  return { games };
+});
+
 // ─── listGameTemplates ──────────────────────────────────────────────────────
 
 interface TemplateVariant {

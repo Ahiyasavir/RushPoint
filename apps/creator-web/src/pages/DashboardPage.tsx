@@ -262,7 +262,14 @@ export default function DashboardPage() {
   async function load(invalidate = false) {
     if (!invalidate && readGamesCache(user?.uid)) return;
     try {
-      const { games } = await listGames();
+      const { games: allGames } = await listGames();
+      // Admin-managed TEMPLATES are ordinary Game documents owned by the admin who
+      // authored them, so they come back from listGames like any other game — and
+      // an admin editing one then found it sitting in "my games", which is exactly
+      // where a template must NOT be. Templates belong to /admin/templates only;
+      // the creator-facing copy of one is what createGameFromTemplate produces, and
+      // that copy is not flagged.
+      const games = allGames.filter((g) => g.isTemplate !== true);
       if (user?.uid) _gamesCache = { uid: user.uid, data: games, ts: Date.now() };
       // Remember the count so the NEXT first paint draws a placeholder that
       // matches what this creator actually has (never six cards for zero games).

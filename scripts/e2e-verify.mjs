@@ -7431,6 +7431,59 @@ async function main() {
     check('listGameTemplates: soft-deleted template excluded',
       !(list3?.templates ?? []).some((g) => g.groupKey === tSolo),
       JSON.stringify((list3?.templates ?? []).map((g) => g.groupKey)));
+
+    // 9. listAdminTemplates — the admin console's own list. It asks the server for
+    //    `isTemplate == true` instead of filtering a capped listGames page, which is
+    //    how templates used to vanish from the templates tab once an admin held more
+    //    than 200 games (every ordinary edit pushed one out of the window).
+    // Admin-owned but UNFLAGGED — the case the old client-side filter existed for.
+    const { gameId: adminPlain } = await platformAdmin.call('createGame', { title: 'Admin Plain Game', mode: 'team' });
+    const adminList = await platformAdmin.call('listAdminTemplates', {});
+    const adminIds = (adminList?.games ?? []).map((g) => g.id);
+    check('listAdminTemplates: returns the flagged templates the admin owns',
+      adminIds.includes(tHe) && adminIds.includes(tEn), JSON.stringify(adminIds));
+    check('listAdminTemplates: an unflagged game the admin owns is absent',
+      !adminIds.includes(adminPlain) && !adminIds.includes(plainGame), JSON.stringify(adminIds));
+    check('listAdminTemplates: a soft-deleted template is absent',
+      !adminIds.includes(tSolo), JSON.stringify(adminIds));
+    check('listAdminTemplates: carries the picker metadata the console edits',
+      (adminList?.games ?? []).find((g) => g.id === tHe)?.templateEmoji === '🧪',
+      JSON.stringify((adminList?.games ?? []).find((g) => g.id === tHe)?.templateEmoji));
+    await expectError('listAdminTemplates: a non-admin creator is denied',
+      creator.call('listAdminTemplates', {}),
+      { codeIn: ['functions/permission-denied'] });
+
+    // 10. Updating a template FROM A FILE keeps it a template. The file format
+    //     deliberately cannot carry isTemplate (a hand-edited file must never be
+    //     able to inject a template into every creator's picker), so a
+    //     fresh-document import always lands as an ordinary game — which is why the
+    //     Builder imports IN PLACE, over the document that already holds the flag.
+    const { file: tplFile } = await platformAdmin.call('exportGameFile', { gameId: tHe });
+    check('exportGameFile: the template flag is NOT in the file',
+      !('isTemplate' in (tplFile?.game ?? {})) && !('templateEmoji' in (tplFile?.game ?? {})),
+      JSON.stringify(Object.keys(tplFile?.game ?? {})));
+    const editedFile = {
+      ...tplFile,
+      game: { ...tplFile.game, title: 'Template HE (from file)' },
+    };
+    const replaced = await platformAdmin.call('importGameFile', { file: editedFile, targetGameId: tHe });
+    check('importGameFile(targetGameId): writes back into the SAME game',
+      replaced?.gameId === tHe && replaced?.replaced === true, JSON.stringify(replaced));
+    const tplAfter = (await platformAdmin.call('getGame', { gameId: tHe }))?.game;
+    check('importGameFile(targetGameId): the imported content is stored',
+      tplAfter?.title === 'Template HE (from file)', String(tplAfter?.title));
+    check('importGameFile(targetGameId): the game STAYS a template',
+      tplAfter?.isTemplate === true && tplAfter?.templateEmoji === '🧪' && tplAfter?.templateOrder === 1,
+      JSON.stringify({ f: tplAfter?.isTemplate, e: tplAfter?.templateEmoji, o: tplAfter?.templateOrder }));
+    check('importGameFile(targetGameId): server-owned identity is untouched',
+      tplAfter?.id === tHe && tplAfter?.ownerUid === 'e2e-platform-admin' && tplAfter?.visibility === 'private',
+      JSON.stringify({ id: tplAfter?.id, own: tplAfter?.ownerUid, vis: tplAfter?.visibility }));
+    const stillListed = ((await platformAdmin.call('listAdminTemplates', {}))?.games ?? []).map((g) => g.id);
+    check('importGameFile(targetGameId): still in the templates tab after the import',
+      stillListed.includes(tHe), JSON.stringify(stillListed));
+    await expectError('importGameFile(targetGameId): a game the caller does not own is refused',
+      creator.call('importGameFile', { file: editedFile, targetGameId: tHe }),
+      { codeIn: ['functions/not-found', 'functions/permission-denied'] });
   });
 
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════
@@ -9010,7 +9063,9 @@ async function main() {
       creator.call('exportGameFile', { gameId: 'no-such-game-at-all' }),
       { codeIn: ['functions/not-found'] });
 
-    // ── (5) Import ALWAYS creates a NEW game (an overwrite is data loss) ──────
+    // ── (5) Import WITHOUT a target creates a NEW game (an overwrite is data loss).
+    //        The in-place door (targetGameId) is exercised in the templates scenario,
+    //        which is the case it exists for. ──────────────────────────────────────
     const { gameId: gImp } = await creator.call('importGameFile', { file });
     check('import: created a NEW game (never overwrites the source)', !!gImp && gImp !== gF, `${gF} → ${gImp}`);
     const { game: imported } = await creator.call('getGame', { gameId: gImp });

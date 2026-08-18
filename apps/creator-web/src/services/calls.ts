@@ -42,9 +42,19 @@ export const listGames     = callable<void, { games: Game[] }>('listGames');
 // Creator-owned portability (change: game-file-export-import). exportGameFile is
 // OWNER-ONLY: the document it returns deliberately contains answer keys, hint text,
 // station codes and hidden-location coordinates, so it must never be surfaced
-// anywhere but the owner's own console. importGameFile always creates a NEW game.
+// anywhere but the owner's own console.
+//
+// importGameFile has TWO doors. Without `targetGameId` it creates a NEW game (the
+// Dashboard's "import a game"). With one, it REPLACES the authored content of a game
+// the caller already owns, keeping that document's server-owned fields — which is the
+// only way to update an admin template from a file: the template flag deliberately
+// cannot travel in the file, so a fresh-document import always lands as an ordinary
+// game in "my games".
 export const exportGameFile = callable<{ gameId: string }, { file: GameFile }>('exportGameFile');
-export const importGameFile = callable<{ file: GameFile }, { gameId: string; stageCount: number }>('importGameFile');
+export const importGameFile = callable<
+  { file: GameFile; targetGameId?: string },
+  { gameId: string; stageCount: number; replaced?: boolean }
+>('importGameFile');
 
 // ── Game trash (change: recoverable-game-deletion) ──
 // deleteGame no longer destroys anything: it tombstones the game, which stays
@@ -325,3 +335,12 @@ export const createGameFromTemplate = callable<
   { templateGameId: string; title: string; scoringPreset?: Game['scoringPreset'] },
   { gameId: string }
 >('createGameFromTemplate');
+
+// The admin console's own list. NOT listGames + a client-side isTemplate filter:
+// listGames is capped at 200 documents ordered by updatedAt, so an admin with more
+// games than that watched real templates fall out of the tab every time an ordinary
+// game was edited. This asks the server for `isTemplate == true`, uncapped.
+export const listAdminTemplates = callable<
+  Record<string, never>,
+  { games: Game[] }
+>('listAdminTemplates');

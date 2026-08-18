@@ -138,6 +138,7 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // action vs. a generous browse-poll budget for the creator-facing picker.
   setGameTemplateFlag: { max: 30, windowMs: MIN },
   listGameTemplates: { max: 60, windowMs: MIN },
+  listAdminTemplates: { max: 60, windowMs: MIN }, // admin console poll of its own template list
   createGameFromTemplate: { max: 20, windowMs: MIN }, // writes a whole new game per call
   getRunHeatmap: { max: 30, windowMs: MIN }, // aggregates every location ping in a run
   getRunSurveyResults: { max: 30, windowMs: MIN },

@@ -26,6 +26,7 @@ import { OverflowMenu } from '../components/OverflowMenu';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { enabledGameFeatureCount } from '../lib/gameFeatureToggles';
 import { dialog } from '../components/dialog';
+import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
 import { useAuth } from '../components/AuthGate';
 // One mapping from a rejection to copy a creator can act on
@@ -447,7 +448,17 @@ export default function BuilderPage() {
     }
   }
 
+  // Importing INSIDE the Builder loads the file over the game you have open — it
+  // does not spawn a copy. A fresh-document import can never carry the admin
+  // template metadata (the file format deliberately excludes it, so a hand-edited
+  // file cannot forge a template), which is why importing a template's own file
+  // used to hand back an ordinary game in "my games" and leave the template
+  // untouched. Replacing in place keeps the document — and therefore its template
+  // flag, its id, its join codes and its run history — exactly where it was.
+  // The Dashboard's import still creates a new game; that is the "I have a file
+  // and no game yet" door.
   async function importFromFile(file: File) {
+    if (!game) return;
     let doc: unknown;
     try {
       doc = JSON.parse(await file.text());
@@ -458,9 +469,22 @@ export default function BuilderPage() {
     // obviously bad file fails instantly with the real reason instead of a round trip.
     const pre = parseGameFile(doc);
     if (pre.errors.length > 0) { await dialog.alert(pre.errors.join(' · ')); return; }
+    // Overwriting authored work is a destructive action — ask, and name the game
+    // being overwritten so the answer is about the right one.
+    if (!(await dialog.confirm(b.importReplaceConfirm(game.title), b.importReplaceCta, true))) return;
+    // Any pending autosave would land AFTER the import and write the old content
+    // straight back over it.
+    window.clearTimeout(saveTimer.current);
     try {
-      const { gameId } = await importGameFile({ file: doc as GameFile });
-      nav(`/build/${gameId}`);
+      await importGameFile({ file: doc as GameFile, targetGameId: game.id });
+      // Re-read rather than patch local state: the server normalizes media,
+      // strips display chars and fills defaults, so the document it stored is the
+      // only trustworthy version of what was just imported. Bumping loadKey re-runs
+      // the same getGame effect the page loads with, which also re-stamps
+      // savedSnapshot — so the freshly imported content is not immediately seen as
+      // an unsaved edit and written back over.
+      setLoadKey((k) => k + 1);
+      toast.success(b.importDone);
     } catch (e) {
       await dialog.alert(e instanceof Error ? e.message : b.importFailed);
     }

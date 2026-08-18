@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
-import { createGame, listGames, setGameTemplateFlag, deleteGame } from '../services/calls';
+import { createGame, listAdminTemplates, setGameTemplateFlag, deleteGame } from '../services/calls';
 import type { Game } from '@rushpoint/shared';
 import { isAdminClaim } from '../lib/adminGate';
 import { EmptyState, Skeleton, Button, Input } from '../components/ui';
@@ -40,10 +40,15 @@ export default function AdminTemplatesPage() {
   async function load() {
     setFailed(false);
     try {
-      const { games } = await listGames();
-      setGames(games.filter((g) => g.isTemplate === true));
+      // Server-side `isTemplate == true`, uncapped. This used to be
+      // `listGames()` filtered client-side, and listGames is
+      // orderBy('updatedAt','desc').limit(200) — so past 200 games, editing or
+      // importing ORDINARY games pushed real templates out of the window and they
+      // disappeared from this tab while still existing everywhere else.
+      const { games } = await listAdminTemplates();
+      setGames(games);
     } catch (e) {
-      console.error('[adminTemplates] listGames failed:', e);
+      console.error('[adminTemplates] listAdminTemplates failed:', e);
       setGames((prev) => prev ?? []);
       setFailed(true);
     }
