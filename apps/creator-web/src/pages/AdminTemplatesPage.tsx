@@ -8,11 +8,14 @@
 // Not in the primary nav (same treatment as /admin/users): reachable only by
 // direct URL, gated on the signed-in user's `admin` custom claim. The REAL
 // boundary is server-side — setGameTemplateFlag re-checks the claim itself.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
-import { createGame, listAdminTemplates, setGameTemplateFlag, deleteGame } from '../services/calls';
-import type { Game } from '@rushpoint/shared';
+import { createGame, listAdminTemplates, setGameTemplateFlag, deleteGame, importGameFile } from '../services/calls';
+import type { Game, GameFile } from '@rushpoint/shared';
+// The SAME pure parser the server runs, so an obviously bad file fails instantly
+// with the real reason instead of a round trip (mirrors BuilderPage/DashboardPage).
+import { parseGameFile } from '@rushpoint/shared';
 import { isAdminClaim } from '../lib/adminGate';
 import { EmptyState, Skeleton, Button, Input } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
@@ -29,16 +32,22 @@ export default function AdminTemplatesPage() {
 
   const [gate, setGate] = useState<GateState>('checking');
   const [games, setGames] = useState<Game[] | null>(null);
-  const [failed, setFailed] = useState(false);
+  // The REASON, not just "it failed". This page is admin-only, so the raw server
+  // message is safe here and is the difference between "the templates tab is
+  // broken" and "this query needs an index" — the generic string cost a whole
+  // debugging session once already.
+  const [failed, setFailed] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [editingMeta, setEditingMeta] = useState<string | null>(null); // gameId of the open emoji/order editor
   const [emojiDraft, setEmojiDraft] = useState('');
   const [orderDraft, setOrderDraft] = useState('');
   const [savingMeta, setSavingMeta] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importInput = useRef<HTMLInputElement | null>(null);
 
   async function load() {
-    setFailed(false);
+    setFailed(null);
     try {
       // Server-side `isTemplate == true`, uncapped. This used to be
       // `listGames()` filtered client-side, and listGames is
@@ -50,7 +59,7 @@ export default function AdminTemplatesPage() {
     } catch (e) {
       console.error('[adminTemplates] listAdminTemplates failed:', e);
       setGames((prev) => prev ?? []);
-      setFailed(true);
+      setFailed(e instanceof Error && e.message ? e.message : at.loadFailed);
     }
   }
 
@@ -72,14 +81,57 @@ export default function AdminTemplatesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function nextTemplateOrder() {
+    return (games ?? []).reduce((max, g) => Math.max(max, g.templateOrder ?? 0), 0) + 1;
+  }
+
+  // Import a .rushpoint.json file AS A TEMPLATE.
+  //
+  // This door exists because the file format deliberately cannot carry
+  // `isTemplate` (EXPORTED_GAME_KEYS excludes it, so a hand-edited file can never
+  // inject a template into every creator's picker) — which means the Dashboard's
+  // import, the only other new-game import door, always produced an ORDINARY game
+  // sitting in "my games". An admin importing a template file had no path at all:
+  // the flag can only be applied AFTER the game exists, by an admin-only callable,
+  // and nothing on this page offered to do it. Same import + flag pair as
+  // newTemplate above, including the delete-on-failure cleanup, so a half-imported
+  // game is never stranded as a plain game in the admin's own dashboard.
+  async function importTemplateFromFile(file: File) {
+    let doc: unknown;
+    try {
+      doc = JSON.parse(await file.text());
+    } catch {
+      await dialog.alert(at.importNotAFile);
+      return;
+    }
+    const pre = parseGameFile(doc);
+    if (pre.errors.length > 0) { await dialog.alert(pre.errors.join(' · ')); return; }
+
+    setImporting(true);
+    let importedGameId: string | undefined;
+    try {
+      const { gameId } = await importGameFile({ file: doc as GameFile });
+      importedGameId = gameId;
+      await setGameTemplateFlag({ gameId, isTemplate: true, templateEmoji: '✨', templateOrder: nextTemplateOrder() });
+      nav(`/build/${gameId}`);
+    } catch (e) {
+      console.error('[adminTemplates] import failed:', e);
+      if (importedGameId) {
+        try { await deleteGame({ gameId: importedGameId }); } catch { /* best effort cleanup */ }
+      }
+      await dialog.alert(e instanceof Error ? e.message : at.importFailed);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function newTemplate() {
     setCreating(true);
     let createdGameId: string | undefined;
     try {
       const { gameId } = await createGame({ title: at.newTemplateTitle, mode: 'team', tags: [] });
       createdGameId = gameId;
-      const nextOrder = (games ?? []).reduce((max, g) => Math.max(max, g.templateOrder ?? 0), 0) + 1;
-      await setGameTemplateFlag({ gameId, isTemplate: true, templateEmoji: '✨', templateOrder: nextOrder });
+      await setGameTemplateFlag({ gameId, isTemplate: true, templateEmoji: '✨', templateOrder: nextTemplateOrder() });
       nav(`/build/${gameId}`);
     } catch (e) {
       console.error('[adminTemplates] create failed:', e);
@@ -157,7 +209,31 @@ export default function AdminTemplatesPage() {
           <h1 className="text-xl font-semibold text-[--ink-1]">{at.title}</h1>
           <p className="text-sm text-[--ink-3]">{at.subtitle}</p>
         </div>
-        <Button onClick={() => void newTemplate()} loading={creating}>{at.newTemplateBtn}</Button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Import AS A TEMPLATE. Without this the only import doors created an
+              ordinary game, so a template file landed in "my games" instead. */}
+          <Button
+            variant="ghost"
+            loading={importing}
+            onClick={() => importInput.current?.click()}
+            title={at.importHint}
+          >
+            {at.importBtn}
+          </Button>
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            aria-label={at.importBtn}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (f) void importTemplateFromFile(f);
+            }}
+          />
+          <Button onClick={() => void newTemplate()} loading={creating}>{at.newTemplateBtn}</Button>
+        </div>
       </div>
 
       <button
@@ -167,7 +243,12 @@ export default function AdminTemplatesPage() {
         {at.toUsersLink}
       </button>
 
-      {failed && <p className="text-sm text-rp-alert" role="alert">{at.loadFailed}</p>}
+      {failed && (
+        <p className="text-sm text-rp-alert" role="alert">
+          {at.loadFailed}
+          <span className="block text-xs opacity-80 break-words" dir="auto">{failed}</span>
+        </p>
+      )}
 
       {games.length === 0 ? (
         <EmptyState icon="🧩" title={at.emptyTitle} body={at.emptyBody} />

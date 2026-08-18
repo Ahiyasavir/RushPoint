@@ -132,12 +132,29 @@ export const listAdminTemplates = loggedCallable('listAdminTemplates', async (_d
   const adminUid = assertAdmin(context);
   await enforceRateLimit(adminUid, 'listAdminTemplates');
 
-  const snap = await db.collection(`users/${adminUid}/games`)
-    .where('isTemplate', '==', true)
-    .get();
+  // The indexed query, with an UNINDEXED fallback. `firestore.indexes.json` carries a
+  // fieldOverrides entry for games.isTemplate, and a field override REPLACES Firestore's
+  // automatic single-field indexing rather than adding to it — so when that entry listed
+  // COLLECTION_GROUP alone it silently disabled the ordinary collection index this query
+  // had been relying on, and every call answered FAILED_PRECONDITION. The failure was
+  // invisible from the outside: the collection-GROUP query behind listGameTemplates kept
+  // working, so every creator still saw the templates in the new-game picker while the
+  // admin console that manages them showed only a load error and no Edit button.
+  // The override now declares both scopes; this fallback means an index-config gap
+  // degrades to a slower read of the caller's OWN games (bounded by one admin's
+  // collection) instead of taking the only management surface offline.
+  let docs;
+  try {
+    docs = (await db.collection(`users/${adminUid}/games`).where('isTemplate', '==', true).get()).docs;
+  } catch (e) {
+    if ((e as { code?: unknown }).code !== 9 && (e as { code?: unknown }).code !== 'failed-precondition') throw e;
+    functions.logger.warn('[listAdminTemplates] isTemplate query unindexed — falling back to a full scan of the admin own games', { adminUid });
+    docs = (await db.collection(`users/${adminUid}/games`).get()).docs
+      .filter((d) => (d.data() as Game).isTemplate === true);
+  }
   // Tombstones are filtered in memory for the same reason listGames does it:
   // `where('deletedAt','==',null)` does NOT match documents that lack the field.
-  const games = snap.docs
+  const games = docs
     .map((d) => d.data() as Game)
     .filter((g) => !isGameDeleted(g))
     .sort((a, b) => (a.templateOrder ?? Infinity) - (b.templateOrder ?? Infinity));
