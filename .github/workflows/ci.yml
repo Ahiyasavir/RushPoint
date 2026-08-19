@@ -46,9 +46,13 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
+      # One turbo invocation instead of three: turbo's own graph builds
+      # packages/shared once and then runs typecheck/lint/vitest in parallel,
+      # instead of each npm call rebuilding shared and waiting its turn.
+      - run: npm run verify:graph
+      # The pure-logic lane reads packages/shared/dist, so it runs AFTER the
+      # turbo phase that owns that directory, never beside it.
+      - run: npm run test:unit
       - run: npm run creator:build
       - run: npm run play:build
 

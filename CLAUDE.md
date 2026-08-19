@@ -110,10 +110,23 @@ teams play a real game at once, then it audits leaderboard invariants + that eve
 counter returns to 0. (`simulate:v1` is the archived v1 tournament script.)
 **One-command gauntlets for agents:** `npm run verify`
 (typecheck·lint·test·creator:build·play:build·**bundle:budget**·**base:check**·**origin:check**·**i18n:check:strict**,
-no emulator)
-and `npm run verify:emulator` (builds → e2e → **Firestore rules** → **Storage rules** → 8-team
-simulate → adversarial simulate, each under its own self-booted suite — no long-running emulator
-needed). `npm run verify:emulator` is emulator-bound end to end; to run it **beside a live
+no emulator) — the same nine gates as ever, now run in **three dependency-ordered phases** that each
+parallelize internally (~2m45 cold, was ~13m):
+`verify:graph` (ONE `turbo run typecheck lint test` — turbo's graph builds `packages/shared`
+once and fans the rest out) → `verify:builds` (both app builds + the pure-logic lane + the i18n
+check, concurrently) → `verify:artifacts` (bundle/base/origin, concurrently). The phase boundaries
+are **not** stylistic: phase 1 is the single writer of `packages/shared/dist` (the in-place-rewrite
+footgun below), phase 2 needs that dist stable, phase 3 needs phase 2's `dist/`. Note `verify:graph`
+runs `typecheck lint test` and deliberately **never** `build` — turbo declares `dist-playtest/**`
+as a build output, and letting it prune/restore that directory could wipe what a live playtest is
+serving; the app builds therefore stay direct `npm run --workspace` calls. `concurrently` is given
+no `--kill-others`, so a red gauntlet reports **every** failing gate in one pass.
+And `npm run verify:emulator` (builds → e2e → **rules (Firestore + Storage in ONE lighter boot,
+`--only=firestore,storage` via `scripts/run-rules-suites.mjs`: neither suite calls a callable, and
+`@firebase/rules-unit-testing` mints its tokens locally, so the functions and auth emulators were
+pure boot cost)** → 8-team simulate → adversarial simulate, each under its own self-booted suite — no
+long-running emulator needed). The two HEAVY phases keep a fresh JVM each on purpose; only the two
+LIGHT rules phases were merged. `npm run verify:emulator` is emulator-bound end to end; to run it **beside a live
 playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see the
 `scripts/lib/emulatorPorts.mjs` note below).
 
@@ -222,6 +235,20 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   (`scripts/test-storage-rules.mjs`, Storage — participant photo/audio prefixes, staff run scoping,
   size/content-type limits, dead legacy prefixes). **Both** are in `verify:emulator`; run either one
   on its own under `scripts/emulator-exec.mjs` when you touch only that rules file.
+- **`scripts/run-unit-tests.mjs`** (the pure-logic lane) auto-discovers every
+  `scripts/test-*.ts` and runs each in **its own tsx process, ~7 at a time** (`cpus-1`, capped at
+  12). One process per file is deliberate — these are top-level programs that end in
+  `process.exit(...)` and import product singletons, so a shared process would mean shimming exit
+  and letting one file's module state reach the next; isolation is the whole point of the lane. It
+  used to shell out to `npx tsx <file>` with `shell: true`, SERIALLY: **4.6 s of npx + cmd.exe +
+  tsx boot per file × 193 files = 10m08s**, of which the assertions were ~20 ms each. Spawning
+  `process.execPath --import tsx` directly and filling the idle cores took it to **59 s at 98%
+  parallel efficiency** — measured, not estimated. Output is buffered per file and a failure is
+  replayed IN FULL at the end, so a red run reads better than the serial one did. There is now also
+  a per-file timeout (`RUSHPOINT_UNIT_TIMEOUT_MS`, default 120 s) — the old runner had none, so one
+  hang wedged the gate forever. `RUSHPOINT_UNIT_CONCURRENCY=1` restores serial live-streamed output
+  for debugging. Same lesson elsewhere: `npx <bin>` inside an npm script is pure overhead — npm
+  already puts every workspace's and the root's `node_modules/.bin` on PATH.
 - **New pure suites in `npm test`** (each is a `scripts/test-*.ts` run by the aggregator):
   `test-bundle-budget` · `test-callable-hardening` · `test-emulator-reap` · `test-play-a11y-scan` ·
   `test-public-task-backfill` · `test-public-task-seed` (publicTasks privacy on the write path) ·

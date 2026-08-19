@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "npx vite --port 5181",
-    "build": "npx vite build",
+    "build": "vite build",
     "preview": "npx vite preview",
-    "typecheck": "npx tsc --noEmit",
-    "lint": "npx eslint src --ext .ts,.tsx"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
     "@rushpoint/shared": "*",

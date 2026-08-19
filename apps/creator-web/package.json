@@ -6,11 +6,11 @@
   "scripts": {
     "dev": "npx vite --port 5180",
     "dev:preview": "npx vite --port 5185 --strictPort",
-    "build": "npx vite build",
+    "build": "vite build",
     "preview": "npx vite preview",
-    "typecheck": "npx tsc --noEmit",
-    "lint": "npx eslint src --ext .ts,.tsx",
-    "test": "npx vitest run"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "test": "vitest run"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
