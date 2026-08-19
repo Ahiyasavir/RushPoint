@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Game, Stage, Task, ScoringPreset, RegistrationField, GameMode, GameInstructions, GameBranding,
 } from '@rushpoint/shared';
+import { gameHasOperatorNotes, extractQuickSetupSteps } from '@rushpoint/shared';
 import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWebhookUrl, validateUnlockGraph, partialStageStarvationWarning, maxCompletableTasks, effectiveExclusiveGroups, exclusiveUnlockRisks, normalizeTags } from '@rushpoint/shared';
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
@@ -221,7 +222,7 @@ function EditableTitle({ title, onCommit }: { title: string; onCommit: (t: strin
         else e.currentTarget.textContent = title || fallback;
       }}
       data-qs-field="game.title"
-      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[12ch] sm:max-w-[40ch] whitespace-nowrap overflow-hidden text-ellipsis"
+      className="text-lg font-bold text-[--ink-1] outline-none rounded px-1 -mx-1 border-b border-transparent focus:border-rp-fire min-w-[6ch] max-w-[12ch] sm:max-w-[14ch] lg:max-w-[18ch] xl:max-w-[26ch] 2xl:max-w-[34ch] whitespace-nowrap overflow-hidden text-ellipsis"
     >
       {title || fallback}
     </h2>
@@ -246,6 +247,7 @@ export default function BuilderPage() {
   const { user } = useAuth();
   const t = useT();
   const b = t.builder;
+  const q = t.quickSetup;
   const TAB_LABEL: Record<BuilderTab, string> = {
     build: b.tabBuild, preview: b.tabPreview, analytics: b.tabAnalytics, settings: b.tabSettings,
   };
@@ -487,6 +489,45 @@ export default function BuilderPage() {
   // flag, its id, its join codes and its run history — exactly where it was.
   // The Dashboard's import still creates a new game; that is the "I have a file
   // and no game yet" door.
+  /**
+   * Lift the creator's own notes out of the player-facing text of a game that is
+   * ALREADY here.
+   *
+   * The import door does this for every new file, but a game imported before that
+   * existed is stranded: participants keep reading "[הערת מפעיל - למחוק]…" and no
+   * screen ever mentions it. Same pure extraction, same single updateGame write,
+   * and it CONFIRMS first because it rewrites authored prose.
+   */
+  async function cleanUpOperatorNotes() {
+    if (!game) return;
+    const result = extractQuickSetupSteps(game);
+    if (result.wizardSteps.length === 0) { toast.info(q.extractNone); return; }
+    const cleaned = result.stages.reduce((n, stage, i) => n + stage.tasks.filter(
+      (task, j) => task.description !== game.stages[i]?.tasks[j]?.description
+        || task.title !== game.stages[i]?.tasks[j]?.title,
+    ).length, 0);
+    if (!(await dialog.confirm(
+      q.extractSummary({ steps: result.wizardSteps.length, cleaned }), q.cleanupCta,
+    ))) return;
+    // A pending autosave would otherwise land after this and write the notes back.
+    window.clearTimeout(saveTimer.current);
+    try {
+      await updateGame({
+        gameId: game.id,
+        stages: result.stages,
+        ...(result.instructions ? { instructions: result.instructions } : {}),
+        wizardSteps: result.wizardSteps,
+      });
+      // Re-read for the same reason the file import does: the server normalizes
+      // what it stored, and re-stamping savedSnapshot stops the fresh content
+      // from reading as an unsaved edit and being written back over.
+      setLoadKey((k) => k + 1);
+      toast.success(q.extractDone(result.wizardSteps.length));
+    } catch (e) {
+      await dialog.alert(e instanceof Error ? e.message : q.extractFailed);
+    }
+  }
+
   async function importFromFile(file: File) {
     if (!game) return;
     let doc: unknown;
@@ -601,6 +642,16 @@ export default function BuilderPage() {
   // Quick Setup, all DERIVED from the live game on every change: what the pill
   // counts and what the launch guard refuses can therefore never disagree with what
   // the creator actually filled in, and no stored flag can outlive an emptied field.
+  // A game IMPORTED before extraction ran on the import path still carries the
+  // creator's own to-do notes inside the text PARTICIPANTS read, and nothing in
+  // the product would ever have said so. Offer the same cleanup the import door
+  // now performs — but only when there is something to clean AND no setup steps
+  // exist yet, so a game that has already been through it is never nagged.
+  const needsNoteCleanup = useMemo(
+    () => (game?.wizardSteps ?? []).length === 0 && gameHasOperatorNotes(game),
+    [game],
+  );
+  const [cleanupDismissed, setCleanupDismissed] = useState(false);
   const qsSteps = useMemo(() => quickSetupSteps(game), [game]);
   const qsOutstanding = useMemo(() => outstandingQuickSetupIds(game), [game]);
   const qsCtx = useMemo(() => ({ steps: qsSteps, outstanding: qsOutstanding }), [qsSteps, qsOutstanding]);
@@ -860,10 +911,17 @@ export default function BuilderPage() {
               : status === 'saving' ? 'bg-rp-amber animate-pulse'
               : status === 'unsaved' ? 'bg-rp-amber'
               : 'bg-rp-go'}`} />
-          {status === 'failed' ? b.saveFailedShort
-            : status === 'saving' ? b.saving
-            : status === 'unsaved' ? b.unsaved
-            : b.saved}
+          {/* Below `xl` the WORD is dropped and the coloured dot carries the state —
+              it frees the pixels the tab strip needs on a small laptop, and the
+              explicit save button sits right beside it. A FAILED save is the one
+              state that must never be reduced to a dot, so it keeps its word at
+              every width. The accessible name is unaffected either way. */}
+          <span className={status === 'failed' ? undefined : 'hidden xl:inline'}>
+            {status === 'failed' ? b.saveFailedShort
+              : status === 'saving' ? b.saving
+              : status === 'unsaved' ? b.unsaved
+              : b.saved}
+          </span>
         </span>
 
         {/* A manual, always-clickable save — independent of the autosave debounce
@@ -961,7 +1019,7 @@ export default function BuilderPage() {
               role="tab"
               aria-selected={activeTab === id}
               onClick={() => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
-              className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`shrink-0 whitespace-nowrap px-2.5 xl:px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === id
                   ? 'bg-rp-fire/10 text-rp-fire'
                   : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
@@ -1119,6 +1177,30 @@ export default function BuilderPage() {
         </div>
       )}
 
+      {/* Leftover creator notes in player-facing text. Shown only on the build
+          tab, only while there is something to clean, and dismissible — it is an
+          offer, not a blocker, and a creator who likes their text as it is must
+          be able to say so and never see it again this session. */}
+      {needsNoteCleanup && !cleanupDismissed && activeTab === 'build' && !qsFocusMode && (
+        <div className="shrink-0 mx-2 mt-2 rounded-xl border border-rp-amber/50 bg-rp-amber/5 px-3 py-2 flex items-start gap-3">
+          <span aria-hidden className="text-base leading-6">🧹</span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[--ink-1]">{q.cleanupTitle}</p>
+            <p className="text-xs text-[--ink-3] leading-snug mt-0.5">{q.cleanupBody}</p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Button onClick={() => { void cleanUpOperatorNotes(); }}>{q.cleanupCta}</Button>
+            <button
+              type="button"
+              onClick={() => setCleanupDismissed(true)}
+              className="px-2.5 py-1.5 rounded-lg text-xs text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors"
+            >
+              {q.cleanupDismiss}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
@@ -1167,13 +1249,13 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
         onClick={onToggle}
         aria-expanded={open}
         aria-label={b.readinessAria(issues.length)}
-        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+        className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
           issues.length === 0
             ? 'border-rp-go/40 text-rp-go hover:bg-[--surface-2]'
             : 'border-rp-amber/50 text-rp-amber hover:bg-[--surface-2]'}`}
       >
         <span aria-hidden>{issues.length === 0 ? '✓' : '⚠'}</span>
-        <span className="hidden md:inline">{b.readinessTitle}</span>
+        <span className="hidden 2xl:inline">{b.readinessTitle}</span>
         {issues.length > 0 && <Badge color="gold">{b.readinessCount(issues.length)}</Badge>}
       </button>
 

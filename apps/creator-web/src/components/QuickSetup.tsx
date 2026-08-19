@@ -405,15 +405,19 @@ export function QuickSetupPill({ remaining, total, onResume }: {
       type="button"
       onClick={onResume}
       data-tour="quick-setup-pill"
-      title={done ? q.allDoneBody : q.resume}
-      className={`shrink-0 flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium border backdrop-blur-sm transition-colors ${
+      title={done ? q.allDoneBody : q.remaining(remaining)}
+      aria-label={done ? q.allDoneTitle : q.remaining(remaining)}
+      className={`shrink-0 flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium border backdrop-blur-sm transition-colors ${
         done
           ? 'border-rp-go/40 text-rp-go hover:bg-rp-go/10'
           : 'border-rp-fire/40 text-rp-fire hover:bg-rp-fire/10'}`}
     >
       <span aria-hidden>{done ? '✓' : '⚡'}</span>
-      <span className="hidden md:inline">{done ? q.allDoneTitle : q.remaining(remaining)}</span>
-      <span className="md:hidden">{done ? '✓' : remaining}</span>
+      {/* The pill carries the SHORT name; the full sentence stays in the tooltip
+          and the accessible name, so the header strip cannot be pushed to a
+          second row by a label that grows with the step count. */}
+      <span className="hidden 2xl:inline">{q.pillLabel}</span>
+      {!done && <span aria-hidden>{remaining}</span>}
     </button>
   );
 }

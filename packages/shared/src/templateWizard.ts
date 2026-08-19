@@ -640,11 +640,25 @@ const ASPECTS: readonly Aspect[] = [
  * on otherwise player-facing prose), and extraction then produces no step at all:
  * an instruction with nothing in it cannot guide anyone.
  */
+/**
+ * A note's own "now delete this paragraph" tail.
+ *
+ * True while the note sat in the mission text; meaningless the moment extraction
+ * moves it into a setup step, where it becomes an instruction to delete something
+ * the creator can no longer see. Dropped as a WHOLE clause (and only when other
+ * words remain), so a note that is nothing but a self-destruct still yields its
+ * text rather than an empty step.
+ */
+const SELF_DESTRUCT_CLAUSE =
+  /[,.;·]?\s*(?:ו?לאחר הקריאה\s*)?(?:תמחקו|מחקו|למחוק)\s*(?:את\s*)?(?:ה?פסקה|ה?הערה)?\s*(?:הזו|הזאת|זו)?\s*(?:לאחר הקריאה)?[\s).]*$/;
+
 export function noteInstruction(note: string): string {
   if (typeof note !== 'string') return '';
-  return collapseWhitespace(
+  const withoutMarker = collapseWhitespace(
     note.replace(BRACKET_NOTE, '').replace(BARE_NOTE, '').replace(/^[\s:：-]+/, ''),
   );
+  const trimmed = collapseWhitespace(withoutMarker.replace(SELF_DESTRUCT_CLAUSE, ''));
+  return trimmed === '' ? withoutMarker : trimmed;
 }
 
 function slug(text: string): string {
@@ -697,6 +711,40 @@ export interface QuickSetupExtraction {
  *
  * Pure: the input game is never mutated.
  */
+/**
+ * Does this game still carry creator-only notes in its player-facing text?
+ *
+ * The question a creator's own console needs to ask: a game IMPORTED before
+ * extraction existed on the import path still has "[הערת מפעיל - למחוק]…" sitting
+ * in mission descriptions, and nothing in the product would ever have told them.
+ * This is what lets the Builder offer to clean it up rather than leaving those
+ * games stranded on the old behaviour.
+ *
+ * Total and cheap — a scan of the authored strings, never a throw, so it is safe
+ * to call on every render of a game of any size.
+ */
+export function gameHasOperatorNotes(game: PointableGame | undefined | null): boolean {
+  if (!game) return false;
+  const instructions = game.instructions;
+  if (instructions) {
+    if (findOperatorNotes(instructions.bodyHe).length > 0) return true;
+    if (findOperatorNotes(instructions.body).length > 0) return true;
+  }
+  for (const stage of game.stages ?? []) {
+    for (const task of stage?.tasks ?? []) {
+      if (!task) continue;
+      if (findOperatorNotes(task.title).length > 0) return true;
+      if (findOperatorNotes(task.description).length > 0) return true;
+      if (findOperatorNotes(task.locationClue).length > 0) return true;
+      if (findOperatorNotes(task.smart?.longInstructions).length > 0) return true;
+      for (const step of task.steps ?? []) {
+        if (findOperatorNotes(step?.prompt).length > 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
 export function extractQuickSetupSteps(game: PointableGame): QuickSetupExtraction {
   const produced: TemplateWizardStep[] = [];
   const add = (stageId: string, taskId: string, field: string, prompt: string, required: boolean): void => {

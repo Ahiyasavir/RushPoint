@@ -7,6 +7,7 @@
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
 import { db } from '../firebase';
+import { countStagesAndTasks } from '../lib/templateCounts';
 import * as admin from 'firebase-admin';
 import {
   type Game,
@@ -65,6 +66,7 @@ import {
   validateConsentFlag,
   // הקמה מהירה / Quick Setup (change: quick-setup-wizard).
   normalizeWizardSteps,
+  extractQuickSetupSteps,
   pruneWizardSteps,
 } from '@rushpoint/shared';
 import { assertGameNotDeleted, loadOwnedLiveGame, loadOwnedTrashedGame } from './lifecycle';
@@ -593,9 +595,28 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   if (existing.visibility === 'public') {
     resyncPublicGameSummary(gameId, { ...existing, ...updates } as Game, updates.updatedAt);
   }
+  restampTemplateCounts(ref, existing, updates.stages);
 
   return { ok: true };
 });
+
+/**
+ * Keep a TEMPLATE's stored stage/task counts true after a content edit.
+ *
+ * `listGameTemplates` reads those two numbers instead of loading every template's
+ * stages (see countStagesAndTasks) — so an edit that changes the shape of a
+ * template and does not restamp them would leave the picker quoting yesterday's
+ * numbers. Ordinary games are not in that list and cost nothing here.
+ */
+function restampTemplateCounts(
+  ref: FirebaseFirestore.DocumentReference,
+  existing: Game,
+  nextStages: unknown,
+): void {
+  if (!existing.isTemplate || !Array.isArray(nextStages)) return;
+  void ref.update(countStagesAndTasks({ stages: nextStages as Game['stages'] }))
+    .catch((e) => logBestEffort('template.counts.restamp', { gameId: existing.id }, e));
+}
 
 
 // ─── Game trash: soft delete · restore · permanent purge ──────────────────────
@@ -1399,7 +1420,29 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     target?.stages,
     target ? { gameId: target.id } : undefined,
   ) ?? [];
-  const instructions = parsed.instructions ? cleanGameInstructions(parsed.instructions) : undefined;
+  const cleanedInstructions = parsed.instructions ? cleanGameInstructions(parsed.instructions) : undefined;
+
+  // Quick Setup, on the door a real creator actually uses.
+  //
+  // Template files are authored with the creator's own to-do list written INTO the
+  // player-facing prose ("[הערת מפעיל - למחוק]: הגדירו כאן את המיקום…"). Extraction
+  // lifts each of those notes out into a guided setup step and leaves the mission
+  // text as a player would read it. Until now that only ran behind an admin-only
+  // button, so every ordinary creator who imported a template got the raw notes and
+  // no guidance — the feature existed but nobody could reach it.
+  //
+  // Only when the file carries NO steps of its own: a file exported from an
+  // already-extracted game must keep the steps it was saved with, never have them
+  // re-derived from prose that no longer contains the notes.
+  const fileHasSteps = Array.isArray(parsed.wizardSteps) && parsed.wizardSteps.length > 0;
+  const extracted = fileHasSteps
+    ? null
+    : extractQuickSetupSteps({ stages: safeStages, instructions: cleanedInstructions });
+  const importedStages = extracted ? extracted.stages : safeStages;
+  const instructions = extracted?.instructions ?? cleanedInstructions;
+  const importedSteps = fileHasSteps
+    ? normalizeWizardSteps(parsed.wizardSteps)
+    : (extracted?.wizardSteps ?? []);
 
   if (target) {
     // Replace = every authored field the file format carries. A field the file does
@@ -1410,7 +1453,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     const updates: Record<string, unknown> = {
       updatedAt: new Date().toISOString(),
       title: stripUnsafeDisplayChars(parsed.title).trim(),
-      stages: safeStages,
+      stages: importedStages,
       mode: parsed.mode ?? 'individual',
       scoringPreset: parsed.scoringPreset ?? DEFAULT_SCORING_PRESET,
       registrationFields: parsed.registrationFields ?? DEFAULT_REGISTRATION_FIELDS,
@@ -1436,6 +1479,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     // stores `false` or clears the field.
     setOrClear('requiresGuardianConsent', parsed.requiresGuardianConsent);
     setOrClear('safeZone', importedZone.value);
+    setOrClear('wizardSteps', (importedSteps ?? []).length > 0 ? importedSteps : undefined);
 
     await db.doc(gamePath(uid, target.id)).update(updates);
     if (target.visibility === 'public') {
@@ -1444,7 +1488,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
       // read through a `??` fallback.
       resyncPublicGameSummary(target.id, { ...target, ...updates } as unknown as Game, updates.updatedAt as string);
     }
-    return { gameId: target.id, stageCount: safeStages.length, replaced: true };
+    return { gameId: target.id, stageCount: importedStages.length, replaced: true };
   }
 
   const now = new Date().toISOString();
@@ -1459,7 +1503,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     id: ref.id,
     ownerUid: uid,
     title: stripUnsafeDisplayChars(parsed.title).trim(),
-    stages: safeStages,
+    stages: importedStages,
     scoringPreset: parsed.scoringPreset ?? DEFAULT_SCORING_PRESET,
     registrationFields: parsed.registrationFields ?? DEFAULT_REGISTRATION_FIELDS,
     mode: parsed.mode ?? 'individual',
@@ -1471,6 +1515,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     updatedAt: now,
   };
   if (instructions) game.instructions = instructions; else delete game.instructions;
+  if ((importedSteps ?? []).length > 0) game.wizardSteps = importedSteps ?? []; else delete game.wizardSteps;
   // Store the NORMALIZED boundary (centre + radius only), never the file's object —
   // the spread above would otherwise carry any extra key straight onto a field the
   // safety path reads.
@@ -1482,5 +1527,5 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
   // is the exact thing this change exists to prevent.
   await ref.set(game);
 
-  return { gameId: ref.id, stageCount: safeStages.length };
+  return { gameId: ref.id, stageCount: importedStages.length };
 });

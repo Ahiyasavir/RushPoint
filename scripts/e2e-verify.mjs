@@ -7477,6 +7477,46 @@ async function main() {
     check('listGameTemplates: stage/task counts are correct',
       group?.variants?.he?.stageCount === 1 && group?.variants?.he?.taskCount === 2,
       JSON.stringify(group?.variants?.he));
+    // The counts are STORED on the document so the picker never loads a
+    // template's stages to draw one row (perf: template-list-projection). An
+    // edit that changes the shape must restamp them, or the menu quotes stale
+    // numbers forever. Done on a template of its OWN — the grouped fixture above
+    // is read by the createGameFromTemplate assertions further down, and editing
+    // it here would break them from a distance.
+    const { gameId: tCounts } = await platformAdmin.call('createGame', { title: 'Counts Template', mode: 'team' });
+    await platformAdmin.call('updateGame', { gameId: tCounts, stages: [
+      { id: 'tc0', order: 0, title: 'One', isFinal: false, tasks: [
+        { id: 'tc-a', title: 'A', type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+        { id: 'tc-b', title: 'B', type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] },
+      { id: 'tc1', order: 1, title: 'Two', isFinal: true, tasks: [
+        { id: 'tc-c', title: 'C', type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] },
+    ] });
+    await platformAdmin.call('setGameTemplateFlag', { gameId: tCounts, isTemplate: true, templateEmoji: '🔢', templateOrder: 9 });
+    const listCounts = await creator.call('listGameTemplates', {});
+    const countsGroup = (listCounts?.templates ?? []).find((g) => g.groupKey === tCounts);
+    check('listGameTemplates: counts are stamped when a game becomes a template',
+      countsGroup?.variants?.he?.stageCount === 2 && countsGroup?.variants?.he?.taskCount === 3,
+      JSON.stringify(countsGroup?.variants?.he));
+    // Now shrink it: an ordinary content edit must restamp, or the menu is stale.
+    await platformAdmin.call('updateGame', { gameId: tCounts, stages: [
+      { id: 'tc0', order: 0, title: 'One', isFinal: true, tasks: [
+        { id: 'tc-a', title: 'A', type: 'field', triggerMode: 'instant', coordinates: { lat: 0, lng: 0 },
+          difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+      ] },
+    ] });
+    const listShrunk = await creator.call('listGameTemplates', {});
+    const shrunkGroup = (listShrunk?.templates ?? []).find((g) => g.groupKey === tCounts);
+    check('listGameTemplates: counts follow a template content edit',
+      shrunkGroup?.variants?.he?.stageCount === 1 && shrunkGroup?.variants?.he?.taskCount === 1,
+      JSON.stringify(shrunkGroup?.variants?.he));
+    check('listGameTemplates: still no stages/tasks leaked by the projection',
+      !('stages' in (shrunkGroup?.variants?.he ?? {})),
+      JSON.stringify(shrunkGroup?.variants?.he));
 
     // 5. A solo (ungrouped) template appears with exactly one variant.
     const { gameId: tSolo } = await platformAdmin.call('createGame', { title: 'Solo Template', mode: 'team' });
@@ -9213,6 +9253,50 @@ async function main() {
     const strip = (f) => JSON.stringify({ ...f, exportedAt: undefined });
     check('import(export(g)) re-exports an identical document', strip(file) === strip(file2),
       strip(file) === strip(file2) ? 'identical' : 'DIFFERS');
+
+    // ── (7b) A TEMPLATE file with operator notes and no steps of its own ──────
+    //        This is the door a real creator uses. Template files are authored with
+    //        the creator's to-do list written INTO the player-facing prose; before
+    //        this, extraction ran only behind an admin-only button, so an ordinary
+    //        import kept the raw notes and produced no guidance at all.
+    const notedFile = {
+      ...file,
+      game: {
+        ...file.game,
+        wizardSteps: undefined,
+        stages: [{
+          id: 'nt0', order: 0, title: 'Noted', isFinal: true,
+          tasks: [{
+            id: 'nt-a', title: 'Find the spot',
+            description: '[הערת מפעיל - למחוק]: הגדירו כאן את המיקום. מחקו פסקה זו לאחר הקריאה.נווטו אל הנקודה שבתמונה.',
+            type: 'field', triggerMode: 'radius', coordinates: { lat: 0, lng: 0 },
+            difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9,
+          }],
+        }],
+      },
+    };
+    const { gameId: gNoted } = await creator.call('importGameFile', { file: notedFile });
+    const { game: notedGame } = await creator.call('getGame', { gameId: gNoted });
+    const notedTask = notedGame?.stages?.[0]?.tasks?.[0];
+    check('import: an operator note becomes a הקמה מהירה step',
+      (notedGame?.wizardSteps ?? []).some((w) => w.taskId === 'nt-a' && w.targetFieldPath === 'coordinates'),
+      JSON.stringify(notedGame?.wizardSteps ?? []));
+    check('import: the note is GONE from the player-facing description',
+      typeof notedTask?.description === 'string'
+      && !notedTask.description.includes('הערת מפעיל')
+      && !notedTask.description.includes('מחקו'),
+      String(notedTask?.description));
+    check('import: the player-facing half of the prose SURVIVES',
+      (notedTask?.description ?? '').includes('נווטו אל הנקודה שבתמונה'),
+      String(notedTask?.description));
+    // Re-importing the CLEANED export must not re-derive steps from prose that no
+    // longer carries any notes, nor drop the steps the file now ships with.
+    const { file: notedExport } = await creator.call('exportGameFile', { gameId: gNoted });
+    const { gameId: gNoted2 } = await creator.call('importGameFile', { file: notedExport });
+    const { game: notedGame2 } = await creator.call('getGame', { gameId: gNoted2 });
+    check('import: re-importing an extracted game keeps its steps unchanged',
+      (notedGame2?.wizardSteps ?? []).length === (notedGame?.wizardSteps ?? []).length,
+      `${(notedGame?.wizardSteps ?? []).length} → ${(notedGame2?.wizardSteps ?? []).length}`);
 
     // ── (8) Malformed imports: refused, and NO half-game left behind ──────────
     const countGames = async () => ((await creator.call('listGames', {}))?.games ?? []).length;

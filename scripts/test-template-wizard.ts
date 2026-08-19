@@ -35,6 +35,8 @@ import {
   stripOperatorNotes,
   isPlaceholderValue,
   extractQuickSetupSteps,
+  noteInstruction,
+  gameHasOperatorNotes,
 } from '../packages/shared/src/templateWizard';
 
 let failures = 0;
@@ -290,6 +292,43 @@ console.log('\noperator notes');
   ok('a bracketed note is detected', isPlaceholderValue('[הערת מפעיל - למחוק]: משהו'));
   ok('a real answer is not a placeholder', !isPlaceholderValue('כחול'));
   ok('a blank is not treated as a placeholder', !isPlaceholderValue('   '));
+}
+
+console.log('\nnoteInstruction — the note becomes a usable instruction');
+{
+  // A note's own "delete this paragraph" is true while it sits in the mission
+  // text and meaningless once extraction has moved it into a setup step, where it
+  // would tell the creator to delete something they can no longer see.
+  eq('the self-destruct tail is dropped',
+    noteInstruction('[הערת מפעיל - למחוק]: הגדירו כאן את המיקום. מחקו פסקה זו לאחר הקריאה.'),
+    'הגדירו כאן את המיקום');
+  eq('a parenthesised tail is dropped too',
+    noteInstruction('הוראות ליוצר: (הכניסו את נקודת ההתחלה על גבי המפה, ולאחר הקריאה מחקו את הפסקה הזו).'),
+    '(הכניסו את נקודת ההתחלה על גבי המפה');
+  eq('a note with no tail is untouched',
+    noteInstruction('[הערת מפעיל - למחוק]: הגדירו מיקום בשלב 1. כתבו רמז.'),
+    'הגדירו מיקום בשלב 1. כתבו רמז.');
+  // Dropping the clause must never empty the step: a note that is ONLY a
+  // self-destruct still has to say something, or the creator gets a blank step.
+  eq('a note that is nothing BUT the tail keeps its text',
+    noteInstruction('[הערת מפעיל - למחוק]: מחקו את הפסקה הזו.'),
+    'מחקו את הפסקה הזו.');
+  eq('English notes are unaffected',
+    noteInstruction('[operator note - delete]: Set the location here.'),
+    'Set the location here.');
+  eq('a non-string is empty, never a throw', noteInstruction(undefined as unknown as string), '');
+}
+
+console.log('\ngameHasOperatorNotes — may the Builder offer to clean this game?');
+{
+  ok('a clean game is left alone',
+    !gameHasOperatorNotes(game([stage('s1', [task({ id: 't1', title: 'A', description: 'נווטו לשם.' })])])));
+  ok('a note in a description is found',
+    gameHasOperatorNotes(game([stage('s1', [task({
+      id: 't1', title: 'A', description: '[הערת מפעיל - למחוק]: הגדירו מיקום.',
+    })])])));
+  ok('an empty game is not a candidate', !gameHasOperatorNotes(game([])));
+  ok('null/undefined never throw', !gameHasOperatorNotes(null) && !gameHasOperatorNotes(undefined));
 }
 
 console.log('\nextractQuickSetupSteps');

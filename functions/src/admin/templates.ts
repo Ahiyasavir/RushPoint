@@ -16,6 +16,7 @@ import { requireAuth, assertAdmin } from '../auth';
 import { enforceRateLimit } from '../rateLimitStore';
 import { loadOwnedLiveGame } from '../games/lifecycle';
 import { cloneTemplateStagesWithMap } from '../lib/cloneTemplateStages';
+import { countStagesAndTasks } from '../lib/templateCounts';
 import {
   FIRESTORE_PATHS,
   isGameDeleted,
@@ -40,6 +41,8 @@ async function loadAllTemplateGames(): Promise<Game[]> {
     .map((d) => d.data() as Game)
     .filter((g) => !isGameDeleted(g));
 }
+
+
 
 // ─── setGameTemplateFlag ────────────────────────────────────────────────────
 
@@ -95,6 +98,11 @@ export const setGameTemplateFlag = loggedCallable('setGameTemplateFlag', async (
   }
 
   const update: Record<string, unknown> = { updatedAt: new Date().toISOString(), isTemplate };
+  if (isTemplate) {
+    // Stamp the picker's two counts now, so listGameTemplates never has to load
+    // this game's stages to draw one menu row.
+    Object.assign(update, countStagesAndTasks(game));
+  }
   if (!isTemplate) {
     // Demoting a template clears the picker-only metadata too — a re-flagged
     // game starts as a fresh, ungrouped template rather than inheriting stale
@@ -184,7 +192,10 @@ interface TemplateGroupEntry {
 }
 
 function toVariant(game: Game): TemplateVariant {
-  const stages = game.stages ?? [];
+  // Read the STORED counts; `listGameTemplates` guarantees they are present by
+  // this point (it stamps any document that lacked them). The `?? 0` is a floor
+  // for a genuinely empty template, never a silent substitute for missing data.
+  const counts = storedCounts(game);
   return {
     id: game.id,
     ownerUid: game.ownerUid,
@@ -192,16 +203,80 @@ function toVariant(game: Game): TemplateVariant {
     description: game.description,
     mode: game.mode,
     scoringPreset: game.scoringPreset,
-    stageCount: stages.length,
-    taskCount: stages.reduce((sum, s) => sum + (s.tasks?.length ?? 0), 0),
+    stageCount: counts?.stageCount ?? 0,
+    taskCount: counts?.taskCount ?? 0,
   };
+}
+
+/**
+ * The picker's menu, WITHOUT downloading a dozen whole games to draw it.
+ *
+ * A template document is a complete game — every stage, every mission, every
+ * answer key and media url — and a finished one runs to hundreds of kilobytes.
+ * The picker shows a title, a description and two counts, so the slowest thing a
+ * creator hit before they had even started building was transferring all of that
+ * in order to call `.length` on the stage arrays.
+ *
+ * `select()` asks Firestore for just the small fields, which is only possible
+ * because the two counts are STORED on the document (`templateStageCount` /
+ * `templateTaskCount`, stamped by every path that writes a template). A template
+ * authored before those fields existed simply has no counts yet — the caller
+ * falls back to reading those documents in full and stamps them on the way past,
+ * so the list self-heals on first use instead of needing a migration.
+ *
+ * Deliberately NOT a cache: the Firebase runtime is multi-process, so an
+ * in-process memo can be invalidated in one worker while another keeps serving
+ * the stale menu — which is exactly what the templates scenario caught.
+ */
+const TEMPLATE_LIST_FIELDS = [
+  'id', 'ownerUid', 'title', 'description', 'mode', 'scoringPreset',
+  'templateEmoji', 'templateOrder', 'templateGroupKey', 'templateLang',
+  'templateStageCount', 'templateTaskCount', 'deletedAt',
+] as const;
+
+/** The counts as stored, or `null` when this document predates them. */
+function storedCounts(g: Partial<Game>): { stageCount: number; taskCount: number } | null {
+  const stageCount = (g as { templateStageCount?: unknown }).templateStageCount;
+  const taskCount = (g as { templateTaskCount?: unknown }).templateTaskCount;
+  if (typeof stageCount !== 'number' || typeof taskCount !== 'number') return null;
+  if (!Number.isFinite(stageCount) || !Number.isFinite(taskCount)) return null;
+  return { stageCount, taskCount };
 }
 
 export const listGameTemplates = loggedCallable('listGameTemplates', async (_data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'listGameTemplates');
 
-  const games = await loadAllTemplateGames();
+  const snap = await db.collectionGroup('games')
+    .where('isTemplate', '==', true)
+    .select(...TEMPLATE_LIST_FIELDS)
+    .get();
+
+  // Tombstones are filtered in memory for the same reason listGames does it:
+  // `where('deletedAt','==',null)` does NOT match documents that lack the field.
+  const rows = snap.docs
+    .map((d) => ({ ref: d.ref, data: d.data() as Partial<Game> }))
+    .filter((r) => !isGameDeleted(r.data as Game));
+
+  // Only the documents that have no stored counts are read in full, and each one
+  // is stamped as we go, so this shrinks to nothing after the first call.
+  const needsCounts = rows.filter((r) => storedCounts(r.data) === null);
+  if (needsCounts.length > 0) {
+    const full = await db.getAll(...needsCounts.map((r) => r.ref));
+    for (const doc of full) {
+      const game = doc.data() as Game | undefined;
+      if (!game) continue;
+      const counts = countStagesAndTasks(game);
+      const row = rows.find((r) => r.ref.path === doc.ref.path);
+      if (row) Object.assign(row.data, counts);
+      // Best-effort: a failed stamp only means the next call recomputes it.
+      void doc.ref.update(counts).catch((e) => functions.logger.warn(
+        '[listGameTemplates] could not stamp template counts', { path: doc.ref.path, err: String(e) },
+      ));
+    }
+  }
+
+  const games = rows.map((r) => r.data as Game);
   const groups = new Map<string, TemplateGroupEntry>();
 
   for (const game of games) {
