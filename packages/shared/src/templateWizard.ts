@@ -861,6 +861,27 @@ export function extractQuickSetupSteps(game: PointableGame): QuickSetupExtractio
         }));
         add(stage.id, task.id, 'steps', titleDescNotes[0] ?? '', true);
       }
+      // (c) a structural step with NO note behind it at all. A photo/video
+      // upload task always ships with SOME value for `smart.autoApprove`
+      // (the schema has no "unset" state for a boolean), so nothing about it
+      // ever reads as an empty field a creator forgot — the whole game can
+      // launch and run with every submission silently auto-approved, or
+      // silently requiring manual review, and nobody ever chose either. This
+      // is not a gap notes can fix: a template author who never wrote a note
+      // about approval leaves no trace to extract. So every photo/video task
+      // gets the decision surfaced ONCE, unconditionally, as guidance rather
+      // than a blocker — `add()` already dedupes against a step this SAME
+      // pass already produced, and the caller's existing-wins merge below
+      // dedupes against one a note or a prior run already created, so this
+      // never duplicates or overrides an admin's own wording.
+      if (task.smart?.enabled && task.smart.verificationType === 'photo_upload') {
+        const isVideo = task.smart.captureKind === 'video';
+        add(stage.id, task.id, 'smart.autoApprove',
+          isVideo ? 'בחרו אם לאשר את הסרטונים אוטומטית או לבדוק כל אחד בעצמכם.'
+            : 'בחרו אם לאשר את התמונות אוטומטית או לבדוק כל אחת בעצמכם.',
+          false);
+      }
+
       return next;
     }),
   }));

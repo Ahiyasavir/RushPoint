@@ -388,6 +388,59 @@ console.log('\nextractQuickSetupSteps — locationClue and smart.longInstruction
     out2.wizardSteps.some((s) => s.taskId === 't2' && s.targetFieldPath === 'smart.longInstructions'));
 }
 
+console.log('\nextractQuickSetupSteps — every photo/video task gets an autoApprove step, note or not');
+{
+  // A photo-upload task's autoApprove is a boolean, so it never reads as an
+  // "empty field" a creator forgot — the game can launch either way with
+  // nobody having consciously chosen. No note, no marker: the general
+  // extractor has to surface this structurally, not from prose.
+  const photoTask = task({
+    id: 'p1', type: 'photo',
+    smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true },
+  });
+  const videoTask = task({
+    id: 'p2', type: 'photo',
+    smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true, captureKind: 'video' },
+  });
+  const notPhoto = task({ id: 'p3', type: 'field' });
+  const out = extractQuickSetupSteps(game([stage('s1', [photoTask, videoTask, notPhoto])]));
+
+  ok('a photo task with NO note still gets an autoApprove step',
+    out.wizardSteps.some((s) => s.taskId === 'p1' && s.targetFieldPath === 'smart.autoApprove'));
+  ok('the step is guidance, not a launch blocker',
+    out.wizardSteps.find((s) => s.taskId === 'p1' && s.targetFieldPath === 'smart.autoApprove')?.isRequired === false);
+  ok('a video task gets its own step too',
+    out.wizardSteps.some((s) => s.taskId === 'p2' && s.targetFieldPath === 'smart.autoApprove'));
+  const videoPrompt = out.wizardSteps.find((s) => s.taskId === 'p2' && s.targetFieldPath === 'smart.autoApprove')?.instructionPrompt ?? '';
+  ok('a video task\'s wording says "videos", not "photos"', videoPrompt.includes('סרטונים'));
+  ok('a task with no photo/video verification gets no such step',
+    !out.wizardSteps.some((s) => s.taskId === 'p3' && s.targetFieldPath === 'smart.autoApprove'));
+
+  // A note that already covers this field wins — no duplicate, and the
+  // authored wording is kept.
+  const noted = task({
+    id: 'p4', type: 'photo',
+    description: '[הערת מפעיל - למחוק]: לאישור ידני, כבו אישור אוטומטי בביצוע ותוספות.',
+    smart: { enabled: true, verificationType: 'photo_upload', autoApprove: true },
+  });
+  const out3 = extractQuickSetupSteps(game([stage('s1', [noted])]));
+  const autoApproveSteps = out3.wizardSteps.filter((s) => s.taskId === 'p4' && s.targetFieldPath === 'smart.autoApprove');
+  eq('a note-derived step is not duplicated by the structural pass', autoApproveSteps.length, 1);
+
+  // Re-running against a game that ALREADY has one (from an admin's own
+  // wording, or a prior run) must not add a second, and must not touch it.
+  const already = game([stage('s1', [photoTask])], {
+    wizardSteps: [{
+      id: 'qs-p1-smart-autoapprove', stageId: 's1', taskId: 'p1', targetFieldPath: 'smart.autoApprove',
+      instructionPrompt: 'ניסוח מותאם אישית שכבר קיים.', isRequired: false,
+    }],
+  });
+  const out4 = extractQuickSetupSteps(already);
+  const rerun = out4.wizardSteps.filter((s) => s.taskId === 'p1' && s.targetFieldPath === 'smart.autoApprove');
+  eq('an existing step is never duplicated on re-run', rerun.length, 1);
+  eq('an existing step\'s own wording is never overwritten', rerun[0].instructionPrompt, 'ניסוח מותאם אישית שכבר קיים.');
+}
+
 console.log('\ngameHasOperatorNotes — may the Builder offer to clean this game?');
 {
   ok('a clean game is left alone',
