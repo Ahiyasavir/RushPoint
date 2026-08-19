@@ -525,28 +525,54 @@ const OPERATOR_SENTENCE = /למחוק|תמחקו|מחקו|כשתסיימו|לא�
  * Nothing is destroyed either way: whatever is removed becomes the step's
  * `instructionPrompt`, and the admin action confirms before it writes.
  */
+/**
+ * The note's own "delete this paragraph" instruction — not anchored to the end
+ * of a string like `SELF_DESTRUCT_CLAUSE` (which trims a finished instruction),
+ * but findable ANYWHERE, because it is the single most reliable sign-off a
+ * template author writes right before pasting or typing the real player text.
+ */
+const SELF_DESTRUCT_PHRASE =
+  /(?:ו?לאחר הקריאה\s*)?(?:תמחקו|מחקו|למחוק)\s*(?:את\s*)?(?:ה?פסקה|ה?הערה)\s*(?:הזו|הזאת|זו)?\s*(?:לאחר הקריאה)?[).]*\s*/g;
+
 function noteEnd(text: string, from: number): number {
   const blank = text.indexOf('\n\n', from);
   const limit = blank >= 0 ? blank : text.length;
 
-  // The glue case: a full stop immediately followed by more text is the seam
-  // between the note and the prose it was pasted onto.
+  // The self-destruct phrase, wherever it falls, is the AUTHORITATIVE end of the
+  // note: a template author writes it as their own sign-off immediately before
+  // the real player text, even inside a multi-part structured note ("בחירת
+  // מיקום: … קוד סודי: … הגדרות מתקדמות: … מחקו פסקה זו לאחר הקריאה.<player
+  // text>") whose earlier sentences don't individually read as authoring prose.
+  // Take the LAST occurrence in the window: a note can mention "delete" more
+  // than once, and only the final one is the actual close.
+  SELF_DESTRUCT_PHRASE.lastIndex = from;
+  let destructEnd = -1;
+  for (let m = SELF_DESTRUCT_PHRASE.exec(text); m && m.index < limit; m = SELF_DESTRUCT_PHRASE.exec(text)) {
+    destructEnd = Math.min(m.index + m[0].length, limit);
+  }
+  if (destructEnd >= 0) return destructEnd;
+
+  // No self-destruct phrase: fall back to the glue seam — a full stop
+  // immediately followed by more text, no space, no capital, is the seam where
+  // player-facing prose was pasted directly onto the end of a short note.
   const glue = /[.!?](?=[^\s.!?)\]])/g;
   glue.lastIndex = from;
   const glued = glue.exec(text);
-  const glueEnd = glued && glued.index + 1 <= limit ? glued.index + 1 : limit;
+  if (glued && glued.index + 1 <= limit) return glued.index + 1;
 
-  // Otherwise walk whole sentences while they still read as authoring notes.
+  // Neither signal exists: the note runs into unrelated prose with no marker at
+  // all, so walk whole sentences while they still read as authoring notes — the
+  // genuinely ambiguous case the vocabulary list exists for.
   const sentence = /[^.!?\n]*[.!?]+|[^.!?\n]+/g;
   sentence.lastIndex = from;
   let cursor = from;
   let first = true;
-  for (let m = sentence.exec(text); m && m.index < glueEnd; m = sentence.exec(text)) {
-    const end = Math.min(m.index + m[0].length, glueEnd);
+  for (let m = sentence.exec(text); m && m.index < limit; m = sentence.exec(text)) {
+    const end = Math.min(m.index + m[0].length, limit);
     if (!first && !OPERATOR_SENTENCE.test(m[0])) break;
     cursor = end;
     first = false;
-    if (end >= glueEnd) break;
+    if (end >= limit) break;
   }
   return Math.max(cursor, from);
 }
@@ -670,7 +696,9 @@ function stepIdFor(taskId: string, field: string): string {
   return `qs-${taskId || 'game'}-${slug(field)}`;
 }
 
-function aspectsOf(noteText: string, task: Task | undefined): { field: string; required: boolean }[] {
+function aspectsOf(
+  noteText: string, task: Task | undefined, fallbackField: string = 'description',
+): { field: string; required: boolean }[] {
   const hits = ASPECTS
     .filter((a) => a.test.test(noteText))
     .map((a) => {
@@ -680,9 +708,11 @@ function aspectsOf(noteText: string, task: Task | undefined): { field: string; r
       if (a.field === 'answers' && task?.type === 'sequence') return { field: 'steps', required: true };
       return { field: a.field, required: a.required };
     });
-  // A note we cannot classify still deserves to be shown — pointed at the prose it
-  // came out of, so the creator at least lands on the right mission.
-  return hits.length > 0 ? hits : [{ field: 'description', required: false }];
+  // A note we cannot classify still deserves to be shown — pointed at the field
+  // it actually lives IN (the caller passes that in), so the creator lands on
+  // the control they need to edit rather than always being sent to `description`
+  // regardless of where the note was written.
+  return hits.length > 0 ? hits : [{ field: fallbackField, required: false }];
 }
 
 /** The answer-key field a task of this type is completed by, if any. */
@@ -775,13 +805,39 @@ export function extractQuickSetupSteps(game: PointableGame): QuickSetupExtractio
     tasks: (stage.tasks ?? []).map((task) => {
       const next: Task = { ...task };
 
-      // (a) notes written into the prose
-      const notes = [...findOperatorNotes(task.title), ...findOperatorNotes(task.description)];
+      // (a) notes written into the prose. `title`/`description` share one pass
+      // (a note in either usually classifies to a DIFFERENT field, like
+      // coordinates or media, so both fall back to `description`); `locationClue`
+      // and `smart.longInstructions` are scanned on their own, because a note
+      // embedded THERE is almost always an instruction to fill in that exact
+      // field ("[…]: לכו אל [ציון דרך כללי…]"), so an unclassifiable one should
+      // fall back to pointing at ITSELF, not at `description`.
+      const titleDescNotes = [...findOperatorNotes(task.title), ...findOperatorNotes(task.description)];
       if (findOperatorNotes(task.title).length > 0) next.title = stripOperatorNotes(task.title);
       if (findOperatorNotes(task.description).length > 0) next.description = stripOperatorNotes(task.description);
-      for (const note of notes) {
-        for (const aspect of aspectsOf(note, task)) {
+      for (const note of titleDescNotes) {
+        for (const aspect of aspectsOf(note, task, 'description')) {
           add(stage.id, task.id, aspect.field, note, aspect.required);
+        }
+      }
+
+      const clueNotes = findOperatorNotes(task.locationClue);
+      if (clueNotes.length > 0) {
+        next.locationClue = stripOperatorNotes(task.locationClue);
+        for (const note of clueNotes) {
+          for (const aspect of aspectsOf(note, task, 'locationClue')) {
+            add(stage.id, task.id, aspect.field, note, aspect.required);
+          }
+        }
+      }
+
+      const longInstrNotes = findOperatorNotes(task.smart?.longInstructions);
+      if (longInstrNotes.length > 0 && task.smart) {
+        next.smart = { ...task.smart, longInstructions: stripOperatorNotes(task.smart.longInstructions) };
+        for (const note of longInstrNotes) {
+          for (const aspect of aspectsOf(note, task, 'smart.longInstructions')) {
+            add(stage.id, task.id, aspect.field, note, aspect.required);
+          }
         }
       }
 
@@ -791,11 +847,11 @@ export function extractQuickSetupSteps(game: PointableGame): QuickSetupExtractio
       const answerField = answerFieldOf(task);
       if (answerField === 'answers' && Array.isArray(task.answers) && task.answers.some(isPlaceholderValue)) {
         next.answers = task.answers.filter((a) => !isPlaceholderValue(a));
-        add(stage.id, task.id, 'answers', notes[0] ?? '', true);
+        add(stage.id, task.id, 'answers', titleDescNotes[0] ?? '', true);
       }
       if (answerField === 'surveyChoices' && Array.isArray(task.surveyChoices) && task.surveyChoices.some(isPlaceholderValue)) {
         next.surveyChoices = task.surveyChoices.filter((c) => !isPlaceholderValue(c));
-        add(stage.id, task.id, 'surveyChoices', notes[0] ?? '', true);
+        add(stage.id, task.id, 'surveyChoices', titleDescNotes[0] ?? '', true);
       }
       if (answerField === 'steps' && Array.isArray(task.steps) && task.steps.some((s) => isPlaceholderValue(s?.answer) || isPlaceholderValue(s?.prompt))) {
         next.steps = task.steps.map((s) => ({
@@ -803,7 +859,7 @@ export function extractQuickSetupSteps(game: PointableGame): QuickSetupExtractio
           prompt: stripOperatorNotes(s?.prompt),
           answer: isPlaceholderValue(s?.answer) ? '' : s?.answer,
         }));
-        add(stage.id, task.id, 'steps', notes[0] ?? '', true);
+        add(stage.id, task.id, 'steps', titleDescNotes[0] ?? '', true);
       }
       return next;
     }),

@@ -33,6 +33,7 @@ import {
   pruneWizardSteps,
   OPERATOR_NOTE_MARKERS,
   stripOperatorNotes,
+  findOperatorNotes,
   isPlaceholderValue,
   extractQuickSetupSteps,
   noteInstruction,
@@ -317,6 +318,74 @@ console.log('\nnoteInstruction — the note becomes a usable instruction');
     noteInstruction('[operator note - delete]: Set the location here.'),
     'Set the location here.');
   eq('a non-string is empty, never a throw', noteInstruction(undefined as unknown as string), '');
+}
+
+console.log('\nfindOperatorNotes — multi-part notes with internal vocabulary gaps');
+{
+  // The bug that reached production: a compound note whose SECOND sentence
+  // doesn't use any word from the operator vocabulary list used to break the
+  // walk early, leaking the rest of a structured note ("בחירת מיקום: …
+  // ביצוע ותוספות: … קוד סודי: … הגדרות מתקדמות: …") straight into player
+  // text. The self-destruct phrase, wherever it falls, is now the
+  // authoritative boundary — trusted over the per-sentence vocabulary gate.
+  const compound = '[הערת מפעיל - למחוק]: זו חידת השיא, היחידה היחידה שבאמת חייבת מקום מיוחד.בחירת מיקום: בחרו מקום עם שני סוגי אלמנטים נפרדים שקל לספור (למשל: פסלים וספסלים).ביצוע ותוספות: ב-longInstructions למטה, החליפו את [אלמנט 1] ו-[אלמנט 2] בבחירה שלכם.הגדרות מתקדמות: מלאו את locationClue ברמז ניווט קצר.מחקו פסקה זו לאחר הקריאה.הקוד לא כתוב באף מקום. הוא המקום עצמו.';
+  const notes = findOperatorNotes(compound);
+  ok('the whole compound note is captured as ONE note', notes.length === 1);
+  ok('the note reaches all the way to the self-destruct phrase',
+    notes[0]?.includes('הגדרות מתקדמות') && notes[0]?.includes('מחקו פסקה זו'));
+  eq('everything after the self-destruct phrase is left as player text',
+    stripOperatorNotes(compound), 'הקוד לא כתוב באף מקום. הוא המקום עצמו.');
+
+  // A note with the self-destruct phrase glued directly onto real player text
+  // (no blank line, no space) must not swallow that player text too.
+  const glued = '[הערת מפעיל - למחוק]: אין צורך במיקום נפרד. השתמשו באותן קואורדינטות שהגדרתם למסירה הראשונה. מחקו פסקה זו לאחר הקריאה.מצאו מישהו בסביבה שנראה כאילו הוא מכיר את המקום הזה.';
+  eq('player text glued right after the self-destruct phrase survives',
+    stripOperatorNotes(glued), 'מצאו מישהו בסביבה שנראה כאילו הוא מכיר את המקום הזה.');
+
+  // No self-destruct phrase at all: falls back to the glue-seam / vocabulary
+  // walk exactly as before this fix.
+  const noPhrase = '[הערת מפעיל - למחוק]: הגדירו מיקום בשלב 1 וצרפו תמונה תקריב קשה לזיהוי.נווטו אל המקום בתמונה.';
+  eq('a note with no self-destruct phrase still falls back correctly',
+    stripOperatorNotes(noPhrase), 'נווטו אל המקום בתמונה.');
+}
+
+console.log('\nextractQuickSetupSteps — locationClue and smart.longInstructions');
+{
+  // Two fields the extractor used to never look at, so a leftover operator
+  // bracket in either shipped straight to a player's screen (locationClue is
+  // the riddle text; longInstructions is what a smart_station shows while a
+  // team is solving it).
+  const dirty = game([
+    stage('s1', [task({
+      id: 't1', type: 'smart_station', hideLocation: true,
+      locationClue: '[הערת מפעיל - למחוק, דוגמה]: לכו אל [ציון דרך כללי, למשל: הכיכר המרכזית].',
+      smart: {
+        enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: '1',
+        longInstructions: 'ההוראות המורחבות עדיין תקינות ואינן הערה.',
+      },
+    })]),
+  ]);
+  const out = extractQuickSetupSteps(dirty);
+  const cleanedTask = out.stages[0].tasks[0];
+  eq('a note-carrying locationClue is emptied', cleanedTask.locationClue, '');
+  ok('a note in locationClue produces a step', out.wizardSteps.some((s) => s.taskId === 't1' && s.targetFieldPath === 'locationClue'));
+  eq('longInstructions with no note is left completely untouched',
+    cleanedTask.smart?.longInstructions, 'ההוראות המורחבות עדיין תקינות ואינן הערה.');
+
+  const dirtyLongInstr = game([
+    stage('s1', [task({
+      id: 't2', type: 'smart_station',
+      smart: {
+        enabled: true, verificationType: 'code_verification', hasCode: true, secretCode: '1',
+        longInstructions: '[הערת מפעיל - למחוק]: זו הוראה למפעיל בלבד.מצאו את הקוד.',
+      },
+    })]),
+  ]);
+  const out2 = extractQuickSetupSteps(dirtyLongInstr);
+  eq('a note in longInstructions is stripped, player text survives',
+    out2.stages[0].tasks[0].smart?.longInstructions, 'מצאו את הקוד.');
+  ok('a note in longInstructions produces a step pointed at ITSELF (not description)',
+    out2.wizardSteps.some((s) => s.taskId === 't2' && s.targetFieldPath === 'smart.longInstructions'));
 }
 
 console.log('\ngameHasOperatorNotes — may the Builder offer to clean this game?');
