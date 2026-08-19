@@ -659,6 +659,12 @@ export default function BuilderPage() {
   // `intro`, so the two can never be on screen together.
   const qsStep = currentQuickSetupStep(qsState, qsSteps);
   const qsIntro = quickSetupIntroStep(qsState, qsSteps);
+  // On a phone the mission editor is a fixed, near-full-width sheet — without this,
+  // its own top edge sits directly under the floating הקמה מהירה bar/card, and a
+  // creator had to close the mission editor just to read the instruction they were
+  // supposed to be following inside it. Reserving space only while a bar/card is
+  // actually up keeps every OTHER open of the editor exactly as tall as before.
+  const qsOverlayActive = Boolean(qsStep) || Boolean(qsIntro);
   // Quick Setup FOCUS MODE (change: quick-setup-wizard). While any Quick Setup
   // surface is up — welcome, a chapter's intro card, or the running bar — the
   // canvas is a distraction, not help: the creator's whole job right now is one
@@ -1204,7 +1210,7 @@ export default function BuilderPage() {
       <div className="flex-1 min-h-0 p-2 overflow-hidden">
         {/* Build tab manages its own 3-pane overflow; the other tabs scroll
             inside their own pane so the page never gains a scrollbar. */}
-        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef} />}
+        {activeTab === 'build' && <StepStages game={game} setGame={setGame} activeStageId={activeStageId} setActiveStageId={setActiveStageId} focusIssue={focusIssue} quickSetupFocus={quickSetupFocus} quickSetupFocusMode={qsFocusMode} autoOpenedGameRef={autoOpenedGameRef} qsOverlayActive={qsOverlayActive} />}
         {activeTab === 'preview' && <div className="h-full overflow-y-auto"><StepPreview game={game} /></div>}
         {activeTab === 'settings' && <div className="h-full overflow-y-auto"><div className="max-w-2xl"><StepDetails game={game} patch={patch} qsAnchor={qsFocusAnchor} /></div></div>}
         {activeTab === 'analytics' && (
@@ -1897,7 +1903,7 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
-function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef }: {
+function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue, quickSetupFocus, quickSetupFocusMode, autoOpenedGameRef, qsOverlayActive }: {
   game: Game; setGame: (g: Game) => void;
   activeStageId: string | null; setActiveStageId: (id: string) => void;
   // An activated readiness entry (change: builder-first-task-flow). The `nonce`
@@ -1912,6 +1918,10 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
   quickSetupFocusMode?: boolean;
   // Parent-owned auto-open guard (survives this component's tab-switch remounts).
   autoOpenedGameRef: { current: string | null };
+  // A הקמה מהירה bar/card is currently floating (change: quick-setup-mobile-visibility)
+  // — forwarded to the mission editor's mobile sheet so it can reserve room at its
+  // own top edge instead of being hidden underneath it.
+  qsOverlayActive?: boolean;
 }) {
   const b = useT().builder;
   const [libraryFor, setLibraryFor] = useState<string | null>(null);
@@ -2465,6 +2475,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
           revealAll={editing.revealAll}
           focus={quickSetupFocus && quickSetupFocus.taskId === editingTask.id ? quickSetupFocus : null}
           siblings={editingStage.tasks}
+          reserveTop={!!qsOverlayActive}
           onFlush={(t) => updateStage(editingStage.id, { tasks: editingStage.tasks.map((x) => (x.id === t.id ? t : x)) })}
           onRemove={editingStage.tasks.length > 1
             ? () => {
@@ -2538,7 +2549,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
 // a typing burst into one undo step, and the server save stays debounced via its
 // own effect — so live flushing here doesn't spam the backend.
 // Hardware-accelerated transform slide-in.
-function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus }: {
+function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, revealAll, focus, reserveTop }: {
   task: Task; onFlush: (t: Task) => void; onClose: () => void; onRemove?: () => void; gameId?: string;
   siblings?: Task[];
   // Opened from a readiness entry: show that task's validation messages at once.
@@ -2546,6 +2557,10 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   // Opened by a הקמה מהירה step (change: quick-setup-wizard): which editor tab owns
   // the target field and which collapsed group it hides in.
   focus?: { tab: TaskEditorTab | null; group: TaskOptInGroup | null; nonce: number } | null;
+  // A הקמה מהירה bar/card is currently floating over the phone-width sheet
+  // (change: quick-setup-mobile-visibility) — reserve room at its top edge instead
+  // of letting the two overlap.
+  reserveTop?: boolean;
 }) {
   const b = useT().builder;
   const [state, setState] = useState<DraftState>(() => initDraft(task));
@@ -2590,7 +2605,7 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
   // (flex-1 min-w-0) yields the space; no separate title bar here (the close control
   // lives in the wizard's tab row, reclaiming ~45px of chrome for the content).
   return (
-    <SlidePanel shown={shown}>
+    <SlidePanel shown={shown} reserveTop={reserveTop}>
       <div className="flex-1 min-h-0 p-2.5">
         <TaskWizard task={state.draft} onChange={handleChange} onRemove={onRemove} onDone={close} onClose={close} closeLabel={b.closePanel} gameId={gameId} siblings={siblings} revealAll={revealAll}
           focusTab={focus?.tab ?? null} focusGroup={focus?.group ?? null} focusNonce={focus?.nonce} />
@@ -2608,11 +2623,20 @@ function ContextPanel({ task, onFlush, onClose, onRemove, gameId, siblings, reve
 // end (a hard 500px pane would otherwise be pushed off a phone screen). The caller
 // owns `shown` so it can drive the mount slide-in. The `!` widths win over the
 // inline style, which only drives the lg open/close animation.
-function SlidePanel({ shown, children }: { shown: boolean; children: ReactNode }) {
+//
+// `reserveTop` (change: quick-setup-mobile-visibility): the floating הקמה מהירה
+// bar/card is a fixed z-50 element pinned near the phone's top edge — same corner
+// as this sheet's own z-40. Rather than fight over who paints on top (either
+// answer disturbs the other: over it hides the mission editor's own tab row,
+// under it hides the very instruction the creator opened the editor to read),
+// the sheet steps its OWN top edge down by the overlay's rough height only while
+// one is actually up, so both stay fully visible and fully usable at once.
+function SlidePanel({ shown, children, reserveTop }: { shown: boolean; children: ReactNode; reserveTop?: boolean }) {
   return (
     <aside
-      className="shrink-0 self-stretch h-full overflow-hidden transition-[width] duration-200 ease-out
-        max-lg:fixed max-lg:inset-y-0 max-lg:end-0 max-lg:z-40 max-lg:!w-[min(100vw,32rem)] max-lg:p-2 max-lg:shadow-soft"
+      className={`shrink-0 self-stretch h-full max-lg:h-auto overflow-hidden transition-[width] duration-200 ease-out
+        max-lg:fixed max-lg:bottom-0 max-lg:end-0 max-lg:z-40 max-lg:!w-[min(100vw,32rem)] max-lg:p-2 max-lg:shadow-soft
+        ${reserveTop ? 'max-lg:top-32' : 'max-lg:top-0'}`}
       style={{ width: shown ? 'min(500px, calc(100vw - 1.5rem))' : 0 }}
     >
       <div

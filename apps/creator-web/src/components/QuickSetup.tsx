@@ -221,7 +221,7 @@ export function QuickSetupIntro({ step, index, total, taskTitle, summary, scope,
     <div
       role="region"
       aria-label={q.title}
-      className={`fixed z-40 top-2 mx-auto w-[min(30rem,calc(100%-1rem))] p-4 ${GLASS_CARD}`}
+      className={`fixed z-50 top-2 mx-auto w-[min(30rem,calc(100%-1rem))] p-4 ${GLASS_CARD}`}
       style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
     >
       <div className="flex items-center gap-2 text-[11px] font-semibold text-rp-fire">
@@ -287,7 +287,7 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
       // Logical inset (not left/right) so the bar centres identically in RTL and
       // LTR; the inline style carries it because Tailwind has no logical-inset
       // utility and a template-string class would not exist at build time.
-      className={`fixed z-40 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex items-start gap-3 ${GLASS_CARD}`}
+      className={`fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex items-start gap-3 ${GLASS_CARD}`}
       style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
     >
       <div className="flex-1 min-w-0">

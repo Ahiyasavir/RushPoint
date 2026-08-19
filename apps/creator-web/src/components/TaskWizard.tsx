@@ -102,7 +102,7 @@ export default function TaskWizard({
   // only obeys. `focusNonce` (not the values) is the trigger, so activating the
   // same step twice navigates twice.
   focusTab?: 'location' | 'details' | 'execution' | null;
-  focusGroup?: OptInGroupKey | null;
+  focusGroup?: OptInGroupKey | 'locationAdvanced' | null;
   focusNonce?: number;
 }) {
   const t = useT();
@@ -137,6 +137,12 @@ export default function TaskWizard({
     setActive((a) => foldGroupAway(task, a, k).active);
   const groups = { active, openGroup, hideGroup };
 
+  // The Location step's own collapsed panel (radius / skip-GPS / hide-location +
+  // its clue) — lifted up from LocationStepBody so Quick Setup can open it the
+  // same way it opens an execution-tab chip. Not part of `active`/`OptInGroupKey`:
+  // those drive the execution tab's chip row, and this panel has no chip at all.
+  const [locAdvOpen, setLocAdvOpen] = useState(false);
+
   // Quick Setup deep navigation. Opening the group is what makes a field that
   // lives behind a chip reachable at all; the scroll + focus + ring is done by the
   // Builder's useQuickSetupFocus against the `data-qs-field` anchors below, which
@@ -144,7 +150,8 @@ export default function TaskWizard({
   useEffect(() => {
     if (!focusNonce) return;
     if (focusTab) setStep(stepIndexOf(focusTab) as WizardStep);
-    if (focusGroup) setActive((a) => ({ ...a, [focusGroup]: true }));
+    if (focusGroup === 'locationAdvanced') setLocAdvOpen(true);
+    else if (focusGroup) setActive((a) => ({ ...a, [focusGroup]: true }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
 
@@ -203,7 +210,7 @@ export default function TaskWizard({
           grow to fill; the other steps scroll only inside themselves if ever
           needed. */}
       <div className="flex-1 min-h-0 pe-0.5 flex flex-col">
-        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} />}
+        {stepKey === 'location' && <LocationStepBody task={task} set={set} b={b} advOpen={locAdvOpen} setAdvOpen={setLocAdvOpen} />}
         {stepKey === 'details' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><DetailsStepBody task={task} set={set} b={b} replace={onChange} gameId={gameId} /></div>}
         {stepKey === 'execution' && <div className="flex-1 min-h-0 overflow-y-auto space-y-2"><ExecutionStepBody task={task} set={set} setSmart={setSmart} replace={onChange} b={b} groups={groups} revealed={revealed} touch={touch} siblings={siblings} /></div>}
       </div>
@@ -307,7 +314,7 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
   }
   return (
     <div>
-      <label className="flex items-start gap-2 cursor-pointer">
+      <label className="flex items-start gap-2 cursor-pointer" data-qs-field="locationHidden">
         <input type="checkbox" className="mt-0.5" checked={!!task.hideLocation}
           onChange={(e) => set(e.target.checked
             ? { hideLocation: true }
@@ -320,7 +327,7 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
       {task.hideLocation && (
         <div className="mt-1.5">
           <Label dense>{b.locationClueField}</Label>
-          <Textarea dense value={task.locationClue ?? ''} onChange={(e) => set({ locationClue: e.target.value })}
+          <Textarea dense data-qs-field="locationClue" value={task.locationClue ?? ''} onChange={(e) => set({ locationClue: e.target.value })}
             placeholder={b.locationCluePlaceholder} rows={2} dir="auto" />
           {taskPlacementState(task) === 'unplaced' ? (
             // A hidden task is still a located task — the placement step's
@@ -357,11 +364,14 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
 // 40 m arrival check. The four stored `TriggerMode` values are unchanged: see
 // lib/locationPicker for why 'instant' stays a LOCATED task rather than being
 // folded into 'anywhere'.
-function LocationStepBody({ task, set, b }: {
+function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
   task: Task; set: (p: Partial<Task>) => void; b: B;
+  // Lifted to TaskWizard (change: quick-setup-mobile-visibility) so a הקמה מהירה
+  // step targeting the radius / skip-GPS / hide-location clue can open this panel
+  // the same way a step targets an execution-tab chip.
+  advOpen: boolean; setAdvOpen: (fn: (o: boolean) => boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [advOpen, setAdvOpen] = useState(false);
   const choice = locationChoiceOf(task);
   const CHOICES: { choice: LocationChoice; label: string; sub: string; desc: string }[] = [
     { choice: 'anywhere', label: b.locAnywhere, sub: b.locAnywhereSub, desc: b.locAnywhereDesc },
@@ -435,7 +445,7 @@ function LocationStepBody({ task, set, b }: {
           <div className="space-y-3">
               <div>
                 <Label dense>{b.locRadiusLabel}</Label>
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5" data-qs-field="geofenceRadiusMeters">
                   <Input dense type="number" min={1} className="w-24" value={radius}
                     onChange={(e) => set(radiusPatch(task, Math.max(1, parseInt(e.target.value) || DEFAULT_RADIUS_M)))} />
                   <span className="text-[11px] text-[--ink-3]">{b.metersShort}</span>

@@ -457,8 +457,17 @@ export function writeQuickSetupRecord(state: QuickSetupState): string {
 
 /** The three tabs of the mission editor (TaskWizard's WIZARD_STEP_ORDER). */
 export type TaskEditorTab = 'location' | 'details' | 'execution';
-/** The collapsed opt-in groups of the interaction tab (lib/taskOptInGroups). */
-export type TaskOptInGroup = 'hint' | 'timerPoints' | 'rules';
+/**
+ * A collapsed panel a step's target field may hide inside. `hint`/`timerPoints`/
+ * `rules` are the execution tab's opt-in chips (lib/taskOptInGroups);
+ * `locationAdvanced` is the Location step's own "⚙ advanced" panel (radius /
+ * skip-GPS / hide-location + its clue) — it has no chip, so it is not one of
+ * `OptInGroupKey`, but it is exactly as collapsed-by-default and exactly as
+ * unreachable-without-opening-it, and a step that targets `locationClue` or
+ * `geofenceRadiusMeters` or `locationHidden` is otherwise navigated to a tab with
+ * nothing visibly there to focus (change: quick-setup-mobile-visibility).
+ */
+export type TaskOptInGroup = 'hint' | 'timerPoints' | 'rules' | 'locationAdvanced';
 
 /**
  * The copy slots the flow speaks in.
@@ -532,9 +541,9 @@ export const QUICK_SETUP_FIELDS: Record<string, QuickSetupFieldEntry> = {
 
   // ── Mission editor, tab 1: where it happens ──
   'coordinates': { anchor: 'coordinates', scope: 'task', wizardStep: 'location', optInGroup: null, copy: 'coordinates' },
-  'geofenceRadiusMeters': { anchor: 'geofenceRadiusMeters', scope: 'task', wizardStep: 'location', optInGroup: null, copy: 'geofence' },
-  'locationClue': { anchor: 'locationClue', scope: 'task', wizardStep: 'location', optInGroup: null, copy: 'locationClue' },
-  'locationHidden': { anchor: 'locationHidden', scope: 'task', wizardStep: 'location', optInGroup: null, copy: 'locationHidden' },
+  'geofenceRadiusMeters': { anchor: 'geofenceRadiusMeters', scope: 'task', wizardStep: 'location', optInGroup: 'locationAdvanced', copy: 'geofence' },
+  'locationClue': { anchor: 'locationClue', scope: 'task', wizardStep: 'location', optInGroup: 'locationAdvanced', copy: 'locationClue' },
+  'locationHidden': { anchor: 'locationHidden', scope: 'task', wizardStep: 'location', optInGroup: 'locationAdvanced', copy: 'locationHidden' },
 
   // ── tab 2: what it says ──
   // `media` is deliberately NOT behind a chip: a picture is part of describing a
