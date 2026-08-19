@@ -150,8 +150,13 @@ export default function TaskWizard({
   useEffect(() => {
     if (!focusNonce) return;
     if (focusTab) setStep(stepIndexOf(focusTab) as WizardStep);
-    if (focusGroup === 'locationAdvanced') setLocAdvOpen(true);
-    else if (focusGroup) setActive((a) => ({ ...a, [focusGroup]: true }));
+    // Set, not just opened: a step that does NOT target the Advanced panel (e.g.
+    // the map pin, right after a step that DID) must actively CLOSE it, or it is
+    // left covering the map from the previous step — the panel has no idea a
+    // later step no longer needs it, since nothing else in this flow ever closes
+    // it again once opened.
+    setLocAdvOpen(focusGroup === 'locationAdvanced');
+    if (focusGroup && focusGroup !== 'locationAdvanced') setActive((a) => ({ ...a, [focusGroup]: true }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNonce]);
 
