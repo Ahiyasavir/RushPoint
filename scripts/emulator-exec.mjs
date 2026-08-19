@@ -71,6 +71,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import process from 'node:process';
+import net from 'node:net';
 import { ensureModernJava, MIN_JAVA } from './lib/resolve-java.mjs';
 import {
   resolveEmulatorPortOffset,
@@ -88,6 +89,44 @@ import {
   recordExecSessionEnd,
   reapOrphanEmulatorProcesses,
 } from './lib/reapEmulatorExec.mjs';
+import { portsToAwait } from './lib/portReadiness.mjs';
+import { sweepStaleHelpers } from './lib/killStaleHelpers.mjs';
+
+/** Resolves once a single port is free to bind, or once timeoutMs elapses. */
+function waitForOnePortFree(port, host, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  return new Promise((resolve) => {
+    const attempt = () => {
+      const probe = net.createServer();
+      probe.once('error', () => {
+        probe.close(() => {
+          if (Date.now() >= deadline) resolve(false);
+          else setTimeout(attempt, 300);
+        });
+      });
+      probe.once('listening', () => probe.close(() => resolve(true)));
+      probe.listen(port, host);
+    };
+    attempt();
+  });
+}
+
+/**
+ * Polls every port this boot needs until each is bindable, up to timeoutMs
+ * total. Returns the ports still busy at the deadline (empty if all cleared).
+ * Never hangs forever — the caller decides what to do with a non-empty result.
+ */
+async function waitForPortsFree(ports, { timeoutMs, host }) {
+  if (ports.length === 0) return [];
+  const deadline = Date.now() + timeoutMs;
+  const stillBusy = [];
+  for (const port of ports) {
+    const remaining = Math.max(0, deadline - Date.now());
+    const free = await waitForOnePortFree(port, host, remaining);
+    if (!free) stillBusy.push(port);
+  }
+  return stillBusy;
+}
 
 // Bump deliberately after testing a newer CLI — never float on @latest.
 const FIREBASE_TOOLS_VERSION = '15.18.0';
@@ -152,6 +191,49 @@ if (offsetInfo.offset > 0) {
     Object.assign(env, isolation.envOverrides);
   }
   console.log(`[emulator-exec] ${describeEmulatorIsolation(isolation)}`);
+}
+
+// ── Wait for our ports to actually be free (change: emulator-exec-port-race) ──
+// `verify:emulator` chains several `node scripts/emulator-exec.mjs "..."` calls
+// with `&&`, each a fresh process. So nothing upstream of THIS boot can guarantee
+// the OS released the previous phase's ports between its JVM receiving SIGINT and
+// this CLI trying to bind them — observed directly: a clean, unmodified boot,
+// started seconds after a prior phase's clean shutdown, failed with "Port 8080 is
+// not open … could not start Firestore Emulator". Root-caused on Windows to a
+// Firestore JVM that can outlive "exited upon receiving signal: SIGINT" by more
+// than a slow-drain timeout can reasonably cover — the log fires before the OS
+// call does, and a bounded wait alone (tried up to 45s) did not resolve it.
+//
+// The orphan reaper (reapEmulatorExec.mjs) is NOT the fix here: it already runs
+// on every exit and correctly declined to kill that JVM, because it reasons ONLY
+// about process lineage and session records, by design (see its own header) —
+// and on this Windows machine the JVM's ppid chain breaks more hops above the
+// exec root than its one-hop "orphan still names its dead parent" fallback
+// covers, so lineage alone can't reattribute it to the finished session.
+//
+// So: wait first (covers a real, if slow, release — no guessing at a sleep
+// duration). If STILL busy at the deadline, fall back to the SAME pattern-based
+// sweep free-ports.mjs already uses (scripts/lib/killStaleHelpers.mjs →
+// staleHelperSweep.mjs) — proven safe by its own carve-outs (a live dev/playtest
+// stack, an offset block, or a port outside this exact boot's list all survive
+// it), just scoped here to only THIS boot's own ports instead of the whole
+// dev-port list. Then one short final wait. A port that's still busy after ALL
+// of that is a genuinely different problem — surface the CLI's own clear error
+// instead of hanging forever.
+const boundPorts = resolveEmulatorPorts(env);
+const awaited = portsToAwait(only, boundPorts);
+const stillBusy = await waitForPortsFree(awaited, { timeoutMs: 20_000, host: '127.0.0.1' });
+if (stillBusy.length > 0) {
+  console.warn(`[emulator-exec] port(s) still busy after 20000ms wait: ${stillBusy.join(', ')} — sweeping for a leftover emulator process.`);
+  const killed = sweepStaleHelpers({ sweptPorts: stillBusy, label: 'emulator-exec' });
+  if (killed > 0) {
+    const finalBusy = await waitForPortsFree(stillBusy, { timeoutMs: 10_000, host: '127.0.0.1' });
+    if (finalBusy.length > 0) {
+      console.warn(`[emulator-exec] port(s) still busy after the sweep: ${finalBusy.join(', ')} — proceeding anyway.`);
+    }
+  } else {
+    console.warn('[emulator-exec] sweep found nothing to kill — proceeding anyway.');
+  }
 }
 
 const cmd = `npx --yes firebase-tools@${FIREBASE_TOOLS_VERSION} emulators:exec --only ${only} --project ${PROJECT_ID}${configFlag} "${script}"`;

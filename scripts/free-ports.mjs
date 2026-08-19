@@ -8,12 +8,8 @@
 
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
-import {
-  enumerateProcesses,
-  readExecSessions,
-  reapOrphanEmulatorProcesses,
-} from './lib/reapEmulatorExec.mjs';
-import { planStaleHelperSweep } from './lib/staleHelperSweep.mjs';
+import { reapOrphanEmulatorProcesses } from './lib/reapEmulatorExec.mjs';
+import { sweepStaleHelpers } from './lib/killStaleHelpers.mjs';
 
 const PORTS = [
   8081,                       // Metro (Expo)
@@ -30,32 +26,12 @@ const isWin = process.platform === 'win32';
 // emulator dead (port already taken) but its 2-min backup loop, tunnel, and
 // reverse-proxy still running. Six accumulated backup loops all firing
 // `firebase emulators:export` at the one live emulator wedges it (Firestore's
-// export takes a hub lock; overlapping exports collide). Match these by command
-// line and kill them too, so each launch starts from exactly one of each.
-const STALE_CMDLINE_PATTERNS = [
-  'scripts/emulator-backup.mjs', // the crash-safe export loop (the wedger)
-  'scripts\\emulator-backup.mjs',
-  'scripts/ngrok-tunnel.mjs',
-  'scripts\\ngrok-tunnel.mjs',
-  'scripts/proxy.mjs',
-  'scripts\\proxy.mjs',
-  'cloudflared tunnel', // the cloudflared playtest tunnel
-  // Emulator-gate orphans (change: emulator-gate hardening). A killed
-  // emulators:exec run leaves its whole tree alive — the firebase-tools parent,
-  // the emulator JVMs (their jars live under .cache/firebase/emulators), and
-  // functions-runtime workers — none of which hold a swept port. 23 leaked
-  // functionsEmulatorRuntime workers + a second live Firestore JVM once drove
-  // this machine to 90% RAM and made every gate fail with ECONNRESET/internal.
-  'functionsEmulatorRuntime',              // functions-emulator worker processes
-  'emulators:exec',                        // a stale firebase-tools exec parent
-  '.cache\\firebase\\emulators',           // emulator JVMs (firestore / rules runtimes)
-  '.cache/firebase/emulators',
-  'scripts/emulator-exec.mjs',             // our hardened exec wrapper
-  'scripts\\emulator-exec.mjs',
-  'scripts/simulate-browser-run.mjs',      // a stale browser-sim driver (holds Chromium)
-  'scripts\\simulate-browser-run.mjs',
-];
-
+// export takes a hub lock; overlapping exports collide). Matched by command line
+// via the shared pattern list (scripts/lib/staleHelperSweep.mjs's
+// STALE_HELPER_PATTERNS — change: emulator-exec-port-race pulled this list and
+// the kill loop out into scripts/lib/killStaleHelpers.mjs so emulator-exec.mjs's
+// own pre-boot sweep uses the EXACT same safety carve-outs, not a second copy).
+//
 // Enumerate → decide → kill. There is deliberately NO selection logic here: every `if`
 // about *whether* a process may die lives in the pure, unit-tested
 // scripts/lib/staleHelperSweep.mjs (change: emulator-gate-isolation). Before that split
@@ -66,32 +42,7 @@ const STALE_CMDLINE_PATTERNS = [
 // different LIVE port block (a running emulators:exec session, an offset marker, or a
 // `--port` outside the block being swept) and kills everything else exactly as before.
 function killStaleHelpers() {
-  const processes = enumerateProcesses();
-  if (processes.length === 0) return;   // no snapshot ⇒ no guessing, no kills
-  const plan = planStaleHelperSweep({
-    processes,
-    patterns: STALE_CMDLINE_PATTERNS,
-    sessions: readExecSessions(),
-    // The clock only ages out an unfinished session record: a gate killed by a power cut
-    // never stamps `endedAt`, and without a bound its debris would be permanently
-    // unkillable — the exact wedge this script exists to clear.
-    nowMs: Date.now(),
-    sweptPorts: PORTS,
-    selfPid: process.pid,
-    protectedPids: [process.ppid].filter((p) => Number.isFinite(Number(p))),
-  });
-  const spared = plan.keep.filter((k) => k.reason === 'live-exec-session'
-    || k.reason === 'offset-port-block' || k.reason === 'foreign-port-block');
-  if (spared.length > 0) {
-    console.log(`[free-ports] Spared ${spared.length} process(es) belonging to a different live emulator block.`);
-  }
-  for (const victim of plan.kill) {
-    const pid = String(victim.pid);
-    const r = isWin
-      ? spawnSync('taskkill', ['/PID', pid, '/F', '/T'], { stdio: 'ignore' })
-      : spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
-    if (r.status === 0) console.log(`[free-ports] Killed stale helper (PID ${pid})`);
-  }
+  sweepStaleHelpers({ sweptPorts: PORTS, label: 'free-ports' });
 }
 
 function killStaleImagesWindows() {

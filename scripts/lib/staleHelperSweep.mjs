@@ -46,6 +46,33 @@ export const OFFSET_MARKER_PATTERNS = Object.freeze([
   'RUSHPOINT_EMULATOR_PORT_OFFSET',
 ]);
 
+/**
+ * Command-line substrings identifying a leftover emulator-gate helper, shared by
+ * free-ports.mjs (sweeps the whole dev-port list before `dev:all`/`playtest`) and
+ * emulator-exec.mjs (change: emulator-exec-port-race — sweeps just THIS boot's
+ * ports as a fallback when a port is still busy after waiting). One list so the
+ * two callers can never drift: a pattern added for one sweep protects the other
+ * for free. See the module header above for why a pattern match alone is not
+ * sufficient — `planStaleHelperSweep` still applies the live-port-block carve-outs.
+ */
+export const STALE_HELPER_PATTERNS = Object.freeze([
+  'scripts/emulator-backup.mjs',
+  'scripts\\emulator-backup.mjs',
+  'scripts/ngrok-tunnel.mjs',
+  'scripts\\ngrok-tunnel.mjs',
+  'scripts/proxy.mjs',
+  'scripts\\proxy.mjs',
+  'cloudflared tunnel',
+  'functionsEmulatorRuntime',
+  'emulators:exec',
+  '.cache\\firebase\\emulators',
+  '.cache/firebase/emulators',
+  'scripts/emulator-exec.mjs',
+  'scripts\\emulator-exec.mjs',
+  'scripts/simulate-browser-run.mjs',
+  'scripts\\simulate-browser-run.mjs',
+]);
+
 function lower(value) {
   return typeof value === 'string' ? value.toLowerCase() : '';
 }
