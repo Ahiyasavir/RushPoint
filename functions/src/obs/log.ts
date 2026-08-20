@@ -70,7 +70,23 @@ export async function logCall<T>(meta: CallMeta, body: () => Promise<T>): Promis
   } catch (err) {
     const ms = Date.now() - startedAtMs;
     const code = (err as { code?: string } | undefined)?.code;
-    if (code) active.warn('callable.error', { ...meta, errorCode: code, ms });
+    // The MESSAGE, not just the code. `invalid-argument` is thrown from a dozen
+    // separate guards in updateGame and the message is the only thing that names
+    // WHICH one (and which stage/task) — without it a refused autosave logs a line
+    // that proves only "something was invalid". That gap cost a live debugging
+    // session on 2026-08-20, where a creator's every save was being rejected and
+    // the logs could not say why.
+    const message = (err as { message?: unknown } | undefined)?.message;
+    if (code) {
+      active.warn('callable.error', {
+        ...meta,
+        errorCode: code,
+        // Omitted rather than stringified when absent, so a blank never shows up
+        // as the literal "undefined" in a log search.
+        ...(typeof message === 'string' && message.trim() !== '' ? { errorMessage: message } : {}),
+        ms,
+      });
+    }
     else active.error('callable.crash', { ...meta, err: String(err), ms });
     throw err;
   }

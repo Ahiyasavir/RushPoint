@@ -46,6 +46,34 @@ describe('logCall — one structured record per invocation', () => {
     expect(records[0].data).toMatchObject({ callable: 'joinRun', errorCode: 'permission-denied' });
   });
 
+  // The CODE alone is not diagnosable. `invalid-argument` is thrown from a dozen
+  // guards in updateGame, and the message is the only thing that says WHICH one —
+  // it names the offending stage/task. Without it, a creator whose autosave is
+  // being refused produces a log line that proves only "something was invalid",
+  // which is exactly the wall this hit in production on 2026-08-20.
+  test('the rejection MESSAGE is logged, not just the code', async () => {
+    const { logger, records } = fakeLogger();
+    __setObsLogger(logger);
+    const err = Object.assign(
+      new Error('Stage "משימות תחרות": requiredTaskCount 4 exceeds the 3 completions this stage can yield'),
+      { code: 'invalid-argument' },
+    );
+    await expect(logCall({ callable: 'updateGame', uid: 'u3' }, async () => { throw err; })).rejects.toBe(err);
+    expect(records[0].data).toMatchObject({
+      callable: 'updateGame',
+      errorCode: 'invalid-argument',
+      errorMessage: err.message,
+    });
+  });
+
+  test('a missing message never becomes the string "undefined"', async () => {
+    const { logger, records } = fakeLogger();
+    __setObsLogger(logger);
+    const err = Object.assign(new Error(''), { code: 'not-found' });
+    await expect(logCall({ callable: 'getGame' }, async () => { throw err; })).rejects.toBe(err);
+    expect(records[0].data).not.toHaveProperty('errorMessage');
+  });
+
   test('an unexpected throw (no .code) logs one error callable.crash and re-throws', async () => {
     const { logger, records } = fakeLogger();
     __setObsLogger(logger);
