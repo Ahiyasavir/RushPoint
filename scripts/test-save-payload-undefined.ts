@@ -115,6 +115,36 @@ function taskOf(payload: unknown): Record<string, unknown> {
     'safeZone' in payload && payload.safeZone === null, JSON.stringify(payload.safeZone));
 }
 
+// ── A CLEARED number field must arrive absent, not as null ───────────────────
+// The same trap as `undefined`, reached by a different road. A React number input
+// yields NaN for an empty box, NaN is not `undefined` so it survived the cleaner,
+// and the callable transport encodes NaN as null on the wire. The server then sees
+// a PRESENT-but-not-a-number optional field and refuses the save — so clearing one
+// duration box wedged every autosave from then on, and the creator's edits stopped
+// persisting with nothing on screen but a readiness panel reopening itself.
+// Reproduced against a real production game on 2026-08-21.
+{
+  const g = gameWith({ expectedDurationMinutes: Number.NaN });
+  const payload = buildSavePayload(g) as unknown as Record<string, unknown>;
+  const task = taskOf(payload);
+  check('a cleared number (NaN) is dropped, not sent',
+    !('expectedDurationMinutes' in task), JSON.stringify(task.expectedDurationMinutes));
+  check('the payload carries no non-finite number anywhere',
+    JSON.stringify(payload) === JSON.stringify(JSON.parse(JSON.stringify(payload))),
+    JSON.stringify(payload).slice(0, 80));
+}
+{
+  // Infinity is the same class of accident (a divide, a parse) and equally fatal.
+  const task = taskOf(buildSavePayload(gameWith({ pointValue: Number.POSITIVE_INFINITY })) as unknown as Record<string, unknown>);
+  check('a non-finite Infinity is dropped too', !('pointValue' in task), JSON.stringify(task.pointValue));
+}
+{
+  // ...but real authored numbers must survive untouched, including 0.
+  const task = taskOf(buildSavePayload(gameWith({ pointValue: 0, expectedDurationMinutes: 12 })) as unknown as Record<string, unknown>);
+  check('0 is an authored value and is kept', task.pointValue === 0, JSON.stringify(task.pointValue));
+  check('a real duration is kept', task.expectedDurationMinutes === 12, JSON.stringify(task.expectedDurationMinutes));
+}
+
 // ── Totality: the cleaner must not corrupt the payload's shape ────────────────
 {
   const payload = buildSavePayload(gameWith({})) as unknown as Record<string, unknown>;

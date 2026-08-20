@@ -114,7 +114,8 @@ export function buildSavePayload(game: Game): UpdateGamePayload {
 }
 
 /**
- * Recursively remove object keys whose value is `undefined`.
+ * Recursively remove object keys whose value is `undefined` OR a non-finite
+ * number (NaN / ±Infinity).
  *
  * `null` is KEPT: it is a deliberate value elsewhere in this payload, and only
  * `undefined` carries the "never set / just cleared" meaning. `0`, `false` and `''`
@@ -122,6 +123,20 @@ export function buildSavePayload(game: Game): UpdateGamePayload {
  * setting a creator chose. Arrays keep their length so no index shifts underneath a
  * task id. Non-plain values (Date, class instances) are returned as-is rather than
  * rebuilt, so this can never quietly flatten something it does not understand.
+ *
+ * ─── Why NaN is treated as "cleared", not as a value ─────────────────────────
+ * A React number input yields NaN for an empty box, so clearing a duration or a
+ * points field produces NaN rather than `undefined`. NaN then survived this
+ * cleaner (it is not `undefined`) and the callable transport encoded it as `null`
+ * on the wire — exactly the shape the server's optional-field guards refuse
+ * (`expectedDurationMinutes must be a non-negative number`). One cleared box
+ * therefore wedged EVERY subsequent autosave: the creator kept editing, nothing
+ * persisted, and the only symptom was the readiness panel reopening itself on
+ * each attempt. Reproduced against a real production game on 2026-08-21.
+ *
+ * Dropping the key means "cleared" arrives ABSENT, which every optional guard
+ * already accepts — the same resolution the `undefined` case got, applied to the
+ * other road that reaches the same trap.
  */
 function dropUndefinedDeep<T>(value: T): T {
   if (Array.isArray(value)) {
@@ -132,6 +147,8 @@ function dropUndefinedDeep<T>(value: T): T {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
     if (v === undefined) continue;
+    // A number that cannot survive JSON is not a value the creator chose.
+    if (typeof v === 'number' && !Number.isFinite(v)) continue;
     out[k] = dropUndefinedDeep(v);
   }
   return out as unknown as T;
