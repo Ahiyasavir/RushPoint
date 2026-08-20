@@ -117,3 +117,7 @@ export * from './adminNotes';
 // Admin-only creator activity rollup — pure aggregation, no Firestore/Auth I/O
 // (change: admin-user-activity-dashboard).
 export * from './adminUserActivity';
+// Template personalization — the structural rules the new-game wizard's answers
+// produce (capacity, mode, consent, pacing), applied server-side inside
+// createGameFromTemplate (change: guided-new-game-wizard).
+export * from './gamePersonalization';

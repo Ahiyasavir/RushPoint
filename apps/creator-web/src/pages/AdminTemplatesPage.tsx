@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../services/firebase';
 import { createGame, listAdminTemplates, setGameTemplateFlag, deleteGame, importGameFile, updateGame } from '../services/calls';
-import type { Game, GameFile } from '@rushpoint/shared';
+import type { Game, GameFile, TemplateGenre } from '@rushpoint/shared';
 // The SAME pure parser the server runs, so an obviously bad file fails instantly
 // with the real reason instead of a round trip (mirrors BuilderPage/DashboardPage).
 import { parseGameFile, extractQuickSetupSteps } from '@rushpoint/shared';
@@ -43,6 +43,12 @@ export default function AdminTemplatesPage() {
   const [editingMeta, setEditingMeta] = useState<string | null>(null); // gameId of the open emoji/order editor
   const [emojiDraft, setEmojiDraft] = useState('');
   const [orderDraft, setOrderDraft] = useState('');
+  // What KIND of game this template is (change: guided-new-game-wizard). The
+  // new-game wizard asks "a story, or missions?" and resolves the answer through
+  // THIS field — declared here, never guessed from the title or picker order.
+  // '' means "not declared", which keeps the template out of the wizard's answers
+  // while leaving it fully usable in the ordinary picker.
+  const [genreDraft, setGenreDraft] = useState<'' | TemplateGenre>('');
   const [savingMeta, setSavingMeta] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // Which template's setup instructions are being lifted into הקמה מהירה
@@ -159,6 +165,7 @@ export default function AdminTemplatesPage() {
     setEditingMeta(g.id);
     setEmojiDraft(g.templateEmoji ?? '');
     setOrderDraft(String(g.templateOrder ?? ''));
+    setGenreDraft(g.templateGenre ?? '');
   }
 
   async function saveMeta(g: Game) {
@@ -169,6 +176,7 @@ export default function AdminTemplatesPage() {
         gameId: g.id, isTemplate: true,
         templateEmoji: emojiDraft.trim() || undefined,
         templateOrder: Number.isFinite(order) ? order : undefined,
+        templateGenre: genreDraft || undefined,
       });
       setEditingMeta(null);
       void load();
@@ -326,6 +334,15 @@ export default function AdminTemplatesPage() {
                   <div className="space-y-1.5 pt-1 border-t border-[--rp-border]">
                     <Input dense value={emojiDraft} onChange={(e) => setEmojiDraft(e.target.value)} placeholder={at.emojiLabel} aria-label={at.emojiLabel} />
                     <Input dense value={orderDraft} onChange={(e) => setOrderDraft(e.target.value)} placeholder={at.orderLabel} aria-label={at.orderLabel} inputMode="numeric" />
+                    {/* Which wizard answer this template answers. Left blank, the
+                        template simply is not offered as a wizard choice. */}
+                    <select aria-label={at.genreLabel} value={genreDraft}
+                      onChange={(e) => setGenreDraft(e.target.value as '' | TemplateGenre)}
+                      className="rounded-lg border border-[--rp-border] bg-[--surface-1] text-[--ink-1] text-sm px-2 py-1.5">
+                      <option value="">{at.genreNone}</option>
+                      <option value="missions">{at.genreMissions}</option>
+                      <option value="story">{at.genreStory}</option>
+                    </select>
                     <div className="flex gap-2">
                       <Button className="!py-1 !text-xs" onClick={() => void saveMeta(g)} loading={savingMeta}>{at.saveMetaBtn}</Button>
                       <button className="text-xs text-[--ink-3]" onClick={() => setEditingMeta(null)}>{at.cancelBtn}</button>

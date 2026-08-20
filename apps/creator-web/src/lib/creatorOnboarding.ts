@@ -641,3 +641,100 @@ export function tourCardPosition({ rect, viewport, card, placement, rtl = false 
 
   return { top: clampInto(top, ch, vh), left: clampInto(left, cw, vw) };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Builder first-open spotlight (change: guided-new-game-wizard)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The full TOUR_STEPS walkthrough above owns the first-SIGNUP moment, and git
+// history records why it must not be stretched to cover this one: auto-firing it
+// on an empty dashboard described screens that did not exist yet (ae512a5). But
+// the hardest reported problem with this product is not building a mission — it is
+// understanding what a "stage" and a "mission" even are, and that question is
+// asked while staring at the Builder, not the dashboard.
+//
+// So the Builder gets its own two-step explainer, pointing at the real panes.
+// Deliberately tiny: three steps is the ceiling, because anything longer stops
+// being an explanation and becomes a thing to dismiss.
+//
+// WHO ACTUALLY SEES IT. It yields to both the full tour and Quick Setup, and Quick
+// Setup auto-opens on Builder mount for any game built from a template — so a
+// guided-path creator is never shown two overlays at once, and this becomes the
+// SCRATCH creator's explainer. That is precisely the creator who gets no other
+// guidance anywhere in the product.
+
+/** One spotlight step. Copy lives in i18n (`t.tour.spotlight[id]`). */
+export interface SpotlightStep {
+  id: string;
+  /** `data-tour` value to point at. Never null — a centred card would explain
+   *  nothing here, and scripts/test-builder-spotlight.ts asserts each anchor
+   *  really exists in BuilderPage.tsx. */
+  anchor: string;
+  placement: TourPlacement;
+}
+
+export const SPOTLIGHT_STEPS: readonly SpotlightStep[] = [
+  // The stage rail lives inside the canvas region on a phone (the 3-pane shell
+  // restacks below `sm`), so both steps anchor on elements that exist at every
+  // width rather than on a desktop-only pane.
+  { id: 'stages', anchor: 'builder-breadcrumb', placement: 'bottom' },
+  { id: 'missions', anchor: 'builder-canvas', placement: 'center' },
+];
+
+/** Separate from TOUR_SEEN_KEY_PREFIX on purpose: dismissing one must not
+ *  silently dismiss the other. */
+export const SPOTLIGHT_SEEN_KEY_PREFIX = 'rp-builder-spotlight-seen';
+
+export interface SpotlightRecord { seen: true }
+
+/** Per-creator key, so two accounts on one browser never share a record. */
+export function spotlightSeenKey(uid: string | undefined | null): string {
+  const clean = typeof uid === 'string' ? uid.trim() : '';
+  return `${SPOTLIGHT_SEEN_KEY_PREFIX}:${clean || 'anon'}`;
+}
+
+/**
+ * Parse a stored record. Anything unparseable reads as never-seen, which is the
+ * friendlier failure: a blocked storage shows the explainer rather than
+ * swallowing it.
+ */
+export function readSpotlightRecord(raw: string | null | undefined): SpotlightRecord | null {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return (parsed as SpotlightRecord).seen === true ? { seen: true } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Should the Builder spotlight run right now? Total — never throws. */
+export function shouldStartBuilderSpotlight(args: {
+  record: SpotlightRecord | null;
+  tourRunning: boolean;
+  quickSetupActive: boolean;
+}): boolean {
+  if (!args || typeof args !== 'object') return false;
+  if (args.record?.seen === true) return false;
+  // Two guided overlays at once is worse than none.
+  if (args.tourRunning === true) return false;
+  if (args.quickSetupActive === true) return false;
+  return true;
+}
+
+/**
+ * The steps whose anchors are actually on screen. A step whose target is not
+ * mounted is SKIPPED rather than highlighting empty space — a collapsed panel, a
+ * narrow viewport or a game with no missions yet all produce missing anchors.
+ */
+export function visibleSpotlightSteps(isMounted: (anchor: string) => boolean): SpotlightStep[] {
+  if (typeof isMounted !== 'function') return [];
+  return SPOTLIGHT_STEPS.filter((s) => {
+    try {
+      return isMounted(s.anchor) === true;
+    } catch {
+      return false;
+    }
+  });
+}

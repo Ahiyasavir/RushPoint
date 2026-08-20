@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import type { Game, GameMode, ScoringPreset, Stage, GameFile } from '@rushpoint/shared';
+import type { Game, GameMode, Stage, GameFile } from '@rushpoint/shared';
 import {
   GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL,
   DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile,
@@ -11,7 +11,8 @@ import {
   createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
-import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
+import NewGameWizard, { type WizardSubmission, type WizardTemplate } from '../components/NewGameWizard';
+import { Badge, Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { LoadingState } from '../components/LoadingState';
 import { OverflowMenu } from '../components/OverflowMenu';
@@ -34,10 +35,6 @@ import {
   skeletonCardCount,
   type OnboardingStepId,
 } from '../lib/creatorOnboarding';
-import {
-  describeGameSettings,
-  templateDescription, templateLabel,
-} from '../lib/templateLabels';
 
 // "Blank" stays a hardcoded, always-first, client-side special case — NOT a real
 // admin-editable template (design decision, admin-manage-game-templates). One
@@ -209,7 +206,6 @@ export default function DashboardPage() {
   // The template the creator selected but has not confirmed yet — the moment the
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<PickerChoice | null>(null);
-  const [chosenPreset, setChosenPreset] = useState<ScoringPreset>('smart_weighted');
   // Firestore-backed templates (change: admin-manage-game-templates). null = still
   // loading; [] + failed = the fetch errored. Seeded SYNCHRONOUSLY from the cache
   // (perf: template-picker-latency) so a returning creator's picker paints its menu
@@ -218,11 +214,12 @@ export default function DashboardPage() {
   const [templateGroups, setTemplateGroups] = useState<TemplateGroupEntry[] | null>(
     () => peekTemplates()?.entry.templates ?? null,
   );
-  const [templatesFailed, setTemplatesFailed] = useState(false);
+  // Only written, never read: the wizard's scratch path works with no templates
+  // at all, so a failed menu load must not become a dead end.
+  const [, setTemplatesFailed] = useState(false);
   const { lang } = useLanguage();
   // Scoring is an easy-wizard default: Create proceeds on the template's own
   // preset unless the creator opens this disclosure to change it.
-  const [showScoring, setShowScoring] = useState(false);
   // Picking a template card reveals a settings + "Create" panel that often sits
   // below the fold, so the creator sees only a highlight and thinks nothing happened.
   // Bring it into view and land focus on the Create button whenever the choice changes.
@@ -259,11 +256,32 @@ export default function DashboardPage() {
   // callable. These hold for the whole duration of the promise instead.
   // launch/publish/delete are keyed by game id so acting on one card never
   // blocks another.
-  const newGameAction = useAsyncAction<[PickerChoice, ScoringPreset?], void>(newGame);
+  const newGameAction = useAsyncAction<[WizardSubmission], void>(newGame);
   const launchAction = useAsyncAction<[Game, { testDrive?: boolean }?], void>(launch, (g) => g.id);
   const publishAction = useAsyncAction(togglePublish, (g: Game) => g.id);
   const removeAction = useAsyncAction(remove, (g: Game) => g.id);
   const busy = newGameAction.busy || launchAction.busy;
+
+  /**
+   * The templates the wizard can offer, flattened out of the grouped menu and
+   * resolved to the creator's own language (change: guided-new-game-wizard).
+   * `templateGenre` rides along so the wizard can map "a story, or missions?" onto
+   * a real template without guessing.
+   */
+  const wizardTemplates: WizardTemplate[] = useMemo(
+    () => orderTemplatesForPicker(templateGroups ?? [], lang).map((r) => ({
+      groupKey: r.groupKey,
+      templateEmoji: r.templateEmoji,
+      templateGenre: r.variant.templateGenre,
+      title: r.variant.title,
+      description: r.variant.description,
+      stageCount: r.variant.stageCount,
+      taskCount: r.variant.taskCount,
+      id: r.variant.id,
+      ownerUid: r.variant.ownerUid,
+    })),
+    [templateGroups, lang],
+  );
 
   async function load(invalidate = false) {
     if (!invalidate && readGamesCache(user?.uid)) return;
@@ -352,17 +370,26 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, [picking]);
 
-  async function newGame(choice: PickerChoice, preset?: ScoringPreset) {
+  /**
+   * Create whatever the wizard asked for (change: guided-new-game-wizard).
+   *
+   * ONE call per path, and the guided path is a single atomic
+   * `createGameFromTemplate` — personalization is applied server-side inside that
+   * same write, so a failure can never leave a half-personalized game behind.
+   * Navigating to /build/<id> IS the Quick Setup handoff: BuilderPage already
+   * offers it on mount for a game carrying wizardSteps.
+   */
+  async function newGame(submission: WizardSubmission) {
+    const { plan } = submission;
     setPicking(false);
-    setChosen(null);
 
-    if (choice.kind === 'blank') {
+    if (plan.kind === 'blank') {
       try {
-        const { gameId } = await createGame({ title: d.untitledGame, mode: BLANK_MODE, tags: [] });
+        const { gameId } = await createGame({ title: plan.title, mode: BLANK_MODE, tags: [] });
         // Wrong-answer cost (change: wrong-answer-cost): NEW games are seeded at
         // the default level so brute forcing a quiz is no longer free.
         await updateGame({
-          gameId, stages: [blankStage()], scoringPreset: preset ?? 'smart_weighted',
+          gameId, stages: [blankStage()], scoringPreset: 'smart_weighted',
           scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
         });
         _gamesCache = null;
@@ -371,37 +398,39 @@ export default function DashboardPage() {
         console.error('[dashboard] create blank game failed:', e);
         await dialog.alert(d.templateFailed);
         setPicking(true);
-        setChosen(choice);
       }
       return;
     }
 
-    const { variant } = choice.resolved;
-    const finalPreset = preset ?? variant.scoringPreset;
+    const template = submission.template;
+    if (!template) { await dialog.alert(d.templateFailed); setPicking(true); return; }
     try {
-      const { gameId } = await createGameFromTemplate({
-        templateGameId: variant.id, title: variant.title, scoringPreset: finalPreset,
+      const res = await createGameFromTemplate({
+        templateGameId: template.id,
+        title: plan.title,
         // Which admin owns this template — straight from the menu the server just
         // sent us, so the server reads one document instead of every template in
         // full (perf: template-picker-latency).
-        templateOwnerUid: variant.ownerUid,
+        templateOwnerUid: template.ownerUid,
+        description: submission.description,
+        tags: submission.tags,
+        personalize: plan.personalize,
       });
-      // Invalidate the games cache — otherwise returning to the dashboard within
-      // the TTL serves a stale list that's missing this just-created game.
       _gamesCache = null;
-      nav(`/build/${gameId}`);
+      // Told, not hidden: the client cannot estimate play time (the template menu
+      // carries counts, not stages), so this is the only honest moment to say the
+      // game may overrun the duration that was asked for.
+      if (res?.fitsRequestedDuration === false && typeof res.estimatedMinutes === 'number') {
+        await dialog.alert(d.wizard.longerThanAsked(res.estimatedMinutes));
+      }
+      nav(`/build/${res.gameId}`);
     } catch (e) {
-      // The picker closes FIRST, so a failure here used to leave the creator on
-      // an unchanged dashboard with no game, no navigation and no error at all
-      // (change: play-no-silent-failures). Re-open the picker so the choice the
-      // creator already made is not lost. createGameFromTemplate is a single
-      // atomic server call (unlike the old create+seed two-step), so there is no
-      // orphaned game doc to clean up on failure.
+      // The wizard closes FIRST, so a failure here used to leave the creator on an
+      // unchanged dashboard with no game and no error at all
+      // (change: play-no-silent-failures). Re-open so the answers are not lost.
       console.error('[dashboard] create from template failed:', e);
       await dialog.alert(d.templateFailed);
       setPicking(true);
-      setChosen(choice);
-      setChosenPreset(finalPreset);
     }
   }
 
@@ -856,93 +885,21 @@ export default function DashboardPage() {
                 on a normal screen, and only this region (never the page) scrolls on
                 a very short viewport. */}
             <div className="overflow-y-auto p-5 pt-4">
-              <div className="grid sm:grid-cols-2 gap-2.5">
-                {/* "Blank" is hardcoded, always first — not a real admin-editable
-                    template (design decision, admin-manage-game-templates). */}
-                {(() => {
-                  const selected = chosen?.kind === 'blank';
-                  return (
-                    <button disabled={busy}
-                      onClick={() => { setChosen({ kind: 'blank' }); setChosenPreset('smart_weighted'); }}
-                      aria-pressed={selected}
-                      className={`flex items-start gap-3 text-start rounded-xl border bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group ${
-                        selected ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}>
-                      <div className="text-2xl leading-none shrink-0 mt-0.5">📄</div>
-                      <div className="min-w-0">
-                        <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors">{templateLabel('blank', t)}</div>
-                        <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2">{templateDescription('blank', t)}</div>
-                      </div>
-                    </button>
-                  );
-                })()}
-
-                {templateGroups === null ? (
-                  <div className="col-span-2 flex items-center gap-2 text-sm text-[--ink-3] p-3">
-                    <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
-                    {d.templatesLoading}
-                  </div>
-                ) : templatesFailed ? (
-                  <p className="col-span-2 text-sm text-rp-alert p-3" role="alert">{d.templatesLoadFailed}</p>
-                ) : (
-                  orderTemplatesForPicker(templateGroups, lang).map((resolved) => {
-                    const selected = chosen?.kind === 'template' && chosen.resolved.groupKey === resolved.groupKey;
-                    return (
-                      <button key={resolved.groupKey} disabled={busy}
-                        onClick={() => { setChosen({ kind: 'template', resolved }); setChosenPreset(resolved.variant.scoringPreset); }}
-                        aria-pressed={selected}
-                        className={`flex items-start gap-3 text-start rounded-xl border bg-[--surface-1] dark:bg-[--surface-2]/50 p-3 hover:border-rp-fire/40 hover:bg-rp-fire/5 dark:hover:bg-rp-fire/8 transition-all duration-150 disabled:opacity-40 group ${
-                          selected ? 'border-rp-fire bg-rp-fire/5' : 'border-[--rp-border]'}`}>
-                        <div className="text-2xl leading-none shrink-0 mt-0.5">{resolved.templateEmoji || '🧩'}</div>
-                        <div className="min-w-0">
-                          <div className="font-brand font-semibold text-[--ink-1] text-sm group-hover:text-rp-fire transition-colors" dir="auto">{resolved.variant.title}</div>
-                          <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed line-clamp-2" dir="auto">{resolved.variant.description || d.templateFallbackDesc}</div>
-                          <div className="text-[10px] text-[--ink-3] mt-1 font-medium tabular-nums">{d.templateMeta(resolved.variant.stageCount, resolved.variant.taskCount)}</div>
-                        </div>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* Nothing that shapes the game is assigned invisibly: the play mode
-                  and the scoring style are stated here, and the scoring style can
-                  be changed BEFORE the game is created. */}
-              {chosen && (
-                <div ref={chosenPanelRef} className="mt-4 rounded-xl border border-[--rp-border] bg-[--surface-1] dark:bg-[--surface-2]/40 p-4">
-                  <p className="text-[11px] text-[--ink-3] mb-3">{d.settingsIntro}</p>
-                  <div className="mb-3">
-                    <Label>{d.modeLabel}</Label>
-                    <p className="text-sm text-[--ink-2]">
-                      {describeGameSettings(chosen.kind === 'blank' ? BLANK_MODE : chosen.resolved.variant.mode, chosenPreset, t).mode}
-                    </p>
-                  </div>
-                  {/* The template sets a sensible scoring preset; Create uses it as
-                      is. Scoring only surfaces on demand, with its one-line
-                      description — no unexplained decision before the game exists. */}
-                  <Advanced
-                    dense
-                    title={d.changeScoring}
-                    meta={b.presetLabels[chosenPreset].name}
-                    open={showScoring}
-                    onToggle={() => setShowScoring((v) => !v)}
-                  >
-                    <Label>{d.scoringLabel}</Label>
-                    <Select value={chosenPreset} onChange={(e) => setChosenPreset(e.target.value as ScoringPreset)}>
-                      <option value="time_only">{d.scoringTimeOnly}</option>
-                      <option value="fixed_points_speed">{d.scoringFixedPointsSpeed}</option>
-                      <option value="smart_weighted">{d.scoringSmartWeighted}</option>
-                    </Select>
-                    <p className="text-[11px] text-[--ink-3] leading-relaxed">{b.presetLabels[chosenPreset].desc}</p>
-                  </Advanced>
-                  <Button
-                    className="mt-4 w-full"
-                    disabled={busy}
-                    loading={newGameAction.busy}
-                    onClick={() => void newGameAction.run(chosen, chosenPreset)}
-                  >
-                    {d.createFromTemplate}
-                  </Button>
+              {templateGroups === null ? (
+                <div className="flex items-center gap-2 text-sm text-[--ink-3] p-3">
+                  <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
+                  {d.templatesLoading}
                 </div>
+              ) : (
+                /* The wizard, not a template list (change: guided-new-game-wizard).
+                   A failed template load is NOT fatal here: the wizard still offers
+                   the scratch path, which needs no template at all, so a creator is
+                   never stranded by a menu that would not load. */
+                <NewGameWizard
+                  templates={wizardTemplates}
+                  busy={busy || newGameAction.busy}
+                  onSubmit={(submission) => void newGameAction.run(submission)}
+                />
               )}
             </div>
           </div>

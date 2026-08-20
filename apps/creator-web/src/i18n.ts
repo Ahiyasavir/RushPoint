@@ -258,7 +258,50 @@ const HE = {
     cardDelete:   'מחיקה',
     cardMoreActions: 'עוד פעולות',
     modalTitle:   'התחל משחק חדש',
-    modalSub:     'בחר תבנית כדי להתחיל תוך שניות',
+    modalSub:     'כמה שאלות קצרות, ואתם בפנים',
+    // ── Guided new-game wizard (change: guided-new-game-wizard) ──
+    wizard: {
+      nameTitle:    'איך נקרא למשחק?',
+      nameSub:      'תמיד אפשר לשנות אחר כך.',
+      namePlaceholder: 'למשל: מרוץ השבט',
+      pathTitle:    'איך תרצו להתחיל?',
+      scratchTitle: 'להתחיל מאפס',
+      scratchBody:  'דף ריק. אתם בונים הכל בעצמכם.',
+      guidedTitle:  'שנבנה לכם משחק',
+      guidedBody:   'כמה שאלות קצרות, ואתם מקבלים משחק מוכן לעריכה.',
+      detailsTitle: 'ספרו לנו על המשחק',
+      detailsSub:   'אפשר לדלג על הכל, יש ברירות מחדל.',
+      typeLabel:    'סוג המשחק',
+      typeMissions: 'משחק משימות',
+      typeStory:    'משחק עלילה',
+      peopleLabel:  'כמה משתתפים?',
+      durationLabel:'כמה זמן?',
+      ageLabel:     'גיל המשתתפים',
+      minutesShort: (n: number) => `${n} דק׳`,
+      peopleUpTo:   (n: number) => `עד ${n}`,
+      peoplePlus:   (n: number) => `${n}+`,
+      // Age bands are spelled out in words: the copy standard forbids every
+      // hyphen, so "14-17" can never be shown (scripts/test-no-dashes.ts).
+      ageRange:     (from: number, to: number) => `${from} עד ${to}`,
+      agePlus:      (n: number) => `${n}+`,
+      previewTitle: 'מה נבנה לכם',
+      // Distinct from a failed LOAD: the menu arrived fine, but no template
+      // declares which kind of game it is, so there is nothing honest to offer.
+      noGenreTemplates: 'אין עדיין תבניות מסומנות לאשף. אפשר להתחיל מדף ריק, או לסמן תבנית בעמוד התבניות.',
+      previewMeta:  (stages: number, tasks: number) => `${stages} שלבים · ${tasks} משימות`,
+      back:         'חזרה',
+      next:         'הבא',
+      create:       'בנו לי את המשחק',
+      createBlank:  'פתחו דף ריק',
+      // Shown after creation when the game could not be trimmed to fit.
+      longerThanAsked: (minutes: number) => `המשחק עשוי להימשך בסביבות ${minutes} דקות, יותר ממה שביקשתם. אפשר להסיר משימות בעורך.`,
+      consentNotice: 'למשתתפים מתחת לגיל 14 נדרש אישור הורה. הפעלנו את זה עבורכם, ואפשר לשנות בהגדרות.',
+      // Age bands — ids come from AGE_BANDS in @rushpoint/shared.
+      ageTag:       (band: string) => `גילאי ${band}`,
+      durationTag:  (minutes: number) => `${minutes} דקות`,
+      descriptionLead: (people: number, minutes: number, ageLabel: string) =>
+        `משחק שדה עבור ${people} משתתפים בגילאי ${ageLabel}, בסביבות ${minutes} דקות`,
+    },
     // Delete confirmation (change: recoverable-game-deletion). Replaces the old
     // one-click confirm; the creator types the game title to confirm.
     deleteDialogTitle: 'מחיקת משחק',
@@ -1769,6 +1812,20 @@ const HE = {
     settingsTitle: 'סיור מודרך',
     settingsDesc: 'הסבר קצר על כל המסכים: בניית משחק, השקה וניהול ריצה חיה. אפשר להפעיל אותו שוב מתי שרוצים.',
     settingsBtn: 'הפעלת הסיור',
+    // Builder first-open spotlight (change: guided-new-game-wizard) — two steps,
+    // in situ, naming the only two words the Builder is built on.
+    spotlight: {
+      gotIt: 'הבנתי',
+      next: 'הבא',
+      stages: {
+        title: 'זה שלב',
+        body: 'משחק בנוי משלבים, בזה אחר זה. כל שלב הוא קבוצה של משימות שהשחקנים משלימים לפני שהם עוברים הלאה.',
+      },
+      missions: {
+        title: 'אלו המשימות',
+        body: 'משימה היא מה שהשחקנים עושים בפועל: להגיע למקום, לפתור חידה, לצלם. כאן מוסיפים ועורכים אותן.',
+      },
+    },
     steps: {
       welcome: {
         title: 'ברוכים הבאים',
@@ -1940,6 +1997,12 @@ const HE = {
     editMetaBtn:      'סמל וסדר',
     emojiLabel:       'סמל (אימוג\'י)',
     orderLabel:       'מיקום בבורר',
+    // What kind of game this template is, for the new-game wizard
+    // (change: guided-new-game-wizard).
+    genreLabel:       'סוג המשחק (לאשף)',
+    genreNone:        'לא מוגדר',
+    genreMissions:    'משחק משימות',
+    genreStory:       'משחק עלילה',
     saveMetaBtn:      'שמירה',
     metaSaveFailed:   'השמירה נכשלה',
     cancelBtn:        'ביטול',
@@ -2198,7 +2261,47 @@ const EN: typeof HE = {
     cardDelete:    'Delete',
     cardMoreActions: 'More actions',
     modalTitle:    'Start a new game',
-    modalSub:      'Pick a template to get started in seconds',
+    modalSub:      'A few quick questions and you are in',
+    // ── Guided new-game wizard (change: guided-new-game-wizard) ──
+    wizard: {
+      nameTitle:    'What should we call it?',
+      nameSub:      'You can always change this later.',
+      namePlaceholder: 'For example: The Tribe Race',
+      pathTitle:    'How would you like to start?',
+      scratchTitle: 'Start from scratch',
+      scratchBody:  'A blank page. You build all of it yourself.',
+      guidedTitle:  'Build one for me',
+      guidedBody:   'A few quick questions, and you get a game ready to edit.',
+      detailsTitle: 'Tell us about the game',
+      detailsSub:   'Skip anything you like, everything has a default.',
+      typeLabel:    'Game type',
+      typeMissions: 'Missions game',
+      typeStory:    'Story game',
+      peopleLabel:  'How many players?',
+      durationLabel:'How long?',
+      ageLabel:     'Player age',
+      minutesShort: (n: number) => `${n} min`,
+      peopleUpTo:   (n: number) => `Up to ${n}`,
+      peoplePlus:   (n: number) => `${n}+`,
+      // Spelled out in words: the copy standard forbids every hyphen.
+      ageRange:     (from: number, to: number) => `${from} to ${to}`,
+      agePlus:      (n: number) => `${n}+`,
+      previewTitle: 'What we will build',
+      // Distinct from a failed LOAD: the menu arrived fine, but no template
+      // declares which kind of game it is, so there is nothing honest to offer.
+      noGenreTemplates: 'No templates are tagged for the wizard yet. You can start from a blank page, or tag one on the templates page.',
+      previewMeta:  (stages: number, tasks: number) => `${stages} stages · ${tasks} missions`,
+      back:         'Back',
+      next:         'Next',
+      create:       'Build my game',
+      createBlank:  'Open a blank page',
+      longerThanAsked: (minutes: number) => `This game may run about ${minutes} minutes, longer than you asked for. You can remove missions in the editor.`,
+      consentNotice: 'Players under 14 need a guardian’s approval. We turned that on for you, and you can change it in settings.',
+      ageTag:       (band: string) => `ages ${band}`,
+      durationTag:  (minutes: number) => `${minutes} minutes`,
+      descriptionLead: (people: number, minutes: number, ageLabel: string) =>
+        `A field game for ${people} players aged ${ageLabel}, about ${minutes} minutes`,
+    },
     // Delete confirmation (change: recoverable-game-deletion). Replaces the old
     // one-click confirm; the creator types the game title to confirm.
     deleteDialogTitle: 'Delete game',
@@ -3708,6 +3811,20 @@ const EN: typeof HE = {
     settingsTitle: 'Guided tour',
     settingsDesc: 'A short walk through every screen: building a game, launching it, and running it live. You can play it again whenever you like.',
     settingsBtn: 'Start the tour',
+    // Builder first-open spotlight (change: guided-new-game-wizard) — two steps,
+    // in situ, naming the only two words the Builder is built on.
+    spotlight: {
+      gotIt: 'Got it',
+      next: 'Next',
+      stages: {
+        title: 'This is a stage',
+        body: 'A game is a series of stages, one after another. Each stage is a group of missions players finish before moving on.',
+      },
+      missions: {
+        title: 'These are missions',
+        body: 'A mission is what players actually do: reach a place, solve a riddle, take a photo. You add and edit them here.',
+      },
+    },
     steps: {
       welcome: {
         title: 'Welcome',
@@ -3879,6 +3996,12 @@ const EN: typeof HE = {
     editMetaBtn:      'Icon & order',
     emojiLabel:       'Emoji icon',
     orderLabel:       'Picker position',
+    // What kind of game this template is, for the new-game wizard
+    // (change: guided-new-game-wizard).
+    genreLabel:       'Game type (for the wizard)',
+    genreNone:        'Not set',
+    genreMissions:    'Missions game',
+    genreStory:       'Story game',
     saveMetaBtn:      'Save',
     metaSaveFailed:   'Could not save',
     cancelBtn:        'Cancel',

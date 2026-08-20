@@ -662,6 +662,40 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   backoff and connects. Confirm before chasing it: `localStorage['firestore_online_state_…']` reads
   `{"onlineState":"Online"}` and the chat/feed panels render their empty state instead of hanging.
   Do not "fix" it by forcing `experimentalForceLongPolling` in production.
+- **A Firestore `.select()` is a FIELD MASK: a field missing from it is absent from every document
+  the query returns, however faithfully the projection copies it.** `listGameTemplates`
+  (`functions/src/admin/templates.ts`) reads templates through
+  `.select(...TEMPLATE_LIST_FIELDS)`, so adding `templateGenre` to the `Game` type, to
+  `setGameTemplateFlag`, to `toVariant`'s projection AND to the client type still shipped
+  `templateGenre: undefined` to the browser — the new-game wizard rendered "no templates are
+  tagged" while Firestore held the tag and the compiled bundle held the copy. Nothing was loud:
+  typecheck passed (the field is optional), the callable returned 200, the doc really had the
+  value, and `grep` found the code in `functions/lib`. Adding a field to a picker/wizard payload
+  ⇒ add it to `TEMPLATE_LIST_FIELDS` too. When a projected field arrives `undefined` but the
+  stored document has it, suspect the mask before the mapper.
+- **MapLibre does NO bidi reordering — Hebrew labels render backwards unless the RTL text plugin
+  is registered.** The `outdoor` style hides this because its labels are `{name:latin}`; the
+  `hybrid` (satellite) style falls back to the LOCAL name
+  (`["coalesce",["get","name:en"],["get","name"]]`), so flipping to satellite drew "תל שבע" as
+  "עבש לת" and read as "the map changed language and scrambled the letters". Every map component
+  in both apps calls `ensureRtlTextPlugin(maplibregl)` at module scope
+  (`apps/*/src/lib/mapRtl.ts`, deliberately duplicated — `packages/shared` holds no map engine).
+  The plugin is served from our OWN bundle via Vite `?url`, never MapLibre's docs' unpkg URL: a map
+  must not need a third-party CDN, and it is registered `lazy` so a Latin-only map never fetches the
+  ~200 KB asm.js. Adding a new map ⇒ add the call; `scripts/test-geocode.ts` enforces it.
+- **The tile key must not choose the GEOCODER.** Both used to hang off "is `VITE_MAPTILER_KEY`
+  set?", so configuring the key for satellite tiles silently moved place search off OSM Nominatim
+  and onto MapTiler's geocoder — whose Israeli/Hebrew address coverage is much weaker. A creator
+  searching a real Jerusalem street (`רמות משעול מורן 3`) got Rehovot, Karmiel, Menashe and Ofakim;
+  Nominatim returns the exact house number as its only hit. Adding `proximity` to the MapTiler call
+  made it WORSE — a coverage gap, not a tuning one. Search now lives in
+  `apps/creator-web/src/lib/geocode.ts`: Nominatim first (biased by `viewbox` to the current map
+  view, never `bounded`), MapTiler only as a fallback, and it throws only when EVERY provider failed
+  so "search is down" stays distinguishable from "no such place".
+- **`text-zinc-*` is REVERSED in creator-web** (`tailwind.config.js` maps `zinc-700` → `#d6d3d1`),
+  a leftover from the dark theme. On the light "Warm Trail" surfaces that is pale grey on beige
+  (~1.2:1) — the map search results looked like a disabled control, which is most of why search
+  read as broken. New UI uses the `--ink-*` / `--surface-*` tokens; don't reach for `text-zinc-*`.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

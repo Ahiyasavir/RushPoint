@@ -31,6 +31,10 @@ import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { useT } from '../components/LanguageContext';
 import { useAuth } from '../components/AuthGate';
+// First-open explainer (change: guided-new-game-wizard). Yields to Quick Setup and
+// to the full tour, so in practice it reaches the creator who started from scratch
+// — the one person the product guides nowhere else.
+import BuilderSpotlight from '../components/BuilderSpotlight';
 // One mapping from a rejection to copy a creator can act on
 // (change: creator-no-silent-failures).
 import { describeCallFailure, type CallFailure } from '../lib/callFeedback';
@@ -842,6 +846,12 @@ export default function BuilderPage() {
         title={t.launch.title}
         messages={[t.launch.step1, t.launch.step2, t.launch.step3]}
       />
+      {/* First-open explainer (change: guided-new-game-wizard). Mounted BEFORE the
+          Quick Setup surfaces below and handed their live status, because it must
+          yield to them: a templated game auto-invites Quick Setup on this same
+          mount, and stacking two guided overlays is worse than showing neither. In
+          practice that makes this the SCRATCH creator's explainer. */}
+      <BuilderSpotlight quickSetupActive={qsFocusMode || qsState.status === 'welcome'} />
       {/* הקמה מהירה: the floating step bar and the launch refusal
           (change: quick-setup-wizard). Both are fixed-position, so they stay legible
           over the mission drawer — which is exactly where the creator is while they

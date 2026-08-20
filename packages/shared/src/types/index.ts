@@ -168,6 +168,13 @@ export interface GeoPoint {
 }
 
 export type GameMode        = 'individual' | 'team';
+/**
+ * What kind of game a TEMPLATE is (change: guided-new-game-wizard) — the answer
+ * the new-game wizard's "a story, or missions?" question maps onto. A closed
+ * union so adding a third kind is a typecheck failure at every switch that has to
+ * grow a label, rather than a silently unhandled string.
+ */
+export type TemplateGenre   = 'story' | 'missions';
 export type ScoringPreset   = 'time_only' | 'fixed_points_speed' | 'smart_weighted';
 export type TaskType        = 'field' | 'smart_station' | 'photo' | 'self_report'
                             | 'quiz' | 'numeric' | 'geofence' | 'sequence' | 'survey';
@@ -622,6 +629,16 @@ export interface Game {
   templateGroupKey?: string;
   // Which language THIS document's stage/task content is authored in, e.g. 'he' | 'en'.
   templateLang?: string;
+  // What KIND of game this template is (change: guided-new-game-wizard). The
+  // new-game wizard asks a conceptual question ("a story, or missions?") instead
+  // of showing template cards, and this is how an answer finds its template.
+  //
+  // Declared by the admin, never inferred: guessing from templateOrder would make
+  // reordering the picker silently swap what the wizard builds, and guessing from
+  // the title or scoringPreset breaks the moment a template is renamed or
+  // retuned. A template with no genre is simply not offered as a wizard answer —
+  // it stays fully usable in the ordinary picker.
+  templateGenre?: TemplateGenre;
   // Task-library priority (change: task-library-priority-boost). Creator-settable
   // (unlike PublicGame/PublicTask.pinnedLast, which is admin-only and set directly
   // in Firestore). When true, every task this game publishes carries

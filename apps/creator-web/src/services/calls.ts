@@ -27,6 +27,7 @@ import type {
   GalleryGameFacets,
   GalleryTaskFacets,
   AdminUserSummary,
+  TemplateGenre,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -306,6 +307,9 @@ export const setGameTemplateFlag = callable<
   {
     gameId: string; isTemplate: boolean; templateEmoji?: string;
     templateOrder?: number; templateGroupKey?: string; templateLang?: string;
+    // What kind of game this template is, so the new-game wizard's conceptual
+    // question can resolve to it (change: guided-new-game-wizard).
+    templateGenre?: TemplateGenre;
   },
   { ok: boolean; gameId: string; isTemplate: boolean }
 >('setGameTemplateFlag');
@@ -319,6 +323,10 @@ export interface TemplateVariant {
   scoringPreset: Game['scoringPreset'];
   stageCount: number;
   taskCount: number;
+  /** What kind of game this is, when the admin declared one — the new-game
+   *  wizard's "a story, or missions?" answer resolves through this
+   *  (change: guided-new-game-wizard). */
+  templateGenre?: TemplateGenre;
 }
 export interface TemplateGroupEntry {
   groupKey: string;
@@ -336,12 +344,27 @@ export const listGameTemplates = callable<
 // template game in full to find it by id (perf: template-picker-latency). It is
 // not an authorization input — the server still requires a live isTemplate:true
 // document and falls back to the scan if the hint misses.
+// `description` and `tags` arrive PRE-COMPOSED from the client on purpose
+// (change: guided-new-game-wizard): they are user-facing Hebrew/English copy, and
+// the dictionaries live here, not on the server. `personalize` carries only the
+// structural answers, which the server turns into capacity, mode, consent and
+// pacing through the shared pure rules. Every new field is optional, so the plain
+// picker call is unchanged.
 export const createGameFromTemplate = callable<
   {
     templateGameId: string; title: string;
     scoringPreset?: Game['scoringPreset']; templateOwnerUid?: string;
+    description?: string; tags?: string[];
+    personalize?: { groupSize?: number; durationMinutes?: number; minAge?: number };
   },
-  { gameId: string }
+  {
+    gameId: string;
+    /** The server's own estimate — the client cannot compute one (the template
+     *  projection carries counts, not stages), so this is the only honest source
+     *  for "this may run longer than you asked". */
+    estimatedMinutes?: number;
+    fitsRequestedDuration?: boolean;
+  }
 >('createGameFromTemplate');
 
 // The admin console's own list. NOT listGames + a client-side isTemplate filter:

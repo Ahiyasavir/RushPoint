@@ -7646,6 +7646,204 @@ async function main() {
     await expectError('importGameFile(targetGameId): a game the caller does not own is refused',
       creator.call('importGameFile', { file: editedFile, targetGameId: tHe }),
       { codeIn: ['functions/not-found', 'functions/permission-denied'] });
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 11. COPY FIDELITY + PERSONALIZATION (change: guided-new-game-wizard).
+    //
+    //     The copy used to be lossy: `tags: []` and DEFAULT_REGISTRATION_FIELDS
+    //     were hardcoded, and instructions / scoringOptions / allowInstantPlay /
+    //     powerUpsEnabled / manualLeaderboardReveal were never copied at all. On
+    //     the real story template that silently dropped its "שם היחידה"
+    //     registration field, its operator instructions, and the
+    //     manualLeaderboardReveal that holds the standings back for the plot
+    //     twist. Personalizing a lossy copy is meaningless, so fidelity is
+    //     asserted first and personalization on top of it.
+    // ═══════════════════════════════════════════════════════════════════════
+    const { gameId: tRich } = await platformAdmin.call('createGame', { title: 'Rich Template', mode: 'team' });
+    // intro (protected) · trimmable middle (explicit count) · "do all" · final.
+    // Durations are authored explicitly so the estimate is pinned, not inferred.
+    const richTask = (id, minutes, capacity) => ({
+      id, title: id, type: 'field', coordinates: { lat: 0, lng: 0 },
+      difficulty: 5, estimatedMinutes: minutes, expectedDurationMinutes: minutes,
+      pointValue: 100, maxConcurrentTeams: capacity,
+      triggerMode: 'locationless', locationless: true,
+    });
+    await platformAdmin.call('updateGame', {
+      gameId: tRich,
+      description: 'משחק שדה לקבוצות בגילאי 11-13: גיבוש, חידות מיקום ואתגרי חשיבה.',
+      tags: ['עלילה', 'נוער'],
+      instructions: { title: 'איך משחקים', bodyHe: 'הסבירו לחניכים לפני שיוצאים.' },
+      manualLeaderboardReveal: true,
+      powerUpsEnabled: true,
+      allowInstantPlay: true,
+      scoringOptions: { wrongAnswerPenalty: 'standard' },
+      registrationFields: [
+        { id: 'name', label: 'שם מלא', type: 'text', required: true, level: 'member' },
+        { id: 'unit', label: 'שם היחידה', type: 'text', required: true, level: 'team' },
+      ],
+      stages: [
+        { id: 'r-intro', order: 0, title: 'Intro', requiredTaskCount: 1, tasks: [richTask('ri1', 5, 3)] },
+        { id: 'r-mid', order: 1, title: 'Middle', requiredTaskCount: 3,
+          tasks: [richTask('rm1', 10, 3), richTask('rm2', 10, 3), richTask('rm3', 10, 3)] },
+        { id: 'r-all', order: 2, title: 'Do all', tasks: [richTask('ra1', 8, 3), richTask('ra2', 8, 100)] },
+        { id: 'r-fin', order: 3, title: 'Final', isFinal: true, requiredTaskCount: 1, tasks: [richTask('rf1', 6, 3)] },
+      ],
+    });
+    await platformAdmin.call('setGameTemplateFlag', {
+      gameId: tRich, isTemplate: true, templateEmoji: '🎁', templateOrder: 20,
+    });
+
+    // ── 11a. Copy fidelity ────────────────────────────────────────────────
+    const plainCopy = await creator.call('createGameFromTemplate', {
+      templateGameId: tRich, title: 'Faithful Copy',
+    });
+    const faithful = (await creator.call('getGame', { gameId: plainCopy.gameId }))?.game;
+    check('createGameFromTemplate: authored instructions survive the copy',
+      faithful?.instructions?.title === 'איך משחקים', JSON.stringify(faithful?.instructions));
+    check('createGameFromTemplate: manualLeaderboardReveal survives the copy',
+      faithful?.manualLeaderboardReveal === true, String(faithful?.manualLeaderboardReveal));
+    check('createGameFromTemplate: custom registrationFields survive the copy',
+      (faithful?.registrationFields ?? []).some((f) => f.label === 'שם היחידה'),
+      JSON.stringify((faithful?.registrationFields ?? []).map((f) => f.label)));
+    check('createGameFromTemplate: scoringOptions survive the copy',
+      faithful?.scoringOptions?.wrongAnswerPenalty === 'standard',
+      JSON.stringify(faithful?.scoringOptions));
+    check('createGameFromTemplate: template tags survive the copy',
+      (faithful?.tags ?? []).includes('עלילה'), JSON.stringify(faithful?.tags));
+    check('createGameFromTemplate: powerUpsEnabled survives the copy',
+      faithful?.powerUpsEnabled === true, String(faithful?.powerUpsEnabled));
+    check('createGameFromTemplate: allowInstantPlay survives the copy',
+      faithful?.allowInstantPlay === true, String(faithful?.allowInstantPlay));
+
+    // ── 11b. The copy is never itself a template ──────────────────────────
+    check('createGameFromTemplate: the copy carries no template markers',
+      faithful?.isTemplate === undefined && faithful?.templateEmoji === undefined
+      && faithful?.templateOrder === undefined && faithful?.templateGroupKey === undefined
+      && faithful?.templateLang === undefined,
+      JSON.stringify({ f: faithful?.isTemplate, e: faithful?.templateEmoji, o: faithful?.templateOrder,
+        g: faithful?.templateGroupKey, l: faithful?.templateLang }));
+    const afterCopyList = await creator.call('listGameTemplates', {});
+    check('createGameFromTemplate: the copy does not appear in the template picker',
+      !(afterCopyList?.templates ?? []).some((g) => g.groupKey === plainCopy.gameId),
+      JSON.stringify((afterCopyList?.templates ?? []).map((g) => g.groupKey)));
+    check('createGameFromTemplate: the copy stays private with a clean play count',
+      faithful?.visibility === 'private' && (faithful?.playCount ?? 0) === 0,
+      JSON.stringify({ v: faithful?.visibility, p: faithful?.playCount }));
+
+    // ── 11c. Backwards compatibility ──────────────────────────────────────
+    //     The existing picker calls this with no personalization at all, so the
+    //     un-personalized copy must be byte-identical in every field the wizard
+    //     would otherwise touch.
+    check('createGameFromTemplate: no personalization leaves the template mode',
+      faithful?.mode === 'team', String(faithful?.mode));
+    check('createGameFromTemplate: no personalization leaves capacities alone',
+      faithful?.stages?.[1]?.tasks?.[0]?.maxConcurrentTeams === 3,
+      String(faithful?.stages?.[1]?.tasks?.[0]?.maxConcurrentTeams));
+    check('createGameFromTemplate: no personalization leaves requiredTaskCount alone',
+      faithful?.stages?.[1]?.requiredTaskCount === 3,
+      String(faithful?.stages?.[1]?.requiredTaskCount));
+    check('createGameFromTemplate: no personalization leaves the description alone',
+      faithful?.description?.includes('בגילאי 11-13'), String(faithful?.description));
+    check('createGameFromTemplate: no personalization sets no minor fields',
+      faithful?.minAge === undefined && faithful?.requiresGuardianConsent === undefined,
+      JSON.stringify({ a: faithful?.minAge, c: faithful?.requiresGuardianConsent }));
+
+    // ── 11d. Personalization is applied ───────────────────────────────────
+    const big = await creator.call('createGameFromTemplate', {
+      templateGameId: tRich, title: 'Big Group Copy',
+      description: 'משחק שדה ל-40 שחקנים: גיבוש, חידות מיקום ואתגרי חשיבה.',
+      tags: ['14-17', 'שעה וחצי'],
+      personalize: { groupSize: 40, durationMinutes: 90, minAge: 11 },
+    });
+    const bigGame = (await creator.call('getGame', { gameId: big.gameId }))?.game;
+    check('createGameFromTemplate: a big group raises station capacity',
+      (bigGame?.stages?.[1]?.tasks?.[0]?.maxConcurrentTeams ?? 0) > 3,
+      String(bigGame?.stages?.[1]?.tasks?.[0]?.maxConcurrentTeams));
+    check('createGameFromTemplate: an unlimited task keeps its authored capacity',
+      bigGame?.stages?.[2]?.tasks?.[1]?.maxConcurrentTeams === 100,
+      String(bigGame?.stages?.[2]?.tasks?.[1]?.maxConcurrentTeams));
+    check('createGameFromTemplate: a client-composed description is stored',
+      bigGame?.description?.includes('40 שחקנים') && !bigGame?.description?.includes('11-13'),
+      String(bigGame?.description));
+    check('createGameFromTemplate: derived tags merge with the template tags',
+      (bigGame?.tags ?? []).includes('14-17') && (bigGame?.tags ?? []).includes('עלילה'),
+      JSON.stringify(bigGame?.tags));
+    check('createGameFromTemplate: an age below the threshold sets minAge',
+      bigGame?.minAge === 11, String(bigGame?.minAge));
+    check('createGameFromTemplate: an age below the threshold turns consent on',
+      bigGame?.requiresGuardianConsent === true, String(bigGame?.requiresGuardianConsent));
+
+    // A tiny group goes solo, and capacity must never fall below 1.
+    const tiny = await creator.call('createGameFromTemplate', {
+      templateGameId: tRich, title: 'Tiny Group Copy',
+      personalize: { groupSize: 4, durationMinutes: 180 },
+    });
+    const tinyGame = (await creator.call('getGame', { gameId: tiny.gameId }))?.game;
+    check('createGameFromTemplate: a tiny group plays individually',
+      tinyGame?.mode === 'individual', String(tinyGame?.mode));
+    check('createGameFromTemplate: capacity never drops below 1',
+      (tinyGame?.stages ?? []).every((s) => (s.tasks ?? []).every((t) => (t.maxConcurrentTeams ?? 0) >= 1)),
+      JSON.stringify((tinyGame?.stages ?? []).map((s) => (s.tasks ?? []).map((t) => t.maxConcurrentTeams))));
+    check('createGameFromTemplate: a 14+ age sets minAge but leaves consent alone',
+      tinyGame?.requiresGuardianConsent === undefined, String(tinyGame?.requiresGuardianConsent));
+
+    // ── 11e. Duration shortening ──────────────────────────────────────────
+    //     The template estimates 5 + 30 + 16 + 6 = 57 minutes. Asking for 40
+    //     must trim the middle stage (explicit requiredTaskCount) and must NOT
+    //     touch the "do all" stage, the intro or the final.
+    const short = await creator.call('createGameFromTemplate', {
+      templateGameId: tRich, title: 'Short Copy',
+      personalize: { groupSize: 20, durationMinutes: 40 },
+    });
+    const shortGame = (await creator.call('getGame', { gameId: short.gameId }))?.game;
+    const stageById = (g, id) => (g?.stages ?? []).find((s) => (s.title || '').includes(id));
+    check('createGameFromTemplate: an over-long game trims the partial stage',
+      (stageById(shortGame, 'Middle')?.requiredTaskCount ?? 3) < 3,
+      String(stageById(shortGame, 'Middle')?.requiredTaskCount));
+    check('createGameFromTemplate: a "do all" stage is never trimmed',
+      stageById(shortGame, 'Do all')?.requiredTaskCount === undefined,
+      String(stageById(shortGame, 'Do all')?.requiredTaskCount));
+    check('createGameFromTemplate: the intro stage is never trimmed',
+      stageById(shortGame, 'Intro')?.requiredTaskCount === 1,
+      String(stageById(shortGame, 'Intro')?.requiredTaskCount));
+    check('createGameFromTemplate: the final stage is never trimmed',
+      stageById(shortGame, 'Final')?.requiredTaskCount === 1,
+      String(stageById(shortGame, 'Final')?.requiredTaskCount));
+    check('createGameFromTemplate: trimming never leaves a count below 1',
+      (shortGame?.stages ?? []).every((s) => s.requiredTaskCount === undefined || s.requiredTaskCount >= 1),
+      JSON.stringify((shortGame?.stages ?? []).map((s) => s.requiredTaskCount)));
+    check('createGameFromTemplate: the response reports the estimate',
+      typeof short?.estimatedMinutes === 'number' && short.estimatedMinutes > 0,
+      JSON.stringify(short));
+    check('createGameFromTemplate: the response reports whether it fits',
+      typeof short?.fitsRequestedDuration === 'boolean', JSON.stringify(short));
+
+    // An impossible duration must still produce a game, honestly labelled.
+    const impossible = await creator.call('createGameFromTemplate', {
+      templateGameId: tRich, title: 'Impossible Copy',
+      personalize: { groupSize: 20, durationMinutes: 5 },
+    });
+    check('createGameFromTemplate: an unfittable duration still creates a game',
+      !!impossible?.gameId, JSON.stringify(impossible));
+    check('createGameFromTemplate: an unfittable duration reports fits: false',
+      impossible?.fitsRequestedDuration === false, JSON.stringify(impossible));
+
+    // ── 11f. Personalization never fails creation ─────────────────────────
+    const junk = await creator.call('createGameFromTemplate', {
+      templateGameId: tRich, title: 'Junk Personalization',
+      personalize: { groupSize: -5, durationMinutes: 0, minAge: 999 },
+      tags: Array.from({ length: 60 }, (_, i) => `t${i}`),
+    });
+    check('createGameFromTemplate: malformed personalization still creates a game',
+      !!junk?.gameId, JSON.stringify(junk));
+    const junkGame = (await creator.call('getGame', { gameId: junk.gameId }))?.game;
+    check('createGameFromTemplate: an out-of-range minAge is skipped, not stored',
+      junkGame?.minAge === undefined, String(junkGame?.minAge));
+    check('createGameFromTemplate: too many tags are clamped, not rejected',
+      (junkGame?.tags ?? []).length <= 20, String((junkGame?.tags ?? []).length));
+    check('createGameFromTemplate: a malformed group size leaves capacity usable',
+      (junkGame?.stages ?? []).every((s) => (s.tasks ?? []).every((t) => (t.maxConcurrentTeams ?? 0) >= 1)),
+      JSON.stringify((junkGame?.stages ?? []).map((s) => (s.tasks ?? []).map((t) => t.maxConcurrentTeams))));
   });
 
   // ═══ Boundary fuzz (seeded, reproducible) ═══════════════════════════════════

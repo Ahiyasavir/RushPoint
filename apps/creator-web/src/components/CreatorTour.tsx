@@ -53,6 +53,17 @@ function readLocal(key: string): string | null {
 
 const EMPTY_RECT: TourRect = { top: 0, left: 0, width: 0, height: 0 };
 
+/**
+ * Is the full walkthrough on screen right now?
+ *
+ * A module-level flag rather than a DOM probe: the Builder's own first-open
+ * spotlight has to YIELD to this tour (two guided overlays at once is worse than
+ * none), and querying for the tour's dialog element would break silently the next
+ * time its markup changes (change: guided-new-game-wizard).
+ */
+let tourRunning = false;
+export function isCreatorTourRunning(): boolean { return tourRunning; }
+
 export default function CreatorTour() {
   const t = useT();
   const tour = t.tour;
@@ -66,6 +77,11 @@ export default function CreatorTour() {
     (action: TourAction) => setState((s) => tourReducer(s, action, steps)),
     [steps],
   );
+
+  // Kept in sync for isCreatorTourRunning(). Assigned during render on purpose:
+  // the Builder reads it in an effect that runs AFTER this render, so an effect
+  // here would publish the flag one frame too late and both overlays could open.
+  tourRunning = state.status === 'running';
 
   const step = currentTourStep(state, steps);
   const uid = user?.uid ?? '';
