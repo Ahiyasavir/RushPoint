@@ -8,8 +8,9 @@ import {
 } from '@rushpoint/shared';
 import {
   createGame, updateGame, listGames, launchRun, deleteGame, publishGame,
-  listGameTemplates, createGameFromTemplate, importGameFile, type TemplateGroupEntry,
+  createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
+import { peekTemplates, fetchTemplates } from '../lib/templateCache';
 import { Advanced, Badge, Button, Card, EmptyState, Input, Label, Select, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
 import { LoadingState } from '../components/LoadingState';
@@ -209,9 +210,14 @@ export default function DashboardPage() {
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<PickerChoice | null>(null);
   const [chosenPreset, setChosenPreset] = useState<ScoringPreset>('smart_weighted');
-  // Firestore-backed templates (change: admin-manage-game-templates), fetched once
-  // the picker opens. null = still loading; [] + failed = the fetch errored.
-  const [templateGroups, setTemplateGroups] = useState<TemplateGroupEntry[] | null>(null);
+  // Firestore-backed templates (change: admin-manage-game-templates). null = still
+  // loading; [] + failed = the fetch errored. Seeded SYNCHRONOUSLY from the cache
+  // (perf: template-picker-latency) so a returning creator's picker paints its menu
+  // on the very first frame instead of a spinner — the callable is a cross-origin
+  // round trip and the menu is the same short list for everyone.
+  const [templateGroups, setTemplateGroups] = useState<TemplateGroupEntry[] | null>(
+    () => peekTemplates()?.entry.templates ?? null,
+  );
   const [templatesFailed, setTemplatesFailed] = useState(false);
   const { lang } = useLanguage();
   // Scoring is an easy-wizard default: Create proceeds on the template's own
@@ -316,23 +322,35 @@ export default function DashboardPage() {
     return () => { document.body.style.overflow = prev; };
   }, [picking]);
 
-  // Fetch the Firestore-backed templates once the picker first opens (cached for
-  // the session — templates change rarely enough that a stale list for the rest
-  // of this visit is an acceptable trade for not refetching on every open).
+  // Warm the template menu when the DASHBOARD mounts, not when the picker opens
+  // (perf: template-picker-latency). The fetch is a cross-origin callable — CORS
+  // preflight, token verification, a rate-limit transaction and a collectionGroup
+  // query — so starting it on the click meant the creator watched a spinner every
+  // single time. Starting it on mount hides that behind the time they spend looking
+  // at their dashboard, and the cache makes every LATER open instant.
+  //
+  // Re-runs when the picker opens, which is the retry path: if the warm-up failed
+  // (offline at mount) reaching for New game tries again. `fetchTemplates` shares
+  // one in-flight promise between callers, so this can never open two round trips.
   useEffect(() => {
-    if (!picking || templateGroups !== null) return;
+    const cached = peekTemplates();
+    if (cached) { setTemplateGroups(cached.entry.templates); setTemplatesFailed(false); }
+    if (cached?.verdict === 'fresh') return;
     let cancelled = false;
-    void (async () => {
-      try {
-        const { templates } = await listGameTemplates();
-        if (!cancelled) setTemplateGroups(templates);
-      } catch (e) {
+    // A retry is underway: show the loader, not the error left by the attempt that
+    // failed. Otherwise a creator who was offline at mount opens the picker onto a
+    // stale "couldn't load" message while the successful retry is already in flight.
+    if (!cached) { setTemplateGroups(null); setTemplatesFailed(false); }
+    void fetchTemplates()
+      .then((templates) => { if (!cancelled) { setTemplateGroups(templates); setTemplatesFailed(false); } })
+      .catch((e) => {
         console.error('[dashboard] listGameTemplates failed:', e);
-        if (!cancelled) { setTemplateGroups([]); setTemplatesFailed(true); }
-      }
-    })();
+        // A cached-but-stale menu stays on screen: it is almost certainly still
+        // correct, and an error message in its place would be a downgrade.
+        if (!cancelled && !cached) { setTemplateGroups([]); setTemplatesFailed(true); }
+      });
     return () => { cancelled = true; };
-  }, [picking, templateGroups]);
+  }, [picking]);
 
   async function newGame(choice: PickerChoice, preset?: ScoringPreset) {
     setPicking(false);
@@ -363,6 +381,10 @@ export default function DashboardPage() {
     try {
       const { gameId } = await createGameFromTemplate({
         templateGameId: variant.id, title: variant.title, scoringPreset: finalPreset,
+        // Which admin owns this template — straight from the menu the server just
+        // sent us, so the server reads one document instead of every template in
+        // full (perf: template-picker-latency).
+        templateOwnerUid: variant.ownerUid,
       });
       // Invalidate the games cache — otherwise returning to the dashboard within
       // the TTL serves a stale list that's missing this just-created game.

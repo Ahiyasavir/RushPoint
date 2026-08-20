@@ -245,12 +245,25 @@ function storedCounts(g: Partial<Game>): { stageCount: number; taskCount: number
 
 export const listGameTemplates = loggedCallable('listGameTemplates', async (_data, context) => {
   const uid = requireAuth(context);
-  await enforceRateLimit(uid, 'listGameTemplates');
 
-  const snap = await db.collectionGroup('games')
+  // The limiter and the query run CONCURRENTLY (perf: template-picker-latency).
+  // They are independent — the limiter's transaction reads a counter document the
+  // query never touches — and awaiting them in sequence put a whole Firestore
+  // round trip in front of every open of the new-game picker. The limit is still
+  // enforced exactly as before: the query's result is thrown away unread if the
+  // limiter refuses, and the refusal is what this function returns.
+  //
+  // `queryPromise` is caught defensively so a query failure that loses the race to
+  // a rate-limit rejection cannot surface as an unhandled rejection and take the
+  // process down; the same error is rethrown when it IS awaited below.
+  const queryPromise = db.collectionGroup('games')
     .where('isTemplate', '==', true)
     .select(...TEMPLATE_LIST_FIELDS)
     .get();
+  queryPromise.catch(() => { /* rethrown at the await below */ });
+
+  await enforceRateLimit(uid, 'listGameTemplates');
+  const snap = await queryPromise;
 
   // Tombstones are filtered in memory for the same reason listGames does it:
   // `where('deletedAt','==',null)` does NOT match documents that lack the field.
@@ -310,12 +323,35 @@ export const listGameTemplates = loggedCallable('listGameTemplates', async (_dat
 
 // ─── createGameFromTemplate ─────────────────────────────────────────────────
 
+/**
+ * The template document, by id.
+ *
+ * `templateOwnerUid` is a HINT from the picker — `listGameTemplates` already told
+ * the client which admin owns each template — and it turns this into a single
+ * document read (perf: template-picker-latency). Without it the only way to find a
+ * template by id is to download EVERY template game in full (a template is a whole
+ * game: every stage, every mission, every media url), which is what stood between
+ * pressing Create and the Builder opening.
+ *
+ * The hint is not trusted for authorization: whatever it points at still has to be
+ * a live, isTemplate:true document, and a hint that misses falls back to the scan.
+ * The worst a forged uid can do is address a document that fails those checks.
+ */
+async function loadTemplateById(templateGameId: string, templateOwnerUid?: string): Promise<Game | null> {
+  if (typeof templateOwnerUid === 'string' && templateOwnerUid.trim()) {
+    const snap = await db.doc(FIRESTORE_PATHS.game(templateOwnerUid, templateGameId)).get();
+    const game = snap.exists ? (snap.data() as Game) : null;
+    if (game && game.isTemplate === true && !isGameDeleted(game)) return game;
+  }
+  return (await loadAllTemplateGames()).find((g) => g.id === templateGameId) ?? null;
+}
+
 export const createGameFromTemplate = loggedCallable('createGameFromTemplate', async (data, context) => {
   const uid = requireAuth(context);
   await enforceRateLimit(uid, 'createGameFromTemplate');
 
-  const { templateGameId, title, scoringPreset } = (data ?? {}) as {
-    templateGameId?: unknown; title?: unknown; scoringPreset?: unknown;
+  const { templateGameId, title, scoringPreset, templateOwnerUid } = (data ?? {}) as {
+    templateGameId?: unknown; title?: unknown; scoringPreset?: unknown; templateOwnerUid?: unknown;
   };
   if (typeof templateGameId !== 'string' || !templateGameId.trim()) {
     throw new functions.https.HttpsError('invalid-argument', 'templateGameId required');
@@ -326,9 +362,10 @@ export const createGameFromTemplate = loggedCallable('createGameFromTemplate', a
 
   // Cross-owner read is DELIBERATE here (unlike every other game callable): a
   // template belongs to whichever admin authored it, not the calling creator.
-  // collectionGroup can't filter by document id directly, so fetch every
-  // template doc (small dataset — see loadAllTemplateGames) and match by id.
-  const template = (await loadAllTemplateGames()).find((g) => g.id === templateGameId);
+  const template = await loadTemplateById(
+    templateGameId,
+    typeof templateOwnerUid === 'string' ? templateOwnerUid : undefined,
+  );
   if (!template) {
     throw new functions.https.HttpsError('invalid-argument', 'Unknown or non-template templateGameId');
   }

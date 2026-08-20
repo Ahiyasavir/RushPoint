@@ -17,6 +17,7 @@ import type { Game, GameFile } from '@rushpoint/shared';
 // with the real reason instead of a round trip (mirrors BuilderPage/DashboardPage).
 import { parseGameFile, extractQuickSetupSteps } from '@rushpoint/shared';
 import { isAdminClaim } from '../lib/adminGate';
+import { invalidateTemplateCache } from '../lib/templateCache';
 import { EmptyState, Skeleton, Button, Input } from '../components/ui';
 import { LoadingState } from '../components/LoadingState';
 import { useT } from '../components/LanguageContext';
@@ -52,6 +53,12 @@ export default function AdminTemplatesPage() {
 
   async function load() {
     setFailed(null);
+    // The creator-facing picker renders from a cached menu (perf:
+    // template-picker-latency), and this page is the only place that changes what
+    // that menu should contain. Every mutation here ends in a load(), so dropping
+    // the cache from here means the admin who just authored, renamed or removed a
+    // template is not the one person left looking at the old list.
+    invalidateTemplateCache();
     try {
       // Server-side `isTemplate == true`, uncapped. This used to be
       // `listGames()` filtered client-side, and listGames is

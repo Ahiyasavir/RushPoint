@@ -331,8 +331,16 @@ export const listGameTemplates = callable<
   { templates: TemplateGroupEntry[] }
 >('listGameTemplates');
 
+// `templateOwnerUid` is the owner the picker was just told about, passed back as a
+// HINT so the server can read that one document instead of downloading every
+// template game in full to find it by id (perf: template-picker-latency). It is
+// not an authorization input — the server still requires a live isTemplate:true
+// document and falls back to the scan if the hint misses.
 export const createGameFromTemplate = callable<
-  { templateGameId: string; title: string; scoringPreset?: Game['scoringPreset'] },
+  {
+    templateGameId: string; title: string;
+    scoringPreset?: Game['scoringPreset']; templateOwnerUid?: string;
+  },
   { gameId: string }
 >('createGameFromTemplate');
 

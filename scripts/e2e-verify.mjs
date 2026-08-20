@@ -7556,6 +7556,37 @@ async function main() {
       creator.call('createGameFromTemplate', { templateGameId: plainGame, title: 'nope' }),
       { codeIn: ['functions/invalid-argument'] });
 
+    // 7b. The `templateOwnerUid` HINT (perf: template-picker-latency). The picker
+    //     passes back the owner the server itself just reported, so the server can
+    //     read ONE document instead of downloading every template game in full.
+    //     It is a performance hint, never an authorization input: a correct hint
+    //     must produce exactly the same clone, and a WRONG one must neither fail
+    //     nor let anything through that the id alone wouldn't.
+    const hintOwner = (await creator.call('listGameTemplates', {}))
+      ?.templates?.find((g) => g.groupKey === tHe)?.variants?.he?.ownerUid;
+    check('listGameTemplates: the picker is told which admin owns a template',
+      typeof hintOwner === 'string' && !!hintOwner, JSON.stringify(hintOwner));
+    const hinted = await creator.call('createGameFromTemplate', {
+      templateGameId: tHe, title: 'Hinted Clone', templateOwnerUid: hintOwner,
+    });
+    const hintedGame = (await creator.call('getGame', { gameId: hinted?.gameId }))?.game;
+    check('createGameFromTemplate: the owner hint clones the same template',
+      (hintedGame?.stages?.[0]?.tasks ?? []).length === 2, JSON.stringify(hintedGame?.stages?.length));
+    // A hint pointing at a uid that does not own this template must fall back to
+    // the id lookup, not fail — otherwise a stale picker menu breaks Create.
+    const stale = await creator.call('createGameFromTemplate', {
+      templateGameId: tHe, title: 'Stale Hint Clone', templateOwnerUid: 'not-the-owner-uid',
+    });
+    check('createGameFromTemplate: a wrong owner hint falls back instead of failing',
+      !!stale?.gameId, JSON.stringify(stale));
+    // And the hint cannot be used to clone something that is NOT a template: the
+    // caller's own plain game, addressed by its real owner.
+    await expectError('createGameFromTemplate: an owner hint cannot clone a non-template',
+      creator.call('createGameFromTemplate', {
+        templateGameId: plainGame, title: 'nope', templateOwnerUid: creatorCred.user.uid,
+      }),
+      { codeIn: ['functions/invalid-argument'] });
+
     // 8. A soft-deleted template drops out of the picker.
     await platformAdmin.call('deleteGame', { gameId: tSolo });
     const list3 = await creator.call('listGameTemplates', {});
