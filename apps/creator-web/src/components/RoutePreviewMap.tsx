@@ -2,11 +2,15 @@
 // connected in play order by a dashed path. Locationless tasks are skipped.
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Stage } from '@rushpoint/shared';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
+
+// Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
+ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 

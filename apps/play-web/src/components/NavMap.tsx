@@ -3,12 +3,16 @@
 // framed together so "where am I vs. where do I go" is always visible.
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, isValidCoord, isHotZoneActive, circlePolygonGeoJSON, type MapMode, type HotZone, type CaptureZone } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
 import { useT } from '../i18nContext';
 import type { MapSearchArea } from '../lib/searchAreas';
 import { recenterVerdict } from '../lib/recenter';
+
+// Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
+ensureRtlTextPlugin(maplibregl);
 
 export interface NavTarget {
   id: string;

@@ -3,12 +3,16 @@
 // (written by the play app's throttled updateLocation pings). Map/Satellite toggle.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { resolveMapStyle, isValidCoord, type MapMode } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import MapModeToggle from './MapModeToggle';
 import { useT } from './LanguageContext';
+
+// Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
+ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 

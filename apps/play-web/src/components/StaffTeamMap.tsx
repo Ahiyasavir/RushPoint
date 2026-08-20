@@ -18,11 +18,15 @@
 // play-web's entry chunk. `npm run bundle:budget` asserts that directly.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, resolveMapStyle, isValidCoord } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { useT } from '../i18nContext';
+
+// Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
+ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 

@@ -15,9 +15,13 @@
 // share the same chunk.
 import { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
+import { ensureRtlTextPlugin } from '../lib/mapRtl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle, type MapMode } from '@rushpoint/shared';
 import MapModeToggle from './MapModeToggle';
+
+// Hebrew labels must not render backwards on the satellite style. See lib/mapRtl.
+ensureRtlTextPlugin(maplibregl);
 
 const KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
 
