@@ -38,6 +38,23 @@ export interface GeoBias {
 const BIAS_DEG = 0.35;
 
 /**
+ * The country codes searched, as OSM CODES them — not as a statement about
+ * anything else.
+ *
+ * `il` alone silently hides a large share of the small settlements this product
+ * is actually used in: OpenStreetMap files places in Area C / Judea and Samaria
+ * under the Palestinian Territories code, so a creator searching their own
+ * moshav got streams, bus stops and ruins of the same name while the village
+ * itself — a plain `place/village` — was filtered out of the response entirely.
+ * Verified against the live API: "סנסנה" and "עתניאל" both returned ZERO place
+ * results under `il`, and the correct village as the first hit under `il,ps`.
+ *
+ * `sy` is deliberately NOT included: the Golan is already coded `il`, so adding
+ * it would widen the search without fixing anything.
+ */
+const SEARCH_COUNTRY_CODES = 'il,ps';
+
+/**
  * Minimum gap between two Nominatim requests, per the OSM Nominatim Usage Policy
  * (https://operations.osmfoundation.org/policies/nominatim/), which caps public
  * use at one request per second.
@@ -109,14 +126,14 @@ export function splitPlaceLabel(displayName: string): { label: string; detail: s
   };
 }
 
-/** The Nominatim search URL: IL-biased, Hebrew, and biased to the current view. */
+/** The Nominatim search URL: regional, Hebrew, and biased to the current map view. */
 export function nominatimUrl(query: string, bias?: GeoBias, limit = 6): string {
   const params = new URLSearchParams({
     format: 'jsonv2',
     q: query.trim(),
     limit: String(limit),
     'accept-language': 'he',
-    countrycodes: 'il',
+    countrycodes: SEARCH_COUNTRY_CODES,
   });
   const b = validBias(bias);
   if (b) {
@@ -138,7 +155,9 @@ export function maptilerUrl(query: string, key: string, limit = 6): string {
   const params = new URLSearchParams({
     key: key.trim(),
     language: 'he',
-    country: 'il',
+    // Same regional coverage as the primary provider — a fallback that can see
+    // fewer places than the thing it backs up is not a fallback.
+    country: SEARCH_COUNTRY_CODES,
     limit: String(limit),
   });
   return `https://api.maptiler.com/geocoding/${encodeURIComponent(query.trim())}.json?${params.toString()}`;

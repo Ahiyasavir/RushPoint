@@ -72,7 +72,15 @@ console.log('\n── nominatimUrl ──');
 const plain = new URL(nominatimUrl('משעול מורן'));
 check('hits Nominatim', plain.host === 'nominatim.openstreetmap.org');
 check('asks for Hebrew names', plain.searchParams.get('accept-language') === 'he');
-check('restricted to the launch market', plain.searchParams.get('countrycodes') === 'il');
+// Region, not one country code. OSM codes settlements in Area C / Judea and
+// Samaria under the Palestinian Territories, so `il` ALONE silently hides them:
+// verified against the live API, "סנסנה" and "עתניאל" (both real, both
+// `place/village`) returned zero place results under `countrycodes=il` while
+// streams, bus stops and ruins of the same name came back fine. A creator
+// searching their own moshav saw junk and concluded search was broken.
+check('the region covers Area C, not just the il country code',
+  plain.searchParams.get('countrycodes') === 'il,ps',
+  String(plain.searchParams.get('countrycodes')));
 check('no viewbox without a bias', plain.searchParams.get('viewbox') === null);
 
 const biased = new URL(nominatimUrl('הכותל המערבי', { lat: 31.78, lng: 35.21 }));
