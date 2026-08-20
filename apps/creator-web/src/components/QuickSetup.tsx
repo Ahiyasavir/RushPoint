@@ -287,7 +287,13 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
       // Logical inset (not left/right) so the bar centres identically in RTL and
       // LTR; the inline style carries it because Tailwind has no logical-inset
       // utility and a template-string class would not exist at build time.
-      className={`fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex items-start gap-3 ${GLASS_CARD}`}
+      // STACKED on a phone, side-by-side from `sm` up. As one row it was unreadable
+      // on a narrow screen: the action cluster below is `shrink-0` and holds a full
+      // Hebrew sentence ("חזור לזה מאוחר יותר") plus a button and a close box, so on
+      // a ~390px viewport it claimed almost the whole width and left the text column
+      // — `flex-1 min-w-0`, which is allowed to shrink to nothing — about two words
+      // per line, turning three sentences into a tall ribbon down one edge.
+      className={`fixed z-50 top-2 mx-auto w-[min(46rem,calc(100%-1rem))] px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3 ${GLASS_CARD}`}
       style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
     >
       <div className="flex-1 min-w-0">
@@ -305,7 +311,9 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
         )}
         <QuickSetupProgressTrail index={index} total={total} />
       </div>
-      <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+      {/* Its own full-width row on a phone (wrapping if the defer sentence is long),
+          a fixed-size cluster beside the text from `sm` up. */}
+      <div className="flex items-center flex-wrap gap-1.5 justify-end shrink-0 sm:flex-nowrap sm:pt-0.5">
         <button
           type="button"
           onClick={onDefer}
