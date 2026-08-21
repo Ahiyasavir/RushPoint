@@ -868,14 +868,35 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       : task.type === 'photo'
         ? t.task.rehearseApprove
         : t.task.rehearseFill;
+  //
+  // NOT the shared <Button>: that one is `w-full py-3.5` — a full-width thumb CTA
+  // by design — so dropping it into a flex row next to text took the whole width
+  // and crushed the label to one word per line. This is a compact inline control
+  // instead, and the row is `flex-wrap` so on a narrow phone the button drops to
+  // its own line rather than squeezing the text again.
   const rehearseBar = session.isTestDrive ? (
-    <div className="mb-3 flex items-center gap-2 rounded-lg border border-rp-amber/40 bg-app-raised px-2.5 py-2">
-      <span aria-hidden="true">🧪</span>
-      <span className="text-[11px] text-ink-warm flex-1 min-w-0">{t.task.rehearseHelp}</span>
-      <Button variant="ghost" disabled={rehearsing || frozen} loading={rehearsing}
-        onClick={() => { void rehearse(); }} data-testid="task-rehearse">
+    <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border border-rp-amber/40 bg-app-raised px-3 py-2">
+      <span aria-hidden="true" className="shrink-0">🧪</span>
+      {/* min-w keeps the text from collapsing into a one-word column; below it
+          the button wraps instead. */}
+      <span className="text-[11px] text-ink-warm flex-1 min-w-[7rem] leading-snug">{t.task.rehearseHelp}</span>
+      <button
+        type="button"
+        disabled={rehearsing || frozen}
+        onClick={() => { void rehearse(); }}
+        data-testid="task-rehearse"
+        className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[40px] px-3.5 rounded-lg
+          border border-rp-amber/60 bg-white/85 text-xs font-bold text-ink-warm
+          active:scale-[0.98] transition-transform
+          disabled:opacity-50 disabled:active:scale-100
+          focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+      >
+        {rehearsing && (
+          <span className="w-3.5 h-3.5 rounded-full border-2 border-current/30 border-t-current animate-spin shrink-0"
+            aria-hidden="true" />
+        )}
         {rehearseLabel}
-      </Button>
+      </button>
     </div>
   ) : null;
 

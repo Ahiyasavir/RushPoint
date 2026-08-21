@@ -190,7 +190,7 @@ const HE = {
     // The ONE rehearsal control (change: test-drive-rehearsal-control). The label
     // changes with what the mission needs, so the button is in the same place and
     // means the same thing on every screen.
-    rehearseHelp: 'חזרה: אפשר להתקדם בלי להיות במקום',
+    rehearseHelp: 'מצב חזרה, אפשר להתקדם מכל מקום',
     rehearseHere: 'כאילו הגעתי',
     rehearseApprove: 'אשרו',
     rehearseFill: 'מלאו תשובה',
@@ -875,7 +875,7 @@ const EN: typeof HE = {
     imHere: "I'm here",
     testDriveImHere: "I'm here (test run)",
     testDriveHint: 'Test run. Location checks are relaxed so you can rehearse from anywhere.',
-    rehearseHelp: 'Rehearsal: you can move on without being there',
+    rehearseHelp: 'Rehearsal mode, move on from anywhere',
     rehearseHere: 'Act as arrived',
     rehearseApprove: 'Approve',
     rehearseFill: 'Fill answer',
