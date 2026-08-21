@@ -24,6 +24,7 @@ import { ShareSheet } from '../components/ShareSheet';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
 import { firstLaunchBlocker, type ReadinessIssue } from '../lib/gameReadiness';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../components/AuthGate';
 import { useT } from '../components/LanguageContext';
 import { useLanguage } from '../components/LanguageContext';
@@ -206,6 +207,9 @@ export default function DashboardPage() {
   // The template the creator selected but has not confirmed yet — the moment the
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<PickerChoice | null>(null);
+  // Escape closes the template picker, matching its backdrop click. Gated on
+  // `picking` because this page renders the whole dashboard behind it.
+  useModalDismiss(() => { setPicking(false); setChosen(null); }, undefined, picking);
   // Firestore-backed templates (change: admin-manage-game-templates). null = still
   // loading; [] + failed = the fetch errored. Seeded SYNCHRONOUSLY from the cache
   // (perf: template-picker-latency) so a returning creator's picker paints its menu
@@ -953,6 +957,9 @@ function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
   const t = useT();
   const d = t.dashboard;
   const [typed, setTyped] = useState('');
+  // Escape cancels the destructive confirm — the one dialog that must never be
+  // hard to back out of.
+  useModalDismiss(onCancel);
   const confirmed = matchesGameDeleteConfirmation(typed, game.title);
 
   return (

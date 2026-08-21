@@ -136,7 +136,10 @@ import {
   assertController, resolveDeviceRole, generateDeviceJoinCode, canAttachDevice,
   attachedDeviceUids, controllerUidOf, canAddRunDevice, MAX_RUN_DEVICES,
 } from './teamDevices';
-import type { RunFeedback, TaskProgressStatus } from '@rushpoint/shared';
+import type { RunFeedback, TaskProgressStatus, RehearsalReveal } from '@rushpoint/shared';
+// `taskSubmissions` is a FIELD on the team doc, not part of the RunTeam type —
+// see packages/shared/src/photoQueue.ts, which owns the shape.
+import type { RawSubmission } from '@rushpoint/shared';
 import { validateFeedbackPayload, computeFeedbackSummary } from './feedbackSummary';
 import { sendRunSummaryEmail } from './runSummaryEmail';
 import { validate, parseStored } from '../validation';
@@ -301,17 +304,30 @@ export const launchRun = loggedCallable('launchRun', async (data, context) => {
     const billingType = decision.ok ? decision.billingType : 'test';
     const maxParticipants = decision.ok ? decision.maxParticipants : 2;
     await db.runTransaction(async (t) => {
-      // Abuse guard: at most ONE live (not finished) test-drive run per game.
+      // At most ONE live test-drive run per game — but the second press RETIRES
+      // the previous rehearsal instead of being refused (change:
+      // test-drive-straight-to-play). "בדיקה" means "show me my game as it is
+      // now", and a creator edits and re-checks in a tight loop, so refusing the
+      // second press with "finalize the old one first" put a chore in front of
+      // the one button whose whole purpose is immediacy.
+      //
+      // Retire rather than REUSE, deliberately: a run snapshots the game at
+      // launch (buildInitialStages), so handing back the existing test run would
+      // walk the creator through the version they had before their last edit —
+      // silently, and looking exactly like a fresh rehearsal. That is a worse
+      // failure than the refusal was.
+      //
+      // The invariant the guard exists for is untouched: still at most one live
+      // test run per game, still no second run created.
+      //
       // Equality-only query (no '!=' → no composite index, txn-safe via
       // t.get(Query)); the tiny result set is status-filtered in code.
       const liveTests = await t.get(
         db.collection(`users/${uid}/games/${gameId}/runs`).where('isTestDrive', '==', true),
       );
-      if (liveTests.docs.some((d) => (d.data() as Run).status !== 'finished')) {
-        throw new functions.https.HttpsError(
-          'failed-precondition',
-          'A test run for this game is already live. Finalize it before launching another.',
-        );
+      for (const doc of liveTests.docs) {
+        if ((doc.data() as Run).status === 'finished') continue;
+        t.update(doc.ref, { status: 'finished', finishedAt: now, updatedAt: now });
       }
       t.set(runRef, buildRun(billingType, maxParticipants));
       t.set(accessCodeRef, accessCode);
@@ -519,6 +535,27 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
 
   const now = new Date().toISOString();
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
+  // A TEST DRIVE self-starts (change: test-drive-straight-to-play). A creator
+  // pressing "בדיקה" wants to see their own game the way a player sees it — the
+  // old flow dropped them on the organizer console with a QR code, and a team that
+  // joined via the code then sat on "waiting for the organizer to start" until the
+  // creator went back to the console and pressed Start. That waiting screen is a
+  // dead end for a rehearsal, so a test-drive run hands out the first task itself.
+  //
+  // Deliberately narrow. It fires ONLY on `run.isTestDrive` — a flag written by
+  // exactly one place (launchRun's testDrive branch), on a run that is free,
+  // capped at 2 participants, excluded from playCount/benchmarks, and limited to
+  // one live instance per game. A real organizer run is untouched: its teams still
+  // register and wait for startTeams, because the organizer's "everyone ready?"
+  // moment is the whole point there.
+  //
+  // Guardian consent is the one hard stop. startTeams holds a minor's team until a
+  // guardian approves, and startInstantPlay refuses outright rather than seed a
+  // launched team with zero consent. Here we neither throw nor bypass: we fall back
+  // to the normal registered/wait path, so the creator can still start from the
+  // console after the consent flow — a rehearsal must not become the one door that
+  // starts play without the check.
+  const selfStart = run.isTestDrive === true && !game.requiresGuardianConsent && (game.stages?.length ?? 0) > 0;
   const team: RunTeam = {
     id: teamId,
     runId,
@@ -528,11 +565,14 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     registrationData,
     memberNames,
     memberCount: game.mode === 'team' ? (memberNames.length || 1) : 1,
-    status: 'registered',
-    stages: buildInitialStages(game),
+    status: selfStart ? 'active' : 'registered',
+    stages: selfStart
+      ? buildInitialStages(game).map((s, i) => ({ ...s, ...(i === 0 ? { startedAt: now } : {}) }))
+      : buildInitialStages(game),
     score: 0,
     bonusPenalty: 0,
-    launched: false,
+    launched: selfStart,
+    ...(selfStart ? { startedAt: now } : {}),
     activeTaskId: null,
     // Shared team devices: the founding phone is the sole device + controller;
     // teammates attach their own phones via joinTeamAsDevice with this code.
@@ -576,7 +616,17 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     return { already: false };
   });
 
-  return { teamId, runId, gameId, ownerUid, alreadyJoined: joined.already };
+  // Hand out the first task exactly as startTeams/startInstantPlay do. AFTER the
+  // commit and only for a freshly self-started team, so a re-join short-circuits
+  // above and never re-assigns. Best-effort by design: the team is already
+  // committed as launched, so a routing hiccup must not fail the join — it
+  // degrades to "joined, no task yet", which requestNextTask recovers from.
+  if (selfStart && !joined.already) {
+    await assignNextInActiveStage(ownerUid, gameId, runId, teamId, { lat: 31.7905, lng: 35.164 }, now, game)
+      .catch((e) => logBestEffort('joinRun.testDrive.assign', { ownerUid, gameId, runId, teamId }, e));
+  }
+
+  return { teamId, runId, gameId, ownerUid, alreadyJoined: joined.already, selfStarted: selfStart && !joined.already };
 });
 
 
@@ -3104,6 +3154,120 @@ export const startInstantPlay = loggedCallable('startInstantPlay', async (data, 
   await assignNextInActiveStage(ownerUid, gameId, runId, uid, { lat: 31.7905, lng: 35.164 }, now);
 
   return { ownerUid, gameId, runId, accessCode: code };
+});
+
+
+// ─── Rehearsal control (change: test-drive-rehearsal-control) ─────────────────
+// One button, in the test-run banner, that resolves whatever the CURRENT mission
+// needs and that a creator at a desk cannot supply:
+//
+//   * a LOCATION they are not standing at  -> 'arrive' (the client then runs the
+//     ordinary check-in/arrival path, which already has a server-side test-drive
+//     bypass keyed on run.isTestDrive);
+//   * an ANSWER they wrote weeks ago       -> the answer itself, for the client to
+//     FILL IN. The human still presses submit, so the real submit/scoring/routing
+//     path runs exactly as it does for a player;
+//   * a STAFF APPROVAL that will never come -> the server approves (or completes)
+//     the media mission. This was a genuine dead end: a photo mission without
+//     `smart.autoApprove` writes status:'pending' and waits for a review that, in
+//     a solo rehearsal, nobody is there to give.
+//
+// WHY A SEPARATE CALLABLE, not a flag on the task payload: answer keys are
+// server-secret and `sanitizeTaskForParticipant` strips every one of them. Making
+// the sanitizer conditional on "is this a test drive" would put the entire answer
+// key one wrong boolean away from every real player. A separate, separately
+// authorized call cannot do that: the worst case here is that a REHEARSAL run
+// reveals its own creator's answers.
+//
+// The gate is the run document, never the request: `run.isTestDrive !== true` is
+// permission-denied, and `resolveCallerTeam` proves the caller is a team in that
+// run. A test-drive run is free, capped at 2 participants and excluded from stats,
+// so the blast radius of its access code being shared is a rehearsal, not a game.
+export const revealTaskAnswer = loggedCallable('revealTaskAnswer', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'revealTaskAnswer');
+  const { taskId, stepIndex, ownerUid, gameId, runId, code } = data as {
+    taskId: string; stepIndex?: number;
+    ownerUid?: string; gameId?: string; runId?: string; code?: string;
+  };
+  if (!taskId) throw new functions.https.HttpsError('invalid-argument', 'taskId required');
+
+  const { ctx, teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
+
+  const runSnap = await db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get();
+  const run = runSnap.data() as Run | undefined;
+  // THE gate. Read from the run document, so a forged request body cannot reach it.
+  if (run?.isTestDrive !== true) {
+    throw new functions.https.HttpsError('permission-denied', 'This is not a test run');
+  }
+
+  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
+  const game = gameSnap.data() as Game;
+  const task = findGameTask(game, taskId);
+  if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
+
+  const reveal = (r: RehearsalReveal): RehearsalReveal => r;
+
+  switch (task.type) {
+    case 'quiz': {
+      // An ordering quiz stages an arrangement; every other quiz fills one string.
+      if (task.orderItems && task.orderItems.length > 0) {
+        return reveal({ kind: 'ordering', order: [...task.orderItems] });
+      }
+      const first = task.answers?.[0];
+      return first == null
+        ? reveal({ kind: 'none' })
+        : reveal({ kind: 'answer', answer: String(first) });
+    }
+    case 'numeric':
+      return task.numericAnswer == null
+        ? reveal({ kind: 'none' })
+        : reveal({ kind: 'answer', answer: String(task.numericAnswer) });
+    case 'smart_station': {
+      const secret = task.smart?.secretCode;
+      return secret ? reveal({ kind: 'answer', answer: String(secret) }) : reveal({ kind: 'none' });
+    }
+    case 'sequence': {
+      // Sequences are answered step by step, so reveal the step the client is on.
+      // An out-of-range index reveals nothing rather than throwing — the client
+      // may be a render behind the team document.
+      const i = typeof stepIndex === 'number' ? stepIndex : 0;
+      const step = task.steps?.[i];
+      return step?.answer == null
+        ? reveal({ kind: 'none' })
+        : reveal({ kind: 'answer', answer: String(step.answer) });
+    }
+    case 'photo': {
+      // Approve the pending submission if there is one; otherwise complete the
+      // mission outright, so the creator is not forced to actually take a photo
+      // at their desk just to see what comes next.
+      const now = new Date().toISOString();
+      // A submission lives ON the team document under `taskSubmissions[taskId]`
+      // (submitStationPhoto), not in a subcollection. Marked approved only when one
+      // is actually there — `merge` on a nested object would otherwise invent a
+      // submission row with no photo in it. Best-effort: the completion below is
+      // what the creator is waiting for, and must not fail over a review stamp.
+      const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
+      const teamSnap = await teamRef.get();
+      const submissions = (teamSnap.data() as { taskSubmissions?: Record<string, RawSubmission> } | undefined)?.taskSubmissions;
+      if (submissions?.[taskId]) {
+        await teamRef.set(
+          { taskSubmissions: { [taskId]: { status: 'approved', reviewedAt: now } } },
+          { merge: true },
+        ).catch((e) => logBestEffort('revealTaskAnswer.approve', { taskId, teamId }, e));
+      }
+      await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+      return reveal({ kind: 'approved' });
+    }
+    case 'survey':
+      // No right answer exists. Saying so is the honest response.
+      return reveal({ kind: 'none' });
+    default:
+      // field / self_report / geofence: the client runs the ordinary arrival path,
+      // which the server already relaxes for a test-drive run.
+      return reveal({ kind: 'arrive' });
+  }
 });
 
 

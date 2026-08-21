@@ -61,11 +61,24 @@ export function DialogHost() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      // z-[110] — ABOVE every other overlay in the app, including the launch
+      // liftoff at z-[100]. This is not cosmetic. A failed launch does
+      // `await dialog.alert(...)` from inside the liftoff's try/finally, so the
+      // liftoff is still up when the alert renders; at z-50 the alert was drawn
+      // UNDERNEATH it and the creator saw "preparing your run…" forever, on a
+      // launch that had already failed, with an invisible dialog waiting for a
+      // click that could never be aimed at it. The app was not hung — it just
+      // looked exactly like it was.
+      //
+      // A blocking alert/confirm is the most urgent thing on screen by
+      // definition, so it outranks progress overlays rather than the other way
+      // round. Keep this the highest z-index in creator-web; the ordering is
+      // asserted by scripts/test-creator-a11y-scan.ts.
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget && req.kind === 'alert') onConfirm(); }}
     >
       <Card className="w-full max-w-sm p-6 space-y-4">
-        <p className="text-sm text-zinc-200 whitespace-pre-line">{req.message}</p>
+        <p className="text-sm text-[--ink-1] whitespace-pre-line">{req.message}</p>
 
         {req.kind === 'prompt' && (
           <Input

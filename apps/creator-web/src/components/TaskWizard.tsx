@@ -29,6 +29,7 @@ import { Button, Input, Label, TagChips, Textarea } from './ui';
 import { parseTagsInput } from '../lib/tags';
 import { loadPopularTags } from '../services/calls';
 import { dialog } from './dialog';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { uploadTaskMedia } from '../services/firebase';
 import { useT } from './LanguageContext';
 import LocationStep from './LocationStep';
@@ -377,6 +378,9 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
   advOpen: boolean; setAdvOpen: (fn: (o: boolean) => boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Escape closes the expanded map. Only while it IS expanded — this component
+  // renders the inline map the rest of the time.
+  useModalDismiss(() => setExpanded(false), undefined, expanded);
   const choice = locationChoiceOf(task);
   const CHOICES: { choice: LocationChoice; label: string; sub: string; desc: string }[] = [
     { choice: 'anywhere', label: b.locAnywhere, sub: b.locAnywhereSub, desc: b.locAnywhereDesc },

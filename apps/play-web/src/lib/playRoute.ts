@@ -25,6 +25,19 @@
 
 import { parseChallengeParam } from '@rushpoint/shared';
 
+/**
+ * Query-param key that marks a join link as the creator's own REHEARSAL
+ * (change: test-drive-straight-to-play): `?code=<CODE>&testdrive=1`.
+ *
+ * It is a pure UX modifier on the join route and carries NO authority — the run
+ * is a test drive because the server said so (`getJoinInfo().isTestDrive`, from
+ * `run.isTestDrive`), never because a URL claimed it. All this flag does is skip
+ * the registration form the creator would otherwise fill in to look at their own
+ * game. Forging it onto a real run's code therefore buys nothing: the join is the
+ * same join, and every test-drive affordance downstream keys off the server flag.
+ */
+export const TEST_DRIVE_ROUTE_PARAM = 'testdrive';
+
 /** Query-param key for the staff console: `?staff=<ownerUid>.<gameId>.<runId>`. */
 export const STAFF_ROUTE_PARAM = 'staff';
 /** Legacy staff link params, kept parseable for QRs already printed/shared. */
@@ -60,7 +73,12 @@ export type PlayRoute =
   | { kind: 'challenge'; gameId: string; taskId: string }
   | { kind: 'play' }
   | { kind: 'promo'; gameId: string }
-  | { kind: 'join'; code: string | null };
+  /**
+   * `autoJoin` is set only by a `?testdrive` link (see TEST_DRIVE_ROUTE_PARAM) and
+   * only alongside a code — "join this without making me fill the form". Absent
+   * everywhere else, so a real participant's link resolves exactly as before.
+   */
+  | { kind: 'join'; code: string | null; autoJoin?: boolean };
 
 export interface PlayRouteInput {
   /** `window.location.search`, with or without the leading `?`. */
@@ -191,6 +209,9 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   // reached JoinScreen. A `?staff=` PARAM (real staff intent in the link) still
   // wins; only a mere stored session yields to the code.
   const linkCode = normCode(p.get('code'));
+  // Only ever consulted together with `linkCode` below — a bare `?testdrive` with
+  // no code is meaningless and must not change any route.
+  const autoJoin = p.has(TEST_DRIVE_ROUTE_PARAM);
 
   // 1. Staff — highest precedence, and it CONSUMES owner/game/run so no later
   //    branch can re-read `game` as a promo id. A staff link never touches the
@@ -232,7 +253,7 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
   //    (and, per the guard above, a stored staff session too).
   if (linkCode) {
     const sessionCode = normCode(session?.code);
-    if (!session) return { route: { kind: 'join', code: linkCode }, clearSession: false };
+    if (!session) return { route: { kind: 'join', code: linkCode, autoJoin }, clearSession: false };
     // Same run → a no-op resume. This is the load-bearing case: re-scanning the
     // team's own QR mid-event must not drop their progress. A finished run with
     // the same code also resumes, so the player keeps their results screen.
@@ -240,7 +261,7 @@ export function resolvePlayRoute(input: PlayRouteInput): PlayRouteResult {
       return { route: { kind: 'play' }, clearSession: false };
     }
     // Different run (or a session with no code at all) → the URL wins.
-    return { route: { kind: 'join', code: linkCode }, clearSession: true };
+    return { route: { kind: 'join', code: linkCode, autoJoin }, clearSession: true };
   }
 
   // 8. No code in the URL → a stored session simply resumes.

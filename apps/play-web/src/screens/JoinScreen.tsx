@@ -13,18 +13,28 @@ import { useAsyncAction } from '../hooks/useAsyncAction';
 import { TAP_TARGET } from '../lib/interaction';
 import { normalizeJoinCodeInput, joinErrorKey } from '../lib/joinCode';
 import { creatorUrl } from '../lib/creatorUrl';
+import { LoadingView } from '../components/LoadingView';
+import { planTestDriveAutoJoin } from '../lib/testDriveAutoJoin';
 
 // The legal footer moved to components/LegalFooter so the Final screen can show
 // the same links (a player who finishes without ever re-reading Join still needs
 // a route to the privacy policy).
 
-export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
+export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, onDemo }: {
   /**
    * The access code carried by the link, already resolved by lib/playRoute.ts.
    * The URL is parsed in exactly ONE place now: a screen re-reading
    * `window.location` is how a stale session ended up beating the link code.
    */
   initialCode?: string | null;
+  /**
+   * The link asked us to join without showing the form — the creator's own
+   * rehearsal (`?code=X&testdrive`, change: test-drive-straight-to-play). Only a
+   * REQUEST: `planTestDriveAutoJoin` still refuses unless the SERVER says this
+   * code belongs to a test-drive run, so this can never skip a real
+   * participant's registration.
+   */
+  autoJoin?: boolean;
   onJoined: (s: Session) => void;
   onStaff?: () => void;
   /**
@@ -157,15 +167,26 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
     if (memberNames.length === 0) return; // guarded by the disabled Join button
     if (errors.size > 0) { setFieldErrors(errors); return; }
     setFieldErrors(new Set());
+    await sendJoin(info, values, memberNames);
+  }
+
+  // The one place that actually joins. Shared by the form path above and the
+  // rehearsal auto-join below so the two can never drift on what a Session holds
+  // (notably `isTestDrive`, which every test-drive affordance downstream reads).
+  async function sendJoin(
+    j: JoinInfo,
+    registrationData: Record<string, string>,
+    memberNames: string[],
+  ): Promise<void> {
     try {
-      const displayName = resolveDisplayName(info.mode, values, memberNames);
+      const displayName = resolveDisplayName(j.mode, registrationData, memberNames);
       const canonicalCode = normalizeJoinCodeInput(code);
-      const res = await joinRun({ code: canonicalCode, displayName, registrationData: values, memberNames });
+      const res = await joinRun({ code: canonicalCode, displayName, registrationData, memberNames });
       const session: Session = {
         ownerUid: res.ownerUid, gameId: res.gameId, runId: res.runId,
         code: canonicalCode, displayName,
         teamId: res.teamId,
-        isTestDrive: info.isTestDrive ?? false,
+        isTestDrive: j.isTestDrive ?? false,
       };
       saveSession(session);
       onJoined(session);
@@ -207,7 +228,58 @@ export default function JoinScreen({ initialCode, onJoined, onStaff, onDemo }: {
   const lookupAction = useAsyncAction(lookup);
   const submitAction = useAsyncAction(submit);
   const attachAction = useAsyncAction(attach);
-  const busy = lookupAction.busy || submitAction.busy || attachAction.busy;
+  const autoJoinAction = useAsyncAction(sendJoin);
+  const busy = lookupAction.busy || submitAction.busy || attachAction.busy || autoJoinAction.busy;
+
+  // ── Rehearsal auto-join (change: test-drive-straight-to-play) ───────────────
+  // "בדיקה" in the builder opens this screen on the test run's own code with
+  // `?testdrive`. The creator is looking at THEIR OWN game, so making them type a
+  // name into a registration form first is pure friction — that form is for
+  // participants. Once the lookup returns we join on their behalf and PlayScreen
+  // takes over, which is the whole point: they see exactly what a player sees.
+  //
+  // Three things keep this from becoming a way around registration:
+  //   * the planner refuses unless the SERVER reported this code as a test drive;
+  //   * it refuses whenever the game has a required field a human must type;
+  //   * `attempted` makes it fire at most once per mount, so a failed join lands
+  //     on the ordinary form with its ordinary error instead of retry-looping.
+  const attempted = useRef(false);
+  // Mirrors `attempted` into render: while this is true the screen shows a short
+  // "opening your game" state instead of flashing the registration form the
+  // creator is never going to fill in.
+  const [autoJoining, setAutoJoining] = useState(false);
+  useEffect(() => {
+    if (!info || attempted.current) return;
+    const plan = planTestDriveAutoJoin({
+      requested: !!autoJoin,
+      isTestDrive: info.isTestDrive ?? false,
+      runStatus: info.runStatus,
+      mode: info.mode,
+      registrationFields: info.registrationFields,
+      playerName: t.join.testDrivePlayerName,
+    });
+    if (plan.kind !== 'join') return;
+    attempted.current = true;
+    setAutoJoining(true);
+    // On success `onJoined` unmounts this screen; on failure `sendJoin` has
+    // already set the error, so drop back to the normal form to show it.
+    void autoJoinAction.run(info, plan.values, plan.memberNames)
+      .finally(() => setAutoJoining(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [info, autoJoin]);
+
+  // ── Rehearsal: joining on the creator's behalf ─────────────────────────────
+  // Placed AHEAD of both step renders so neither the code field nor the
+  // registration form flashes on the way into the game. `autoJoining` is false
+  // again the moment the join settles, so a failure falls straight through to the
+  // ordinary screens below with `err` already set.
+  if (autoJoining) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <LoadingView messages={[t.join.testDriveEntering]} />
+      </div>
+    );
+  }
 
   // ── Step 1: enter access code ──────────────────────────────────────────────
   if (!info) {

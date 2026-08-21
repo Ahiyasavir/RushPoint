@@ -2,7 +2,6 @@ import { Suspense, useCallback, useEffect, useState } from 'react';
 import { ensureAuth } from './services/firebase';
 import { clearSession, loadSession, loadStaffSession, type Session } from './store';
 import JoinScreen from './screens/JoinScreen';
-import PlayScreen from './screens/PlayScreen';
 import ConnectionBanner from './components/ConnectionBanner';
 import { DialogHost } from './components/dialog';
 import { Spinner } from './components/Spinner';
@@ -16,6 +15,17 @@ import { lazyWithRetry } from './lib/lazyWithRetry';
 // service-worker shell (old hashed chunk 404s after a redeploy) self-heals with a
 // one-shot reload instead of hanging Suspense forever — previously only
 // StaffConsole was protected (wave-g robustness #2).
+// PlayScreen was the LAST statically-imported screen, and by far the heaviest: it
+// pulls TaskRunner (2.2k lines) and the whole gameplay engine into the entry
+// chunk — which every first-time visitor downloads to look at the JOIN screen,
+// before they have a game to play at all. Splitting it is what kept the initial
+// payload under budget instead of ratcheting the number a second time.
+//
+// Safe for a mid-race resume: a player only reaches PlayScreen by joining, which
+// is an online action, so the chunk lands while they are already connected and is
+// served from the service-worker cache on every later resume. lazyWithRetry
+// covers the stale-chunk-404 case a redeploy creates.
+const PlayScreen = lazyWithRetry('play', () => import('./screens/PlayScreen'));
 const CeremonyScreen = lazyWithRetry('ceremony', () => import('./screens/CeremonyScreen'));
 const GamePromoScreen = lazyWithRetry('promo', () => import('./screens/GamePromoScreen'));
 const PublicLeaderboardScreen = lazyWithRetry('board', () => import('./screens/PublicLeaderboardScreen'));
@@ -285,9 +295,14 @@ function AppInner() {
     <>
       <ConnectionBanner />
       {bottom === 'play' && session
-        ? <PlayScreen session={session} onLeave={leaveRun} />
+        ? (
+          <Suspense fallback={routeFallback}>
+            <PlayScreen session={session} onLeave={leaveRun} />
+          </Suspense>
+        )
         : <JoinScreen
             initialCode={route.kind === 'join' ? route.code : null}
+            autoJoin={route.kind === 'join' && route.autoJoin === true}
             onJoined={setSession}
             onStaff={() => setStaffMode(true)}
             onDemo={shouldOfferDemo(route, !!session) ? openDemo : undefined}

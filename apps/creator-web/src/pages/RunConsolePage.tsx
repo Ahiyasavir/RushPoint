@@ -32,6 +32,7 @@ import {
 // so the two views can never disagree about what counts as "this team's media".
 import { buildRunMediaGallery } from '../lib/runMediaGallery';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { Badge, Button, Card, EmptyState, Input, Label, Spinner } from '../components/ui';
 import { OverflowMenu } from '../components/OverflowMenu';
 import RichTooltip from '../components/RichTooltip';
@@ -3026,6 +3027,10 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
   const t = useT();
   const [data, setData] = useState<{ summary: RunFeedbackSummary; responses: RunFeedback[] } | null>(null);
   const [open, setOpen] = useState<RunFeedback | null>(null);
+  // Escape closes the drill-down. `active` is the open flag: this component keeps
+  // rendering the panel behind the modal, so an always-on listener would fire
+  // with nothing open.
+  useModalDismiss(() => setOpen(null), undefined, open !== null);
   // Surface a failed load instead of a silent blank (change: fix-post-run-analytics-visibility).
   const [err, setErr] = useState('');
 

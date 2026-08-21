@@ -883,6 +883,42 @@ export interface TaskScoreBreakdown {
   total: number;
 }
 
+/**
+ * What the rehearsal control did, or is handing back, for one mission
+ * (change: test-drive-rehearsal-control).
+ *
+ * A creator pressing "בדיקה" walks their own game from a desk, so three things
+ * that are load-bearing in the field are impossible there: standing at a place,
+ * knowing an answer they wrote weeks ago, and having a staff member on hand to
+ * approve a photo. The rehearsal button resolves whichever of those the CURRENT
+ * mission needs, and this is what the server says it resolved.
+ *
+ * `answer` / `order` are ANSWER-KEY material and are returned ONLY for a run
+ * whose `isTestDrive` is true. They are never added to the participant task
+ * payload — `sanitizeTaskForParticipant` still strips every key — so the reveal
+ * is a separate, separately-authorized call rather than a conditional inside the
+ * sanitizer, where a wrong flag would leak answers to real players.
+ */
+export type RehearsalRevealKind =
+  /** The client should fill this answer into the input and let the human submit. */
+  | 'answer'
+  /** Ordering quiz: the correct arrangement, to stage in the list. */
+  | 'ordering'
+  /** Located mission: nothing to reveal — run the normal arrival/check-in path. */
+  | 'arrive'
+  /** Media mission: the server approved (or completed) it; nothing to fill. */
+  | 'approved'
+  /** Nothing to reveal (a survey has no right answer). */
+  | 'none';
+
+export interface RehearsalReveal {
+  kind: RehearsalRevealKind;
+  /** Present for kind 'answer'. */
+  answer?: string;
+  /** Present for kind 'ordering'. */
+  order?: string[];
+}
+
 export interface RunTaskRecord {
   taskId: string;
   taskIndex: number;  // index into Stage.tasks for multi-task stages

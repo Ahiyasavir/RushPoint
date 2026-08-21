@@ -44,6 +44,18 @@ const PLAY_POLICY = {
   entryJs: /^assets\/index-[^/]*\.js$/,
   entryCss: /^assets\/index-[^/]*\.css$/,
   maxEntryGzipBytes: 255_000,
+  // Held at the original 975_000. It was briefly moved to 980_000 when the
+  // rehearsal control pushed the entry 45 B over, then moved BACK when the real
+  // cause turned up: PlayScreen — and TaskRunner with it, ~2.2k lines of gameplay
+  // engine — was the last statically-imported screen, so every first-time visitor
+  // downloaded the whole thing to look at the JOIN screen. Splitting it
+  // (apps/play-web/src/App.tsx) freed ~29.7 KB gzip and took the entry from
+  // 976,544 raw to 867,029.
+  //
+  // The lesson worth keeping: this gate firing twice in a row was the signal, and
+  // the second time the answer was NOT a bigger number. When it fires again, look
+  // at what is in the entry chunk before touching these constants — the remaining
+  // candidate is the i18n dictionaries, which ship BOTH languages to everyone.
   maxEntryRawBytes: 975_000,
   maxInitialGzipBytes: 262_000,
   // Size alone is not enough: the smallest deferred heavy dependency (qrcode,

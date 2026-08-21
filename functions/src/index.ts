@@ -46,7 +46,7 @@ export {
   setTeamHold, forceAssignTask,
   refreshLeaderboard, getPublicLeaderboard, getRunRecap, getRunReplay, getRunAnalytics, getRunSummary, getRunHeatmap,
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
-  submitTaskAnswer, submitSequenceStep, getRecommendedTasks,
+  submitTaskAnswer, submitSequenceStep, getRecommendedTasks, revealTaskAnswer,
   checkOutTask, getMyTeamState, listLiveRuns, getMyProfile,
   createTrackable, getRunTrackables, pickUpTrackable, dropTrackable,
   startInstantPlay,

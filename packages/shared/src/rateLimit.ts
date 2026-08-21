@@ -67,6 +67,11 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   submitStationPhoto: { max: 20, windowMs: MIN },
   completeTask: { max: 60, windowMs: MIN },
   requestTaskHint: { max: 20, windowMs: MIN },
+  // Rehearsal answer reveal (change: test-drive-rehearsal-control). Only ever
+  // reachable on a run whose `isTestDrive` is true, so this is not an oracle a
+  // real participant can touch — but it IS an answer-key read, so it is capped
+  // roughly like the submit path it feeds rather than left open.
+  revealTaskAnswer: { max: 30, windowMs: MIN },
   // Hidden-location arrival probe (change: play-task-gating). Strictly TIGHTER
   // than completeTask — it evaluates the same proximity predicate, so it must
   // never become a cheaper grid-search oracle than the check-in it mirrors.

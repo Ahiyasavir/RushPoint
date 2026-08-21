@@ -130,5 +130,22 @@ for (const s of SPOTLIGHT_STEPS) {
   check(`copy for "${s.id}" exists in both dictionaries`, hits >= 2, `${hits} occurrence(s)`);
 }
 
+// ── The advance guard (regression: the "5/2" counter) ────────────────────────
+// `last` is captured from a render, so a burst of taps all take the "not last"
+// branch and each runs `i + 1` — walking `index` past the end. The step render
+// was already clamped, so the only visible symptom was a counter reading "5/2",
+// while the real damage was that no further tap could reach `finish()` at all.
+// Found by clicking the spotlight through faster than React could re-render.
+// Component behaviour, and creator-web has no component test runner, so this is
+// a source assertion — but a precise one: the increment MUST be clamped.
+console.log('\n── advance guard ──');
+const spotlightSrc = readFileSync(
+  join(process.cwd(), 'apps/creator-web/src/components/BuilderSpotlight.tsx'), 'utf8');
+check('the step increment is clamped to the last index',
+  /setIndex\(\(i\) => Math\.min\(i \+ 1, steps\.length - 1\)\)/.test(spotlightSrc),
+  'an unclamped `i + 1` lets a tap burst run off the end');
+check('the raw index is never rendered as the step number',
+  !/\{index \+ 1\}\//.test(spotlightSrc));
+
 console.log(`\n${failures === 0 ? 'ALL BUILDER-SPOTLIGHT TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

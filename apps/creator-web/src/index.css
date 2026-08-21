@@ -16,11 +16,26 @@
   --rp-border: #E0E3ED;
   --ink-1: #0A0C1A;
   --ink-2: #3D4259;
-  --ink-3: #7B82A0;
+  /* --ink-3 is the app's SECONDARY text: help lines, hints, metadata, empty-state
+     bodies. It was #7B82A0, which is 3.79:1 on white and 3.04:1 on --rp-card —
+     below the 4.5:1 AA needs for normal text, on the token carrying most of the
+     explanatory copy in the product. Darkened along its own hue to #60657D
+     (5.75:1 on --surface-0, 4.61:1 on the worst surface it is used over).
+     Nothing checked this: play-web's a11y scan asserts AA over the tokens in its
+     TAILWIND CONFIG, and creator-web keeps its ink in this stylesheet, so the
+     tokens here were never measured. They are now — see
+     scripts/test-creator-a11y-scan.ts, which parses this file directly. */
+  --ink-3: #60657D;
   /* One step fainter than --ink-3 for tiny count badges (StageRail / RunConsole
      section counts, Builder exclusive-groups hint). Was referenced but never
-     defined, so those spans fell back to the inherited color. */
-  --ink-4: #A6ABC0;
+     defined, so those spans fell back to the inherited color.
+     Held to 3:1, the NON-TEXT / large-text threshold, not 4.5:1 — at AA it would
+     be indistinguishable from --ink-3 and the token would have no reason to
+     exist. That is the contract: --ink-4 is for a count or a glyph that sits
+     beside an already-labelled control, never for a sentence someone must read.
+     Anything that IS prose belongs on --ink-3. Was #A6ABC0 = 2.28:1, which met
+     neither bar. */
+  --ink-4: #7E8292;
 
   --rp-fire:   #FF5722;
   --rp-amber:  #FFB300;
@@ -67,8 +82,14 @@ html.dark {
   --rp-border: rgba(255,255,255,0.07);
   --ink-1: #E8EAFF;
   --ink-2: #8890B8;
-  --ink-3: #464D6E;
-  --ink-4: #363B54;
+  /* Dark mode was the worse half, and it is not a niche: useDarkMode() seeds
+     itself from prefers-color-scheme, so this palette is the DEFAULT for every
+     creator whose OS is dark. --ink-3 was #464D6E = 2.42:1 on --surface-0 — every
+     help line, hint and empty-state body in the app, effectively unreadable.
+     Lightened along its own hue to #81869C (5.54:1, worst surface 4.57:1). */
+  --ink-3: #81869C;
+  /* 3:1 like its light-mode twin, and for the same reason. Was 1.82:1. */
+  --ink-4: #666A7D;
 
   --rp-bg: #07080F;
   --rp-bg-elevated: #0D0E1A;

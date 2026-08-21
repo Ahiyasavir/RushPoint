@@ -21,6 +21,7 @@ import {
   type SpotlightStep,
 } from '../lib/creatorOnboarding';
 import { isCreatorTourRunning } from './CreatorTour';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 
 /** How long to let the Builder settle before pointing at any of it. */
 const SETTLE_MS = 700;
@@ -39,6 +40,12 @@ export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActiv
   const { user } = useAuth();
   const [steps, setSteps] = useState<SpotlightStep[] | null>(null);
   const [index, setIndex] = useState(0);
+  // Escape dismisses the explainer, exactly as clicking the scrim does. No focus
+  // management: the spotlight points AT the Builder, so stealing focus off the
+  // thing it is pointing at would defeat it. `finish` is declared below (function
+  // declaration, hoisted) and records the "seen" flag, so Escape does not make it
+  // come back on the next open.
+  useModalDismiss(() => finish(), undefined, steps !== null && steps.length > 0);
 
   // Decide ONCE, after the Builder has settled. Deliberately not re-evaluated on
   // every render: a spotlight that reappears because a panel opened would be a
@@ -87,6 +94,7 @@ export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActiv
   // skip rather than point at nothing.
   if (!rect) return null;
 
+  const stepNumber = Math.min(index, steps.length - 1) + 1;
   const last = index >= steps.length - 1;
   const stepCopy = (copy as unknown as Record<string, { title: string; body: string }>)[step.id];
 
@@ -115,10 +123,22 @@ export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActiv
         <div className="font-brand font-bold text-[--ink-1] text-sm">{stepCopy?.title}</div>
         <p className="text-[12px] text-[--ink-2] mt-1 leading-relaxed">{stepCopy?.body}</p>
         <div className="flex items-center justify-between gap-2 mt-3">
-          <span className="text-[11px] text-[--ink-3] tabular-nums">{index + 1}/{steps.length}</span>
+          {/* Clamped, not `index + 1`: see the click guard below. */}
+          <span className="text-[11px] text-[--ink-3] tabular-nums">{stepNumber}/{steps.length}</span>
           <button
             type="button"
-            onClick={() => (last ? finish() : setIndex((i) => i + 1))}
+            // `last` is read from THIS render, so a burst of taps (an impatient
+            // double-tap, a laggy phone) all see the same stale index: every one
+            // of them took the "not last" branch and `i + 1` ran once per tap,
+            // walking index past the end. The step itself was clamped, so the
+            // only visible symptom was the counter reading "5/2" — and the real
+            // one was that no amount of tapping could reach `finish()`. Clamping
+            // inside the updater makes a burst idempotent: index stops at the
+            // last step, the label flips to "got it", and the next tap closes.
+            onClick={() => {
+              if (last) { finish(); return; }
+              setIndex((i) => Math.min(i + 1, steps.length - 1));
+            }}
             className="min-h-[40px] px-4 rounded-lg bg-rp-fire text-white text-[13px] font-medium"
           >
             {last ? copy.gotIt : copy.next}

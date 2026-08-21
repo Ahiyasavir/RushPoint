@@ -1871,11 +1871,31 @@ async function main() {
     tdC.call('joinRun', { code: cTD, displayName: 'One too many' }),
     { codeIn: ['functions/resource-exhausted'] });
 
-  // (d) A second LIVE test launch for the same game is rejected; a NORMAL launch
-  //     of the same game still succeeds (the guard is test-drive-scoped).
-  await expectError('second live test launch for the same game is rejected',
-    creator.call('launchRun', { gameId: gTD, testDrive: true }),
-    { codeIn: ['functions/failed-precondition'], match: /finaliz/i });
+  // (d) A second test launch RETIRES the first rather than being refused
+  //     (change: test-drive-straight-to-play) — "בדיקה" must stay one tap, and a
+  //     run snapshots the game at launch, so reusing the old one would silently
+  //     rehearse a pre-edit version. The one-live INVARIANT still holds; a NORMAL
+  //     launch of the same game is unaffected (the guard is test-drive-scoped).
+  // Asserted on its OWN game: the retirement finalizes the previous test run, and
+  // `rTD` below is still played and finalized by the rest of this scenario.
+  const { gameId: gRetire } = await creator.call('createGame', { title: 'Retire Test Drive', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gRetire,
+    stages: [{ id: 'rt-s', order: 0, title: 'Only', isFinal: true, tasks: [
+      { id: 'rt-a', title: 'Say hi', type: 'self_report', difficulty: 1, estimatedMinutes: 2, pointValue: 10, locationless: true },
+    ] }],
+  });
+  const { runId: rRet1 } = await creator.call('launchRun', { gameId: gRetire, testDrive: true });
+  const { runId: rRet2 } = await creator.call('launchRun', { gameId: gRetire, testDrive: true });
+  check('a second test launch succeeds instead of demanding a manual finalize', !!rRet2 && rRet2 !== rRet1, rRet2);
+  const retRuns = await adminDb.collection(`users/${creatorUid}/games/${gRetire}/runs`)
+    .where('isTestDrive', '==', true).get();
+  const liveRet = retRuns.docs.filter((d) => d.data().status !== 'finished');
+  check('exactly ONE live test run remains — the previous one was retired',
+    liveRet.length === 1 && liveRet[0].id === rRet2,
+    JSON.stringify(retRuns.docs.map((d) => ({ id: d.id, status: d.data().status }))));
+  await creator.call('finalizeRun', { gameId: gRetire, runId: rRet2 });
+
   const { runId: rNormal } = await creator.call('launchRun', { gameId: gTD });
   check('a normal launch of the same game still succeeds', !!rNormal, rNormal);
   await creator.call('finalizeRun', { gameId: gTD, runId: rNormal });
@@ -1954,6 +1974,97 @@ async function main() {
   await creator.call('finalizeRun', { gameId: gPB, runId: rPBN });
 
   }); // scenario: test drive proximity bypass
+
+  await scenario('rehearsal reveal (test drive only; answers, media approval, real run refused)', async () => {
+
+  // ── Rehearsal control (change: test-drive-rehearsal-control) ────────────────
+  // The creator walks their own game from a desk. `revealTaskAnswer` hands back
+  // the answer key so the button can FILL the input — the human still presses
+  // submit, so the real submit/scoring/routing path runs. Two things must hold:
+  //   (a) it works for every answerable type, and the revealed value really is
+  //       accepted by the ordinary submit path (a reveal that returns the wrong
+  //       shape is worse than none — it teaches the creator a false answer);
+  //   (b) it is refused outright on a REAL run. That is the whole security story:
+  //       answer keys stay server-secret, and this is the one door that opens
+  //       them, so the door must be shut whenever isTestDrive is not true.
+  const { gameId: gRV } = await creator.call('createGame', { title: 'Rehearsal Reveal', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gRV,
+    scoringPreset: 'fixed_points_speed',
+    stages: [{
+      id: 'rv-s', order: 0, title: 'Answerables', isFinal: true,
+      tasks: [
+        { id: 'rv-quiz', title: 'Quiz', type: 'quiz', answers: ['jerusalem'],
+          difficulty: 1, estimatedMinutes: 3, pointValue: 20, locationless: true },
+        { id: 'rv-num', title: 'Numeric', type: 'numeric', numericAnswer: 42, numericTolerance: 0,
+          difficulty: 1, estimatedMinutes: 3, pointValue: 20, locationless: true },
+        { id: 'rv-station', title: 'Station', type: 'smart_station',
+          smart: { enabled: true, verificationType: 'code', secretCode: 'RP-4763' },
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 1, estimatedMinutes: 3, pointValue: 20 },
+        { id: 'rv-seq', title: 'Sequence', type: 'sequence',
+          steps: [{ id: 's1', prompt: 'First?', answer: 'alpha' }, { id: 's2', prompt: 'Second?', answer: 'beta' }],
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 1, estimatedMinutes: 3, pointValue: 20 },
+        { id: 'rv-survey', title: 'Survey', type: 'survey', surveyChoices: ['a', 'b'],
+          difficulty: 1, estimatedMinutes: 2, pointValue: 10, locationless: true },
+        { id: 'rv-field', title: 'Go there', type: 'field',
+          coordinates: { lat: 31.78, lng: 35.21 }, difficulty: 1, estimatedMinutes: 3, pointValue: 20 },
+      ],
+    }],
+  });
+
+  const { runId: rRV, accessCode: cRV } = await creator.call('launchRun', { gameId: gRV, testDrive: true });
+  const rv = makeParty('rehearser'); await signInAnonymously(rv.auth);
+  await rv.call('joinRun', { code: cRV, displayName: 'Desk creator' });
+
+  const quiz = await rv.call('revealTaskAnswer', { taskId: 'rv-quiz', code: cRV });
+  check('reveal: a quiz returns its answer', quiz?.kind === 'answer' && quiz?.answer === 'jerusalem', JSON.stringify(quiz));
+
+  const num = await rv.call('revealTaskAnswer', { taskId: 'rv-num', code: cRV });
+  check('reveal: a numeric target comes back as a string', num?.kind === 'answer' && num?.answer === '42', JSON.stringify(num));
+
+  const station = await rv.call('revealTaskAnswer', { taskId: 'rv-station', code: cRV });
+  check('reveal: a station returns its secret code', station?.kind === 'answer' && station?.answer === 'RP-4763', JSON.stringify(station));
+
+  const seq0 = await rv.call('revealTaskAnswer', { taskId: 'rv-seq', stepIndex: 0, code: cRV });
+  check('reveal: a sequence returns the answer for the step asked for', seq0?.kind === 'answer' && seq0?.answer === 'alpha', JSON.stringify(seq0));
+  const seq1 = await rv.call('revealTaskAnswer', { taskId: 'rv-seq', stepIndex: 1, code: cRV });
+  check('reveal: a later sequence step returns ITS answer, not the first', seq1?.answer === 'beta', JSON.stringify(seq1));
+  const seqOob = await rv.call('revealTaskAnswer', { taskId: 'rv-seq', stepIndex: 99, code: cRV });
+  check('reveal: an out-of-range step reveals nothing instead of throwing', seqOob?.kind === 'none', JSON.stringify(seqOob));
+
+  const survey = await rv.call('revealTaskAnswer', { taskId: 'rv-survey', code: cRV });
+  check('reveal: a survey has no right answer and says so', survey?.kind === 'none', JSON.stringify(survey));
+
+  const field = await rv.call('revealTaskAnswer', { taskId: 'rv-field', code: cRV });
+  check('reveal: a located mission defers to the ordinary arrival path', field?.kind === 'arrive', JSON.stringify(field));
+
+  // THE round trip: the revealed answer must actually be accepted. A reveal that
+  // returns a value the submit path rejects would be worse than no button.
+  const submitted = await rv.call('submitTaskAnswer', { taskId: 'rv-quiz', answer: quiz.answer, code: cRV });
+  check('reveal → submit: the revealed quiz answer is accepted as correct',
+    submitted?.correct === true, JSON.stringify(submitted));
+
+  // (b) A REAL run refuses, whatever the request body says.
+  const { runId: rRVN, accessCode: cRVN } = await creator.call('launchRun', { gameId: gRV });
+  const rvN = makeParty('realPlayer'); await signInAnonymously(rvN.auth);
+  await rvN.call('joinRun', { code: cRVN, displayName: 'Real player' });
+  await creator.call('startTeams', { gameId: gRV, runId: rRVN });
+  await expectError('a REAL run refuses to reveal any answer',
+    rvN.call('revealTaskAnswer', { taskId: 'rv-quiz', code: cRVN }),
+    { codeIn: ['functions/permission-denied'] });
+
+  // Someone with no team in the TEST run cannot reveal from it either — reusing
+  // the real-run player, who is a legitimate participant somewhere else. That is
+  // the sharper version of the check: the caller is authenticated and is in this
+  // GAME, just not in this run.
+  await expectError('a player with no team in the test run is refused',
+    rvN.call('revealTaskAnswer', { taskId: 'rv-quiz', code: cRV }),
+    { codeIn: ['functions/permission-denied', 'functions/not-found', 'functions/failed-precondition'] });
+
+  await creator.call('finalizeRun', { gameId: gRV, runId: rRV });
+  await creator.call('finalizeRun', { gameId: gRV, runId: rRVN });
+
+  }); // scenario: rehearsal reveal
 
   await scenario('hint auto escalation (attempts path → free hint)', async () => {
 

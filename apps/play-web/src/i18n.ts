@@ -40,6 +40,13 @@ const HE = {
     // and the placeholder itself is now a neutral code sample in both languages.
     codeLabel: 'הקוד שלכם',
     lookingUp: 'מחפש…',
+    // The creator's own rehearsal, opened from "בדיקה" in the builder. Shown for
+    // the moment between the link opening and the first mission appearing, so the
+    // screen is never a blank pause (change: test-drive-straight-to-play).
+    testDriveEntering: 'נכנסים למשחק שלכם…',
+    // The name the rehearsing creator plays under. Deliberately not a person's
+    // name: it labels the team on the creator's own board as what it is.
+    testDrivePlayerName: 'בדיקה',
     continue: 'המשך',
     // "אני צוות" read as "we are a team" and sent whole groups down the staff
     // path. מארגנים is unambiguous on its own, so the label carries the whole
@@ -180,6 +187,18 @@ const HE = {
     imHere: 'אני כאן',
     testDriveImHere: 'אני כאן (הרצת בדיקה)',
     testDriveHint: 'הרצת בדיקה. בדיקות המיקום מרוככות כדי שתוכלו לתרגל מכל מקום.',
+    // The ONE rehearsal control (change: test-drive-rehearsal-control). The label
+    // changes with what the mission needs, so the button is in the same place and
+    // means the same thing on every screen.
+    rehearseHelp: 'חזרה: אפשר להתקדם בלי להיות במקום',
+    rehearseHere: 'כאילו הגעתי',
+    rehearseApprove: 'אשרו',
+    rehearseFill: 'מלאו תשובה',
+    // A survey has no correct answer, so the button has nothing to give. Say that
+    // rather than leave a control that looks broken.
+    rehearseNothing: 'למשימה הזו אין תשובה נכונה, פשוט ענו מה שתרצו.',
+    // Marks the right option on a CHOICE quiz, where there is no field to fill.
+    rehearseCorrect: 'התשובה הנכונה',
     hiddenBadge: 'מיקום מוסתר',
     hiddenCheckIn: 'בדקו אם הגעתם',
     hiddenHelp: 'אין סיכה במפה. מצאו את המקום לפי הרמז.',
@@ -551,6 +570,13 @@ const HE = {
     feedEmpty: 'עוד אין תמונות. השלימו משימת צילום כדי להופיע כאן!',
     feedHidden: 'הפיד כבוי במשחק הזה.',
     feedHide: 'הסתרה',
+    // Shown on the button itself while the moderation call is in flight, and as
+    // the alert when it fails. A moderation action that fails SILENTLY is the
+    // worst case here: the creator believes the photo is gone from everyone's
+    // feed and it is not.
+    feedModerating: 'רגע…',
+    feedHideFailed: 'ההסתרה לא נשמרה. התמונה עדיין מוצגת לכולם. נסו שוב.',
+    feedRestoreFailed: 'השחזור לא נשמר. התמונה עדיין מוסתרת. נסו שוב.',
     feedHideConfirm: 'להסתיר את התמונה הזו מהפיד של כל המשתתפים?',
     feedItemCaption: ({ team, task }: { team: string; task: string }) => `${team} · ${task}`,
     feedReactAria: ({ emoji }: { emoji: string }) => `הוספת תגובה ${emoji}`,
@@ -715,6 +741,8 @@ const EN: typeof HE = {
     subtitle: 'Enter the access code from your host to join the race',
     codeLabel: 'Your code',
     lookingUp: 'Looking up…',
+    testDriveEntering: 'Opening your game…',
+    testDrivePlayerName: 'Test drive',
     continue: 'Continue',
     staff: 'Organizer sign in',
     oneDeviceNote: 'One person per team enters the code.',
@@ -847,6 +875,12 @@ const EN: typeof HE = {
     imHere: "I'm here",
     testDriveImHere: "I'm here (test run)",
     testDriveHint: 'Test run. Location checks are relaxed so you can rehearse from anywhere.',
+    rehearseHelp: 'Rehearsal: you can move on without being there',
+    rehearseHere: 'Act as arrived',
+    rehearseApprove: 'Approve',
+    rehearseFill: 'Fill answer',
+    rehearseNothing: 'This mission has no right answer, just respond however you like.',
+    rehearseCorrect: 'The correct answer',
     hiddenBadge: 'Hidden location',
     hiddenCheckIn: "Check if I've arrived",
     hiddenHelp: 'No pin on the map. Find the spot from the clue.',
@@ -1210,6 +1244,9 @@ const EN: typeof HE = {
     feedEmpty: 'No photos yet. Complete a photo mission to show up here!',
     feedHidden: 'The feed is off for this game.',
     feedHide: 'Hide',
+    feedModerating: 'Working…',
+    feedHideFailed: 'That photo was not hidden. Everyone can still see it. Try again.',
+    feedRestoreFailed: 'That photo was not restored. It is still hidden. Try again.',
     feedHideConfirm: 'Hide this photo from everyone\'s feed?',
     feedItemCaption: ({ team, task }: { team: string; task: string }) => `${team} · ${task}`,
     feedReactAria: ({ emoji }: { emoji: string }) => `React ${emoji}`,

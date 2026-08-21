@@ -4,6 +4,7 @@ import QRCode from 'qrcode';
 import { Button } from './ui';
 import { useT } from './LanguageContext';
 import { useAsyncAction } from '../hooks/useAsyncAction';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 
 // Reusable share modal: QR + copyable link + native share sheet. Used to recruit
 // players to a game's public promo page before an event, and reusable anywhere a
@@ -21,6 +22,9 @@ export function ShareSheet({
   const b = useT().builder;
   const [qr, setQr] = useState('');
   const [copied, setCopied] = useState(false);
+  // Escape closes the sheet. Without it the only way out for a keyboard user was
+  // to find the ✕ by tab order; the backdrop click is mouse-only.
+  useModalDismiss(onClose);
 
   useEffect(() => {
     QRCode.toDataURL(url, { margin: 1, width: 220 }).then(setQr).catch(() => setQr(''));

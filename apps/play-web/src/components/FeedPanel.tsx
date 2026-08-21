@@ -71,6 +71,16 @@ export default function FeedPanel({
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [mute, setMute] = useState<FeedMuteState>(EMPTY_FEED_MUTE);
   const [reportFor, setReportFor] = useState<FeedItem | null>(null);
+  // Which feed items have a hide/restore call in flight. Per ITEM, not a single
+  // shared flag: the moderator works down a list, and one pending card must not
+  // freeze the others. `react`/`report`/`muteTeam` need nothing here — they are
+  // optimistic and already change the UI on the first tap.
+  const [moderating, setModerating] = useState<Set<string>>(new Set());
+  const setPending = (id: string, on: boolean) => setModerating((prev) => {
+    const next = new Set(prev);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  });
   const { ownerUid, gameId, runId } = ctx;
 
   useEffect(() => { setMute(loadMute(runId)); }, [runId]);
@@ -167,19 +177,36 @@ export default function FeedPanel({
     }
   }
 
-  async function hide(item: FeedItem) {
-    if (!(await dialog.confirm(t.feed.feedHideConfirm, { danger: true }))) return;
+  // Hide and restore both wait on the server and are reconciled by the Firestore
+  // listener, so unlike the optimistic actions above they have nothing to show on
+  // the first tap. Two problems followed, and both mattered most in exactly the
+  // situation these buttons exist for — a photo up on a screen that should not be:
+  //
+  //   * no pending state, so on a slow connection the tap looked ignored and the
+  //     moderator tapped again, landing a second confirm dialog on top of a call
+  //     that was already in flight;
+  //   * the failure was SWALLOWED. The comment said "a retry is one tap away",
+  //     but nothing told anyone a retry was needed — the moderator walked away
+  //     believing the photo was gone from everyone's feed while it was still up.
+  async function moderateItem(item: FeedItem, restore: boolean) {
+    const confirmed = restore
+      ? await dialog.confirm(t.feed.feedRestoreConfirm)
+      : await dialog.confirm(t.feed.feedHideConfirm, { danger: true });
+    if (!confirmed) return;
+    setPending(item.id, true);
     try {
-      await hideFeedItem({ ...ctx, itemId: item.id });
-    } catch { /* the listener keeps the card; a retry is one tap away */ }
+      await hideFeedItem({ ...ctx, itemId: item.id, ...(restore ? { restore: true } : {}) });
+    } catch {
+      await dialog.alert(restore ? t.feed.feedRestoreFailed : t.feed.feedHideFailed);
+    } finally {
+      // Always released, so a failed call re-arms the button instead of leaving
+      // the card stuck in a pending state the listener will never resolve.
+      setPending(item.id, false);
+    }
   }
 
-  async function restore(item: FeedItem) {
-    if (!(await dialog.confirm(t.feed.feedRestoreConfirm))) return;
-    try {
-      await hideFeedItem({ ...ctx, itemId: item.id, restore: true });
-    } catch { /* the listener keeps the card as hidden; retry is one tap away */ }
-  }
+  const hide = (item: FeedItem) => moderateItem(item, false);
+  const restore = (item: FeedItem) => moderateItem(item, true);
 
   async function report(item: FeedItem, reason: FeedReportReason) {
     setReportFor(null);
@@ -271,16 +298,20 @@ export default function FeedPanel({
                   isHidden ? (
                     <button
                       onClick={() => void restore(item)}
-                      className="shrink-0 text-xs font-semibold text-ink-fire hover:underline"
+                      disabled={moderating.has(item.id)}
+                      aria-busy={moderating.has(item.id)}
+                      className="shrink-0 text-xs font-semibold text-ink-fire hover:underline disabled:opacity-50 disabled:no-underline"
                     >
-                      {t.feed.feedRestore}
+                      {moderating.has(item.id) ? t.feed.feedModerating : t.feed.feedRestore}
                     </button>
                   ) : (
                     <button
                       onClick={() => void hide(item)}
-                      className="shrink-0 text-xs text-zinc-500 hover:text-danger"
+                      disabled={moderating.has(item.id)}
+                      aria-busy={moderating.has(item.id)}
+                      className="shrink-0 text-xs text-zinc-500 hover:text-danger disabled:opacity-50"
                     >
-                      {t.feed.feedHide}
+                      {moderating.has(item.id) ? t.feed.feedModerating : t.feed.feedHide}
                     </button>
                   )
                 ) : (

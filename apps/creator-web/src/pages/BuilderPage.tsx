@@ -10,6 +10,7 @@ import { PRESET_LABELS, WRONG_ANSWER_LEVEL_ORDER, PAYMENTS_ENABLED, isAllowedWeb
 // Safe-zone authoring (change: expose-enforced-settings) — the SAME validator the
 // server applies, plus the pure derivation that seeds the boundary from the stops.
 import { suggestSafeZone, validateSafeZone, SAFE_ZONE_MAX_RADIUS_M } from '@rushpoint/shared';
+import { resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, TouchSensor, MeasuringStrategy,
   useSensor, useSensors,
@@ -88,6 +89,12 @@ const RoutePreviewMap = lazyWithRetry('routePreviewMap', () => import('../compon
 
 // One styling for every header menu item, so the File menu and the phone-width
 // overflow menu can never drift apart (change: builder-simplification-round-3).
+// Where the participant app lives, resolved exactly as the Dashboard/RunConsole
+// resolve it (dev derives it from this origin; production reads VITE_PLAY_URL).
+const PLAY_URL = import.meta.env.DEV
+  ? resolvePlayOrigin(window.location.origin)
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
+
 const HEADER_MENU_ITEM_CLASS =
   'w-full justify-start text-start min-h-[44px] px-2.5 py-2 rounded-lg text-xs font-medium text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50';
 
@@ -567,6 +574,25 @@ export default function BuilderPage() {
 
   async function saveAndLaunch(testDrive = false) {
     if (!game) return;
+    // A TEST DRIVE opens the participant app, not the organizer console
+    // (change: test-drive-straight-to-play). "בדיקה" means "show me my game the
+    // way a player sees it"; the console — a QR code and the live-ops panel — is
+    // the thing you use to RUN an event, and landing there made the button
+    // indistinguishable from a real launch. The Builder tab is left exactly where
+    // it was so the creator can keep editing after looking.
+    //
+    // The tab is opened HERE, before any await, because a popup opened after an
+    // async gap is blocked by Safari and Firefox. It is parked on about:blank and
+    // pointed at the run once the code exists; every failure path below closes it
+    // rather than leaving a blank tab behind.
+    // NOT `noopener`: with that feature the browser returns null by design, and
+    // we need the handle to point the tab at the run once the code exists. The
+    // opener link is severed immediately after navigating instead.
+    const playTab = testDrive ? window.open('about:blank', '_blank') : null;
+    // True once the tab has been sent somewhere real. Every path that ends
+    // WITHOUT handing off closes it, so a refused save/readiness check can't
+    // strand the creator on a blank tab.
+    let handedOff = false;
     // The one time "am I sure" gate before a creator's FIRST real launch ever
     // (change: creator-first-launch-confirm). Only the real launch is gated, never
     // Test run, and only when the game is actually launchable (a broken game gets
@@ -608,9 +634,24 @@ export default function BuilderPage() {
       const missing = quickSetupLaunchBlockers(game);
       if (missing.length > 0) { setQsBlockers(missing); return; }
       try {
-        const { runId } = await launchRun({ gameId: game.id, testDrive });
+        const { runId, accessCode } = await launchRun({ gameId: game.id, testDrive });
         // Launch succeeded — now it's safe to burn the one-time first-launch gate.
         if (needFirstLaunchConfirm) markFirstLaunchConfirmed(user?.uid);
+        if (testDrive) {
+          // `testdrive` asks play-web to join without the registration form. It is
+          // a hint only — the server's run.isTestDrive is what actually authorizes
+          // it (see lib/testDriveAutoJoin.ts).
+          const url = `${PLAY_URL}/?code=${encodeURIComponent(accessCode)}&testdrive=1`;
+          if (playTab) {
+            playTab.location.replace(url);
+            try { playTab.opener = null; } catch { /* cross-origin once navigated */ }
+            handedOff = true;
+          }
+          // Popup blocked: send this tab instead, so the button still does what it
+          // says rather than silently doing nothing.
+          else { handedOff = true; window.location.assign(url); }
+          return;
+        }
         nav(`/run/${game.id}/${runId}`);
       } catch (e) {
         const msg = e instanceof Error ? e.message : '';
@@ -626,6 +667,7 @@ export default function BuilderPage() {
         }
       }
     } finally {
+      if (!handedOff) { try { playTab?.close(); } catch { /* already gone */ } }
       setLaunching(false);
     }
   }
@@ -1632,7 +1674,7 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           </div>
         </div>
       )}
-      <p className="text-xs text-zinc-500 mt-1">{b.tagsHelp}</p>
+      <p className="text-xs text-[--ink-3] mt-1">{b.tagsHelp}</p>
     </div>
   );
 }
@@ -2276,7 +2318,7 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
             <div className="flex items-center gap-2">
               <Input value={activeStage.title} onChange={(e) => updateStage(activeStage.id, { title: e.target.value })} className="flex-1" placeholder={b.stageTitlePlaceholder} dir="auto" />
               {isLastStage && (
-                <label className="flex items-center gap-1 text-xs text-zinc-400 shrink-0">
+                <label className="flex items-center gap-1 text-xs text-[--ink-2] shrink-0">
                   <input type="checkbox" checked={!!activeStage.isFinal}
                     onChange={(e) => updateStage(activeStage.id, { isFinal: e.target.checked })} />{b.finalLabel}
                 </label>
@@ -2825,7 +2867,7 @@ function StepPreview({ game }: { game: Game }) {
     <Card className="p-5 space-y-4">
       <div>
         <h2 className="text-xl font-bold" dir="auto">{game.title || b.untitledGame}</h2>
-        <p className="text-zinc-500 text-sm" dir="auto">{game.description}</p>
+        <p className="text-[--ink-2] text-sm" dir="auto">{game.description}</p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge>{modeLabel[game.mode]}</Badge>
@@ -2854,7 +2896,7 @@ function StepPreview({ game }: { game: Game }) {
         </Suspense>
       </div>
 
-      <p className="text-xs text-zinc-500">{b.previewLaunchNote}</p>
+      <p className="text-xs text-[--ink-3]">{b.previewLaunchNote}</p>
     </Card>
   );
 }

@@ -14,6 +14,7 @@ import { useNavigate } from 'react-router-dom';
 import { daysUntilPurge } from '@rushpoint/shared';
 import { listDeletedGames, restoreGame, purgeGameNow, type TrashedGame } from '../services/calls';
 import { Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
+import { useModalDismiss } from '../hooks/useModalDismiss';
 import { LoadingState } from '../components/LoadingState';
 import { dialog } from '../components/dialog';
 import { matchesGameDeleteConfirmation } from '../lib/deleteConfirm';
@@ -160,6 +161,9 @@ function PurgeDialog({ game, busy, onCancel, onConfirm }: {
   const t = useT();
   const tr = t.trash;
   const [typed, setTyped] = useState('');
+  // Escape cancels — the same thing the backdrop click already does for a mouse.
+  // A destructive confirm is the LAST dialog that should be hard to back out of.
+  useModalDismiss(onCancel);
   const confirmed = matchesGameDeleteConfirmation(typed, game.title);
   const untitled = (game.title ?? '').trim() === '';
 

@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -270,6 +270,14 @@ export const submitSequenceStep = callable<
   Ctx & { taskId: string; stepIndex: number; answer?: string; lat?: number; lng?: number },
   { stepCorrect: boolean; stepsDone: number; totalSteps: number; taskComplete: boolean }
 >('submitSequenceStep');
+
+// Rehearsal control (change: test-drive-rehearsal-control). Refused with
+// permission-denied unless the RUN says isTestDrive — the flag is read from the
+// run document server-side, never from this request.
+export const revealTaskAnswer = callable<
+  Ctx & { taskId: string; stepIndex?: number },
+  RehearsalReveal
+>('revealTaskAnswer');
 
 export const verifyStationCode = callable<
   Ctx & { teamId: string; taskId: string; code: string },

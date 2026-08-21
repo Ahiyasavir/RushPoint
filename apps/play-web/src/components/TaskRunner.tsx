@@ -3,7 +3,7 @@ import { haversineKm, expiryInstantMs, defaultRadiusFor, cooldownRemainingSecond
 import type { RunStageRecord, TaskMedia } from '@rushpoint/shared';
 import {
   completeTask, requestNextTask, verifyStationCode, submitStationPhoto, requestTaskHint, reportArrival,
-  submitTaskAnswer, submitSequenceStep, triggerSOS,
+  submitTaskAnswer, submitSequenceStep, triggerSOS, revealTaskAnswer,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
 import { uploadTaskPhoto, uploadTaskAudio, uploadTaskVideo } from '../services/firebase';
@@ -323,6 +323,22 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   // and a reload resumed with the points banked.
   const [wrongAttempts, setWrongAttempts] = useState<Record<string, number>>({});
 
+  // ── Rehearsal control (change: test-drive-rehearsal-control) ───────────────
+  // A creator pressing "בדיקה" walks their own game from a desk, where three
+  // things a real player has are missing: they are not standing at the place,
+  // they do not remember the answer they wrote weeks ago, and there is no staff
+  // member to approve a photo. ONE button resolves whichever of those THIS
+  // mission needs, so the control is in the same spot and means the same thing
+  // everywhere — instead of the three scattered, type-specific bypasses this
+  // replaces.
+  //
+  // Answers are FILLED IN, never auto-submitted: the human still presses the
+  // mission's own submit button, so the real submit → scoring → routing path
+  // runs exactly as it does for a player. That is the point of a rehearsal.
+  const [rehearsal, setRehearsal] = useState<{ taskId: string; value?: string; order?: string[] } | null>(null);
+  const [rehearsing, setRehearsing] = useState(false);
+  const fillFor = (id: string) => (rehearsal?.taskId === id ? rehearsal.value : undefined);
+
   // Every interactive element freezes for viewers; a submission that loses a
   // race with a mid-flight control transfer maps to a friendly localized message.
   const frozen = busy || readOnly;
@@ -598,6 +614,46 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     );
   }
 
+  // The rehearsal button's one handler. The SERVER decides what this mission
+  // needs — the client only knows the sanitized payload, which by design contains
+  // no answers at all — and this dispatches on that verdict.
+  async function rehearse() {
+    if (!task) return;
+    setRehearsing(true);
+    clearMsg();
+    try {
+      const r = await revealTaskAnswer({
+        ...ctx,
+        taskId: task.id,
+        stepIndex: state.team.taskStepProgress?.[task.id] ?? 0,
+      });
+      if (r.kind === 'answer') {
+        // Staged for the human to submit — never auto-submitted.
+        setRehearsal({ taskId: task.id, value: r.answer });
+      } else if (r.kind === 'ordering') {
+        setRehearsal({ taskId: task.id, order: r.order });
+      } else if (r.kind === 'approved') {
+        // The server approved/completed the media mission; nothing to fill in.
+        feedback('task');
+        advanceWithCardExit();
+      } else if (r.kind === 'arrive') {
+        // Defer to the mission's OWN action, so the rehearsal path and the real
+        // path stay the same code. Each already falls back to a coordinate-less
+        // submit on a test drive, which the server accepts.
+        if (task.arrivalPending) { void checkArrival(); }
+        else if (task.type === 'geofence') { void geofenceTestCheckIn(); }
+        else { void field(); }
+      } else {
+        // 'none' — a survey has no right answer, and saying so beats a dead button.
+        showProgress(t.task.rehearseNothing);
+      }
+    } catch (e) {
+      setMsg(submitError(e, t.task.failed));
+    } finally {
+      setRehearsing(false);
+    }
+  }
+
   async function verify(code: string) {
     if (blockedOffline()) return;
     if (!begin()) return;
@@ -802,6 +858,27 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     ? (requiredHere < stage.tasks.length ? t.task.stopOf({ done: completedHere + 1, total: requiredHere }) : t.task.routedTask)
     : t.task.yourTask;
 
+  // The rehearsal bar. ONE control, same place on every mission, label chosen by
+  // what the mission needs — so the creator learns it once. Rendered only on a
+  // test drive (server-authoritative `run.isTestDrive`, the same flag the TEST RUN
+  // banner keys off), so a real participant never sees it.
+  const rehearseLabel =
+    task.arrivalPending || task.type === 'field' || task.type === 'self_report' || task.type === 'geofence'
+      ? t.task.rehearseHere
+      : task.type === 'photo'
+        ? t.task.rehearseApprove
+        : t.task.rehearseFill;
+  const rehearseBar = session.isTestDrive ? (
+    <div className="mb-3 flex items-center gap-2 rounded-lg border border-rp-amber/40 bg-app-raised px-2.5 py-2">
+      <span aria-hidden="true">🧪</span>
+      <span className="text-[11px] text-ink-warm flex-1 min-w-0">{t.task.rehearseHelp}</span>
+      <Button variant="ghost" disabled={rehearsing || frozen} loading={rehearsing}
+        onClick={() => { void rehearse(); }} data-testid="task-rehearse">
+        {rehearseLabel}
+      </Button>
+    </div>
+  ) : null;
+
   // play-task-gating: SEALED hidden-location task. The server has not confirmed
   // arrival, so the payload literally contains no title, no type and no inputs —
   // there is nothing to render but the clue. This is not a UI-level hide; there
@@ -809,6 +886,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
   if (task.arrivalPending) {
     return (
       <Card className={exiting ? 'p-5 rp-card-exit' : 'p-5'} data-testid="task-card" data-task-sealed="true" data-task-id={task.id}>
+        {rehearseBar}
         <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
         <h2 className="text-2xl font-bold mb-2">🧭 {t.task.sealedTitle}</h2>
         <div className="rounded-lg bg-app-raised border border-glass-border px-3 py-2.5 mb-1">
@@ -829,9 +907,6 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <Button disabled={frozen} onClick={checkArrival} data-testid="task-check-arrival">
             {t.task.checkArrival}
           </Button>
-          {session.isTestDrive && (
-            <p className="text-[11px] text-zinc-500 mt-2 text-center" data-testid="testdrive-hint">{t.task.testDriveHint}</p>
-          )}
         </div>
 
         {task.hasHint && !hint && (
@@ -855,6 +930,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
 
   return (
     <Card className={exiting ? 'p-5 rp-card-exit' : 'p-5'} data-testid="task-card" data-task-type={task.type} data-task-id={task.id}>
+      {rehearseBar}
       <div className="text-xs text-ink-fire uppercase tracking-widest mb-1">{headerLabel}</div>
       {/* Legibility (change: fix-play-screen-hierarchy): the primary task text was
           too small/low-contrast. Bigger title + higher-contrast body (play-web's
@@ -938,29 +1014,26 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
             )}
           </>
         ) : task.type === 'smart_station' ? (
-          <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode} onSubmit={verify} />
+          <CodeEntry busy={frozen} label={task.smart?.codeInputLabel ?? t.task.enterStationCode}
+            prefill={fillFor(task.id)} onSubmit={verify} />
         ) : task.type === 'quiz' ? (
           task.orderItems && task.orderItems.length > 0
             // Ordering quiz: the items arrive server-shuffled (per-team seed);
             // key by task id so a new task reseeds the local arrangement.
-            ? <OrderingEntry key={task.id} items={task.orderItems} busy={answerFrozen} onSubmit={submitOrdered} />
-            : <QuizEntry task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0} onSubmit={answer} />
+            ? <OrderingEntry key={task.id} items={task.orderItems} busy={answerFrozen}
+                prefillOrder={rehearsal?.taskId === task.id ? rehearsal.order : undefined} onSubmit={submitOrdered} />
+            : <QuizEntry task={task} busy={answerFrozen} wrongSoFar={wrongAttempts[task.id] ?? 0}
+                prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'numeric' ? (
-          <NumericEntry busy={answerFrozen} onSubmit={answer} />
+          <NumericEntry busy={answerFrozen} prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
             <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={() => { void requestHelp(task.id); }}
               helpSent={helpAlreadySent(helpSentFor, task.id)} />
-            {session.isTestDrive && (
-              <div className="mt-3">
-                <Button disabled={frozen} onClick={geofenceTestCheckIn} data-testid="task-geofence-testdrive-checkin">
-                  {t.task.testDriveImHere}
-                </Button>
-              </div>
-            )}
           </>
         ) : task.type === 'sequence' ? (
-          <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen} onSubmit={sequenceStep} />
+          <SequenceRunner task={task} stepsDone={state.team.taskStepProgress?.[task.id] ?? 0} busy={frozen}
+            prefill={fillFor(task.id)} onSubmit={sequenceStep} />
         ) : task.type === 'survey' ? (
           <SurveyEntry task={task} busy={frozen} onSubmit={answer} />
         ) : task.smart?.captureKind === 'audio' ? (
@@ -972,11 +1045,6 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         )}
       </div>
 
-      {/* Test-run affordance hint: explain why proximity checks are relaxed for the
-          check-in / geofence task types (server-authoritative run.isTestDrive). */}
-      {session.isTestDrive && (task.type === 'field' || task.type === 'self_report' || task.type === 'geofence') && (
-        <p className="text-[11px] text-zinc-500 mt-2 text-center" data-testid="testdrive-hint">{t.task.testDriveHint}</p>
-      )}
 
       {task.hasHint && (
         <div className="mt-3">
@@ -1116,9 +1184,15 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
   );
 }
 
-function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; onSubmit: (code: string) => void }) {
+function CodeEntry({ busy, label, prefill, onSubmit }: {
+  busy: boolean; label: string; prefill?: string; onSubmit: (code: string) => void;
+}) {
   const { t } = useT();
   const [code, setCode] = useState('');
+  // Rehearsal fill: the creator asked for the answer, so stage it — but do NOT
+  // submit. Pressing submit stays the human's job, which is the whole point: the
+  // real submit/scoring/routing path runs exactly as it does for a player.
+  useEffect(() => { if (prefill) setCode(prefill); }, [prefill]);
   const [scanning, setScanning] = useState(false);
   // Only offer the scanner where a camera API exists (feature-detect).
   const canScan = typeof navigator !== 'undefined' && !!navigator.mediaDevices;
@@ -1153,11 +1227,12 @@ function CodeEntry({ busy, label, onSubmit }: { busy: boolean; label: string; on
 }
 
 // Quiz — tap a choice, or type a free-text answer.
-function QuizEntry({ task, busy, wrongSoFar, onSubmit }: {
-  task: SafeTask; busy: boolean; wrongSoFar: number; onSubmit: (a: string) => void;
+function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
+  task: SafeTask; busy: boolean; wrongSoFar: number; prefill?: string; onSubmit: (a: string) => void;
 }) {
   const { t } = useT();
   const [val, setVal] = useState('');
+  useEffect(() => { if (prefill) setVal(prefill); }, [prefill]);
   if (task.choices && task.choices.length > 0) {
     // A choice submits on its own tap, with nothing staged. That is fine while a
     // wrong answer is free, but when the creator set smart.attemptLimit the
@@ -1172,14 +1247,23 @@ function QuizEntry({ task, busy, wrongSoFar, onSubmit }: {
         .confirm(t.task.attemptConfirm({ remaining: guard.remaining }), { confirmLabel: t.task.attemptConfirmBtn })
         .then((ok) => { if (ok) onSubmit(c); });
     };
+    // Rehearsal: a CHOICE quiz has no field to fill, so "fill answer" marks the
+    // right option instead and the creator still taps it. Without this the button
+    // looked broken on the single most common quiz shape — the reveal succeeded
+    // server-side and the UI had nowhere to put it.
     return (
       <div className="space-y-2">
-        {task.choices.map((c) => (
-          <Button key={c} variant="ghost" disabled={busy} onClick={() => choose(c)} className="w-full"
-            data-testid="quiz-choice" data-choice={c}>
-            <span dir="auto">{c}</span>
-          </Button>
-        ))}
+        {task.choices.map((c) => {
+          const isAnswer = !!prefill && c === prefill;
+          return (
+            <Button key={c} variant="ghost" disabled={busy} onClick={() => choose(c)}
+              className={`w-full${isAnswer ? ' ring-2 ring-rp-amber' : ''}`}
+              data-testid="quiz-choice" data-choice={c} data-rehearsal-answer={isAnswer || undefined}>
+              <span dir="auto">{c}</span>
+              {isAnswer && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}>✅</span>}
+            </Button>
+          );
+        })}
       </div>
     );
   }
@@ -1227,11 +1311,13 @@ function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; 
 // up/down buttons (touch-first, RTL-safe; no drag-and-drop) and submit the
 // arrangement. The parent keeps a wrong arrangement on screen (no reset), so the
 // team refines instead of restarting.
-function OrderingEntry({ items, busy, onSubmit }: {
-  items: string[]; busy: boolean; onSubmit: (arrangement: string[]) => void;
+function OrderingEntry({ items, busy, prefillOrder, onSubmit }: {
+  items: string[]; busy: boolean; prefillOrder?: string[]; onSubmit: (arrangement: string[]) => void;
 }) {
   const { t } = useT();
   const [arranged, setArranged] = useState<string[]>(items);
+  // Staged, not submitted — same contract as every other rehearsal fill.
+  useEffect(() => { if (prefillOrder?.length) setArranged(prefillOrder); }, [prefillOrder]);
   function move(i: number, dir: -1 | 1) {
     const j = i + dir;
     if (j < 0 || j >= arranged.length) return;
@@ -1262,9 +1348,12 @@ function OrderingEntry({ items, busy, onSubmit }: {
 }
 
 // Numeric — enter a number (server checks within tolerance).
-function NumericEntry({ busy, onSubmit }: { busy: boolean; onSubmit: (a: string) => void }) {
+function NumericEntry({ busy, prefill, onSubmit }: {
+  busy: boolean; prefill?: string; onSubmit: (a: string) => void;
+}) {
   const { t } = useT();
   const [val, setVal] = useState('');
+  useEffect(() => { if (prefill) setVal(prefill); }, [prefill]);
   return (
     <div className="space-y-3">
       <Input type="number" value={val} onChange={(e) => setVal(e.target.value)} placeholder={t.task.enterNumber} aria-label={t.task.enterNumber} inputMode="decimal"
@@ -1414,12 +1503,14 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
 }
 
 // Sequence — one ordered step at a time, with progress.
-function SequenceRunner({ task, stepsDone, busy, onSubmit }: {
-  task: SafeTask; stepsDone: number; busy: boolean; onSubmit: (stepIndex: number, ans: string) => Promise<boolean> | void;
+function SequenceRunner({ task, stepsDone, busy, prefill, onSubmit }: {
+  task: SafeTask; stepsDone: number; busy: boolean; prefill?: string;
+  onSubmit: (stepIndex: number, ans: string) => Promise<boolean> | void;
 }) {
   const { t } = useT();
   const steps = task.steps ?? [];
   const [val, setVal] = useState('');
+  useEffect(() => { if (prefill) setVal(prefill); }, [prefill]);
   const idx = Math.min(stepsDone, steps.length - 1);
   const step = steps[idx];
   // Clear the input only when the step is accepted, so a wrong answer keeps what

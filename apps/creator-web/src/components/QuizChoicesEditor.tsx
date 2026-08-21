@@ -62,7 +62,7 @@ export default function QuizChoicesEditor({
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-2">
             <label
-              className="flex items-center gap-1 text-[11px] text-zinc-400 shrink-0 cursor-pointer select-none"
+              className="flex items-center gap-1 text-[11px] text-[--ink-2] shrink-0 cursor-pointer select-none"
               title={b.correct}
             >
               <input
