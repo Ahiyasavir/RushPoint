@@ -11,11 +11,14 @@ test.describe('play-web Join', () => {
     await assertNoCrash(page);
 
     // The access-code field is the one control every participant must see.
-    await expect(page.getByPlaceholder('הקוד שלכם')).toBeVisible();
+    // It's a real <label>, not a placeholder — a placeholder shreds Hebrew text
+    // under this field's dir="ltr" tracking-[0.5em] styling (see i18n.ts join.codeLabel).
+    await expect(page.getByLabel('הקוד שלכם')).toBeVisible();
     // Hebrew-first subtitle renders (broken-i18n-mount guard).
     await expect(page.getByText(/קוד הגישה/)).toBeVisible();
-    // The staff entry point is present.
-    await expect(page.getByText('אני צוות')).toBeVisible();
+    // The staff entry point is present. Renamed from "אני צוות" — that read as
+    // "we are a team" and sent whole groups down the staff path (see i18n.ts join.staff).
+    await expect(page.getByText('כניסת מארגנים')).toBeVisible();
 
     expect(pageErrors, `uncaught page errors: ${pageErrors.join(' | ')}`).toHaveLength(0);
   });
