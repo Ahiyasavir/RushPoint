@@ -4,24 +4,50 @@ import { loadLang } from '../store';
 import { reportError } from '../services/telemetry';
 
 interface Props { children: React.ReactNode }
-interface State { error: Error | null }
+interface State { error: Error | null; autoRetries: number }
+
+// How many times this boundary silently re-renders its children before showing
+// the crash UI. Bounded to 1 per boundary lifetime so a persistent error can't
+// loop forever — the manual buttons handle anything the single auto-retry missed.
+const MAX_AUTO_RETRIES = 1;
+// Delay before the automatic re-render, giving a transient blip (a data-consistency
+// window, a stale lazy chunk mid-redeploy) a moment to clear.
+const AUTO_RETRY_DELAY_MS = 1_200;
 
 /**
  * Top-level crash guard for the participant app. A render error in any screen
  * would otherwise blank the whole app mid-race; instead we catch it, log it
- * (a production Sentry hook slots into componentDidCatch), and offer a recover
- * button so the team can keep racing without losing their session.
+ * (a production Sentry hook slots into componentDidCatch), and — for the common
+ * TRANSIENT throw (a brief data window, a stale lazy chunk during a redeploy) —
+ * auto-retry ONCE before falling back to the manual recover button so the team
+ * keeps racing without losing their session.
  */
 export default class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, autoRetries: 0 };
+  private retryTimer: number | undefined;
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
+    // Merge ONLY `error` — leave `autoRetries` intact so componentDidCatch can see
+    // how many auto-retries this boundary has already spent and stop at the bound.
     return { error };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    // Funnel through the telemetry seam (console-only until a Sentry DSN is set).
+    // Funnel through the telemetry seam (console-only until a Sentry DSN is set) —
+    // on EVERY catch, including the one that precedes an auto-retry.
     reportError(error, { boundary: 'play-root', componentStack: info.componentStack });
+    // First transient throw: schedule ONE silent re-render. If the same boundary
+    // catches again (autoRetries already spent) we leave the error set and the
+    // crash UI with its manual try-again / reload buttons shows.
+    if (this.state.autoRetries < MAX_AUTO_RETRIES) {
+      this.retryTimer = window.setTimeout(() => {
+        this.setState((s) => ({ error: null, autoRetries: s.autoRetries + 1 }));
+      }, AUTO_RETRY_DELAY_MS);
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.retryTimer !== undefined) window.clearTimeout(this.retryTimer);
   }
 
   reset = () => this.setState({ error: null });
@@ -43,7 +69,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
                 {c.tryAgain}
               </button>
               <button onClick={() => window.location.reload()}
-                className="border border-glass-border text-zinc-600 rounded-lg px-4 py-2 text-sm">
+                className="border border-glass-border text-zinc-500 rounded-lg px-4 py-2 text-sm">
                 {c.reload}
               </button>
             </div>

@@ -1,0 +1,270 @@
+// The guided new-game wizard (change: guided-new-game-wizard).
+//
+// Replaces the template-card picker as the "+ New game" entry point. Two screens,
+// both designed at 390px FIRST: this repo has a documented habit of shipping
+// creator-web UI desktop-first and patching it for phones afterwards (the Quick
+// Setup step bar and the mission-editor sheet both did exactly that), and the
+// creator console is used on a phone more than anywhere else.
+//
+// Every decision lives in lib/newGameWizard.ts and lib/describeNewGame.ts — this
+// file only renders them. In particular it does NOT decide which template a game
+// type maps to: that comes from `templateGenre`, declared by an admin per
+// template, so renaming or reordering a template can never silently change what
+// the wizard builds.
+import { useMemo, useReducer, useState } from 'react';
+import { Button, Input } from './ui';
+import { useT } from './LanguageContext';
+import {
+  AGE_BANDS, DURATION_BANDS, GROUP_SIZE_BANDS, ADULT_AGE,
+  GUARDIAN_CONSENT_AGE_THRESHOLD,
+} from '@rushpoint/shared';
+import {
+  initialWizardState, wizardReducer, buildCreationPlan, availableGameTypes,
+  templateForGameType, type CreationPlan, type GameTypeId, type WizardTemplateOption,
+} from '../lib/newGameWizard';
+import { blendGameDescription, derivedGameTags, type NewGameDescriptionCopy } from '../lib/describeNewGame';
+
+/** What the wizard needs to know about each available template. */
+export interface WizardTemplate extends WizardTemplateOption {
+  templateEmoji?: string;
+  title: string;
+  description?: string;
+  stageCount: number;
+  taskCount: number;
+  id: string;
+  ownerUid: string;
+}
+
+/** What the Dashboard is asked to create. */
+export interface WizardSubmission {
+  plan: CreationPlan;
+  /** Present only on the guided path: the resolved template plus composed copy. */
+  template?: WizardTemplate;
+  description?: string;
+  tags?: string[];
+}
+
+/** A chip row. Deliberately wraps rather than scrolls — a horizontally scrolling
+ *  option row hides options on a phone, and a hidden option is an unasked question. */
+function ChipRow<T extends string | number>({ label, options, value, onChange, render }: {
+  label: string;
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+  render: (v: T) => string;
+}) {
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = o === value;
+          return (
+            <button key={String(o)} type="button" onClick={() => onChange(o)} aria-pressed={on}
+              className={`min-h-[40px] px-3 rounded-lg border text-[13px] transition-colors ${
+                on ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                   : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+              {render(o)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function NewGameWizard({ templates, busy, onSubmit }: {
+  templates: readonly WizardTemplate[];
+  busy?: boolean;
+  onSubmit: (submission: WizardSubmission) => void;
+}) {
+  const t = useT();
+  const d = t.dashboard;
+  const w = d.wizard;
+  const [state, dispatch] = useReducer(wizardReducer, undefined, initialWizardState);
+  const [nameTouched, setNameTouched] = useState(false);
+
+  // Only the types an admin actually tagged a template for. A type nothing can
+  // build is not offered — offering it would silently create the wrong game.
+  const offered = useMemo(() => availableGameTypes(templates), [templates]);
+  const chosenType = (offered.includes(state.answers.type) ? state.answers.type : offered[0]) as GameTypeId | undefined;
+  const resolved = useMemo(
+    () => (chosenType ? templateForGameType(templates, chosenType) : null),
+    [templates, chosenType],
+  );
+  const template = resolved
+    ? templates.find((x) => x.groupKey === resolved.groupKey)
+    : undefined;
+
+  /** A band's human label, in words. Never its id — ids carry hyphens, and the
+   *  copy standard forbids showing one. */
+  const ageBandLabel = (bandId: string): string => {
+    const band = AGE_BANDS.find((b) => b.id === bandId);
+    if (!band) return '';
+    return band.to === undefined ? w.agePlus(band.from) : w.ageRange(band.from, band.to);
+  };
+
+  const copy: NewGameDescriptionCopy = ({
+    lead: ({ people, minutes, ageLabel }) => w.descriptionLead(people, minutes, ageLabel),
+    ageLabel: (bandId) => ageBandLabel(bandId),
+    ageTag: (bandId) => w.ageTag(ageBandLabel(bandId)),
+    durationTag: (minutes) => w.durationTag(minutes),
+  });
+
+  /**
+   * Create whatever the given action makes creatable, or advance if it does not.
+   *
+   * The reducer is the single source of "is anything creatable yet" — choosing
+   * the guided path only advances to the questions, while choosing scratch (or
+   * pressing the final CTA) lands on `done` and yields a plan. Asking the reducer
+   * rather than tracking it here is what keeps "nothing is created until the end"
+   * true in one place instead of two.
+   */
+  function advanceOrCreate(action: Parameters<typeof wizardReducer>[1]) {
+    const next = wizardReducer(state, action);
+    const plan = buildCreationPlan(next, d.untitledGame);
+    if (!plan) { dispatch(action); return; }
+    if (plan.kind === 'blank') { onSubmit({ plan }); return; }
+    onSubmit({
+      plan,
+      template,
+      description: blendGameDescription(template?.description, plan.answers, copy),
+      tags: derivedGameTags(plan.answers, copy),
+    });
+  }
+
+  const ageBand = AGE_BANDS.find((b) => b.id === state.answers.age);
+  const showConsentNotice = (ageBand?.from ?? ADULT_AGE) < GUARDIAN_CONSENT_AGE_THRESHOLD;
+
+  // ── Screen 1: name, then the fork ──────────────────────────────────────────
+  if (state.step === 'name' || state.step === 'path') {
+    return (
+      <div className="flex flex-col gap-4">
+        <div>
+          <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.nameTitle}</h3>
+          <p className="text-[--ink-3] text-[13px] mt-0.5">{w.nameSub}</p>
+        </div>
+        <Input
+          value={state.name}
+          autoFocus
+          dir="auto"
+          placeholder={w.namePlaceholder}
+          onChange={(e) => { dispatch({ type: 'setName', name: e.target.value }); setNameTouched(true); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' && state.step === 'name') dispatch({ type: 'next' }); }}
+        />
+        {state.step === 'name' ? (
+          // A blank name never blocks — it resolves to the untitled fallback.
+          <Button onClick={() => dispatch({ type: 'next' })} className="w-full min-h-[44px]">
+            {w.next}
+          </Button>
+        ) : (
+          <>
+            <div className="text-[13px] font-medium text-[--ink-2]">{w.pathTitle}</div>
+            {/* Equal weight, side by side on a wide screen and stacked on a phone.
+                Neither may look like the other's fallback. */}
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'guided' })}
+                className="text-start rounded-xl border-2 border-rp-fire/60 bg-rp-fire/5 p-3.5 hover:border-rp-fire hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
+                <div className="text-2xl leading-none">✨</div>
+                <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.guidedTitle}</div>
+                <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.guidedBody}</div>
+              </button>
+              <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'scratch' })}
+                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-3.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
+                <div className="text-2xl leading-none">📄</div>
+                <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.scratchTitle}</div>
+                <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.scratchBody}</div>
+              </button>
+            </div>
+            <button type="button" onClick={() => dispatch({ type: 'back' })}
+              className="text-[12px] text-[--ink-3] hover:text-[--ink-1] self-start min-h-[40px]">
+              ← {w.back}
+            </button>
+          </>
+        )}
+        {/* Only shown once the creator has typed something, so an untouched field
+            never looks like an error. */}
+        {nameTouched && !state.name.trim() && (
+          <p className="text-[11px] text-[--ink-3]">{d.untitledGame}</p>
+        )}
+      </div>
+    );
+  }
+
+  // The guided path was chosen but no template can answer it — say so plainly
+  // instead of rendering a question with no possible answer.
+  if (state.step === 'details' && offered.length === 0) {
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-sm text-[--ink-2]">{w.noGenreTemplates}</p>
+        <Button variant="ghost" onClick={() => dispatch({ type: 'back' })}>{w.back}</Button>
+      </div>
+    );
+  }
+
+  // ── Screen 2: the four questions, one scroll, then the CTA ─────────────────
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.detailsTitle}</h3>
+        <p className="text-[--ink-3] text-[13px] mt-0.5">{w.detailsSub}</p>
+      </div>
+
+      {offered.length > 1 && (
+        <ChipRow label={w.typeLabel} options={offered} value={chosenType as GameTypeId}
+          onChange={(v) => dispatch({ type: 'setAnswer', key: 'type', value: v })}
+          render={(v) => (v === 'story' ? w.typeStory : w.typeMissions)} />
+      )}
+
+      <ChipRow label={w.peopleLabel} options={GROUP_SIZE_BANDS.map((b) => b.people)}
+        value={state.answers.people}
+        onChange={(v) => dispatch({ type: 'setAnswer', key: 'people', value: v })}
+        render={(v) => (v >= (GROUP_SIZE_BANDS[GROUP_SIZE_BANDS.length - 1]?.people ?? 40)
+          ? w.peoplePlus(v) : w.peopleUpTo(v))} />
+
+      <ChipRow label={w.durationLabel} options={DURATION_BANDS}
+        value={state.answers.duration}
+        onChange={(v) => dispatch({ type: 'setAnswer', key: 'duration', value: v })}
+        render={(v) => w.minutesShort(v)} />
+
+      <ChipRow label={w.ageLabel} options={AGE_BANDS.map((b) => b.id)}
+        value={state.answers.age}
+        onChange={(v) => dispatch({ type: 'setAnswer', key: 'age', value: v })}
+        render={(v) => ageBandLabel(v)} />
+
+      {showConsentNotice && (
+        <p className="text-[11px] text-[--ink-2] bg-[--surface-2] rounded-lg px-3 py-2 leading-relaxed">
+          {w.consentNotice}
+        </p>
+      )}
+
+      {/* What we will build. Only what the projection actually carries — counts,
+          not a play-time estimate, because the client genuinely cannot compute one
+          (listGameTemplates sends counts, never stages). The honest estimate comes
+          back in the creation RESPONSE. */}
+      {template && (
+        <div className="rounded-xl border border-[--rp-border] bg-[--surface-1] p-3">
+          <div className="text-[11px] text-[--ink-3]">{w.previewTitle}</div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-xl leading-none">{template.templateEmoji || '🧩'}</span>
+            <span className="font-brand font-semibold text-[--ink-1] text-sm min-w-0 truncate" dir="auto">
+              {template.title}
+            </span>
+          </div>
+          <div className="text-[11px] text-[--ink-3] mt-1">
+            {w.previewMeta(template.stageCount, template.taskCount)}
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <Button variant="ghost" onClick={() => dispatch({ type: 'back' })} className="min-h-[44px]">
+          {w.back}
+        </Button>
+        <Button onClick={() => advanceOrCreate({ type: 'next' })} loading={busy} className="flex-1 min-h-[44px]">
+          {w.create}
+        </Button>
+      </div>
+    </div>
+  );
+}

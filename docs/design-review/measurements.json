@@ -1,0 +1,438 @@
+{
+  "join-pixel7-he": {
+    "dir": "rtl",
+    "bodyDir": "rtl",
+    "docHeight": 839,
+    "viewport": 839,
+    "input": {
+      "top": 272,
+      "bottom": 352,
+      "h": 80,
+      "fontSize": "30px",
+      "color": "rgb(28, 25, 23)",
+      "weight": "700",
+      "placeholderText": "ABC123"
+    },
+    "placeholder": {
+      "color": "rgb(120, 113, 108)",
+      "fontSize": "20px",
+      "weight": "700",
+      "letterSpacing": "normal"
+    },
+    "buttons": [
+      {
+        "text": "🔊",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(176, 58, 11)",
+        "fs": "12px"
+      },
+      {
+        "text": "◐",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(120, 113, 108)",
+        "fs": "10px"
+      },
+      {
+        "text": "English",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "12px"
+      },
+      {
+        "text": "המשך",
+        "top": 391,
+        "h": 60,
+        "color": "rgb(255, 255, 255)",
+        "fs": "18px"
+      },
+      {
+        "text": "🔑 כניסת מפעילי האירוע",
+        "top": 471,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "14px"
+      }
+    ],
+    "paragraphs": [
+      {
+        "text": "הזינו את קוד הגישה מהמארגן כדי להצטרף למירוץ",
+        "top": 164,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "נציג אחד מכל קבוצה מזין את הקוד. לא כל המשתתפים.",
+        "top": 364,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "12px"
+      },
+      {
+        "text": "למארגנים ולמפעילים בלבד, לא לשחקנים",
+        "top": 515,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "רוצים ליצור משחק משלכם? בנו משחק",
+        "top": 546,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      },
+      {
+        "text": "● לא צריך חשבון. רק הטלפון שלכם.",
+        "top": 766,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "12px",
+        "mb": "0px"
+      },
+      {
+        "text": "תנאי שימוש·מדיניות פרטיות",
+        "top": 799,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      }
+    ]
+  },
+  "join-pixel7-en": {
+    "dir": "ltr",
+    "bodyDir": "ltr",
+    "docHeight": 839,
+    "viewport": 839,
+    "input": {
+      "top": 272,
+      "bottom": 352,
+      "h": 80,
+      "fontSize": "30px",
+      "color": "rgb(28, 25, 23)",
+      "weight": "700",
+      "placeholderText": "ABC123"
+    },
+    "placeholder": {
+      "color": "rgb(120, 113, 108)",
+      "fontSize": "20px",
+      "weight": "700",
+      "letterSpacing": "normal"
+    },
+    "buttons": [
+      {
+        "text": "🔊",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(176, 58, 11)",
+        "fs": "12px"
+      },
+      {
+        "text": "◐",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(120, 113, 108)",
+        "fs": "10px"
+      },
+      {
+        "text": "עברית",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "12px"
+      },
+      {
+        "text": "Continue",
+        "top": 391,
+        "h": 60,
+        "color": "rgb(255, 255, 255)",
+        "fs": "18px"
+      },
+      {
+        "text": "🔑 Event staff sign in",
+        "top": 471,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "14px"
+      }
+    ],
+    "paragraphs": [
+      {
+        "text": "Enter the access code from your host to join the r",
+        "top": 164,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "One person per team enters the code, not everyone.",
+        "top": 364,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "12px"
+      },
+      {
+        "text": "For hosts and staff only, not for players",
+        "top": 515,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "Want to run your own game? Build a game",
+        "top": 546,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      },
+      {
+        "text": "● No account needed. Just your phone.",
+        "top": 766,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "12px",
+        "mb": "0px"
+      },
+      {
+        "text": "Terms of Use·Privacy Policy",
+        "top": 799,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      }
+    ]
+  },
+  "join-iphonese-he": {
+    "dir": "rtl",
+    "bodyDir": "rtl",
+    "docHeight": 764,
+    "viewport": 568,
+    "input": {
+      "top": 272,
+      "bottom": 352,
+      "h": 80,
+      "fontSize": "30px",
+      "color": "rgb(28, 25, 23)",
+      "weight": "700",
+      "placeholderText": "ABC123"
+    },
+    "placeholder": {
+      "color": "rgb(120, 113, 108)",
+      "fontSize": "20px",
+      "weight": "700",
+      "letterSpacing": "normal"
+    },
+    "buttons": [
+      {
+        "text": "🔊",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(176, 58, 11)",
+        "fs": "12px"
+      },
+      {
+        "text": "◐",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(120, 113, 108)",
+        "fs": "10px"
+      },
+      {
+        "text": "English",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "12px"
+      },
+      {
+        "text": "המשך",
+        "top": 391,
+        "h": 60,
+        "color": "rgb(255, 255, 255)",
+        "fs": "18px"
+      },
+      {
+        "text": "🔑 כניסת מפעילי האירוע",
+        "top": 471,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "14px"
+      }
+    ],
+    "paragraphs": [
+      {
+        "text": "הזינו את קוד הגישה מהמארגן כדי להצטרף למירוץ",
+        "top": 164,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "נציג אחד מכל קבוצה מזין את הקוד. לא כל המשתתפים.",
+        "top": 364,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "12px"
+      },
+      {
+        "text": "למארגנים ולמפעילים בלבד, לא לשחקנים",
+        "top": 515,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "רוצים ליצור משחק משלכם? בנו משחק",
+        "top": 546,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      },
+      {
+        "text": "● לא צריך חשבון. רק הטלפון שלכם.",
+        "top": 691,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "12px",
+        "mb": "0px"
+      },
+      {
+        "text": "תנאי שימוש·מדיניות פרטיות",
+        "top": 724,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      }
+    ]
+  },
+  "join-iphonese-en": {
+    "dir": "ltr",
+    "bodyDir": "ltr",
+    "docHeight": 779,
+    "viewport": 568,
+    "input": {
+      "top": 272,
+      "bottom": 352,
+      "h": 80,
+      "fontSize": "30px",
+      "color": "rgb(28, 25, 23)",
+      "weight": "700",
+      "placeholderText": "ABC123"
+    },
+    "placeholder": {
+      "color": "rgb(120, 113, 108)",
+      "fontSize": "20px",
+      "weight": "700",
+      "letterSpacing": "normal"
+    },
+    "buttons": [
+      {
+        "text": "🔊",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(176, 58, 11)",
+        "fs": "12px"
+      },
+      {
+        "text": "◐",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(120, 113, 108)",
+        "fs": "10px"
+      },
+      {
+        "text": "עברית",
+        "top": 16,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "12px"
+      },
+      {
+        "text": "Continue",
+        "top": 406,
+        "h": 60,
+        "color": "rgb(255, 255, 255)",
+        "fs": "18px"
+      },
+      {
+        "text": "🔑 Event staff sign in",
+        "top": 486,
+        "h": 44,
+        "color": "rgb(87, 83, 78)",
+        "fs": "14px"
+      }
+    ],
+    "paragraphs": [
+      {
+        "text": "Enter the access code from your host to join the r",
+        "top": 164,
+        "fs": "16px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "One person per team enters the code, not everyone.",
+        "top": 364,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "12px"
+      },
+      {
+        "text": "For hosts and staff only, not for players",
+        "top": 530,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "0px",
+        "mb": "0px"
+      },
+      {
+        "text": "Want to run your own game? Build a game",
+        "top": 561,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      },
+      {
+        "text": "● No account needed. Just your phone.",
+        "top": 706,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "12px",
+        "mb": "0px"
+      },
+      {
+        "text": "Terms of Use·Privacy Policy",
+        "top": 739,
+        "fs": "11px",
+        "color": "rgb(120, 113, 108)",
+        "mt": "16px",
+        "mb": "0px"
+      }
+    ]
+  },
+  "terms": {
+    "h": 8967,
+    "text": "←\nחזרה\nתנאי שימוש\n\nעודכן לאחרונה: יולי 2026\n\nעברית\nEnglish\n1. כללי וקבלת התנאים\n\nברוך הבא ל-RushPoint. תנאי שימוש אלו (\"התנאים\") מסדירים את הגישה שלך לפלטפורמת RushPoint ואת השימוש בה. RushPoint (\"החב"
+  }
+}

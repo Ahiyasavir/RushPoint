@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "seed":       "npx tsx seed-emulator.ts",
-    "seed:reset": "npx tsx seed-emulator.ts --reset"
+    "seed:reset": "npx tsx seed-emulator.ts --reset",
+    "bundle:budget": "node check-bundle-budget.mjs"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0"

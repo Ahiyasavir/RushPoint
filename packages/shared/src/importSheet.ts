@@ -3,6 +3,7 @@
 // The CSV/xlsx reading is client-side; this module only maps already-parsed rows.
 import type { GeoPoint } from './types';
 import { isValidCoord } from './geo';
+import { stripUnsafeDisplayChars } from './validation';
 
 const TASK_TYPES = ['field', 'smart_station', 'photo', 'self_report', 'quiz', 'numeric', 'geofence', 'sequence'] as const;
 type ImportTaskType = (typeof TASK_TYPES)[number];
@@ -64,12 +65,26 @@ export function parseGameRows(rows: ImportRow[], opts: { gameTitle?: string } = 
     const rowNum = i + 1;
     if (isBlank(row)) return;
 
-    const title = String(row.title ?? '').trim();
+    // Strip control / bidi-override / zero-width spoofing chars from authored text
+    // at the import source (wave-j J6), mirroring requireString on the callables.
+    const title = stripUnsafeDisplayChars(String(row.title ?? '')).trim();
     if (!title) { errors.push({ row: rowNum, field: 'title', message: 'Title is required' }); return; }
 
     const type = String(row.type ?? '').trim().toLowerCase() as ImportTaskType;
     if (!TASK_TYPES.includes(type)) {
       errors.push({ row: rowNum, field: 'type', message: `Unknown task type "${row.type ?? ''}"` });
+      return;
+    }
+    // A flat sheet has no secret-code / steps column, so smart_station and sequence
+    // rows would import permanently uncompletable (matchesTaskAnswer/verifyStationCode/
+    // submitSequenceStep all reject an empty key). Reject per-row here instead of
+    // emitting a task that updateGame/launchRun later rejects wholesale (wave-j J5).
+    if (type === 'smart_station') {
+      errors.push({ row: rowNum, field: 'type', message: 'Station tasks cannot be imported from a sheet (no secret-code column)' });
+      return;
+    }
+    if (type === 'sequence') {
+      errors.push({ row: rowNum, field: 'type', message: 'Sequence tasks cannot be imported from a sheet (no steps column)' });
       return;
     }
 
@@ -90,7 +105,7 @@ export function parseGameRows(rows: ImportRow[], opts: { gameTitle?: string } = 
       id: `task-${rowNum}`,
       title,
       type,
-      description: String(row.description ?? '').trim() || undefined,
+      description: stripUnsafeDisplayChars(String(row.description ?? '')).trim() || undefined,
       coordinates,
       locationless: locationless || undefined,
       difficulty: Math.min(5, Math.max(1, Math.round(num(row.difficulty) ?? 3))),

@@ -36,6 +36,11 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
+// The A3/A4 leak predicates live in ONE place — scripts/lib/i18nLeak.ts — so this
+// authoritative gate and scripts/test-i18n-parity.ts cannot drift apart (they used
+// to be near-duplicate copies "kept in sync" by a comment, and both carried the
+// same {placeholder} defect). Unit-tested by scripts/test-i18n-leak.ts.
+import { HEBREW, hasEnglishWord, hasHebrew } from './lib/i18nLeak';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const STRICT = process.argv.includes('--strict');
@@ -48,33 +53,6 @@ const c = {
   bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
 };
-
-const HEBREW = /[֐-׿]/;
-
-// Brand names / units / acronyms that may legitimately stay Latin inside Hebrew
-// copy, the language-toggle label, and the structural direction values.
-const LATIN_WHITELIST = [
-  'RushPoint', 'Creator Pro', 'Pro', 'QR', 'SOS', 'GPS', 'Google', 'YouTube', 'PWA',
-  'English', 'rtl', 'ltr', '₪',
-];
-// Hebrew words allowed inside English copy (a language's own name in the toggle).
-const HEBREW_WHITELIST = ['עברית'];
-
-function stripAll(s: string, words: string[]): string {
-  let out = s;
-  for (const w of words) out = out.split(w).join('');
-  return out;
-}
-// A "Latin English word" = 2+ consecutive ASCII letters left after whitelisting.
-// Tokens that contain a digit (sample codes/ids like "FOX42", "ABC123") are not
-// English copy and are stripped first.
-function hasEnglishWord(s: string): boolean {
-  const noCodes = stripAll(s, LATIN_WHITELIST).replace(/[A-Za-z]*\d[A-Za-z\d]*/g, '');
-  return /[A-Za-z]{2,}/.test(noCodes);
-}
-function hasHebrew(s: string): boolean {
-  return HEBREW.test(stripAll(s, HEBREW_WHITELIST));
-}
 
 // ── Universal sample arg ─────────────────────────────────────────────────────
 // i18n function entries take either positional primitives — (n: number),

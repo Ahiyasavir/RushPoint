@@ -1,5 +1,5 @@
 import { callable } from './firebase';
-import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions } from '@rushpoint/shared';
+import type { RunTeam, GameBranding, RunLeaderboard, LeaderboardEntry, Task, RegistrationField, GameRequirement, RunRecap, HotZone, PlayerProfile, Trackable, CaptureZone, CeremonyFeedItem, ScoringPreset, GameInstructions, AnswerCostDisplay, RehearsalReveal } from '@rushpoint/shared';
 
 // Cross-run player profile (change: player-profile-badges).
 export const getMyProfile = callable<Record<string, never>, { profile: PlayerProfile }>('getMyProfile');
@@ -80,17 +80,41 @@ export const joinRun = callable<
 
 // Sanitized task shape returned to participants — every answer key is stripped
 // server-side (secretCode, hint text, quiz answers, numeric target, step answers).
-export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps' | 'coordinates'> & {
+export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer' | 'steps' | 'coordinates' | 'title' | 'type'> & {
+  // play-task-gating: a SEALED hidden-location task (see `arrivalPending`) ships
+  // as a stub with NO title and NO type — the client must render the clue card
+  // and must never assume these exist. They return the moment the server
+  // confirms arrival.
+  title?: string;
+  type?: Task['type'];
+  // play-task-gating: true while a hidden-location task has not yet been
+  // unsealed by `reportArrival`. Everything but the clue is absent from the
+  // payload — this is not a UI-level hide.
+  arrivalPending?: boolean;
   hasHint?: boolean;
   hintPenalty?: number;
   // Hint auto escalation: server-computed display flag — the paid hint is FREE
   // right now (time or wrong-attempt threshold met). The charge decision is
   // re-made server-side inside requestTaskHint, so this can never mischarge.
   hintFreeNow?: boolean;
+  // Wrong-answer cost (change: wrong-answer-cost): server-computed, display-only.
+  // Present only on the team's ACTIVE graded task and only when the creator set a
+  // cost level, so a game authored before this change never carries it. Derived
+  // from the team's own progress; it says what a wrong answer COSTS, never what
+  // the answer is.
+  answerCost?: AnswerCostDisplay;
   // Hidden-location tasks have their coordinates stripped server-side and carry
   // `locationHidden`; the client suppresses the pin and shows `locationClue`.
   coordinates?: Task['coordinates'];
   locationHidden?: boolean;
+  // Hidden-mission search area (change: hidden-mission-search-area): the ONLY
+  // locational value a SEALED hidden task carries. A grid-snapped ~445m circle
+  // that is guaranteed to contain the real spot and can never be sharpened by
+  // polling. Present only while `arrivalPending` is true; once the server
+  // confirms arrival the exact `coordinates` come back and this is absent, so
+  // the map never shows two answers for one mission. Rendered via
+  // `lib/searchAreas.ts` → NavMap.
+  searchArea?: { lat: number; lng: number; radiusMeters: number };
   steps?: { id: string; prompt: string }[];
   smart?: {
     enabled: boolean;
@@ -99,9 +123,20 @@ export type SafeTask = Omit<Task, 'smart' | 'hint' | 'answers' | 'numericAnswer'
     codeInputLabel?: string;
     hasCode?: boolean;
     autoApprove?: boolean;
-    // audio-tasks: on a photo task, capture an audio clip instead of a photo.
-    captureKind?: 'photo' | 'audio';
+    // audio-tasks / video-submission-task: on a photo task, capture an audio or
+    // video clip instead of a photo.
+    captureKind?: 'photo' | 'audio' | 'video';
+    // The video mission's clip-length range. Participant-visible by necessity —
+    // the recorder cannot enforce a limit it cannot see. Resolved through the
+    // shared resolveVideoDuration() so a garbage value can never break a recorder.
+    videoMinSeconds?: number;
+    videoMaxSeconds?: number;
     stationCoords?: { lat: number; lng: number };
+    // How many wrong answers this task allows before submitTaskAnswer refuses
+    // with 'resource-exhausted'. Already shipped by sanitizeTaskForParticipant;
+    // the client needs it so a single mis-tap can't silently spend one
+    // (change: play-touch-rtl-a11y).
+    attemptLimit?: number;
   };
 };
 
@@ -116,9 +151,29 @@ export interface StageNarrative {
 
 export interface MyTeamState {
   team: RunTeam;
+  // Why this team has not been started, or null when nothing is holding it
+  // (change: held-team-visibility). A REASON only: no guardian name, contact or
+  // token. Optional on the wire so a console/app talking to a backend that
+  // predates it degrades to "nothing known", never to a fabricated hold.
+  holdReason?: 'guardian_consent' | null;
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
   game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
   activeStageTasks: SafeTask[];
+  // Completed-mission pins (change: hidden-mission-map): the coordinates + title of
+  // every mission this team has ALREADY COMPLETED, across all stages — a trail of
+  // where they've been. Built server-side by construction from completed task
+  // records only, so it can never carry a hidden-not-arrived / unassigned / sealed
+  // task's location. The play map plots these + the client's own GPS while the
+  // active mission is a still-sealed hidden target. Locationless/coordinate-less
+  // completed tasks are omitted, so this can be shorter than the completed count.
+  completedTaskPins: { id: string; coordinates: { lat: number; lng: number }; title: string }[];
+  // wave-f (next-task-regression, Bug A): ids of active-stage tasks that are
+  // GENUINELY gated (release-scheduled and not yet released, or unlock-gated with
+  // an unmet prerequisite) — i.e. routing cannot hand them out yet. Ids only, no
+  // content. The play UI uses this to distinguish "all remaining tasks are locked"
+  // from "unassigned because routing hasn't picked one yet", since wave D omits
+  // non-assigned task content from `activeStageTasks`.
+  lockedTaskIds?: string[];
   // Narrative chapters: intro/outro beats for stages the team has reached (active or
   // completed). The play UI shows an intro when a chapter opens, an outro when it ends.
   stageNarratives?: StageNarrative[];
@@ -137,29 +192,92 @@ export const getMyTeamState = callable<
 
 type Ctx = { ownerUid: string; gameId: string; runId: string };
 
+// `reason` explains why routing handed back no task: 'stationsFull' (transient —
+// every eligible station is at cap; wait and retry), 'allLocked' (only gated
+// tasks remain), or 'none'. `already` marks an idempotent replay (WO-3).
+export type NoAssignmentReason = 'stationsFull' | 'allLocked' | 'none';
+
+// Safe-zone verdicts (`evaluateSafeZoneStatus`). `requestNextTask` reuses `reason`
+// for them when it answers `outOfBounds: true`, so the two spaces are distinguished
+// by that flag, never by the string. Typed as an open string on the wire because the
+// server may be a version ahead; `blockedGuidance()` is the total mapping.
+export type SafeZoneBlockReason =
+  | 'outside' | 'low_confidence' | 'stale_fix' | 'no_fix' | 'invalid_fix'
+  | 'override' | 'inside' | 'no_zone' | 'unverifiable';
+
 export const completeTask = callable<
   Ctx & { taskId: string; lat?: number; lng?: number },
-  { ok: boolean; nextTaskId: string | null }
+  { ok: boolean; nextTaskId: string | null; already?: boolean; nextReason?: NoAssignmentReason | null }
 >('completeTask');
 
-export const requestNextTask = callable<Ctx & { lat?: number; lng?: number }, { taskId: string | null }>('requestNextTask');
+export const requestNextTask = callable<
+  Ctx & { lat?: number; lng?: number },
+  {
+    taskId: string | null;
+    // `string & Record<never, never>` is the widen-to-string-but-keep-autocomplete
+    // idiom. Spelled the long way because the usual `string & {}` trips ban-types.
+    reason?: NoAssignmentReason | SafeZoneBlockReason | (string & Record<never, never>) | null;
+    // Safe-zone soft-pause: the server refused to route because the team is out of
+    // bounds. `metersOutside` is metres BEYOND the boundary (never the zone itself),
+    // present only on a confirmed breach.
+    outOfBounds?: boolean;
+    metersOutside?: number | null;
+  }
+>('requestNextTask');
 
 export const requestTaskHint = callable<
   Ctx & { taskId: string },
   { hint: string; penalty: number; alreadyUsed: boolean; free?: boolean }
 >('requestTaskHint');
 
+// play-task-gating: ask the server whether we have ARRIVED at a hidden-location
+// task. The server re-checks GPS against the secret coordinates with the same
+// rule as a check-in and latches the verdict, so a reload / GPS dropout can
+// never re-seal a spot the team already found. Never returns a distance.
+export const reportArrival = callable<
+  Ctx & { taskId: string; lat?: number; lng?: number },
+  { arrived: boolean; reason?: string }
+>('reportArrival');
+
 export const submitTaskAnswer = callable<
   // quiz/numeric take `answer`; an ordering quiz takes `orderedAnswer` (the
   // player's arrangement) instead — the server rejects a mixed/missing payload.
   Ctx & { taskId: string; answer?: string; orderedAnswer?: string[]; lat?: number; lng?: number },
-  { correct: boolean; nextTaskId?: string | null }
+  {
+    correct: boolean;
+    nextTaskId?: string | null;
+    // Wrong-answer cost (change: wrong-answer-cost). Present on the wrong path
+    // only, and only when the creator set a cost level. `penalty` is the points
+    // just charged (always 0 under the time_only preset, which has no points),
+    // `retryAfterMs` drives the retry countdown, and `replay` marks a duplicate
+    // submission that was deliberately NOT charged.
+    penalty?: number;
+    // retry-lockout-clock-skew: milliseconds LEFT, computed server-side against
+    // the server clock. The client turns it into a deadline on its OWN clock, so
+    // a device with a wrong clock still counts down the right number of seconds.
+    retryAfterMs?: number;
+    // Deprecated: an ABSOLUTE server instant. Comparing it to the device clock is
+    // the bug retry-lockout-clock-skew removed. Kept only as a fallback for a
+    // server that has not been redeployed yet.
+    cooldownUntil?: number;
+    retryAfterSeconds?: number;
+    attemptsUsed?: number;
+    replay?: boolean;
+  }
 >('submitTaskAnswer');
 
 export const submitSequenceStep = callable<
   Ctx & { taskId: string; stepIndex: number; answer?: string; lat?: number; lng?: number },
   { stepCorrect: boolean; stepsDone: number; totalSteps: number; taskComplete: boolean }
 >('submitSequenceStep');
+
+// Rehearsal control (change: test-drive-rehearsal-control). Refused with
+// permission-denied unless the RUN says isTestDrive — the flag is read from the
+// run document server-side, never from this request.
+export const revealTaskAnswer = callable<
+  Ctx & { taskId: string; stepIndex?: number },
+  RehearsalReveal
+>('revealTaskAnswer');
 
 export const verifyStationCode = callable<
   Ctx & { teamId: string; taskId: string; code: string },
@@ -180,7 +298,10 @@ export const triggerSOS = callable<
   { alertId: string }
 >('triggerSOS', { retry: false });
 
-export const updateLocation = callable<Ctx & { lat: number; lng: number }, { ok: boolean }>('updateLocation');
+// `accuracyMeters` is the fix's own error radius (change: out-of-bounds-recovery). It
+// is REPORTING, not authority: the server still decides whether a team is out of
+// bounds — it just stops treating a 500 m-accuracy fix as proof of a 5 m violation.
+export const updateLocation = callable<Ctx & { lat: number; lng: number; accuracyMeters?: number }, { ok: boolean }>('updateLocation');
 
 // ── Team ↔ HQ chat (change: team-hq-chat) ──
 // Participants (any attached device, no controller gating like SOS) send with just
@@ -227,13 +348,25 @@ export const reactToFeedItem = callable<
 >('reactToFeedItem');
 
 // Staff/owner moderation: hide a feed item (listeners filter active == true).
+// `restore` (change: feed-ugc-safety) reverses a hide (auto or staff) and
+// disarms future auto-hiding for the item; authz is unchanged (staff/owner).
 export const hideFeedItem = callable<
-  Ctx & { itemId: string },
+  Ctx & { itemId: string; restore?: boolean },
   { ok: boolean }
 >('hideFeedItem');
 
+// Any run participant (or staff/owner) reports a feed item from a closed
+// reason set (change: feed-ugc-safety). Idempotent per caller's team; a
+// second distinct team's report may auto-hide the item (`hidden: true`).
+export const reportFeedItem = callable<
+  Ctx & { itemId: string; reason: 'inappropriate' | 'harassment' | 'privacy' | 'other' },
+  { ok: boolean; reportCount: number; hidden: boolean }
+>('reportFeedItem');
+
 export const staffSignIn = callable<
-  { ownerUid: string; gameId: string; runId: string; pin: string },
+  // `name` is the staffer's self-declared display name (attribution only — the
+  // server treats it as untrusted and it grants nothing). Omitted ⇒ the invite's name.
+  { ownerUid: string; gameId: string; runId: string; pin: string; name?: string },
   { customToken: string; name: string; permissions: string[] }
 >('staffSignIn');
 
@@ -259,3 +392,47 @@ export const adjustTeamScore = callable<
   Ctx & { teamId: string; delta: number; reason?: string },
   { ok: boolean; newBonusPenalty: number }
 >('adjustTeamScore');
+
+// ── Staff field-ops (change: staff-console-field-ops) ──
+// All four are authorized by the same assertStaffOrOwner the console's existing
+// actions use; the staff custom token is scoped to one run, so none of them can
+// reach another organizer's event.
+
+// Park / release ONE team. While held the team's clock stops and every
+// progress-advancing callable refuses; `heldMsAdded` is what the resume settled.
+export const setTeamHold = callable<
+  Ctx & { teamId: string; held: boolean; reason?: string },
+  { ok: boolean; held: boolean; heldMsAdded: number }
+>('setTeamHold');
+
+// Send ONE team to a SPECIFIC mission in its current stage. `override` bypasses
+// only the unlock / scheduled-release / expiry gates — never a station's capacity.
+export const forceAssignTask = callable<
+  Ctx & { teamId: string; taskId: string; override?: boolean; reason?: string },
+  { ok: boolean; taskId: string; displacedTaskId: string | null; override: boolean }
+>('forceAssignTask');
+
+// Release a team from the safety-zone latch — previously reachable only from the
+// desktop run console, which meant a marshal had to find a laptop to unstick a team.
+export const clearTeamOutOfBounds = callable<
+  Ctx & { teamId: string },
+  { ok: boolean }
+>('clearTeamOutOfBounds');
+
+// Skip ONE mission for ONE team, keeping them in the same stage. Same callable the
+// desktop console uses; `taskId` omitted means "whatever they're holding now".
+export const skipTaskForTeam = callable<
+  Ctx & { teamId: string; taskId?: string; reason?: string },
+  {
+    ok: boolean; taskId: string; stageCompleted: boolean;
+    requiredTaskCount: number; requirementLowered: boolean;
+    nextTaskId: string | null; nextReason: string | null;
+  }
+>('skipTaskForTeam');
+
+// The run's ONE shared staff↔admin thread. The server decides whether this lands
+// as 'staff' or 'admin' from the caller's identity.
+export const sendStaffChannelMessage = callable<
+  Ctx & { text: string; senderName?: string },
+  { messageId: string }
+>('sendStaffChannelMessage');

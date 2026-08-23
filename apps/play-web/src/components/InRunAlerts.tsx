@@ -15,7 +15,16 @@ function fmtCountdown(ms: number): string {
   return `${m}:${String(ss).padStart(2, '0')}`;
 }
 
-export default function InRunAlerts({ hotZone, outOfBounds }: { hotZone: HotZone | null; outOfBounds?: boolean }) {
+export default function InRunAlerts({
+  hotZone, outOfBounds, held, heldReason,
+}: {
+  hotZone: HotZone | null;
+  outOfBounds?: boolean;
+  // Staff-initiated hold (change: staff-console-field-ops). Server state, like every
+  // other banner here — the client never decides it is held.
+  held?: boolean;
+  heldReason?: string;
+}) {
   const { t } = useT();
   const [now, setNow] = useState(() => Date.now());
 
@@ -38,19 +47,45 @@ export default function InRunAlerts({ hotZone, outOfBounds }: { hotZone: HotZone
     wasActive.current = active;
   }, [active]);
 
-  if (!active && !outOfBounds) return null;
+  // Only an EXPLICIT true holds: an absent/stale/garbled value must never freeze a
+  // playing team's screen behind a hold banner. Same fail-open direction the
+  // stuckGuards siblings use — the server independently refuses the actions, so a
+  // missing banner costs an explanatory sentence, while a phantom one costs the run.
+  const isHeld = held === true;
+
+  if (!active && !outOfBounds && !isHeld) return null;
 
   return (
     <div className="space-y-2 mb-2">
+      {/* Held is FIRST and visually strongest: while it is up, nothing else the
+          player might try will work, so it must not sit below a hot-zone banner
+          telling them to hurry. */}
+      {isHeld && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-2 rounded-xl border border-rp-fire/50 bg-rp-fire/15 px-3 py-2.5 text-sm font-semibold text-ink-fire"
+        >
+          <span className="text-base leading-none">⏸</span>
+          <span className="flex-1">
+            {t.play.teamHeld}
+            {/* The marshal's own words when they gave any — a stated cause is the
+                difference between "staff paused us" and "the app is broken". */}
+            {heldReason?.trim() && (
+              <span dir="auto" className="block font-normal text-zinc-300 mt-0.5">{heldReason}</span>
+            )}
+          </span>
+        </div>
+      )}
       {active && hotZone && (
-        <div className="flex items-center gap-2 rounded-xl border border-rp-fire/40 bg-rp-fire/15 px-3 py-2 text-sm font-semibold text-rp-fire animate-fade-up motion-reduce:animate-none">
+        <div className="flex items-center gap-2 rounded-xl border border-rp-fire/40 bg-rp-fire/15 px-3 py-2 text-sm font-semibold text-ink-fire animate-fade-up motion-reduce:animate-none">
           <span className="text-base leading-none">🔥</span>
           <span className="flex-1">{t.play.hotZoneActive({ mult: hotZone.multiplier })}</span>
           <span className="font-mono tabular-nums">{fmtCountdown(remainMs)}</span>
         </div>
       )}
       {outOfBounds && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-amber-300">
+        <div className="flex items-center gap-2 rounded-xl border border-amber-400/40 bg-amber-400/15 px-3 py-2 text-sm font-semibold text-ink-amber">
           <span className="text-base leading-none">⚠️</span>
           <span className="flex-1">{t.play.outOfBounds}</span>
         </div>

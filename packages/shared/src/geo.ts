@@ -81,7 +81,11 @@ export function evaluateTrigger(
   if (distanceM == null || !Number.isFinite(distanceM)) {
     return { ok: false, reason: 'Location required to check in here' };
   }
-  const limit = radiusM != null && Number.isFinite(radiusM) ? radiusM : defaultRadiusFor(mode);
+  // radiusM must be POSITIVE to be honored — a 0/negative radius (hand-crafted or
+  // legacy data) would make `distanceM > 0` reject any real GPS, permanently
+  // stranding a player at the correct spot. Fall back to the mode default, exactly
+  // as evaluatePresence does (wave-h defense-in-depth; the Builder already clamps).
+  const limit = radiusM != null && Number.isFinite(radiusM) && radiusM > 0 ? radiusM : defaultRadiusFor(mode);
   if (distanceM > limit) {
     // Hidden-location tasks (treasure-hunt) must not leak the distance — otherwise
     // a player could triangulate the secret spot by polling completeTask. Return a
@@ -124,6 +128,19 @@ export function evaluatePresence(
   const limit = radiusM != null && Number.isFinite(radiusM) && radiusM > 0 ? radiusM : PRESENCE_DEFAULT_RADIUS_M;
   if (distM > limit) return { ok: false, reason: 'Move closer to the location to answer', distanceM: distM };
   return { ok: true, distanceM: distM };
+}
+
+/**
+ * Whether a proximity/presence gate is satisfied (change: testdrive-here-bypass).
+ * In a TEST RUN (server-authoritative `run.isTestDrive`) any submission passes so a
+ * creator can rehearse the whole course from their desk; in a real run the distance
+ * verdict rules (the anti-cheat that rejects far-away check-ins). `isTestDrive` MUST
+ * come from the CF-written run doc, never a client payload/header/flag — only the
+ * literal boolean `true` bypasses (a real run's absent flag is identity: for any
+ * `distanceOk`, `proximitySatisfied(distanceOk, undefined) === distanceOk`).
+ */
+export function proximitySatisfied(distanceOk: boolean, isTestDrive?: boolean): boolean {
+  return isTestDrive === true || distanceOk;
 }
 
 /**

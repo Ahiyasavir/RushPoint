@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ceremonyStart, ceremonyNext, type CeremonyPhase } from '@rushpoint/shared';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { useT } from '../i18nContext';
+import { Spinner } from '../components/Spinner';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const POLL_MS = 12_000;     // re-poll while unpublished — comes alive on publish
@@ -38,6 +39,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
   const [data, setData] = useState<PublicLeaderboard | null | undefined>(undefined);
   const [phase, setPhase] = useState<CeremonyPhase | null>(null);
   const [slide, setSlide] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const started = useRef(false);
 
   // Load + re-poll until published, so the operator can open the screen BEFORE
@@ -49,10 +51,12 @@ export default function CeremonyScreen({ code }: { code: string }) {
       try {
         const next = await getPublicLeaderboard({ code });
         if (!alive) return;
+        setLoadError(false);
         setData(next);
         if (!next.published) timer = window.setTimeout(() => void load(), POLL_MS);
       } catch {
         if (!alive) return;
+        setLoadError(true);
         setData(null);
         timer = window.setTimeout(() => void load(), POLL_MS);
       }
@@ -97,7 +101,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
   if (data === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-app-bg">
-        <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -108,7 +112,9 @@ export default function CeremonyScreen({ code }: { code: string }) {
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
         <div className="text-7xl">🏆</div>
         <h1 dir="auto" className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
-        <p className="text-2xl text-zinc-500">{t.ceremony.ceremonyWaiting}</p>
+        <p className={`text-2xl ${loadError ? 'text-rp-fire font-semibold' : 'text-zinc-500'}`}>
+          {loadError ? t.ceremony.loadError : t.ceremony.ceremonyWaiting}
+        </p>
       </div>
     );
   }
@@ -118,9 +124,20 @@ export default function CeremonyScreen({ code }: { code: string }) {
   // public / finish boards).
   const isTimeOnly = data!.scoringPreset === 'time_only';
 
-  // Tap/click anywhere advances early (operator escape hatch).
+  // Tap/click anywhere advances early (operator escape hatch). It is also a real
+  // keyboard control (change: play-web-accessibility): a ceremony is usually
+  // driven from a laptop wired to a projector, where Enter/Space is the natural
+  // "next" and a mouse may not be within reach.
   return (
-    <div className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col cursor-pointer select-none" onClick={advance}>
+    <div
+      className="min-h-screen bg-app-bg p-6 sm:p-10 flex flex-col cursor-pointer select-none"
+      role="button"
+      tabIndex={0}
+      onClick={advance}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowRight') { e.preventDefault(); advance(); }
+      }}
+    >
       <style>{CEREMONY_CSS}</style>
 
       <div className="text-center mb-6">
@@ -176,7 +193,7 @@ export default function CeremonyScreen({ code }: { code: string }) {
                   {MEDALS[i] ?? r.rank}
                 </span>
                 <div dir="auto" className="flex-1 min-w-0 text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
-                <div className="text-right">
+                <div className="text-end">
                   {isTimeOnly ? (
                     <div className="text-3xl font-brand font-extrabold font-mono tabular-nums" style={{ color: accent }}>{fmtTime(r) || '—'}</div>
                   ) : (
@@ -253,6 +270,9 @@ function ConfettiCanvas({ accent }: { accent: string }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
+    // Reduced motion: no particle storm at all (change: play-web-accessibility).
+    // lib/confetti.ts already does this; this canvas was the one that did not.
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
     const canvas = ref.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');

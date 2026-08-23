@@ -70,14 +70,14 @@ type ShareNav = Navigator & {
 export async function shareRecap(
   photos: RunRecapPhoto[],
   opts: { title: string; ctaUrl: string; text: string },
-): Promise<'shared' | 'downloaded' | 'copied' | 'failed'> {
+): Promise<'shared' | 'downloaded' | 'copied' | 'failed' | 'cancelled'> {
   try {
     const nav = navigator as ShareNav;
     const blob = await buildRecapCollage(photos, opts);
     if (blob) {
       const file = new File([blob], 'rushpoint-recap.png', { type: 'image/png' });
       if (nav.share && nav.canShare?.({ files: [file] })) {
-        try { await nav.share({ files: [file], text: opts.text, url: opts.ctaUrl }); return 'shared'; } catch { return 'failed'; }
+        try { await nav.share({ files: [file], text: opts.text, url: opts.ctaUrl }); return 'shared'; } catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; }
       }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -85,7 +85,7 @@ export async function shareRecap(
       URL.revokeObjectURL(url);
       return 'downloaded';
     }
-    if (nav.share) { try { await nav.share({ title: 'RushPoint', text: opts.text, url: opts.ctaUrl }); return 'shared'; } catch { return 'failed'; } }
+    if (nav.share) { try { await nav.share({ title: 'RushPoint', text: opts.text, url: opts.ctaUrl }); return 'shared'; } catch (e) { return (e as { name?: string })?.name === 'AbortError' ? 'cancelled' : 'failed'; } }
     await navigator.clipboard.writeText(`${opts.text} ${opts.ctaUrl}`); return 'copied';
   } catch { return 'failed'; }
 }

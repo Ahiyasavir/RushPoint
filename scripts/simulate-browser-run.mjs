@@ -33,14 +33,37 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { auditRun } from './lib/run-audit.mjs';
 import { makeRng, stepToward, jitterFix } from './lib/gpsRoute.mjs';
+// Emulator ports come from ONE pure resolver (change: emulator-port-offset) so this can
+// run on an offset block beside a live playtest. Unset ⇒ exactly today's ports.
+import { resolveEmulatorPorts, BASE_EMULATOR_PORTS, PORT_OFFSET_ENV } from './lib/emulatorPorts.mjs';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
-const STORAGE_BUCKET = 'rushpoint-pwa-7daaa.appspot.com';
-// Set once the run launches; the photo task crafts a well-formed Storage URL from
-// it (the emulator can't mint a prod-origin download URL that requireStorageUrl
-// accepts, so — like scripts/e2e-verify.mjs — we submit a valid-format URL under
-// the team's own folder through the real PhotoEntry URL field).
-let RUN_ID = null;
+const EMU = resolveEmulatorPorts(process.env);
+
+// FAIL CLOSED under an offset. The browser half of this sim drives the REAL play-web dev
+// server, whose Firebase client pins the DEFAULT emulator ports in product code
+// (apps/play-web/src/services/firebase.ts:101) that this tooling change deliberately does
+// not touch. On an offset block the Node half would talk to the gate's emulator while the
+// browser half talked to whatever owns the default block — i.e. a live playtest stack —
+// and would create games, runs and teams inside it. Refuse loudly instead of corrupting it.
+if (EMU.firestore !== BASE_EMULATOR_PORTS.firestore) {
+  console.error(
+    `\n✖ simulate-browser-run cannot run with ${PORT_OFFSET_ENV} set: the play-web client pins the\n` +
+      '  default emulator ports, so the browser would drive the DEFAULT block (possibly a live\n' +
+      `  playtest) while this process drove :${EMU.firestore}. Run it without the offset.\n`,
+  );
+  process.exit(1);
+}
+// A tiny but VALID 1x1 JPEG. PhotoEntry is camera-capture only now (no free-text
+// URL field): the sim sets these bytes on the hidden <input type=file> and lets
+// the real compress+upload pipeline run against the Storage emulator, whose
+// origin submitStationPhoto accepts in emulator mode (docs/wave-c).
+const TINY_JPEG = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkI' +
+  'CQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAALCAABAAEBAREA/8QAFAABAAAAAAAA' +
+  'AAAAAAAAAAAAB//EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AfwD/2Q==',
+  'base64',
+);
 const PLAY_URL = process.env.PLAY_URL || 'http://localhost:5181';
 const PLAY_PORT = Number(new URL(PLAY_URL).port || 80);
 const TEAMS = Math.max(1, Number((process.argv.find((a) => a.startsWith('--teams=')) ?? '').split('=')[1] || 3));
@@ -58,9 +81,9 @@ function makeParty(name) {
   const auth = getAuth(app);
   const functions = getFunctions(app);
   const db = getFirestore(app);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectAuthEmulator(auth, `http://127.0.0.1:${EMU.auth}`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', EMU.functions);
+  connectFirestoreEmulator(db, '127.0.0.1', EMU.firestore);
   return {
     auth,
     // Same transient-retry as e2e/simulate: absorb an emulator blip (max 2)
@@ -285,14 +308,16 @@ async function satisfyTask(team, type, plan, taskId) {
       audit(`geofence status rendered for team ${team.index + 1}`, (await tid(page, 'geofence-status').count()) > 0);
       return;
     default: {
-      // photo (and any future capture type): submit a well-formed Storage URL under
-      // the team's own folder via the real PhotoEntry URL field. (A real
-      // setInputFiles upload lands at the emulator origin, which requireStorageUrl
-      // rejects — the emulator can't mint a prod-origin download URL. The server
-      // validates URL FORMAT, not existence, exactly as e2e-verify does.)
-      const objectPath = `runs/${RUN_ID}/teams/${team.uid}/${taskId}.jpg`;
-      const url = `https://firebasestorage.googleapis.com/v0/b/${STORAGE_BUCKET}/o/${encodeURIComponent(objectPath)}?alt=media`;
-      await tid(page, 'photo-url').fill(url);
+      // photo (and any future capture type): PhotoEntry is camera-capture only now
+      // — the old free-text `photo-url` field is gone (testids are photo-take /
+      // photo-file / photo-submit). Drive the REAL capture: set a tiny valid JPEG on
+      // the hidden file input, then submit. The compress+upload lands at the Storage
+      // emulator origin; against the emulator submitStationPhoto accepts that origin
+      // (requireStorageUrl allowLocalEmulator — see docs/wave-c), so the round-trip
+      // succeeds exactly as a real phone would.
+      await tid(page, 'photo-file').setInputFiles({
+        name: `${taskId}.jpg`, mimeType: 'image/jpeg', buffer: TINY_JPEG,
+      });
       await tid(page, 'photo-submit').click();
       return;
     }
@@ -327,6 +352,26 @@ async function runTeam(team) {
     const taskId = await card.getAttribute('data-task-id');
     const plan = planFor(taskId);
     if (process.env.BSIM_DEBUG) console.log(`  [team ${team.index + 1}] turn ${turn}: type=${type} id=${taskId}`);
+
+    // play-task-gating: a SEALED hidden-location card ships NO data-task-type — the
+    // payload is just a clue + an arrival control (TaskRunner.tsx sealed branch).
+    // Falling through to satisfyTask(type=null) would hit the photo default and
+    // fail. Instead: walk to the spot and click the arrival control; the server
+    // unseals the card (SAME task id, now with data-task-type), and the next loop
+    // turn plays its real type. NOTE: the current PLAN ships no hidden-location
+    // task, so this branch is defensive — it lets the sim gain one without a driver
+    // rewrite (add a task with `hideLocation` + a `gps` in PLAN).
+    if ((await card.getAttribute('data-task-sealed')) === 'true') {
+      team.pushFix(plan?.gps ?? BASE);
+      await tid(page, 'task-check-arrival').click().catch(() => {});
+      await waitUntil(async () => {
+        if (await tid(page, 'final-screen').count()) return true;
+        const c = tid(page, 'task-card').first();
+        if (!(await c.count())) return false;
+        return (await c.getAttribute('data-task-sealed')) !== 'true';
+      }, { timeout: 20_000, label: `arrival unseals ${taskId}` }).catch(() => {});
+      continue;
+    }
 
     // Scripted offline blip on team 0, once, mid-run — exercises the banner +
     // offline hardening, then reconnects and must still finish.
@@ -379,7 +424,6 @@ async function main() {
   const { gameId } = await creator.call('createGame', { title: `Browser Sim ${TEAMS}`, mode: 'individual' });
   await creator.call('updateGame', { gameId, scoringPreset: 'smart_weighted', stages: buildStages() });
   const { runId, accessCode } = await creator.call('launchRun', { gameId });
-  RUN_ID = runId;
   console.log(`game=${gameId} run=${runId} code=${accessCode}\n`);
 
   const browser = await chromium.launch({ headless: true });

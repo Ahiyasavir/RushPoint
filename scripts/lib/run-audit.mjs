@@ -37,18 +37,40 @@ export async function auditRun({ creator, ownerUid, gameId, runId, states, audit
 
   const live = await creator.call('refreshLeaderboard', { gameId, runId, publish: false });
   oracle('live board', live?.rankings);
+
+  // Station slots — read the LIVE run doc BEFORE finalizeRun (finalizeRun reconciles
+  // taskCounts, which would erase a mid-run leak before we can see it). Two checks:
+  //   1) counters back to 0 (every assignment was released — no leaked slot), and
+  //   2) the STORED counts equal the reconciled ground truth from the live team
+  //      states (Fix 1c) — a strictly stronger oracle than "all zero": it flags an
+  //      orphaned +1 that survived because a station never drained, even one masked
+  //      by another key sitting at 0.
+  const preFinalRunDoc = await creator.getDocAt(`users/${ownerUid}/games/${gameId}/runs/${runId}`);
+  const preCounts = preFinalRunDoc.data?.taskCounts ?? {};
+  // Reconcile mirror of functions/src/routing/reconcileTaskCounts.ts: a team holds
+  // exactly one slot iff it has a non-empty activeTaskId.
+  const expected = {};
+  for (const st of states) {
+    const held = st?.team?.activeTaskId;
+    if (typeof held === 'string' && held.length > 0) expected[held] = (expected[held] ?? 0) + 1;
+  }
+  const nonZero = (m) => Object.entries(m).filter(([, v]) => v !== 0);
+  const preNZ = nonZero(preCounts);
+  const expNZ = nonZero(expected);
+  // Robust regardless of finish state: STORED non-zero counters must exactly match
+  // the teams actually holding slots. All teams finished ⇒ both sides empty (the old
+  // "all back to 0" guarantee); a legitimate straggler holding a slot is matched, not
+  // flagged; only an orphaned/leaked +1 (or negative) breaks the equality.
+  const reconciled = preNZ.length === expNZ.length && preNZ.every(([k, v]) => expected[k] === v);
+  audit('taskCounts reconcile with live holders (no leaked/orphaned station slots)', reconciled,
+    `stored=${JSON.stringify(preCounts)} expected=${JSON.stringify(expected)}`);
+  const negative = Object.entries(preCounts).filter(([, v]) => v < 0);
+  audit('no negative station counters', negative.length === 0, JSON.stringify(negative));
+
   const fin = await creator.call('finalizeRun', { gameId, runId });
   oracle('final board', fin?.rankings);
   audit('live/final ordering parity (no drift)',
     JSON.stringify((live?.rankings ?? []).map((r) => r.teamId)) === JSON.stringify((fin?.rankings ?? []).map((r) => r.teamId)));
-
-  // Station slots: every assignment was released → all counters back to 0.
-  const runDoc = await creator.getDocAt(`users/${ownerUid}/games/${gameId}/runs/${runId}`);
-  const counts = runDoc.data?.taskCounts ?? {};
-  const leaked = Object.entries(counts).filter(([, v]) => v !== 0);
-  audit('no leaked station slots (all taskCounts back to 0)', leaked.length === 0, JSON.stringify(counts));
-  const negative = Object.entries(counts).filter(([, v]) => v < 0);
-  audit('no negative station counters', negative.length === 0, JSON.stringify(negative));
 
   return { live, fin };
 }

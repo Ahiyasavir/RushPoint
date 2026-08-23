@@ -11,10 +11,19 @@
 import { describe, test, expect } from 'vitest';
 import {
   speedBonus, SPEED_BONUS_CAP, sigmoidMultiplier, taskScoreSmart, taskScoreFixed,
+  scoreFixedPointsSpeed,
+  // pause-clock-tasks: the excluded-duration rule.
+  taskExcludedMs, teamExcludedMs, adjustedElapsedMs,
   matchesTaskAnswer, evaluateTrigger, rateLimit, haversineKm,
+  wrongAnswerCost, cooldownRemainingSeconds, hashAnswerForReplay, WRONG_ANSWER_LEVELS,
+  // task-duration-defaults: the derived per-interaction duration safety envelope.
+  defaultExpectedDurationMinutes, effectiveExpectedDurationMinutes,
+  TASK_DURATION_MIN_MINUTES, TASK_DURATION_MAX_MINUTES,
+  // visible-time-estimates: the walk-inclusive estimate the smart sigmoid divides by.
+  defaultEstimatedMinutes, TASK_ESTIMATE_MIN_MINUTES, TASK_ESTIMATE_MAX_MINUTES,
 } from '@rushpoint/shared';
 import { buildRankings } from '../runs/index';
-import type { Game, RunTeam } from '@rushpoint/shared';
+import type { Game, RunTeam, ScoringPreset, WrongAnswerLevel } from '@rushpoint/shared';
 
 // ── Seeded RNG (reproducible: a failure always repeats) ───────────────────────
 function makeRng(seed: number) {
@@ -59,6 +68,79 @@ describe('scoringPresets — value invariants', () => {
       const s = taskScoreSmart(difficulty, actual, est);
       expect(Number.isFinite(s)).toBe(true);
       expect(s).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  // Per-interaction default durations (change: task-duration-defaults). The derived
+  // default is an AUTHORING-time value — no scoring function calls it, which is why
+  // every scoring invariant above is unchanged — but a NaN/0/negative escaping it
+  // into a task template would poison taskScoreSmart's divisor and computeSkillRatio's
+  // pace term. Pin the safety envelope against arbitrary garbage.
+  test('defaultExpectedDurationMinutes is finite and within [0.5, 30] for ANY input', () => {
+    const rng = makeRng(11);
+    const types = ['field', 'smart_station', 'photo', 'self_report', 'quiz', 'numeric',
+      'geofence', 'sequence', 'survey', 'teleport', '', undefined, null, 7, {}];
+    const garbageArrays = [undefined, null, 'nope', 5, {}, [], ['a'], ['a', 'b', 'c']];
+    for (let i = 0; i < N; i++) {
+      const pick = <T>(arr: T[]): T => arr[Math.floor(rng() * arr.length) % arr.length];
+      const task = {
+        type: pick(types),
+        choices: pick(garbageArrays),
+        orderItems: pick(garbageArrays),
+        surveyChoices: pick(garbageArrays),
+        steps: pick(garbageArrays),
+        smart: rng() < 0.5 ? { verificationType: pick(['code_verification', 'photo_upload', 'x']) } : undefined,
+      };
+      const m = defaultExpectedDurationMinutes(task as never);
+      expect(Number.isFinite(m)).toBe(true);
+      expect(m).toBeGreaterThanOrEqual(TASK_DURATION_MIN_MINUTES);
+      expect(m).toBeLessThanOrEqual(TASK_DURATION_MAX_MINUTES);
+
+      // The authored value wins when usable, and garbage never wins.
+      const authored = pick([NaN, Infinity, -Infinity, 0, -5, 1e9, 7, undefined]);
+      const eff = effectiveExpectedDurationMinutes({ ...task, expectedDurationMinutes: authored } as never);
+      expect(Number.isFinite(eff)).toBe(true);
+      expect(eff).toBeGreaterThan(0);
+      expect(eff).toBeLessThanOrEqual(TASK_DURATION_MAX_MINUTES);
+      if (authored === 7) expect(eff).toBe(7);
+    }
+  });
+
+  // The VISIBLE estimate (change: visible-time-estimates). Unlike the interaction
+  // duration above, `estimatedMinutes` IS a scoring input: taskScoreSmart divides by it
+  // (and returns 0 when it is <= 0) and computeSkillRatio divides by it too. The derived
+  // default is still authoring-only, but anything it can produce may be saved onto a
+  // template, so its safety envelope is a scoring invariant. Garbage coordinates and a
+  // garbage sibling list must never yield NaN, 0, a negative, or a fraction.
+  test('defaultEstimatedMinutes is a whole number within [1, 60] for ANY input', () => {
+    const rng = makeRng(29);
+    const types = ['field', 'smart_station', 'photo', 'self_report', 'quiz', 'numeric',
+      'geofence', 'sequence', 'survey', 'teleport', '', undefined, null, 7];
+    const coords = [
+      undefined, null, {}, { lat: 0, lng: 0 }, { lat: NaN, lng: NaN },
+      { lat: 900, lng: -4000 }, { lat: Infinity, lng: 0 }, { lat: '31', lng: '35' },
+      { lat: 31.7767, lng: 35.2345 }, { lat: -33.9, lng: 151.2 }, { lat: 90, lng: 180 },
+    ];
+    const pickAny = <T>(arr: T[]): T => arr[Math.floor(rng() * arr.length) % arr.length];
+    for (let i = 0; i < N; i++) {
+      const task = {
+        id: `t${i}`, type: pickAny(types), coordinates: pickAny(coords),
+        locationless: rng() < 0.2 ? true : undefined,
+        steps: rng() < 0.3 ? Array.from({ length: Math.floor(rng() * 20) }, () => ({ id: 'a' })) : undefined,
+      };
+      const siblings = rng() < 0.2
+        ? pickAny([undefined, null, 'nope', 5, {}] as unknown[])
+        : Array.from({ length: Math.floor(rng() * 6) }, (_, k) => ({
+          id: `s${k}`, coordinates: pickAny(coords),
+          locationless: rng() < 0.2 ? true : undefined,
+        }));
+      const m = defaultEstimatedMinutes(task as never, siblings as never);
+      expect(Number.isFinite(m)).toBe(true);
+      expect(Number.isInteger(m)).toBe(true);
+      expect(m).toBeGreaterThanOrEqual(TASK_ESTIMATE_MIN_MINUTES);
+      expect(m).toBeLessThanOrEqual(TASK_ESTIMATE_MAX_MINUTES);
+      // The value can therefore never make taskScoreSmart short-circuit to 0.
+      expect(taskScoreSmart(5, m, m)).toBeGreaterThan(0);
     }
   });
 
@@ -292,6 +374,78 @@ describe('buildRankings — leaderboard invariants (all presets)', () => {
   });
 });
 
+describe('buildRankings — NaN-poison resistance', () => {
+  const now = new Date(1_700_000_100_000).toISOString();
+
+  // A team whose ONE task record carries a non-finite earnedScore (legacy/hand-
+  // written data, or a scoring bug upstream). parseRunTeam validates the top-level
+  // `score` but never the nested earnedScore, so this class reaches buildRankings.
+  function poisonedTeam(id: string): RunTeam {
+    const start = new Date(1_700_000_000_000).toISOString();
+    return {
+      id, displayName: id, status: 'finished',
+      startedAt: start, finishedAt: new Date(1_700_000_050_000).toISOString(),
+      score: 0, bonusPenalty: 0,
+      stages: [{
+        stageId: 's0', status: 'completed',
+        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: NaN }],
+      }],
+    } as unknown as RunTeam;
+  }
+
+  // A clean, finished team (finite earnedScore).
+  function cleanTeam(id: string, earned: number): RunTeam {
+    const start = new Date(1_700_000_000_000).toISOString();
+    return {
+      id, displayName: id, status: 'finished',
+      startedAt: start, finishedAt: new Date(1_700_000_040_000).toISOString(),
+      score: 0, bonusPenalty: 0,
+      stages: [{
+        stageId: 's0', status: 'completed',
+        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: earned }],
+      }],
+    } as unknown as RunTeam;
+  }
+
+  // A game whose single task omits BOTH expectedDurationMinutes and estimatedMinutes,
+  // exercising the expectedTotal reduce in scoreFixedPointsSpeed.
+  function gameNoDurations(preset: Game['scoringPreset']): Game {
+    return {
+      id: 'g', title: 'G', mode: 'individual', scoringPreset: preset,
+      stages: [{
+        id: 's0', order: 0, title: 'S0',
+        tasks: [{ id: 's0t0', title: 'T', type: 'field', coordinates: { lat: 0, lng: 0 },
+          difficulty: 3, pointValue: 50, maxConcurrentTeams: 3 }],
+      }],
+    } as unknown as Game;
+  }
+
+  test('a poisoned earnedScore never yields a non-finite leaderboard score (all point presets)', () => {
+    for (const preset of ['smart_weighted', 'fixed_points_speed'] as const) {
+      const teams = [poisonedTeam('poison'), cleanTeam('clean-a', 40), cleanTeam('clean-b', 70)];
+      const board = buildRankings(gameFor(preset), teams, now);
+      expect(board.every((r) => Number.isFinite(r.score))).toBe(true);
+      expect(board.map((r) => r.rank)).toEqual([1, 2, 3]);
+      expect(new Set(board.map((r) => r.teamId)).size).toBe(3);
+    }
+  });
+
+  test('a task missing both durations still yields a finite fixed_points_speed score', () => {
+    const board = buildRankings(gameNoDurations('fixed_points_speed'), [cleanTeam('t0', 50)], now);
+    expect(board).toHaveLength(1);
+    expect(Number.isFinite(board[0].score)).toBe(true);
+  });
+
+  test('live/final parity under poison: ranking is independent of (unordered) input order', () => {
+    for (const preset of ['smart_weighted', 'fixed_points_speed'] as const) {
+      const teams = [poisonedTeam('poison'), cleanTeam('a', 40), cleanTeam('b', 70), cleanTeam('c', 55)];
+      const forward = buildRankings(gameFor(preset), teams, now);
+      const reversed = buildRankings(gameFor(preset), teams.slice().reverse(), now);
+      expect(forward).toEqual(reversed);
+    }
+  });
+});
+
 describe('haversineKm — metric invariants', () => {
   test('non-negative, symmetric, and zero for identical points', () => {
     const rng = makeRng(14);
@@ -304,4 +458,219 @@ describe('haversineKm — metric invariants', () => {
       expect(haversineKm(a, a)).toBeLessThan(1e-9);
     }
   });
+});
+
+// ── Wrong-answer cost (change: wrong-answer-cost) ─────────────────────────────
+// The curve charges bonusPenalty, so a NaN or a negative here would poison every
+// finisher's Z-score, and an uncapped charge could spiral one bad question into an
+// unwinnable game. These properties pin exactly that.
+describe('wrongAnswerCost — penalty invariants', () => {
+  const LEVELS: WrongAnswerLevel[] = ['off', 'gentle', 'standard', 'strict'];
+  const PRESETS: ScoringPreset[] = ['time_only', 'fixed_points_speed', 'smart_weighted'];
+  const GARBAGE = [NaN, Infinity, -Infinity, -7, 0, 1.5];
+
+  test('finite, non-negative, and inside both caps for ANY input (incl. garbage)', () => {
+    const rng = makeRng(21);
+    for (let i = 0; i < N; i++) {
+      const level = LEVELS[Math.floor(rng() * LEVELS.length)];
+      const preset = PRESETS[Math.floor(rng() * PRESETS.length)];
+      const attempt = rng() < 0.15 ? GARBAGE[i % GARBAGE.length] : Math.floor(rng() * 20);
+      const charged = rng() < 0.15 ? GARBAGE[i % GARBAGE.length] : Math.floor(rng() * 200);
+      const c = wrongAnswerCost(level, preset, attempt, charged);
+      const tuning = WRONG_ANSWER_LEVELS[level];
+      expect(Number.isFinite(c.points)).toBe(true);
+      expect(c.points).toBeGreaterThanOrEqual(0);
+      expect(c.points).toBeLessThanOrEqual(tuning.maxPoints);
+      expect(Number.isFinite(c.cooldownSeconds)).toBe(true);
+      expect(c.cooldownSeconds).toBeGreaterThanOrEqual(0);
+      expect(c.cooldownSeconds).toBeLessThanOrEqual(tuning.maxCooldownSeconds);
+    }
+  });
+
+  test('the cumulative point cap can never be exceeded, however many wrong answers', () => {
+    for (const level of LEVELS) {
+      for (const preset of PRESETS) {
+        let charged = 0;
+        for (let attempt = 1; attempt <= 40; attempt++) {
+          const c = wrongAnswerCost(level, preset, attempt, charged);
+          expect(charged + c.points).toBeLessThanOrEqual(WRONG_ANSWER_LEVELS[level].maxPoints);
+          charged += c.points;
+        }
+        expect(charged).toBeLessThanOrEqual(WRONG_ANSWER_LEVELS[level].maxPoints);
+      }
+    }
+  });
+
+  test('cumulative points are non-decreasing and the cooldown is monotonic in attempts', () => {
+    for (const level of LEVELS) {
+      let charged = 0;
+      let prevCooldown = -1;
+      for (let attempt = 1; attempt <= 30; attempt++) {
+        const c = wrongAnswerCost(level, 'smart_weighted', attempt, charged);
+        // per-attempt points fall to 0 once the cap is spent, so the honest
+        // monotonic quantity is the CUMULATIVE charge.
+        expect(c.points).toBeGreaterThanOrEqual(0);
+        charged += c.points;
+        expect(c.cooldownSeconds).toBeGreaterThanOrEqual(prevCooldown);
+        prevCooldown = c.cooldownSeconds;
+      }
+    }
+  });
+
+  test('time_only never charges points; the cooldown is identical across presets', () => {
+    for (const level of LEVELS) {
+      for (let attempt = 1; attempt <= 12; attempt++) {
+        const t = wrongAnswerCost(level, 'time_only', attempt, 0);
+        const p = wrongAnswerCost(level, 'fixed_points_speed', attempt, 0);
+        expect(t.points).toBe(0);
+        expect(t.cooldownSeconds).toBe(p.cooldownSeconds);
+      }
+    }
+  });
+
+  test('level off is a total no-op (every pre-existing game)', () => {
+    const rng = makeRng(22);
+    for (let i = 0; i < N; i++) {
+      const preset = PRESETS[Math.floor(rng() * PRESETS.length)];
+      const c = wrongAnswerCost('off', preset, Math.floor(rng() * 50), Math.floor(rng() * 500));
+      expect(c).toEqual({ points: 0, cooldownSeconds: 0, chargedIndex: 0 });
+    }
+  });
+
+  test('cooldownRemainingSeconds is non-negative, finite, and fails OPEN on garbage', () => {
+    const rng = makeRng(23);
+    const now = 1_800_000_000_000;
+    for (let i = 0; i < N; i++) {
+      const until = rng() < 0.15 ? GARBAGE[i % GARBAGE.length] : now + (rng() - 0.4) * 300_000;
+      const left = cooldownRemainingSeconds(until, now);
+      expect(Number.isFinite(left)).toBe(true);
+      expect(left).toBeGreaterThanOrEqual(0);
+      if (!Number.isFinite(until) || until <= now) expect(left).toBe(0);
+    }
+  });
+
+  test('the replay hash is stable, normalizing, and collision-free on the sampled space', () => {
+    const rng = makeRng(24);
+    const seen = new Map<string, string>();
+    for (let i = 0; i < N; i++) {
+      const raw = Math.floor(rng() * 100000).toString(36);
+      const mangled = `  ${[...raw].map((ch) => (rng() < 0.5 ? ch.toUpperCase() : ch)).join('')} `;
+      expect(hashAnswerForReplay(mangled)).toBe(hashAnswerForReplay(raw));
+      const prior = seen.get(hashAnswerForReplay(raw));
+      if (prior !== undefined) expect(prior).toBe(raw);   // same hash ⇒ same answer
+      seen.set(hashAnswerForReplay(raw), raw);
+    }
+  });
+});
+
+// ── pause-clock-tasks — excluded-time invariants ──────────────────────────────
+// The excluded duration is subtracted from EVERY time-derived scoring term, so
+// the one thing it must never do is add time, go negative, or turn a finite
+// elapsed time into garbage. These properties are the oracle for that.
+describe('pausedClock — excluded-time invariants', () => {
+  test('adjustedElapsedMs never adds time, never goes negative, stays finite', () => {
+    const rng = makeRng(31);
+    const garbage = [NaN, Infinity, -Infinity, -1, 0];
+    for (let i = 0; i < N; i++) {
+      const raw = rng() * 7_200_000;                                  // up to 2h
+      const exc = rng() < 0.15 ? garbage[i % garbage.length] : rng() * 9_000_000;
+      const adj = adjustedElapsedMs(raw, exc);
+      expect(Number.isFinite(adj)).toBe(true);
+      expect(adj).toBeGreaterThanOrEqual(0);
+      expect(adj).toBeLessThanOrEqual(raw + 1e-9);                    // can only subtract
+    }
+  });
+
+  test('adjustedElapsedMs is monotonic non-increasing in the excluded amount', () => {
+    const rng = makeRng(32);
+    for (let i = 0; i < N; i++) {
+      const raw = rng() * 7_200_000;
+      const exc = rng() * 7_200_000;
+      expect(adjustedElapsedMs(raw, exc + rng() * 60_000))
+        .toBeLessThanOrEqual(adjustedElapsedMs(raw, exc) + 1e-9);
+    }
+  });
+
+  test('teamExcludedMs is finite and non-negative for ANY stored records (incl. garbage)', () => {
+    const rng = makeRng(33);
+    const garbage = [NaN, Infinity, -Infinity, -5_000];
+    for (let i = 0; i < N; i++) {
+      const stages = Array.from({ length: 1 + Math.floor(rng() * 3) }, () => ({
+        tasks: Array.from({ length: Math.floor(rng() * 4) }, (_, k) => ({
+          excludedMs: rng() < 0.25 ? garbage[k % garbage.length] : rng() * 600_000,
+        })),
+      }));
+      const total = teamExcludedMs(stages);
+      expect(Number.isFinite(total)).toBe(true);
+      expect(total).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test('taskExcludedMs is 0 or a non-negative finite span, never NaN', () => {
+    const rng = makeRng(34);
+    const stamps: (string | undefined)[] = [
+      undefined, '', 'not-a-date', new Date(1_700_000_000_000).toISOString(),
+      new Date(1_700_000_600_000).toISOString(),
+    ];
+    for (let i = 0; i < N; i++) {
+      const a = stamps[Math.floor(rng() * stamps.length)];
+      const b = stamps[Math.floor(rng() * stamps.length)];
+      const v = taskExcludedMs({ startedAt: a, completedAt: b }, rng() < 0.5);
+      expect(Number.isFinite(v)).toBe(true);
+      expect(v).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test('an excluded amount can only INCREASE a fixed_points_speed score, and stays capped', () => {
+    const rng = makeRng(35);
+    const game = gameFor('fixed_points_speed');
+    for (let i = 0; i < N; i++) {
+      const start = new Date(1_700_000_000_000).toISOString();
+      const finish = new Date(1_700_000_000_000 + rng() * 7_200_000).toISOString();
+      const stages = [{ stageId: 's0', order: 0, status: 'completed' as const,
+        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed' as const, earnedScore: 50 }] }];
+      const exc = rng() * 9_000_000;
+      const withOut = scoreFixedPointsSpeed(stages, start, finish, game);
+      const withExc = scoreFixedPointsSpeed(stages, start, finish, game, exc);
+      expect(withExc).toBeGreaterThanOrEqual(withOut);
+      expect(withExc - 50).toBeLessThanOrEqual(SPEED_BONUS_CAP);
+    }
+  });
+});
+
+describe('buildRankings — a run in which EVERY task pauses the clock', () => {
+  const now = new Date(1_700_000_100_000).toISOString();
+
+  // The degenerate case the feature makes reachable: total excluded >= total
+  // elapsed, so every adjusted duration floors at exactly 0. Nothing divides by
+  // the elapsed time, and the Z-Score's sigma-of-zeros guard must hold.
+  function allPausedTeam(i: number, elapsedMs: number): RunTeam {
+    const start = 1_700_000_000_000;
+    return {
+      id: `team-${i}`, displayName: `Team ${i}`, status: 'finished',
+      startedAt: new Date(start).toISOString(),
+      finishedAt: new Date(start + elapsedMs).toISOString(),
+      score: 0, bonusPenalty: 0,
+      stages: [{
+        stageId: 's0', order: 0, status: 'completed',
+        // Excluded >= elapsed on purpose: the floor, not the arithmetic, is the guard.
+        tasks: [{ taskId: 's0t0', taskIndex: 0, status: 'completed', earnedScore: 40,
+          excludedMs: elapsedMs + 60_000 }],
+      }],
+    } as unknown as RunTeam;
+  }
+
+  for (const preset of ['time_only', 'fixed_points_speed', 'smart_weighted'] as const) {
+    test(`${preset}: ranks stay contiguous, scores finite, durations exactly 0`, () => {
+      const rng = makeRng(36);
+      const teams = Array.from({ length: 4 }, (_, k) => allPausedTeam(k, 60_000 + rng() * 3_600_000));
+      const board = buildRankings(gameFor(preset), teams, now);
+      expect(board.map((r) => r.rank)).toEqual([1, 2, 3, 4]);
+      expect(board.every((r) => Number.isFinite(r.score))).toBe(true);
+      expect(board.every((r) => r.score >= 0)).toBe(true);
+      expect(board.every((r) => r.durationSeconds === 0)).toBe(true);
+      expect(board.every((r) => r.totalMinutes === 0)).toBe(true);
+      expect(new Set(board.map((r) => r.teamId)).size).toBe(4);
+    });
+  }
 });

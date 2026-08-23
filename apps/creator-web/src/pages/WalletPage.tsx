@@ -4,10 +4,14 @@ import type { WalletStatus, WalletTransaction, EventPackageId } from '@rushpoint
 import { EVENT_PACKAGES, PRO_MONTHLY_ILS, PRO_ANNUAL_ILS } from '@rushpoint/shared';
 import { getWalletStatus, purchaseCredits, subscribePro } from '../services/calls';
 import { db } from '../services/firebase';
-import { Button, Card, Spinner } from '../components/ui';
+import { Button, Card, Skeleton } from '../components/ui';
+import { LoadingState } from '../components/LoadingState';
 import { dialog } from '../components/dialog';
 import { ShareSheet } from '../components/ShareSheet';
 import { useAuth } from '../components/AuthGate';
+import { useAsyncAction } from '../hooks/useAsyncAction';
+import { classifyBillingError } from '../lib/callErrors';
+import { formatTxDate } from '../lib/formatTxDate';
 import { useT } from '../components/LanguageContext';
 
 const PACKAGE_ORDER: EventPackageId[] = ['starter', 'standard', 'pro_pack'];
@@ -19,10 +23,22 @@ export default function WalletPage() {
 
   const [status, setStatus] = useState<WalletStatus | null>(null);
   const [txns, setTxns] = useState<WalletTransaction[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
+  // A failed getWalletStatus used to leave `status` null forever, and `!status`
+  // renders a Spinner — a PERMANENT spinner on the page where a creator pays
+  // (change: play-no-silent-failures). Same shape DashboardPage already uses:
+  // escape the loading state, log the real error, show localized copy.
+  const [statusErr, setStatusErr] = useState(false);
 
-  async function loadStatus() { setStatus(await getWalletStatus()); }
+  async function loadStatus() {
+    try {
+      setStatusErr(false);
+      setStatus(await getWalletStatus());
+    } catch (e) {
+      console.error('[wallet] getWalletStatus failed:', e);
+      setStatusErr(true);
+    }
+  }
   useEffect(() => { void loadStatus(); }, []);
 
   // Transactions are owner-readable directly (firestore.rules) — live list.
@@ -37,26 +53,78 @@ export default function WalletPage() {
   }, [user]);
 
   async function buy(packageId: EventPackageId) {
-    setBusy(packageId);
     try {
       const res = await purchaseCredits({ packageId });
       if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
       await loadStatus(); // emulator grants instantly
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : w.purchaseFailed); }
-    finally { setBusy(null); }
+    } catch (e) {
+      // Never render a raw English server message at the moment money is
+      // involved: map by error code, log the original.
+      console.error('[wallet] purchaseCredits failed:', e);
+      await dialog.alert(w[classifyBillingError(e)]);
+    }
   }
 
   async function goPro(interval: 'month' | 'year') {
-    setBusy(`pro-${interval}`);
     try {
       const res = await subscribePro({ interval });
       if (res.checkoutUrl) { window.location.href = res.checkoutUrl; return; }
       await loadStatus();
-    } catch (e) { await dialog.alert(e instanceof Error ? e.message : w.subscriptionFailed); }
-    finally { setBusy(null); }
+    } catch (e) {
+      console.error('[wallet] subscribePro failed:', e);
+      await dialog.alert(w[classifyBillingError(e)]);
+    }
   }
 
-  if (!status) return <Spinner label={w.loading} />;
+  // These MOVE MONEY, so a second click in the same React batch (which a
+  // `useState` busy flag can't stop — setState is async) would double-charge.
+  // The guard is held for the whole callable (change: wave-b/async-action-guard).
+  const buyAction = useAsyncAction(buy, (packageId: EventPackageId) => packageId);
+  const proAction = useAsyncAction(goPro, (interval: 'month' | 'year') => `pro-${interval}`);
+  // Same shape the JSX already used: the in-flight key, or null when idle.
+  const busy: string | null = buyAction.busyKeys[0] ?? proAction.busyKeys[0] ?? null;
+
+  if (!status) {
+    if (!statusErr) {
+      // Content-shaped skeleton mirroring the loaded layout (status card +
+      // package grid), the same idiom every other creator page uses on initial
+      // load instead of a bare spinner. Text-free (Skeleton is aria-hidden).
+      return (
+        <div className="max-w-2xl mx-auto animate-fade-up">
+          <LoadingState messages={w.loadingBilling} className="!py-6" />
+          <Card className="p-6 mb-5">
+            <div className="flex items-center justify-between mb-5">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-5 w-16" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          </Card>
+          <div className="grid sm:grid-cols-3 gap-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Card key={i} className="p-4 flex flex-col gap-3">
+                <Skeleton className="h-6 w-24" />
+                <Skeleton className="h-3 w-32" />
+                <Skeleton className="h-7 w-16" />
+                <Skeleton className="h-9 w-full mt-1" />
+              </Card>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="max-w-2xl mx-auto animate-fade-up">
+        <Card className="p-8 text-center">
+          <div className="text-3xl mb-3">⚠️</div>
+          <p className="text-sm text-[--ink-2] mb-4">{w.statusFailed}</p>
+          <Button onClick={() => void loadStatus()}>{w.retry}</Button>
+        </Card>
+      </div>
+    );
+  }
 
   const isPro = status.plan === 'pro';
 
@@ -112,7 +180,7 @@ export default function WalletPage() {
                 <div className="font-brand text-xl font-extrabold text-[--ink-1]">{w.packageCredits(pkg.credits)}</div>
                 <div className="text-[11px] text-[--ink-3] mt-0.5 flex-1">{w.packageMaxP(pkg.maxParticipants)}</div>
                 <div className="font-brand text-2xl font-bold text-rp-fire mt-3">₪{pkg.priceILS}</div>
-                <Button className="!py-2 !text-sm mt-3" disabled={busy !== null} onClick={() => buy(id)}>
+                <Button className="!py-2 !text-sm mt-3" disabled={busy !== null} loading={busy === id} onClick={() => void buyAction.run(id)}>
                   {busy === id ? w.purchasing : w.packageBuy}
                 </Button>
               </Card>
@@ -132,11 +200,21 @@ export default function WalletPage() {
           <p className="text-sm text-rp-signal font-medium">{w.proActiveNote}</p>
         ) : (
           <div className="flex flex-col sm:flex-row gap-2.5">
-            <Button variant="ghost" className="flex-1 !py-2.5" disabled={busy !== null} onClick={() => goPro('month')}>
-              {busy === 'pro-month' ? w.purchasing : `${w.proCtaMonthly} · ${w.proMonthly(PRO_MONTHLY_ILS)}`}
+            <Button variant="ghost" className="flex-1 !py-2.5 !flex-col !gap-0.5" disabled={busy !== null} loading={busy === 'pro-month'} onClick={() => void proAction.run('month')}>
+              {busy === 'pro-month' ? w.purchasing : (
+                <>
+                  <span>{w.proCtaMonthly}</span>
+                  <span className="text-[11px] font-normal text-[--ink-3]">{w.proMonthly(PRO_MONTHLY_ILS)}</span>
+                </>
+              )}
             </Button>
-            <Button className="flex-1 !py-2.5" disabled={busy !== null} onClick={() => goPro('year')}>
-              {busy === 'pro-year' ? w.purchasing : `${w.proCtaAnnual} · ${w.proAnnual(PRO_ANNUAL_ILS)}`}
+            <Button className="flex-1 !py-2.5 !flex-col !gap-0.5" disabled={busy !== null} loading={busy === 'pro-year'} onClick={() => void proAction.run('year')}>
+              {busy === 'pro-year' ? w.purchasing : (
+                <>
+                  <span>{w.proCtaAnnual}</span>
+                  <span className="text-[11px] font-normal text-[--ink-3]">{w.proAnnual(PRO_ANNUAL_ILS)}</span>
+                </>
+              )}
             </Button>
           </div>
         )}
@@ -160,7 +238,7 @@ export default function WalletPage() {
               <div key={tx.id} className="flex items-center justify-between py-2.5 text-sm">
                 <div className="min-w-0">
                   <div className="text-[--ink-1] font-medium truncate">{txLabel(tx, w)}</div>
-                  <div className="text-[11px] text-[--ink-3]">{new Date(tx.createdAt).toLocaleDateString()}</div>
+                  <div className="text-[11px] text-[--ink-3]">{formatTxDate(tx.createdAt)}</div>
                 </div>
                 <div className="text-[--ink-2] font-mono text-xs whitespace-nowrap ps-3">{txAmount(tx)}</div>
               </div>

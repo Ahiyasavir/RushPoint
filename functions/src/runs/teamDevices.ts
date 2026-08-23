@@ -1,4 +1,5 @@
 import * as functions from 'firebase-functions';
+import { randomInt } from 'node:crypto';
 import type { RunTeam } from '@rushpoint/shared';
 
 // The GLOBAL per-run phone ceiling + its decision helper live in @rushpoint/shared
@@ -45,13 +46,22 @@ export function assertController(team: RunTeam, uid: string): void {
   }
 }
 
-export function generateDeviceJoinCode(rng: () => number = Math.random): string {
+/**
+ * Mint a team device join code. A device code is a real credential (attach →
+ * claimController → full team control), so production uses `crypto.randomInt` per
+ * character — a CSPRNG with no modulo bias, matching how the staff PIN was hardened
+ * (generatePin, anti-cheat row 40). An injected float `rng` (0..1) is retained for
+ * deterministic unit tests; when omitted the CSPRNG is used. Same alphabet + length.
+ */
+export function generateDeviceJoinCode(rng?: () => number): string {
   let code = '';
   for (let i = 0; i < DEVICE_JOIN_CODE_LENGTH; i += 1) {
-    const idx = Math.min(
-      DEVICE_JOIN_CODE_ALPHABET.length - 1,
-      Math.floor(rng() * DEVICE_JOIN_CODE_ALPHABET.length),
-    );
+    const idx = rng
+      ? Math.min(
+        DEVICE_JOIN_CODE_ALPHABET.length - 1,
+        Math.floor(rng() * DEVICE_JOIN_CODE_ALPHABET.length),
+      )
+      : randomInt(0, DEVICE_JOIN_CODE_ALPHABET.length);
     code += DEVICE_JOIN_CODE_ALPHABET[idx];
   }
   return code;

@@ -4,7 +4,9 @@
       "PowerShell(if \\(-not $?\\) { \"Directory is empty or doesn't exist yet\" })",
       "Bash(openspec new *)",
       "Bash(npx openspec *)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "PowerShell(npm run typecheck 2>&1)",
+      "Bash(openspec status *)"
     ]
   }
 }

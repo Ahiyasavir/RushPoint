@@ -1,0 +1,17 @@
+# Fire the retention sweep once a day. The original Cloud Functions schedule ran
+# "every 24 hours" in Asia/Jerusalem; this runs at 03:30 in the server's local
+# time — set the VPS timezone (`timedatectl set-timezone Asia/Jerusalem`) if you
+# want to match, or change OnCalendar below.
+#
+# Persistent=true ⇒ if the box was off at 03:30, it runs at next boot, so a
+# missed day is not skipped (the sweep is idempotent and capped, so catching up
+# is safe).
+[Unit]
+Description=Run the RushPoint retention sweep daily
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

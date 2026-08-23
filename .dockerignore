@@ -1,0 +1,16 @@
+# Keep the Docker build context small and force a clean install in-image.
+**/node_modules
+.git
+**/dist
+**/dist-playtest
+functions/lib
+.firebase
+**/.turbo
+**/*.log
+dev-logs
+e2e-ui
+**/.env
+**/.env.*
+*.local
+coverage
+playwright-report

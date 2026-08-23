@@ -28,3 +28,13 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     </ErrorBoundary>
   </React.StrictMode>,
 );
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    // BASE_URL, not '/': in playtest/tunnel mode creator-web is served under
+    // `/creator/` on the same origin as play-web, so a hardcoded '/sw.js'
+    // registered the *participant* app's worker (and a scope we don't own).
+    const base = import.meta.env.BASE_URL || '/';
+    navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).catch(() => undefined);
+  });
+}

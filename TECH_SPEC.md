@@ -132,7 +132,9 @@ users/{ownerUid}/games/{gameId}/runs/{runId}                   Live run (CF-writ
        …/runs/{runId}/teamLocations/{teamId}                   Live GPS pings (CURRENT). 🔭 v2.1: migrates to RTDB (see §4.B)
        …/runs/{runId}/staffInvites/{id}                        One-time staff PINs
 publicGames/{gameId}                                           Denormalized gallery index (public read)
-publicTasks/{gameId}_{taskId}                                  Task library entries (public read)
+publicTasks/{gameId}_{taskId}                                  Task library entries (public read). Location is the
+                                                               COARSE `approxLocation` only — never exact coordinates
+                                                               (enforced on the WRITE path; rules cannot gate fields)
 wallets/{uid}                                                  Creator credit/Pro ledger
 wallets/{uid}/transactions/{txId}                              Payment history
 accessCodes/{CODE}                                             Join code → {ownerUid, gameId, runId, status}
@@ -272,8 +274,13 @@ interface Stage {
   tasks: Task[];                  // 1+ tasks
   isFinal?: boolean;              // completing this stage finishes the team → Final screen
   requiredTaskCount?: number;     // partial completion: do N of M tasks (undefined = all)
+  exclusiveGroups?: ExclusiveTaskGroup[];  // "pick one of these" — at most ONE completion per group
 }
 ```
+- `requiredTaskCount` must not exceed `maxCompletableTasks(stage)`
+  (`packages/shared/src/mutualExclusion.ts`) — each exclusive group yields at most one completion, so
+  a stage that requires more than the ceiling cannot be completed. `requiredTaskCountProblem()` is
+  the one check shared by `updateGame`/`importGameFile` validation and the Builder's readiness.
 - A stage unlocks the next stage (`order + 1`) when it completes.
 - The first stage starts `active`; the rest start `locked`.
 - **Stage completion rule:** complete when `completedCount >= required` OR all tasks are terminal.
@@ -286,10 +293,16 @@ interface Task {
   type: TaskType;                  // see §7
   coordinates: { lat; lng };
   difficulty;                      // 1–10
-  estimatedMinutes;
-  expectedDurationMinutes?;        // used by fixed_points_speed bonus
+  estimatedMinutes;                // measured from ASSIGNMENT (startedAt is stamped when the task
+                                   // is claimed) so it INCLUDES travel — feeds smart_weighted + UI
+  expectedDurationMinutes?;        // interaction time AT the stop; used ONLY by the
+                                   // fixed_points_speed bonus. Per-type defaults: shared/taskDuration.ts
   pointValue;
   maxConcurrentTeams;              // default 3 — station capacity for routing
+  status?: StationStatus;          // 'active'|'paused'|'closed' operator override; per-RUN overrides
+                                   // live on Run.taskStatusOverrides (setRunTaskStatus), not here
+  pausesTimer?: boolean;           // while a team is on this task its race clock STOPS; the server
+                                   // stamps RunTaskRecord.excludedMs once at completion
   locationless?: boolean;          // no map pin / zero transit / done from anywhere
   hint?; hintPenalty?;             // paid hint (default 25 pts); text is SERVER-SECRET
   // type-specific (answer keys SERVER-SECRET — stripped from participant payload):
@@ -570,6 +583,13 @@ Then, for non-`time_only` presets with ≥2 **finished** teams, a **Z-Score time
 finished teams: `score + round(−z × 200)`, where `z = (teamDurationMin − μ) / σ` across finishers
 (faster than average → bonus; 1σ ≈ ±200 pts), floored at 0.
 
+Every time-derived term (speed bonus, emitted duration, the `time_only` ordering, the Z-Score's
+`durationMin`) is first reduced by `teamExcludedMs(team.stages)` — the SUM of the `excludedMs` the
+server stamped on each completed `pausesTimer` task. **Parity rule:** `buildRankings` must stay a
+pure function of the stored team document (never `now`, never the current template, never client
+input), or a mid-run template edit would retroactively re-time finished work and `finalizeRun` and
+`refreshLeaderboard` would disagree.
+
 **Sort order:**
 - `time_only` — finished teams by `durationSeconds` ascending; unfinished sink, broken by `completedStages`.
 - Others — by final `score` descending.
@@ -741,7 +761,11 @@ All re-exported from `functions/src/index.ts`. Internal helpers (`completeTaskFo
 |---|---|---|
 | `createGame` | owner | New empty game (private, default preset/fields). |
 | `updateGame` | owner | Patch any subset of game fields (only provided keys). |
-| `deleteGame` | owner | Removes gallery index + public tasks, purges run photos, `recursiveDelete`s the game tree. |
+| `deleteGame` | owner | **Soft delete** (change: recoverable-game-deletion). Refused while any run is not `finished`. Removes the gallery index + public tasks, **revokes** (does not delete) the game's `accessCodes`, and writes a `deletedAt`/`deletedBy` tombstone. Destroys nothing; writes a `game_deleted` audit entry. |
+| `listDeletedGames` | owner | The trash view: tombstoned games plus each one's `purgeDueAt` and the retention window. |
+| `restoreGame` | owner | Clears the tombstone, reinstates the access codes that deletion revoked, returns the game (and its runs/teams) intact as **private**. Idempotent; `not-found` once purged. |
+| `purgeGameNow` | owner | Permanent destruction of a **tombstoned** game (`failed-precondition` otherwise): gallery index, run photos, game media, access codes, `recursiveDelete`. Writes `game_purged`. |
+| `purgeDeletedGamesNow` | admin | Runs the grace-period purge sweep on demand (optional `graceDays` override). The same sweep runs daily inside `pruneExpiredRunData`. |
 | `duplicateGame` | owner | Copies own game or any **public** game; new private copy, increments source `playCount`. |
 | `publishGame` | owner | Toggle `public`/`private`; syncs `publicGames` + per-task `publicTasks` index. |
 | `getGame` | owner | Returns the full game template. |
@@ -770,7 +794,20 @@ tasks) · `incrementTaskCopyCount`.
 ### Ops / Staff / Station (root `index.ts`)
 `inviteStaff` · `staffSignIn` · `updateLocation` · `triggerSOS` · `acknowledgeAlert` ·
 `pushAnnouncement` · `deactivateAnnouncement` · `pushFlashMission` · `verifyStationCode` ·
-`submitStationPhoto` · `reviewStationSubmission` · `adjustTeamScore` · `listAuditLogs` (admin).
+`submitStationPhoto` · `reviewStationSubmission` · `adjustTeamScore` · `setRunTaskStatus` ·
+`listAuditLogs` (admin).
+
+`setRunTaskStatus` (staff/owner) takes ONE task out of play for ONE **run**, or puts it back:
+it writes `Run.taskStatusOverrides[taskId] = 'active' | 'paused' | 'closed'` — deliberately **never**
+the game template, which later runs replay and duplicate/export/publish copy. Routing resolves it
+through `effectiveTaskStatus()`; the completion path never reads it, so a team already holding the
+task still finishes and scores it (the response reports how many teams that is). Refuses when the
+change would leave a stage with fewer available tasks than its `requiredTaskCount`
+(`stageUnwinnable`, overridable with `force`), and writes a `task_status_changed` audit entry.
+
+> This section is an abridged reference and lags the code. The **complete, count-checked** callable
+> table lives in [CLAUDE.md](CLAUDE.md) § *Cloud Functions — by domain module*; the authoritative
+> list is the re-export block at the top of `functions/src/index.ts`.
 
 ### 🔭 Planned (v2.1) new callables
 | Callable | Domain | Purpose |

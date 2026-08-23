@@ -7,7 +7,7 @@
       <stop offset="1" stop-color="#39ff14" stop-opacity="0"/>
     </radialGradient>
     <!-- Faint neon halo behind the reticle -> the mark reads on any crop. -->
-    <radialGradient id="halo" cx="256" cy="216" r="150" gradientUnits="userSpaceOnUse">
+    <radialGradient id="halo" cx="256" cy="210" r="190" gradientUnits="userSpaceOnUse">
       <stop offset="0.6" stop-color="#39ff14" stop-opacity="0"/>
       <stop offset="0.85" stop-color="#39ff14" stop-opacity="0.18"/>
       <stop offset="1" stop-color="#39ff14" stop-opacity="0"/>
@@ -19,10 +19,11 @@
   <rect width="512" height="512" fill="#050508"/>
   <rect width="512" height="512" fill="url(#gloss)"/>
 
-  <!-- Centered reticle mark, sized to stay inside the maskable safe zone. -->
-  <circle cx="256" cy="216" r="150" fill="url(#halo)"/>
-  <circle cx="256" cy="216" r="104" fill="none" stroke="#39ff14" stroke-width="30"/>
-  <circle cx="256" cy="216" r="40" fill="#39ff14"/>
-  <path d="M256 320 L256 400" stroke="#39ff14" stroke-width="30" stroke-linecap="round"/>
-  <path d="M206 400 L306 400" stroke="#39ff14" stroke-width="30" stroke-linecap="round"/>
+  <!-- Centered reticle mark, enlarged to fill the tile while staying inside the
+       maskable safe zone (all geometry within radius ~205 of the 256,256 center). -->
+  <circle cx="256" cy="210" r="190" fill="url(#halo)"/>
+  <circle cx="256" cy="210" r="130" fill="none" stroke="#39ff14" stroke-width="34"/>
+  <circle cx="256" cy="210" r="52" fill="#39ff14"/>
+  <path d="M256 340 L256 430" stroke="#39ff14" stroke-width="34" stroke-linecap="round"/>
+  <path d="M196 430 L316 430" stroke="#39ff14" stroke-width="34" stroke-linecap="round"/>
 </svg>

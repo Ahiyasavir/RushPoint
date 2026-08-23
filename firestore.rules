@@ -36,9 +36,28 @@ service cloud.firestore {
       //    createGame/updateGame callables (Admin SDK) but direct owner writes
       //    are also permitted for responsiveness. publicGames is the read path
       //    for everyone else.
+      //    TOMBSTONE (change: recoverable-game-deletion): deleting a game is now a
+      //    server-written `deletedAt`/`deletedBy` pair with a 30-day grace period.
+      //    Those two fields are SERVER-ONLY — a client must not be able to forge a
+      //    tombstone (hiding a game from itself with no audit record) or clear one
+      //    (undeleting past the grace period, or un-queueing a pending purge).
+      //    Direct owner writes to the rest of the doc stay allowed as before; no
+      //    client code writes a game document today, so this narrows nothing in use.
+      //    DELETE IS DENIED (change: firestore-rules-coverage). Destroying a game is
+      //    a FIVE-system act — the game subtree, the publicGames/publicTasks gallery
+      //    index, the accessCodes pointers, Storage photos + authored media, and the
+      //    audit record — and only purgeGameTree does all five. A raw client delete
+      //    does exactly one of them: the world-readable gallery row would keep
+      //    serving a "deleted" game with no owner doc left to unpublish it, the join
+      //    codes would dangle, and the run subtree would be orphaned AND unpurgeable
+      //    (purgeGameNow requires a tombstone that no longer exists anywhere). It
+      //    would also bypass the trash and the audit trail entirely. The client path
+      //    is the deleteGame callable, which tombstones.
       match /games/{gameId} {
-        allow read:  if isOwner(uid);
-        allow write: if isOwner(uid);
+        allow read:   if isOwner(uid);
+        allow create: if isOwner(uid) && !hasTombstone(request.resource.data);
+        allow update: if isOwner(uid) && tombstoneUnchanged();
+        allow delete: if false;
 
         // ── RUNS ─────────────────────────────────────────────────────────────
         //    Live instances. Owner reads everything; all writes are CF-only
@@ -110,14 +129,32 @@ service cloud.firestore {
             allow write: if false;
           }
 
+          // ── STAFF ↔ ADMIN CHANNEL (staff-console-field-ops) ────────────────
+          //    ONE shared thread per run (the singleton doc `thread`) between the
+          //    field marshals and the run's owner. Deliberately NARROWER than the
+          //    team chat above: participants are excluded entirely, because this is
+          //    where staff report problems and request exceptions — operational
+          //    talk that must not be readable by the teams it concerns.
+          //    Writes are CF-only (sendStaffChannelMessage), like every other
+          //    run-scoped doc.
+          match /staffChannel/{docId} {
+            allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
+            allow write: if false;
+          }
+
           // ── OPERATIONAL (alerts, locations, staffInvites) ──────────────────
           //    Owner reads; all writes + staff/participant reads go through CFs.
           match /alerts/{docId} {
             allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
             allow write: if false;
           }
+          // Live team positions. Staff read was added with the mobile staff console's
+          // live map (staff-console-field-ops): a marshal in the field needs to see
+          // where every team is, which is the same data the owner's desktop map has
+          // always shown. Scoped by isStaffForRun, so a staff token still only ever
+          // reaches the ONE run it was minted for. Writes stay CF-only (updateLocation).
           match /teamLocations/{docId} {
-            allow read:  if isOwner(uid);
+            allow read:  if isOwner(uid) || isStaffForRun(uid, gameId, runId);
             allow write: if false;
           }
           // Retained GPS track for the post-run movement heatmap (movement-heatmap).
@@ -174,8 +211,31 @@ service cloud.firestore {
       allow read:  if true;
       allow write: if false;
     }
+    // Location privacy on publicTasks is NOT — and structurally CANNOT BE — a rules
+    // guarantee (audit: firestore-rules-coverage). Rules gate DOCUMENTS, not fields,
+    // on read, and every write here is Admin SDK, for which rules are never
+    // evaluated at all. The coarse-area contract (change: task-library-map-view) is
+    // therefore enforced at the WRITE PATH: publishGame writes only
+    // publicTaskLocation(task) and uses batch.set() (full overwrite, so a legacy
+    // exact `coordinates` key is erased on re-publish), searchTaskLibrary strips it
+    // from responses, and backfillPublicTaskCoordinatesNow repairs documents that
+    // are never re-published. Do not re-open this as a rules finding.
     match /publicTasks/{taskId} {
       allow read:  if true;
+      allow write: if false;
+    }
+
+    // ── PUBLIC-CONTENT LIKES (change: gallery-popularity-ranking) ────────────
+    //    publicLikes/{kind}_{itemId}_{uid} — one like per user per item, the id
+    //    IS the uniqueness constraint. Server-write-only like every other signal
+    //    that feeds a ranking: if a client could write here it could forge likes
+    //    and pin its own game to the top of the gallery.
+    //    Reads are denied too, deliberately — the caller's own like state comes
+    //    back from searchGallery/searchTaskLibrary, so no client ever needs to
+    //    query this collection, and denying it keeps the "who liked what" graph
+    //    from being scrapable.
+    match /publicLikes/{likeId} {
+      allow read:  if false;
       allow write: if false;
     }
 
@@ -239,6 +299,26 @@ service cloud.firestore {
     function isOwner(uid) {
       return request.auth != null && request.auth.uid == uid;
     }
+    // Game trash tombstone (change: recoverable-game-deletion). The tombstone is
+    // written ONLY by the deleteGame / restoreGame callables (Admin SDK, which
+    // bypasses these rules), so any client write that introduces, changes or
+    // removes it is a forgery attempt and is denied.
+    function hasTombstone(d) {
+      return d.keys().hasAny(['deletedAt', 'deletedBy']);
+    }
+    // EVERY field of the deletion record is compared, not just the timestamp
+    // (change: firestore-rules-coverage) — `deletedBy` is as server-written as
+    // `deletedAt`, so a client may neither re-attribute nor erase it while the
+    // tombstone stands. `get(field, null)` keeps the check TOTAL: absence becomes a
+    // first-class value, so a doc carrying only one of the two fields still yields a
+    // definite allow/deny instead of an evaluation error whose deny is incidental.
+    // Ordinary fields of a trashed game stay writable — this guards the record only.
+    function tombstoneUnchanged() {
+      return hasTombstone(request.resource.data) == hasTombstone(resource.data)
+          && (!hasTombstone(resource.data)
+              || (request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)
+                  && request.resource.data.get('deletedBy', null) == resource.data.get('deletedBy', null)));
+    }
     // Shared team devices: an attached phone (its uid listed in the team doc's
     // deviceUids) may read that team doc. Checked against resource.data — free,
     // no extra document reads. Legacy docs (no deviceUids) fall back to the
@@ -257,14 +337,30 @@ service cloud.firestore {
           && request.auth.token.gameId == gameId
           && request.auth.token.runId == runId;
     }
-    // A participant of THIS run: the caller owns a team doc under the run. Team
-    // docs are keyed by the founding uid (uid == teamId), so run membership for
-    // the founding device is exactly the existence of its team doc. Costs one
-    // document read per subscription. (Secondary attached devices — deviceUids —
-    // are NOT matched here; they read via the team/chat docs, not the raw feed.)
+    // A participant of THIS run — EITHER the founding phone or any secondary phone
+    // attached to a team (shared-team-devices).
+    //
+    //   • founding phone: team docs are keyed by the founding uid (uid == teamId),
+    //     so its membership is exactly the existence of its own team doc.
+    //   • attached phone: it has NO team doc — joinTeamAsDevice only appends its uid
+    //     to the FOUNDER's `deviceUids` array. isAttachedDevice() cannot help here:
+    //     that trick reads `resource.data.deviceUids` off the doc being read, which
+    //     exists on the team/chat docs but NOT on an announcement. And rules cannot
+    //     query a collection, so "is this uid in ANY team's deviceUids" is
+    //     unanswerable from an announcement. The fix is the deviceMembers reverse
+    //     index — a server-written marker keyed by the DEVICE uid
+    //     (FIRESTORE_PATHS.runDeviceMember), written in the same transaction that
+    //     appends to deviceUids, so the two can never disagree.
+    //
+    // Without the second clause every secondary phone on a multi-phone team got
+    // permission-denied on announcements / flashMissions / feedItems, which
+    // PlayScreen renders unconditionally: only the founder saw organizer broadcasts.
+    // Costs at most two document reads per subscription (the second is only
+    // evaluated when the first misses, i.e. for attached phones).
     function isRunParticipant(uid, gameId, runId) {
       return request.auth != null
-          && exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/teams/$(request.auth.uid));
+          && (exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/teams/$(request.auth.uid))
+              || exists(/databases/$(database)/documents/users/$(uid)/games/$(gameId)/runs/$(runId)/deviceMembers/$(request.auth.uid)));
     }
   }
 }

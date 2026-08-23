@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "npx vite --port 5181",
-    "build": "npx vite build",
+    "build": "vite build",
     "preview": "npx vite preview",
-    "typecheck": "npx tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@mapbox/mapbox-gl-rtl-text": "^0.2.3",
     "@rushpoint/shared": "*",
     "firebase": "^10.12.0",
     "jsqr": "^1.4.0",

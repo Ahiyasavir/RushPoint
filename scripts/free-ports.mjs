@@ -8,6 +8,8 @@
 
 import { spawnSync } from 'node:child_process';
 import process from 'node:process';
+import { reapOrphanEmulatorProcesses } from './lib/reapEmulatorExec.mjs';
+import { sweepStaleHelpers } from './lib/killStaleHelpers.mjs';
 
 const PORTS = [
   8081,                       // Metro (Expo)
@@ -24,51 +26,26 @@ const isWin = process.platform === 'win32';
 // emulator dead (port already taken) but its 2-min backup loop, tunnel, and
 // reverse-proxy still running. Six accumulated backup loops all firing
 // `firebase emulators:export` at the one live emulator wedges it (Firestore's
-// export takes a hub lock; overlapping exports collide). Match these by command
-// line and kill them too, so each launch starts from exactly one of each.
-const STALE_CMDLINE_PATTERNS = [
-  'scripts/emulator-backup.mjs', // the crash-safe export loop (the wedger)
-  'scripts\\emulator-backup.mjs',
-  'scripts/ngrok-tunnel.mjs',
-  'scripts\\ngrok-tunnel.mjs',
-  'scripts/proxy.mjs',
-  'scripts\\proxy.mjs',
-  'cloudflared tunnel', // the cloudflared playtest tunnel
-  // Emulator-gate orphans (change: emulator-gate hardening). A killed
-  // emulators:exec run leaves its whole tree alive — the firebase-tools parent,
-  // the emulator JVMs (their jars live under .cache/firebase/emulators), and
-  // functions-runtime workers — none of which hold a swept port. 23 leaked
-  // functionsEmulatorRuntime workers + a second live Firestore JVM once drove
-  // this machine to 90% RAM and made every gate fail with ECONNRESET/internal.
-  'functionsEmulatorRuntime',              // functions-emulator worker processes
-  'emulators:exec',                        // a stale firebase-tools exec parent
-  '.cache\\firebase\\emulators',           // emulator JVMs (firestore / rules runtimes)
-  '.cache/firebase/emulators',
-  'scripts/emulator-exec.mjs',             // our hardened exec wrapper
-  'scripts\\emulator-exec.mjs',
-  'scripts/simulate-browser-run.mjs',      // a stale browser-sim driver (holds Chromium)
-  'scripts\\simulate-browser-run.mjs',
-];
+// export takes a hub lock; overlapping exports collide). Matched by command line
+// via the shared pattern list (scripts/lib/staleHelperSweep.mjs's
+// STALE_HELPER_PATTERNS — change: emulator-exec-port-race pulled this list and
+// the kill loop out into scripts/lib/killStaleHelpers.mjs so emulator-exec.mjs's
+// own pre-boot sweep uses the EXACT same safety carve-outs, not a second copy).
+//
+// Enumerate → decide → kill. There is deliberately NO selection logic here: every `if`
+// about *whether* a process may die lives in the pure, unit-tested
+// scripts/lib/staleHelperSweep.mjs (change: emulator-gate-isolation). Before that split
+// this swept purely by command-line pattern, which meant an in-flight OFFSET gate run —
+// which matches `emulators:exec`, `.cache\firebase\emulators`, `functionsEmulatorRuntime`
+// AND `scripts/emulator-exec.mjs` — was destroyed by every playtest restart regardless of
+// which ports it held. The planner now spares anything positively attributed to a
+// different LIVE port block (a running emulators:exec session, an offset marker, or a
+// `--port` outside the block being swept) and kills everything else exactly as before.
+function killStaleHelpers() {
+  sweepStaleHelpers({ sweptPorts: PORTS, label: 'free-ports' });
+}
 
-function killStaleHelpersWindows() {
-  // Enumerate every process with its command line; kill the ones matching a
-  // stale-helper pattern. PowerShell CIM avoids the deprecated/absent wmic.
-  const ps = spawnSync('powershell', ['-NoProfile', '-Command',
-    'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine } | ' +
-    'Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress'],
-    { encoding: 'utf8' });
-  let procs = [];
-  try {
-    const parsed = JSON.parse(ps.stdout || '[]');
-    procs = Array.isArray(parsed) ? parsed : [parsed];
-  } catch { return; }
-  for (const p of procs) {
-    const cmd = String(p.CommandLine || '');
-    if (!STALE_CMDLINE_PATTERNS.some((pat) => cmd.includes(pat))) continue;
-    const pid = String(p.ProcessId);
-    const r = spawnSync('taskkill', ['/PID', pid, '/F', '/T'], { stdio: 'ignore' });
-    if (r.status === 0) console.log(`[free-ports] Killed stale helper (PID ${pid})`);
-  }
+function killStaleImagesWindows() {
   // cloudflared spawns worker exes whose command line may not carry the pattern;
   // sweep any leftover by image name (dev-only; safe in this workflow).
   spawnSync('taskkill', ['/IM', 'cloudflared.exe', '/F', '/T'], { stdio: 'ignore' });
@@ -80,14 +57,15 @@ function killStaleHelpersWindows() {
   spawnSync('taskkill', ['/IM', 'ngrok.exe', '/F', '/T'], { stdio: 'ignore' });
 }
 
-function killStaleHelpersUnix() {
-  for (const pat of [...STALE_CMDLINE_PATTERNS, 'cloudflared']) {
-    const res = spawnSync('bash', ['-c', `pgrep -f ${JSON.stringify(pat)} || true`], { encoding: 'utf8' });
-    for (const pid of (res.stdout || '').split(/\s+/).filter(Boolean)) {
-      if (Number(pid) === process.pid) continue;
-      spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
-      console.log(`[free-ports] Killed stale helper (PID ${pid})`);
-    }
+// cloudflared has no repo path in its command line and no session to belong to, so it
+// keeps the blunt pattern sweep it always had. (The Windows side does the same by image
+// name, above.)
+function killCloudflaredUnix() {
+  const res = spawnSync('bash', ['-c', 'pgrep -f cloudflared || true'], { encoding: 'utf8' });
+  for (const pid of (res.stdout || '').split(/\s+/).filter(Boolean)) {
+    if (Number(pid) === process.pid) continue;
+    spawnSync('kill', ['-9', pid], { stdio: 'ignore' });
+    console.log(`[free-ports] Killed stale helper (PID ${pid})`);
   }
 }
 
@@ -126,8 +104,17 @@ function freeUnix() {
 }
 
 try {
-  if (isWin) { killStaleHelpersWindows(); freeWindows(); }
-  else { killStaleHelpersUnix(); freeUnix(); }
+  // Guarded reap FIRST (change: emulator-exec-orphan-reap) — collects debris from an
+  // emulators:exec run whose own end-of-run cleanup never executed (closed terminal,
+  // crash). Unlike the blunt STALE_CMDLINE_PATTERNS sweep below, this one only touches
+  // processes positively attributed to a FINISHED exec session of THIS repo; it is
+  // additive, and deliberately does not replace either sweep.
+  const reaped = reapOrphanEmulatorProcesses({ label: 'free-ports' });
+  if (reaped > 0) console.log(`[free-ports] Reaped ${reaped} orphaned emulator-exec process(es).`);
+
+  killStaleHelpers();
+  if (isWin) { killStaleImagesWindows(); freeWindows(); }
+  else { killCloudflaredUnix(); freeUnix(); }
   console.log('[free-ports] Ports clear.');
 } catch (e) {
   console.warn('[free-ports] Skipped (non-fatal):', e.message);

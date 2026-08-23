@@ -33,8 +33,16 @@ function check(label: string, cond: boolean, detail = ''): void {
 function task(
   status: RunTaskRecord['status'],
   earnedScore?: number,
+  // fix-fixed-points-speed-template-drift: the per-task EXPECTED route-minutes the
+  // server stamps at a record's terminal transition. scoreFixedPointsSpeed now SUMS
+  // these over the team's completed/skipped records (never re-reduces the template),
+  // so a terminal record must carry it for the route expected-total to accrue.
+  expectedStamp?: number,
 ): RunTaskRecord {
-  return { taskId: 't', taskIndex: 0, status, earnedScore };
+  return {
+    taskId: 't', taskIndex: 0, status, earnedScore,
+    ...(expectedStamp !== undefined ? { expectedDurationMinutesAtCompletion: expectedStamp } : {}),
+  };
 }
 function stage(status: RunStageRecord['status'], tasks: RunTaskRecord[]): RunStageRecord {
   return { stageId: 's', order: 0, status, tasks };
@@ -61,9 +69,11 @@ check('speedBonus: huge lead is capped', speedBonus(10_000, 1) === SPEED_BONUS_C
 
 // ── Preset B: fixed_points_speed ──────────────────────────────────────────────
 {
+  // The three terminal records carry stamps summing to the route expected-total
+  // (30 + 30 + 0 = 60), exactly as the server would have stamped them at completion.
   const stages = [
-    stage('completed', [task('completed', 100), task('skipped', 50)]),
-    stage('completed', [task('completed', 75), task('assigned', 999)]), // assigned not counted
+    stage('completed', [task('completed', 100, 30), task('skipped', 50, 30)]),
+    stage('completed', [task('completed', 75, 0), task('assigned', 999)]), // assigned not counted
   ];
   // No times → just the sum of completed+skipped earnedScore (100+50+75 = 225).
   check('fixed: sums completed + skipped earnedScore, ignores assigned',
@@ -74,9 +84,11 @@ check('speedBonus: huge lead is capped', speedBonus(10_000, 1) === SPEED_BONUS_C
   check('fixed: pending tasks contribute 0',
     scoreFixedPointsSpeed(withPending, undefined, undefined, { stages: [] }) === 40);
 
-  // With a finish faster than expected → speed bonus added on top.
-  const game = { stages: [{ tasks: [{ estimatedMinutes: 30, expectedDurationMinutes: 30 }, { estimatedMinutes: 30 }] }] } as never;
-  const fast = scoreFixedPointsSpeed(stages, ISO(0), ISO(40), game); // expected 60, actual 40 → +200? delta 20 → +200 capped at... 20*10=200=cap
+  // With a finish faster than expected → speed bonus added on top. Expected total is
+  // summed from the stored stamps (60), NOT re-reduced from the template — the template
+  // arg is now only the legacy fallback for un-stamped records.
+  const game = { stages: [{ tasks: [{ id: 't', estimatedMinutes: 30, expectedDurationMinutes: 30 }] }] } as never;
+  const fast = scoreFixedPointsSpeed(stages, ISO(0), ISO(40), game); // expected 60, actual 40 → delta 20 → +200 capped
   check('fixed: finishing under expected adds a speed bonus', fast > 225, `score=${fast}`);
   const slow = scoreFixedPointsSpeed(stages, ISO(0), ISO(120), game); // way over
   check('fixed: finishing over expected adds no bonus', slow === 225, `score=${slow}`);

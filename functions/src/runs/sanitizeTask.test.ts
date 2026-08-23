@@ -1,5 +1,6 @@
 import { expect, test, describe } from 'vitest';
 import type { Task } from '@rushpoint/shared';
+import { publicTaskLocation } from '@rushpoint/shared';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 
 // A minimal located task factory — only the fields the sanitizer reads.
@@ -101,6 +102,32 @@ describe('sanitizeTaskForParticipant — secrecy invariants (existing)', () => {
     expect(smart?.adminNotes).toBeUndefined();
   });
 
+  // video-submission-task: 'video' is a third captureKind, and its clip-length
+  // range must reach the participant too — the recorder cannot enforce a limit it
+  // cannot see. Neither field carries secret information.
+  test('smart.captureKind video + its duration range survive sanitization', () => {
+    const out = sanitizeTaskForParticipant(
+      baseTask({
+        type: 'photo',
+        smart: {
+          enabled: true,
+          verificationType: 'photo_upload',
+          captureKind: 'video',
+          videoMinSeconds: 10,
+          videoMaxSeconds: 30,
+          secretCode: 'OPEN-SESAME',
+          adminNotes: 'internal only',
+        },
+      } as Partial<Task>),
+    ) as Record<string, unknown>;
+    const smart = out.smart as Record<string, unknown> | undefined;
+    expect(smart?.captureKind).toBe('video');
+    expect(smart?.videoMinSeconds).toBe(10);
+    expect(smart?.videoMaxSeconds).toBe(30);
+    expect(smart?.secretCode).toBeUndefined();
+    expect(smart?.adminNotes).toBeUndefined();
+  });
+
   // task-media-attachments: general media is participant-visible (no secret) and
   // must survive the sanitizer intact so the TaskRunner can render it.
   test('task media (image + youtube) passes through to the participant unchanged', () => {
@@ -169,6 +196,158 @@ describe('sanitizeTaskForParticipant — ordering quiz (orderItems)', () => {
   });
 });
 
+// ─── The three-way location boundary (change: hidden-mission-search-area) ─────
+//
+// ONE hidden task now has THREE distinct locational projections, for three
+// audiences, produced by three code paths. Getting them confused is the whole bug
+// class, so they are asserted together, on the SAME task, in one place:
+//
+//   1. the CREATOR, reading a world-readable publicTasks document, gets
+//      publicTaskLocation() — a ~1.11 km grid cell (change:
+//      hidden-location-map-visibility);
+//   2. the PLAYER, before the server has confirmed arrival, gets `searchArea` —
+//      a ~445 m grid cell plus a containing radius, and NOTHING else locational
+//      (change: hidden-mission-search-area). It exists because a hunt whose map
+//      showed nothing at all was not a hunt, it was a dead end;
+//   3. the PLAYER, after arrival, gets the EXACT coordinates back so they can
+//      navigate to the spot again if they wander off.
+//
+// The two coarsenings are deliberately DIFFERENT sizes and neither is derived
+// from the other, so an edit that forwards one where the other belongs fails here
+// with the reason written next to it.
+describe('sanitizeTaskForParticipant — the three location projections stay separate', () => {
+  // Coordinates deliberately NOT on a grid-cell centre. A grid snap is allowed to
+  // return the truth for a point that happens to sit exactly on a centre (the
+  // public projection has the same property), so a "centre !== spot" assertion is
+  // only meaningful on a coordinate that is off-centre. Containment is the
+  // property that holds for EVERY input, and it is asserted separately.
+  const SPOT = { lat: 31.7767, lng: 35.2345 };
+  const hiddenTask = () => baseTask({
+    hideLocation: true,
+    coordinates: { ...SPOT },
+    locationClue: 'Where the lions guard the gate',
+    hint: 'behind the third arch',
+  });
+
+  /** Metres between two points — local so the test never depends on the impl. */
+  function metresApart(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+    const R = 6371000;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const h = Math.sin(dLat / 2) ** 2
+      + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(h));
+  }
+
+  test('a sealed hidden task ships a search area that CONTAINS the spot but is not the spot', () => {
+    const task = hiddenTask();
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    const area = sealed.searchArea as { lat: number; lng: number; radiusMeters: number } | undefined;
+
+    expect(sealed.arrivalPending).toBe(true);
+    expect(area).toBeDefined();
+    expect(Number.isFinite(area!.lat)).toBe(true);
+    expect(Number.isFinite(area!.lng)).toBe(true);
+    expect(area!.radiusMeters).toBeGreaterThan(0);
+    // Not the spot, on either axis.
+    expect(area!.lat).not.toBe(task.coordinates!.lat);
+    expect(area!.lng).not.toBe(task.coordinates!.lng);
+    // But guaranteed to contain it — a circle that excludes the answer would send
+    // the player away from it, which is worse than no circle at all.
+    expect(metresApart(area!, task.coordinates!)).toBeLessThanOrEqual(area!.radiusMeters);
+  });
+
+  test('the sealed payload still withholds everything else', () => {
+    const task = hiddenTask();
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    // The exact spot and everything that could reconstruct it.
+    expect(sealed.coordinates).toBeUndefined();
+    expect(sealed.geofenceRadiusMeters).toBeUndefined();
+    expect(sealed.smart).toBeUndefined();
+    // The task itself is still sealed: no title, no type, no inputs.
+    expect(sealed.title).toBeUndefined();
+    expect(sealed.type).toBeUndefined();
+    expect(sealed.answers).toBeUndefined();
+    expect(sealed.numericAnswer).toBeUndefined();
+    expect(sealed.steps).toBeUndefined();
+    // The paid hint TEXT never rides along, only the affordance.
+    expect(sealed.hint).toBeUndefined();
+    expect(sealed.hasHint).toBe(true);
+    // The clue is the whole point of the sealed card.
+    expect(sealed.locationClue).toBe('Where the lions guard the gate');
+    // Built by CONSTRUCTION: the sealed payload's key set is exactly the allowlist.
+    expect(Object.keys(sealed).sort()).toEqual([
+      'arrivalPending', 'difficulty', 'estimatedMinutes', 'hasHint', 'hintPenalty',
+      'id', 'locationClue', 'locationHidden', 'pointValue', 'searchArea',
+    ]);
+  });
+
+  test('the public projection is now the EXACT spot, yet the PLAYER never receives it', () => {
+    const task = hiddenTask();
+    // The world-readable gallery now pins the hidden mission at its EXACT spot
+    // (change: gallery-exact-hidden-location) so the creator's map is accurate…
+    const publicArea = publicTaskLocation(task);
+    expect(publicArea).toEqual({ lat: task.coordinates!.lat, lng: task.coordinates!.lng });
+
+    // …but the PLAYER's sealed payload still leaks nothing: no exact coordinates,
+    // no public approxLocation, only a coarse search circle that is NOT the spot.
+    // This is the whole safety boundary — the public projection being exact does
+    // not reach the participant device; the seal is a separate control.
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    expect(sealed.coordinates).toBeUndefined();
+    expect(sealed.approxLocation).toBeUndefined();
+    const area = sealed.searchArea as { lat: number; lng: number };
+    expect(area.lat === publicArea!.lat && area.lng === publicArea!.lng).toBe(false);
+  });
+
+  test('an unsealed hidden task gets the exact spot back and NO search area', () => {
+    const task = hiddenTask();
+    const revealed = sanitizeTaskForParticipant(task, { revealed: true }) as Record<string, unknown>;
+    // One mission must never carry two contradictory answers on one map.
+    expect(revealed.searchArea).toBeUndefined();
+    expect(revealed.approxLocation).toBeUndefined();
+    expect(revealed.coordinates).toEqual(task.coordinates);
+    expect(revealed.locationHidden).toBe(true);
+  });
+
+  test('a task that is not hidden never carries a search area', () => {
+    const out = sanitizeTaskForParticipant(baseTask()) as Record<string, unknown>;
+    expect(out.searchArea).toBeUndefined();
+    expect(out.coordinates).toEqual({ lat: 31.78, lng: 35.21 });
+  });
+
+  test('a sealed hidden task with no usable location carries no search area', () => {
+    for (const coords of [undefined, { lat: 0, lng: 0 }, { lat: Number.NaN, lng: 35.2 }]) {
+      const sealed = sanitizeTaskForParticipant(
+        baseTask({ hideLocation: true, coordinates: coords as never }),
+      ) as Record<string, unknown>;
+      expect(sealed.arrivalPending).toBe(true);
+      expect(sealed.searchArea).toBeUndefined();
+    }
+  });
+
+  test('a sealed hidden STATION derives its area from the injected station coordinates', () => {
+    const task = baseTask({
+      hideLocation: true,
+      type: 'smart_station',
+      coordinates: { lat: 31.78, lng: 35.21 },
+      smart: {
+        enabled: true,
+        verificationType: 'code_verification',
+        secretCode: 'XYZ',
+        stationCoords: { lat: 32.0853, lng: 34.7818 },
+      } as never,
+    });
+    const sealed = sanitizeTaskForParticipant(task) as Record<string, unknown>;
+    const area = sealed.searchArea as { lat: number; lng: number; radiusMeters: number };
+    expect(area).toBeDefined();
+    expect(metresApart(area, { lat: 32.0853, lng: 34.7818 })).toBeLessThanOrEqual(area.radiusMeters);
+    // …and the station's secret code and coordinates still never ship.
+    expect(sealed.smart).toBeUndefined();
+    expect(JSON.stringify(sealed)).not.toContain('XYZ');
+  });
+});
+
 describe('sanitizeTaskForParticipant — hidden location', () => {
   test('a hidden task strips coordinates and emits locationHidden:true', () => {
     const out = sanitizeTaskForParticipant(
@@ -225,5 +404,127 @@ describe('sanitizeTaskForParticipant — hidden location', () => {
     const smart = out.smart as Record<string, unknown> | undefined;
     expect(smart?.stationCoords).toBeUndefined();
     expect(smart?.geofenceRadiusMeters).toBeUndefined();
+  });
+});
+
+// change: play-task-gating (wave D). Product decision: a hidden-location task
+// reveals NOTHING but its clue until the server has confirmed the team actually
+// ARRIVED (reportArrival → RunTaskRecord.arrivedAt). Before that the sanitizer
+// emits a "sealed stub" built by CONSTRUCTION (allowlist), so a future Task field
+// defaults to withheld — same fail-closed policy as the answer keys.
+// After arrival the task sanitizes like any other task, coordinates INCLUDED
+// (user decision: a player who wanders off must be able to navigate back).
+describe('sanitizeTaskForParticipant — hidden location: sealed until arrival', () => {
+  const SEALED_KEYS = [
+    'arrivalPending', 'difficulty', 'estimatedMinutes', 'hasHint', 'hintPenalty',
+    'id', 'locationClue', 'locationClueHe', 'locationHidden', 'media', 'pointValue',
+    // change: hidden-mission-search-area — the coarse, containing search circle.
+    // It is the ONLY locational key a sealed payload may carry; the exact spot
+    // and everything that could reconstruct it are still absent from this list.
+    'searchArea',
+  ];
+  const treasure = (extra: Partial<Task> = {}) =>
+    baseTask({
+      hideLocation: true,
+      title: 'The secret spot',
+      description: 'Behind the blue door',
+      type: 'quiz',
+      locationClue: 'Where water never stops',
+      locationClueHe: 'במקום שבו המים לא נחים',
+      choices: ['a', 'b'],
+      answers: ['a'],
+      hint: 'paid secret',
+      media: [{ id: 'm1', kind: 'image', url: 'https://firebasestorage.googleapis.com/x.jpg' }],
+      smart: { enabled: true, verificationType: 'code_verification', longInstructions: 'go inside' },
+      steps: [{ id: 's1', prompt: 'do it', answer: 'X' }],
+      numericTolerance: 3,
+      tags: ['secret'],
+      ...extra,
+    } as Partial<Task>);
+
+  test('sealed: the title is ABSENT from the payload', () => {
+    const out = sanitizeTaskForParticipant(treasure()) as Record<string, unknown>;
+    expect('title' in out).toBe(false);
+  });
+
+  test('sealed: no description / type / smart / choices / steps / tolerance / tags', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { shuffleSeed: 't:1' }) as Record<string, unknown>;
+    for (const k of ['description', 'type', 'smart', 'choices', 'steps',
+      'numericTolerance', 'tags', 'coordinates', 'geofenceRadiusMeters', 'triggerMode',
+      'surveyChoices', 'orderItems', 'unlockAfterTaskIds', 'hideLocation']) {
+      expect([k, k in out]).toEqual([k, false]);
+    }
+  });
+
+  // change: sealed-mission-media — a mission photo/video doesn't reveal WHERE the
+  // task is, only WHAT it is, so it's safe to show while the location is still
+  // sealed (unlike title/description/type, which are withheld until arrival).
+  test('sealed: media IS shown pre-arrival (it carries no location secret)', () => {
+    const out = sanitizeTaskForParticipant(treasure()) as Record<string, unknown>;
+    expect(out.media).toEqual([{ id: 'm1', kind: 'image', url: 'https://firebasestorage.googleapis.com/x.jpg' }]);
+  });
+
+  test('sealed: no media key at all when the task has none', () => {
+    const out = sanitizeTaskForParticipant(treasure({ media: [] } as Partial<Task>)) as Record<string, unknown>;
+    expect('media' in out).toBe(false);
+  });
+
+  test('sealed: emits arrivalPending + locationHidden + the clue (EN + HE) + hint affordance', () => {
+    const out = sanitizeTaskForParticipant(treasure()) as Record<string, unknown>;
+    expect(out.arrivalPending).toBe(true);
+    expect(out.locationHidden).toBe(true);
+    expect(out.locationClue).toBe('Where water never stops');
+    expect(out.locationClueHe).toBe('במקום שבו המים לא נחים');
+    expect(out.hasHint).toBe(true);
+    expect(out.hintPenalty).toBe(25);
+    expect(out.id).toBe('t1');
+  });
+
+  test('sealed: key set is EXACTLY the allowlist (a new Task field defaults to withheld)', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { shuffleSeed: 't:1' }) as Record<string, unknown>;
+    expect(Object.keys(out).sort()).toEqual([...SEALED_KEYS].sort());
+  });
+
+  test('sealed beats the ordering shuffle: orderItems never ship pre-arrival', () => {
+    const out = sanitizeTaskForParticipant(
+      treasure({ orderItems: ['one', 'two', 'three'] } as Partial<Task>),
+      { shuffleSeed: 'team-1:t1' },
+    ) as Record<string, unknown>;
+    expect('orderItems' in out).toBe(false);
+  });
+
+  test('arrived: title/description/type return and coordinates are RESTORED', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { revealed: true, shuffleSeed: 't:1' }) as Record<string, unknown>;
+    expect(out.title).toBe('The secret spot');
+    expect(out.description).toBe('Behind the blue door');
+    expect(out.type).toBe('quiz');
+    expect(out.coordinates).toEqual({ lat: 31.78, lng: 35.21 });
+    expect(out.geofenceRadiusMeters).toBe(40);
+    expect(out.locationHidden).toBe(true);
+    expect('arrivalPending' in out).toBe(false);
+  });
+
+  test('arrived: the answer keys are STILL stripped (reveal is not a bypass)', () => {
+    const out = sanitizeTaskForParticipant(treasure(), { revealed: true }) as Record<string, unknown>;
+    expect(out.answers).toBeUndefined();
+    expect(out.hint).toBeUndefined();
+    const steps = out.steps as Array<Record<string, unknown>> | undefined;
+    expect(steps?.[0]).not.toHaveProperty('answer');
+    const smart = out.smart as Record<string, unknown> | undefined;
+    expect(smart?.secretCode).toBeUndefined();
+  });
+
+  test('a NOT-hidden task is unaffected by revealed (byte-identical either way)', () => {
+    const a = sanitizeTaskForParticipant(baseTask({ type: 'quiz', choices: ['x'] } as Partial<Task>));
+    const b = sanitizeTaskForParticipant(baseTask({ type: 'quiz', choices: ['x'] } as Partial<Task>), { revealed: true });
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    expect((a as Record<string, unknown>).arrivalPending).toBeUndefined();
+  });
+
+  test('sealed: the whole serialized payload contains neither the title nor the description', () => {
+    const json = JSON.stringify(sanitizeTaskForParticipant(treasure()));
+    expect(json.includes('The secret spot')).toBe(false);
+    expect(json.includes('Behind the blue door')).toBe(false);
+    expect(json.includes('go inside')).toBe(false);
   });
 });

@@ -3,7 +3,7 @@
 // permission-denied / unauthenticated; every transient code keeps the last state
 // and shows "reconnecting". No emulator.
 //   npx tsx scripts/test-sync-error.ts
-import { isFatalSyncError } from '../apps/play-web/src/lib/syncError';
+import { isFatalSyncError, syncErrorVerdict, FIRST_LOAD_MAX_FAILS } from '../apps/play-web/src/lib/syncError';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -22,6 +22,54 @@ check('internal is transient', isFatalSyncError('functions/internal') === false)
 check('deadline-exceeded is transient', isFatalSyncError('functions/deadline-exceeded') === false);
 check('undefined (raw network error) is transient', isFatalSyncError(undefined) === false);
 check('empty string is transient', isFatalSyncError('') === false);
+
+// --- syncErrorVerdict (change: fix-play-first-load-retry-grace) -----------------
+// not-found → the game/run is gone, once state has loaded at least once.
+check('verdict not-found → game-gone (with state)', syncErrorVerdict('not-found', true, 0) === 'game-gone');
+check('verdict not-found → game-gone (with state, high budget)', syncErrorVerdict('not-found', true, 99) === 'game-gone');
+
+// not-found on the FIRST load is usually transient (team doc still creating right
+// after joinRun, or a run read racing finalize/prune): grant the same first-load
+// retry grace, and only declare the game gone once the budget is spent.
+check('verdict first-load not-found within budget → reconnect', syncErrorVerdict('not-found', false, 0) === 'reconnect');
+check('verdict first-load not-found below max → reconnect', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS - 1) === 'reconnect');
+check('verdict first-load not-found at max → game-gone', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS) === 'game-gone');
+check('verdict first-load not-found over max → game-gone', syncErrorVerdict('not-found', false, FIRST_LOAD_MAX_FAILS + 2) === 'game-gone');
+
+// permission-denied → hard sync-failed regardless of hasState / budget (a real
+// access removal, e.g. the team was pruned or the run's rules changed).
+check('verdict permission-denied → sync-failed', syncErrorVerdict('permission-denied', false, 0) === 'sync-failed');
+check('verdict permission-denied → sync-failed (with state)', syncErrorVerdict('permission-denied', true, 0) === 'sync-failed');
+
+// unauthenticated on the FIRST load (!hasState) now gets the same first-load retry
+// grace as not-found / transient codes (change: fix-play-first-load-unauth-grace): a
+// tab reload mid-run races the anonymous ID-token refresh, so the very first
+// getMyTeamState can return `unauthenticated` before the SDK re-mints. Reconnect
+// while within the budget, and only give up (sync-failed) once it is spent.
+check('verdict first-load unauthenticated within budget → reconnect', syncErrorVerdict('unauthenticated', false, 0) === 'reconnect');
+check('verdict first-load unauthenticated below max → reconnect', syncErrorVerdict('unauthenticated', false, FIRST_LOAD_MAX_FAILS - 1) === 'reconnect');
+check('verdict first-load unauthenticated at max → sync-failed', syncErrorVerdict('unauthenticated', false, FIRST_LOAD_MAX_FAILS) === 'sync-failed');
+check('verdict first-load unauthenticated over max → sync-failed', syncErrorVerdict('unauthenticated', false, FIRST_LOAD_MAX_FAILS + 2) === 'sync-failed');
+
+// unauthenticated mid-game (hasState) is almost always a transient Firebase
+// ID-token refresh window, not a terminal state: keep the live board and reconnect
+// (regression: fix-play-unauthenticated-midgame-reconnect). Bouncing an actively-
+// playing participant to the recovery card here was the P2 bug.
+check('verdict unauthenticated + hasState → reconnect', syncErrorVerdict('unauthenticated', true, 0) === 'reconnect');
+check('verdict unauthenticated + hasState → reconnect (high budget)', syncErrorVerdict('unauthenticated', true, 99) === 'reconnect');
+
+// Transient WITH state → keep the game on screen and reconnect.
+check('verdict transient undefined + hasState → reconnect', syncErrorVerdict(undefined, true, 0) === 'reconnect');
+check('verdict transient unavailable + hasState → reconnect', syncErrorVerdict('unavailable', true, 0) === 'reconnect');
+check('verdict transient internal + hasState → reconnect', syncErrorVerdict('internal', true, 0) === 'reconnect');
+
+// Transient FIRST load, budget not spent → reconnect (retry grace).
+check('verdict first-load fail 1 → reconnect', syncErrorVerdict('unavailable', false, 1) === 'reconnect');
+check('verdict first-load fail below max → reconnect', syncErrorVerdict(undefined, false, FIRST_LOAD_MAX_FAILS - 1) === 'reconnect');
+
+// Transient FIRST load, budget spent → give up with sync-failed.
+check('verdict first-load fail at max → sync-failed', syncErrorVerdict('unavailable', false, FIRST_LOAD_MAX_FAILS) === 'sync-failed');
+check('verdict first-load fail over max → sync-failed', syncErrorVerdict('internal', false, FIRST_LOAD_MAX_FAILS + 3) === 'sync-failed');
 
 console.log(`\n${failures === 0 ? 'ALL SYNC-ERROR TESTS PASSED' : failures + ' FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

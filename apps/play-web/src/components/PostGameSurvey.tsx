@@ -4,6 +4,7 @@ import { submitRunFeedback } from '../services/calls';
 import { useT } from '../i18nContext';
 import type { Session } from '../store';
 import { Button } from './ui';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Post-game feedback (change: post-game-feedback): a playful, tap-only survey on
 // the finish screen. One question per screen, auto-advancing, every step
@@ -34,6 +35,12 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
   const advanceTimer = useRef<number>();
 
   useEffect(() => () => window.clearTimeout(advanceTimer.current), []);
+
+  // In-flight guard (change: wave-b/async-action-guard). Declared before the
+  // `hidden` early return so the hook order is stable. The server rejects a
+  // duplicate response anyway, but a double-tapped send used to fire two
+  // submitRunFeedback calls and race the `phase` transition.
+  const sendAction = useAsyncAction(send);
 
   // The step list is dynamic: the "what went wrong" step only appears when the
   // player reports the game did not run perfectly smoothly (smoothness < 3).
@@ -103,7 +110,8 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
       {/* header: title + progress + dismiss */}
       <div className="flex items-center justify-between mb-1">
         <span className="text-sm font-bold text-zinc-200">📝 {t.survey.cardTitle}</span>
-        <button onClick={dismiss} className="text-xs text-zinc-500 hover:text-zinc-400">{t.survey.dismiss}</button>
+        {/* Was a bare ~16px line of text: the only way out of this card. */}
+        <button onClick={dismiss} className="inline-flex items-center justify-center min-h-[44px] px-3 -me-3 text-xs text-zinc-500 hover:text-zinc-400">{t.survey.dismiss}</button>
       </div>
       <div className="text-[11px] text-zinc-500 mb-3">
         {t.survey.intro} · {t.survey.progress({ cur: Math.min(stepIdx + 1, total), total })}
@@ -163,7 +171,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
                 key={issue}
                 onClick={() => toggleIssue(issue)}
                 className={`rounded-full border px-3 py-1.5 text-sm ${issues.includes(issue)
-                  ? 'bg-accent/15 border-accent/50 text-accent font-semibold'
+                  ? 'bg-accent/15 border-accent/50 text-ink-fire font-semibold'
                   : 'bg-app-raised border-glass-border text-zinc-300'}`}
               >
                 {issueLabels[issue]}
@@ -193,10 +201,10 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
       {/* footer: skip (non-comment) / send (comment) */}
       <div className="flex items-center justify-between mt-4">
         {!isLast ? (
-          <button onClick={advance} className="text-sm text-zinc-500 hover:text-zinc-400">{t.survey.skip}</button>
+          <button onClick={advance} className="inline-flex items-center justify-center min-h-[44px] px-3 -ms-3 text-sm text-zinc-500 hover:text-zinc-400">{t.survey.skip}</button>
         ) : <span />}
         {isLast && (
-          <Button disabled={phase === 'sending'} onClick={send}>
+          <Button disabled={phase === 'sending'} loading={sendAction.busy} onClick={() => void sendAction.run()}>
             {phase === 'sending' ? t.survey.sending : t.survey.send}
           </Button>
         )}
@@ -247,7 +255,7 @@ function Chips3({ prompt, options, selected, onPick }: {
             key={value}
             onClick={() => onPick(value)}
             className={`rounded-xl border px-4 py-3 text-sm font-medium transition-transform active:scale-95 ${selected === value
-              ? 'bg-accent/15 border-accent text-accent font-semibold'
+              ? 'bg-accent/15 border-accent text-ink-fire font-semibold'
               : 'bg-app-raised border-glass-border text-zinc-200'}`}
           >
             {label}

@@ -5,13 +5,34 @@
 // content-type gate shared by the server (submitStationPhoto) and the RED-first
 // pure test. Dependency-free; exported from @rushpoint/shared.
 
-export type MediaKind = 'photo' | 'audio';
+export type MediaKind = 'photo' | 'audio' | 'video';
 
 // The exact audio content-types a captureKind:'audio' submission may declare.
 // MediaRecorder emits 'audio/webm;codecs=opus' (Chrome/Firefox) or 'audio/mp4'
 // (Safari); 'audio/mpeg'/'audio/ogg' cover other encoders. Codec params are
 // stripped by normalizeContentType before matching, so this stays exact-match.
-export const AUDIO_CONTENT_TYPES = ['audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg'] as const;
+// Widened beyond the four MediaRecorder outputs (change: audio-recorder-fallback).
+// When MediaRecorder is unavailable — an in-app WhatsApp/Instagram webview, or an
+// Android build where the constructor throws — the player records with the PHONE's
+// own recorder and picks the file. Those recorders emit containers MediaRecorder
+// never produces: Android gives audio/3gpp or audio/amr, iOS gives audio/x-m4a or
+// audio/aac. Without them the fallback is a dead end WITH EXTRA STEPS: the file
+// uploads and is then refused by the server.
+// Keep in sync with ALLOWED_CONTENT_TYPES in functions/server.js and storage.rules.
+export const AUDIO_CONTENT_TYPES = [
+  'audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg',
+  'audio/aac', 'audio/x-m4a', 'audio/3gpp', 'audio/amr',
+] as const;
+
+// The exact video content-types a captureKind:'video' submission may declare
+// (change: video-submission-task). MediaRecorder emits 'video/webm;codecs=vp8,opus';
+// the native-picker fallback — the only path on browsers whose MediaRecorder cannot
+// record video at all — hands back whatever the device camera app produced, which is
+// video/mp4 on iOS and most Android, video/quicktime on older iOS.
+// Keep in sync with ALLOWED_CONTENT_TYPES in functions/uploadRoute.js.
+export const VIDEO_CONTENT_TYPES = [
+  'video/webm', 'video/mp4', 'video/quicktime',
+] as const;
 
 // 'audio/webm;codecs=opus' -> 'audio/webm'. Also lowercases + trims so a
 // browser-supplied blob type matches the allowlist and the storage.rules regex.
@@ -24,6 +45,7 @@ export function normalizeContentType(ct: string): string {
 // kind 'audio': REQUIRES a content-type and accepts exactly the normalized
 //   AUDIO_CONTENT_TYPES. Cross submissions are rejected both ways (an image type
 //   on an audio task, an audio type on a photo task).
+// kind 'video': same shape as audio, against VIDEO_CONTENT_TYPES.
 export function isAllowedSubmissionContentType(
   kind: MediaKind,
   contentType: string | undefined,
@@ -31,6 +53,10 @@ export function isAllowedSubmissionContentType(
   if (kind === 'audio') {
     if (!contentType) return false;
     return (AUDIO_CONTENT_TYPES as readonly string[]).includes(normalizeContentType(contentType));
+  }
+  if (kind === 'video') {
+    if (!contentType) return false;
+    return (VIDEO_CONTENT_TYPES as readonly string[]).includes(normalizeContentType(contentType));
   }
   // photo
   if (contentType === undefined) return true;

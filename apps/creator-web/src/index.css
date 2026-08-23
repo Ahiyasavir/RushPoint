@@ -9,10 +9,33 @@
   --surface-0: #FFFFFF;
   --surface-1: #F6F7FB;
   --surface-2: #ECEEF5;
+  /* Raised panel + its hover (RunConsole feedback/survey panels). Previously
+     undefined -> those panels rendered with no background. */
+  --rp-raised: #ECEEF5;
+  --rp-card:   #E3E6F0;
   --rp-border: #E0E3ED;
   --ink-1: #0A0C1A;
   --ink-2: #3D4259;
-  --ink-3: #7B82A0;
+  /* --ink-3 is the app's SECONDARY text: help lines, hints, metadata, empty-state
+     bodies. It was #7B82A0, which is 3.79:1 on white and 3.04:1 on --rp-card —
+     below the 4.5:1 AA needs for normal text, on the token carrying most of the
+     explanatory copy in the product. Darkened along its own hue to #60657D
+     (5.75:1 on --surface-0, 4.61:1 on the worst surface it is used over).
+     Nothing checked this: play-web's a11y scan asserts AA over the tokens in its
+     TAILWIND CONFIG, and creator-web keeps its ink in this stylesheet, so the
+     tokens here were never measured. They are now — see
+     scripts/test-creator-a11y-scan.ts, which parses this file directly. */
+  --ink-3: #60657D;
+  /* One step fainter than --ink-3 for tiny count badges (StageRail / RunConsole
+     section counts, Builder exclusive-groups hint). Was referenced but never
+     defined, so those spans fell back to the inherited color.
+     Held to 3:1, the NON-TEXT / large-text threshold, not 4.5:1 — at AA it would
+     be indistinguishable from --ink-3 and the token would have no reason to
+     exist. That is the contract: --ink-4 is for a count or a glyph that sits
+     beside an already-labelled control, never for a sentence someone must read.
+     Anything that IS prose belongs on --ink-3. Was #A6ABC0 = 2.28:1, which met
+     neither bar. */
+  --ink-4: #7E8292;
 
   --rp-fire:   #FF5722;
   --rp-amber:  #FFB300;
@@ -54,10 +77,19 @@ html.dark {
   --surface-0: #07080F;
   --surface-1: #0D0E1A;
   --surface-2: #141626;
+  --rp-raised: #141626;
+  --rp-card:   #1B1E30;
   --rp-border: rgba(255,255,255,0.07);
   --ink-1: #E8EAFF;
   --ink-2: #8890B8;
-  --ink-3: #464D6E;
+  /* Dark mode was the worse half, and it is not a niche: useDarkMode() seeds
+     itself from prefers-color-scheme, so this palette is the DEFAULT for every
+     creator whose OS is dark. --ink-3 was #464D6E = 2.42:1 on --surface-0 — every
+     help line, hint and empty-state body in the app, effectively unreadable.
+     Lightened along its own hue to #81869C (5.54:1, worst surface 4.57:1). */
+  --ink-3: #81869C;
+  /* 3:1 like its light-mode twin, and for the same reason. Was 1.82:1. */
+  --ink-4: #666A7D;
 
   --rp-bg: #07080F;
   --rp-bg-elevated: #0D0E1A;
@@ -78,6 +110,21 @@ body {
   margin: 0;
   transition: background-color 0.25s, color 0.25s;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Builder shell height: 100vh everywhere, upgraded to 100dvh only where the
+   browser actually supports it. `@supports` is the deliberate mechanism here
+   instead of pairing `h-screen`/`h-dvh` Tailwind classes — Tailwind's
+   compiled utility order in this build puts `.h-dvh` BEFORE `.h-screen`, so
+   two equal-specificity classes would let `h-screen` always win regardless
+   of browser support, silently discarding the dvh behavior everywhere. */
+.rp-h-dvh {
+  height: 100vh;
+}
+@supports (height: 100dvh) {
+  .rp-h-dvh {
+    height: 100dvh;
+  }
 }
 
 /* ── Ambient depth layer (mesh glows + grid) — both modes ─────────────────── */
@@ -160,6 +207,12 @@ html.dark .rp-blob-3 { background: radial-gradient(circle, rgba(6,182,212,0.11) 
 
 /* Pause for users who prefer reduced motion, and skip on mobile to save GPU */
 @media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
   .rp-blob { animation: none !important; }
 }
 @media (max-width: 640px) {
@@ -222,6 +275,28 @@ html.dark .rp-skeleton::after {
   .rp-skeleton::after { animation: none; }
 }
 
+/* ── Launch liftoff (change: creator-launch-liftoff) ──────────────────────────
+   An INDETERMINATE sweep for the launchRun wait: a partial gradient bar slides
+   start→end so the wait reads as forward motion, never a fake percentage. The JS
+   also branches on prefers-reduced-motion (shows a static fill instead), so this
+   keyframe is a progressive enhancement; the guard below neutralises it too. */
+.rp-liftoff-sweep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, var(--rp-fire, #FF5722), var(--rp-amber, #FFB300));
+  animation: rp-liftoff-sweep 1.6s ease-in-out infinite;
+}
+@keyframes rp-liftoff-sweep {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-liftoff-sweep { animation: none; }
+}
+
 /* ── Glass card ──────────────────────────────────────────────────────────── */
 html.dark .glass-card {
   background: rgba(255,255,255,0.035);
@@ -255,4 +330,97 @@ html.dark .glass-card {
   .print-cell svg { display: block; margin: 0 auto; }
   .print-code { font-family: var(--rp-font-mono); font-size: 16px; font-weight: 700; letter-spacing: 1px; margin-top: 6px; }
   .print-meta { font-size: 11px; color: #333; margin-top: 2px; }
+}
+
+/* ── הקמה מהירה / Quick Setup glass surface + focus-mode scrim
+   (change: quick-setup-wizard) ─────────────────────────────────────────────
+   NOT `bg-[--surface-1]/80` in the component: Tailwind 3's opacity-slash
+   modifier on an ARBITRARY property only works when it can decompose the value
+   into an r/g/b triplet itself, and `--surface-1` is a plain hex custom
+   property — so `bg-[--surface-1]/80` silently compiles to NO RULE AT ALL
+   (verified: `document.styleSheets` has zero rules for it). Every "glass" card
+   was therefore rendering with a genuinely TRANSPARENT background this whole
+   time, riding on `backdrop-blur` alone — which is very likely the real cause
+   behind "the welcome and completion screens are hard to read": it was never
+   only the ink token, the card had no tinted surface under the text at all.
+   `color-mix()` sidesteps Tailwind's opacity engine entirely and is not
+   theme-conditional to write, since it always reads the CURRENT value of
+   `--surface-1` (dark or light) at paint time. */
+.rp-qs-glass {
+  background-color: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+/* The focus-mode scrim over the mission canvas — a lighter tint (creator work
+   underneath should read as "dimmed", not "gone") plus a soft blur. */
+.rp-qs-scrim {
+  background-color: color-mix(in srgb, var(--surface-1) 78%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ── הקמה מהירה / Quick Setup focus pulse (change: quick-setup-wizard) ─────
+   Applied to the TARGET CONTROL itself, never to the mission card around it: the
+   whole point of the flow is "this exact field", and a card-wide highlight puts
+   the creator back to hunting. A static class, never a template string — Tailwind
+   cannot see `ring-${x}` and the class would silently not exist.
+   `prefers-reduced-motion` keeps the ring and drops the animation, so the target
+   is still identifiable without movement. */
+.rp-qs-pulse {
+  border-radius: 10px;
+  outline: 2px solid var(--rp-fire, #ff6b35);
+  outline-offset: 2px;
+  animation: rp-qs-pulse 1.2s ease-out 2;
+}
+@keyframes rp-qs-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(255, 107, 53, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 107, 53, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-qs-pulse { animation: none; }
+}
+
+/* הקמה מהירה — the finish-line moment (change: quick-setup-wizard).
+   Purely decorative and purely CSS: no animation library, no canvas, nothing that
+   could add weight to a route that already loads a map. `pointer-events: none` on
+   the field means the burst can never intercept a click meant for the card under
+   it, and `prefers-reduced-motion` removes the whole thing rather than slowing it
+   — falling confetti is exactly the sort of motion that setting exists to stop.
+   The checkmark still scales in under reduced motion, because a 300 ms scale is
+   feedback, not spectacle. */
+.rp-confetti-field {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.rp-confetti-piece {
+  position: absolute;
+  top: -12px;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: rp-confetti-fall;
+  animation-timing-function: cubic-bezier(0.2, 0.6, 0.4, 1);
+  animation-fill-mode: forwards;
+}
+@keyframes rp-confetti-fall {
+  0%   { opacity: 0; transform: translate3d(0, -10vh, 0) rotate(0deg); }
+  10%  { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--rp-confetti-drift, 0), 105vh, 0) rotate(540deg); }
+}
+.rp-qs-checkmark {
+  animation: rp-qs-checkmark 420ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes rp-qs-checkmark {
+  0%   { transform: scale(0.4); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-confetti-field { display: none; }
+  .rp-qs-checkmark { animation-duration: 200ms; }
 }

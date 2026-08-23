@@ -1,3 +1,5 @@
+import type { MediaKind } from '../mediaKinds';
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // @rushpoint/shared — v2 Platform types
 //
@@ -27,6 +29,8 @@ export const COLLECTIONS = {
   // Public gallery
   PUBLIC_GAMES:  'publicGames',
   PUBLIC_TASKS:  'publicTasks',
+  // One like per (kind, item, user) — see FIRESTORE_PATHS.publicLike.
+  PUBLIC_LIKES:  'publicLikes',
 
   // Payments
   WALLETS:      'wallets',
@@ -68,6 +72,16 @@ export const FIRESTORE_PATHS = {
   publicGame:  (gameId: string) => `publicGames/${gameId}`,
   publicTask:  (taskId: string) => `publicTasks/${taskId}`,
 
+  // Public-content likes (change: gallery-popularity-ranking). The document id is
+  // DERIVED from (kind, itemId, uid), so "one like per user per item" is a
+  // property of the address itself — a second like from the same user resolves to
+  // the same document and cannot create a second record, whatever the client
+  // sends. Server-write-only; clients can neither read nor write this collection
+  // (like state is served back through the gallery search callables).
+  publicLike:    (kind: 'game' | 'task', itemId: string, uid: string) =>
+    `publicLikes/${kind}_${itemId}_${uid}`,
+  publicLikesCol: () => 'publicLikes',
+
   // Hidden geofenced discovery POIs on a game (surprise-trivia-waypoints).
   // Creator read/write; play clients denied (coordinates are server-secret).
   discoveryPoisCol: (ownerUid: string, gameId: string) =>
@@ -92,6 +106,28 @@ export const FIRESTORE_PATHS = {
     `users/${ownerUid}/games/${gameId}/runs/${runId}/chat/${teamId}`,
   runChatCol: (ownerUid: string, gameId: string, runId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/chat`,
+
+  // Staff ↔ admin channel (change: staff-console-field-ops): ONE shared thread per
+  // run — a singleton doc, not a collection, because there is exactly one channel
+  // (unlike runChat, which is one thread per team). Server-write only; the owner and
+  // any token carrying this run's staff claims may read it. Participants may not.
+  runStaffChannel: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/staffChannel/thread`,
+
+  // Device-membership reverse index (fix: shared-team-devices live-ops read).
+  // A secondary phone attached via joinTeamAsDevice has NO team doc of its own —
+  // its uid only lives inside the FOUNDER's `deviceUids` array. firestore.rules
+  // cannot query a collection, so from an announcement/flashMission/feedItem doc
+  // there is no way to ask "is this uid in ANY team's deviceUids in this run"
+  // (isAttachedDevice() works on the team + chat docs only because deviceUids is
+  // on the very document being read). This marker is that missing reverse index:
+  // one tiny doc keyed by the DEVICE uid that rules can `exists()` in O(1).
+  // Server-write-only; holds {teamId, joinedAt} — no PII, so it is not part of
+  // the retention prune's PII_BULK_SUBCOLLECTIONS.
+  runDeviceMember: (ownerUid: string, gameId: string, runId: string, deviceUid: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/deviceMembers/${deviceUid}`,
+  runDeviceMembersCol: (ownerUid: string, gameId: string, runId: string) =>
+    `users/${ownerUid}/games/${gameId}/runs/${runId}/deviceMembers`,
 
   teamLocation: (ownerUid: string, gameId: string, runId: string, teamId: string) =>
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
@@ -132,6 +168,13 @@ export interface GeoPoint {
 }
 
 export type GameMode        = 'individual' | 'team';
+/**
+ * What kind of game a TEMPLATE is (change: guided-new-game-wizard) — the answer
+ * the new-game wizard's "a story, or missions?" question maps onto. A closed
+ * union so adding a third kind is a typecheck failure at every switch that has to
+ * grow a label, rather than a silently unhandled string.
+ */
+export type TemplateGenre   = 'story' | 'missions';
 export type ScoringPreset   = 'time_only' | 'fixed_points_speed' | 'smart_weighted';
 export type TaskType        = 'field' | 'smart_station' | 'photo' | 'self_report'
                             | 'quiz' | 'numeric' | 'geofence' | 'sequence' | 'survey';
@@ -152,7 +195,13 @@ export type FieldType       = 'text' | 'number' | 'phone' | 'checkbox' | 'select
 export type FieldLevel      = 'team' | 'member';
 export type Visibility      = 'private' | 'public';
 export type AccessCodeStatus = 'unused' | 'used' | 'revoked';
-export type StaffPermission = 'announce' | 'review_photos' | 'track_locations';
+// `manage_teams` (change: staff-console-field-ops) covers the four actions that can
+// materially change a team's outcome from the field console: hold/resume, an
+// arbitrary-amount score adjustment, clearing out-of-bounds, and force-assigning a
+// task. Deliberately ONE coarse flag rather than four — the desktop run console
+// already trusts any authenticated staffer with the three that predate this change,
+// so a single new permission is a net tightening, not a new axis of restriction.
+export type StaffPermission = 'announce' | 'review_photos' | 'track_locations' | 'manage_teams';
 export type AlertType       = 'sos' | 'technical' | 'stationary';
 export type AnnouncementLevel = 'info' | 'warning' | 'critical';
 export type VerificationType  = 'code_verification' | 'photo_upload';
@@ -206,11 +255,16 @@ export interface SmartStationConfig {
   canSkip?: boolean;
   autoCompleteOnSuccess?: boolean;
   autoApprove?: boolean;   // photo_upload: approve without staff review (staffless events)
-  // audio-tasks: on a photo-type task, capture an audio clip instead of a photo
-  // (rides the same ingest/review pipeline). Default absent = 'photo'; only
-  // meaningful on photo-type tasks. NOT secret — the client needs it to render the
-  // right capture widget, so the sanitizer must pass it through.
-  captureKind?: 'photo' | 'audio';
+  // audio-tasks / video-submission-task: on a photo-type task, capture an audio or
+  // video clip instead of a photo (rides the same ingest/review pipeline). Default
+  // absent = 'photo'; only meaningful on photo-type tasks. NOT secret — the client
+  // needs it to render the right capture widget, so the sanitizer must pass it through.
+  captureKind?: 'photo' | 'audio' | 'video';
+  // captureKind 'video' only: the creator's clip-length range, bounded by
+  // VIDEO_DURATION_LIMITS (packages/shared/src/videoDuration.ts). Participant-visible
+  // by necessity — the recorder cannot enforce a limit it cannot see.
+  videoMinSeconds?: number;
+  videoMaxSeconds?: number;
 
   geofenceRadiusMeters?: number;
   stationCoords?: GeoPoint;  // injected by assignTask; never authored
@@ -288,6 +342,24 @@ export interface Task {
   // passthrough. Absent = the hint stays paid forever.
   hintAutoRevealMinutes?: number;
   hintAutoRevealAttempts?: number;
+  // Wrong-answer cost (change: wrong-answer-cost): per-task override of the game's
+  // `scoringOptions.wrongAnswerPenalty`, so one brutal final riddle can be stricter
+  // than the warm-up. Absent = inherit the game level (which itself defaults to
+  // `off`). Carries no secret — it says what a wrong answer costs, never what the
+  // answer is — so it is a sanitizer passthrough and the participant is TOLD the
+  // rule before they answer.
+  wrongAnswerPenalty?: WrongAnswerLevel;
+  // Pause-clock tasks (change: pause-clock-tasks): while a team is on this task
+  // its race clock STOPS, so hurrying buys nothing. The server measures the span
+  // from its OWN stamps (RunTaskRecord.startedAt → completedAt) and subtracts it
+  // from every time-derived scoring term (ranked duration, speed bonus, Z-Score);
+  // under smart_weighted the task is scored on-estimate so its sigmoid multiplier
+  // is time-independent. Offered on ANY task type; absent/false = today's
+  // behaviour exactly, so no existing game or in-flight run changes. On a LOCATED
+  // task the excluded span also covers the walk to the spot (the Builder says so).
+  // Carries no secret — the player MUST be told the clock stopped, or they hurry
+  // anyway — so it is a sanitizer passthrough.
+  pausesTimer?: boolean;
   // ── Verification config by type. Answer keys (answers/numericAnswer/
   //    steps[].answer) are SERVER-SECRET — stripped from the participant payload. ──
   // quiz: render `choices` as buttons (if present) else a text box; correct
@@ -425,6 +497,20 @@ export interface Stage {
   // multi-day / timed-drop games. Absent = unlocks as soon as the prior stage ends.
   releaseAt?: string;
   releaseAfterMinutes?: number;
+  // Mutually exclusive task groups (change: mutually-exclusive-tasks). Each entry
+  // names a set of task ids WITHIN this stage of which a team may complete at most
+  // ONE — completing any member locks the rest for that team (they are skipped, not
+  // failed). Lets a creator offer "pick one of these three" alternatives without a
+  // team farming every variant. Scoped to the stage: ids not present in
+  // `tasks` are ignored. A task may appear in at most one group.
+  exclusiveGroups?: ExclusiveTaskGroup[];
+}
+
+// One "choose at most one of these" set inside a Stage (change: mutually-exclusive-tasks).
+export interface ExclusiveTaskGroup {
+  id: string;
+  // Task ids belonging to this stage. A group of fewer than 2 ids is inert.
+  taskIds: string[];
 }
 
 
@@ -432,9 +518,21 @@ export interface Stage {
 // Stored at: users/{ownerUid}/games/{gameId}
 // The canonical definition a Creator builds. Instantiated into Runs.
 
+// Wrong-answer cost (change: wrong-answer-cost). How much a wrong answer on a
+// graded task (quiz / numeric / ordering) costs the team. Four strictness levels
+// so a kids' hunt and a competitive gibush can share one product. The numbers
+// behind each level live in packages/shared/src/wrongAnswerPenalty.ts.
+//
+// ABSENT MEANS `off`, which is byte-for-byte the pre-change behavior — every game
+// authored before this change keeps costing nothing, and no run in flight changes
+// its rules. New games are seeded at DEFAULT_WRONG_ANSWER_LEVEL ('standard').
+export type WrongAnswerLevel = 'off' | 'gentle' | 'standard' | 'strict';
+
 export interface ScoringOptions {
   transitPenaltyEnabled?: boolean;  // exponential late penalty for distance-based stages
   sprintPenaltyEnabled?: boolean;   // exponential late penalty for timed stages
+  // Game-wide default strictness for a wrong answer. A task may override it.
+  wrongAnswerPenalty?: WrongAnswerLevel;
 }
 
 export interface GameBranding {
@@ -464,8 +562,11 @@ export interface Game {
   requiresGuardianConsent?: boolean;
   minAge?: number;
   // Safe-zone boundary (change: safe-zone-boundary): a circular play area; a team
-  // outside it triggers a server-side alert + soft-pause.
-  safeZone?: import('./../safeZone').SafeZone;
+  // outside it triggers a server-side alert + soft-pause. Nullable because the
+  // Builder must be able to send an explicit CLEAR (change:
+  // expose-enforced-settings): `undefined` already means "field not sent" on the
+  // save payload, so removing a boundary needs a value of its own.
+  safeZone?: import('./../safeZone').SafeZone | null;
   // Platform benchmark (change: platform-benchmark): opt this game's finished runs
   // out of the anonymized cross-platform aggregate contribution.
   benchmarkOptOut?: boolean;
@@ -493,8 +594,64 @@ export interface Game {
   // Optional: absent games render no primer. Not secret — echoed to participants
   // and, when public, denormalized into publicGames. Cosmetic; never gates play.
   instructions?: GameInstructions;
+  // Staged leaderboard reveal (change: manual-leaderboard-reveal): when true,
+  // finalizeRun leaves the final board UNPUBLISHED so players cannot see who won
+  // the moment the run ends — the creator reveals it explicitly via
+  // refreshLeaderboard({ publish: true }). Default false (undefined ⇒ auto-publish),
+  // so every existing game keeps today's behaviour. Organizers always see the
+  // standings regardless (they read the run doc directly); this flag gates only
+  // the PARTICIPANT-visible board. Never denormalized into publicGames.
+  manualLeaderboardReveal?: boolean;
+  // Trash / tombstone (change: recoverable-game-deletion). PRESENCE of a non-empty
+  // `deletedAt` means the game is deleted: it disappears from listGames, the
+  // gallery and every play surface, but nothing beneath it is destroyed until the
+  // grace period elapses (GAME_TRASH_RETENTION_DAYS) or the owner asks for
+  // permanent destruction. Absence is the normal state, so existing games need no
+  // migration. SERVER-WRITTEN ONLY — firestore.rules rejects any client write that
+  // introduces, changes or removes these two fields. See gameLifecycle.ts.
+  deletedAt?: string;
+  deletedBy?: string;
   createdAt: string;
   updatedAt: string;
+  // Admin-managed game templates (change: admin-manage-game-templates). A template
+  // is an ordinary Game, owned by whichever admin authored it, flagged so it shows
+  // up in the creator-facing "new game" picker instead of that admin's own
+  // dashboard-only games list. Admin-only-writable: setGameTemplateFlag is the only
+  // path that sets these fields (never part of Builder's autosave field allowlist).
+  isTemplate?: boolean;
+  templateEmoji?: string;
+  // Sort position in the picker; the MINIMUM across a templateGroupKey's siblings
+  // is authoritative (see templateGroupKey below).
+  templateOrder?: number;
+  // Links this template to its translated siblings (produced via the existing
+  // translateGame callable, then each flagged with the SAME templateGroupKey). A
+  // template with no siblings is its own group of one. Undefined ⇒ not grouped.
+  templateGroupKey?: string;
+  // Which language THIS document's stage/task content is authored in, e.g. 'he' | 'en'.
+  templateLang?: string;
+  // What KIND of game this template is (change: guided-new-game-wizard). The
+  // new-game wizard asks a conceptual question ("a story, or missions?") instead
+  // of showing template cards, and this is how an answer finds its template.
+  //
+  // Declared by the admin, never inferred: guessing from templateOrder would make
+  // reordering the picker silently swap what the wizard builds, and guessing from
+  // the title or scoringPreset breaks the moment a template is renamed or
+  // retuned. A template with no genre is simply not offered as a wizard answer —
+  // it stays fully usable in the ordinary picker.
+  templateGenre?: TemplateGenre;
+  // Task-library priority (change: task-library-priority-boost). Creator-settable
+  // (unlike PublicGame/PublicTask.pinnedLast, which is admin-only and set directly
+  // in Firestore). When true, every task this game publishes carries
+  // PublicTask.pinnedFirst — see that field for the ranking contract.
+  pinnedFirst?: boolean;
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). The creator-facing
+  // setup instructions a TEMPLATE carries, each one a POINTER at the single field
+  // it is about — so the instruction stops living inside the player-facing prose it
+  // describes. Creator-only: never sanitized into a task payload (it never reaches
+  // one) and never denormalized into publicGames/publicTasks. Absent ⇒ this game has
+  // no quick setup, which is every game that predates the feature.
+  // See packages/shared/src/templateWizard.ts.
+  wizardSteps?: import('../templateWizard').TemplateWizardStep[];
 }
 
 
@@ -525,6 +682,18 @@ export interface PublicGame {
   // Game intro primer (change: game-intro-instructions): denormalized for the
   // pre-join promo teaser so a player can preview how the game plays before joining.
   instructions?: GameInstructions;
+  // ── Popularity ranking (change: gallery-popularity-ranking) ──
+  // SERVER-WRITE-ONLY, both of them. `likeCount` is the number of distinct users
+  // who liked this game; `popularity` is popularityScore() applied to playCount +
+  // likeCount + createdAt and is the field Firestore actually orders by. Optional
+  // because games published before this change have neither — every reader treats
+  // undefined as 0 and the document self-heals on its next signal.
+  likeCount?: number;
+  popularity?: number;
+  // Always ranks after every non-pinned item, regardless of popularity/likes/uses
+  // (change: gallery-pin-last). For content that must stay reachable but never
+  // compete for the front of the gallery — e.g. the QA playground game.
+  pinnedLast?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -540,12 +709,54 @@ export interface PublicTask {
   title: string;
   description?: string;
   type: TaskType;
-  coordinates: GeoPoint;
+  /**
+   * @deprecated (change: task-library-map-view) The EXACT authored coordinate.
+   * publicTasks is world-readable (`allow read: if true`), so publishing this was
+   * a live exposure — and it was written even for `hideLocation` tasks, whose
+   * coordinates are server-secret everywhere else in this codebase. No longer
+   * written by publishGame and no longer read by anything; `searchTaskLibrary`
+   * strips it from its response so documents published before that change stop
+   * serving exact points too. Optional only so legacy stored docs still parse.
+   */
+  coordinates?: GeoPoint;
+  /**
+   * Coarse ~1 km area pin (change: task-library-map-view) — the centre of the grid
+   * cell containing the authored coordinate, via `approximatePublicPoint`. ABSENT
+   * for `hideLocation` tasks, locationless tasks and unplaced tasks: the exclusion
+   * is applied at the WRITE, so no world-readable document ever holds the value.
+   * The only location field any reader may use.
+   */
+  approxLocation?: GeoPoint;
   difficulty: number;
   estimatedMinutes: number;
   pointValue: number;
   tags?: string[];
   copyCount: number;
+  // Popularity ranking (change: gallery-popularity-ranking) — server-write-only,
+  // same contract as PublicGame above. `uses` for a task is its copyCount.
+  likeCount?: number;
+  popularity?: number;
+  // See PublicGame.pinnedLast (change: gallery-pin-last) — same contract.
+  pinnedLast?: boolean;
+  // Task-library priority (change: task-library-priority-boost): the OPPOSITE of
+  // pinnedLast — sorts BEFORE every non-pinned item in comparePopularity,
+  // regardless of score/uses/likes. Set at publish time from the source game's
+  // OWN `Game.pinnedFirst` toggle (creator-settable in the Builder), never
+  // written directly. If a task is somehow flagged both `pinnedFirst` and
+  // `pinnedLast`, `pinnedFirst` wins — see comparePopularity.
+  pinnedFirst?: boolean;
+  createdAt: string;
+}
+
+// Stored at: publicLikes/{kind}_{itemId}_{uid}  (FIRESTORE_PATHS.publicLike)
+// One creator's like of one public game or public task. Written only by the
+// setPublicLike callable; clients can neither read nor write it.
+export interface PublicLike {
+  id: string;
+  kind: 'game' | 'task';
+  /** publicGames/{itemId} or publicTasks/{itemId}. */
+  itemId: string;
+  uid: string;
   createdAt: string;
 }
 
@@ -607,6 +818,13 @@ export interface Run {
   // Marketplace instant play (change: marketplace-instant-play): a free self-guided solo
   // run started on demand from a public game, not launched by an organizer.
   selfGuided?: boolean;
+  // Live task availability (change: live-task-pause): per RUN operator overrides of
+  // a task's `status`, keyed by task id. Server written only (setRunTaskStatus).
+  // Deliberately NOT on the game template: a stop that closed today must not stay
+  // closed for tomorrow's run, for a duplicate, for an export, or in the gallery.
+  // Routing resolves it via effectiveTaskStatus(); the completion path never reads
+  // it, so a team already holding a paused task still finishes and scores it.
+  taskStatusOverrides?: Record<string, StationStatus>;
   createdAt: string;
   updatedAt: string;
 }
@@ -665,6 +883,42 @@ export interface TaskScoreBreakdown {
   total: number;
 }
 
+/**
+ * What the rehearsal control did, or is handing back, for one mission
+ * (change: test-drive-rehearsal-control).
+ *
+ * A creator pressing "בדיקה" walks their own game from a desk, so three things
+ * that are load-bearing in the field are impossible there: standing at a place,
+ * knowing an answer they wrote weeks ago, and having a staff member on hand to
+ * approve a photo. The rehearsal button resolves whichever of those the CURRENT
+ * mission needs, and this is what the server says it resolved.
+ *
+ * `answer` / `order` are ANSWER-KEY material and are returned ONLY for a run
+ * whose `isTestDrive` is true. They are never added to the participant task
+ * payload — `sanitizeTaskForParticipant` still strips every key — so the reveal
+ * is a separate, separately-authorized call rather than a conditional inside the
+ * sanitizer, where a wrong flag would leak answers to real players.
+ */
+export type RehearsalRevealKind =
+  /** The client should fill this answer into the input and let the human submit. */
+  | 'answer'
+  /** Ordering quiz: the correct arrangement, to stage in the list. */
+  | 'ordering'
+  /** Located mission: nothing to reveal — run the normal arrival/check-in path. */
+  | 'arrive'
+  /** Media mission: the server approved (or completed) it; nothing to fill. */
+  | 'approved'
+  /** Nothing to reveal (a survey has no right answer). */
+  | 'none';
+
+export interface RehearsalReveal {
+  kind: RehearsalRevealKind;
+  /** Present for kind 'answer'. */
+  answer?: string;
+  /** Present for kind 'ordering'. */
+  order?: string[];
+}
+
 export interface RunTaskRecord {
   taskId: string;
   taskIndex: number;  // index into Stage.tasks for multi-task stages
@@ -672,6 +926,30 @@ export interface RunTaskRecord {
   startedAt?: string;
   completedAt?: string;
   actualMinutes?: number;
+  // Pause-clock tasks (change: pause-clock-tasks): milliseconds of THIS team's
+  // clock excluded because the game task carries `pausesTimer`. Stamped ONCE, at
+  // completion, from the server's own startedAt → completedAt span (never from
+  // anything a client reports), as part of the whole-object stage rewrite the
+  // record already receives. Absent on every pre-existing record and read as 0.
+  //
+  // Two jobs, one field: buildRankings SUMS it (so live and final standings read
+  // the same immutable number even if the creator edits `pausesTimer` mid-run),
+  // and routing's computeSkillRatio drops any record that CARRIES it from the
+  // team's measured pace — which is why it is stamped even when the span is 0.
+  // `actualMinutes` above deliberately keeps the REAL measured span, because
+  // benchmarks, per-type analytics and the staff over-duration warning read it.
+  excludedMs?: number;
+  // fix-fixed-points-speed-template-drift: the per-task EXPECTED route-time
+  // contribution (minutes), snapshotted from the game template at the moment this
+  // record reached a terminal state — the same value scoreFixedPointsSpeed's route
+  // reduce reads today (expectedDurationMinutes ?? estimatedMinutes), with the same
+  // finite-and->0 guard. buildRankings SUMS this stamp across the team's terminal
+  // records instead of reducing over the live template, so a creator editing a
+  // task's expected duration mid-run cannot retroactively re-score a team that has
+  // already finished (which would jump the live board and break live/final parity).
+  // Absent on every pre-change record and on any run started before this shipped —
+  // read via a template fallback, never as 0.
+  expectedDurationMinutesAtCompletion?: number;
   earnedScore?: number;
   scoreBreakdown?: TaskScoreBreakdown;
   // Smart station
@@ -682,6 +960,12 @@ export interface RunTaskRecord {
   // response is final (the already-completed guard never overwrites it). Not
   // secret to its own team, so it flows through getMyTeamState unchanged.
   surveyResponse?: string;
+  // Hidden-location arrival latch (change: play-task-gating). Server-written by
+  // `reportArrival` once the team's GPS passed the SAME haversine/evaluateTrigger
+  // check that gates a check-in. Once set it is never cleared — arrival is sticky,
+  // so a reload / GPS loss / offline spell can never re-seal a task the player has
+  // already reached. Until it is set, the sanitizer ships only the sealed stub.
+  arrivedAt?: string;
 }
 
 export interface RunStageRecord {
@@ -733,6 +1017,32 @@ export interface RunTeam {
   // Safe-zone (change: safe-zone-boundary): set true while the team's last known
   // location is outside the play area; soft-pauses new task assignment.
   outOfBounds?: boolean;
+  // Out-of-bounds recovery (change: out-of-bounds-recovery): when the latch was set
+  // (ISO), and until when a staff release keeps it suppressed. Both optional — a team
+  // document written before this change evaluates as "unknown", which fails OPEN.
+  outOfBoundsAt?: string;
+  outOfBoundsOverrideUntil?: string;
+  // Staff-initiated per-team hold (change: staff-console-field-ops). A marshal parks
+  // ONE team (injury, dispute, waiting on staff) without touching the run or any other
+  // team. Lives here, not on the Run doc, because a hold is inherently per-team — the
+  // same place every other per-team operational latch (outOfBounds above) already lives,
+  // and therefore immune to template edits, duplication and export.
+  //
+  // While `held` is true every progress-advancing callable refuses (assertTeamNotHeld);
+  // reads are deliberately NOT gated, so the participant app can explain the pause
+  // instead of showing an opaque failure.
+  held?: boolean;
+  heldAt?: string;        // ISO — start of the CURRENT hold; cleared on resume
+  heldReason?: string;    // optional staff free text, shown to the team
+  heldBy?: string;        // staffName claim of whoever held them (attribution)
+  // ACCUMULATED held milliseconds across every past hold in this run, stamped on each
+  // resume (and at finalization for a still-open hold). Summed by buildRankings via
+  // teamHeldExclusionMs so held time never counts against a team's race clock — the
+  // team-level analogue of RunTaskRecord.excludedMs. Absent on every pre-change doc
+  // and read as 0.
+  heldMs?: number;
+  /** Cooldown marker so an active override can't mint a breach alert every ping. */
+  lastBreachAlertAt?: string;
   // Discovery POIs (change: surprise-trivia-waypoints): poiId → lifecycle state.
   discoveryState?: import('./../discoveryPoi').TeamDiscoveryState;
   activeTaskId?: string | null;  // mirror for getStationTeams query
@@ -748,6 +1058,30 @@ export interface RunTeam {
   evacuatedFrom?: string | null;
   // Tasks for which this team has already paid to reveal the hint (charge once).
   taskHintsUsed?: string[];
+  // Wrong answers recorded per task: taskId → count. Read by the attempt limit
+  // (attemptLimitReached), by hint auto escalation (isHintFree) and by the
+  // wrong-answer cost curve. A MAP field keyed by taskId, never an array element.
+  taskAttempts?: Record<string, number>;
+  // Wrong-answer cost ledger (change: wrong-answer-cost), taskId → state. A real
+  // nested map; never written through a dotted key.
+  //   charged       points already taken off this team for this task (enforces the cap)
+  //   lastHash      hash of the last wrong answer (the duplicate-submission replay guard)
+  //   cooldownUntil epoch ms the retry lockout expires; 0 when not cooling down
+  // retry-lockout-clock-skew: the lockout is ALSO recorded as (server instant +
+  // duration), which is what lets the server ship a remaining duration and bound
+  // the wait by the level's own ceiling. All three are OPTIONAL — rows written
+  // before that change carry only the fields above and keep working unchanged.
+  //   lastFailureAt server instant of the wrong answer that started the lockout
+  //   lockoutMs     the lockout duration that failure earned, in ms
+  //   failureCount  charged-attempt index; diagnostic only, never trusted
+  answerPenalties?: Record<string, {
+    charged: number;
+    lastHash: string;
+    cooldownUntil: number;
+    lastFailureAt?: number;
+    lockoutMs?: number;
+    failureCount?: number;
+  }>;
   // Per-sequence-task progress: taskId → number of steps completed so far.
   taskStepProgress?: Record<string, number>;
   // Shared team devices (change: shared-team-devices). Absent on legacy docs —
@@ -830,6 +1164,16 @@ export interface AccessCode {
   teamId?: string | null;
   createdAt: string;
   usedAt?: string | null;
+  // Game trash (change: recoverable-game-deletion). Soft-deleting a game REVOKES
+  // its codes rather than deleting them: a released code could be handed to a
+  // different creator's run by uniqueCode() inside the grace period, so restoring
+  // the game would hand back dead (or worse, misdirected) shared links. These two
+  // fields let restore reinstate EXACTLY the codes this deletion revoked —
+  // `revokedByGameDeletionAt` mirrors the game's `deletedAt` verbatim, and
+  // `revokedFromStatus` is the status to put back. A code revoked for any other
+  // reason carries neither field and is never resurrected by a restore.
+  revokedByGameDeletionAt?: string;
+  revokedFromStatus?: AccessCodeStatus;
 }
 
 
@@ -976,6 +1320,9 @@ export interface FlashMission {
 // photo-approval paths (submitStationPhoto autoApprove + reviewStationSubmission
 // approve); read by any authed participant of the run (announcements pattern).
 // Contains ONLY celebratory, non-secret data — no task config, no answer keys.
+// Video submissions ride the same two write sites (change:
+// run-media-gallery-and-video-feed) — see `mediaKind` below. Audio never reaches
+// the feed.
 export interface FeedItem {
   id: string;
   taskId: string;
@@ -986,6 +1333,13 @@ export interface FeedItem {
   teamName: string;
   /** Already Storage-validated by requireStorageUrl at submit time. */
   photoUrl: string;
+  /**
+   * What `photoUrl` actually is (change: run-media-gallery-and-video-feed). Absent
+   * on every item written before this change — those are all photos, so renderers
+   * must treat a missing value as `'photo'`, never as unknown. Audio never reaches
+   * the feed, so this is only ever `'photo'` or `'video'` in practice.
+   */
+  mediaKind?: MediaKind;
   /** emoji → count, e.g. { '🔥': 3 }. Zero-count keys are dropped. */
   reactions: Record<string, number>;
   /** uid → emoji: dedup/switch source of truth (one reaction per uid). */
@@ -995,6 +1349,18 @@ export interface FeedItem {
   createdAt: string;
   hiddenAt?: string;
   hiddenBy?: string;
+  /**
+   * reporterKey (teamId, or `staff:<uid>`) → reason (change: feed-ugc-safety).
+   * Written only by reportFeedItem via the pure applyReport reducer.
+   */
+  reportedBy?: Record<string, string>;
+  /** Number of distinct reporterKeys in reportedBy (change: feed-ugc-safety). */
+  reportCount?: number;
+  /**
+   * Set by hideFeedItem({ restore: true }) — disarms auto-hide permanently for
+   * this item even as further reports keep accumulating (change: feed-ugc-safety).
+   */
+  reportsCleared?: boolean;
 }
 
 export interface TeamLocation {
@@ -1132,9 +1498,19 @@ export interface UpdateGamePayload {
   photoFeedEnabled?: boolean;
   // Power-ups toggle (change: power-ups). Default false when absent.
   powerUpsEnabled?: boolean;
+  // Staged leaderboard reveal (change: manual-leaderboard-reveal). Default false
+  // when absent ⇒ finalizeRun auto-publishes the final board, today's behaviour.
+  manualLeaderboardReveal?: boolean;
   // Game intro primer (change: game-intro-instructions). Empty/whitespace-only ⇒
   // the field is cleared server-side; a non-https image is dropped on clean.
   instructions?: GameInstructions | null;
+  // Task-library priority (change: task-library-priority-boost). Default false
+  // when absent.
+  pinnedFirst?: boolean;
+  // הקמה מהירה / Quick Setup (change: quick-setup-wizard). `null` is an explicit
+  // clear; absent means "not sent" and leaves the stored steps alone. Steps whose
+  // stage/mission no longer exists are DROPPED on save, never a refusal.
+  wizardSteps?: import('../templateWizard').TemplateWizardStep[] | null;
 }
 
 // Run management
@@ -1165,7 +1541,11 @@ export interface RequestNextTaskResult {
 export interface TaskRecommendation {
   taskId: string;
   taskIndex: number;
-  title: string;
+  // play-task-gating: OPTIONAL because a hidden-location task withholds its title
+  // until the team has arrived (the same secret the participant sanitizer seals).
+  // When it is absent, `locationHidden` is set instead.
+  title?: string;
+  locationHidden?: boolean;
   priority: number;
   estimatedMinutes: number;
   difficulty: number;

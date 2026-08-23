@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
+import { LoadingView } from '../components/LoadingView';
 import { useT } from '../i18nContext';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
+import { CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
@@ -22,11 +24,18 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
   const [err, setErr] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     setRefreshing(true);
     try { setData(await getPublicLeaderboard({ code })); setErr(''); setNowTick(Date.now()); }
-    catch (e) { setErr(e instanceof Error ? e.message.replace('Firebase: ', '') : t.board.couldNotLoad); setData(null); }
+    catch (e) {
+      // Never render a raw Firebase error code (e.g. auth/admin-restricted-operation)
+      // to players (WO-5) — show one friendly localized line, log the code for us.
+      console.warn('public leaderboard load failed:', e instanceof Error ? e.message : e);
+      setErr(t.board.couldNotLoad);
+      setData(null);
+    }
     finally { setRefreshing(false); }
   }, [code, t]);
 
@@ -51,14 +60,17 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
     const url = window.location.href;
     const nav = navigator as Navigator & { share?: (d: { title?: string; url?: string }) => Promise<void> };
     if (nav.share) { try { await nav.share({ title: data?.title ?? 'RushPoint', url }); return; } catch { /* cancelled */ } }
-    try { await navigator.clipboard.writeText(url); } catch { /* no clipboard */ }
+    // Confirm the copy (change: play-no-silent-failures): a clipboard write with
+    // an empty catch gave the visitor no way to know whether anything happened.
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { /* no clipboard */ }
   }
 
   if (data === undefined) {
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          <LoadingView messages={[t.board.loadingA, t.board.loadingB]} />
         </div>
       </Screen>
     );
@@ -73,7 +85,10 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
             {t.board.unavailable}
           </h1>
           <p className="text-zinc-500 text-sm">{err || t.board.notFound}</p>
-          <Button className="mt-2" onClick={onJoin}>{t.board.enterCode}</Button>
+          {/* The only CTA used to ask for a code the visitor does not have
+              (change: play-no-silent-failures). `load` is a stable useCallback. */}
+          <Button className="mt-2" loading={refreshing} onClick={() => void load()}>{t.board.retry}</Button>
+          <Button variant="ghost" onClick={onJoin}>{t.board.enterCode}</Button>
         </div>
       </Screen>
     );
@@ -110,7 +125,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
               onClick={() => void load()}
               disabled={refreshing}
               aria-label={t.board.refresh}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:text-rp-fire disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 hover:text-ink-fire disabled:opacity-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
             >
               <span aria-hidden="true" className={refreshing ? 'inline-block animate-spin' : 'inline-block'}>↻</span>
               {t.board.refresh}
@@ -183,7 +198,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                             className={
                               final
                                 ? 'text-[11px] text-zinc-500 font-mono tabular-nums'
-                                : 'text-[11px] text-zinc-600 italic font-mono tabular-nums opacity-80'
+                                : 'text-[11px] text-zinc-500 italic font-mono tabular-nums opacity-80'
                             }
                           >
                             {final ? '' : '⏱ '}{formatDuration(sec)}
@@ -199,7 +214,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         )}
       </div>
 
-      <Button variant="ghost" className="mt-4" onClick={share}>{t.board.share}</Button>
+      <Button variant="ghost" className="mt-4" onClick={share}>{copied ? t.board.linkCopied : t.board.share}</Button>
       <a href={CREATOR_URL} target="_blank" rel="noreferrer"
         className="block text-center text-sm font-semibold py-3 hover:underline bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent"
       >

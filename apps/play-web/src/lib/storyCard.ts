@@ -13,6 +13,11 @@ export interface StoryCardData {
   ctaUrl: string; // shown as the "create your own" call-to-action
   headline?: string; // big banner word(s); defaults to FINISHED!
   scoreLabel?: string; // label under the big number; defaults to POINTS
+  heroValue?: string; // overrides the big number (used for the time_only finish time)
+  rankLabel?: string; // chip label; defaults to RANK
+  timeLabel?: string; // chip label; defaults to TIME
+  stagesLabel?: string; // chip label; defaults to STAGES
+  ctaText?: string; // tagline; defaults to 'Build your own field game'
 }
 
 const W = 1080;
@@ -84,16 +89,16 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   // Big score
   ctx.fillStyle = '#ffffff';
   ctx.font = '800 320px Outfit, Inter, sans-serif';
-  ctx.fillText(String(data.score), W / 2, 1170);
+  ctx.fillText(data.heroValue ?? String(data.score), W / 2, 1170);
   ctx.font = '600 46px Inter, sans-serif';
   ctx.fillStyle = 'rgba(255,255,255,0.8)';
   ctx.fillText(data.scoreLabel ?? 'POINTS', W / 2, 1240);
 
   // Stat chips (rank · time · stages) — only those present
   const chips: [string, string][] = [];
-  if (data.rank) chips.push(['RANK', `#${data.rank}`]);
-  if (data.totalTime) chips.push(['TIME', data.totalTime]);
-  if (data.stagesDone) chips.push(['STAGES', data.stagesDone]);
+  if (data.rank) chips.push([data.rankLabel ?? 'RANK', `#${data.rank}`]);
+  if (data.totalTime) chips.push([data.timeLabel ?? 'TIME', data.totalTime]);
+  if (data.stagesDone) chips.push([data.stagesLabel ?? 'STAGES', data.stagesDone]);
   if (chips.length) {
     const cw = 290, ch = 180, gap = 28;
     const totalW = chips.length * cw + (chips.length - 1) * gap;
@@ -117,7 +122,7 @@ export async function buildStoryCard(data: StoryCardData): Promise<Blob | null> 
   // shared brand stamp on the bottom edge, so every share is one scan from joining.
   ctx.fillStyle = '#ffffff';
   ctx.font = '700 48px Outfit, Inter, sans-serif';
-  ctx.fillText('Build your own field game', W / 2, 1690);
+  ctx.fillText(data.ctaText ?? 'Build your own field game', W / 2, 1690);
 
   await stampBrand(ctx, {
     width: W,

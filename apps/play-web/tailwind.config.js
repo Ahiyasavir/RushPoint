@@ -28,6 +28,21 @@ export default {
         'glass-border': 'rgba(90,70,45,0.12)',
         'glass-hover':  'rgba(90,70,45,0.06)',
 
+        // ── "Ink" text tokens (change: play-web-accessibility) ────────────────
+        // The brand colours above FAIL WCAG AA as text on this light theme:
+        // #FF5722 = 3.16:1, #FF8A00 = 2.36:1, #FFB300 = 1.79:1, #EF4444 = 3.76:1
+        // and #10B981 = 2.54:1 on white. Participants read this screen outdoors in
+        // direct sun, so these are the darkened variants used for TEXT ONLY —
+        // every fill, border, ring and gradient keeps the original brand colour,
+        // which is why they are separate tokens and not a retune.
+        // Ratios vs #FFFFFF / #FFFCF7 / #FFF0E6, asserted in
+        // scripts/test-play-a11y-scan.ts:
+        'ink-fire':  '#B03A0B', // 6.08 / 5.95 / 5.46  (replaces text-accent, text-rp-fire)
+        'ink-warm':  '#8A4B00', // 6.80 / 6.66 / 6.11  (replaces text-accent-warm)
+        'ink-amber': '#7A5200', // 6.92 / 6.78 / 6.21  (replaces text-rp-amber)
+        'ink-alert': '#C21414', // 6.17 / 6.04 / 5.54  (replaces text-rp-alert)
+        'ink-go':    '#067A55', // 5.35 / 5.24 / 4.81  (replaces text-rp-go)
+
         // Reversed/warm text scale — dark text on light background.
         zinc: {
           50:  '#fafaf9',

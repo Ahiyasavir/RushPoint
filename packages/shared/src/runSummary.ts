@@ -39,11 +39,28 @@ export interface RunSummaryFeedbackDigest {
   comments: RunSummaryComment[];  // raw player comments, max 5, input order
 }
 
+/**
+ * Who built and ran the game (change: run-email-scope-and-digest). Both fields are
+ * optional and independently so: a creator may never have set a display name, and
+ * a legacy `users/{uid}` doc may carry neither. The formatter renders whatever is
+ * present and omits the block entirely when nothing is — a header with no value is
+ * worse than no header.
+ *
+ * There is deliberately no participant equivalent. Players authenticate
+ * anonymously and `FieldType` has no `email` variant, so a participant address
+ * does not exist to report; player identity travels as `standings[].teamName`.
+ */
+export interface RunSummaryOrganizer {
+  displayName?: string;
+  email?: string;
+}
+
 export interface RunSummary {
   title: string;
   runStatus: string;
   finishedAt?: string;
   isTestDrive: boolean;
+  organizer?: RunSummaryOrganizer;
   standings: RunSummaryStanding[];
   completion: RunSummaryCompletion;
   feedback: RunSummaryFeedbackDigest;
@@ -153,8 +170,22 @@ export function formatRunSummaryEmail(summary: RunSummary): { subject: string; t
   const c = summary.completion;
   const f = summary.feedback;
 
+  // Who ran it. Built once and reused by both renderings so the two can't drift.
+  // Every branch yields a non-empty string or null — never "undefined", never an
+  // empty "Name <>" — so an absent/partial profile degrades instead of leaking a
+  // placeholder into the organizer's inbox.
+  const org = summary.organizer;
+  const orgName = org?.displayName?.trim() || '';
+  const orgEmail = org?.email?.trim() || '';
+  const orgLine = orgName && orgEmail ? `${orgName} <${orgEmail}>` : (orgName || orgEmail || null);
+
   // ── Plain-text fallback (unchanged shape, now with a Comments section) ──────
   const lines: string[] = [subject, ''];
+
+  if (orgLine) {
+    lines.push(`Created by: ${orgLine}`);
+    lines.push('');
+  }
 
   lines.push('Final standings');
   if (summary.standings.length === 0) {
@@ -232,6 +263,7 @@ export function formatRunSummaryEmail(summary: RunSummary): { subject: string; t
       <div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#fff7ed;opacity:.85;">RushPoint · Run Summary</div>
       <div style="font-size:22px;font-weight:700;color:#fff;margin-top:4px;">${esc(summary.title)}</div>
       ${c.winnerName ? `<div style="font-size:13px;color:#fff7ed;margin-top:6px;">🏆 Winner: ${esc(c.winnerName)}</div>` : ''}
+      ${orgLine ? `<div style="font-size:13px;color:#fff7ed;margin-top:6px;">Created by: ${esc(orgLine)}</div>` : ''}
     </div>
 
     <div style="padding:24px 28px;">

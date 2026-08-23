@@ -21,6 +21,81 @@ This starts (via `concurrently`, after a port cleanup):
 | **PROXY** | single-origin reverse proxy on `:3000` ([scripts/proxy.mjs](scripts/proxy.mjs) → `resolveProxyTarget`) |
 | **TUNNEL** | `cloudflared` exposing `http://localhost:3000` at a public `*.trycloudflare.com` URL |
 
+## ⚡ Fast mode (recommended for real events) — `npm run playtest:prod`
+
+`npm run playtest` / `playtest:ngrok` tunnel the **Vite dev servers**, which ship the
+app as hundreds of unbundled ES modules — one HTTP request each. Over a free tunnel
+(ngrok/cloudflared) every one of those hundreds of requests pays the relay latency, so
+first load crawls.
+
+`npm run playtest:prod` instead serves **pre-built** bundles with `vite preview` behind
+the same proxy + the fixed **ngrok** domain. That collapses hundreds of round-trips into
+~10 hashed, gzipped, cacheable bundles — dramatically faster over the tunnel, same
+backend, same links.
+
+It does **not** build for you. Build first:
+
+```bash
+npm run playtest:build       # → apps/*/dist-playtest  (mode: playtest)
+npm run playtest:prod        # serve those bundles + ngrok
+```
+
+`playtest:prod` (and `playtest:ngrok`) tunnel through **ngrok**, which needs a repo-root
+`.tunnel.env` (never committed) with `NGROK_AUTHTOKEN=…` and
+`NGROK_DOMAIN=<your reserved domain>`. A missing file is not fatal: the tunnel retries
+and picks the file up as soon as it appears, without restarting the stack
+([scripts/ngrok-tunnel.mjs](scripts/ngrok-tunnel.mjs)).
+
+Or let the supervisor do both: `npm run playtest:forever`
+([scripts/playtest-forever.mjs](scripts/playtest-forever.mjs)) compiles functions, runs
+`playtest:build` when `apps/*/dist-playtest/index.html` is missing, launches
+`playtest:prod` and restarts it forever. `npm run playtest:stop` asks it to stop cleanly
+so `--export-on-exit` still fires.
+
+Trade-off: **no hot reload** — re-run `npm run playtest:build` (and restart the preview)
+to pick up code changes. That's the right call for a live event where you're running,
+not editing. `playtest:prod` uses the fixed ngrok domain (`.tunnel.env`), so the links
+stay stable across restarts. Keep `npm run playtest` for iterating on the app locally.
+
+## ⚠ Build isolation — a gate build must never touch what the playtest serves
+
+The always-on playtest (`npm run playtest:prod`, supervised by
+`scripts/playtest-forever.mjs`) serves **pre-built** bundles through `vite preview`.
+`npm run verify` builds the same two apps. Those builds are **not interchangeable**,
+so they are kept in **separate output directories**:
+
+| You want | Command | Writes | Mode |
+|---|---|---|---|
+| A gate run / a Firebase deploy | `npm run creator:build` · `npm run play:build` (both inside `npm run verify`) | `apps/*/dist` | `production` |
+| To refresh the live playtest | `npm run playtest:build` | `apps/*/dist-playtest` | `playtest` |
+
+`playtest:creator:preview` and `playtest:play:preview` pin `--outDir dist-playtest`, so
+the live site is served from a directory the gate never writes.
+
+**Why this matters** (it broke a live event once, and left no trace):
+`npm run verify` used to overwrite the exact bytes the tunnel was serving, and both
+resulting breakages are **completely silent** — every process stays healthy and every
+request returns `200`:
+
+1. **Blank creator console.** creator-web only gets `base: '/creator/'` under
+   `--mode playtest`. A gate build emits `/assets/index-*.js`; the single-origin proxy
+   routes only `/creator*` to creator-web, so those requests go to **play-web**, which
+   answers `200` with its own HTML. The creator's JavaScript never loads.
+2. **Nobody can join.** `isEmulatorBuild` (`packages/shared/src/env.ts`) is
+   `DEV || MODE === 'playtest'`, so only the playtest bundle keeps the local-emulator
+   wiring. A gate build points participants' phones at real Firebase, where anonymous
+   auth is disabled (`auth/admin-restricted-operation`).
+
+Two guards make a regression loud instead of invisible:
+
+```bash
+npm test           # scripts/test-build-artifact-guard.ts — the build/serve wiring in package.json
+npm run base:check # scripts/check-build-base.mjs — each built index.html's asset base vs. its serve path
+```
+
+`base:check` runs inside `npm run verify` right after the builds. If it ever fails,
+rebuild the named artifact with the mode from the table above; nothing else is needed.
+
 ## Share the links
 
 Once `cloudflared` prints its `https://<sub>.trycloudflare.com` URL, turn it into the

@@ -1,16 +1,46 @@
 import { useEffect, useRef, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore';
 import { announcementVisibleTo, formatScoreNotice, type RunLeaderboard } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { translations } from '../i18n';
 import { haptic } from '../lib/haptics';
 import { boardTimeSeconds, formatDuration } from '../lib/boardTime';
+import { TAP_INLINE } from '../lib/interaction';
+import { loadDismissed, saveDismissed } from '../lib/dismissedAnnouncements';
+import { Collapsible } from './ui';
 
 interface Ctx { ownerUid: string; gameId: string; runId: string }
 
 // Score notices (kind:'score') auto-hide once older than this so a stale bonus
 // doesn't pile up on late joiners; global announcements persist until dismissed.
 const SCORE_NOTICE_TTL_MS = 10 * 60 * 1000;
+
+// COST BOUND (why, not what): Firestore reads cannot be hard-capped on Blaze, so
+// an unbounded onSnapshot over a collection that grows all run long is the
+// uncapped billing tail — and these two are on EVERY participant's screen, so the
+// cost is per-phone. Both are already recency-only by construction: an
+// announcement is a banner the player dismisses, a score notice self-expires
+// after SCORE_NOTICE_TTL_MS (10 min), and a flash mission is filtered out the
+// moment `expiresAt` passes. Nothing older than the newest few dozen docs can
+// ever reach the screen, so the windows below cost nothing visible while making
+// the read cost of a 4-hour run flat instead of linear.
+//   30 announcements: a run pushes a handful of global banners plus per-team
+//   score notices; 30 covers a burst of adjustments and still can't starve a
+//   global broadcast, which is always among the newest.
+//   20 flash missions: they are short-TTL by design, so more than a handful can
+//   be live at once only if staff spam them — and only unexpired ones render.
+// The orderBy is load-bearing, NOT cosmetic: these docs carry Firestore auto-IDs,
+// so a bare limit() orders by __name__ and returns an ARBITRARY subset — it could
+// silently drop the announcement pushed one second ago. `createdAt` is the ISO
+// string stamped by pushAnnouncement / pushFlashMission / adjustTeamScore
+// (functions/src/index.ts).
+// ⚠ DEPLOY ORDER: equality + orderBy needs the composite indexes in
+// firestore.indexes.json, and the EMULATOR AUTO-INDEXES so a missing one is
+// invisible in dev and fails only in production. Indexes must ship BEFORE this
+// code: `deploy:all` is safe (deploy:backend runs before deploy:hosting), a
+// hosting-only deploy against a project without them is not.
+const ANNOUNCEMENT_WINDOW = 30;
+const FLASH_WINDOW = 20;
 
 interface AnnouncementDoc {
   id: string; message: string; messageHe?: string; active: boolean; createdAt?: string;
@@ -22,19 +52,33 @@ interface FlashDoc { id: string; title: string; titleHe?: string; description?: 
 // Non-blocking live-ops banners + a collapsible leaderboard peek. Rendered above
 // the map/task card so it never covers the active mission UI.
 export default function LiveOps({
-  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false,
+  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false, showBoard = true,
 }: {
   ctx: Ctx;
   leaderboard: RunLeaderboard | null;
   myTeamId: string;
   lang?: 'en' | 'he';
+  /**
+   * Render the leaderboard peek inline (change: play-card-simplification).
+   * FALSE on the racing screen, where the board moved into the "more" drawer and
+   * this component is kept at the TOP for one reason: announcements and flash
+   * missions are the organizer talking to the team mid-race, and they used to sit
+   * BELOW the mission card with the other secondary panels — i.e. below the fold
+   * on a phone. Splitting the two means the urgent half can be promoted without
+   * dragging a leaderboard up with it. Defaults to true so every other caller is
+   * unchanged.
+   */
+  showBoard?: boolean;
   // time_only runs never award points, so the peek must show each team's time,
   // not a column of zeros (mirrors the finish/TV/public boards).
   timeOnly?: boolean;
 }) {
   const [announcements, setAnnouncements] = useState<AnnouncementDoc[]>([]);
   const [flashes, setFlashes] = useState<FlashDoc[]>([]);
-  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  // Dismissed banners persist to run-scoped localStorage so a persistent GLOBAL
+  // announcement (server still `active`) stays dismissed across reloads/reconnects
+  // — same pattern as FeedPanel's per-run mutes; fails open if storage is absent.
+  const [dismissed, setDismissed] = useState<Set<string>>(() => loadDismissed(ctx.runId));
   const [now, setNow] = useState(() => Date.now());
 
   const { ownerUid, gameId, runId } = ctx;
@@ -43,6 +87,12 @@ export default function LiveOps({
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/announcements`),
       where('active', '==', true),
+      // Newest-first (see the ANNOUNCEMENT_WINDOW note above). The render below
+      // preserves this order, so the freshest banner sits at the top of the
+      // stack where the player looks — previously the order was __name__, i.e.
+      // effectively random, so this is a fix as well as a bound.
+      orderBy('createdAt', 'desc'),
+      limit(ANNOUNCEMENT_WINDOW),
     );
     return onSnapshot(ref, (snap) => {
       setAnnouncements(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<AnnouncementDoc, 'id'>) })));
@@ -53,6 +103,10 @@ export default function LiveOps({
     const ref = query(
       collection(db, `users/${ownerUid}/games/${gameId}/runs/${runId}/flashMissions`),
       where('isActive', '==', true),
+      // Newest-first, bounded (see FLASH_WINDOW above). Expiry is still decided
+      // in the render filter against `expiresAt`, never by this ordering.
+      orderBy('createdAt', 'desc'),
+      limit(FLASH_WINDOW),
     );
     return onSnapshot(ref, (snap) => {
       setFlashes(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<FlashDoc, 'id'>) })));
@@ -77,7 +131,11 @@ export default function LiveOps({
   });
 
   function dismiss(id: string) {
-    setDismissed((prev) => new Set(prev).add(id));
+    setDismissed((prev) => {
+      const next = new Set(prev).add(id);
+      saveDismissed(runId, next);
+      return next;
+    });
   }
 
   // Haptic buzz when a NEW score notice arrives — success for a gain, warn for a
@@ -103,7 +161,9 @@ export default function LiveOps({
   // Standings are only shown to participants once the organizer publishes them
   // (the reveal is staged); organizers see live standings on their own console.
   const hasBoard = !!leaderboard?.published && (leaderboard.rankings?.length ?? 0) > 0;
-  if (!hasBanners && !hasBoard) return null;
+  // With the board delegated to the drawer, a run with no banners renders nothing
+  // at all here rather than an empty bordered shell.
+  if (!hasBanners && !(hasBoard && showBoard)) return null;
 
   return (
     <div className="space-y-2 mb-3">
@@ -123,9 +183,9 @@ export default function LiveOps({
               <span className="text-sm">💯</span>
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-zinc-400">{label}</p>
-                <p dir="auto" className="text-sm font-mono text-accent">{notice}</p>
+                <p dir="auto" className="text-sm font-mono text-ink-fire">{notice}</p>
               </div>
-              <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
+              <button aria-label={translations[lang].liveOps.dismiss} className={`text-zinc-500 text-xs shrink-0 ${TAP_INLINE}`} onClick={() => dismiss(a.id)}>✕</button>
             </div>
           );
         }
@@ -133,7 +193,7 @@ export default function LiveOps({
           <div key={a.id} className="flex items-start gap-2 rounded-xl bg-accent/10 border border-accent/30 px-3 py-2">
             <span className="text-sm">📢</span>
             <p dir="auto" className="flex-1 text-sm text-zinc-200">{lang === 'he' && a.messageHe ? a.messageHe : a.message}</p>
-            <button className="text-zinc-500 text-xs shrink-0" onClick={() => dismiss(a.id)}>✕</button>
+            <button aria-label={translations[lang].liveOps.dismiss} className={`text-zinc-500 text-xs shrink-0 ${TAP_INLINE}`} onClick={() => dismiss(a.id)}>✕</button>
           </div>
         );
       })}
@@ -149,7 +209,7 @@ export default function LiveOps({
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-sm font-semibold text-purple-200">
                   {lang === 'he' && f.titleHe ? f.titleHe : f.title}
-                  {f.bonusPoints ? <span className="ms-2 text-accent font-mono">+{f.bonusPoints}</span> : null}
+                  {f.bonusPoints ? <span className="ms-2 text-ink-fire font-mono">+{f.bonusPoints}</span> : null}
                 </div>
                 {(f.description || f.descriptionHe) && (
                   <p dir="auto" className="text-xs text-zinc-300 mt-0.5">{lang === 'he' && f.descriptionHe ? f.descriptionHe : f.description}</p>
@@ -161,12 +221,12 @@ export default function LiveOps({
         );
       })}
 
-      {hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
+      {showBoard && hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
     </div>
   );
 }
 
-function LeaderboardPeek({
+export function LeaderboardPeek({
   leaderboard, myTeamId, lang, timeOnly,
 }: {
   leaderboard: RunLeaderboard; myTeamId: string; lang: 'en' | 'he'; timeOnly: boolean;
@@ -176,23 +236,21 @@ function LeaderboardPeek({
   const mine = leaderboard.rankings.find((r) => r.teamId === myTeamId);
 
   return (
-    <div className="rounded-xl bg-app-card border border-glass-border">
-      <button
-        className="w-full flex items-center justify-between px-3 py-2 text-sm text-zinc-300"
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span>🏆 {translations[lang].liveOps.leaderboardHeading}
+    <Collapsible
+      open={open}
+      onToggle={() => setOpen((o) => !o)}
+      bodyClassName="px-3 pb-2 space-y-1"
+      header={
+        <span className="truncate">🏆 {translations[lang].liveOps.leaderboardHeading}
           {leaderboard.frozen && <span className="ms-2 text-xs text-zinc-500">{translations[lang].liveOps.frozenTag}</span>}
-          {mine && <span className="ms-2 text-accent font-mono">#{mine.rank}</span>}
+          {mine && <span className="ms-2 text-ink-fire font-mono">#{mine.rank}</span>}
         </span>
-        <span className="text-zinc-500">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="px-3 pb-2 space-y-1">
+      }
+    >
           {top.map((r) => (
             <div
               key={r.teamId}
-              className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-accent font-semibold' : 'text-zinc-400'}`}
+              className={`flex items-center justify-between text-sm ${r.teamId === myTeamId ? 'text-ink-fire font-semibold' : 'text-zinc-400'}`}
             >
               <span dir="auto" className="truncate min-w-0"><span className="font-mono me-2">{r.rank}</span>{r.teamName}</span>
               <span className="font-mono shrink-0">
@@ -200,8 +258,6 @@ function LeaderboardPeek({
               </span>
             </div>
           ))}
-        </div>
-      )}
-    </div>
+    </Collapsible>
   );
 }

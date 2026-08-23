@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, type PublicTask, type PublicGame } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, type PublicTask, type PublicGame, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 import { db } from '../services/firebase';
 import { checkChallengeAnswer } from '../services/calls';
 import { Button, Card, Screen } from '../components/ui';
+import { Spinner } from '../components/Spinner';
 import { useT } from '../i18nContext';
 import { shareChallenge } from '../lib/challengeCard';
+import { shareOutcomeFeedback } from '../lib/shareFeedback';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 const COUNTDOWN = 30;
 
@@ -28,6 +30,7 @@ export default function ChallengeTeaser({
   const [answer, setAnswer] = useState('');
   const [result, setResult] = useState<'correct' | 'wrong' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [shareNote, setShareNote] = useState<'ok' | 'copied' | null>(null);
   const [left, setLeft] = useState(COUNTDOWN);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -71,20 +74,35 @@ export default function ChallengeTeaser({
   }
 
   async function share() {
-    await shareChallenge({
-      gameId, taskId,
-      question: task?.title ?? '',
-      gameName,
-      playBaseUrl: window.location.origin,
-      ctaText: t.challenge.shareText({ game: gameName || 'RushPoint' }),
-    });
+    // Busy guard so a double-tap can't fire two share sheets.
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await shareChallenge({
+        gameId, taskId,
+        question: task?.title ?? '',
+        gameName,
+        playBaseUrl: window.location.origin,
+        ctaText: t.challenge.shareText({ game: gameName || 'RushPoint' }),
+      });
+      const verdict = shareOutcomeFeedback(result);
+      if (verdict === 'confirm') {
+        setShareNote('ok');
+        setTimeout(() => setShareNote(null), 2500);
+      } else if (verdict === 'fallback') {
+        try { await navigator.clipboard.writeText(window.location.href); } catch { /* still show the notice */ }
+        setShareNote('copied');
+        setTimeout(() => setShareNote(null), 2500);
+      }
+      // 'silent' (user cancelled): no feedback.
+    } finally { setBusy(false); }
   }
 
   if (task === undefined) {
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          <Spinner />
         </div>
       </Screen>
     );
@@ -108,7 +126,7 @@ export default function ChallengeTeaser({
     <Screen>
       <div className="flex-1 flex flex-col animate-race-in gap-4">
         <div className="text-center">
-          <div className="inline-block text-[11px] font-semibold uppercase tracking-widest text-rp-fire bg-rp-fire/10 rounded-full px-3 py-1">
+          <div className="inline-block text-[11px] font-semibold uppercase tracking-widest text-ink-fire bg-rp-fire/10 rounded-full px-3 py-1">
             {t.challenge.badge}
           </div>
           <p className="text-zinc-500 text-sm mt-2">{t.challenge.tagline}</p>
@@ -117,7 +135,7 @@ export default function ChallengeTeaser({
         {/* Timer ring */}
         {!result && (
           <div className="flex items-center justify-center">
-            <div className={`text-3xl font-brand font-extrabold ${left <= 5 ? 'text-rp-fire' : 'text-zinc-300'}`}>
+            <div className={`text-3xl font-brand font-extrabold ${left <= 5 ? 'text-ink-fire' : 'text-zinc-300'}`}>
               {timesUp ? t.challenge.timesUp : t.challenge.timeLeft({ sec: left })}
             </div>
           </div>
@@ -138,7 +156,7 @@ export default function ChallengeTeaser({
               value={answer}
               disabled={timesUp}
               onChange={(e) => setAnswer(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
               placeholder={t.challenge.yourAnswer}
               className="w-full bg-app-raised rounded-xl px-4 py-3 text-zinc-100 outline-none focus:ring-2 focus:ring-rp-fire/40 disabled:opacity-50 disabled:cursor-not-allowed"
             />
@@ -164,13 +182,18 @@ export default function ChallengeTeaser({
           <p className="text-sm text-zinc-300 mb-3">{t.challenge.ctaTitle}</p>
           <Button className="w-full" onClick={onJoin}>{t.challenge.ctaJoin}</Button>
           <a href={CREATOR_URL} target="_blank" rel="noreferrer"
-            className="block mt-2 text-sm font-semibold text-rp-fire hover:text-rp-amber">
+            className="block mt-2 text-sm font-semibold text-ink-fire hover:text-ink-amber">
             {t.challenge.ctaBuild}
           </a>
-          <button onClick={share}
-            className="mt-3 text-xs text-zinc-500 hover:text-zinc-300">
+          <button onClick={share} disabled={busy}
+            className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50">
             {t.challenge.shareBtn}
           </button>
+          {shareNote && (
+            <p className="mt-2 text-xs font-semibold text-zinc-400" role="status">
+              {shareNote === 'ok' ? t.challenge.shareSaved : t.challenge.shareFailed}
+            </p>
+          )}
         </Card>
       </div>
     </Screen>

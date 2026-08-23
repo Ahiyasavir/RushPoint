@@ -37,6 +37,22 @@ ok(resolveProxyTarget('/?code=ABC123') === EMULATOR_PORTS.playWeb, 'join path �
 ok(resolveProxyTarget('/src/main.tsx') === EMULATOR_PORTS.playWeb, 'play asset at root → play 5181');
 ok(resolveProxyTarget('/assets/app.js') === EMULATOR_PORTS.playWeb, 'static asset → play 5181 (default)');
 
+// Public legal paths (change: legal-pages-participant-origin). play-web owns
+// /terms and /privacy on the participant origin, so the tunnel root behaves like
+// the production play site. These already fall through to the default branch —
+// these assertions PIN that, because the emulator rules above are substring
+// matches and a future rule could silently capture a public legal path.
+ok(resolveProxyTarget('/terms') === EMULATOR_PORTS.playWeb, '/terms → play 5181 (participant origin owns it)');
+ok(resolveProxyTarget('/privacy') === EMULATOR_PORTS.playWeb, '/privacy → play 5181 (participant origin owns it)');
+ok(resolveProxyTarget('/terms/') === EMULATOR_PORTS.playWeb, '/terms/ (trailing slash) → play 5181');
+ok(resolveProxyTarget('/privacy/') === EMULATOR_PORTS.playWeb, '/privacy/ (trailing slash) → play 5181');
+ok(resolveProxyTarget('/privacy?lang=en') === EMULATOR_PORTS.playWeb, '/privacy with a query → play 5181');
+ok(resolveProxyTarget('/terms#top') === EMULATOR_PORTS.playWeb, '/terms with a fragment → play 5181');
+// …and the creator console keeps its own copies: rushpoint-creator.web.app/privacy
+// is a live, externally referenced URL and must not move.
+ok(resolveProxyTarget('/creator/terms') === EMULATOR_PORTS.creatorWeb, '/creator/terms → 5180 (unchanged)');
+ok(resolveProxyTarget('/creator/privacy') === EMULATOR_PORTS.creatorWeb, '/creator/privacy → 5180 (unchanged)');
+
 // ── buildPlaytestLinks ───────────────────────────────────────────────────────
 {
   const l = buildPlaytestLinks('https://abc.trycloudflare.com', 'PLAY01');

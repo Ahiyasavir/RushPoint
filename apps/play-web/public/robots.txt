@@ -1,0 +1,14 @@
+# RushPoint player app — crawl rules.
+#
+# This file has to EXIST as a real file: Firebase Hosting's `"source": "**"` SPA rewrite
+# answers any missing path with index.html, so /robots.txt was returning a text/html web
+# page. A crawler asking for crawl rules and receiving HTML gets no rules at all.
+#
+# Everything here is public and worth indexing: the join screen, the legal documents, and
+# the shareable marketing surfaces (?game= game teasers, ?board= public leaderboards),
+# which are the pages real links point at.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://rush-point.com/sitemap.xml

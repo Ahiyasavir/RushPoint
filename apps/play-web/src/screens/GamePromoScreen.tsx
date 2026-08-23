@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame } from '@rushpoint/shared';
+import { FIRESTORE_PATHS, selectGameDescription, gameInstructionsHasContent, localizedInstructionsBody, type PublicGame, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { startInstantPlay } from '../services/calls';
 import { saveSession, type Session } from '../store';
-import { Button, Card, Screen, Skeleton } from '../components/ui';
+import { Spinner } from '../components/Spinner';
+import { Button, Card, Screen, Skeleton, TagChips } from '../components/ui';
 import { useT } from '../i18nContext';
 
 const CREATOR_URL = import.meta.env.DEV
   ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? CANONICAL_CREATOR_URL);
 
 export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gameId: string; onPlay: () => void; onInstantPlay: (s: Session) => void }) {
   const { t, lang } = useT();
@@ -17,6 +18,9 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
   const [starting, setStarting] = useState(false);
   const [imgState, setImgState] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [copied, setCopied] = useState(false);
+  const [startErr, setStartErr] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   async function shareGame() {
     const url = window.location.href;
@@ -27,6 +31,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
 
   async function playNow() {
     setStarting(true);
+    setStartErr(false);
     try {
       await ensureAuth();
       const name = t.promo.soloPlayer;
@@ -37,23 +42,48 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
       };
       saveSession(session);
       onInstantPlay(session);
-    } catch { setStarting(false); }
+    } catch {
+      // A stranger's first-ever tap on RushPoint used to fail in total silence:
+      // the button simply un-pressed (change: play-no-silent-failures).
+      setStarting(false);
+      setStartErr(true);
+    }
   }
 
   useEffect(() => {
     let alive = true;
     setImgState('loading');
     getDoc(doc(db, FIRESTORE_PATHS.publicGame(gameId)))
-      .then((snap) => { if (alive) setGame(snap.exists() ? (snap.data() as PublicGame) : null); })
-      .catch(() => { if (alive) setGame(null); });
+      .then((snap) => { if (alive) { setLoadError(false); setGame(snap.exists() ? (snap.data() as PublicGame) : null); } })
+      // A transient fetch rejection must NOT collapse into the not-found value:
+      // flag it separately so the retry card, not the dead "game not found" card,
+      // renders on the flagship demo funnel (change: fix-demo-promo-fetch-error).
+      .catch(() => { if (alive) setLoadError(true); });
     return () => { alive = false; };
-  }, [gameId]);
+  }, [gameId, reloadKey]);
+
+  if (loadError) {
+    return (
+      <Screen>
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 animate-race-in">
+          <div className="text-5xl">⚠️</div>
+          <h1 className="font-brand text-2xl font-extrabold bg-gradient-to-r from-rp-fire to-rp-amber bg-clip-text text-transparent">
+            {t.promo.loadError}
+          </h1>
+          <p className="text-zinc-500 text-sm">{t.promo.loadErrorSub}</p>
+          <Button className="mt-2" onClick={() => { setLoadError(false); setGame(undefined); setReloadKey((k) => k + 1); }}>
+            {t.common.tryAgain}
+          </Button>
+        </div>
+      </Screen>
+    );
+  }
 
   if (game === undefined) {
     return (
       <Screen>
         <div className="flex-1 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+          <Spinner />
         </div>
       </Screen>
     );
@@ -121,7 +151,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             play" preview so a player deciding whether to join can see how it plays. */}
         {gameInstructionsHasContent(game.instructions) && (
           <Card className="p-3 mb-3 text-start">
-            <div className="text-xs font-bold text-accent uppercase tracking-wide mb-1">
+            <div className="text-xs font-bold text-ink-fire uppercase tracking-wide mb-1">
               {game.instructions!.title ?? t.play.howToPlayTitle}
             </div>
             {localizedInstructionsBody(game.instructions, lang) && (
@@ -131,6 +161,10 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             )}
           </Card>
         )}
+
+        {/* Tags (change: game-task-tags) — carried on PublicGame since the
+            gallery existed, never rendered until now. */}
+        <TagChips tags={game.tags} more={t.promo.moreTags} className="mb-4" />
 
         {/* Accurate GPS requirement derived server-side, when available. */}
         {game.requirement && (
@@ -148,7 +182,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           ].map((s) => (
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
               <div className="text-base mb-0.5">{s.emoji}</div>
-              <div className="text-lg font-brand font-bold text-rp-fire">{s.value}</div>
+              <div className="text-lg font-brand font-bold text-ink-fire">{s.value}</div>
               <div className="text-[10px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
             </div>
           ))}
@@ -169,15 +203,20 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
           <div className="text-sm font-semibold text-zinc-200 mb-1">{t.promo.playingTitle}</div>
           <p className="text-xs text-zinc-500 mb-4">{t.promo.playingSub}</p>
           {game.allowInstantPlay && (
-            <Button className="mb-2" disabled={starting} onClick={playNow}>
+            <Button className="mb-2" loading={starting} onClick={playNow}>
               {starting ? t.promo.starting : t.promo.playNow}
             </Button>
+          )}
+          {startErr && (
+            <p role="status" aria-live="polite" className="mb-2 text-xs font-medium text-ink-alert">
+              ⚠ {t.promo.startFailed}
+            </p>
           )}
           <Button variant={game.allowInstantPlay ? 'ghost' : 'primary'} onClick={onPlay}>{t.promo.haveCode}</Button>
           <button
             type="button"
             onClick={shareGame}
-            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-rp-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
+            className="mt-3 w-full text-xs font-medium text-zinc-500 hover:text-ink-fire transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50 rounded py-1"
           >
             {copied ? t.promo.linkCopied : `🔗 ${t.promo.shareGame}`}
           </button>

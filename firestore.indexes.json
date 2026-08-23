@@ -17,6 +17,22 @@
       ]
     },
     {
+      "collectionGroup": "publicGames",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "popularity", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "publicTasks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "popularity", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "teams",
       "queryScope": "COLLECTION",
       "fields": [
@@ -39,7 +55,74 @@
         { "fieldPath": "ownerUid", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "runs",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "accessCodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerUid", "order": "ASCENDING" },
+        { "fieldPath": "gameId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "feedItems",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "announcements",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "flashMissions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "isActive", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
-  "fieldOverrides": []
+  "fieldOverrides": [
+    {
+      "collectionGroup": "games",
+      "fieldPath": "deletedAt",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "_comment": "listPlatformUsers (change: admin-user-activity-dashboard) runs an EQUALITY-ONLY collection-group query: collectionGroup('runs').where('ownerUid','==',uid). Firestore does NOT auto-index single fields at COLLECTION_GROUP scope, and the (ownerUid, status) composite above does not satisfy it either — production answered this exact query with FAILED_PRECONDITION asking for COLLECTION_GROUP_ASC on runs.ownerUid. Deploy indexes BEFORE the functions that use them.",
+      "collectionGroup": "runs",
+      "fieldPath": "ownerUid",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "_comment": "listGameTemplates / createGameFromTemplate (change: admin-manage-game-templates) run an EQUALITY-ONLY collection-group query: collectionGroup('games').where('isTemplate','==',true), and listAdminTemplates runs the same equality at COLLECTION scope: collection('users/{uid}/games').where('isTemplate','==',true). BOTH scopes must be listed. A fieldOverrides entry REPLACES Firestore's automatic single-field indexing for that field — it does not add to it — so declaring COLLECTION_GROUP alone silently DISABLED the ordinary collection index that had been automatic, and listAdminTemplates answered every call with FAILED_PRECONDITION while the collection-group query kept working. That reads exactly like \"the templates tab is broken but the creator picker still shows my templates\": the admin console showed a load error and offered no Edit button, while every creator kept seeing the same templates in the new-game picker. Grouping/sorting happens in application code, so only the equality filter needs an index, not a composite with templateOrder. Deploy BEFORE the functions that use it.",
+      "collectionGroup": "games",
+      "fieldPath": "isTemplate",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    }
+  ]
 }

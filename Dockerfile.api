@@ -1,0 +1,66 @@
+# ─── RushPoint API server (self-hosted Cloud Functions) — VPS image ──────────
+#
+# Builds the functions bundle from the monorepo, then ships a tiny runtime image
+# that runs `functions/server.js` (every callable, as a plain Node HTTP server).
+# Talks to your REAL Firebase project (Auth + Firestore) via the Admin SDK.
+#
+#   docker build -f Dockerfile.api -t rushpoint-api .
+#   docker run -p 8080:8080 \
+#     -e GCLOUD_PROJECT=rushpoint-pwa-7daaa \
+#     -e GOOGLE_APPLICATION_CREDENTIALS=/secrets/sa.json \
+#     -e ALLOWED_ORIGINS=https://play.example.com,https://creator.example.com \
+#     -v /path/to/service-account.json:/secrets/sa.json:ro \
+#     rushpoint-api
+#
+# Prefer `docker compose up -d` (see docker-compose.api.yml) so restart, env and
+# the secret mount are declared once.
+
+# ---- build: compile @rushpoint/shared and bundle the functions ----
+FROM node:20-slim AS build
+WORKDIR /repo
+COPY . .
+RUN npm ci --no-audit --no-fund
+RUN npm --prefix packages/shared run build \
+ && npm --prefix functions run build
+# Runtime-only package.json: `functions/package.json`'s devDependencies list the
+# LOCAL workspace package `@rushpoint/shared` (never published to npm). Copying
+# that file as-is into the runtime stage and running `npm install --omit=dev`
+# still 404s — with no lockfile present, npm resolves the FULL dependency graph
+# (including devDependencies) before it can decide what to omit, so it tries to
+# fetch `@rushpoint/shared` from the public registry and the build fails before
+# a single runtime package installs. Stripping devDependencies here, rather than
+# relying on --omit=dev, means npm never has a reason to look for it at all.
+RUN node -e "\
+  const p = require('/repo/functions/package.json'); \
+  const { devDependencies, scripts, ...rest } = p; \
+  require('fs').writeFileSync('/repo/functions/package.runtime.json', JSON.stringify(rest, null, 2));"
+
+# ---- runtime: node + only the deps the bundle externalises + the bundle ----
+FROM node:20-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+# functions/package.json's runtime deps are firebase-admin, firebase-functions,
+# stripe and express — exactly what the esbuild bundle leaves external plus the
+# HTTP host. package.runtime.json (built above) carries ONLY those — no
+# devDependencies section for npm to ever try resolving.
+COPY --from=build /repo/functions/package.runtime.json ./package.json
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+COPY --from=build /repo/functions/lib ./lib
+COPY --from=build /repo/functions/server.js ./server.js
+# server.js requires this directly (streaming-upload-write) — it is plain Node,
+# never bundled by esbuild, so it must be copied into the runtime image alongside
+# server.js or the container crash-loops on boot with MODULE_NOT_FOUND.
+COPY --from=build /repo/functions/uploadRoute.js ./uploadRoute.js
+# Upload storage. This mkdir only matters when NO volume is mounted (a bind mount
+# at the same path replaces the image's directory entirely, ownership included) —
+# it keeps the server writable in a bare `docker run` rather than 500ing on the
+# first photo. Deliberately no `chown`: there is no USER directive, so the process
+# runs as root and writes to a host-owned bind mount fine. If a USER is ever added,
+# the HOST directory's ownership is what has to change, not this line.
+RUN mkdir -p /data/uploads
+ENV PORT=8080
+ENV UPLOAD_DIR=/data/uploads
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||8080)+'/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+CMD ["node", "server.js"]

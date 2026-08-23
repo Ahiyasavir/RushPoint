@@ -37,7 +37,12 @@ export function matchesTaskAnswer(
 ): boolean {
   const given = raw.trim().toLowerCase();
   if (task.type === 'numeric') {
-    const n = parseFloat(raw);
+    // Strict parse (wave-h #5): parseFloat is lenient — parseFloat('42abc') === 42,
+    // so trailing garbage would grade correct. Number() rejects any non-numeric
+    // tail. Trim first so whitespace-padded answers still grade; guard the empty
+    // string because Number('') is 0 and would spuriously match numericAnswer:0.
+    const t = raw.trim();
+    const n = t === '' ? NaN : Number(t);
     if (Number.isNaN(n) || task.numericAnswer == null) return false;
     return Math.abs(n - task.numericAnswer) <= (task.numericTolerance ?? 0);
   }

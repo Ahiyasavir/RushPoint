@@ -15,7 +15,7 @@
 // same value, so the enforced limit and the number shown to creators can never
 // disagree.
 // ══════════════════════════════════════════════════════════════════════════════
-export const MAX_RUN_DEVICES = 16;
+export const MAX_RUN_DEVICES = 100;
 
 export type RunDeviceDecision = { ok: true } | { ok: false; reason: 'run-full' };
 

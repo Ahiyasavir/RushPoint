@@ -9,10 +9,16 @@
  * would serve stale game state, so we let every non-GET and every cross-origin
  * request fall straight through to the network.
  */
-const CACHE = 'rushpoint-admin-shell-v2';
+const CACHE = 'rushpoint-admin-shell-v4';
+// Every shell path is resolved against the worker's OWN directory, never '/'.
+// In playtest/tunnel mode creator-web is served under `/creator/` (vite `base`)
+// while play-web owns `/` on the same origin — hardcoding '/' made this worker
+// cache (and offline-serve) the *participant* app's shell.
+const BASE = new URL('./', self.location).href;
+const p = (rel) => new URL(rel, BASE).href;
 const SHELL = [
-  '/', '/index.html', '/manifest.webmanifest',
-  '/icon.svg', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png',
+  p('./'), p('index.html'), p('manifest.webmanifest'),
+  p('icon.svg'), p('icon-192.png'), p('icon-512.png'), p('icon-512-maskable.png'),
 ];
 
 self.addEventListener('install', (event) => {
@@ -41,25 +47,28 @@ self.addEventListener('fetch', (event) => {
       fetch(req)
         .then((res) => {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('/index.html', copy));
+          caches.open(CACHE).then((c) => c.put(p('index.html'), copy));
           return res;
         })
-        .catch(() => caches.match('/index.html').then((r) => r || caches.match('/'))),
+        .catch(() => caches.match(p('index.html')).then((r) => r || caches.match(p('./')))),
     );
     return;
   }
 
-  // Static assets: cache-first, then populate the cache on first network hit.
+  // Static assets: NETWORK-FIRST, cache as offline fallback. A previous cache-first
+  // strategy meant an installed PWA kept serving a stale bundle forever — code
+  // edits (and dev-server/playtest updates) never reached the device because the
+  // worker answered from cache and never re-fetched. Network-first always prefers
+  // fresh content when online, and still falls back to the cache in a dead zone.
   event.respondWith(
-    caches.match(req).then((cached) =>
-      cached ||
-      fetch(req).then((res) => {
+    fetch(req)
+      .then((res) => {
         if (res.ok && res.type === 'basic') {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
-      }),
-    ),
+      })
+      .catch(() => caches.match(req)),
   );
 });

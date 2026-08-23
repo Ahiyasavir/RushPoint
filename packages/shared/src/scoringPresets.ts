@@ -9,7 +9,8 @@
 //
 // Keep this file free of Firebase/Node imports so it can run in any context.
 
-import type { Game, RunTeam, RunStageRecord, ScoringPreset } from './types';
+import type { Game, RunTeam, RunStageRecord, ScoringPreset, Task } from './types';
+import { adjustedElapsedMs } from './pausedClock';
 
 // ─── Preset A — Time Only ────────────────────────────────────────────────────
 // Rank by total race duration. No points at all.
@@ -43,36 +44,102 @@ export function speedBonus(
   return Math.min(SPEED_BONUS_CAP, Math.round(delta * SPEED_BONUS_PER_MINUTE));
 }
 
+/**
+ * One task's resolved expected route-minutes, guarded exactly as the old reduce:
+ * `expectedDurationMinutes ?? estimatedMinutes`, treated as 0 when non-finite or
+ * not greater than 0. This is the exact value stamped onto a terminal
+ * RunTaskRecord at completion (fix-fixed-points-speed-template-drift).
+ */
+export function resolveExpectedMinutes(
+  t: Pick<Task, 'expectedDurationMinutes' | 'estimatedMinutes'>,
+): number {
+  const m = t.expectedDurationMinutes ?? t.estimatedMinutes;
+  return Number.isFinite(m) && (m as number) > 0 ? (m as number) : 0;
+}
+
+/**
+ * Route expected-total minutes for a team, summed from the STAMP the server wrote
+ * on each terminal (completed/skipped) record — never re-derived from the live
+ * template. A record missing the stamp (pre-change / legacy) falls back to that
+ * task's resolved template value (matched by taskId), so old runs keep scoring and
+ * nothing throws. A record whose template task can no longer be found contributes
+ * its stamp if present, else 0 — never NaN.
+ */
+export function teamExpectedRouteMinutes(
+  stages: RunStageRecord[],
+  game: Pick<Game, 'stages'>,
+): number {
+  // Build a taskId → template task lookup once for the fallback path.
+  const templateById = new Map<string, Task>();
+  for (const stage of game.stages) {
+    for (const t of stage.tasks) templateById.set(t.id, t);
+  }
+  let total = 0;
+  for (const stageRec of stages) {
+    for (const taskRec of stageRec.tasks) {
+      if (taskRec.status !== 'completed' && taskRec.status !== 'skipped') continue;
+      const stamp = taskRec.expectedDurationMinutesAtCompletion;
+      if (Number.isFinite(stamp)) {
+        total += stamp as number;
+        continue;
+      }
+      // Legacy / in-flight record with no stamp: fall back to the resolved
+      // template value for that task (pre-change behavior), or 0 if the template
+      // task is gone — never NaN, never a throw.
+      const templateTask = templateById.get(taskRec.taskId);
+      total += templateTask ? resolveExpectedMinutes(templateTask) : 0;
+    }
+  }
+  return total;
+}
+
 export function scoreFixedPointsSpeed(
   stages: RunStageRecord[],
   startedAt: string | undefined,
   finishedAt: string | undefined,
   game: Pick<Game, 'stages'>,
+  // Pause-clock tasks (change: pause-clock-tasks): milliseconds already stamped
+  // as excluded on this team's own task records. Subtracted from the measured
+  // span BEFORE the speed bonus, so a paused task cannot be bought back as
+  // "slowness". Optional and defaulting to 0, so every pre-existing call site
+  // (and every game with no paused task) is byte-for-byte unchanged. Guarded for
+  // finiteness and sign in adjustedElapsedMs — it can only ever subtract.
+  excludedMs = 0,
 ): number {
   let taskPoints = 0;
   for (const stageRec of stages) {
     for (const taskRec of stageRec.tasks) {
       if (taskRec.status === 'completed' || taskRec.status === 'skipped') {
-        taskPoints += taskRec.earnedScore ?? 0;
+        // NaN ?? 0 === NaN, so a single poisoned per-task record would NaN the
+        // whole team total (parseRunTeam validates top-level score, not nested
+        // earnedScore). Guard for finiteness, not just null-ish.
+        const e = taskRec.earnedScore;
+        taskPoints += Number.isFinite(e) ? (e as number) : 0;
       }
     }
   }
 
   if (!startedAt || !finishedAt) return taskPoints;
 
-  // Build expected total from the game template's expectedDurationMinutes
-  const expectedTotal = game.stages.reduce((sum, stage) =>
-    sum + stage.tasks.reduce((s, t) => s + (t.expectedDurationMinutes ?? t.estimatedMinutes), 0), 0);
-  const actualTotal = (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 60_000;
+  // Build expected total from the per-task stamps the server wrote at each record's
+  // terminal transition (fix-fixed-points-speed-template-drift) — never re-read from
+  // the live template — so a mid-run edit to a task's expectedDurationMinutes cannot
+  // retroactively re-score a finished team. Legacy records with no stamp fall back to
+  // the resolved template value, so unedited/old runs score byte-identically.
+  const expectedTotal = teamExpectedRouteMinutes(stages, game);
+  const rawTotalMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  const actualTotal = adjustedElapsedMs(rawTotalMs, excludedMs) / 60_000;
 
   return taskPoints + speedBonus(expectedTotal, actualTotal);
 }
 
 // Awarded score for a single task under this preset
 export function taskScoreFixed(task: Pick<{ pointValue: number }, 'pointValue'>): number {
-  // Guard malformed/legacy data: a non-numeric pointValue would return NaN,
-  // which poisons the team's total and every leaderboard comparison.
-  return Number.isFinite(task.pointValue) ? task.pointValue : 0;
+  // Guard malformed/legacy data: a non-numeric pointValue would return NaN, which
+  // poisons the team's total; a NEGATIVE pointValue would SUBTRACT from the total
+  // (wave-i B1 / wave-j J4). Clamp to >= 0 — mirrors taskScoreSmart's difficulty
+  // clamp — so no per-task record can ever push a team's earned score down.
+  return Number.isFinite(task.pointValue) ? Math.max(0, task.pointValue) : 0;
 }
 
 
@@ -104,7 +171,10 @@ export function scoreSmartWeighted(stages: RunStageRecord[]): number {
   for (const stageRec of stages) {
     for (const taskRec of stageRec.tasks) {
       if (taskRec.status === 'completed' || taskRec.status === 'skipped') {
-        total += taskRec.earnedScore ?? 0;
+        // Guard non-finite per-task earnedScore (NaN ?? 0 === NaN) — one poisoned
+        // record must not NaN the whole team total.
+        const e = taskRec.earnedScore;
+        total += Number.isFinite(e) ? (e as number) : 0;
       }
     }
   }
@@ -160,7 +230,7 @@ export function applyZScoreBonus(
   const mu = allDurationMinutes.reduce((a, b) => a + b, 0) / allDurationMinutes.length;
   const variance = allDurationMinutes.reduce((s, d) => s + (d - mu) ** 2, 0) / allDurationMinutes.length;
   const sigma = Math.sqrt(variance);
-  if (sigma === 0) return rawScore;
+  if (!Number.isFinite(sigma) || sigma === 0) return rawScore;
   const z = (teamDurationMinutes - mu) / sigma;
   return Math.max(0, rawScore + Math.round(-z * 200));
 }
@@ -197,10 +267,10 @@ export function skipAward(
     case 'time_only':
       return 0;
     case 'fixed_points_speed':
-      // Guard a missing/non-finite pointValue (legacy/hand-written task), matching
-      // taskScoreFixed — otherwise a skipped task could award NaN and poison the
-      // whole leaderboard's comparisons (nightly hardening).
-      return Number.isFinite(task.pointValue) ? task.pointValue : 0;
+      // Guard a missing/non-finite AND negative pointValue (legacy/hand-written
+      // task), matching taskScoreFixed — otherwise a skipped task could award NaN
+      // or a negative value and poison the whole leaderboard (nightly hardening / J4).
+      return Number.isFinite(task.pointValue) ? Math.max(0, task.pointValue) : 0;
     case 'smart_weighted':
       // On-target sigmoid score (x=1)
       return taskScoreSmart(task.difficulty, task.estimatedMinutes, task.estimatedMinutes);

@@ -3,6 +3,7 @@ import type { RunTeam } from '@rushpoint/shared';
 import { transferController, claimController } from '../services/calls';
 import { useT } from '../i18nContext';
 import { dialog } from './dialog';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 
 // Shared team devices (change: shared-team-devices): every attached phone sees
 // the team's device join code (to invite the rest of the team), who is attached,
@@ -18,7 +19,6 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
   const { t } = useT();
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
   const controllerUid = team.controllerUid ?? team.id;
@@ -36,25 +36,31 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
 
   async function transfer(toUid: string, toName: string) {
     if (!(await dialog.confirm(t.devices.transferTo({ name: toName }), { confirmLabel: t.devices.transferBtn }))) return;
-    setBusy(true); setErr('');
+    setErr('');
     try { await transferController({ ...ctx, toUid }); onChanged(); }
     catch { setErr(t.devices.actionFailed); }
-    finally { setBusy(false); }
   }
 
   async function takeControl() {
     if (!(await dialog.confirm(t.devices.takeControlConfirm, { confirmLabel: t.devices.takeControl }))) return;
-    setBusy(true); setErr('');
+    setErr('');
     try { await claimController(ctx); onChanged(); }
     catch { setErr(t.devices.actionFailed); }
-    finally { setBusy(false); }
   }
+
+  // In-flight guards (change: wave-b/async-action-guard). These also cover the
+  // confirm dialog, so a double tap can no longer stack two confirms — and
+  // handing control twice can't race the team into the wrong controller.
+  const transferAction = useAsyncAction<[string, string], void>(transfer, (toUid) => toUid);
+  const takeControlAction = useAsyncAction(takeControl);
+  const busy = transferAction.busy || takeControlAction.busy;
 
   return (
     <div className="rounded-xl bg-app-card border border-glass-border mb-3">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold text-zinc-300"
+        aria-expanded={open}
+        className="w-full flex items-center justify-between px-4 py-2.5 min-h-[44px] text-sm font-semibold text-zinc-300"
       >
         <span className="flex items-center gap-2">📱 {t.devices.panelTitle}</span>
         <span className="text-xs text-zinc-500">{devices.length} {open ? '▴' : '▾'}</span>
@@ -68,7 +74,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                 <div className="text-[11px] text-zinc-500">{t.devices.inviteHint}</div>
                 <div className="font-mono font-bold text-lg tracking-[0.3em] text-zinc-100">{team.deviceJoinCode}</div>
               </div>
-              <button onClick={copyCode} className="text-xs font-semibold text-accent hover:underline shrink-0">
+              <button onClick={copyCode} className="inline-flex items-center min-h-[44px] px-2 text-xs font-semibold text-ink-fire hover:underline shrink-0">
                 {copied ? t.devices.copied : t.devices.copy}
               </button>
             </div>
@@ -82,14 +88,14 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                   {d.uid === myUid && <span className="text-zinc-500 text-xs ms-1">{t.devices.youTag}</span>}
                 </span>
                 {d.uid === controllerUid ? (
-                  <span className="shrink-0 text-[11px] font-bold text-rp-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
+                  <span className="shrink-0 text-[11px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
                     ✏️ {t.devices.controllerBadge}
                   </span>
                 ) : isController ? (
                   <button
                     disabled={busy}
-                    onClick={() => transfer(d.uid, d.name || t.devices.deviceFallbackName)}
-                    className="shrink-0 text-xs text-accent hover:underline disabled:opacity-40"
+                    onClick={() => void transferAction.run(d.uid, d.name || t.devices.deviceFallbackName)}
+                    className="shrink-0 inline-flex items-center min-h-[44px] px-2 text-xs text-ink-fire hover:underline disabled:opacity-40"
                   >
                     {t.devices.transferBtn}
                   </button>
@@ -101,14 +107,14 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
           {!isController && (
             <button
               disabled={busy}
-              onClick={takeControl}
-              className="w-full text-sm font-semibold text-accent border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
+              onClick={() => void takeControlAction.run()}
+              className="w-full min-h-[44px] text-sm font-semibold text-ink-fire border border-accent/30 rounded-lg py-2 hover:bg-accent/5 disabled:opacity-40"
             >
               ✏️ {t.devices.takeControl}
             </button>
           )}
 
-          {err && <p className="text-rp-alert text-xs text-center">{err}</p>}
+          {err && <p role="status" aria-live="polite" className="text-ink-alert text-xs text-center">{err}</p>}
         </div>
       )}
     </div>

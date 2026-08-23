@@ -1,5 +1,9 @@
-import { createContext, useContext, useEffect, useState, lazy, Suspense, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, Suspense, type ReactNode } from 'react';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import type { User } from 'firebase/auth';
+import { getAdditionalUserInfo } from 'firebase/auth';
+import { useNavigate } from 'react-router-dom';
+import { markJustSignedUp, shouldRedirectAfterSignup } from '../lib/creatorOnboarding';
 import { doc, setDoc } from 'firebase/firestore';
 import {
   watchAuth,
@@ -15,19 +19,24 @@ import { Button, Card, Input, Label, Spinner } from './ui';
 import { claimReferral } from '../services/calls';
 import { dialog, DialogHost } from './dialog';
 import { ToastHost } from './toast';
-import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin } from '@rushpoint/shared';
+import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 
-const LegalPage = lazy(() => import('../pages/LegalPage'));
+const LegalPage = lazyWithRetry('legalGate', () => import('../pages/LegalPage'));
 
 const LEGAL_PATHS = ['/privacy', '/terms'];
 
-// The participant app, for the no-signup "try a sample game" demo link. The seed
-// always keeps a live demo run reachable with the PLAY01 access code.
+// The participant app, for the no-signup "try a sample game" demo link. This
+// opens the FLAGSHIP instant-play demo ("אקדמיית הסוכנים"): the `?game=<id>` promo
+// route lets a first-time visitor start a fresh solo run through startInstantPlay
+// — free, anonymous, staffless, playable from anywhere on earth, no organizer and
+// no access code. Seeded (gallery-published, allowInstantPlay:true) by
+// scripts/lib/spy-academy-game-def.mjs. Change: flagship-instant-demo.
+const DEMO_GAME_ID = 'demo-instant-spy';
 const PLAY_URL = import.meta.env.DEV
   ? resolvePlayOrigin(window.location.origin)
-  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? 'https://rushpoint-play.web.app');
-const DEMO_URL = `${PLAY_URL}/?code=PLAY01`;
+  : ((import.meta.env.VITE_PLAY_URL as string | undefined) ?? CANONICAL_PLAY_URL);
+const DEMO_URL = `${PLAY_URL}/?game=${DEMO_GAME_ID}`;
 
 interface AuthCtx {
   user: User | null;
@@ -101,6 +110,12 @@ const GOOGLE_SVG = (
 
 function LoginScreen() {
   const t = useT();
+  // creator-web is URL-driven and this screen never navigated after a successful
+  // sign-in, so whatever path was in the address bar when auth flipped is what
+  // rendered — which is why signing up from /settings "redirected to settings"
+  // (change: post-signup-redirect). AuthProvider is mounted INSIDE BrowserRouter
+  // (main.tsx), so a navigate here is safe.
+  const nav = useNavigate();
   const [mode, setMode] = useState<'in' | 'up'>('in');
 
   const [email, setEmail]       = useState('');
@@ -141,6 +156,8 @@ function LoginScreen() {
           email: cred.user.email,
           createdAt: new Date().toISOString(),
         }, { merge: true });
+        // The email/password SIGN-UP branch is a new account by construction.
+        landAfterAuth(true);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.signInFailed);
@@ -149,9 +166,25 @@ function LoginScreen() {
     }
   }
 
+  // Send a genuinely NEW creator to the dashboard, and leave everyone else exactly
+  // where they were: yanking a returning creator off a page they deliberately
+  // opened would be a worse bug than the one this fixes. `replace` so Back does not
+  // return to the (now dead) login screen.
+  function landAfterAuth(isNewUser: boolean) {
+    if (!shouldRedirectAfterSignup({ isNewUser })) return;
+    markJustSignedUp();
+    nav('/', { replace: true });
+  }
+
   async function google() {
     setErr(''); setBusy(true);
-    try { await signInWithGoogle(); }
+    try {
+      const cred = await signInWithGoogle();
+      // Google covers BOTH signup and sign-in through one button, so "new" has to
+      // come from the credential itself. If the metadata is missing, isNewUser is
+      // undefined → treated as returning → no redirect (fail-safe).
+      landAfterAuth(getAdditionalUserInfo(cred)?.isNewUser === true);
+    }
     catch (e) {
       const msg = e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.googleSignInFailed;
       if (!/popup-closed-by-user|cancelled-popup-request|popup-blocked/.test(msg)) setErr(msg);
@@ -279,10 +312,10 @@ function LoginScreen() {
 
           {mode === 'up' && (
             <p className="text-center text-[10px] text-[--ink-3] leading-relaxed pt-1">
-              {t.auth.agreeToTerms(
-                <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.termsLink}</a> as unknown as string,
-                <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.privacyLink}</a> as unknown as string,
-              )}
+              {t.auth.agreeToTermsLead}
+              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.termsLink}</a>
+              {t.auth.agreeToTermsBetween}
+              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.privacyLink}</a>
             </p>
           )}
 
@@ -374,6 +407,16 @@ function Landing({ authCard }: { authCard: ReactNode }) {
               </a>
               <a href="#how" className="text-sm font-medium text-[--ink-2] hover:text-[--ink-1] px-3 py-2.5 rounded-xl hover:bg-[--surface-2] transition-colors">{l.ctaSecondary}</a>
             </div>
+            {/* The return half of the cross-app link (change: cross-app-discovery).
+                play-web's join screen points here for would-be organizers; this
+                points back for a player who followed a creator link by mistake.
+                Deliberately the bare join screen, not the demo — they have a code. */}
+            <p className="mt-4 text-sm text-[--ink-3]">
+              {l.playerCta}{' '}
+              <a href={PLAY_URL} className="font-semibold text-rp-fire underline underline-offset-2 hover:opacity-80">
+                {l.playerLink}
+              </a>
+            </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustNoCc}</span>
               <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustDemo}</span>
@@ -459,21 +502,31 @@ function PhoneMockup() {
     { rank: 2, name: 'שועלי המדבר', score: 690, me: true },
     { rank: 3, name: 'מנהרי השער', score: 615, me: false },
   ];
+  // Colours in this mockup are LITERAL on purpose, twice over.
+  //  1. creator-web REVERSES the zinc scale (tailwind.config.js), so `text-zinc-800`
+  //     resolves to #e7e5e4 — near-white. These cards are white, so the two bold
+  //     labels below rendered at ~1.1:1 and were simply invisible, and `bg-zinc-200`
+  //     (#292524) painted the *incomplete* progress segment near-BLACK, so it read
+  //     as complete. This is the first thing every prospective creator sees.
+  //  2. `--ink-*` would be wrong here too: those tokens INVERT under `html.dark`,
+  //     while this mockup's surfaces are hardcoded light (it depicts the
+  //     light-themed player app), so a token puts #E8EAFF back on #FFFFFF the
+  //     moment a creator flips the theme.
   return (
     <div className="relative w-[290px] shrink-0" aria-hidden="true">
       <div className="absolute -inset-8 rounded-[3rem] bg-orange-500/25 blur-3xl" />
-      <div className="relative rounded-[2.5rem] border border-white/10 bg-zinc-950 p-2.5 shadow-2xl">
+      <div className="relative rounded-[2.5rem] border border-white/10 bg-[#18181b] p-2.5 shadow-2xl">
         <div className="rounded-[2rem] overflow-hidden bg-orange-50">
           <div className="h-6 bg-orange-50 flex items-center justify-center">
-            <div className="w-16 h-1.5 rounded-full bg-zinc-300" />
+            <div className="w-16 h-1.5 rounded-full bg-black/20" />
           </div>
           <div className="px-4 pt-1 pb-3">
             <div className="text-[13px] font-extrabold text-orange-600">מסע אוצר העיר העתיקה</div> {/* i18n-ignore mockup sample */}
-            <div className="text-[10px] text-zinc-500">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
+            <div className="text-[10px] text-[#3D4259]">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
             <div className="mt-2 flex gap-1">
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
-              <div className="h-1.5 flex-1 rounded-full bg-zinc-200" />
+              <div className="h-1.5 flex-1 rounded-full bg-orange-200" />
             </div>
           </div>
           <div className="relative mx-4 h-28 rounded-xl overflow-hidden bg-gradient-to-br from-amber-100 to-orange-200">
@@ -483,17 +536,17 @@ function PhoneMockup() {
               <circle cx="130" cy="35" r="5" fill="#ea580c" />
               <circle cx="185" cy="18" r="5" fill="#f97316" />
             </svg>
-            <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-zinc-600">240מ להמשך</div> {/* i18n-ignore mockup sample */}
+            <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-[#3D4259]">240מ להמשך</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="m-4 mt-3 rounded-xl border border-orange-200 bg-white p-3">
-            <div className="text-[11px] font-semibold text-zinc-800">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
-            <div className="text-[10px] text-zinc-500 mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[11px] font-semibold text-[#0A0C1A]">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[10px] text-[#3D4259] mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
             <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
           </div>
-          <div className="mx-4 mb-4 rounded-xl bg-white border border-zinc-200 p-2.5">
-            <div className="text-[10px] font-semibold text-zinc-700 mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
+          <div className="mx-4 mb-4 rounded-xl bg-white border border-orange-100 p-2.5">
+            <div className="text-[10px] font-semibold text-[#0A0C1A] mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
             {board.map((r) => (
-              <div key={r.rank} className={`flex items-center justify-between text-[10px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-zinc-500'}`}>
+              <div key={r.rank} className={`flex items-center justify-between text-[10px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-[#3D4259]'}`}>
                 <span className="truncate"><span className="font-mono me-1.5">{r.rank}</span>{r.name}</span>
                 <span className="font-mono">{r.score}</span>
               </div>

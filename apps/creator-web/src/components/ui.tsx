@@ -56,7 +56,7 @@ export function Button({
   };
   return (
     <button
-      className={`inline-flex items-center justify-center min-h-[40px] px-4 py-2 rounded-xl text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1] ${styles[variant]} ${className}`}
+      className={`inline-flex items-center justify-center min-h-[44px] px-4 py-2 rounded-xl text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1] ${styles[variant]} ${className}`}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...rest}
@@ -70,11 +70,16 @@ export function Button({
 }
 
 // ── Input ─────────────────────────────────────────────────────────────────────
-export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
+// `dense` trades the roomy default padding for a compact control — used by the
+// Task Builder so a form of many small fields fits on screen without scrolling.
+// It is a prop (not a className override) because two conflicting Tailwind
+// padding utilities in one class list resolve by stylesheet order, not by which
+// one is written last.
+export function Input({ className = '', dense = false, ...rest }: InputHTMLAttributes<HTMLInputElement> & { dense?: boolean }) {
   return (
     <input
       className={`
-        w-full px-3.5 py-2.5 rounded-xl text-sm
+        w-full ${dense ? 'px-2.5 py-2 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
         bg-[--surface-0] dark:bg-[--surface-2]/60
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
@@ -88,11 +93,11 @@ export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInput
 }
 
 // ── Textarea ──────────────────────────────────────────────────────────────────
-export function Textarea({ className = '', ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ className = '', dense = false, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement> & { dense?: boolean }) {
   return (
     <textarea
       className={`
-        w-full px-3.5 py-2.5 rounded-xl text-sm resize-y
+        w-full resize-y ${dense ? 'px-2.5 py-2 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
         bg-[--surface-0] dark:bg-[--surface-2]/60
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
@@ -126,8 +131,11 @@ export function Select({ className = '', children, ...rest }: SelectHTMLAttribut
 }
 
 // ── Label ─────────────────────────────────────────────────────────────────────
-export function Label({ children }: { children: ReactNode }) {
-  return <label className="block text-xs font-semibold text-[--ink-3] uppercase tracking-wider mb-1.5">{children}</label>;
+export function Label({ children, dense = false }: { children: ReactNode; dense?: boolean }) {
+  return (
+    <label className={`block font-semibold text-[--ink-3] uppercase tracking-wider ${
+      dense ? 'text-[10px] mb-0.5' : 'text-xs mb-1.5'}`}>{children}</label>
+  );
 }
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
@@ -135,6 +143,8 @@ export function Badge({
   children, color = 'zinc',
 }: { children: ReactNode; color?: 'zinc' | 'green' | 'gold' | 'red' | 'cyan' | 'purple' }) {
   const map: Record<string, string> = {
+    // NOTE: color="green" intentionally maps to rp-fire (the orange brand accent),
+    // NOT a green. The actual green token is rp-go — don't assume green === green here.
     zinc:   'bg-[--surface-2] text-[--ink-2] border-[--rp-border]',
     green:  'bg-rp-fire/10 text-rp-fire border-rp-fire/20 dark:bg-rp-fire/15',
     gold:   'bg-rp-amber/10 text-rp-amber border-rp-amber/20',
@@ -149,21 +159,68 @@ export function Badge({
   );
 }
 
+// ── TagChips ──────────────────────────────────────────────────────────────────
+// Creator-authored tags, one chip per tag (change: game-task-tags). Before this
+// existed `tags` was a WRITE-ONLY field: persisted, denormalized into publicGames
+// /publicTasks and returned by searchGallery — and rendered by nothing at all,
+// which is exactly what "I don't see the tags anywhere" was.
+//
+// Contract:
+//  • Renders NOTHING (not an empty box) for an empty/absent list.
+//  • `dir="auto"` on each chip — the text is creator-authored, so a Hebrew tag
+//    must lay out RTL while an English one beside it stays LTR.
+//  • Overflow is bounded so a 20-tag game cannot blow out a card; the "+N" text
+//    comes from the caller's dictionary (`more`), never from string concatenation
+//    here, so ui.tsx stays free of user-facing copy.
+export function TagChips({ tags, max = 6, more, className = '' }: {
+  tags?: string[]; max?: number; more?: (n: number) => string; className?: string;
+}) {
+  const list = (tags ?? []).filter((t) => typeof t === 'string' && t.trim().length > 0);
+  if (list.length === 0) return null;
+  const shown = list.slice(0, max);
+  const hidden = list.length - shown.length;
+  return (
+    <div className={`flex flex-wrap items-center gap-1 ${className}`}>
+      {shown.map((tag) => (
+        <span key={tag} dir="auto"
+          className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border bg-[--surface-2] text-[--ink-2] border-[--rp-border]">
+          {tag}
+        </span>
+      ))}
+      {hidden > 0 && more && (
+        <span className="text-[11px] font-medium text-[--ink-3]">{more(hidden)}</span>
+      )}
+    </div>
+  );
+}
+
 // ── Advanced (collapsible) ────────────────────────────────────────────────────
-export function Advanced({ title, children, open, onToggle }: {
+// `dense` is the Task Builder variant: tighter chrome so a stack of collapsed
+// sections reads as a compact list rather than a wall of boxes. `meta` renders
+// beside the chevron — use it for an at-rest summary (a count badge), so folding
+// a section never hides the fact that it is configured.
+// The chevron rotates by 90deg on open and the trigger carries aria-expanded, so
+// screen readers and sighted users get the same state.
+export function Advanced({ title, children, open, onToggle, dense = false, meta }: {
   title: string; children: ReactNode; open: boolean; onToggle: () => void;
+  dense?: boolean; meta?: ReactNode;
 }) {
   return (
-    <div className="border border-[--rp-border] rounded-xl overflow-hidden">
+    <div className={`border border-[--rp-border] overflow-hidden ${dense ? 'rounded-lg' : 'rounded-xl'}`}>
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-semibold text-[--ink-3] uppercase tracking-wider hover:bg-[--surface-2] transition-colors"
+        aria-expanded={open}
+        className={`w-full flex items-center gap-2 font-semibold text-[--ink-3] uppercase tracking-wider hover:bg-[--surface-2] transition-colors text-start ${
+          dense ? 'px-2.5 py-1.5 text-[11px]' : 'px-3.5 py-2.5 text-xs'}`}
       >
-        <span>{title}</span>
-        <span className={`transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
+        <span className="min-w-0 truncate">{title}</span>
+        {meta && <span className="shrink-0 normal-case tracking-normal font-medium text-[--ink-3]">{meta}</span>}
+        <span aria-hidden className={`ms-auto shrink-0 transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
       </button>
-      {open && <div className="p-3.5 border-t border-[--rp-border] space-y-3">{children}</div>}
+      {open && (
+        <div className={`border-t border-[--rp-border] ${dense ? 'p-2.5 space-y-2' : 'p-3.5 space-y-3'}`}>{children}</div>
+      )}
     </div>
   );
 }

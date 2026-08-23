@@ -46,11 +46,22 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
+      # One turbo invocation instead of three: turbo's own graph builds
+      # packages/shared once and then runs typecheck/lint/vitest in parallel,
+      # instead of each npm call rebuilding shared and waiting its turn.
+      - run: npm run verify:graph
+      # The pure-logic lane reads packages/shared/dist, so it runs AFTER the
+      # turbo phase that owns that directory, never beside it.
+      - run: npm run test:unit
       - run: npm run creator:build
       - run: npm run play:build
+
+      # Participant bundle budget. play-web is loaded outdoors on mobile data, so
+      # a collapsed code split is a gameplay problem. Size budget PLUS a marker
+      # check for heavy deps (maplibre/mapbox/jsqr/qrcode) in the entry chunk,
+      # because the smallest deferred dep is smaller than any useful headroom.
+      # Must run AFTER both builds — it reads dist/.
+      - run: npm run bundle:budget
 
       # PART A i18n parity (HE is HE, EN is EN) — a hard gate on every PR.
       - name: i18n parity (PART A — required)
@@ -113,6 +124,11 @@ jobs:
 
       - name: Security-rules tests (anti-cheat + tenant isolation)
         run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/test-rules.mjs"
+
+      # Storage rules: participant photo/audio read+write scoping, content-type
+      # allowlist and size caps. These are photos of participants, often minors.
+      - name: Storage-rules tests (participant media scoping)
+        run: npx --yes firebase-tools emulators:exec --only firestore,auth,functions,storage --project rushpoint-pwa-7daaa "node scripts/test-storage-rules.mjs"
 
       # Concurrent load smoke: 8 teams play a real game at once, then the run's
       # leaderboard invariants + station-slot accounting are audited. Catches

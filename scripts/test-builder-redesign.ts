@@ -5,6 +5,7 @@
 //   npx tsx scripts/test-builder-redesign.ts
 import type { Task, TaskType } from '../packages/shared/src/types/index';
 import { taskPreviewLine, TYPE_FAMILY_COLOR, TYPE_LABEL } from '../apps/creator-web/src/lib/taskCardPreview';
+import { GROUP_STYLES } from '../apps/creator-web/src/lib/groupStyles';
 import {
   choicesFromTask, choicesToTask, addChoice, removeChoice, setChoiceText, toggleCorrect,
 } from '../apps/creator-web/src/lib/quizFields';
@@ -124,6 +125,23 @@ check('sequence singular', taskPreviewLine(task({ type: 'sequence', steps: [{ id
     TYPES.filter((ty) => !TYPE_FAMILY_COLOR[ty]).join(','));
   check('every task type has a label',
     TYPES.every((ty) => typeof TYPE_LABEL[ty] === 'string' && TYPE_LABEL[ty].length > 0));
+}
+
+// ── GROUP_STYLES palette: calm colour refinement (docs/wave-l/task-card-colour-
+//    refine.md). Every entry must expose a static, non-empty `badge` (letter chip)
+//    AND a `accent` (slim leading edge) class string — the two low-key group cues
+//    that replaced the loud full-card ring. Classes must be literal (no `${}`), or
+//    Tailwind purges them and the group cue renders colourless. Full 6-entry
+//    palette so distinct group letters map to distinct hues. ───────────────────
+{
+  check('GROUP_STYLES has 6 palette entries', GROUP_STYLES.length === 6, String(GROUP_STYLES.length));
+  const nonEmpty = (s: unknown) => typeof s === 'string' && s.trim().length > 0;
+  check('every group style has a non-empty badge class',
+    GROUP_STYLES.every((g) => nonEmpty(g.badge)));
+  check('every group style has a non-empty accent class',
+    GROUP_STYLES.every((g) => nonEmpty((g as { accent?: string }).accent)));
+  check('group style classes are literal (no template placeholders)',
+    GROUP_STYLES.every((g) => !g.badge.includes('${') && !(g as { accent: string }).accent.includes('${')));
 }
 
 // ── moveItem: native drag-drop stage reorder ────────────────────────────────

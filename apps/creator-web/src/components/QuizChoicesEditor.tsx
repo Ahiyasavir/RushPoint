@@ -26,9 +26,17 @@ import { useT } from './LanguageContext';
 export default function QuizChoicesEditor({
   task,
   onChange,
+  revealError = false,
+  onTouch,
 }: {
   task: Task;
   onChange: (p: Pick<Task, 'choices' | 'answers'>) => void;
+  // Reveal gating (change: builder-first-task-flow): the two seeded empty rows
+  // below invite authoring, so the "mark a correct answer" message must not
+  // greet them. It speaks once the creator has edited the choice list, or once
+  // the finish control has revealed every blocker.
+  revealError?: boolean;
+  onTouch?: () => void;
 }) {
   const b = useT().builder;
   const [rows, setRows] = useState<QuizChoice[]>(() => {
@@ -40,6 +48,7 @@ export default function QuizChoicesEditor({
 
   // Update local UI state, then flush the cleaned model up for auto-save.
   const apply = (next: QuizChoice[]) => {
+    onTouch?.();
     setRows(next);
     onChange(choicesToTask(next));
   };
@@ -53,7 +62,7 @@ export default function QuizChoicesEditor({
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-2">
             <label
-              className="flex items-center gap-1 text-[11px] text-zinc-400 shrink-0 cursor-pointer select-none"
+              className="flex items-center gap-1 text-[11px] text-[--ink-2] shrink-0 cursor-pointer select-none"
               title={b.correct}
             >
               <input
@@ -89,7 +98,7 @@ export default function QuizChoicesEditor({
         + {b.addChoice}
       </Button>
 
-      {!anyCorrect && (
+      {revealError && !anyCorrect && (
         <p className="text-[11px] text-rp-amber">
           {b.quizNeedsCorrect}
         </p>

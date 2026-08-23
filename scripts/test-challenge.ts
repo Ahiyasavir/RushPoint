@@ -46,6 +46,17 @@ ok(!matchesTaskAnswer(numeric, '44'), 'numeric: outside tolerance');
 ok(!matchesTaskAnswer(numeric, 'abc'), 'numeric: NaN rejected');
 ok(!matchesTaskAnswer({ type: 'numeric' } as unknown as Task, '42'), 'numeric: no answer → no match');
 
+// strict parse (wave-h #5): a trailing-garbage answer must NOT grade correct
+ok(!matchesTaskAnswer(numeric, '42abc'), 'numeric: "42abc" rejected (strict parse, not parseFloat)');
+ok(!matchesTaskAnswer(numeric, '42 43'), 'numeric: "42 43" rejected (not a single number)');
+// but legitimate numeric forms still grade
+ok(matchesTaskAnswer(numeric, '  42  '), 'numeric: whitespace-padded still matches');
+const negNum = { type: 'numeric', numericAnswer: -3.5, numericTolerance: 0 } as unknown as Task;
+ok(matchesTaskAnswer(negNum, '-3.5'), 'numeric: negative decimal still matches');
+const zeroNum = { type: 'numeric', numericAnswer: 0, numericTolerance: 0 } as unknown as Task;
+ok(!matchesTaskAnswer(zeroNum, ''), 'numeric: empty string does NOT match 0 (Number("") guard)');
+ok(matchesTaskAnswer(zeroNum, '0'), 'numeric: "0" matches 0');
+
 console.log(failed === 0
   ? `\n✅ ALL CHALLENGE TESTS PASSED (${passed})`
   : `\n❌ ${failed} failed, ${passed} passed`);

@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from 'vitest';
-import { __resetObsLogger, __setObsLogger, logBestEffort, logCall, redact, type ObsLogger } from './log';
+import {
+  __resetObsLogger,
+  __setObsLogger,
+  DEFAULT_MAX_INSTANCES,
+  logBestEffort,
+  logCall,
+  redact,
+  resolveRuntimeOpts,
+  type ObsLogger,
+} from './log';
 
 function fakeLogger() {
   const records: Array<{ level: 'info' | 'warn' | 'error'; message: string; data?: Record<string, unknown> }> = [];
@@ -35,6 +44,34 @@ describe('logCall — one structured record per invocation', () => {
     expect(records[0].level).toBe('warn');
     expect(records[0].message).toBe('callable.error');
     expect(records[0].data).toMatchObject({ callable: 'joinRun', errorCode: 'permission-denied' });
+  });
+
+  // The CODE alone is not diagnosable. `invalid-argument` is thrown from a dozen
+  // guards in updateGame, and the message is the only thing that says WHICH one —
+  // it names the offending stage/task. Without it, a creator whose autosave is
+  // being refused produces a log line that proves only "something was invalid",
+  // which is exactly the wall this hit in production on 2026-08-20.
+  test('the rejection MESSAGE is logged, not just the code', async () => {
+    const { logger, records } = fakeLogger();
+    __setObsLogger(logger);
+    const err = Object.assign(
+      new Error('Stage "משימות תחרות": requiredTaskCount 4 exceeds the 3 completions this stage can yield'),
+      { code: 'invalid-argument' },
+    );
+    await expect(logCall({ callable: 'updateGame', uid: 'u3' }, async () => { throw err; })).rejects.toBe(err);
+    expect(records[0].data).toMatchObject({
+      callable: 'updateGame',
+      errorCode: 'invalid-argument',
+      errorMessage: err.message,
+    });
+  });
+
+  test('a missing message never becomes the string "undefined"', async () => {
+    const { logger, records } = fakeLogger();
+    __setObsLogger(logger);
+    const err = Object.assign(new Error(''), { code: 'not-found' });
+    await expect(logCall({ callable: 'getGame' }, async () => { throw err; })).rejects.toBe(err);
+    expect(records[0].data).not.toHaveProperty('errorMessage');
   });
 
   test('an unexpected throw (no .code) logs one error callable.crash and re-throws', async () => {
@@ -79,5 +116,31 @@ describe('redact', () => {
   });
   test('undefined context → empty object', () => {
     expect(redact(undefined)).toEqual({});
+  });
+});
+
+// Cost containment: an unbounded callable can scale to Google's project-wide
+// ceiling, so one runaway loop or abuse spike becomes a real bill. Every callable
+// funnels through loggedCallable, so capping there bounds the worst case for all
+// of them by construction — no per-call-site discipline required.
+describe('resolveRuntimeOpts — every callable is instance-capped', () => {
+  test('a callable that passes no opts still gets the default cap', () => {
+    expect(resolveRuntimeOpts(undefined).maxInstances).toBe(DEFAULT_MAX_INSTANCES);
+  });
+
+  test('the cap is applied alongside per-callable opts, not instead of them', () => {
+    const opts = resolveRuntimeOpts({ timeoutSeconds: 180, memory: '512MB' });
+    expect(opts.timeoutSeconds).toBe(180);
+    expect(opts.memory).toBe('512MB');
+    expect(opts.maxInstances).toBe(DEFAULT_MAX_INSTANCES);
+  });
+
+  test('an explicit maxInstances wins — a heavy callable can raise its own ceiling', () => {
+    expect(resolveRuntimeOpts({ maxInstances: 3 }).maxInstances).toBe(3);
+  });
+
+  test('the default cap is a real bound, not effectively unlimited', () => {
+    expect(DEFAULT_MAX_INSTANCES).toBeGreaterThan(0);
+    expect(DEFAULT_MAX_INSTANCES).toBeLessThanOrEqual(50);
   });
 });

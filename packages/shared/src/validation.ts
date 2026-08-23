@@ -13,6 +13,8 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { isValidCoord } from './geo';
+import { taskCompletabilityError } from './taskCompletability';
+import type { Stage } from './types';
 
 /** Size caps that defend against oversized-string / payload-bloat submissions. */
 export const MAX_ID_LEN = 200;
@@ -110,14 +112,133 @@ function fail(field: string, constraint: string, [en, he]: [string, string]): ne
   throw new ValidationError({ field, constraint, message: en, messageHe: he });
 }
 
-/** Required, non-empty string of bounded length. Returns the trimmed value. */
+// Characters that never belong in a human-visible string but can spoof the
+// creator/staff console (display-spoofing hardening — wave-h H3; there is no DOM
+// XSS since React escapes). Stripped:
+//   • C0/C1 control chars — U+0000–U+001F, U+007F–U+009F (incl. DEL)
+//   • bidi OVERRIDE + ISOLATE formatters — U+202A–U+202E, U+2066–U+2069
+//     (RLO/LRO reorder glyphs to impersonate another name; isolates hide text)
+//   • zero-width chars — U+200B–U+200D, U+FEFF (invisible padding / BOM)
+// Deliberately KEPT: Hebrew letters (U+0590–U+05FF) and the plain directional
+// marks LRM/RLM (U+200E/U+200F) that legitimate RTL content relies on — the strip
+// stops at U+200D so LRM/RLM pass through untouched.
+const UNSAFE_DISPLAY_CHARS = new RegExp(
+  "[\u0000-\u001F\u007F-\u009F\u200B-\u200D\u202A-\u202E\u2066-\u2069\uFEFF]",
+  "g",
+);
+
+/** Remove control / bidi-override / zero-width spoofing chars; keep ordinary text
+ *  (Hebrew + LRM/RLM preserved). Pure — unit-tested directly. */
+export function stripUnsafeDisplayChars(value: string): string {
+  return value.replace(UNSAFE_DISPLAY_CHARS, '');
+}
+
+// ─── Structural winnability guard (wave-j J2/J3/J4) ───────────────────────────
+// The single SOURCE of the "a broken game can't be saved or published" rule,
+// mirroring launchRun's launch-time defense (functions/src/runs/index.ts) so a
+// broken shape is rejected at every authoring surface, not only at launch:
+//   • an empty-task stage becomes active but never completes → the run strands;
+//   • a task with no usable answer key (quiz/numeric/smart_station/sequence) can
+//     never be completed by any participant (taskCompletabilityError);
+//   • a NEGATIVE pointValue subtracts from the team total, and a negative
+//     difficulty / estimatedMinutes skews smart_weighted routing & scoring.
+// Pure (no Firebase) → shared by updateGame (save) + publishGame (gallery) and
+// unit-tested directly. An empty `stages` array is fine (a game still being built).
+//
+// PHASE (change: builder-draft-save-tolerance) — an unfinished ANSWER KEY is the one
+// problem here that is a DRAFT state rather than a corrupt one, so it is the one
+// problem that belongs to the go-live gate instead of the save gate:
+//   • 'authoring' (updateGame / importGameFile) — skips `taskCompletabilityError`.
+//     The Builder autosaves 1.5 s after every edit, so enforcing it on save meant
+//     that picking "quiz" as a task type refused EVERY autosave until the answer key
+//     was finished — the creator's authoring was silently not persisted. This is the
+//     same rule wizardLogic.ts already documents for placement: an incomplete task is
+//     reported by the readiness surface (lib/gameReadiness), which also refuses launch.
+//   • 'golive' (publishGame) — enforces it, and is the DEFAULT so no caller can
+//     relax the rule by forgetting the argument.
+// Everything else stays save-blocking in BOTH phases: a negative point value or a
+// 0-task stage is corruption, and no amount of further authoring makes it legitimate.
+// Relaxing the save path is only safe because launchRun runs its OWN independent
+// `taskCompletabilityError` loop (functions/src/runs/index.ts) — do not remove it.
+export function gameStructureProblems(
+  stages: Stage[] | undefined,
+  opts: { phase?: 'authoring' | 'golive' } = {},
+): string[] {
+  const enforceCompletability = (opts.phase ?? 'golive') === 'golive';
+  const problems: string[] = [];
+  for (const stage of stages ?? []) {
+    if ((stage.tasks?.length ?? 0) === 0) {
+      problems.push(`Stage "${stage.title || stage.id}" needs at least one task`);
+    }
+    for (const task of stage.tasks ?? []) {
+      if (enforceCompletability) {
+        const completabilityError = taskCompletabilityError(task);
+        if (completabilityError) problems.push(completabilityError);
+      }
+      const label = `Task "${task.title || task.id}"`;
+      if (typeof task.pointValue === 'number' && !(task.pointValue >= 0)) {
+        problems.push(`${label}: point value cannot be negative`);
+      }
+      if (typeof task.difficulty === 'number' && !(task.difficulty >= 0)) {
+        problems.push(`${label}: difficulty cannot be negative`);
+      }
+      if (typeof task.estimatedMinutes === 'number' && !(task.estimatedMinutes >= 0)) {
+        problems.push(`${label}: estimated minutes cannot be negative`);
+      }
+      // Expected duration (change: task-duration-defaults). Optional, so only a
+      // PRESENT value is checked — absent means "derive the per-interaction default
+      // in the Builder", which is not an error. NaN/Infinity are refused too: a
+      // non-finite value reaching scoreFixedPointsSpeed's expected route total makes
+      // the whole speed bonus NaN for every team in the run.
+      if (task.expectedDurationMinutes !== undefined
+        && (typeof task.expectedDurationMinutes !== 'number'
+          || !Number.isFinite(task.expectedDurationMinutes)
+          || task.expectedDurationMinutes < 0)) {
+        problems.push(`${label}: expected duration must be a non-negative number`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** Required, non-empty string of bounded length. Returns the trimmed value with
+ *  control / bidi-override / zero-width spoofing chars stripped (wave-h H3). */
 export function requireString(value: unknown, field: string, max: number = MAX_ID_LEN): string {
   if (value === undefined || value === null) fail(field, 'required', MESSAGES.required(field));
   if (typeof value !== 'string') fail(field, 'type:string', MESSAGES.string(field));
   if ((value as string).length > max) fail(field, `maxLength:${max}`, MESSAGES.maxLen(field, max));
-  const trimmed = (value as string).trim();
+  const trimmed = stripUnsafeDisplayChars(value as string).trim();
   if (!trimmed) fail(field, 'nonEmpty', MESSAGES.empty(field));
   return trimmed;
+}
+
+// ─── Access code normalization (Wave 1, Fix 1) ───────────────────────────────
+// Join/board/recap/device codes come straight from client payloads and are
+// interpolated into a Firestore doc path (accessCodes/{CODE}). A non-string code
+// makes `.trim()` a TypeError; a code containing `/` builds an odd-segment path
+// that db.doc() rejects — both re-thrown as opaque INTERNAL/500. Normalize (and
+// reject) BEFORE any doc path is built so every bad code is a typed, bilingual
+// invalid-argument. Codes are alphanumeric only (server-generated codes always are).
+export const ACCESS_CODE_RE = /^[A-Za-z0-9]+$/;
+
+const ACCESS_CODE_MESSAGES = {
+  invalid: (): [string, string] => [
+    'code must be letters and digits only',
+    'הקוד חייב להכיל אותיות וספרות בלבד',
+  ],
+} as const;
+
+/** Validate + canonicalize a client-supplied access code. Rejects non-strings,
+ *  empty/whitespace-only, over-length, and any non-alphanumeric char (incl. `/`,
+ *  spaces, non-ASCII). Returns the trimmed, upper-cased code. */
+export function normalizeAccessCode(code: unknown): string {
+  if (code === undefined || code === null) fail('code', 'required', MESSAGES.required('code'));
+  if (typeof code !== 'string') fail('code', 'type:string', MESSAGES.string('code'));
+  const t = (code as string).trim();
+  if (!t) fail('code', 'nonEmpty', MESSAGES.empty('code'));
+  if (t.length > MAX_CODE_LEN) fail('code', `maxLength:${MAX_CODE_LEN}`, MESSAGES.maxLen('code', MAX_CODE_LEN));
+  if (!ACCESS_CODE_RE.test(t)) fail('code', 'alphanumeric', ACCESS_CODE_MESSAGES.invalid());
+  return t.toUpperCase();
 }
 
 /** Optional string of bounded length. Absent/empty → undefined. */
@@ -207,8 +328,119 @@ export const FIREBASE_STORAGE_ORIGINS = FIREBASE_STORAGE_BUCKETS.map(
 // Back-compat single-origin constant (legacy appspot form).
 export const FIREBASE_STORAGE_ORIGIN = `${FIREBASE_STORAGE_HTTPS_PREFIX}rushpoint-pwa-7daaa.appspot.com/`;
 
-export function isFirebaseStorageUrl(url: unknown): boolean {
-  return typeof url === 'string' && FIREBASE_STORAGE_ORIGINS.some((o) => (url as string).startsWith(o));
+/**
+ * The upload origins this platform mints URLs on, COMPILED IN rather than configured
+ * (change: task-media-durability).
+ *
+ * There is no Firebase Storage bucket in production — uploads are served by the
+ * self-hosted API (`functions/server.js`), and the accepted-origin set used to be
+ * assembled from `process.env.VPS_UPLOAD_ORIGIN` ALONE. That made a single env var
+ * load-bearing for data retention: with it absent or renamed, `normalizeTaskMedia`
+ * stopped recognising the URLs this very platform had minted, and — because it was
+ * written as a filter — DELETED every creator's stored picture on the next autosave,
+ * while the callable returned success. A constant cannot go missing on a redeploy.
+ *
+ * `storageOriginOpts()` (functions/src/storageOriginOpts.ts) unions this with the env
+ * var, so an extra/staging origin is still configurable; it just isn't load-bearing.
+ */
+export const RUSHPOINT_UPLOAD_ORIGINS = ['https://api.rush-point.com'];
+
+/**
+ * Opt-in relaxation for local/playtest environments. See `extractStorageObjectPath`.
+ * ALWAYS decided by the CALLER (this module is pure — it never reads process.env),
+ * defaults to `false`, so every existing call site keeps production behaviour.
+ */
+export interface StorageOriginOptions {
+  /** Also accept an emulator-hosted / tunnel-proxied Storage URL. */
+  allowLocalEmulator?: boolean;
+  /** Additional VPS-hosted upload origins, unioned with RUSHPOINT_UPLOAD_ORIGINS. */
+  vpsOrigins?: string[];
+  /** @deprecated single-origin form, kept so no existing caller changes meaning. */
+  vpsOrigin?: string;
+}
+
+/** Every upload origin to accept: the compiled-in canonical set plus anything configured. */
+function uploadOrigins(opts?: StorageOriginOptions): string[] {
+  const extra = [...(opts?.vpsOrigins ?? []), ...(opts?.vpsOrigin ? [opts.vpsOrigin] : [])];
+  return [...RUSHPOINT_UPLOAD_ORIGINS, ...extra]
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
+
+// The Firebase Storage download REST shape, host-agnostic: <origin>/v0/b/<bucket>/o/<encodedPath>.
+// Used ONLY when the caller opted into `allowLocalEmulator` — the Storage emulator serves
+// http://127.0.0.1:9199/v0/b/…, and behind the playtest tunnel (scripts/proxy.mjs) the same
+// path arrives on the single https tunnel origin. Both are rejected in production mode.
+const EMULATOR_STORAGE_URL_RE = /^https?:\/\/[^/?#]+\/v0\/b\/[^/?#]+\/o\/([^?#]+)/;
+
+/**
+ * The Storage object path a URL points at, or null if the URL is not one we trust.
+ * Production accept-set: our project's Firebase download origins, or `gs://`.
+ * With `allowLocalEmulator`, additionally any origin serving the `/v0/b/<bucket>/o/<path>`
+ * download shape (emulator or tunnel proxy). With `vpsOrigin`, additionally accepts
+ * the `/uploads/<path>` shape on that origin. Never accepts an arbitrary URL in any mode.
+ */
+function extractStorageObjectPath(s: string, opts?: StorageOriginOptions): string | null {
+  const decode = (raw: string): string | null => {
+    let out: string;
+    try { out = decodeURIComponent(raw); } catch { return null; }
+    // Reject traversal in EVERY shape. The run/team prefix check below is a
+    // startsWith, so `runs/<run>/teams/<uid>/../../elsewhere` would satisfy it
+    // while naming a different team's object. The upload server also refuses
+    // `..` on read and write; this makes the stored URL itself untrustworthy
+    // to begin with, rather than relying on that one downstream check.
+    //
+    // A SEGMENT-wise test, not `includes('..')`: only a segment that IS `..`
+    // traverses. A plain substring test also rejects innocent names like
+    // `photo..jpg` or `runs/...`, which are legal object paths. Backslash counts
+    // as a separator too — `path.join` treats it as one on Windows, so a
+    // `..\..\x` payload must not survive by virtue of the server's OS.
+    if (out.split(/[/\\]/).some((seg) => seg === '..')) return null;
+    return out;
+  };
+  for (const origin of uploadOrigins(opts)) {
+    const prefix = `${origin}/uploads/`;
+    if (s.startsWith(prefix)) return decode(s.slice(prefix.length));
+    // The `http://` form of a KNOWN host, for path extraction only. Not a widening of
+    // trust — the host set is compiled in, and anyone able to serve that host already
+    // owns the origin. It exists because `server.js` fell back to
+    // `${req.protocol}://${host}` with no `trust proxy` set, so a proxied upload minted
+    // an http:// URL that every mode then refused — and therefore deleted.
+    if (prefix.startsWith('https://')) {
+      const httpPrefix = `http://${prefix.slice('https://'.length)}`;
+      if (s.startsWith(httpPrefix)) return decode(s.slice(httpPrefix.length));
+    }
+  }
+  if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
+    const m = s.match(/\/o\/([^?]+)/);
+    return m ? decode(m[1]) : null;
+  }
+  if (s.startsWith('gs://')) {
+    const rest = s.slice('gs://'.length);
+    const slash = rest.indexOf('/');
+    // decode() (not a raw slice) so gs:// gets the same traversal rejection as
+    // every other shape — otherwise it is the one way in that skips the check.
+    return slash >= 0 ? decode(rest.slice(slash + 1)) : null;
+  }
+  if (opts?.allowLocalEmulator) {
+    const m = s.match(EMULATOR_STORAGE_URL_RE);
+    return m ? decode(m[1]) : null;
+  }
+  return null;
+}
+
+/**
+ * Is this a URL we trust to be one of OUR stored objects?
+ *
+ * Delegates to `extractStorageObjectPath` rather than re-listing the accepted
+ * origins. The two used to carry separate copies of the accept rule, so a fix to
+ * one silently left the other permissive — which is exactly how a traversal
+ * `..` path stayed acceptable to `normalizeTaskMedia` after `requireStorageUrl`
+ * had already learned to reject it. One rule, one place.
+ */
+export function isFirebaseStorageUrl(url: unknown, opts?: StorageOriginOptions): boolean {
+  if (typeof url !== 'string') return false;
+  return extractStorageObjectPath(url, opts) !== null;
 }
 
 // ─── Task media: YouTube parsing + upload-URL validation (change: task-media-attachments) ─
@@ -258,11 +490,11 @@ export function youTubeEmbedUrl(id: string): string {
 
 /** True if a single media entry is well-formed and its URL passes its kind's origin
  *  rule (image/video → Firebase Storage URL; youtube → parseable to a valid id). */
-export function isTaskMediaValid(m: unknown): boolean {
+export function isTaskMediaValid(m: unknown, opts?: StorageOriginOptions): boolean {
   if (!m || typeof m !== 'object') return false;
   const { kind, url } = m as { kind?: unknown; url?: unknown };
   if (typeof url !== 'string') return false;
-  if (kind === 'image' || kind === 'video') return isFirebaseStorageUrl(url);
+  if (kind === 'image' || kind === 'video') return isFirebaseStorageUrl(url, opts);
   if (kind === 'youtube') return parseYouTubeId(url) !== null;
   return false;
 }
@@ -274,9 +506,55 @@ export function isTaskMediaValid(m: unknown): boolean {
  * entry given a stable non-empty id (preserved if present, else derived from index).
  * This is the server-side enforcement boundary in createGame/updateGame.
  */
-export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
-  if (!Array.isArray(input)) return [];
-  const out: TaskMediaLike[] = [];
+export function normalizeTaskMedia(input: unknown, opts?: StorageOriginOptions): TaskMediaLike[] {
+  return normalizeTaskMediaDetailed(input, opts).media;
+}
+
+/** What `normalizeTaskMediaDetailed` decided about each entry it was given. */
+export interface TaskMediaNormalizeResult {
+  /** The entries that survive, cleaned and canonicalized. */
+  media: TaskMediaLike[];
+  /** URLs refused because they are NEW and off-origin (or an unusable kind/link). */
+  rejected: string[];
+  /** URLs kept ONLY because they were already stored — i.e. observed origin drift. */
+  retained: string[];
+}
+
+/**
+ * The same normalization as `normalizeTaskMedia`, but it REPORTS what it did and can
+ * grandfather URLs the server already persisted (change: task-media-durability).
+ *
+ * ─── Why this exists ────────────────────────────────────────────────────────────
+ * `normalizeTaskMedia` is a filter: given arbitrary client input, keep what passes.
+ * That is right for a URL the client just invented and WRONG for one this server
+ * accepted and stored weeks ago — and the same call site sees both, because every
+ * Builder autosave re-sends the whole `stages` array. So a stored picture was re-judged
+ * against whatever the saving runtime's env happened to accept, and when the two
+ * disagreed the filter deleted it and the callable reported success. A creator lost a
+ * mission photo with no error anywhere.
+ *
+ * `keepUrls` is the set of URLs already persisted on THIS task. An entry whose URL is in
+ * it is kept regardless of origin; anything else must pass the accept-set or it lands in
+ * `rejected` for the caller to refuse the save over. Validation governs what may be newly
+ * INTRODUCED; it must never retroactively destroy what was already accepted.
+ *
+ * Grandfathering covers the ORIGIN check only — shape is still enforced (a non-string
+ * url, an unknown kind and an unparseable YouTube link are still refused), and stored
+ * entries are still cleaned: id preserved, caption trimmed, YouTube canonicalized.
+ *
+ * A `Set` of raw url STRINGS, deliberately — not object paths. The whole failure mode is
+ * that path extraction fails for a drifted URL, so a key that needs extraction to succeed
+ * cannot recognise the entries that need protecting.
+ */
+export function normalizeTaskMediaDetailed(
+  input: unknown,
+  opts?: StorageOriginOptions,
+  keepUrls?: ReadonlySet<string>,
+): TaskMediaNormalizeResult {
+  const media: TaskMediaLike[] = [];
+  const rejected: string[] = [];
+  const retained: string[] = [];
+  if (!Array.isArray(input)) return { media, rejected, retained };
   input.forEach((raw, i) => {
     if (!raw || typeof raw !== 'object') return;
     const { id, kind, url, caption } = raw as {
@@ -286,22 +564,97 @@ export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
     let finalUrl = url;
     if (kind === 'youtube') {
       const ytId = parseYouTubeId(url);
-      if (!ytId) return;
+      if (!ytId) { rejected.push(url); return; }
       finalUrl = youTubeEmbedUrl(ytId);
     } else if (kind === 'image' || kind === 'video') {
-      if (!isFirebaseStorageUrl(url)) return;
+      if (!isFirebaseStorageUrl(url, opts)) {
+        if (!keepUrls?.has(url)) { rejected.push(url); return; }
+        retained.push(url);
+      }
     } else {
-      return; // unknown kind
+      rejected.push(url); // unknown kind
+      return;
     }
     const trimmedCaption = typeof caption === 'string' ? caption.trim() : '';
-    out.push({
+    media.push({
       id: typeof id === 'string' && id.trim() ? id.trim() : `m${i}-${finalUrl.length}`,
       kind: kind as TaskMediaKind,
       url: finalUrl,
       ...(trimmedCaption ? { caption: trimmedCaption } : {}),
     });
   });
+  return { media, rejected, retained };
+}
+
+/**
+ * Turn an object-path mapping (what a Storage copy produces) into a URL mapping (what
+ * `rewriteStagesMedia` consumes), for the media urls actually present on a game.
+ *
+ * The same object path appears in a url in one of three encodings depending on who minted
+ * it — raw on the VPS upload route (`/uploads/gameMedia/u/games/g/x.jpg`), `encodeURI`'d
+ * there for exotic names, and `encodeURIComponent`'d in a Firebase download url
+ * (`/o/gameMedia%2Fu%2Fgames%2Fg%2Fx.jpg`). All three are tried, so this works for every
+ * shape the platform has ever stored without parsing the url. A url whose path is not in
+ * the mapping is simply absent from the result, which `rewriteStagesMedia` reads as
+ * "leave it alone".
+ */
+export function buildMediaUrlMapping(
+  urls: Iterable<string>,
+  pathMapping: ReadonlyMap<string, string>,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  const forms = (p: string): string[] => {
+    const set = new Set([p, encodeURI(p), encodeURIComponent(p)]);
+    return [...set];
+  };
+  for (const url of urls) {
+    for (const [oldPath, newPath] of pathMapping) {
+      const oldForms = forms(oldPath);
+      const newForms = forms(newPath);
+      const hit = oldForms.findIndex((f) => url.includes(f));
+      if (hit >= 0) {
+        out.set(url, url.replace(oldForms[hit], newForms[hit]));
+        break;
+      }
+    }
+  }
   return out;
+}
+
+/**
+ * Rewrite every uploaded (`image`/`video`) media URL through `mapping`, returning a NEW
+ * stages array (change: task-media-durability).
+ *
+ * The pure half of re-hosting media when a game is duplicated, translated, or saved for
+ * the first time out of the `draft` prefix. Media objects are keyed on the owning game id
+ * (`gameMedia/{ownerUid}/games/{gameId}/…`), so a game copied by spreading its document
+ * keeps pointing into the SOURCE game's storage folder — it renders until that game is
+ * purged, then breaks. The bytes are copied server-side; this rewrites the references.
+ *
+ * `youtube` entries are carried over untouched (there is no object to copy), and a URL
+ * absent from `mapping` is left exactly as it was — a copy that failed must degrade to
+ * "still points at the original", never to "points at nothing".
+ */
+export function rewriteStagesMedia<St extends { tasks?: unknown[] }>(
+  stages: St[] | undefined,
+  mapping: ReadonlyMap<string, string>,
+): St[] | undefined {
+  if (!Array.isArray(stages)) return stages;
+  return stages.map((stage) => ({
+    ...stage,
+    tasks: (stage.tasks ?? []).map((raw) => {
+      const task = raw as { media?: TaskMediaLike[] };
+      if (!Array.isArray(task.media) || task.media.length === 0) return raw;
+      return {
+        ...task,
+        media: task.media.map((m) => {
+          if (m.kind === 'youtube') return m;
+          const next = mapping.get(m.url);
+          return next ? { ...m, url: next } : m;
+        }),
+      };
+    }),
+  })) as St[];
 }
 
 // ─── Caller-scoped photo URL (change: auth-anticheat-hardening, row 41) ───────
@@ -313,21 +666,22 @@ export function normalizeTaskMedia(input: unknown): TaskMediaLike[] {
 // invalid-argument).
 const MAX_URL_LEN = 2048;
 
-export function requireStorageUrl(url: unknown, runId: string, uid: string): string {
+export function requireStorageUrl(
+  url: unknown,
+  runId: string,
+  uid: string,
+  // wave-c: the CALLER decides whether emulator/tunnel-proxied Storage origins are
+  // acceptable (submitStationPhoto passes process.env.FUNCTIONS_EMULATOR === 'true').
+  // Default false ⇒ production accept-set unchanged. The run/team prefix check below
+  // — the actual IDOR guard — applies in EVERY mode.
+  opts?: StorageOriginOptions,
+): string {
   if (typeof url !== 'string') fail('photoUrl', 'type:string', MESSAGES.string('photoUrl'));
   const s = url as string;
   if (s.length === 0) fail('photoUrl', 'nonEmpty', MESSAGES.empty('photoUrl'));
   if (s.length > MAX_URL_LEN) fail('photoUrl', `maxLength:${MAX_URL_LEN}`, MESSAGES.maxLen('photoUrl', MAX_URL_LEN));
 
-  let objectPath: string | null = null;
-  if (FIREBASE_STORAGE_ORIGINS.some((o) => s.startsWith(o))) {
-    const m = s.match(/\/o\/([^?]+)/);
-    if (m) { try { objectPath = decodeURIComponent(m[1]); } catch { objectPath = null; } }
-  } else if (s.startsWith('gs://')) {
-    const rest = s.slice('gs://'.length);
-    const slash = rest.indexOf('/');
-    if (slash >= 0) objectPath = rest.slice(slash + 1);
-  }
+  const objectPath = extractStorageObjectPath(s, opts);
 
   const expected = `runs/${runId}/teams/${uid}/`;
   if (!objectPath || !objectPath.startsWith(expected)) {

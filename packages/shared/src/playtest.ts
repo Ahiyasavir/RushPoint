@@ -41,6 +41,15 @@ export function resolveEmulatorHost(env: EnvLike, origin?: string | null): strin
  * Route a request path under the single proxy origin to the right local port:
  * the emulator services by their SDK path signatures, `/creator*` to creator-web,
  * everything else to play-web.
+ *
+ * That default branch is load-bearing for the PUBLIC LEGAL PATHS: `/terms` and
+ * `/privacy` belong to the participant app, which serves them itself (change:
+ * legal-pages-participant-origin), so the tunnel origin behaves exactly like the
+ * production participant site. The emulator rules below are substring matches —
+ * a future rule could silently capture a public path — so scripts/test-playtest-links.ts
+ * pins `/terms` and `/privacy` (and their trailing-slash and query forms) to
+ * play-web, and `/creator/terms` / `/creator/privacy` to the creator console,
+ * whose own `/privacy` URL is live and externally referenced.
  */
 export function resolveProxyTarget(path: string): number {
   const p = String(path);

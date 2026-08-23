@@ -78,7 +78,7 @@ export default function QrScanner({ onDecode, onClose }: {
       if (!cancelled) raf = requestAnimationFrame(tick);
     }
 
-    (async () => {
+    void (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         if (cancelled) {

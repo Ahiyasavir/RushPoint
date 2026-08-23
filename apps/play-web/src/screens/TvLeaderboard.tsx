@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { detectLeaderChange } from '@rushpoint/shared';
 import { getPublicLeaderboard, type PublicLeaderboard } from '../services/calls';
 import { useT } from '../i18nContext';
+import { Spinner } from '../components/Spinner';
 import { isFinalTime, boardTimeSeconds, formatDuration } from '../lib/boardTime';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -18,6 +19,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
   const prevTopId = useRef<string | null>(null);
   const flashTimer = useRef<number | null>(null);
   const [newLeaderId, setNewLeaderId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -32,8 +34,10 @@ export default function TvLeaderboard({ code }: { code: string }) {
         );
       }
       prevTopId.current = topId;
+      setLoadError(false);
       setData(next);
     } catch {
+      setLoadError(true);
       setData(null);
     }
   }, [code]);
@@ -59,7 +63,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
   if (data === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-app-bg">
-        <div className="w-10 h-10 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin" />
+        <Spinner size="lg" />
       </div>
     );
   }
@@ -69,7 +73,9 @@ export default function TvLeaderboard({ code }: { code: string }) {
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
         <div className="text-7xl">📺</div>
         <h1 className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
-        <p className="text-2xl text-zinc-500">{t.tv.notAvailable}</p>
+        <p className={`text-2xl ${loadError ? 'text-rp-fire font-semibold' : 'text-zinc-500'}`}>
+          {loadError ? t.tv.loadError : t.tv.notAvailable}
+        </p>
       </div>
     );
   }
@@ -98,10 +104,10 @@ export default function TvLeaderboard({ code }: { code: string }) {
               <div className="flex-1 min-w-0">
                 <div dir="auto" className="text-3xl font-bold text-zinc-100 truncate">{r.teamName}</div>
                 {isLeaderFlash && (
-                  <div className="text-sm font-semibold text-rp-fire">{t.tv.nowLeading}</div>
+                  <div className="text-sm font-semibold text-ink-fire">{t.tv.nowLeading}</div>
                 )}
               </div>
-              <div className="text-right">
+              <div className="text-end">
                 {(() => {
                   // A finished team shows its real completion time; a still-playing
                   // team's time is an ever-growing ELAPSED value — mark it (⏱ prefix,
@@ -133,7 +139,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
                         <div
                           title={final ? t.board.finalTime : t.board.elapsed}
                           aria-label={final ? t.board.finalTime : t.board.elapsed}
-                          className={final ? 'text-sm text-zinc-500 font-mono' : 'text-sm text-zinc-600 italic font-mono'}
+                          className={final ? 'text-sm text-zinc-500 font-mono' : 'text-sm text-zinc-500 italic font-mono'}
                         >
                           {final ? '' : '⏱ '}{formatDuration(sec)}
                         </div>

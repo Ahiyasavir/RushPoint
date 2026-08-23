@@ -1,0 +1,22 @@
+# Fire the daily digest at 03:30 in the server's local time (the VPS is set to
+# Asia/Jerusalem via `timedatectl set-timezone Asia/Jerusalem`).
+#
+# The digest itself does NOT trust this clock for its day boundary: it reports the
+# PREVIOUS complete local day using the explicit RUN_DIGEST_TIMEZONE, because a
+# Docker container's local time is UTC even when the host is Asia/Jerusalem. So
+# shifting OnCalendar changes WHEN the mail arrives, never WHICH day it covers.
+#
+# Persistent=true ⇒ if the box was off at 03:30 the job runs at next boot. Note
+# the digest is NOT idempotent in the "already sent" sense — there is no per-day
+# claim — so a catch-up run after a long outage reports whatever day it computes
+# at that moment, which may duplicate or skip. Acceptable for an informational
+# email; do not build billing on it.
+[Unit]
+Description=Run the RushPoint daily digest
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

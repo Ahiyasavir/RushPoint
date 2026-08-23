@@ -4,16 +4,20 @@
   "private": true,
   "main": "lib/index.js",
   "scripts": {
-    "build": "npx esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=lib/index.js --external:firebase-admin --external:firebase-functions --external:stripe",
+    "prebuild": "npm --prefix ../packages/shared run build",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node20 --outfile=lib/index.js --external:firebase-admin --external:firebase-functions --external:stripe && npm run build:cron",
+    "build:cron": "npx esbuild src/prune-cron.ts --bundle --platform=node --target=node20 --outfile=lib/prune-cron.js --external:firebase-admin --external:firebase-functions --external:stripe && npx esbuild src/digest-cron.ts --bundle --platform=node --target=node20 --outfile=lib/digest-cron.js --external:firebase-admin --external:firebase-functions --external:stripe",
     "serve": "npm run build && npx firebase emulators:start --only functions,firestore,auth",
     "deploy": "npm run build && npx firebase deploy --only functions",
-    "typecheck": "npx tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "engines": {
     "node": "20"
   },
   "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^4.22.2",
     "firebase-admin": "^12.0.0",
     "firebase-functions": "^5.0.0",
     "stripe": "^16.12.0"
@@ -21,7 +25,9 @@
   "devDependencies": {
     "@rushpoint/shared": "*",
     "@types/node": "^20.0.0",
+    "@types/supertest": "^7.2.1",
     "esbuild": "^0.28.0",
+    "supertest": "^7.2.2",
     "typescript": "^5.4.0",
     "vitest": "^4.1.8"
   }

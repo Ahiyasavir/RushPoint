@@ -24,8 +24,12 @@ import { getAuth, connectAuthEmulator, signInAnonymously } from 'firebase/auth';
 import { getFunctions, connectFunctionsEmulator, httpsCallable } from 'firebase/functions';
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from 'firebase/firestore';
 import { auditRun } from './lib/run-audit.mjs';
+// Emulator ports come from ONE pure resolver (change: emulator-port-offset) so this can
+// run on an offset block beside a live playtest. Unset ⇒ exactly today's ports.
+import { resolveEmulatorPorts } from './lib/emulatorPorts.mjs';
 
 const PROJECT = 'rushpoint-pwa-7daaa';
+const EMU = resolveEmulatorPorts(process.env);
 const TEAMS = Math.max(2, Number((process.argv.find((a) => a.startsWith('--teams=')) ?? '').split('=')[1] || 12));
 const CONCURRENCY = 8;
 const MAX_TURNS = 40; // safety cap per team (a stuck loop is itself a failure)
@@ -45,14 +49,22 @@ function recordLatency(fn, ms) {
 // counted + reported: a NOISY retry tally is itself a finding, a hidden one isn't).
 let transientRetries = 0;
 
+// WO Item 1/3: structural INTERNAL oracle. A player callable that aborts under the
+// single-run-doc lock (Firestore "10 ABORTED: lock timeout") used to surface to the
+// player as an opaque `functions/internal`. The harness's own retry could absorb it
+// at 8/12 teams (exit 0, bug hidden) and only crash the whole sim at 16. Record EVERY
+// internal rejection so it's a hard violation regardless of team count — the RED
+// signal for the withLockRetry wraps on completeTaskForTeam + the claim txn.
+const internalErrors = [];
+
 function makeParty(name) {
   const app = initializeApp({ apiKey: 'emulator-key', projectId: PROJECT, appId: `sim-${name}` }, name);
   const auth = getAuth(app);
   const functions = getFunctions(app);
   const db = getFirestore(app);
-  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-  connectFunctionsEmulator(functions, '127.0.0.1', 5001);
-  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+  connectAuthEmulator(auth, `http://127.0.0.1:${EMU.auth}`, { disableWarnings: true });
+  connectFunctionsEmulator(functions, '127.0.0.1', EMU.functions);
+  connectFirestoreEmulator(db, '127.0.0.1', EMU.firestore);
   return {
     auth,
     call: async (fn, data) => {
@@ -62,6 +74,7 @@ function makeParty(name) {
           try {
             return (await httpsCallable(functions, fn)(data)).data;
           } catch (e) {
+            if (e.code === 'functions/internal') internalErrors.push(fn);
             if (e.code !== 'functions/internal' || attempt >= 2) throw e;
             transientRetries++;
             await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
@@ -118,12 +131,15 @@ function buildStages() {
     {
       id: 'sim-stage-2', order: 1, title: 'Answers',
       tasks: [
+        // WO Fix 4: locationless tasks are uncapped in routing, so these deliberately
+        // OMIT maxConcurrentTeams — they exercise the unset-cap default and must still
+        // hand every team the task (no phantom 'stationsFull').
         { id: 'sim-quiz', title: 'Quiz', type: 'quiz', locationless: true, triggerMode: 'locationless',
           coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: 60,
-          maxConcurrentTeams: TEAMS + 1, choices: ['Jerusalem', 'Haifa', 'Eilat'], answers: ['Jerusalem'] },
+          choices: ['Jerusalem', 'Haifa', 'Eilat'], answers: ['Jerusalem'] },
         { id: 'sim-num', title: 'Numeric', type: 'numeric', locationless: true, triggerMode: 'locationless',
           coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 2, pointValue: 60,
-          maxConcurrentTeams: TEAMS + 1, numericAnswer: 7, numericTolerance: 0 },
+          numericAnswer: 7, numericTolerance: 0 },
       ],
     },
     {
@@ -227,6 +243,14 @@ async function main() {
 
   console.log(`\ntransient INTERNAL retries absorbed: ${transientRetries}`);
   audit('transient-error rate is sane (< 1 retry per team)', transientRetries < TEAMS, String(transientRetries));
+  // WO Item 1/3: ANY player-facing INTERNAL is a hard violation (un-retried ABORTED
+  // from the run-doc lock). Post-fix (withLockRetry on completeTaskForTeam + claim)
+  // this stays empty even at --teams=16.
+  audit(
+    'no player callable surfaced INTERNAL under load',
+    internalErrors.length === 0,
+    internalErrors.length ? `${internalErrors.length}× [${[...new Set(internalErrors)].join(', ')}]` : '',
+  );
   console.log(`total wall time: ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(violations === 0 ? '\n✅ LOAD SIM CONSISTENT' : `\n❌ ${violations} CONSISTENCY VIOLATION(S)`);
   process.exit(violations === 0 ? 0 : 1);

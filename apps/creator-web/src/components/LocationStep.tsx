@@ -7,11 +7,63 @@
 //
 // `fill` makes the map grow to fill the available height (the wizard's step 1 is a
 // flex column), so it is as large as the panel allows and never forces a scroll.
-import { Suspense, lazy } from 'react';
+import { Suspense, useState, type ReactNode } from 'react';
+import { lazyWithRetry } from '../lib/lazyWithRetry';
 import { Input, Label } from './ui';
 import { useT } from './LanguageContext';
 
-const LocationPicker = lazy(() => import('./LocationPicker'));
+/**
+ * ONE field for the pair, not two boxes side by side (change: builder-ux-round-2).
+ *
+ * Latitude and longitude are never useful apart — a half-entered pair is not a
+ * place — and every source a creator copies from (Google Maps, Waze, a WhatsApp
+ * pin) hands them over as a single "31.7767, 35.2345" string. Two separate inputs
+ * forced that string to be split by hand into two boxes, which is work the parser
+ * can do. Any separator runs: comma, space, or both.
+ *
+ * A LOCAL text buffer while typing, and the props while not: without it, echoing
+ * the parsed props back on every keystroke fights the caret the moment an
+ * intermediate value ("31.", "31.7767,") is not yet a valid pair. It resyncs on
+ * blur, so the field can never end up showing something the task does not hold.
+ */
+function CoordinatePairField({ coordinates, onChange, label, hint }: {
+  coordinates: { lat: number; lng: number };
+  onChange: (lat: number, lng: number) => void;
+  label: string;
+  hint: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const fromTask = coordinates.lat || coordinates.lng ? `${coordinates.lat}, ${coordinates.lng}` : '';
+
+  return (
+    <div>
+      <Label>{label}</Label>
+      <Input
+        value={draft ?? fromTask}
+        placeholder={hint}
+        inputMode="decimal"
+        dir="ltr"
+        // A coordinate pair is ~22 characters; a full-width box just made the row
+        // look like it needed the space, and left nothing beside it.
+        className="max-w-[18rem]"
+        onChange={(e) => {
+          const raw = e.target.value;
+          setDraft(raw);
+          const parts = raw.split(/[,\s]+/).filter((p) => p !== '').map(Number);
+          // Committed only as a COMPLETE, finite pair. A partial or malformed entry
+          // simply does not move the pin — it never writes a half coordinate, and
+          // never a NaN, which would put the task on the {0,0} sentinel by accident.
+          if (parts.length === 2 && parts.every((n) => Number.isFinite(n))) {
+            onChange(parts[0], parts[1]);
+          }
+        }}
+        onBlur={() => setDraft(null)}
+      />
+    </div>
+  );
+}
+
+const LocationPicker = lazyWithRetry('locationPicker', () => import('./LocationPicker'));
 
 function MapSkeleton({ label, className }: { label: string; className: string }) {
   return (
@@ -21,27 +73,19 @@ function MapSkeleton({ label, className }: { label: string; className: string })
   );
 }
 
-export default function LocationStep({ coordinates, onChange, mapClassName = 'h-44', fill = false }: {
+export default function LocationStep({ coordinates, onChange, mapClassName = 'h-44', fill = false, cornerControl }: {
   coordinates: { lat: number; lng: number };
   onChange: (lat: number, lng: number) => void;
   mapClassName?: string;
   fill?: boolean;
+  /** Passed straight through to the map's bottom-end corner. See LocationPicker. */
+  cornerControl?: ReactNode;
 }) {
   const b = useT().builder;
 
   const latLngFields = (
-    <div className="grid grid-cols-2 gap-2">
-      <div>
-        <Label>{b.latLabel}</Label>
-        <Input type="number" value={coordinates.lat || ''}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0, coordinates.lng)} />
-      </div>
-      <div>
-        <Label>{b.lngLabel}</Label>
-        <Input type="number" value={coordinates.lng || ''}
-          onChange={(e) => onChange(coordinates.lat, parseFloat(e.target.value) || 0)} />
-      </div>
-    </div>
+    <CoordinatePairField coordinates={coordinates} onChange={onChange}
+      label={b.coordsLabel} hint={b.coordsHint} />
   );
 
   if (fill) {
@@ -52,11 +96,12 @@ export default function LocationStep({ coordinates, onChange, mapClassName = 'h-
       <div className="flex-1 min-h-0 flex flex-col gap-2">
         <div className="flex-1 min-h-0 flex flex-col">
           <Suspense fallback={<MapSkeleton label={b.loadingMap} className="flex-1 min-h-0" />}>
-            <LocationPicker lat={coordinates.lat} lng={coordinates.lng} onChange={onChange} fill />
+            <LocationPicker lat={coordinates.lat} lng={coordinates.lng} onChange={onChange} fill
+              cornerControl={cornerControl} />
           </Suspense>
         </div>
         <details className="shrink-0 text-xs">
-          <summary className="cursor-pointer select-none text-[--ink-3]">{b.latLabel} / {b.lngLabel}</summary>
+          <summary className="cursor-pointer select-none text-[--ink-3]">{b.coordsLabel}</summary>
           <div className="mt-1.5">{latLngFields}</div>
         </details>
       </div>

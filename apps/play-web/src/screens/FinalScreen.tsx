@@ -5,17 +5,16 @@ import { getMyProfile } from '../services/calls';
 import { uid } from '../services/firebase';
 import type { Session } from '../store';
 import { Button, Card, Screen } from '../components/ui';
+import { useAsyncAction } from '../hooks/useAsyncAction';
 import PostGameSurvey from '../components/PostGameSurvey';
 import { useT } from '../i18nContext';
 import { selectPodium } from '@rushpoint/shared';
-import { shareStoryCard } from '../lib/storyCard';
-import { sharePhoto } from '../lib/sharePhoto';
-import { sharePodium } from '../lib/podiumCard';
 import { fireConfetti } from '../lib/confetti';
-
-const CREATOR_URL = import.meta.env.DEV
-  ? `${window.location.protocol}//${window.location.hostname}:5180`
-  : ((import.meta.env.VITE_CREATOR_URL as string | undefined) ?? 'https://rushpoint-creator.web.app');
+import { feedback } from '../lib/sound';
+import { creatorUrl } from '../lib/creatorUrl';
+import { shareCardLabels } from '../lib/shareCardLabels';
+import LegalFooter from '../components/LegalFooter';
+import { LoadingView } from '../components/LoadingView';
 
 function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));
@@ -35,7 +34,15 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   const { t, lang } = useT();
   const { team, run, game } = state;
   const accent = game.branding?.primaryColor ?? '#FF5722';
-  const myEntry = run.leaderboard?.rankings.find((r) => r.teamId === team.id);
+  // Staged reveal (change: manual-leaderboard-reveal): a game may ask for the
+  // final standings to stay hidden from players until the creator reveals them.
+  // EVERY ranking-derived surface here (rank badge, podium, board, share text)
+  // reads this gated `board`, never run.leaderboard directly — before this gate
+  // an unpublished board rendered in full. `run.leaderboard` still means "the run
+  // was finalized" and keeps driving the badges + waiting state.
+  const board = run.leaderboard?.published ? run.leaderboard : null;
+  const boardWithheld = !!run.leaderboard && !run.leaderboard.published;
+  const myEntry = board?.rankings.find((r) => r.teamId === team.id);
   const myRank = myEntry?.rank;
   const finalScore = myEntry?.score ?? team.score;
   const isTimeOnly = game.scoringPreset === 'time_only';
@@ -58,16 +65,17 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   }
   const hintsUsed = team.taskHintsUsed?.length ?? 0;
   const [shared, setShared] = useState(false);
-  const [busy, setBusy] = useState(false);
 
-  // Celebrate the finish once — a brand-colored confetti burst timed to land with
-  // the score-pop. Reduced-motion is honored inside fireConfetti(); the ref guard
-  // stops any re-render (live leaderboard updates, survey steps) from re-firing it.
-  const confettiFired = useRef(false);
+  // Celebrate the finish once — a brand-colored confetti burst plus the existing
+  // mute-gated rank-up sound+haptic, timed to land with the score-pop. Reduced-motion
+  // is honored inside fireConfetti() and the mute toggle inside feedback(); the ref
+  // guard stops any re-render (live leaderboard updates, survey steps) from re-firing
+  // the climax.
+  const climaxFired = useRef(false);
   useEffect(() => {
-    if (confettiFired.current) return;
-    confettiFired.current = true;
-    const id = window.setTimeout(() => fireConfetti(), 350);
+    if (climaxFired.current) return;
+    climaxFired.current = true;
+    const id = window.setTimeout(() => { fireConfetti(); feedback('rankUp'); }, 350);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -80,44 +88,39 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   })();
 
   // Top-3 podium for the reveal + the branded podium share (podium-share-moment).
-  const { podium } = selectPodium(run.leaderboard?.rankings ?? [], team.id);
+  const { podium } = selectPodium(board?.rankings ?? [], team.id);
 
   async function sharePodiumFn() {
     if (podium.length === 0) return;
-    setBusy(true);
-    try {
-      await sharePodium(podium, {
-        gameName: game.branding?.name ?? game.title,
-        ctaUrl: CREATOR_URL,
-        text: t.final.shareText({
-          team: team.displayName, game: game.branding?.name ?? game.title,
-          rankPart: '', timePart: '', url: CREATOR_URL.replace(/^https?:\/\//, ''),
-        }),
-      });
-    } finally { setBusy(false); }
+    const { sharePodium } = await import('../lib/podiumCard');
+    await sharePodium(podium, {
+      gameName: game.branding?.name ?? game.title,
+      ctaUrl: creatorUrl(),
+      title: shareCardLabels(t.final, isTimeOnly).podiumTitle,
+      text: t.final.shareText({
+        team: team.displayName, game: game.branding?.name ?? game.title,
+        rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
+      }),
+    });
   }
 
   async function sharePhotoFn() {
     if (!firstPhotoUrl) return;
-    setBusy(true);
-    try {
-      const playBase = window.location.origin;
-      await sharePhoto(firstPhotoUrl, {
-        playBaseUrl: playBase,
-        gameId: (game as { id?: string }).id ?? null,
-        urlText: CREATOR_URL.replace(/^https?:\/\//, ''),
-        caption: t.final.shareText({
-          team: team.displayName, game: game.branding?.name ?? game.title,
-          rankPart: '', timePart: '', url: CREATOR_URL.replace(/^https?:\/\//, ''),
-        }),
-      });
-    } finally { setBusy(false); }
+    const playBase = window.location.origin;
+    const { sharePhoto } = await import('../lib/sharePhoto');
+    await sharePhoto(firstPhotoUrl, {
+      playBaseUrl: playBase,
+      gameId: (game as { id?: string }).id ?? null,
+      urlText: creatorUrl().replace(/^https?:\/\//, ''),
+      caption: t.final.shareText({
+        team: team.displayName, game: game.branding?.name ?? game.title,
+        rankPart: '', timePart: '', url: creatorUrl().replace(/^https?:\/\//, ''),
+      }),
+    });
   }
 
   async function share() {
-    setBusy(true);
-    try {
-      const name = game.branding?.name ?? game.title;
+    const name = game.branding?.name ?? game.title;
       const rankPart = myRank ? t.final.shareRankPart({ rank: myRank }) : '';
       const timePart = totalSec != null ? t.final.shareTimePart({ time: fmtDuration(totalSec) }) : '';
       const text = t.final.shareText({
@@ -125,20 +128,40 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         game: name,
         rankPart,
         timePart,
-        url: CREATOR_URL.replace(/^https?:\/\//, ''),
+        url: creatorUrl().replace(/^https?:\/\//, ''),
       });
+      const labels = shareCardLabels(t.final, isTimeOnly);
+      const { shareStoryCard } = await import('../lib/storyCard');
       const result = await shareStoryCard({
         gameName: name,
         teamName: team.displayName,
         score: finalScore,
+        heroValue: isTimeOnly ? (totalSec != null ? fmtDuration(totalSec) : undefined) : undefined,
         rank: myRank,
         totalTime: totalSec != null ? fmtDuration(totalSec) : undefined,
         stagesDone: `${completedStages.length}/${team.stages.length}`,
-        ctaUrl: CREATOR_URL,
+        ctaUrl: creatorUrl(),
+        headline: labels.headline,
+        scoreLabel: labels.scoreLabel,
+        rankLabel: labels.rankLabel,
+        timeLabel: labels.timeLabel,
+        stagesLabel: labels.stagesLabel,
+        ctaText: labels.ctaText,
       }, text);
-      if (result === 'downloaded' || result === 'copied') { setShared(true); setTimeout(() => setShared(false), 2500); }
-    } finally { setBusy(false); }
+      // Confirm a genuine delivery: a native share ('shared') as well as a download
+      // or clipboard copy. A cancellation resolves to 'failed', so it stays silent —
+      // no false "shared!". Reuses the existing shareSaved label (no new i18n key).
+      if (result === 'downloaded' || result === 'copied' || result === 'shared') { setShared(true); setTimeout(() => setShared(false), 2500); }
   }
+
+  // Single-flight guards (mirrors PlayScreen's shareProgress): setBusy is async, so a
+  // same-batch ghost double-tap could otherwise pass the busy===false check twice and
+  // fire two canvas renders + two native share sheets / downloads before the disabled
+  // re-render lands. useAsyncAction rejects the re-entrant tap synchronously.
+  const shareAction = useAsyncAction(share);
+  const sharePhotoAction = useAsyncAction(sharePhotoFn);
+  const sharePodiumAction = useAsyncAction(sharePodiumFn);
+  const busy = shareAction.busy || sharePhotoAction.busy || sharePodiumAction.busy;
 
   return (
     <Screen>
@@ -184,14 +207,24 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
             <Stat label={t.final.statFastest} value={fastest ? `#${fastest.order + 1} · ${fmtDuration(fastest.dur)}` : '?'} accent={accent} />
             <Stat label={t.final.statHints} value={String(hintsUsed)} accent={accent} />
           </div>
-          <Button className="mt-4" disabled={busy} onClick={share}>
+          <Button className="mt-4" disabled={busy} onClick={() => shareAction.run()}>
             {busy ? t.final.shareCreating : shared ? t.final.shareSaved : t.final.shareBtn}
           </Button>
-          {firstPhotoUrl && (
-            <button disabled={busy} onClick={sharePhotoFn}
-              className="mt-2 w-full text-sm text-accent/90 hover:text-accent disabled:opacity-50">
-              {t.final.sharePhoto}
-            </button>
+          {(firstPhotoUrl || podium.length > 0) && (
+            <div className="mt-2 flex flex-col gap-2">
+              {firstPhotoUrl && (
+                <button disabled={busy} onClick={() => sharePhotoAction.run()}
+                  className="w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
+                  {t.final.sharePhoto}
+                </button>
+              )}
+              {podium.length > 0 && (
+                <button disabled={busy} onClick={() => sharePodiumAction.run()}
+                  className="w-full min-h-[44px] text-sm text-ink-fire disabled:opacity-50">
+                  {t.final.sharePodium}
+                </button>
+              )}
+            </div>
           )}
         </Card>
 
@@ -216,27 +249,26 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     className="flex-1 flex flex-col items-center justify-end animate-fade-up motion-reduce:animate-none"
                     style={{ animationDelay: `${place * 80}ms` }}>
                     <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
-                    <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-accent' : 'text-zinc-200'}`}>{e.teamName}</div>
+                    <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-ink-fire' : 'text-zinc-200'}`}>{e.teamName}</div>
                     <div className="text-[11px] text-zinc-400 mb-1">
                       {isTimeOnly
-                        ? (() => { const d = run.leaderboard?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
+                        ? (() => { const d = board?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
                         : e.score}
                     </div>
-                    <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-accent' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
+                    <div className={`w-full ${h} rounded-t-lg flex items-start justify-center pt-1 font-brand font-extrabold ${isMe ? 'bg-rp-fire/30 border border-rp-fire/40 text-ink-fire' : 'bg-white/10 text-zinc-300'}`}>{place}</div>
                   </div>
                 );
               })}
             </div>
-            <Button variant="ghost" className="mt-3 w-full" disabled={busy} onClick={sharePodiumFn}>{t.final.sharePodium}</Button>
           </Card>
         )}
 
         {/* Leaderboard */}
-        {run.leaderboard && run.leaderboard.rankings.length > 0 && (
+        {board && board.rankings.length > 0 && (
           <Card className="p-4 w-full">
             <div className="text-sm font-semibold text-zinc-300 mb-3 text-start">🏅 {t.final.leaderboardTitle}</div>
             <div className="space-y-1.5">
-              {run.leaderboard.rankings.slice(0, 10).map((r, i) => {
+              {board.rankings.slice(0, 10).map((r, i) => {
                 const isMe = r.teamId === team.id;
                 const medalBg = i < 3 ? MEDAL_BG[i] : '';
                 return (
@@ -255,7 +287,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                       )}
                     </span>
                     <span dir="auto" className="flex-1 text-start font-medium">{r.teamName}</span>
-                    <span className="font-mono text-xs font-semibold" style={{ color: isMe ? accent : undefined }}>
+                    <span className={`font-mono text-xs font-semibold${isMe ? ' text-ink-fire' : ''}`}>
                       {isTimeOnly ? (r.durationSeconds != null ? fmtDuration(r.durationSeconds) : '—') : r.score}
                     </span>
                   </div>
@@ -265,19 +297,31 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
           </Card>
         )}
 
+        {/* Finalized, but the host is staging the reveal — say so plainly instead
+            of showing a blank space where the board would be. */}
+        {boardWithheld && (
+          <Card className="p-6 w-full text-center">
+            <div className="text-4xl mb-2">🤫</div>
+            <div className="text-sm font-semibold text-zinc-300">{t.final.notRevealedTitle}</div>
+            <p className="text-zinc-500 text-sm mt-1">{t.final.notRevealedBody}</p>
+          </Card>
+        )}
+
         {!run.leaderboard && (
-          <div className="flex items-center justify-center gap-2.5 text-zinc-500 text-sm py-2">
-            <span aria-hidden="true" className="w-4 h-4 rounded-full border-2 border-rp-fire/30 border-t-rp-fire animate-spin shrink-0" />
-            <span>{t.final.waitingFinalize}</span>
-          </div>
+          <LoadingView
+            className="py-2"
+            messages={[t.final.waitingFinalize, t.final.finalizingTally, t.final.finalizingRanks]}
+          />
         )}
       </div>
 
-      {/* Viral footer — hidden for Pro runs (white-label) and entirely in free
-          mode (no payment/upsell surface). The ?ref tag credits the host with a
-          free run if a participant signs up as a creator. */}
-      {PAYMENTS_ENABLED && run.billingType !== 'pro' && (
-        <a href={`${CREATOR_URL}/?ref=${team.ownerUid}`} target="_blank" rel="noreferrer"
+      {/* Viral footer — hidden only for Pro runs (white-label). The create-your-own
+          INVITE shows in both free and paid mode so every finisher gets a next step.
+          The ?ref REWARD (a free run credited to the host when a finisher signs up as
+          a creator) is a payments concept, so it is only appended when payments are on;
+          in free mode the CTA links to the plain creator URL (no dead ?ref param). */}
+      {run.billingType !== 'pro' && (
+        <a href={PAYMENTS_ENABLED ? `${creatorUrl()}/?ref=${team.ownerUid}` : creatorUrl()} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">
             <span>⚡</span> {t.final.poweredBy}
@@ -288,6 +332,10 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
         </a>
       )}
       <Button variant="ghost" onClick={onLeave} className="mt-2">{t.final.leave}</Button>
+      {/* Same legal links as the Join screen. Once a player has finished they
+          never pass through Join again, so without this the privacy policy
+          would be unreachable from the last screen they actually look at. */}
+      <LegalFooter />
     </Screen>
   );
 }
@@ -308,31 +356,53 @@ const BADGE_EMOJI: Record<string, string> = {
   first_finish: '🏁', explorer: '🧭', pathfinder: '🗺️', veteran: '🎖️', high_scorer: '💯', legend: '👑',
 };
 
+// Badges are written by the async onRunFinalized trigger AFTER finalize completes, so
+// on a solo instant-play finish (where run.leaderboard is already set at first mount,
+// so `finalized` never flips) the first fetch races the trigger and comes back empty.
+// A small bounded poll closes that gap without ever spamming the callable.
+const MAX_BADGE_POLLS = 3;
+const BADGE_POLL_INTERVAL_MS = 2000;
+
 function BadgesCard({ finalized }: { finalized: boolean }) {
   const { t } = useT();
   const [badges, setBadges] = useState<string[] | null>(null);
   const [fresh, setFresh] = useState<Set<string>>(new Set());
 
   // Profiles are recorded when the organizer finalizes the run, so (re)fetch on mount
-  // and again once the run is finalized — that's when new badges actually appear.
+  // and again once the run is finalized — that's when new badges actually appear. If
+  // finalized but the list is still empty (the trigger hasn't landed yet), retry a
+  // bounded few times a couple of seconds apart, then stop.
   useEffect(() => {
     let alive = true;
-    getMyProfile({})
-      .then((res) => {
-        if (!alive) return;
-        const earned = res.profile.badges ?? [];
-        // Per-player key: on a shared device, each player's "already seen" set is
-        // separate so player B doesn't inherit player A's highlighted-badge state.
-        const seenKey = `rp.badges.seen.${uid() ?? 'anon'}`;
-        let seen: string[] = [];
-        try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { /* ignore */ }
-        const seenSet = new Set(seen);
-        setFresh(new Set(earned.filter((b) => !seenSet.has(b))));
-        setBadges(earned);
-        try { localStorage.setItem(seenKey, JSON.stringify(earned)); } catch { /* ignore */ }
-      })
-      .catch(() => { if (alive) setBadges((b) => b ?? []); });
-    return () => { alive = false; };
+    let timer: number | undefined;
+    let attempts = 0;
+
+    const poll = () => {
+      attempts += 1;
+      getMyProfile({})
+        .then((res) => {
+          if (!alive) return;
+          const earned = res.profile.badges ?? [];
+          // Per-player key: on a shared device, each player's "already seen" set is
+          // separate so player B doesn't inherit player A's highlighted-badge state.
+          const seenKey = `rp.badges.seen.${uid() ?? 'anon'}`;
+          let seen: string[] = [];
+          try { seen = JSON.parse(localStorage.getItem(seenKey) || '[]'); } catch { /* ignore */ }
+          const seenSet = new Set(seen);
+          setFresh(new Set(earned.filter((b) => !seenSet.has(b))));
+          setBadges(earned);
+          try { localStorage.setItem(seenKey, JSON.stringify(earned)); } catch { /* ignore */ }
+          // Bounded eventual-consistency retry: only while finalized, still empty, and
+          // under the attempt cap. Stops the moment badges arrive or the cap is hit.
+          if (finalized && earned.length === 0 && attempts < MAX_BADGE_POLLS) {
+            timer = window.setTimeout(poll, BADGE_POLL_INTERVAL_MS);
+          }
+        })
+        .catch(() => { if (alive) setBadges((b) => b ?? []); });
+    };
+
+    poll();
+    return () => { alive = false; if (timer !== undefined) window.clearTimeout(timer); };
   }, [finalized]);
 
   if (!badges || badges.length === 0) return null;
@@ -349,7 +419,7 @@ function BadgesCard({ finalized }: { finalized: boolean }) {
             key={b}
             className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 border text-sm ${
               fresh.has(b)
-                ? 'border-accent bg-accent/10 text-accent animate-score-pop motion-reduce:animate-none'
+                ? 'border-accent bg-accent/10 text-ink-fire animate-score-pop motion-reduce:animate-none'
                 : 'border-glass-border text-zinc-300'
             }`}
           >
