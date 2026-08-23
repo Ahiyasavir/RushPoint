@@ -258,6 +258,11 @@ const HE = {
     walkCloser: ({ dist, radius }: { dist: number; radius: number }) => `${dist} מ' מהנקודה. התקרבו לאישור אוטומטי (עד ${radius} מ').`,
     metersAway: ({ m }: { m: number }) => `${m} מ' מכאן`,
     navigateHere: 'ניווט לשם',
+    // The overflow trigger on the mission card (change: play-card-simplification).
+    // The card used to show navigate, hint and "ask for help" as three separate
+    // controls beside the submit button; they are recovery tools, wanted only when
+    // the mission is not going well, so they live behind one menu now.
+    moreOptions: 'עוד אפשרויות',
     navigateMaps: 'מפות',
     navigateAria: 'פתיחת הניווט אל נקודת המשימה',
     kmAway: ({ km }: { km: string }) => `${km} ק"מ מכאן`,
@@ -470,6 +475,20 @@ const HE = {
     offline: 'אין חיבור לשרת כרגע. הפעולה תתאפשר כשהקליטה תחזור.',
     generic: 'הפעולה נכשלה. נסו שוב.',
     backToSignIn: 'חזרה למסך ההתחברות',
+  },
+  // The one drawer that replaced six always-mounted panels below the mission
+  // (change: play-card-simplification): standings, photos, chat, collectibles,
+  // territory, devices. Tabs appear only for features actually in play.
+  more: {
+    toggle: 'עוד',
+    board: '🏆 דירוג',
+    feed: '📸 תמונות',
+    chat: '💬 צ׳אט',
+    trackables: '🎒 פריטים',
+    zones: '🚩 שטחים',
+    devices: '📱 מכשירים',
+    tabsAria: 'מדורים נוספים',
+    unread: ({ n }: { n: number }) => `${n} חדשות`,
   },
   play: {
     syncFailed: 'הסנכרון נכשל',
@@ -940,6 +959,7 @@ const EN: typeof HE = {
     walkCloser: ({ dist, radius }: { dist: number; radius: number }) => `${dist} m away. Walk closer to auto check in (within ${radius} m).`,
     metersAway: ({ m }: { m: number }) => `${m} m away`,
     navigateHere: 'Navigate here',
+    moreOptions: 'More options',
     navigateMaps: 'Maps',
     navigateAria: 'Open navigation to the mission location',
     kmAway: ({ km }: { km: string }) => `${km} km away`,
@@ -1150,6 +1170,17 @@ const EN: typeof HE = {
     offline: 'No connection to the server right now. This will work once signal returns.',
     generic: 'That action failed. Try again.',
     backToSignIn: 'Back to sign in',
+  },
+  more: {
+    toggle: 'More',
+    board: '🏆 Standings',
+    feed: '📸 Photos',
+    chat: '💬 Chat',
+    trackables: '🎒 Items',
+    zones: '🚩 Territory',
+    devices: '📱 Devices',
+    tabsAria: 'More sections',
+    unread: ({ n }: { n: number }) => `${n} new`,
   },
   play: {
     syncFailed: 'Sync failed',

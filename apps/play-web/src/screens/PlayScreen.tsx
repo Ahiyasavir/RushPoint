@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
@@ -12,7 +12,7 @@ import { heldNotice } from '../lib/holdNotice';
 // Which sealed hidden missions may be drawn as a search circle
 // (change: hidden-mission-search-area).
 import { selectSearchAreas } from '../lib/searchAreas';
-import { Button, Collapsible, Progress, Screen } from '../components/ui';
+import { Button, Progress, Screen } from '../components/ui';
 import { useT } from '../i18nContext';
 import { dialog } from '../components/dialog';
 import TaskRunner from '../components/TaskRunner';
@@ -30,7 +30,10 @@ const NavMap = lazyWithRetry('navmap', () => import('../components/NavMap'));
 const FeedPanel = lazyWithRetry('feed', () => import('../components/FeedPanel'));
 // Team ↔ HQ chat (team-hq-chat): lazy so the chat chunk + listener load on first open.
 const ChatPanel = lazyWithRetry('chat', () => import('../components/ChatPanel'));
-import LiveOps from '../components/LiveOps';
+import LiveOps, { LeaderboardPeek } from '../components/LiveOps';
+// Which secondary panels exist right now, and which opens first — pure, so the
+// "an empty feature must not become an empty tab" rule is testable.
+import { planMoreDrawer, type DrawerTabId } from '../lib/moreDrawer';
 import FinalScreen from './FinalScreen';
 import { formatDuration } from '../lib/boardTime';
 import { feedback, isRankUp } from '../lib/sound';
@@ -101,6 +104,11 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // SAME list feeds both the NavMap circles and the ZonesPanel list, and both
   // refresh together after a capture.
   const [zones, setZones] = useState<CaptureZone[]>([]);
+  // Trackables are lifted here for the same reason zones already were
+  // (change: play-card-simplification): the "more" drawer must know whether this
+  // run HAS collectibles before it offers a tab for them. A tab that opens onto an
+  // empty panel is exactly the clutter the drawer exists to remove.
+  const [trackables, setTrackables] = useState<Trackable[]>([]);
   // Power-ups (change: power-ups): a transient award toast fired when the team's
   // powerUps.log grows across polls (ref-compared), for both award types.
   const [powerUpToast, setPowerUpToast] = useState<'double_points' | 'bonus_points' | null>(null);
@@ -114,6 +122,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
+  // Chat unread, lifted so the CLOSED drawer can badge it. Declared with the other
+  // hooks at the top — never below an early return, which is the hooks-order
+  // mistake that crashed TaskRunner in production (CLAUDE.md, rules-of-hooks).
+  // `session.teamId` is stable for the life of this screen.
+  const [viewingTab, setViewingTab] = useState<DrawerTabId | null>(null);
+  const { unreadCount: chatUnread } = useTeamChat(session, session.teamId ?? uid() ?? '', viewingTab === 'chat');
   // Shared team devices: only the CONTROLLING phone pings the live map, so the
   // team's pin follows whoever is actually playing instead of flickering.
   const controllerRef = useRef(true);
@@ -162,6 +176,14 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     } catch { /* zones are best-effort; keep the last list */ }
   }, [session]);
   useEffect(() => { void reloadZones(); }, [reloadZones]);
+
+  const reloadTrackables = useCallback(async () => {
+    try {
+      const r = await getRunTrackables({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId });
+      setTrackables(r.trackables);
+    } catch { /* best-effort, exactly as before; keep the last list */ }
+  }, [session]);
+  useEffect(() => { void reloadTrackables(); }, [reloadTrackables]);
 
   useEffect(() => {
     let alive = true;
@@ -558,39 +580,52 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
 
   const powerUpArmed = team.powerUps?.active === 'double_points';
 
+  // What the "more" drawer holds right now. A tab appears only for a feature
+  // actually in play, so nothing empty can surface.
+  const drawerPlan = planMoreDrawer({
+    hasBoard: !!state.run.leaderboard?.published && (state.run.leaderboard?.rankings?.length ?? 0) > 0,
+    hasFeed: state.game.photoFeedEnabled !== false && !!myUid,
+    hasChat: true,
+    unreadChat: chatUnread,
+    trackableCount: trackables.length,
+    zoneCount: zones.length,
+    hasTeammateDevices: hasTeammateDevices && !!myUid,
+  });
+
   return (
     <Screen>
       <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
       <StoryInterstitial narratives={state.stageNarratives ?? []} runId={session.runId} lang={lang} />
       <PowerUpToast type={powerUpToast} />
+      {/* ONE compact strip (change: play-card-simplification). Identity, score,
+          progress, streak and every utility used to be EIGHT stacked full-width
+          rows before the map — so on a phone the player scrolled past their own
+          chrome to reach the mission. Now: two lines and an icon row.
+          How-to-play and share became icon buttons; both carry aria-labels,
+          because an icon-only button with no accessible name is a defect the
+          play-web a11y scan fails on. */}
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
-        onSos={() => void sosAction.run()} sosBusy={sosAction.busy} />
-      <HowToPlayButton instructions={game.instructions} lang={lang} />
-      {session.isTestDrive && (
-        <div dir="auto" className="mt-3 rounded-lg bg-app-raised border border-rp-amber/40 px-3 py-2 text-sm font-semibold text-ink-amber flex items-center gap-2">
-          🧪 {t.play.testRunBanner}
-        </div>
-      )}
-      <div className="mt-4 mb-2"><Progress done={completedStages} total={team.stages.length} /></div>
+        onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
+        isTestDrive={session.isTestDrive}
+        streak={streak} streakMilestone={milestone}
+        progress={<Progress done={completedStages} total={team.stages.length} />}
+        howToPlay={<HowToPlayButton instructions={game.instructions} lang={lang} />}
+        onShare={() => void shareAction.run()} sharing={sharing}
+      />
+      {/* Announcements + flash missions are the organizer TALKING to this team
+          mid-race. They used to render below the mission with the other secondary
+          panels — i.e. below the fold on a phone. The leaderboard half moved into
+          the drawer (showBoard={false}), which is what let the urgent half come up
+          here without dragging a scoreboard with it. */}
+      <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id}
+        lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={false} />
       <InRunAlerts
         hotZone={state.run.hotZone}
         outOfBounds={team.outOfBounds}
         held={team.held}
         heldReason={team.heldReason}
       />
-      {streak >= 2 && (
-        <div
-          key={milestone ?? streak}
-          className={`self-start mb-2 inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-3 py-1 text-sm font-bold text-ink-fire ${milestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
-        >
-          {t.play.streak({ n: streak })}
-        </div>
-      )}
-      <button onClick={() => void shareAction.run()} disabled={sharing}
-        className="self-end inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-ink-fire hover:text-ink-fire disabled:opacity-50 mb-2">
-        {sharing ? t.play.creating : t.play.shareProgress}
-      </button>
 
       {/* PRIMARY: the map + current task sit at the TOP, prominent
           (change: fix-play-screen-hierarchy) — the family playtest buried the task
@@ -622,29 +657,53 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         )}
       </div>
 
-      {/* SECONDARY: standings, feed, chat, trackables, territory, devices. This
-          lower-priority status content sits below the promoted task and scrolls
-          with the page; each panel self hides when its feature is unused
-          (trackables, zones and devices return null; chat is collapsible). There
-          is deliberately no nested bounded scroll region: a second scroll surface
-          on mobile traps momentum and hides content below an invisible fold, so
-          the natural page scroll reaches every panel instead. */}
+      {/* SECONDARY: ONE drawer (change: play-card-simplification). These six were
+          six always-mounted, separately-bordered sections competing in one long
+          scroll below the mission — standings, photos, chat, collectibles,
+          territory, devices. Almost nobody needs more than one at a time, and
+          during a race the mission IS the screen, so the drawer starts closed and
+          the badge is what keeps that honest (an unread word from the organizer
+          still announces itself).
+          A tab exists only when its feature is actually in play, so folding them
+          together did not resurrect the empty sections that used to self-hide. */}
       <div className="mt-1 -mx-1 px-1">
         {!isController && (
           <div dir="auto" className="mb-3 rounded-lg bg-app-raised border border-glass-border px-3 py-2 text-sm text-zinc-400 flex items-center gap-2">
             👀 {t.devices.viewingBanner({ name: controllerName })}
           </div>
         )}
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
-        {state.game.photoFeedEnabled !== false && myUid && (
-          <FeedSection ctx={session} myUid={myUid} />
-        )}
-        <ChatSection ctx={session} teamId={team.id} />
-        <TrackablesPanel ctx={session} myTeamId={team.id} isController={isController} />
-        <ZonesPanel zones={zones} myTeamId={team.id} isController={isController} me={me} ctx={session} onCaptured={reloadZones} />
-        {hasTeammateDevices && myUid && (
-          <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} />
-        )}
+        <MoreDrawer
+          plan={drawerPlan}
+          onActiveTabChange={setViewingTab}
+          renderTab={(id) => {
+            if (id === 'board') {
+              return state.run.leaderboard
+                ? <LeaderboardPeek leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
+                : null;
+            }
+            if (id === 'feed') {
+              return myUid ? (
+                <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+                  <FeedPanel ctx={session} myUid={myUid} />
+                </Suspense>
+              ) : null;
+            }
+            if (id === 'chat') {
+              return (
+                <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
+                  <ChatPanel ctx={session} teamId={team.id} />
+                </Suspense>
+              );
+            }
+            if (id === 'trackables') {
+              return <TrackablesPanel ctx={session} items={trackables} myTeamId={team.id} isController={isController} onChanged={() => { void reloadTrackables(); }} />;
+            }
+            if (id === 'zones') {
+              return <ZonesPanel zones={zones} myTeamId={team.id} isController={isController} me={me} ctx={session} onCaptured={reloadZones} />;
+            }
+            return myUid ? <TeamDevicesPanel team={team} myUid={myUid} ctx={session} onChanged={refresh} /> : null;
+          }}
+        />
       </div>
     </Screen>
   );
@@ -784,11 +843,19 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
   const body = localizedInstructionsBody(ins, lang);
   return (
     <>
+      {/* An icon in the header action row now (change: play-card-simplification)
+          — it used to be a full-width pill on its own line above the map. Icon-only,
+          so the accessible name comes from aria-label; `title` gives sighted users
+          the same words on hover. */}
       <button
+        type="button"
         onClick={() => setOpen(true)}
-        className="self-start mt-2 inline-flex items-center min-h-[44px] gap-1 rounded-full bg-app-card border border-glass-border px-4 py-2 text-xs font-semibold text-zinc-300 hover:text-zinc-100"
+        aria-label={t.play.howToPlay}
+        title={t.play.howToPlay}
+        data-testid="how-to-play"
+        className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base text-zinc-400 hover:text-zinc-200"
       >
-        📖 {t.play.howToPlay}
+        📖
       </button>
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-5 animate-fade-up">
@@ -807,107 +874,156 @@ function HowToPlayButton({ instructions, lang }: { instructions?: GameInstructio
   );
 }
 
-// Live photo feed (change: live-photo-feed): a collapsible section over the lazy
-// FeedPanel. The panel (and its listener) only mounts on first open, so a team
-// that never opens the feed pays zero bundle + zero snapshot cost.
-function FeedSection({ ctx, myUid }: { ctx: Session; myUid: string }) {
-  const { t } = useT();
-  const [open, setOpen] = useState(false);
-  return (
-    <Collapsible
-      className="mb-3"
-      open={open}
-      onToggle={() => setOpen((o) => !o)}
-      header={<span>{t.feed.feedToggle}</span>}
-    >
-      <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
-        <FeedPanel ctx={ctx} myUid={myUid} />
-      </Suspense>
-    </Collapsible>
-  );
-}
-
-// Team ↔ HQ chat (change: team-hq-chat): a collapsible section with an unread dot.
-// A cheap single-doc listener tracks the thread even while collapsed so the dot
-// can appear; the full ChatPanel (list + send box) only mounts on first open.
-// The unread decision itself is the shared, unit-tested countUnreadChatMessages
-// (change: team-chat-unread-accuracy) — ID-anchored, own messages excluded.
-function ChatSection({ ctx, teamId }: { ctx: Session; teamId: string }) {
-  const { t } = useT();
-  const [open, setOpen] = useState(false);
+// Team↔HQ chat state, lifted out of the panel (change: play-card-simplification).
+// The drawer badges unread chat while CLOSED, so the count has to live above the
+// panel that shows the thread — otherwise the only way to discover a message from
+// the organizer is to go looking for it, which is the failure the badge exists to
+// prevent. The unread decision is still the shared, unit-tested
+// countUnreadChatMessages (ID-anchored, own messages excluded).
+function useTeamChat(ctx: Session, teamId: string, viewing: boolean) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [seen, setSeen] = useState(() => loadChatSeen(ctx.runId, teamId));
   const myUid = uid();
 
   useEffect(() => {
+    // No team id yet (a session saved before shared devices, mid-restore): do not
+    // build a path out of an empty segment — just stay silent until it arrives.
+    if (!teamId) return;
     const ref = doc(db, FIRESTORE_PATHS.runChat(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
     return onSnapshot(ref, (snap) => {
       setMessages((snap.data() as { messages?: ChatMessage[] } | undefined)?.messages ?? []);
     }, () => setMessages([]));
   }, [ctx.ownerUid, ctx.gameId, ctx.runId, teamId]);
 
-  const unread = countUnreadChatMessages(messages, seen, myUid) > 0;
+  const unreadCount = countUnreadChatMessages(messages, seen, myUid);
 
-  // While the panel is open, arriving messages are being read — keep the marker
-  // in step so they don't resurface as an "unread" dot the moment the panel is
-  // collapsed again.
+  // Mirrors the original ChatSection exactly (change: play-card-simplification
+  // regression catch): while the thread is actually being VIEWED — the chat tab
+  // is the drawer's open tab — keep the seen marker in step with EVERY arriving
+  // message, not just the one at the moment the tab opened. Without this, a
+  // message that lands while the player is looking straight at it would still
+  // read as unread the instant the drawer closes, because `seen` would have been
+  // synced once, at open, and never again for the rest of the visit.
   useEffect(() => {
-    if (!open || !unread) return;
+    if (!viewing || !teamId || unreadCount === 0) return;
     const marker = chatSeenMarker(messages);
     saveChatSeen(ctx.runId, teamId, marker);
     setSeen(marker);
-  }, [open, unread, messages, ctx.runId, teamId]);
+  }, [viewing, unreadCount, messages, ctx.runId, teamId]);
 
-  function toggle() {
-    setOpen((o) => {
-      const next = !o;
-      if (next) {
-        // Opening marks everything currently in the thread as seen.
-        const marker = chatSeenMarker(messages);
-        saveChatSeen(ctx.runId, teamId, marker);
-        setSeen(marker);
-      }
-      return next;
-    });
-  }
+  return { unreadCount };
+}
+
+// ONE drawer in place of six always-mounted sections (change:
+// play-card-simplification). Which tabs exist, and which opens first, is
+// `planMoreDrawer` — pure and tested. This renders it and owns only the open/active
+// UI state.
+//
+// Closed by default: during a race the mission is the screen, and everything in
+// here is something you go looking for. The badge is what keeps that honest.
+function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
+  plan: ReturnType<typeof planMoreDrawer>;
+  renderTab: (id: DrawerTabId) => ReactNode;
+  /**
+   * Fires with the tab actually ON SCREEN (drawer open + that tab active), or
+   * `null` the instant neither is true. `null` matters as much as any id: it is
+   * what lets the caller know viewing has STOPPED (change:
+   * play-card-simplification), e.g. so the chat hook stops re-marking messages
+   * seen the moment the drawer closes.
+   */
+  onActiveTabChange?: (id: DrawerTabId | null) => void;
+}) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<DrawerTabId | null>(null);
+
+  const label: Record<DrawerTabId, string> = {
+    board: t.more.board, feed: t.more.feed, chat: t.more.chat,
+    trackables: t.more.trackables, zones: t.more.zones, devices: t.more.devices,
+  };
+
+  // The tab a player picked can VANISH mid-race (the last collectible is taken,
+  // a run ends its territory phase). Derive the active tab every render instead of
+  // trusting stored state, so the drawer can never point at a tab that is gone.
+  const active: DrawerTabId | null =
+    picked && plan.tabs.some((x) => x.id === picked) ? picked : plan.defaultTab;
+
+  useEffect(() => {
+    onActiveTabChange?.(open ? active : null);
+  }, [open, active, onActiveTabChange]);
+
+  if (plan.empty) return null;
 
   return (
-    <Collapsible
-      className="mb-3"
-      open={open}
-      onToggle={toggle}
-      header={
-        <span className="flex items-center gap-2">
-          {t.chat.chatTitle}
-          {unread && !open && (
-            // 11px white on the brand #FF5722 was 3.16:1; ink-fire takes it to 6.08:1.
-            <span className="inline-flex items-center rounded-full bg-ink-fire px-2 py-0.5 text-[11px] font-semibold text-white">
-              {t.chat.chatUnread}
+    <div className="mt-1">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-testid="more-drawer-toggle"
+        className="w-full inline-flex items-center justify-between gap-2 min-h-[48px] px-4 rounded-xl bg-app-card border border-glass-border text-sm font-semibold text-zinc-200"
+      >
+        <span className="inline-flex items-center gap-2">
+          {t.more.toggle}
+          {plan.totalBadge > 0 && (
+            // The number alone is meaningless to a screen reader sitting next to
+            // "עוד" — aria-label supplies the sentence the visible digit implies.
+            <span data-testid="more-drawer-badge" aria-label={t.more.unread({ n: plan.totalBadge })}
+              className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-ink-fire text-white text-[11px] font-bold">
+              {plan.totalBadge}
             </span>
           )}
         </span>
-      }
-    >
-      <Suspense fallback={<div className="h-24 rounded-xl bg-app-raised animate-pulse" />}>
-        <ChatPanel ctx={ctx} teamId={teamId} />
-      </Suspense>
-    </Collapsible>
+        <span aria-hidden="true" className="text-zinc-400">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-2" data-testid="more-drawer-body">
+          {plan.tabs.length > 1 && (
+            <div role="tablist" aria-label={t.more.tabsAria}
+              className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1">
+              {plan.tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  role="tab"
+                  type="button"
+                  aria-selected={active === tab.id}
+                  onClick={() => setPicked(tab.id)}
+                  data-testid={`more-tab-${tab.id}`}
+                  className={`shrink-0 inline-flex items-center gap-1.5 min-h-[40px] px-3 rounded-lg text-xs font-semibold border transition-colors ${
+                    active === tab.id
+                      ? 'bg-rp-fire/15 border-rp-fire/40 text-ink-fire'
+                      : 'bg-app-card border-glass-border text-zinc-400'
+                  }`}
+                >
+                  {label[tab.id]}
+                  {tab.badge > 0 && (
+                    <span aria-label={t.more.unread({ n: tab.badge })}
+                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-ink-fire text-white text-[10px] font-bold">
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+          {active && <div data-testid={`more-panel-${active}`}>{renderTab(active)}</div>}
+        </div>
+      )}
+    </div>
   );
 }
 
 // Trackable collectibles (change: trackable-collectibles): the run's items with their
 // holder status; the controller can pick up an unheld item or drop one it carries.
-function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeamId: string; isController: boolean }) {
+// The list is now OWNED by PlayScreen (change: play-card-simplification) so the
+// drawer can decide whether a collectibles tab should exist at all. This renders
+// what it is given and asks the owner to refetch after an action.
+function TrackablesPanel({ ctx, items, myTeamId, isController, onChanged }: {
+  ctx: Session; items: Trackable[]; myTeamId: string; isController: boolean; onChanged: () => void;
+}) {
   const { t } = useT();
-  const [items, setItems] = useState<Trackable[] | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const r = await getRunTrackables({ ownerUid: ctx.ownerUid, gameId: ctx.gameId, runId: ctx.runId });
-      setItems(r.trackables);
-    } catch { setItems([]); }
-  }, [ctx.ownerUid, ctx.gameId, ctx.runId]);
-  useEffect(() => { void load(); }, [load]);
+  const load = onChanged;
 
   // Per-row failure copy (change: play-no-silent-failures): this used to be an
   // empty catch, so a rejected pick up looked exactly like nothing happening.
@@ -928,7 +1044,7 @@ function TrackablesPanel({ ctx, myTeamId, isController }: { ctx: Session; myTeam
 
   if (!items || items.length === 0) return null;
   return (
-    <div className="mb-3 rounded-xl bg-app-card border border-glass-border p-3">
+    <div className="rounded-xl bg-app-card border border-glass-border p-3">
       <div className="text-sm font-bold text-zinc-100 mb-2">🎒 {t.trackables.title}</div>
       <div className="space-y-2">
         {items.map((tr) => {
@@ -987,7 +1103,7 @@ function ZonesPanel({ zones, ctx, myTeamId, isController, me, onCaptured }: { zo
 
   if (!zones || zones.length === 0) return null;
   return (
-    <div className="mb-3 rounded-xl bg-app-card border border-glass-border p-3">
+    <div className="rounded-xl bg-app-card border border-glass-border p-3">
       <div className="text-sm font-bold text-zinc-100 mb-2">🚩 {t.zones.title}</div>
       <div className="space-y-2">
         {zones.map((z) => {
@@ -1107,7 +1223,10 @@ function StageDropCountdown({ releaseAt, onOpen }: { releaseAt: number; onOpen: 
   );
 }
 
-function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy }: {
+function Header({
+  game, score, accent, onLeave, powerUpArmed, timeOnly, startedAt, onSos, sosBusy,
+  isTestDrive, streak = 0, streakMilestone, progress, howToPlay, onShare, sharing,
+}: {
   game: MyTeamState['game']; score: number; accent: string; onLeave: () => void; powerUpArmed?: boolean;
   // time_only runs are ranked purely by time and never award points, so the
   // in-run "score" is a permanent 0 that misreads as a total — show a live
@@ -1116,35 +1235,70 @@ function Header({ game, score, accent, onLeave, powerUpArmed, timeOnly, startedA
   // Always-reachable SOS entry point (active-race branch only). Drives the same
   // shared sosAction as the bottom SOS button, so sosBusy loads/disables both.
   onSos?: () => void; sosBusy?: boolean;
+  // Everything below folded UP into this strip (change: play-card-simplification).
+  // Each was its own full-width row above the map; together they cost the player a
+  // scroll to reach their own mission.
+  isTestDrive?: boolean;
+  streak?: number; streakMilestone?: number | null;
+  progress?: ReactNode;
+  howToPlay?: ReactNode;
+  onShare?: () => void; sharing?: boolean;
 }) {
   const { t } = useT();
   return (
-    <div className="flex items-center justify-between">
-      <div>
-        <div dir="auto" className="font-brand font-extrabold text-lg" style={{ color: accent }}>
-          {game.branding?.name ?? game.title}
+    <div className="mb-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div dir="auto" className="font-brand font-extrabold text-lg truncate" style={{ color: accent }}>
+            {game.branding?.name ?? game.title}
+          </div>
+          <div className="text-xs text-zinc-500 flex items-center gap-2 flex-wrap">
+            {timeOnly
+              ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
+              : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
+            {streak >= 2 && (
+              <span
+                key={streakMilestone ?? streak}
+                data-testid="streak-chip"
+                className={`inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-2 py-0.5 text-[11px] font-bold text-ink-fire ${streakMilestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
+              >
+                {t.play.streak({ n: streak })}
+              </span>
+            )}
+            {powerUpArmed && (
+              <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
+                {t.play.powerUpArmedChip}
+              </span>
+            )}
+            {isTestDrive && (
+              <span data-testid="test-run-chip"
+                className="inline-flex items-center rounded-full bg-app-raised border border-rp-amber/40 px-2 py-0.5 text-[11px] font-bold text-ink-amber">
+                🧪 {t.play.testRunBanner}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="text-xs text-zinc-500 flex items-center gap-2">
-          {timeOnly
-            ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
-            : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
-          {powerUpArmed && (
-            <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
-              {t.play.powerUpArmedChip}
-            </span>
+        <div className="flex items-center gap-0.5 shrink-0">
+          {howToPlay}
+          {onShare && (
+            <button type="button" onClick={onShare} disabled={sharing}
+              aria-label={t.play.shareProgress} title={t.play.shareProgress}
+              data-testid="share-progress"
+              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg text-base text-ink-fire disabled:opacity-50">
+              {sharing ? '…' : '📸'}
+            </button>
           )}
+          {onSos && (
+            <button type="button" onClick={onSos} aria-label={t.play.sosAria} disabled={sosBusy}
+              className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-2 rounded-lg text-xs font-bold text-ink-alert border border-rp-alert/40 disabled:opacity-50">
+              SOS
+            </button>
+          )}
+          <button onClick={onLeave} aria-label={t.play.leaveAria} title={t.play.leave}
+            className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] -me-2 rounded-lg text-base text-zinc-500">✕</button>
         </div>
       </div>
-      <div className="flex items-center gap-1">
-        {onSos && (
-          <button type="button" onClick={onSos} aria-label={t.play.sosAria} disabled={sosBusy}
-            className="inline-flex items-center justify-center min-h-[44px] min-w-[44px] px-3 rounded-lg text-xs font-bold text-ink-alert border border-rp-alert/40 disabled:opacity-50">
-            SOS
-          </button>
-        )}
-        <button onClick={onLeave} aria-label={t.play.leaveAria}
-          className="inline-flex items-center min-h-[44px] px-3 py-2 -me-3 rounded-lg text-xs text-zinc-500">{t.play.leave}</button>
-      </div>
+      {progress && <div className="mt-2">{progress}</div>}
     </div>
   );
 }

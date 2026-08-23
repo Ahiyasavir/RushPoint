@@ -52,12 +52,23 @@ interface FlashDoc { id: string; title: string; titleHe?: string; description?: 
 // Non-blocking live-ops banners + a collapsible leaderboard peek. Rendered above
 // the map/task card so it never covers the active mission UI.
 export default function LiveOps({
-  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false,
+  ctx, leaderboard, myTeamId, lang = 'en', timeOnly = false, showBoard = true,
 }: {
   ctx: Ctx;
   leaderboard: RunLeaderboard | null;
   myTeamId: string;
   lang?: 'en' | 'he';
+  /**
+   * Render the leaderboard peek inline (change: play-card-simplification).
+   * FALSE on the racing screen, where the board moved into the "more" drawer and
+   * this component is kept at the TOP for one reason: announcements and flash
+   * missions are the organizer talking to the team mid-race, and they used to sit
+   * BELOW the mission card with the other secondary panels — i.e. below the fold
+   * on a phone. Splitting the two means the urgent half can be promoted without
+   * dragging a leaderboard up with it. Defaults to true so every other caller is
+   * unchanged.
+   */
+  showBoard?: boolean;
   // time_only runs never award points, so the peek must show each team's time,
   // not a column of zeros (mirrors the finish/TV/public boards).
   timeOnly?: boolean;
@@ -150,7 +161,9 @@ export default function LiveOps({
   // Standings are only shown to participants once the organizer publishes them
   // (the reveal is staged); organizers see live standings on their own console.
   const hasBoard = !!leaderboard?.published && (leaderboard.rankings?.length ?? 0) > 0;
-  if (!hasBanners && !hasBoard) return null;
+  // With the board delegated to the drawer, a run with no banners renders nothing
+  // at all here rather than an empty bordered shell.
+  if (!hasBanners && !(hasBoard && showBoard)) return null;
 
   return (
     <div className="space-y-2 mb-3">
@@ -208,12 +221,12 @@ export default function LiveOps({
         );
       })}
 
-      {hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
+      {showBoard && hasBoard && leaderboard && <LeaderboardPeek leaderboard={leaderboard} myTeamId={myTeamId} lang={lang} timeOnly={timeOnly} />}
     </div>
   );
 }
 
-function LeaderboardPeek({
+export function LeaderboardPeek({
   leaderboard, myTeamId, lang, timeOnly,
 }: {
   leaderboard: RunLeaderboard; myTeamId: string; lang: 'en' | 'he'; timeOnly: boolean;

@@ -6,6 +6,11 @@ import {
   submitTaskAnswer, submitSequenceStep, triggerSOS, revealTaskAnswer,
   type MyTeamState, type SafeTask,
 } from '../services/calls';
+// The card's two decisions, kept pure so they can be tested without a DOM
+// (change: play-card-simplification): which single status line to show, and
+// which secondary actions belong behind the overflow.
+import { selectMissionNotice, type MissionNotice } from '../lib/missionNotice';
+import MissionExtras from './MissionExtras';
 import { uploadTaskPhoto, uploadTaskAudio, uploadTaskVideo } from '../services/firebase';
 import { compressImageWithReport } from '../lib/imageResize';
 import {
@@ -975,39 +980,25 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <p className="text-[11px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
         </div>
       ) : (
-        <>
-          <DistanceBadge task={task} />
-          <NavigateHereLink task={task} />
-        </>
+        // Distance stays PRIMARY: on a located mission it is the one number that
+        // decides whether you walk or look around. The navigate hand-off moves
+        // into the overflow with the rest of the recovery kit.
+        <DistanceBadge task={task} />
       )}
 
-      {/* Pause-clock tasks (change: pause-clock-tasks): the clock only stops for
-          a team that KNOWS it stopped, so say it on the card. Rendered only when
-          the creator authored the flag, so a task from before this change shows
-          nothing new. */}
-      {task.pausesTimer && (
-        <p role="status" aria-live="polite" dir="auto" data-testid="clock-paused-notice"
-          className="mt-3 text-xs text-zinc-400 bg-app-raised border border-glass-border rounded-lg px-3 py-2">
-          {`⏸ ${t.task.clockPaused}`}
-        </p>
-      )}
-
-      {/* Wrong-answer cost (change: wrong-answer-cost): state the rule BEFORE the
-          player answers, then count the retry lockout down. Rendered only when the
-          creator set a cost level, so a game authored before this change shows
-          nothing new. Says what a wrong answer COSTS, never what the answer is. */}
-      {task.answerCost && (
-        <p role="status" aria-live="polite" dir="auto" data-testid="answer-cost-notice"
-          className="mt-3 text-xs text-zinc-400 bg-app-raised border border-glass-border rounded-lg px-3 py-2">
-          {cooldownLeft > 0
-            ? `⏳ ${t.task.answerCooldown({ sec: cooldownLeft })}`
-            : task.answerCost.freeAttemptsLeft > 0
-              ? `🙂 ${t.task.answerCostFreeTries({ n: task.answerCost.freeAttemptsLeft })}`
-              : task.answerCost.nextPoints > 0
-                ? `⚠ ${t.task.answerCostNotice({ points: task.answerCost.nextPoints, sec: task.answerCost.nextCooldownSeconds })}`
-                : `⚠ ${t.task.answerCostNoticeTime({ sec: task.answerCost.nextCooldownSeconds })}`}
-        </p>
-      )}
+      {/* ONE status line, not a stack (change: play-card-simplification). The
+          pause-clock notice and all four wrong-answer-cost states used to be two
+          independently-rendered boxes that could both be on screen at once, above
+          the mission itself. `selectMissionNotice` picks the single one that
+          changes what the player does next; the testids below are preserved so a
+          cooldown/cost assertion still finds its element. */}
+      <MissionNoticeLine
+        notice={selectMissionNotice({
+          pausesTimer: task.pausesTimer,
+          answerCost: task.answerCost,
+          cooldownLeft,
+        })}
+      />
 
       <div className={readOnly ? 'mt-5 pointer-events-none opacity-60' : 'mt-5'} aria-disabled={readOnly}>
         {task.type === 'field' || task.type === 'self_report' ? (
@@ -1021,16 +1012,11 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
                 cards. Only appears once a located check-in has failed on GPS
                 (fieldGpsFailed is never set for locationless / self_report tasks,
                 which submit without a fix), never blocking the normal submit. */}
-            {fieldGpsFailed && (
+            {/* The stuck-escape ACTION moved into the overflow; the receipt stays
+                here, where the failure happened. */}
+            {fieldGpsFailed && helpAlreadySent(helpSentFor, task.id) && (
               <div className="mt-2 text-center">
-                {helpAlreadySent(helpSentFor, task.id)
-                  ? <p className="text-xs text-ink-fire font-medium" data-testid="field-help-sent">{t.task.helpSent}</p>
-                  : <button
-                      onClick={() => { void requestHelp(task.id); }}
-                      data-testid="field-help"
-                      className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-alert bg-rp-alert/10 border border-rp-alert/30 rounded-full px-4 py-2 hover:bg-rp-alert/20">
-                      {t.task.requestHelp}
-                    </button>}
+                <p className="text-xs text-ink-fire font-medium" data-testid="field-help-sent">{t.task.helpSent}</p>
               </div>
             )}
           </>
@@ -1067,23 +1053,44 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       </div>
 
 
-      {task.hasHint && (
+      {/* The revealed hint is CONTENT and stays inline; so does a FREE hint offer,
+          which the server escalates precisely so a stuck team takes it. Only the
+          PAID offer moves into the overflow below. */}
+      {hint && (
+        <p dir="auto" className="mt-3 text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
+      )}
+      {task.hasHint && !hint && task.hintFreeNow && (
         <div className="mt-3">
-          {hint
-            ? <p dir="auto" className="text-sm text-zinc-200 bg-app-raised rounded-lg px-3 py-2">💡 {hint}</p>
-            : task.hintFreeNow
-              // Hint auto escalation: the server says this hint is free right now —
-              // highlight it so a stuck team actually takes the help.
-              ? <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintFreeNow}
-                  className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-fire bg-accent/10 border border-accent/30 rounded-full px-4 py-2 hover:bg-accent/20 disabled:opacity-40">
-                  🎁 {t.task.hintFreeNow}
-                </button>
-              : <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
-                  className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-ink-warm hover:underline disabled:opacity-40">
-                  💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
-                </button>}
+          <button onClick={revealHint} disabled={frozen} aria-label={t.task.hintFreeNow}
+            className="inline-flex items-center min-h-[44px] text-xs font-semibold text-ink-fire bg-accent/10 border border-accent/30 rounded-full px-4 py-2 hover:bg-accent/20 disabled:opacity-40">
+            🎁 {t.task.hintFreeNow}
+          </button>
         </div>
       )}
+
+      {/* ONE overflow for the recovery kit (change: play-card-simplification):
+          navigate, the paid hint, and the stuck-escape. `helpSent` keeps its
+          inline receipt below rather than becoming a repeatable menu item. */}
+      {/* key={task.id}: this component owns per-task LOCAL UI state (its overflow
+          open/closed), and TaskRunner itself is never remounted between missions
+          (no key at its PlayScreen call site — everything here resets via effects
+          keyed on taskId instead). Without this key, a menu left open on one
+          mission would still be open the instant the poll reassigns the next one.
+          Same pattern as ExpiryCountdown/OrderingEntry above. */}
+      <MissionExtras
+        key={task.id}
+        hasLocation={!!navigationTarget(task)}
+        hasHint={!!task.hasHint && !hint}
+        hintFree={!!task.hintFreeNow}
+        canRequestHelp={fieldGpsFailed}
+        helpSent={helpAlreadySent(helpSentFor, task.id)}
+        readOnly={readOnly}
+        disabled={frozen}
+        navigate={<NavigateHereLink task={task} />}
+        onHint={revealHint}
+        onHelp={() => { void requestHelp(task.id); }}
+        hintLabel={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+      />
 
       {msg && (
         <p role="status" aria-live="polite" dir="auto" className={taskMessageClass(msg.tone)}>
@@ -1202,6 +1209,37 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
         {t.task.navigateMaps}
       </a>
     </div>
+  );
+}
+
+// The card's ONE status line (change: play-card-simplification). Which notice —
+// if any — is `selectMissionNotice`'s call; this only renders it. The old
+// `clock-paused-notice` / `answer-cost-notice` testids are preserved so anything
+// asserting on them still resolves.
+function MissionNoticeLine({ notice }: { notice: MissionNotice | null }) {
+  const { t } = useT();
+  if (!notice) return null;
+  const copy: Record<MissionNotice['kind'], string> = {
+    cooldown: `⏳ ${t.task.answerCooldown({ sec: notice.seconds ?? 0 })}`,
+    freeTries: `🙂 ${t.task.answerCostFreeTries({ n: notice.tries ?? 0 })}`,
+    cost: `⚠ ${t.task.answerCostNotice({ points: notice.points ?? 0, sec: notice.seconds ?? 0 })}`,
+    costTime: `⚠ ${t.task.answerCostNoticeTime({ sec: notice.seconds ?? 0 })}`,
+    paused: `⏸ ${t.task.clockPaused}`,
+  };
+  // A warning must not read like a courtesy. Tone drives the tint, so the one
+  // line the player does see is unambiguous at a glance, outdoors.
+  const tint = notice.tone === 'warn'
+    ? 'text-ink-alert bg-rp-alert/10 border-rp-alert/30'
+    : notice.tone === 'good'
+      ? 'text-ink-warm bg-app-raised border-glass-border'
+      : 'text-zinc-400 bg-app-raised border-glass-border';
+  return (
+    <p role="status" aria-live="polite" dir="auto"
+      data-testid={notice.kind === 'paused' ? 'clock-paused-notice' : 'answer-cost-notice'}
+      data-notice={notice.kind}
+      className={`mt-3 text-xs rounded-lg border px-3 py-2 ${tint}`}>
+      {copy[notice.kind]}
+    </p>
   );
 }
 
