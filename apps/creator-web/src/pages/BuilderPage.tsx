@@ -957,7 +957,7 @@ export default function BuilderPage() {
           of being squeezed to zero. At `sm` and up every class below restores
           today's exact single-row geometry. */}
       <header className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-x-2 gap-y-1 px-2 py-1.5 sm:gap-x-3 sm:px-4 sm:py-0 min-h-14 sm:h-14 border-b border-[--rp-border] bg-[--surface-1]">
-        <button onClick={() => { void leaveToGames(); }} aria-label={b.backToGames} className="flex items-center gap-1 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
+        <button onClick={() => { void leaveToGames(); }} aria-label={b.backToGames} className="flex items-center justify-center gap-1 min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 text-xs text-[--ink-3] hover:text-[--ink-1] shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 hover:bg-[--surface-2] transition-colors">
           <span className="text-sm leading-none">←</span> <span className="hidden sm:inline">{b.backToGames}</span>
         </button>
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
@@ -2747,7 +2747,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
             <span className="text-sm font-semibold text-[--ink-1] truncate">{b.stageSettings}</span>
           </div>
           <button onClick={onClose} aria-label={b.closePanel}
-            className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+            className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
             ✕
           </button>
         </div>

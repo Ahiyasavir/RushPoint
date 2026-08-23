@@ -207,7 +207,7 @@ export default function TaskWizard({
         })}
         </div>
         <button onClick={onClose} aria-label={closeLabel}
-          className="shrink-0 w-7 h-7 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
+          className="shrink-0 w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">
           ✕
         </button>
       </div>
@@ -548,7 +548,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
             <div className="flex items-center justify-between px-4 py-2.5 shrink-0 border-b border-[--rp-border]">
               <span className="font-medium text-sm text-[--ink-1]">{b.mapModalTitle}</span>
               <button onClick={() => setExpanded(false)} aria-label={b.closePanel}
-                className="w-7 h-7 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">✕</button>
+                className="w-11 h-11 flex items-center justify-center rounded-lg text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2] text-lg leading-none">✕</button>
             </div>
             <div className="flex-1 min-h-0 p-3 flex flex-col">
               <LocationStep coordinates={task.coordinates} onChange={onChange} fill />
@@ -858,7 +858,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                       ? { type: ty, pointValue: 0 }
                       : { type: ty },
                   )}
-                  className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-11 py-1.5 text-start transition-colors ${
+                  className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-12 py-1.5 text-start transition-colors ${
                     active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                   <BuilderIcon name={TYPE_ICON_NAME[ty]} className="w-4 h-4 shrink-0" />
                   <span className="text-[11px] font-medium truncate">{TYPE_META[ty].label}</span>
@@ -869,7 +869,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                   <button type="button" onClick={() => onSampleClick(ty)}
                     aria-label={b.loadSampleFor(TYPE_META[ty].label)} title={b.loadSampleFor(TYPE_META[ty].label)}
                     aria-expanded={samplePickerFor === ty}
-                    className="w-4 h-4 rounded-full bg-[--surface-2] text-[--ink-3] text-[10px] leading-none flex items-center justify-center hover:text-rp-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
+                    className="w-6 h-6 rounded-full bg-[--surface-2] text-[--ink-3] text-[11px] leading-none flex items-center justify-center hover:text-rp-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
                     ✨
                   </button>
                   <RichTooltip title={TYPE_META[ty].label} body={TYPE_META[ty].desc} svg={TYPE_ANIM[ty]} />

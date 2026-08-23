@@ -106,7 +106,12 @@ function RailEntry({ stage, index, active, onSelect, taskDragging }: {
           title={b.dragStageHandle}
           aria-label={b.dragStageHandle}
           onClick={(e) => e.stopPropagation()}
+          // 44px touch target; see the matching note in TaskCard. -mx-1.5
+          // matches THIS row's gap-1.5, so the enlarged box stops flush against
+          // the stage label; -my-2.5 grows into the card's p-2.5 instead of
+          // making every rail entry taller.
           className="cursor-grab active:cursor-grabbing select-none text-[--ink-3] touch-none rounded
+            flex items-center justify-center w-11 h-11 -mx-1.5 -my-2.5
             focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
         >⠿</span>
         <span className="text-[10px] font-semibold uppercase tracking-wide text-[--ink-3]">{b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}</span>

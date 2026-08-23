@@ -56,7 +56,7 @@ export function Button({
   };
   return (
     <button
-      className={`inline-flex items-center justify-center min-h-[40px] px-4 py-2 rounded-xl text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1] ${styles[variant]} ${className}`}
+      className={`inline-flex items-center justify-center min-h-[44px] px-4 py-2 rounded-xl text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1] ${styles[variant]} ${className}`}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...rest}
@@ -79,7 +79,7 @@ export function Input({ className = '', dense = false, ...rest }: InputHTMLAttri
   return (
     <input
       className={`
-        w-full ${dense ? 'px-2.5 py-1.5 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
+        w-full ${dense ? 'px-2.5 py-2 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
         bg-[--surface-0] dark:bg-[--surface-2]/60
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]
@@ -97,7 +97,7 @@ export function Textarea({ className = '', dense = false, ...rest }: TextareaHTM
   return (
     <textarea
       className={`
-        w-full resize-y ${dense ? 'px-2.5 py-1.5 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
+        w-full resize-y ${dense ? 'px-2.5 py-2 rounded-lg text-[13px]' : 'px-3.5 py-2.5 rounded-xl text-sm'}
         bg-[--surface-0] dark:bg-[--surface-2]/60
         border border-[--rp-border]
         text-[--ink-1] placeholder:text-[--ink-3]

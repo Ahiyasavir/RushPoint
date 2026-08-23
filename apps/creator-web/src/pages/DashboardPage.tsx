@@ -662,7 +662,7 @@ export default function DashboardPage() {
 
         {/* Stats row */}
         {games.length > 0 && (
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
             {[
               { label: d.statGamesBuilt, value: games.length, icon: '🗺️', tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30' },
               { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: '🌐', tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30' },
@@ -1018,7 +1018,7 @@ function DashboardSkeleton({ uid }: { uid?: string }) {
           </div>
           <Skeleton className="h-11 w-36 rounded-xl" />
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[68px] rounded-2xl" />)}
         </div>
       </div>

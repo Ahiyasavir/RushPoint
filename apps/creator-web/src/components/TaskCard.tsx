@@ -107,8 +107,15 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
           title={b.dragTaskHandle}
           aria-label={b.dragTaskHandle}
           onClick={(e) => e.stopPropagation()}
+          // 44px touch target (the glyph's own box was 12x24 — unhittable on a
+          // phone). The negative margin lets the enlarged box grow into the
+          // card's padding instead of the flow, so the row's other content does
+          // not shift. It is split per axis on purpose: -mx-2 matches this row's
+          // gap-2 exactly, so the box stops flush against the type chip instead
+          // of overlapping it, while -my-2.5 keeps the row at its original 24px.
           className="shrink-0 select-none text-[--ink-3] cursor-grab active:cursor-grabbing touch-none
-            focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 rounded"
+            flex items-center justify-center w-11 h-11 -mx-2 -my-2.5 rounded
+            focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
         >⠿</span>
         {/* Type chip: a small filled dot carries the family hue (the only saturated
             pixel); the label stays neutral + legible, so the grid reads calm. */}
@@ -152,7 +159,7 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
             // the labelled version ate; opacity reveals it on hover or focus while
             // the reserved width keeps the row from shifting.
             className="shrink-0 w-8 appearance-none text-center cursor-pointer rounded border border-[--rp-border]
-              bg-[--surface-2] text-[--ink-3] text-[11px] leading-none px-0 py-0.5 opacity-0
+              bg-[--surface-2] text-[--ink-3] text-[11px] leading-none px-0 py-0.5 opacity-60
               transition-opacity group-hover/card:opacity-100 focus:opacity-100 focus-visible:opacity-100"
           >
             <option value="">⋯</option>
