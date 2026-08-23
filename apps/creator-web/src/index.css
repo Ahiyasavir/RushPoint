@@ -112,6 +112,21 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Builder shell height: 100vh everywhere, upgraded to 100dvh only where the
+   browser actually supports it. `@supports` is the deliberate mechanism here
+   instead of pairing `h-screen`/`h-dvh` Tailwind classes — Tailwind's
+   compiled utility order in this build puts `.h-dvh` BEFORE `.h-screen`, so
+   two equal-specificity classes would let `h-screen` always win regardless
+   of browser support, silently discarding the dvh behavior everywhere. */
+.rp-h-dvh {
+  height: 100vh;
+}
+@supports (height: 100dvh) {
+  .rp-h-dvh {
+    height: 100dvh;
+  }
+}
+
 /* ── Ambient depth layer (mesh glows + grid) — both modes ─────────────────── */
 .rp-mesh-layer {
   position: fixed;

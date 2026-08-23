@@ -23,15 +23,46 @@ and `GalleryTaskDetailModal.tsx:122` both size against `max-h-[88dvh]` — `dvh`
 viewport, keyboard included, exactly the browser feature that doesn't exist
 in `vh`.
 
-## 2. The fix
+## 2. The fix, and a wrong first attempt worth recording
 
-```tsx
-${isBuilder ? 'h-dvh overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}
+The first attempt paired the two Tailwind utility classes directly —
+`h-screen h-dvh` — reasoning that a browser without `dvh` support would drop
+that one invalid declaration and fall back to the `h-screen` rule, matching
+the standard hand-written CSS fallback idiom (`height: 100vh; height:
+100dvh;`). **That reasoning does not transfer to two separate utility
+classes.** A code-review pass caught it before this reached the working
+tree unverified: inspecting the actual PRODUCTION build's compiled CSS
+(`apps/creator-web/dist/assets/index-*.css`) showed `.h-dvh{height:100dvh}`
+is emitted **before** `.h-screen{height:100vh}` in this build — the opposite
+of what the fallback idiom needs. Two classes of equal specificity resolve
+by the LATER rule in the stylesheet, so pairing them would have made
+`h-screen` always win, on every browser, silently discarding the entire
+point of the change while looking like a fix. (Tailwind's utility emission
+order is an implementation detail of the JIT engine, not a documented
+contract — assuming it without checking the compiled output was the actual
+mistake, not the fallback idiom itself.)
+
+The fix that ships instead uses `@supports`, which is unambiguous
+regardless of any utility ordering — `index.css`:
+```css
+.rp-h-dvh {
+  height: 100vh;
+}
+@supports (height: 100dvh) {
+  .rp-h-dvh {
+    height: 100dvh;
+  }
+}
 ```
-One class token changes (`h-screen` → `h-dvh`); `overflow-hidden flex
-flex-col` and every downstream layout (`SlidePanel`, the 3-pane workspace)
-is unchanged and now sizes against a viewport unit that shrinks with the
-keyboard instead of one that doesn't.
+`App.tsx:90`:
+```tsx
+${isBuilder ? 'rp-h-dvh overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}
+```
+`overflow-hidden flex flex-col` and every downstream layout (`SlidePanel`,
+the 3-pane workspace) is unchanged. Confirmed in the compiled CSS: `.rp-h-dvh{height:100vh}@supports (height: 100dvh){.rp-h-dvh{height:100dvh}}`
+— the unconditional `100vh` rule first, the `100dvh` upgrade gated behind
+an explicit feature query second, so a browser without `dvh` support simply
+never enters the `@supports` block rather than depending on rule order.
 
 ## 3. Test strategy
 

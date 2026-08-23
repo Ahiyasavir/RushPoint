@@ -22,11 +22,13 @@ own shell was never migrated to it.
 
 ## What Changes
 
-- `App.tsx:90` — the Builder shell's `h-screen` becomes `h-dvh` (with the
-  existing class otherwise unchanged), matching the `dvh` pattern already
-  used by the Gallery modals. `dvh` support requires a modern mobile
-  browser; all creator-web target browsers already qualify (the Gallery
-  modals rely on the same support today).
+- `App.tsx:90` — the Builder shell's `h-screen` becomes a new `rp-h-dvh`
+  class (`index.css`), which sizes to `100vh` unconditionally and upgrades
+  to `100dvh` only inside an `@supports (height: 100dvh)` block. This is
+  NOT the same as pairing `h-screen h-dvh` as two Tailwind utilities —
+  see design.md §2 for why that first attempt was actually a no-op (the
+  compiled CSS order makes `h-screen` win regardless of browser support)
+  and why `@supports` is the version that ships.
 
 ## Non-goals
 

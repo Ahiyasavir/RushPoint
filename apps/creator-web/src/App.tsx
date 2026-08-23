@@ -86,8 +86,14 @@ export default function App() {
 
   return (
     // The Builder is an app-like, fixed-height workspace (no page scroll); every
-    // other route is a normal scrolling document.
-    <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'h-dvh overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}`}>
+    // other route is a normal scrolling document. The Builder's height uses
+    // `rp-h-dvh` (index.css), not a bare `h-dvh` Tailwind class: Tailwind's
+    // compiled order puts `.h-dvh` BEFORE `.h-screen` in this build, so pairing
+    // the two utility classes would let `h-screen`'s later, equal-specificity
+    // rule always win — silently reverting to vh on every browser instead of
+    // tracking the keyboard on the ones that support dvh. `rp-h-dvh` uses
+    // `@supports` for an unambiguous, order-independent fallback instead.
+    <div className={`relative bg-[--surface-1] dark:bg-[--surface-0] text-[--ink-1] transition-colors duration-250 ${isBuilder ? 'rp-h-dvh overflow-hidden flex flex-col' : 'min-h-screen overflow-x-clip'}`}>
 
       {/* ── Animated mesh gradient ── */}
       <div className="rp-mesh-layer" aria-hidden="true">
