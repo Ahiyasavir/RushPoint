@@ -1035,7 +1035,13 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           <NumericEntry busy={answerFrozen} prefill={fillFor(task.id)} onSubmit={answer} />
         ) : task.type === 'geofence' ? (
           <>
-            <GeofenceAuto task={task} onArrive={geofenceArrive} onRequestHelp={() => { void requestHelp(task.id); }}
+            {/* Key by task id: every piece of this watcher's state (the `fired`
+                latch, the stuck timer, the last distance) is per-task, and its
+                effects key on coords/radius — which two geofence tasks at the
+                SAME stop share. Without this the effects never re-run on a task
+                change, the previous task's `fired` latch stays set, and a task
+                type with no manual submit can never be completed. */}
+            <GeofenceAuto key={task.id} task={task} onArrive={geofenceArrive} onRequestHelp={() => { void requestHelp(task.id); }}
               helpSent={helpAlreadySent(helpSentFor, task.id)} />
           </>
         ) : task.type === 'sequence' ? (
@@ -1458,9 +1464,10 @@ function GeofenceAuto({ task, onArrive, onRequestHelp, helpSent }: {
   const errorCount = useRef(0);
   useEffect(() => {
     if (!navigator.geolocation || !coords) { setGpsError(true); return; }
-    // Reset per task: if this component instance is reused for a different
-    // geofence task, the previous task's "already fired" latch must not block
-    // the new one (otherwise a transferred/next geofence never auto-checks-in).
+    // Belt-and-braces reset. Crossing to a different task is handled by the
+    // `key={task.id}` at the call site (a fresh mount, so a fresh latch) —
+    // this dep array cannot do it alone, because two geofence tasks at the same
+    // stop share coords AND radius and would never re-run the effect.
     fired.current = false;
     setGpsError(false);
     errorCount.current = 0;
