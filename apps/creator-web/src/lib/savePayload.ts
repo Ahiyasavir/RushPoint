@@ -110,7 +110,63 @@ export function buildSavePayload(game: Game): UpdateGamePayload {
   // documented "clear this" signal (safeZone), and `undefined` there means "not sent"
   // — conflating the two would silently resurrect a boundary a creator removed.
   payload.stages = dropUndefinedDeep(payload.stages);
-  return payload as unknown as UpdateGamePayload;
+  // ...and then strip non-finite numbers from the WHOLE payload, stages included.
+  //
+  // This second pass exists because the first one is deliberately scoped to `stages`,
+  // and a NaN outside them is not merely refused by the server — it never REACHES the
+  // server. The Firebase callable serializer (@firebase/functions `encode`) accepts a
+  // number only when `isFinite(data)`; a NaN falls through every branch and the call
+  // throws `Data cannot be encoded in JSON: NaN` BEFORE any request is sent. The
+  // Builder then shows its red "save failed" banner for a save the backend never saw,
+  // so nothing in the server logs can explain it, and every later autosave throws the
+  // same way — one emptied number box wedges the game until the tab is reloaded.
+  //
+  // `undefined` is NOT touched here: at top level it still means "not sent" for some
+  // fields and rides the transport's `undefined → null` mapping to CLEAR others
+  // (coverImage, branding), and the serializer encodes it happily either way. Only
+  // non-finite numbers are removed, because no creator can author one — it is always
+  // an emptied or half-typed box (`parseFloat('')`, `Number('-')`).
+  return sanitizeNonFinite(payload) as unknown as UpdateGamePayload;
+}
+
+/**
+ * Remove every non-finite number (NaN / ±Infinity) from a payload, recursively.
+ *
+ * An object PROPERTY is dropped, so the value arrives ABSENT — the state every
+ * optional server guard already accepts. An ARRAY element becomes `null` instead,
+ * because dropping it would shift every later index underneath an id. That is exactly
+ * what `JSON.stringify` does with the same input, which keeps the Builder's dirty
+ * check (`JSON.stringify(buildSavePayload(g))`) equal to what the wire carries.
+ *
+ * Everything else is preserved verbatim: `null`, `undefined`, `0`, `false`, `''` and
+ * non-plain objects (Date, class instances) all pass through untouched.
+ */
+function sanitizeNonFinite<T>(value: T, path = ''): T {
+  const bad = (v: unknown): boolean => typeof v === 'number' && !Number.isFinite(v);
+
+  if (Array.isArray(value)) {
+    return value.map((v, i) => (bad(v)
+      ? (warnNonFinite(`${path}[${i}]`), null)
+      : sanitizeNonFinite(v, `${path}[${i}]`))) as unknown as T;
+  }
+  if (value === null || typeof value !== 'object') return value;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (bad(v)) { warnNonFinite(path ? `${path}.${k}` : k); continue; }
+    out[k] = sanitizeNonFinite(v, path ? `${path}.${k}` : k);
+  }
+  return out as unknown as T;
+}
+
+/**
+ * Say WHICH field was cleared to nothing. Silently repairing it is the right save
+ * behaviour, but a repair nobody can see is how the original bug stayed invisible
+ * for so long — this line is the breadcrumb the next report will be solved by.
+ */
+function warnNonFinite(path: string): void {
+  console.warn(`[savePayload] dropped a non-finite value at "${path}" — a number field was left empty or half-typed`);
 }
 
 /**

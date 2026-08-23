@@ -59,6 +59,31 @@ function taskOf(payload: unknown): Record<string, unknown> {
   return p.stages?.[0]?.tasks?.[0] ?? {};
 }
 
+/**
+ * The rule @firebase/functions' `encode` actually applies (node_modules/@firebase/
+ * functions/dist/index.cjs.js): a number passes ONLY when `isFinite`, and anything
+ * that matches no branch throws "Data cannot be encoded in JSON". `undefined` and
+ * `null` are fine (both become null); only non-finite numbers fall through.
+ * Re-stated here rather than imported because the SDK does not export it.
+ */
+function firstNonFinite(value: unknown, path = ''): string | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? null : path || '<root>';
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = firstNonFinite(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (value === null || typeof value !== 'object') return null;
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const hit = firstNonFinite(v, path ? `${path}.${k}` : k);
+    if (hit) return hit;
+  }
+  return null;
+}
+const encodableByFirebase = (value: unknown): boolean => firstNonFinite(value) === null;
+
 // ── The reported bug: clearing the timer group ────────────────────────────────
 {
   const task = taskOf(buildSavePayload(gameWith({
@@ -143,6 +168,40 @@ function taskOf(payload: unknown): Record<string, unknown> {
   const task = taskOf(buildSavePayload(gameWith({ pointValue: 0, expectedDurationMinutes: 12 })) as unknown as Record<string, unknown>);
   check('0 is an authored value and is kept', task.pointValue === 0, JSON.stringify(task.pointValue));
   check('a real duration is kept', task.expectedDurationMinutes === 12, JSON.stringify(task.expectedDurationMinutes));
+}
+
+// ── A non-finite OUTSIDE stages is worse: the request is never even sent ──────
+// The `stages` cleaner above covers task fields. Everywhere else — a game-level
+// number, a nested object, an array element — a NaN used to survive into the
+// callable, and @firebase/functions' `encode` accepts a number ONLY when
+// `isFinite(...)`: it falls through every branch and THROWS
+// "Data cannot be encoded in JSON: NaN" before any HTTP request exists. So the
+// Builder reported a failed save that the backend never saw (nothing in the server
+// logs, no callable.error), and every later autosave threw identically — the game
+// stayed wedged until the tab was reloaded, losing the work in it.
+{
+  const g = gameWith({});
+  const o = g as unknown as Record<string, unknown>;
+  o.safeZone = { center: { lat: 31.7, lng: 35.2 }, radiusMeters: Number.NaN };
+  o.approxLocation = { lat: Number.POSITIVE_INFINITY, lng: 35 };
+  const payload = buildSavePayload(g) as unknown as Record<string, unknown>;
+
+  const zone = payload.safeZone as { center?: Record<string, unknown>; radiusMeters?: unknown };
+  check('a cleared radius (NaN) is dropped, not sent', !('radiusMeters' in zone), JSON.stringify(zone.radiusMeters));
+  check('its finite siblings survive', zone.center?.lat === 31.7 && zone.center?.lng === 35.2);
+  check('a non-finite inside approxLocation is dropped',
+    !('lat' in (payload.approxLocation as Record<string, unknown>)), JSON.stringify(payload.approxLocation));
+  check('the WHOLE payload is now encodable by the callable serializer',
+    encodableByFirebase(payload), firstNonFinite(payload) ?? '');
+}
+// An array element cannot be DROPPED — that would shift every later index underneath
+// an id — so it becomes null, exactly as JSON.stringify would render it.
+{
+  const g = gameWith({});
+  (g as unknown as Record<string, unknown>).tags = ['a', Number.NaN as unknown as string, 'b'];
+  const payload = buildSavePayload(g) as unknown as Record<string, unknown>;
+  check('a non-finite array element becomes null and keeps its position',
+    JSON.stringify(payload.tags) === JSON.stringify(['a', null, 'b']), JSON.stringify(payload.tags));
 }
 
 // ── Totality: the cleaner must not corrupt the payload's shape ────────────────

@@ -312,10 +312,10 @@ function LoginScreen() {
 
           {mode === 'up' && (
             <p className="text-center text-[10px] text-[--ink-3] leading-relaxed pt-1">
-              {t.auth.agreeToTerms(
-                <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.termsLink}</a> as unknown as string,
-                <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.privacyLink}</a> as unknown as string,
-              )}
+              {t.auth.agreeToTermsLead}
+              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.termsLink}</a>
+              {t.auth.agreeToTermsBetween}
+              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.privacyLink}</a>
             </p>
           )}
 

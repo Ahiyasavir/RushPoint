@@ -152,7 +152,12 @@ const HE = {
     validationEmail:   'אנא הכנס את האימייל שלך.',
     validationPwdLen:  'הסיסמה חייבת להכיל לפחות 8 תווים.',
     validationPwdMatch: 'הסיסמאות אינן תואמות.',
-    agreeToTerms: (terms: string, privacy: string) => `בלחיצה על "יצירת חשבון" אתה מסכים ל${terms} ול${privacy}`,
+    // The two legal links are real <a> elements, so this consent line is stored as
+    // the TEXT AROUND them rather than as a function taking them as arguments: a
+    // JSX element interpolated into a template literal stringifies to
+    // "[object Object]", which is exactly what every new creator used to read.
+    agreeToTermsLead: 'בלחיצה על "יצירת חשבון" אתה מסכים ל',
+    agreeToTermsBetween: ' ול',
   },
   dashboard: {
     welcomeBack:    (name: string) => `ברוך הבא, ${name}`,
@@ -2161,7 +2166,8 @@ const EN: typeof HE = {
     validationEmail:   'Please enter your email.',
     validationPwdLen:  'Password must be at least 8 characters.',
     validationPwdMatch: 'Passwords do not match.',
-    agreeToTerms: (terms: string, privacy: string) => `By creating an account you agree to the ${terms} and ${privacy}`,
+    agreeToTermsLead: 'By creating an account you agree to the ',
+    agreeToTermsBetween: ' and ',
   },
   dashboard: {
     welcomeBack:    (name: string) => `Welcome back, ${name}`,
