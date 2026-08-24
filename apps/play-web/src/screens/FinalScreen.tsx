@@ -163,6 +163,38 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
   const sharePodiumAction = useAsyncAction(sharePodiumFn);
   const busy = shareAction.busy || sharePhotoAction.busy || sharePodiumAction.busy;
 
+  // ── Test mode (change: test-mode-hidden-scoring) ───────────────────────────
+  // A neutral finish: completion only — no score, no rank, no podium, no board,
+  // no share card. An EARLY RETURN rather than a dozen `!sealed &&` guards, so no
+  // scoring surface below can be reintroduced by accident; the payload is already
+  // empty of scores, so everything under here would render blanks anyway.
+  //
+  // Placed AFTER every hook on purpose. Returning above them would run one hook
+  // fewer on this render than the last, which is React error #300 — the exact
+  // crash `react-hooks/rules-of-hooks` exists to catch.
+  if (game.testMode === true) {
+    return (
+      <Screen>
+        <div data-testid="final-screen-test-mode" className="flex-1 flex flex-col items-center justify-center text-center gap-5">
+          <div className="animate-score-pop">
+            <div
+              className="w-24 h-24 rounded-3xl flex items-center justify-center text-5xl mx-auto mb-3"
+              style={{ background: `radial-gradient(circle at 40% 35%, ${accent}30, ${accent}08)`, boxShadow: `0 0 40px ${accent}40` }}
+            >
+              ✅
+            </div>
+            <h1 className="font-brand text-4xl font-extrabold" style={{ color: accent }}>{t.play.testModeDoneTitle}</h1>
+            <p dir="auto" className="text-zinc-400 mt-1">{t.final.subtitle({ name: team.displayName })}</p>
+          </div>
+          <Card className="p-6 w-full" style={{ borderColor: `${accent}30` }}>
+            <p className="text-zinc-400">{t.play.testModeDoneBody}</p>
+          </Card>
+          <Button variant="ghost" onClick={onLeave} className="w-full">{t.final.leave}</Button>
+        </div>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <div data-testid="final-screen" className="flex-1 flex flex-col items-center justify-center text-center gap-5">

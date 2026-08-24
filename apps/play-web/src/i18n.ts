@@ -215,6 +215,7 @@ const HE = {
     wrongCode: 'קוד שגוי. נסו שוב.',
     yourAnswer: 'התשובה שלכם',
     submitAnswer: 'שלח תשובה',
+    answerSending: 'קיבלנו את הבחירה שלכם, בודקים…',
     enterNumber: 'הזינו מספר',
     submit: 'שלח',
     uploadingPhoto: 'מעלה תמונה…',
@@ -273,6 +274,9 @@ const HE = {
     failed: 'נכשל',
     uploadFailed: 'ההעלאה נכשלה, נסו שוב.',
     notQuite: 'לא מדויק. נסו שוב.',
+    // Test mode (change: test-mode-hidden-scoring): the neutral receipt that
+    // REPLACES both the right and the wrong verdict.
+    testModeAnswerRecorded: 'התשובה נשמרה. ממשיכים הלאה.',
     // Wrong-answer cost (change: wrong-answer-cost): the participant is told the
     // rule BEFORE answering, and what it cost after.
     answerCostFreeTries: ({ n }: { n: number }) => `ניסיונות ללא עלות שנותרו: ${n}`,
@@ -537,6 +541,11 @@ const HE = {
     howToPlayTitle: 'איך משחקים',
     howToPlayClose: 'הבנתי',
     score: 'ניקוד',
+    // Test mode (change: test-mode-hidden-scoring): replaces the score counter.
+    // Names the mode plainly so a player is not left wondering where the points went.
+    testModeChip: 'מצב מבחן',
+    testModeDoneTitle: 'סיימתם!',
+    testModeDoneBody: 'כל התשובות שלכם נשמרו ונשלחו למנהל המשחק.',
     leave: 'יציאה',
     leaveAria: 'יציאה מהמשחק',
     sosAria: 'שליחת קריאת מצוקה למארגנים',
@@ -916,6 +925,7 @@ const EN: typeof HE = {
     wrongCode: 'Wrong code. Try again.',
     yourAnswer: 'Your answer',
     submitAnswer: 'Submit answer',
+    answerSending: 'Got your pick, checking…',
     enterNumber: 'Enter a number',
     submit: 'Submit',
     uploadingPhoto: 'Uploading photo…',
@@ -970,6 +980,9 @@ const EN: typeof HE = {
     failed: 'Failed',
     uploadFailed: 'Upload failed, try again.',
     notQuite: 'Not quite. Try again.',
+    // Test mode (change: test-mode-hidden-scoring): the neutral receipt that
+    // REPLACES both the right and the wrong verdict.
+    testModeAnswerRecorded: 'Answer saved. Moving on.',
     answerCostFreeTries: ({ n }: { n: number }) => `Free attempts left: ${n}`,
     answerCostNotice: ({ points, sec }: { points: number; sec: number }) => `A wrong answer costs ${points} points and a ${sec} second wait`,
     answerCostNoticeTime: ({ sec }: { sec: number }) => `A wrong answer costs a ${sec} second wait`,
@@ -1226,6 +1239,10 @@ const EN: typeof HE = {
     howToPlayTitle: 'How to play',
     howToPlayClose: 'Got it',
     score: 'Score',
+    // Test mode (change: test-mode-hidden-scoring): replaces the score counter.
+    testModeChip: 'Test mode',
+    testModeDoneTitle: "You're done!",
+    testModeDoneBody: 'All your answers were saved and sent to the organizer.',
     leave: 'Leave',
     leaveAria: 'Leave the game',
     sosAria: 'Send an SOS alert to the organizers',

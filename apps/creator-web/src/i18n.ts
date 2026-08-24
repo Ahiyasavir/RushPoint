@@ -1579,6 +1579,9 @@ const HE = {
     powerUpsHint: 'סיכוי של בערך 25% בכל משימה שהושלמה לזכות בכוח מיוחד: פי 2 נקודות במשימה הבאה או 15 נקודות בונוס.',
     manualRevealLabel: 'חשיפה ידנית של טבלת הדירוג',
     manualRevealHint: 'בסיום המשחק הדירוג יישאר מוסתר מהמשתתפים עד שתחשפו אותו מלוח הבקרה של ההרצה.',
+    testModeLabel: 'מצב מבחן',
+    testModeHint: 'המשתתפים לא רואים ניקוד ולא יודעים אם ענו נכון. כל תשובה נרשמת והמשחק ממשיך הלאה.',
+    testModeCaveats: 'הניקוד ממשיך לרוץ ונשאר גלוי לכם בלוח הבקרה ובדוחות. שימו לב: הפעלה באמצע הרצה חיה מסתירה את הניקוד מהמשתתפים מיד, ורמת הקושי מותאמת לפי אחוז התשובות הנכונות רק אם הגדרתם דרגות קושי למשימות.',
     pinnedFirstLabel: 'תעדוף במאגר המשימות',
     pinnedFirstHint: 'המשימות של המשחק הזה יופיעו ראשונות במאגר המשימות של כל היוצרים, לפני משימות פופולריות יותר.',
     // Group the four feature toggles under one collapsed section (change: builder-settings-grouping).
@@ -3580,6 +3583,9 @@ const EN: typeof HE = {
     powerUpsHint: 'About a 25% chance on each completed mission to win a power up: 2x points on the next mission, or 15 bonus points.',
     manualRevealLabel: 'Manual leaderboard reveal',
     manualRevealHint: 'When the game ends the standings stay hidden from players until you reveal them from the run console.',
+    testModeLabel: 'Test mode',
+    testModeHint: 'Players see no score and never learn whether an answer was right. Every answer is recorded and the game moves on.',
+    testModeCaveats: 'Scoring keeps running and stays visible to you in the run console and reports. Note: switching this on during a live run hides scores from players immediately, and difficulty only adapts to accuracy if your missions have difficulty levels set.',
     pinnedFirstLabel: 'Priority in the mission library',
     pinnedFirstHint: 'This game’s missions show up first in every creator’s mission library, ahead of more popular ones.',
     // Group the four feature toggles under one collapsed section (change: builder-settings-grouping).

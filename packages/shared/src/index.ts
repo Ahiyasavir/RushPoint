@@ -104,6 +104,10 @@ export * from './tags';
 // Live per-run task availability — the pause/close/resume decision both the
 // routing filters and the run console read (change: live-task-pause).
 export * from './liveTaskStatus';
+// Test mode / assessment mode (change: test-mode-hidden-scoring) — the seal
+// predicate, the participant team projection (a SECURITY boundary, not chrome)
+// and the accuracy-derived routing strength.
+export * from './testMode';
 // Admin-managed game templates (change: admin-manage-game-templates) — the
 // sibling-emoji/order-match predicate shared by setGameTemplateFlag and its test.
 export * from './gameTemplates';

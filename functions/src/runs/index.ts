@@ -119,6 +119,10 @@ import {
 } from '@rushpoint/shared';
 // Pause-clock tasks (change: pause-clock-tasks) — the excluded-duration rule.
 import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSeconds } from '@rushpoint/shared';
+// Test mode (change: test-mode-hidden-scoring) — the seal predicate, the participant
+// team projection (the SECURITY boundary for the sealed payload, not chrome) and the
+// stored-answer bound.
+import { sealsScoreFromParticipant, sanitizeTeamForParticipant, boundStoredAnswer } from '@rushpoint/shared';
 import { shouldEmailRunSummary } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
@@ -126,6 +130,10 @@ import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboar
 import { bumpPublicSignals } from '../gallery/popularityStore';
 import { assignTask, claimSpecificTask, releaseTask, computeSkillRatio, buildRecommendations, withLockRetry } from '../routing/assignNextTask';
 import type { NoAssignmentReason } from '../routing/assignNextTask';
+// Test mode (change: test-mode-hidden-scoring): pace vs accuracy as the routing
+// strength signal — ONE decision, shared by the assignment path and the
+// recommendation list so the two can never disagree about difficulty.
+import { resolveRoutingSkillRatio } from '../routing/testModeRouting';
 import { reconcileTaskCounts } from '../routing/reconcileTaskCounts';
 import { sanitizeTaskForParticipant } from './sanitizeTask';
 // Guardian-consent assignment gate (change: consent-gate-routing): the pure,
@@ -783,7 +791,7 @@ export async function completeTaskForTeam(
   now: string,
   // survey-tasks: optional per-completion extras stamped onto the team's task
   // record INSIDE the existing transaction (no new transaction, no new reads).
-  extras?: { surveyResponse?: string },
+  extras?: { surveyResponse?: string; submittedAnswer?: string; wasCorrect?: boolean },
 ): Promise<{ completed: boolean; heldSlot: boolean }> {
   // Returns { completed, heldSlot }. `completed` is TRUE only when this call
   // actually transitioned the task to completed; a duplicate/idempotent no-op
@@ -966,7 +974,14 @@ export async function completeTaskForTeam(
     }
 
     let earnedScore = 0;
-    if (gameTask) {
+    // Test mode (change: test-mode-hidden-scoring): a WRONG answer completes the
+    // task — that is the whole point — but it must not be PAID for. Scoring every
+    // completion regardless of correctness would make the creator's score column
+    // read "questions attempted", which is useless for the grading this mode
+    // exists to enable. `wasCorrect === false` is the only case that zeroes; a
+    // task with no recorded verdict (a field check-in, a photo) scores normally.
+    const gradedWrong = extras?.wasCorrect === false;
+    if (gameTask && !gradedWrong) {
       switch (game.scoringPreset) {
         case 'time_only':
           earnedScore = 0;
@@ -1034,6 +1049,18 @@ export async function completeTaskForTeam(
     // no-op, so the first response is final and is never overwritten.
     if (extras?.surveyResponse != null) {
       taskRec.surveyResponse = extras.surveyResponse;
+    }
+    // Test mode (change: test-mode-hidden-scoring): stamp WHAT the participant
+    // answered and whether it was right, through the same whole-object stage
+    // rewrite. Inside this transaction on purpose — a submission must never exist
+    // without its verdict, and the already-completed guard above makes a double
+    // tap a no-op, so the FIRST answer is the graded one and is never overwritten.
+    // Owner-only: sanitizeTeamForParticipant never allow-lists either field.
+    if (extras?.submittedAnswer != null) {
+      taskRec.submittedAnswer = extras.submittedAnswer;
+    }
+    if (extras?.wasCorrect != null) {
+      taskRec.wasCorrect = extras.wasCorrect;
     }
 
     // Power-ups (change: power-ups) — ALL inside this existing transaction; no new
@@ -2794,7 +2821,13 @@ export const getPublicLeaderboard = loggedCallable('getPublicLeaderboard', async
   const run = runSnap.exists ? (runSnap.data() as Run) : null;
 
   const board = run?.leaderboard;
-  const published = !!board?.published;
+  // Test mode (change: test-mode-hidden-scoring): a standing IS a score, and the
+  // shareable board is the one participant-facing standing that never passes
+  // through getMyTeamState — so it has to be sealed here or the neutral finish is
+  // undone by anyone holding the access code. Forcing `published` false reuses the
+  // existing withheld path end to end (rankings, ceremony feed, the client's
+  // "not published yet" state) rather than inventing a second empty shape.
+  const published = !!board?.published && !sealsScoreFromParticipant(game);
 
   // Ceremony mode (change: ceremony-mode): the run's top-liked approved feed
   // items, server-selected + capped, so the big screen never needs a Firestore
@@ -4042,7 +4075,7 @@ export async function assignNextInActiveStage(
   const candidateTasks = gameStage.tasks.filter(
     (gt) => stageRec.tasks.find((tr) => tr.taskId === gt.id)?.status === 'unassigned',
   );
-  const skillRatio = await computeSkillRatio(
+  const paceSkillRatio = await computeSkillRatio(
     team.stages.flatMap((s) => s.tasks).filter((t) => t.status === 'completed').map((t) => ({
       taskId: t.taskId, actualMinutes: t.actualMinutes, completedAt: t.completedAt, startedAt: t.startedAt,
       // pause-clock-tasks: carried so computeSkillRatio can drop a paused record
@@ -4051,6 +4084,10 @@ export async function assignNextInActiveStage(
     })),
     game.stages.flatMap((s) => s.tasks),
   );
+  // Test mode (change: test-mode-hidden-scoring) routes on ACCURACY instead of
+  // pace — a wrong answer completes the task there, so "fast" stops meaning
+  // "strong". Returns the pace ratio unchanged for every normal run.
+  const skillRatio = resolveRoutingSkillRatio(game, team, paceSkillRatio);
   const result = await assignTask(
     teamLocation, candidateTasks, completedTaskIds, skillRatio,
     ownerUid, gameId, runId,
@@ -4302,7 +4339,12 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
     // recorded wrong-attempt count. Free ⇒ record the reveal in taskHintsUsed as
     // usual (idempotence unchanged) but leave bonusPenalty untouched.
     const rec = team.stages.flatMap((s) => s.tasks).find((r) => r.taskId === taskId);
-    const free = isHintFree(
+    // Test mode (change: test-mode-hidden-scoring): a hint is always free on a run
+    // that seals scoring. Charging points the participant is not permitted to see
+    // is an invisible punishment — they cannot weigh the cost, notice it, or learn
+    // from it. Decided here, inside the same transaction as every other charge
+    // decision, so there is no TOCTOU between "is it free?" and "charge".
+    const free = sealsScoreFromParticipant(game) || isHintFree(
       { startedAt: rec?.startedAt, wrongAttempts: team.taskAttempts?.[taskId] ?? 0 },
       escalation,
       Date.now(),
@@ -4627,6 +4669,46 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   // Task expiry (change: task-expiry): a closed task takes no more answers.
   await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
 
+  // ── Test mode (change: test-mode-hidden-scoring) ────────────────────────────
+  // On a run whose game seals scoring, an answer is FREE AND FINAL: it completes
+  // the task and routing moves on, right or wrong. So every pre-grade gate below
+  // is skipped wholesale rather than neutralised piecemeal — the attempt cap, the
+  // replay guard and the retry cooldown all exist to make a wrong answer
+  // expensive, and there is no cheaper way to be wrong than "it already counted".
+  //
+  // Skipping is also what keeps the participant unstuck: a lockout they are not
+  // allowed to see the reason for is a stuck player with no signal, which is worse
+  // than the feedback this mode removes. And because the first submission
+  // completes the task, re-submitting cannot re-grade it — there is nothing left
+  // to brute-force, which is what the attempt cap defended.
+  //
+  // The answer is still GRADED and still SCORED: the creator's console, analytics,
+  // leaderboard and recap are untouched. Only the verdict's visibility and its
+  // consequences change.
+  if (sealsScoreFromParticipant(game)) {
+    const correctSealed = ordering
+      ? matchesOrderedAnswer(task.orderItems as string[], orderedAnswer)
+      : matchesTaskAnswer(task, String(answer));
+    const nowSealed = new Date().toISOString();
+    const { completed } = await completeTaskForTeam(
+      ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, nowSealed,
+      {
+        submittedAnswer: boundStoredAnswer(ordering ? JSON.stringify(orderedAnswer) : answer),
+        wasCorrect: correctSealed,
+      },
+    );
+    // `recorded` is the whole verdict the participant gets. `correct` is OMITTED,
+    // never set to a fixed value: an always-true field would be a false statement
+    // on the wire that some future client could surface, whereas an absent field
+    // cannot be misread. A correct and a wrong answer return the identical key set.
+    if (!completed) return { recorded: true, nextTaskId: null };
+    const teamLocSealed = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
+    const nextSealed = await assignNextInActiveStage(
+      ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLocSealed, nowSealed,
+    );
+    return { recorded: true, nextTaskId: nextSealed.taskId ?? null };
+  }
+
   // ── Pre-grade gates ─────────────────────────────────────────────────────────
   // Everything below runs BEFORE the answer is graded, on ONE team read. Order
   // matters and is deliberate:
@@ -4902,7 +4984,7 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
 
   const completedTaskIds = team.stages.flatMap((s) => s.tasks)
     .filter((t) => t.status === 'completed').map((t) => t.taskId);
-  const skillRatio = await computeSkillRatio(
+  const paceSkillRatio = await computeSkillRatio(
     team.stages.flatMap((s) => s.tasks).filter((t) => t.status === 'completed').map((t) => ({
       taskId: t.taskId, actualMinutes: t.actualMinutes, completedAt: t.completedAt, startedAt: t.startedAt,
       // pause-clock-tasks: carried so computeSkillRatio can drop a paused record
@@ -4911,6 +4993,10 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
     })),
     game.stages.flatMap((s) => s.tasks),
   );
+  // Test mode (change: test-mode-hidden-scoring) routes on ACCURACY instead of
+  // pace — a wrong answer completes the task there, so "fast" stops meaning
+  // "strong". Returns the pace ratio unchanged for every normal run.
+  const skillRatio = resolveRoutingSkillRatio(game, team, paceSkillRatio);
 
   const recommendations = await buildRecommendations(
     { lat, lng }, gameStage.tasks, completedTaskIds, skillRatio,
@@ -4978,6 +5064,12 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   // NOTE: this is a PAYLOAD concern only. completeTask / submitTaskAnswer /
   // verifyStationCode keep their own authorization + locked/unreleased/expired
   // gates unchanged — omission is never the security control.
+  // Test mode (change: test-mode-hidden-scoring). Declared HERE, above the task
+  // decoration below, because that .map reads it and runs immediately — leaving
+  // this next to its other use (the team projection at the return) put it in the
+  // temporal dead zone and crashed every getMyTeamState with "Cannot access
+  // 'sealed' before initialization". tsc cannot see that across a closure.
+  const sealed = sealsScoreFromParticipant(game);
   const recByTaskId = new Map(
     (activeStageIdx >= 0 ? team.stages[activeStageIdx].tasks : []).map((r) => [r.taskId, r]),
   );
@@ -4997,7 +5089,24 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
           // team's ACTIVE task with a display-only `hintFreeNow` flag. The charge
           // decision is re-made inside requestTaskHint's transaction, so a stale
           // flag can never mischarge — this only lights up the free-hint button.
-          if (
+          // Test mode (change: test-mode-hidden-scoring): the attempt cap does not
+          // apply on a sealed run, so it must not be ADVERTISED either. The play
+          // app uses this value to warn "a wrong answer spends one of your 2
+          // remaining attempts" before submitting — a warning that is false there,
+          // and which tells the participant that wrong answers are a thing that
+          // happens to them, in the one mode built to withhold exactly that.
+          if (sealed && safe.smart && typeof safe.smart === 'object') {
+            delete (safe.smart as Record<string, unknown>).attemptLimit;
+          }
+          // Test mode (change: test-mode-hidden-scoring): every hint is free on a
+          // sealed run, so report it through the EXISTING free-hint flag rather
+          // than adding a second signal. Without this the participant app still
+          // renders the price tag ("gy a hint (-25 pts)") for a charge the server
+          // no longer applies — a score on screen in the one mode that must show
+          // none, and a lie about the cost besides.
+          if (assignedActiveRec?.taskId === t.id && sealed && safe.hasHint) {
+            safe.hintFreeNow = true;
+          } else if (
             assignedActiveRec?.taskId === t.id &&
             (t.hintAutoRevealMinutes != null || t.hintAutoRevealAttempts != null) &&
             isHintFree(
@@ -5018,7 +5127,11 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
           // fragment of an answer key; the real charge is re-decided inside
           // submitTaskAnswer's transaction. Omitted entirely when the level is
           // 'off', so a game authored before this change ships an identical payload.
+          // Test mode (change: test-mode-hidden-scoring): no cost is charged on a
+          // sealed run, so warning about one would be both a lie and a leak — the
+          // warning names a point value, which is a score.
           if (
+            !sealed &&
             assignedActiveRec?.taskId === t.id &&
             (t.type === 'quiz' || t.type === 'numeric')
           ) {
@@ -5132,8 +5245,19 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   const holdReason: 'guardian_consent' | null =
     !team.launched && !isConsentSatisfied(team, game) ? 'guardian_consent' : null;
 
+  // ── Test mode (change: test-mode-hidden-scoring) ────────────────────────────
+  // THE seal. This function returns the team document WHOLE, so every field on
+  // RunTeam and on each nested RunTaskRecord reaches the device — task CONTENT is
+  // sanitized by construction, team PROGRESS never was. Hiding a score in play-web
+  // would leave it sitting in this response, readable in devtools; the projection
+  // below is the actual boundary, exactly as `run.leaderboard`'s `published` gate
+  // is for the staged reveal.
+  //
+  // It runs on EVERY run, not only sealed ones: the recorded submission fields are
+  // stripped in both modes (they are simply never allow-listed), because a stored
+  // `wasCorrect` has no participant use in any game and would void this feature.
   return {
-    team,
+    team: sanitizeTeamForParticipant(team, sealed),
     // Why the team is held back from starting, or null when it is not.
     holdReason,
     stageNarratives,
@@ -5149,7 +5273,10 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       // `published` before rendering, but an unpublished board on the wire is
       // still readable in devtools — which would defeat a staged reveal. Gate it
       // at the source so "hidden from players" means hidden, not just unrendered.
-      leaderboard: run.leaderboard?.published ? run.leaderboard : null,
+      // Test mode seals the board outright, on top of the `published` gate: a
+      // standing is a score, and this run has none as far as the player is
+      // concerned (change: test-mode-hidden-scoring).
+      leaderboard: !sealed && run.leaderboard?.published ? run.leaderboard : null,
       // Active hot zone (hot-zone-bonus) so the participant app can show the
       // live "🔥 Hot Zone" banner + countdown. Coordinates are the zone centre
       // (already public to anyone in the run); answer keys are unaffected.
@@ -5167,6 +5294,12 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
       // Live photo feed (live-photo-feed): whether the play app should show the
       // Feed panel. Not a secret; the write-side gate lives in the functions.
       photoFeedEnabled: game.photoFeedEnabled !== false,
+      // Test mode (change: test-mode-hidden-scoring): tells the participant app to
+      // render its sealed chrome — no score header, no right/wrong feedback, no
+      // board, a neutral finish. Presentation only; the payload above is already
+      // empty of everything it would otherwise show, so this flag decides how the
+      // absence LOOKS, never whether the data is withheld.
+      testMode: sealed,
       // Game intro primer (change: game-intro-instructions): the "How to play"
       // card/modal content. Cleaned at the echo boundary so even a legacy/hand-edited
       // doc with a non-https image is https-guarded on the way out. null when unset.

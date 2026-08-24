@@ -493,7 +493,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         <ReconnectingPill show={reconnecting} text={t.play.reconnecting} />
         <Header game={game} score={team.score} accent={accent} onLeave={leave}
           timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt} />
-        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} />
+        <LiveOps ctx={session} leaderboard={state.run.leaderboard} myTeamId={team.id} lang={lang} timeOnly={game.scoringPreset === 'time_only'} showBoard={game.testMode !== true} />
         <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
           <div className="text-5xl">{hold.held ? '🙋' : '⏳'}</div>
           <h2 dir="auto" className="text-xl font-bold">{t.play.youreIn({ name: team.displayName })}</h2>
@@ -604,6 +604,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
           How-to-play and share became icon buttons; both carry aria-labels,
           because an icon-only button with no accessible name is a defect the
           play-web a11y scan fails on. */}
+      {/* Test mode (change: test-mode-hidden-scoring): the brag card is withheld —
+          storyCard bakes score and rank into the image pixels, and a sealed run
+          has neither, so the button would draw blanks. */}
       <Header game={game} score={team.score} accent={accent} onLeave={leave} powerUpArmed={powerUpArmed}
         timeOnly={game.scoringPreset === 'time_only'} startedAt={team.startedAt}
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
@@ -611,7 +614,7 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         streak={streak} streakMilestone={milestone}
         progress={<Progress done={completedStages} total={team.stages.length} />}
         howToPlay={<HowToPlayButton instructions={game.instructions} lang={lang} />}
-        onShare={() => void shareAction.run()} sharing={sharing}
+        onShare={game.testMode === true ? undefined : () => void shareAction.run()} sharing={sharing}
       />
       {/* Announcements + flash missions are the organizer TALKING to this team
           mid-race. They used to render below the mission with the other secondary
@@ -1245,6 +1248,11 @@ function Header({
   onShare?: () => void; sharing?: boolean;
 }) {
   const { t } = useT();
+  // Test mode (change: test-mode-hidden-scoring): no score, no streak, no power-up
+  // chip — every one of them is a scoring signal. Read off the game rather than
+  // threaded as a prop, so a caller cannot forget to pass it. The server has
+  // already stripped these values, so this only decides how the absence looks.
+  const sealed = game.testMode === true;
   return (
     <div className="mb-3">
       <div className="flex items-center justify-between gap-2">
@@ -1253,10 +1261,12 @@ function Header({
             {game.branding?.name ?? game.title}
           </div>
           <div className="text-xs text-zinc-500 flex items-center gap-2 flex-wrap">
-            {timeOnly
-              ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
-              : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
-            {streak >= 2 && (
+            {sealed
+              ? <span data-testid="test-mode-chip">{t.play.testModeChip}</span>
+              : timeOnly
+                ? <span aria-label={t.board.elapsed}>⏱ <ElapsedClock startedAt={startedAt} /></span>
+                : <span>{t.play.score}: <span aria-live="polite" className="text-ink-fire font-mono">{score}</span></span>}
+            {!sealed && streak >= 2 && (
               <span
                 key={streakMilestone ?? streak}
                 data-testid="streak-chip"
@@ -1265,7 +1275,7 @@ function Header({
                 {t.play.streak({ n: streak })}
               </span>
             )}
-            {powerUpArmed && (
+            {!sealed && powerUpArmed && (
               <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
                 {t.play.powerUpArmedChip}
               </span>

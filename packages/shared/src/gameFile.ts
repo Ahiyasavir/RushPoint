@@ -112,6 +112,9 @@ export const EXPORTED_GAME_KEYS = [
   'requiresGuardianConsent', 'minAge', 'safeZone', 'benchmarkOptOut',
   'allowInstantPlay', 'photoFeedEnabled', 'powerUpsEnabled', 'instructions',
   'manualLeaderboardReveal',
+  // Test mode (change: test-mode-hidden-scoring): authored play behaviour, so it
+  // round trips through export/import like any other setting.
+  'testMode',
   // הקמה מהירה / Quick Setup (change: quick-setup-wizard). Pure authorship — the
   // setup instructions a template carries — so it round trips like any other
   // authored field. It points at stage/task ids, which import preserves verbatim,
@@ -399,6 +402,7 @@ const GAME_FIELD_TYPES: Readonly<Record<string, FieldKind>> = {
   photoFeedEnabled: 'boolean',
   powerUpsEnabled: 'boolean',
   manualLeaderboardReveal: 'boolean',
+  testMode: 'boolean',
   wizardSteps: 'objectList',
 };
 

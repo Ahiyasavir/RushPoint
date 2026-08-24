@@ -1457,6 +1457,20 @@ function StepDetails({ game, patch, qsAnchor }: {
           {b.manualRevealLabel}
         </label>
 
+        {/* Test mode (change: test-mode-hidden-scoring): default OFF. When ON the
+            PARTICIPANT payload carries no score and no right/wrong verdict, every
+            answer completes and moves on, and the run finishes neutrally. Scoring
+            keeps running underneath — the creator's console, analytics and
+            leaderboard are unchanged, which is what the help text says. */}
+        <label title={b.testModeHint} className="flex items-center gap-2 text-sm text-[--ink-2] cursor-pointer">
+          <input type="checkbox" checked={!!game.testMode}
+            onChange={(e) => patch({ testMode: e.target.checked })} />
+          {b.testModeLabel}
+        </label>
+        {/* The three caveats that actually bite, stated where the decision is made
+            rather than left for the creator to discover mid-run. */}
+        {game.testMode && <p className="text-xs text-[--ink-3] -mt-2">{b.testModeCaveats}</p>}
+
         {/* Task-library priority (change: task-library-priority-boost): default OFF
             (absent = normal popularity ranking). When ON, every task published from
             this game sorts to the top of every creator's task library search. */}
