@@ -816,9 +816,17 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     clearMsg();
     try {
       const res = await submitSequenceStep({ ...ctx, taskId: task!.id, stepIndex, answer: ans || undefined });
+      // `recorded` FIRST (test mode): a sealed run omits `stepCorrect` entirely, so
+      // the normal branch would read undefined as falsy and call every step wrong —
+      // announcing a verdict in the one mode built to announce none.
+      if (res.recorded) {
+        onChanged();
+        if (!res.taskComplete) showProgress(t.task.stepOf({ step: res.stepsDone, total: res.totalSteps }));
+        return true;
+      }
       if (res.stepCorrect) { onChanged(); if (!res.taskComplete) showProgress(`${t.task.stepOf({ step: res.stepsDone, total: res.totalSteps })} ✓`); }
       else showError(t.task.notQuite);
-      return res.stepCorrect;
+      return !!res.stepCorrect;
     } catch (e) {
       setMsg(submitError(e, t.task.failed));
       return false;

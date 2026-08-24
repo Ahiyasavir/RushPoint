@@ -10652,6 +10652,82 @@ async function main() {
       String(normState?.game?.testMode));
   });
 
+  // ── Test mode: the OTHER answer-bearing task types ─────────────────────────
+  // quiz/numeric were sealed first; a sequence is the same class of knowledge task
+  // and was still returning `stepCorrect: false` AND blocking, which is both a
+  // verdict and a stuck player. A survey has no right answer, but returning
+  // `correct: true` for it alone made the play app celebrate one task type and stay
+  // neutral for the rest — an accidental tell about which questions are graded.
+  await scenario('test mode: sequence steps and surveys are sealed too', async () => {
+    const sqPlayer = makeParty('sqPlayer');
+    await signInAnonymously(sqPlayer.auth);
+    const OWNER = creatorCred.user.uid;
+
+    const { gameId: sq } = await creator.call('createGame', { title: 'Sealed Sequence', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: sq,
+      testMode: true,
+      scoringPreset: 'fixed_points_speed',
+      stages: [{ id: 'sq-s', order: 0, title: 'Mixed', isFinal: true, tasks: [
+        { id: 'sq-seq', title: 'Two steps', type: 'sequence', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 3, estimatedMinutes: 2, pointValue: 40,
+          maxConcurrentTeams: 3,
+          steps: [{ id: 's1', prompt: 'Step one', answer: 'alpha' },
+                  { id: 's2', prompt: 'Step two', answer: 'beta' }] },
+        { id: 'sq-sv', title: 'How was it?', type: 'survey', locationless: true,
+          coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 10,
+          maxConcurrentTeams: 3, surveyChoices: ['good', 'bad'] },
+      ] }],
+    });
+    const { runId: sr, accessCode: sc } = await creator.call('launchRun', { gameId: sq });
+    await sqPlayer.call('joinRun', { code: sc, displayName: 'Seq' });
+    await creator.call('startTeams', { gameId: sq, runId: sr });
+
+    // Routing picks the order, so drive whichever task is assigned.
+    let seqSeen = false, svSeen = false;
+    for (let guard = 0; guard < 6 && !(seqSeen && svSeen); guard++) {
+      const st = await sqPlayer.call('getMyTeamState', { code: sc });
+      const rec = st?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+      if (!rec) break;
+
+      if (rec.taskId === 'sq-seq') {
+        seqSeen = true;
+        // A WRONG first step must still advance and must not say so.
+        const s1 = await sqPlayer.call('submitSequenceStep', { code: sc, taskId: 'sq-seq', stepIndex: 0, answer: 'WRONG' });
+        check('test mode: a wrong sequence step returns recorded:true', s1?.recorded === true, JSON.stringify(s1));
+        check('test mode: the step response omits stepCorrect', !('stepCorrect' in (s1 ?? {})), JSON.stringify(s1));
+        check('test mode: a wrong step still ADVANCES (no stuck player)', s1?.stepsDone === 1, JSON.stringify(s1));
+        const s2 = await sqPlayer.call('submitSequenceStep', { code: sc, taskId: 'sq-seq', stepIndex: 1, answer: 'beta' });
+        check('test mode: the final step completes the sequence', s2?.taskComplete === true, JSON.stringify(s2));
+        check('test mode: the final step response also omits stepCorrect', !('stepCorrect' in (s2 ?? {})), JSON.stringify(s2));
+      } else if (rec.taskId === 'sq-sv') {
+        svSeen = true;
+        const sv = await sqPlayer.call('submitTaskAnswer', { code: sc, taskId: 'sq-sv', answer: 'good' });
+        check('test mode: a survey returns the same neutral shape as every other answer',
+          sv?.recorded === true && !('correct' in (sv ?? {})), JSON.stringify(sv));
+      } else break;
+    }
+    check('test mode: both the sequence and the survey were exercised', seqSeen && svSeen, `seq=${seqSeen} survey=${svSeen}`);
+
+    // The creator's grading view: one wrong step means the whole sequence is wrong.
+    const sqDb = adminSdk.firestore();
+    const sqTeam = (await sqDb.collection(`users/${OWNER}/games/${sq}/runs/${sr}/teams`).get()).docs[0]?.data();
+    const sqRecs = (sqTeam?.stages ?? []).flatMap((st) => st.tasks ?? []);
+    const seqRec = sqRecs.find((r) => r.taskId === 'sq-seq');
+    check('test mode: the owner sees the sequence graded WRONG (one step missed)',
+      seqRec?.wasCorrect === false, JSON.stringify(seqRec?.wasCorrect));
+    check('test mode: a sequence missed a step scores zero', seqRec?.earnedScore === 0, String(seqRec?.earnedScore));
+    // A sequence's answers span several calls, so no single one is "the answer".
+    check('test mode: no misleading submittedAnswer is recorded for a sequence',
+      seqRec?.submittedAnswer === undefined, JSON.stringify(seqRec?.submittedAnswer));
+
+    // And none of it reached the player.
+    const sqState = await sqPlayer.call('getMyTeamState', { code: sc });
+    const sqLeak = findKeysDeep(sqState?.team, ['wasCorrect', 'score', 'earnedScore', 'taskAttempts']);
+    check('test mode: no verdict, score or wrong-step count reaches the sequence player',
+      sqLeak.length === 0, sqLeak.join(','));
+  });
+
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
     check('coverage: introspected the deployed callable set', deployed.length > 0, `${deployed.length} callables`);
