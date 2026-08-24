@@ -10613,6 +10613,23 @@ async function main() {
     check('test mode: the public board stays sealed even after finalize',
       tmBoard?.published === false && (tmBoard?.rankings?.length ?? 0) === 0,
       `published=${tmBoard?.published} n=${tmBoard?.rankings?.length}`);
+    // The SECOND door to the same standings. getRunRecap gates on `published`
+    // alone and finalizeRun publishes a test-mode board like any other, so a
+    // participant holding the access code could read the whole scoreboard here
+    // even though every other surface withholds it.
+    let recapRefused = null;
+    try {
+      const r = await tmPlayer.call('getRunRecap', { code: tc });
+      recapRefused = `ALLOWED: ${JSON.stringify(r?.standings?.length)} standings`;
+    } catch (e) { recapRefused = e?.code ?? String(e); }
+    check('test mode: the recap refuses a PARTICIPANT even after finalize',
+      recapRefused === 'functions/permission-denied', String(recapRefused));
+    const ownerRecap = await creator.call('getRunRecap', { code: tc });
+    check('test mode: the OWNER still gets the recap standings',
+      (ownerRecap?.standings?.length ?? 0) > 0, String(ownerRecap?.standings?.length));
+    check('test mode: the owner recap still carries real scores',
+      typeof ownerRecap?.standings?.[0]?.score === 'number', JSON.stringify(ownerRecap?.standings?.[0]));
+
     const tmAnalytics = await creator.call('getRunAnalytics', { code: tc });
     check('test mode: the owner still gets analytics for the sealed run',
       (tmAnalytics?.tasks?.length ?? 0) > 0, String(tmAnalytics?.tasks?.length));
