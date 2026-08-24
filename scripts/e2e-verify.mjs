@@ -243,6 +243,24 @@ const randCase = (s) => [...s].map((c) => (rand() < 0.5 ? c.toLowerCase() : c.to
 // a blocklist can't catch a NEW secret field. These lists pin the client-safe
 // shape: any key not listed here fails the e2e until it is consciously
 // classified as safe (update the list) or stripped (fix the sanitizer).
+// Recursively collect any of `keys` present anywhere inside `value` (change:
+// test-mode-hidden-scoring). The sealed-payload assertions need DEPTH: the score
+// fields that matter most live on nested task records, so a top-level key check
+// would pass while `team.stages[0].tasks[0].earnedScore` sailed through. Returns
+// dotted paths so a failure names the exact leak site.
+function findKeysDeep(value, keys, path = 'team', out = []) {
+  if (value === null || typeof value !== 'object') return out;
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => findKeysDeep(v, keys, `${path}[${i}]`, out));
+    return out;
+  }
+  for (const [k, v] of Object.entries(value)) {
+    if (keys.includes(k)) out.push(`${path}.${k}`);
+    findKeysDeep(v, keys, `${path}.${k}`, out);
+  }
+  return out;
+}
+
 const ALLOWED_TASK_KEYS = new Set([
   'id', 'title', 'description', 'type', 'coordinates', 'difficulty',
   'estimatedMinutes', 'expectedDurationMinutes', 'pointValue',
@@ -10475,6 +10493,148 @@ async function main() {
   // and require every one to have been INVOKED by the suite above (positively or
   // via the authz denial matrix). A newly added callable ships RED here until it
   // gets a test — the single biggest "don't let an untested callable slip" lever.
+  // ── Test mode / assessment mode (change: test-mode-hidden-scoring) ──────────
+  // The feature is a PAYLOAD guarantee, not a UI one: getMyTeamState returns the
+  // team document whole, so a score hidden only in play-web is still one devtools
+  // tab away. Every assertion here therefore inspects the WIRE, and the score
+  // sweep is RECURSIVE — a nested task record is exactly where a leak would hide.
+  await scenario('test mode (sealed scoring · answers always advance · graded for the owner)', async () => {
+    const tmPlayer = makeParty('tmPlayer');
+    await signInAnonymously(tmPlayer.auth);
+    const OWNER = creatorCred.user.uid;
+
+    const { gameId: tg } = await creator.call('createGame', { title: 'Assessment Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: tg,
+      testMode: true,
+      scoringPreset: 'fixed_points_speed',
+      // attemptLimit + hintPenalty on purpose: both are mechanisms test mode must
+      // SUPPRESS, so a regression that leaves them armed fails right here.
+      stages: [{ id: 'tm-s', order: 0, title: 'Questions', isFinal: true, tasks: [
+        { id: 'tm-q1', title: 'Q1', type: 'quiz', locationless: true, coordinates: { lat: 0, lng: 0 },
+          choices: ['a', 'b'], answers: ['a'], difficulty: 3, estimatedMinutes: 2, pointValue: 50,
+          maxConcurrentTeams: 3, hint: 'it is a', hintPenalty: 25, smart: { attemptLimit: 2 } },
+        { id: 'tm-q2', title: 'Q2', type: 'quiz', locationless: true, coordinates: { lat: 0, lng: 0 },
+          choices: ['x', 'y'], answers: ['x'], difficulty: 3, estimatedMinutes: 2, pointValue: 50,
+          maxConcurrentTeams: 3 },
+      ] }],
+    });
+    const savedTm = await creator.call('getGame', { gameId: tg });
+    check('test mode: the setting persists through updateGame', savedTm?.game?.testMode === true, String(savedTm?.game?.testMode));
+
+    const { runId: tr, accessCode: tc } = await creator.call('launchRun', { gameId: tg });
+    await tmPlayer.call('joinRun', { code: tc, displayName: 'Candidate' });
+    await creator.call('startTeams', { gameId: tg, runId: tr });
+
+    let tmState = await tmPlayer.call('getMyTeamState', { code: tc });
+    const firstTask = tmState?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+    check('test mode: a task is assigned', !!firstTask, JSON.stringify(tmState?.team?.stages?.[0]?.tasks));
+    check('test mode: the payload advertises testMode so the app can seal its chrome',
+      tmState?.game?.testMode === true, String(tmState?.game?.testMode));
+
+    // ── A WRONG answer must complete the task and move on ────────────────────
+    const wrongRes = await tmPlayer.call('submitTaskAnswer', {
+      code: tc, taskId: firstTask.taskId, answer: 'definitely-wrong',
+    });
+    check('test mode: a wrong answer returns recorded:true', wrongRes?.recorded === true, JSON.stringify(wrongRes));
+    for (const k of ['correct', 'penalty', 'attemptsUsed', 'cooldownUntil', 'retryAfterMs', 'retryAfterSeconds']) {
+      check(`test mode: the answer response omits ${k}`, !(k in (wrongRes ?? {})), JSON.stringify(wrongRes));
+    }
+
+    tmState = await tmPlayer.call('getMyTeamState', { code: tc });
+    const q1Rec = tmState?.team?.stages?.[0]?.tasks?.find((t) => t.taskId === 'tm-q1');
+    check('test mode: a WRONG answer still completes the task', q1Rec?.status === 'completed', q1Rec?.status);
+    const nextTask = tmState?.team?.stages?.[0]?.tasks?.find((t) => t.status === 'assigned');
+    check('test mode: the participant is routed onward after a wrong answer', !!nextTask, nextTask?.taskId);
+
+    // ── No cap, no lockout, no hint charge ───────────────────────────────────
+    // q1 carried attemptLimit 2 and a cost level would normally have started a
+    // cooldown; answering the NEXT task straight away proves neither armed.
+    let secondThrew = null;
+    if (nextTask) {
+      try {
+        // CORRECT this time, so the scenario covers both scoring outcomes — and it
+        // still proves the cap never armed, because the old rule refuses even a
+        // correct answer once a task is locked.
+        const r2 = await tmPlayer.call('submitTaskAnswer', { code: tc, taskId: nextTask.taskId, answer: 'x' });
+        check('test mode: a second answer is accepted with the same neutral shape',
+          r2?.recorded === true && !('correct' in r2), JSON.stringify(r2));
+      } catch (e) { secondThrew = e?.code ?? String(e); }
+    }
+    check('test mode: consecutive answers never yield resource-exhausted / a cooldown',
+      secondThrew === null, String(secondThrew));
+
+    // ── The owner still sees everything, including WHAT was answered ─────────
+    const tmTeams = await creator.call('listRunTeams', { gameId: tg, runId: tr });
+    check('test mode: the owner still reads the team score', typeof tmTeams?.teams?.[0]?.score === 'number',
+      JSON.stringify(tmTeams?.teams?.[0]?.score));
+
+    // Read the team as the OWNER would, via the Admin SDK: these fields are
+    // deliberately unreachable through any participant callable, so the only
+    // honest way to assert they exist is to look where the creator looks.
+    const tmDb = adminSdk.firestore();
+    const ownerTeamDoc = (await tmDb
+      .collection(`users/${OWNER}/games/${tg}/runs/${tr}/teams`).get()).docs[0]?.data();
+    const ownerRecs = (ownerTeamDoc?.stages ?? []).flatMap((st) => st.tasks ?? []);
+    const gradedRec = ownerRecs.find((r) => r.taskId === 'tm-q1');
+    check('test mode: the owner can read WHAT the participant answered',
+      gradedRec?.submittedAnswer === 'definitely-wrong', JSON.stringify(gradedRec?.submittedAnswer));
+    check('test mode: the owner can read WHETHER it was correct',
+      gradedRec?.wasCorrect === false, String(gradedRec?.wasCorrect));
+    // A WRONG answer must complete for ZERO. The first cut of this asserted only
+    // `typeof earnedScore === 'number'` and happily passed while every wrong
+    // answer banked full points — which would have made the creator's score column
+    // mean "questions attempted" and quietly destroyed the grading this whole mode
+    // exists for. Assert the VALUE.
+    check('test mode: a WRONG answer scores ZERO (not full points)',
+      gradedRec?.earnedScore === 0, String(gradedRec?.earnedScore));
+    const rightRec = ownerRecs.find((r) => r.wasCorrect === true);
+    if (rightRec) {
+      check('test mode: a CORRECT answer still scores normally',
+        (rightRec.earnedScore ?? 0) > 0, String(rightRec?.earnedScore));
+    }
+
+    // ── The seal itself: nothing scoring-shaped anywhere in the payload ──────
+    const SEALED_KEYS = [
+      'score', 'bonusPenalty', 'smartStreak', 'streakMultiplier',
+      'earnedScore', 'scoreBreakdown', 'answerCost', 'submittedAnswer', 'wasCorrect',
+    ];
+    const found = findKeysDeep(tmState?.team, SEALED_KEYS);
+    check('test mode: NO scoring or verdict key appears anywhere in the participant team payload',
+      found.length === 0, found.join(','));
+    check('test mode: the participant is served no leaderboard',
+      tmState?.run?.leaderboard === null, JSON.stringify(tmState?.run?.leaderboard));
+
+    // The public board is the ONE participant standing that never passes through
+    // getMyTeamState, so it is sealed separately — and must STAY sealed after a
+    // finalize that would normally publish it.
+    await creator.call('finalizeRun', { gameId: tg, runId: tr });
+    const tmBoard = await tmPlayer.call('getPublicLeaderboard', { code: tc });
+    check('test mode: the public board stays sealed even after finalize',
+      tmBoard?.published === false && (tmBoard?.rankings?.length ?? 0) === 0,
+      `published=${tmBoard?.published} n=${tmBoard?.rankings?.length}`);
+    const tmAnalytics = await creator.call('getRunAnalytics', { code: tc });
+    check('test mode: the owner still gets analytics for the sealed run',
+      (tmAnalytics?.tasks?.length ?? 0) > 0, String(tmAnalytics?.tasks?.length));
+  });
+
+  // Regression pin for the OTHER half of the seal: the recorded-submission fields
+  // must be absent from a NORMAL game's payload too (they are never allow-listed,
+  // not merely stripped when sealed), and a normal game must still ship scores.
+  await scenario('test mode: a normal run is untouched by the seal', async () => {
+    const normState = await player.call('getMyTeamState', { code: accessCode });
+    const leaked = findKeysDeep(normState?.team, ['submittedAnswer', 'wasCorrect']);
+    check('normal run: the recorded-submission fields never reach a participant',
+      leaked.length === 0, leaked.join(','));
+    check('normal run: the team score is still shipped',
+      typeof normState?.team?.score === 'number', String(normState?.team?.score));
+    check('normal run: per-task earnedScore is still shipped',
+      (normState?.team?.stages ?? []).flatMap((st) => st.tasks ?? [])
+        .some((r) => typeof r.earnedScore === 'number'), 'no earnedScore found');
+    check('normal run: testMode is reported false', normState?.game?.testMode === false,
+      String(normState?.game?.testMode));
+  });
+
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
     check('coverage: introspected the deployed callable set', deployed.length > 0, `${deployed.length} callables`);

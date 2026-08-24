@@ -56,6 +56,10 @@ export const BUILDER_EDITABLE_FIELDS = [
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Undefined means
   // off (default) = finalizeRun auto publishes, the prior behaviour.
   'manualLeaderboardReveal',
+  // Test mode (change: test-mode-hidden-scoring). Undefined means off (default).
+  // Without this entry the switch would round-trip in local state and look alive
+  // while never saving AND never registering as a change.
+  'testMode',
   // Game intro primer (change: game-intro-instructions). Undefined when unset
   // (skipped server-side); an empty/whitespace-only primer clears it on save.
   'instructions',

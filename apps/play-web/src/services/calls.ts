@@ -157,7 +157,13 @@ export interface MyTeamState {
   // predates it degrades to "nothing known", never to a fabricated hold.
   holdReason?: 'guardian_consent' | null;
   run: { id: string; status: string; accessCode: string; billingType: 'free' | 'credit' | 'pro'; launchedAt?: string | null; leaderboard: RunLeaderboard | null; hotZone: HotZone | null };
-  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null };
+  // `testMode` (change: test-mode-hidden-scoring): render the sealed chrome — no
+  // score header, no right/wrong feedback, no board, a neutral finish. Optional on
+  // the wire so a bundle talking to a backend that predates it degrades to a normal
+  // game. Presentation only: on a sealed run the server has ALREADY stripped every
+  // score from this payload, so this flag decides how the absence looks, never
+  // whether the data is withheld.
+  game: { id: string; title: string; mode: string; scoringPreset: string; branding: GameBranding | null; stageCount: number; photoFeedEnabled?: boolean; instructions?: GameInstructions | null; testMode?: boolean };
   activeStageTasks: SafeTask[];
   // Completed-mission pins (change: hidden-mission-map): the coordinates + title of
   // every mission this team has ALREADY COMPLETED, across all stages — a trail of
@@ -244,7 +250,15 @@ export const submitTaskAnswer = callable<
   // player's arrangement) instead — the server rejects a mixed/missing payload.
   Ctx & { taskId: string; answer?: string; orderedAnswer?: string[]; lat?: number; lng?: number },
   {
-    correct: boolean;
+    // Test mode (change: test-mode-hidden-scoring): OPTIONAL, because a sealed run
+    // omits it entirely rather than sending a fixed value — an always-true
+    // `correct` would be a false statement on the wire. Callers MUST branch on
+    // `recorded` FIRST: treating an absent `correct` as falsy reads every answer
+    // on a sealed run as wrong.
+    correct?: boolean;
+    // Present (and true) only on a sealed run: "your answer was recorded", which
+    // is the entire verdict a participant gets there.
+    recorded?: boolean;
     nextTaskId?: string | null;
     // Wrong-answer cost (change: wrong-answer-cost). Present on the wrong path
     // only, and only when the creator set a cost level. `penalty` is the points

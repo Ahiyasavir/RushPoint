@@ -773,7 +773,13 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, answer: text, ...(coords ?? {}) });
-        if (res.correct) { feedback('task'); advanceWithCardExit(); }
+        // Test mode (change: test-mode-hidden-scoring) MUST be checked first. A
+        // sealed run omits `correct` entirely, so falling through to the normal
+        // branch would read undefined as falsy and show "not quite" on EVERY
+        // answer — announcing a wrong verdict on the correct ones, in the one mode
+        // whose entire purpose is to announce nothing.
+        if (res.recorded) { showProgress(t.task.testModeAnswerRecorded); advanceWithCardExit(); }
+        else if (res.correct) { feedback('task'); advanceWithCardExit(); }
         else applyAnswerCost(res, t.task.notQuite);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
@@ -790,7 +796,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
     submitWithOptionalPresence(async (coords) => {
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items, ...(coords ?? {}) });
-        if (res.correct) advanceWithCardExit();
+        // Same ordering rule as `answer()` above — `recorded` first (test mode).
+        if (res.recorded) { showProgress(t.task.testModeAnswerRecorded); advanceWithCardExit(); }
+        else if (res.correct) advanceWithCardExit();
         else applyAnswerCost(res, t.task.orderingWrong);
       } catch (e) {
         setMsg(submitError(e, t.task.failed));
@@ -938,9 +946,9 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         {task.hasHint && !hint && (
           <div className="mt-3">
             <button onClick={revealHint} disabled={frozen}
-              aria-label={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+              aria-label={hintButtonLabel(t, task)}
               className="inline-flex items-center min-h-[44px] px-3 py-2 -ms-3 rounded-lg text-xs text-ink-warm hover:underline disabled:opacity-40">
-              💡 {t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+              💡 {hintButtonLabel(t, task)}
             </button>
           </div>
         )}
@@ -1095,7 +1103,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         navigate={<NavigateHereLink task={task} />}
         onHint={revealHint}
         onHelp={() => { void requestHelp(task.id); }}
-        hintLabel={t.task.hintStuck({ cost: task.hintPenalty ?? 25 })}
+        hintLabel={hintButtonLabel(t, task)}
       />
 
       {msg && (
@@ -1291,13 +1299,41 @@ function CodeEntry({ busy, label, prefill, onSubmit }: {
   );
 }
 
+/**
+ * Label for every "reveal the hint" affordance.
+ *
+ * A hint has a POINT PRICE, so the label is a score — and on a test-mode run the
+ * server reports `hintFreeNow` (the hint really is free there) precisely so this
+ * never renders "-25 pts" at a participant who is not allowed to see points. The
+ * same flag already covers hint auto-escalation, so free is free either way and
+ * there is exactly one place that decides how the button reads.
+ */
+function hintButtonLabel(
+  t: { task: { hintFreeNow: string; hintStuck: (a: { cost: number }) => string } },
+  task: { hintFreeNow?: boolean; hintPenalty?: number },
+): string {
+  return task.hintFreeNow ? t.task.hintFreeNow : t.task.hintStuck({ cost: task.hintPenalty ?? 25 });
+}
+
 // Quiz — tap a choice, or type a free-text answer.
 function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
   task: SafeTask; busy: boolean; wrongSoFar: number; prefill?: string; onSubmit: (a: string) => void;
 }) {
   const { t } = useT();
   const [val, setVal] = useState('');
+  // Which option this player just tapped. A choice quiz submits on the tap, so
+  // `busy` immediately disables ALL four buttons — and the shared disabled skin
+  // (`disabled:bg-zinc-800`, ui.tsx) painted every one of them the same grey.
+  // The player got no receipt at all: their pick was indistinguishable from the
+  // three they did not touch. Track the tap locally and keep it lit.
+  const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => { if (prefill) setVal(prefill); }, [prefill]);
+  // Derive, never latch: the highlight lives only for the in-flight submit.
+  // `busy` is also true during a server retry lockout (nothing was picked then,
+  // and all-grey is the correct look), and a submit that never starts — offline
+  // gate, presence prompt declined — leaves `busy` false, so this self-heals
+  // instead of stranding a highlight on an option that was never sent.
+  const selected = busy ? picked : null;
   if (task.choices && task.choices.length > 0) {
     // A choice submits on its own tap, with nothing staged. That is fine while a
     // wrong answer is free, but when the creator set smart.attemptLimit the
@@ -1307,10 +1343,10 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
     // (change: play-touch-rtl-a11y).
     const choose = (c: string) => {
       const guard = quizAttemptGuard(task.smart?.attemptLimit, wrongSoFar);
-      if (!guard.needsConfirm) { onSubmit(c); return; }
+      if (!guard.needsConfirm) { setPicked(c); onSubmit(c); return; }
       void dialog
         .confirm(t.task.attemptConfirm({ remaining: guard.remaining }), { confirmLabel: t.task.attemptConfirmBtn })
-        .then((ok) => { if (ok) onSubmit(c); });
+        .then((ok) => { if (ok) { setPicked(c); onSubmit(c); } });
     };
     // Rehearsal: a CHOICE quiz has no field to fill, so "fill answer" marks the
     // right option instead and the creator still taps it. Without this the button
@@ -1320,15 +1356,32 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
       <div className="space-y-2">
         {task.choices.map((c) => {
           const isAnswer = !!prefill && c === prefill;
+          const isPicked = selected === c;
+          // The picked option overrides the disabled skin with `!` — the disabled
+          // rules in ui.tsx are plain declarations, so importance is what wins,
+          // not source order. `ink-fire` (not the brand `rp-fire`) because this
+          // now carries white LABEL text: 6.08:1 vs 3.16:1, read in sunlight.
+          const skin = isPicked
+            ? ' !bg-ink-fire !text-white !shadow-cta-glow ring-2 ring-rp-fire'
+            : isAnswer ? ' ring-2 ring-rp-amber' : '';
           return (
-            <Button key={c} variant="ghost" disabled={busy} onClick={() => choose(c)}
-              className={`w-full${isAnswer ? ' ring-2 ring-rp-amber' : ''}`}
-              data-testid="quiz-choice" data-choice={c} data-rehearsal-answer={isAnswer || undefined}>
+            <Button key={c} variant="ghost" disabled={busy} loading={isPicked} onClick={() => choose(c)}
+              aria-pressed={isPicked || undefined}
+              className={`w-full${skin}`}
+              data-testid="quiz-choice" data-choice={c} data-picked={isPicked || undefined}
+              data-rehearsal-answer={isAnswer || undefined}>
               <span dir="auto">{c}</span>
-              {isAnswer && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}>✅</span>}
+              {isAnswer && !isPicked && <span className="ms-2" aria-label={t.task.rehearseCorrect} title={t.task.rehearseCorrect}>✅</span>}
             </Button>
           );
         })}
+        {/* Spoken receipt for the tap — the spinner alone is silent to a screen
+            reader, and this is the one task type with no submit button to press. */}
+        {selected && (
+          <p role="status" className="text-center text-xs text-ink-fire font-medium" data-testid="quiz-choice-sent">
+            {t.task.answerSending}
+          </p>
+        )}
       </div>
     );
   }
@@ -1348,16 +1401,30 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
 function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; onSubmit: (a: string) => void }) {
   const { t } = useT();
   const [val, setVal] = useState('');
+  // Same one-tap-submits shape as the quiz, so the same all-four-grey defect —
+  // see QuizEntry for why the highlight is derived from `busy` and never latched.
+  const [picked, setPicked] = useState<string | null>(null);
+  const selected = busy ? picked : null;
   if (task.surveyChoices && task.surveyChoices.length > 0) {
     return (
       <div className="space-y-2">
         <p className="text-xs text-zinc-500">{t.task.surveyChoicePrompt}</p>
-        {task.surveyChoices.map((c) => (
-          <Button key={c} variant="ghost" disabled={busy} onClick={() => onSubmit(c)} className="w-full"
-            data-testid="survey-choice" data-choice={c}>
-            <span dir="auto">{c}</span>
-          </Button>
-        ))}
+        {task.surveyChoices.map((c) => {
+          const isPicked = selected === c;
+          return (
+            <Button key={c} variant="ghost" disabled={busy} loading={isPicked} aria-pressed={isPicked || undefined}
+              onClick={() => { setPicked(c); onSubmit(c); }}
+              className={`w-full${isPicked ? ' !bg-ink-fire !text-white !shadow-cta-glow ring-2 ring-rp-fire' : ''}`}
+              data-testid="survey-choice" data-choice={c} data-picked={isPicked || undefined}>
+              <span dir="auto">{c}</span>
+            </Button>
+          );
+        })}
+        {selected && (
+          <p role="status" className="text-center text-xs text-ink-fire font-medium" data-testid="survey-choice-sent">
+            {t.task.answerSending}
+          </p>
+        )}
       </div>
     );
   }

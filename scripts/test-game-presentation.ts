@@ -62,6 +62,7 @@ const fullGame = {
   photoFeedEnabled: false,
   powerUpsEnabled: true,
   manualLeaderboardReveal: true,
+  testMode: true,
   instructions: { title: 'How to play', body: 'Walk.', bodyHe: 'ללכת.' },
   pinnedFirst: true,
   // הקמה מהירה / Quick Setup (change: quick-setup-wizard). The Builder does not

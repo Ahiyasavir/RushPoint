@@ -450,6 +450,10 @@ function randomGame(rng: () => number, forceTaskType?: TaskType): Game {
     requiresGuardianConsent: true, minAge: true, safeZone: true, benchmarkOptOut: true,
     integrationWebhookUrl: true, integrationPlatform: true, allowInstantPlay: true,
     photoFeedEnabled: true, powerUpsEnabled: true, instructions: true, manualLeaderboardReveal: true,
+    // Test mode (change: test-mode-hidden-scoring) — authored play behaviour, so
+    // it is EXPORTED: an exported game that silently lost its assessment mode
+    // would re-run as a scored race.
+    testMode: true,
     deletedAt: true, deletedBy: true, createdAt: true, updatedAt: true,
     // הקמה מהירה / Quick Setup (change: quick-setup-wizard) — pure authorship, so
     // it is EXPORTED: a file that dropped it would restore a game whose setup

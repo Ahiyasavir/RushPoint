@@ -440,6 +440,9 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // docs/wave-b/leaderboard-reveal.md); adding it there is a pure type widening
   // and this stays correct either way.
   const { manualLeaderboardReveal } = data as { manualLeaderboardReveal?: boolean };
+  // Test mode (change: test-mode-hidden-scoring). Destructured the same way for the
+  // same reason: a plain optional boolean the Builder owns.
+  const { testMode } = data as { testMode?: boolean };
 
   if (!gameId) throw new functions.https.HttpsError('invalid-argument', 'gameId required');
 
@@ -561,6 +564,9 @@ export const updateGame = loggedCallable('updateGame', async (data, context) => 
   // participants. Deliberately NOT mirrored into publicGames (below) — it is a run
   // control, not gallery data.
   if (manualLeaderboardReveal !== undefined) updates.manualLeaderboardReveal = manualLeaderboardReveal;
+  // Test mode (change: test-mode-hidden-scoring): a play-behaviour flag, NOT gallery
+  // data — deliberately not mirrored into publicGames, like the reveal flag above.
+  if (testMode !== undefined) updates.testMode = testMode === true;
   // Game intro primer (change: game-intro-instructions): clean-or-clear, mirroring
   // integrationWebhookUrl. A defined primer with content is stored cleaned (https
   // image guard lives in cleanGameInstructions); defined + empty ⇒ delete the field.
@@ -1474,6 +1480,7 @@ export const importGameFile = loggedCallable('importGameFile', async (data, cont
     setOrClear('photoFeedEnabled', parsed.photoFeedEnabled);
     setOrClear('powerUpsEnabled', parsed.powerUpsEnabled);
     setOrClear('manualLeaderboardReveal', (parsed as { manualLeaderboardReveal?: boolean }).manualLeaderboardReveal);
+    setOrClear('testMode', (parsed as { testMode?: boolean }).testMode);
     setOrClear('instructions', instructions);
     // requiresGuardianConsent: `true` was already refused above, so this only ever
     // stores `false` or clears the field.

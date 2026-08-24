@@ -602,6 +602,18 @@ export interface Game {
   // standings regardless (they read the run doc directly); this flag gates only
   // the PARTICIPANT-visible board. Never denormalized into publicGames.
   manualLeaderboardReveal?: boolean;
+  // Test mode / assessment mode (change: test-mode-hidden-scoring): when true the
+  // PARTICIPANT payload carries no score and no right/wrong verdict, every answer
+  // completes the task and routes onward (no attempt cap, retry lockout, wrong-answer
+  // charge or hint cost), routing derives strength from ACCURACY instead of pace, and
+  // the run finishes on a neutral completion screen. Scoring keeps running underneath:
+  // the creator's console, analytics, leaderboard and recap are all unchanged.
+  //
+  // Interpreted in exactly ONE place — `sealsScoreFromParticipant` in ../testMode —
+  // never by reading this field inline, because the seal spans three packages and
+  // eleven participant surfaces that must not drift. Default false (undefined ⇒
+  // today's behaviour), so every existing game and in-flight run is untouched.
+  testMode?: boolean;
   // Trash / tombstone (change: recoverable-game-deletion). PRESENCE of a non-empty
   // `deletedAt` means the game is deleted: it disappears from listGames, the
   // gallery and every play surface, but nothing beneath it is destroyed until the
@@ -966,6 +978,20 @@ export interface RunTaskRecord {
   // so a reload / GPS loss / offline spell can never re-seal a task the player has
   // already reached. Until it is set, the sanitizer ships only the sealed stub.
   arrivedAt?: string;
+  // Test mode (change: test-mode-hidden-scoring): what the participant actually
+  // submitted, and whether it was right. Written ONLY on a run whose game seals
+  // scoring, inside the SAME transaction that scores the answer, so a submission can
+  // never exist without its verdict or be raced by a double tap. `submittedAnswer` is
+  // length-bounded (boundStoredAnswer) because it is the one field on this document
+  // whose size a client chooses.
+  //
+  // SERVER + OWNER ONLY. Both are absent from the participant payload in EVERY game,
+  // sealed or not — they are simply never allow-listed by sanitizeTeamForParticipant.
+  // A `wasCorrect` boolean on the wire would defeat test mode outright, and the team
+  // document is returned WHOLE by getMyTeamState, so "not allow-listed" is the only
+  // thing standing between this field and the player's devtools.
+  submittedAnswer?: string;
+  wasCorrect?: boolean;
 }
 
 export interface RunStageRecord {
@@ -1501,6 +1527,8 @@ export interface UpdateGamePayload {
   // Staged leaderboard reveal (change: manual-leaderboard-reveal). Default false
   // when absent ⇒ finalizeRun auto-publishes the final board, today's behaviour.
   manualLeaderboardReveal?: boolean;
+  // Test mode (change: test-mode-hidden-scoring). Default false when absent.
+  testMode?: boolean;
   // Game intro primer (change: game-intro-instructions). Empty/whitespace-only ⇒
   // the field is cleared server-side; a non-https image is dropped on clean.
   instructions?: GameInstructions | null;
