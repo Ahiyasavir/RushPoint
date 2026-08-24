@@ -282,7 +282,14 @@ export const submitTaskAnswer = callable<
 
 export const submitSequenceStep = callable<
   Ctx & { taskId: string; stepIndex: number; answer?: string; lat?: number; lng?: number },
-  { stepCorrect: boolean; stepsDone: number; totalSteps: number; taskComplete: boolean }
+  {
+    // Test mode (change: test-mode-hidden-scoring): a sealed run omits `stepCorrect`
+    // and sends `recorded` instead, so callers MUST branch on `recorded` first —
+    // reading an absent `stepCorrect` as falsy reports every step as wrong.
+    stepCorrect?: boolean;
+    recorded?: boolean;
+    stepsDone: number; totalSteps: number; taskComplete: boolean;
+  }
 >('submitSequenceStep');
 
 // Rehearsal control (change: test-drive-rehearsal-control). Refused with

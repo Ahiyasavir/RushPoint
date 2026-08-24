@@ -2240,6 +2240,12 @@ export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data
   if (!poiSnap.exists) throw new functions.https.HttpsError('not-found', 'POI not found');
   const poi = poiSnap.data() as DiscoveryPoi;
 
+  // Test mode (change: test-mode-hidden-scoring): a discovery waypoint is trivia with
+  // a point bonus, so it leaks BOTH halves of what this mode hides. Costs one extra
+  // read, on a rare path (a POI is claimed at most once per team).
+  const poiGameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  const poiSealed = sealsScoreFromParticipant(poiGameSnap.data() as Game | undefined);
+
   const teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, teamId));
 
   return db.runTransaction(async (tx) => {
@@ -2286,13 +2292,18 @@ export const claimDiscoveryPoi = loggedCallable('claimDiscoveryPoi', async (data
         score: (team.score ?? 0) + bonus,
         updatedAt: now,
       });
-      return { correct: true, bonus };
+      return poiSealed ? { recorded: true } : { correct: true, bonus };
     }
 
-    // Wrong answer: mark triggered (seen) but award nothing; retry allowed.
-    discoveryState[poiId] = 'triggered';
+    // Wrong answer. Normally: mark triggered (seen), award nothing, retry allowed.
+    //
+    // On a sealed run the answer is FINAL instead ('answered'), for the same reason a
+    // wrong quiz answer completes its task: leaving it retryable while saying nothing
+    // invites the player to grind the same waypoint forever with no signal that they
+    // already had their go. No bonus either way, so the creator's scoring is unchanged.
+    discoveryState[poiId] = poiSealed ? 'answered' : 'triggered';
     tx.update(teamRef, { discoveryState, updatedAt: now });
-    return { correct: false, bonus: 0 };
+    return poiSealed ? { recorded: true } : { correct: false, bonus: 0 };
   });
 });
 
@@ -4658,11 +4669,19 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
     await assertTaskNotExpired(ctx.ownerUid, ctx.gameId, ctx.runId, task);
     const now = new Date().toISOString();
     const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now, { surveyResponse: resp });
-    if (!completed) return { correct: true, nextTaskId: null };
+    // Test mode (change: test-mode-hidden-scoring): a survey has no right answer, so
+    // nothing leaks either way — but the SHAPE must match every other answer on a
+    // sealed run. Returning `correct: true` here makes the play app fire its
+    // celebratory "you got it" feedback for one task type and stay neutral for the
+    // rest, which reads as an accidental tell about which questions are graded.
+    const sealedSurvey = sealsScoreFromParticipant(game);
+    if (!completed) return sealedSurvey ? { recorded: true, nextTaskId: null } : { correct: true, nextTaskId: null };
     // WO Fix 1: slot release is atomic inside completeTaskForTeam.
     const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
     const next = await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
-    return { correct: true, nextTaskId: next.taskId ?? null };
+    return sealedSurvey
+      ? { recorded: true, nextTaskId: next.taskId ?? null }
+      : { correct: true, nextTaskId: next.taskId ?? null };
   }
 
   // Ordering variant (change: quiz-ordering): an ordering task is graded ONLY
@@ -4933,7 +4952,12 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
 
   const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const task = findGameTask(gameSnap.data() as Game, taskId);
+  const seqGame = gameSnap.data() as Game;
+  // Test mode (change: test-mode-hidden-scoring): a sequence is a knowledge task
+  // like a quiz, so it gets the same treatment — every step advances, no step ever
+  // reports a verdict, and the per-task result is recorded for the creator.
+  const seqSealed = sealsScoreFromParticipant(seqGame);
+  const task = findGameTask(seqGame, taskId);
   if (!task || task.type !== 'sequence' || !task.steps?.length) {
     throw new functions.https.HttpsError('failed-precondition', 'Not a sequence task');
   }
@@ -4946,29 +4970,62 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
 
   const done = team.taskStepProgress?.[taskId] ?? 0;
 
-  // Must answer steps in order; ignore replays of already-cleared steps.
-  if (stepIndex !== done) return { stepCorrect: false, stepsDone: done, totalSteps: task.steps.length, taskComplete: false };
+  // Must answer steps in order; ignore replays of already-cleared steps. This is a
+  // REPLAY, not a wrong answer, so it stays a no-op in both modes — it just cannot
+  // say "incorrect" on a sealed run.
+  if (stepIndex !== done) {
+    return seqSealed
+      ? { recorded: true, stepsDone: done, totalSteps: task.steps.length, taskComplete: false }
+      : { stepCorrect: false, stepsDone: done, totalSteps: task.steps.length, taskComplete: false };
+  }
 
   const step = task.steps[stepIndex];
   const expected = step.answer?.trim().toLowerCase();
   const ok = !expected || (answer ?? '').trim().toLowerCase() === expected; // no answer = tap-to-confirm
-  if (!ok) return { stepCorrect: false, stepsDone: done, totalSteps: task.steps.length, taskComplete: false };
+  // Normal run: a wrong step stops here and says so. Sealed run: it FALLS THROUGH and
+  // advances like any other answer — being told nothing while also being blocked is
+  // the stuck-player-with-no-signal failure this mode must never create.
+  if (!ok && !seqSealed) {
+    return { stepCorrect: false, stepsDone: done, totalSteps: task.steps.length, taskComplete: false };
+  }
+
+  // How many steps of THIS task the team has now got wrong. Reuses `taskAttempts`
+  // (a map keyed by taskId, already sealed from the participant payload) rather than
+  // adding a field, and is read back locally so the verdict below counts the step
+  // being graded right now.
+  const seqWrongBefore = team.taskAttempts?.[taskId] ?? 0;
+  const seqWrongNow = seqWrongBefore + (ok ? 0 : 1);
 
   const newDone = done + 1;
   const now = new Date().toISOString();
   const taskComplete = newDone >= task.steps.length;
 
-  await teamRef.update({ [`taskStepProgress.${taskId}`]: newDone, updatedAt: now });
+  await teamRef.update({
+    [`taskStepProgress.${taskId}`]: newDone,
+    // Dotted path on a MAP field, which IS a real nested path — the documented
+    // footgun is dotted-updating an ARRAY element, which this is not.
+    ...(seqSealed && !ok ? { [`taskAttempts.${taskId}`]: admin.firestore.FieldValue.increment(1) } : {}),
+    updatedAt: now,
+  });
 
   if (taskComplete) {
-    const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+    const { completed } = await completeTaskForTeam(
+      ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now,
+      // The whole sequence counts as correct only if no step was missed. There is one
+      // verdict slot per task record, so `submittedAnswer` is deliberately NOT written
+      // for a sequence: its answers span several calls and no single one of them is
+      // "the answer" — recording the last step alone would read as the whole thing.
+      seqSealed ? { wasCorrect: seqWrongNow === 0 } : undefined,
+    );
     if (completed) {
       // WO Fix 1: slot release is atomic inside completeTaskForTeam.
       const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
       await assignNextInActiveStage(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, teamLoc, now);
     }
   }
-  return { stepCorrect: true, stepsDone: newDone, totalSteps: task.steps.length, taskComplete };
+  return seqSealed
+    ? { recorded: true, stepsDone: newDone, totalSteps: task.steps.length, taskComplete }
+    : { stepCorrect: true, stepsDone: newDone, totalSteps: task.steps.length, taskComplete };
 });
 
 // ─── getRecommendedTasks (ranked list, no assignment) ─────────────────────────

@@ -134,3 +134,38 @@ standing that is not reached through `getMyTeamState`.
 #### Scenario: The public board is sealed too
 - **WHEN** anyone opens the public leaderboard route for a test-mode run
 - **THEN** no standing for that run is served, whether or not the board was published
+
+### Requirement: Task-type coverage is explicit
+Test mode SHALL seal every task type whose submission carries a **knowledge verdict**: quiz,
+numeric, sequence and survey. For each, a submission always advances, the response omits any
+correctness field, and the per-task result is recorded for the creator.
+
+Two participant-visible verdicts are deliberately NOT sealed, and this is a decision rather than an
+omission:
+
+- **Smart-station codes.** A station code is proof of *presence* — a value read off a sign at a
+  physical location — not an answer being assessed. Auto-advancing on a wrong code would let a
+  participant skip the stop entirely and would break the game rather than seal it, so
+  `verifyStationCode` keeps refusing an incorrect code.
+- **Photo review outcomes.** A `rejected` photo MUST stay visible to the participant. Withholding
+  it would leave someone whose submission was rejected with no way to know they need to resubmit —
+  a stuck player with no signal, which is a worse failure than the verdict it would hide.
+
+#### Scenario: A sequence step never reports a verdict and never blocks
+- **WHEN** a participant submits a wrong step of a sequence task in a test-mode run
+- **THEN** the response contains no `stepCorrect` value
+- **AND** the step still advances
+- **AND** the task is recorded as incorrect for the creator once the sequence completes
+
+#### Scenario: A survey answers with the same shape as a graded task
+- **WHEN** a participant answers a survey task in a test-mode run
+- **THEN** the response carries the same key set as a quiz answer and contains no `correct` value
+
+#### Scenario: A discovery waypoint reveals neither verdict nor bonus
+- **WHEN** a participant answers a discovery-POI trivia prompt in a test-mode run
+- **THEN** the response contains no `correct` and no `bonus` value
+- **AND** the answer is final, so an unanswerable waypoint cannot be ground indefinitely
+
+#### Scenario: A station code still refuses when wrong
+- **WHEN** a participant submits an incorrect station code in a test-mode run
+- **THEN** the submission is still refused, because the code proves presence rather than knowledge
