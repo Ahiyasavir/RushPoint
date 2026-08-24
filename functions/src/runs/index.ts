@@ -2896,6 +2896,18 @@ export const getRunRecap = loggedCallable('getRunRecap', async (data, context) =
   // getRunRecap tolerates a MISSING game (a pruned run), so this is an explicit
   // tombstone check rather than a not-exists one.
   assertGameNotDeleted(game);
+  // Test mode (change: test-mode-hidden-scoring): the recap is FULL STANDINGS —
+  // every team, ranked, with scores. It gates on `published` alone, and finalizeRun
+  // publishes a test-mode run's board like any other, so without this a participant
+  // holding the access code could read the whole scoreboard the rest of the app is
+  // careful never to show them. getPublicLeaderboard is sealed separately; this is
+  // the second, easy-to-miss door to the same data.
+  //
+  // Owner-only from here, exactly as if the board were unpublished — reusing the
+  // existing refusal the client already handles rather than inventing an empty shape.
+  if (!isOwner && sealsScoreFromParticipant(game)) {
+    throw new functions.https.HttpsError('permission-denied', 'Recap is not public yet');
+  }
   const teamsSnap = await db.collection(teamsCol(c.ownerUid, c.gameId, c.runId)).get();
   const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
 
