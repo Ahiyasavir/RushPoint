@@ -97,6 +97,31 @@ export function canLaunchGame(game: ReadableGame): boolean {
 }
 
 /**
+ * The readiness codes `launchRun` ITSELF refuses (functions/src/runs/index.ts):
+ * a stage with no tasks, and a task with no usable answer key. A rehearsal can
+ * never be offered past these — the server would reject the launch — so they stay
+ * a hard refusal even for a test drive.
+ */
+const TEST_DRIVE_HARD_CODES: readonly ReadinessCode[] = ['stageHasNoTask', 'taskNotCompletable'];
+
+/**
+ * Split readiness for a TEST DRIVE, where an unfinished game is the normal case.
+ *
+ * `soft` issues (an unplaced pin, a stage whose required count is out of reach)
+ * make for a rough rehearsal but a perfectly launchable run, so the creator is
+ * asked rather than refused. `hard` issues would be rejected by launchRun itself.
+ */
+export function splitTestDriveReadiness(game: ReadableGame): { hard: ReadinessIssue[]; soft: ReadinessIssue[] } {
+  const hard: ReadinessIssue[] = [];
+  const soft: ReadinessIssue[] = [];
+  for (const issue of computeGameReadiness(game)) {
+    if (TEST_DRIVE_HARD_CODES.includes(issue.code)) hard.push(issue);
+    else soft.push(issue);
+  }
+  return { hard, soft };
+}
+
+/**
  * The issue a caller with no readiness panel should name.
  *
  * The Dashboard launches games without a Builder view, so it cannot point at the

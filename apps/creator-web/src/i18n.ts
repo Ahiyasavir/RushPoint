@@ -306,6 +306,109 @@ const HE = {
       durationTag:  (minutes: number) => `${minutes} דקות`,
       descriptionLead: (people: number, minutes: number, ageLabel: string) =>
         `משחק שדה עבור ${people} משתתפים בגילאי ${ageLabel}, בסביבות ${minutes} דקות`,
+
+      // ── Smart build (change: smart-game-composer) ─────────────────────────
+      smartTitle:   'שנרכיב לכם משחק',
+      smartBody:    'עונים על כמה שאלות, ומקבלים משחק שנבנה במיוחד לאירוע שלכם. כל פעם יוצא אחר.',
+      smartFinish:  'הרכיבו לי משחק',
+      smartProgress: (step: number, total: number) => `שאלה ${step} מתוך ${total}`,
+      // WHO is playing — audience and age in ONE question. They used to be two,
+      // which asked the same fact twice and let a creator pick "kids" and then
+      // "18+". Keys are SMART_BUILD_WHO ids (lib/smartBuildWizard.ts).
+      whoTitle:      'מי משחק?',
+      whoSub:        'נתאים את המשימות ואת רמת הקושי.',
+      whoLabel:      'קהל היעד',
+      whoOptions: {
+        kids:      'ילדים, 8 עד 10',
+        preteens:  'נוער, 11 עד 13',
+        teens:     'נוער, 14 עד 17',
+        adults:    'מבוגרים',
+        corporate: 'צוות עבודה',
+        mixed:     'כל הגילאים',
+      } as Record<string, string>,
+      // The AREA question — finer than indoor/outdoor, multi-select, skippable.
+      areasTitle:    'איפה זה קורה?',
+      areasSub:      'סמנו את המקומות שיש לכם. בלי לסמן, נבנה משחק שאפשר לשחק מכל מקום.',
+      areasLabel:    'סוגי מקומות',
+      areasHint:     'אפשר לסמן כמה. נתאים משימות למקומות שבחרתם.',
+      // Whether to PIN missions to real spots, as its own explicit question —
+      // never inferred from the places named above. Keys are 'no'/'yes'
+      // (lib/smartBuildWizard.ts SmartBuildAnswers.locationMissions).
+      locationMissionsLabel: 'מיקומים קבועים לכל משימה',
+      locationMissionsYes:   'כן, תנחו אותי להוסיף מיקום לכל משימה',
+      locationMissionsNo:    'לא, מכל מקום',
+      locationMissionsHint:  'אפשר להוסיף מיקום למשימה בודדת גם מאוחר יותר, בעורך.',
+      // Shown in Quick Setup for a mission that can be played מכל מקום, in a game
+      // that does have real places — the creator picks its spot.
+      placeMissionPrompt: 'המשימה הזאת יכולה לקרות בכל מקום. בחרו לה נקודה על המפה.',
+      smartPeopleTitle: 'כמה משתתפים?',
+      smartPeopleSub:   'נתאים את הקיבולת של כל תחנה.',
+      smartDurationTitle: 'כמה זמן יש לכם?',
+      smartDurationSub:   'נתאים את מספר המשימות.',
+      difficultyTitle:  'כמה מאתגר?',
+      difficultySub:    'תמיד אפשר לשנות אחר כך בעורך.',
+      difficultyLabel:  'רמת אתגר',
+      difficultyEasy:     'קליל',
+      difficultyBalanced: 'מאוזן',
+      difficultyHard:     'מאתגר',
+      preferredTitle:   'משהו שאתם אוהבים במיוחד?',
+      preferredSub:     'אפשר לדלג. נשלב יותר ממה שתבחרו.',
+      preferredLabel:   'סוגי משימות',
+      preferredHint:    'אפשר לבחור כמה, או כלום.',
+      // The composed game's own description and tags.
+      composedLead: (people: number, minutes: number, ageLabel: string) =>
+        `משחק שדה שהורכב עבור ${people} משתתפים בגילאי ${ageLabel}, בסביבות ${minutes} דקות`,
+      // DATA, not functions. These were lookup tables wearing function costumes,
+      // and as functions the i18n gate could only ever evaluate them ONCE, with a
+      // probe argument — so it verified nothing about the ten phrases themselves.
+      // As plain maps every single phrase is parity-checked and language-checked.
+      // Keys are BankTagId activity ids (apps/creator-web/src/bankTags.ts).
+      activityPhrases: {
+        action:   'הרבה תנועה',
+        camera:   'משימות צילום',
+        thinking: 'חידות לפיצוח',
+        teamwork: 'אתגרי צוות',
+        creative: 'משימות יצירה',
+        educational: 'משימות חינוכיות',
+      } as Record<string, string>,
+      /**
+       * The clause opener, written ONCE in front of the joined phrases.
+       *
+       * It used to live inside each phrase, which read "עם משימות צילום ועם
+       * חידות וחשיבה" — the connector repeated on every item. One prefix plus a
+       * bare separator gives "עם משימות צילום וחידות וחשיבה".
+       */
+      activityPrefix: 'עם',
+      /** How two activity phrases are joined. A separator, so it is checkable copy. */
+      activityJoinSeparator: ' ו',
+      activityTags: {
+        action:   'תנועה',
+        camera:   'צילום',
+        thinking: 'חשיבה',
+        teamwork: 'צוות',
+        creative: 'יצירה',
+        educational: 'חינוך',
+      } as Record<string, string>,
+      // Stage names for a composed game, by position in the arc. LISTS, so the
+      // composer can pick and two games of the same shape do not read alike —
+      // and so the i18n gate checks every single name (it walks arrays, so each
+      // entry is parity- and language-checked by index; EN must stay the same
+      // length). Keys are StageRole (apps/creator-web/src/lib/composeGame.ts).
+      composedStageNames: {
+        opener: ['יוצאים לדרך', 'קו הזינוק', 'המשימה מתחילה', 'חימום'],
+        middle: ['צוברים תאוצה', 'עולים שלב', 'באמצע הדרך', 'הלב של המשחק', 'מגבירים קצב'],
+        finale: ['הישורת האחרונה', 'קו הסיום', 'המשימה האחרונה', 'סיבוב הניצחון'],
+      } as Record<string, string[]>,
+      // Shown when a game was built but runs materially shorter than asked. Two
+      // versions on purpose: if the creator named no places, the fix is in their
+      // hands and we say so, because "add places" is advice they can act on.
+      shortNoPlaces: ({ asked, got }: { asked: number; got: number }) =>
+        `בנינו משחק של כ ${got} דקות במקום ${asked}. רוב המשימות שלנו קורות במקום מסוים, אז אם תסמנו איפה האירוע קורה נוכל להוסיף עוד.`,
+      shortWithPlaces: ({ asked, got }: { asked: number; got: number }) =>
+        `בנינו משחק של כ ${got} דקות במקום ${asked}. אלה כל המשימות שמתאימות למה שביקשתם. אפשר להוסיף משימות משלכם בעורך.`,
+      // Shown when the mission bank cannot produce a game at all. The creator is
+      // handed a blank game rather than nothing, and told why.
+      smartFailed: 'לא הצלחנו להרכיב משחק מהמשימות הקיימות. פתחנו לכם דף ריק במקום.',
     },
     // Delete confirmation (change: recoverable-game-deletion). Replaces the old
     // one-click confirm; the creator types the game title to confirm.
@@ -1339,6 +1442,10 @@ const HE = {
     issueTaskNotPlaced: 'למשימה אין נקודה על המפה',
     issueStageUnwinnable: 'השלב דורש להשלים יותר משימות ממה שאפשר',
     launchBlockedSeeReadiness: 'יש דברים לתקן לפני ההשקה. פתחו את לוח המוכנות בראש המסך כדי לראות את כולם.',
+    testDriveNotReadyBody: (n: number) => n === 1
+      ? 'המשחק עדיין לא מוכן, נשאר פריט אחד לסדר. אפשר לבדוק אותו ככה, רק שהחלק הזה לא יעבוד כמו שצריך.'
+      : `המשחק עדיין לא מוכן, נשארו ${n} פריטים לסדר. אפשר לבדוק אותו ככה, רק שהחלקים האלה לא יעבדו כמו שצריך.`,
+    testDriveNotReadyCta: 'לבדוק בכל זאת',
     releaseAfterDisclosure: (n: number) => `המשימה נפתחת ${n} דקות אחרי תחילת המשחק`,
     back: 'חזרה',
     next: 'הבא',
@@ -2310,6 +2417,87 @@ const EN: typeof HE = {
       durationTag:  (minutes: number) => `${minutes} minutes`,
       descriptionLead: (people: number, minutes: number, ageLabel: string) =>
         `A field game for ${people} players aged ${ageLabel}, about ${minutes} minutes`,
+
+      // ── Smart build (change: smart-game-composer) ─────────────────────────
+      smartTitle:   'Compose one for me',
+      smartBody:    'Answer a few questions and get a game built for your event. Different every time.',
+      smartFinish:  'Compose my game',
+      smartProgress: (step: number, total: number) => `Question ${step} of ${total}`,
+      /** WHO is playing — audience and age in one. See the note on the Hebrew entry. */
+      whoTitle:      'Who is playing?',
+      whoSub:        'We match the missions and the challenge level.',
+      whoLabel:      'Audience',
+      whoOptions: {
+        kids:      'Kids, 8 to 10',
+        preteens:  'Youth, 11 to 13',
+        teens:     'Youth, 14 to 17',
+        adults:    'Adults',
+        corporate: 'Work team',
+        mixed:     'All ages',
+      } as Record<string, string>,
+      /** The AREA question — see the note on the Hebrew entry. */
+      areasTitle:    'Where does it happen?',
+      areasSub:      'Mark the places you have. Mark none and we build a game playable anywhere.',
+      areasLabel:    'Kinds of places',
+      areasHint:     'Pick as many as you like. We match missions to them.',
+      /** Whether to pin missions to real spots — see the note on the Hebrew entry. */
+      locationMissionsLabel: 'Fixed locations per mission',
+      locationMissionsYes:   'Yes, walk me through adding a location to each mission',
+      locationMissionsNo:    'No, anywhere',
+      locationMissionsHint:  'You can add a location to a single mission later, in the editor.',
+      placeMissionPrompt: 'This mission works anywhere. Pick a spot for it on the map.',
+      smartPeopleTitle: 'How many players?',
+      smartPeopleSub:   'We will size each station to match.',
+      smartDurationTitle: 'How long do you have?',
+      smartDurationSub:   'We will pick how many missions fit.',
+      difficultyTitle:  'How challenging?',
+      difficultySub:    'You can always change this later in the editor.',
+      difficultyLabel:  'Challenge level',
+      difficultyEasy:     'Light',
+      difficultyBalanced: 'Balanced',
+      difficultyHard:     'Challenging',
+      preferredTitle:   'Anything you especially want?',
+      preferredSub:     'Skippable. We will lean into whatever you pick.',
+      preferredLabel:   'Kinds of mission',
+      preferredHint:    'Pick a few, or none at all.',
+      // The composed game's own description and tags.
+      composedLead: (people: number, minutes: number, ageLabel: string) =>
+        `A field game composed for ${people} players aged ${ageLabel}, about ${minutes} minutes`,
+      // DATA, not functions — see the note on the Hebrew entries.
+      activityPhrases: {
+        action:   'plenty of movement',
+        camera:   'photo missions',
+        thinking: 'riddles to solve',
+        teamwork: 'team challenges',
+        creative: 'creative missions',
+        educational: 'educational missions',
+      } as Record<string, string>,
+      /** The clause opener, written ONCE — see the note on the Hebrew entry. */
+      activityPrefix: 'with',
+      /** How two activity phrases are joined. A separator, so it is checkable copy. */
+      activityJoinSeparator: ' and ',
+      activityTags: {
+        action:   'movement',
+        camera:   'photo',
+        thinking: 'thinking',
+        teamwork: 'teamwork',
+        creative: 'creative',
+        educational: 'educational',
+      } as Record<string, string>,
+      /** Stage names by position — see the note on the Hebrew entry. Same lengths. */
+      composedStageNames: {
+        opener: ['Getting started', 'The starting line', 'The mission begins', 'Warming up'],
+        middle: ['Picking up speed', 'Levelling up', 'Halfway there', 'The heart of the game', 'Raising the pace'],
+        finale: ['The final stretch', 'The finish line', 'The last mission', 'Victory lap'],
+      } as Record<string, string[]>,
+      /** Shorter than asked — see the note on the Hebrew entries. */
+      shortNoPlaces: ({ asked, got }: { asked: number; got: number }) =>
+        `We built about ${got} minutes instead of ${asked}. Most of our missions happen somewhere specific, so tell us where your event is and we can add more.`,
+      shortWithPlaces: ({ asked, got }: { asked: number; got: number }) =>
+        `We built about ${got} minutes instead of ${asked}. Those are all the missions that suit what you asked for. You can add your own in the editor.`,
+      // Shown when the mission bank cannot produce a game at all. The creator is
+      // handed a blank game rather than nothing, and told why.
+      smartFailed: 'We could not compose a game from the current missions. We opened a blank one instead.',
     },
     // Delete confirmation (change: recoverable-game-deletion). Replaces the old
     // one-click confirm; the creator types the game title to confirm.
@@ -3339,6 +3527,10 @@ const EN: typeof HE = {
     issueTaskNotPlaced: 'Mission has no point on the map',
     issueStageUnwinnable: 'Stage requires completing more missions than it can yield',
     launchBlockedSeeReadiness: 'Some things need fixing before launch. Open launch readiness at the top of the screen to see them all.',
+    testDriveNotReadyBody: (n: number) => n === 1
+      ? 'This game is not finished yet. One item still needs attention, so that part will not work properly in the rehearsal.'
+      : `This game is not finished yet. ${n} items still need attention, so those parts will not work properly in the rehearsal.`,
+    testDriveNotReadyCta: 'Rehearse anyway',
     releaseAfterDisclosure: (n: number) => `This mission opens ${n} minutes after the game starts`,
     back: 'Back',
     next: 'Next',

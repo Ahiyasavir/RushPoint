@@ -31,6 +31,7 @@ import {
   availableGameTypes,
   type WizardState,
 } from '../apps/creator-web/src/lib/newGameWizard';
+import type { ComposerAnswers } from '../apps/creator-web/src/lib/composeGame';
 
 let failures = 0;
 function check(label: string, cond: boolean, detail = ''): void {
@@ -246,6 +247,116 @@ for (const junk of [null, undefined, {}, 'nope', 42]) {
 for (const junk of [null, undefined, {}, 'nope']) {
   const s = wizardReducer(initialWizardState(), junk as never);
   check(`reducer total on action ${JSON.stringify(junk)}`, !!s && typeof s.step === 'string');
+}
+
+// ── The smart-build fork (change: smart-game-composer) ───────────────────────
+//
+// ADDITIVE ONLY. Everything above this line describes the wizard as it was, and
+// must keep passing untouched — the third path is a new arm on existing unions,
+// not a rewrite. The last block below is the explicit regression guard for that.
+console.log('\n── smart build: the third path ──');
+
+{
+  const s = run({ type: 'setName', name: 'מרוץ' }, { type: 'next' }, { type: 'choosePath', path: 'smart_build' });
+  check('choosing smart build records the path', s.path === 'smart_build', JSON.stringify(s.path));
+  check('…and opens the questionnaire step', s.step === 'smartBuildDetails', JSON.stringify(s.step));
+  check('nothing is created yet', buildCreationPlan(s) === null, JSON.stringify(buildCreationPlan(s)));
+}
+
+{
+  // Back from the questionnaire returns to the fork with NO path selected, so
+  // the creator can pick a different card — same shape as the guided arm.
+  const s = run(
+    { type: 'setName', name: 'מרוץ' }, { type: 'next' },
+    { type: 'choosePath', path: 'smart_build' }, { type: 'back' },
+  );
+  check('back returns to the fork', s.step === 'path', JSON.stringify(s.step));
+  check('…with the path cleared', s.path === null, JSON.stringify(s.path));
+  check('…and still nothing created', buildCreationPlan(s) === null);
+}
+
+{
+  const s = run(
+    { type: 'setName', name: 'מרוץ' }, { type: 'next' },
+    { type: 'choosePath', path: 'smart_build' }, { type: 'cancel' },
+  );
+  check('cancel closes the wizard', s.step === 'closed', JSON.stringify(s.step));
+  check('…creating nothing', buildCreationPlan(s) === null);
+}
+
+{
+  const answers: ComposerAnswers = {
+    audience: 'youth', setting: 'outdoor', people: 24, minutes: 90,
+    ageBandId: 'band-14-17', difficultyPreference: 'balanced',
+  };
+  const s = run(
+    { type: 'setName', name: 'מרוץ' }, { type: 'next' },
+    { type: 'choosePath', path: 'smart_build' },
+    { type: 'setComposerAnswers', answers },
+    { type: 'next' },
+  );
+  const plan = buildCreationPlan(s, UNTITLED);
+  check('a finished smart build yields a smart_build plan', plan?.kind === 'smart_build', JSON.stringify(plan?.kind));
+  check('the title reaches the plan', plan?.title === 'מרוץ', JSON.stringify(plan?.title));
+  check('the composer answers reach the plan',
+    plan?.kind === 'smart_build' && JSON.stringify(plan.composerAnswers) === JSON.stringify(answers),
+    JSON.stringify(plan?.kind === 'smart_build' ? plan.composerAnswers : null));
+}
+
+{
+  // A blank name must not block here either (rule 2), and the questionnaire's
+  // own defaults must carry through when the creator answered nothing.
+  const s = run(
+    { type: 'setName', name: '   ' }, { type: 'next' },
+    { type: 'choosePath', path: 'smart_build' }, { type: 'next' },
+  );
+  const plan = buildCreationPlan(s, UNTITLED);
+  check('a blank name falls back to the untitled title', plan?.title === UNTITLED, JSON.stringify(plan?.title));
+  check('…and still produces a smart_build plan', plan?.kind === 'smart_build');
+  check('…carrying usable default answers',
+    plan?.kind === 'smart_build'
+    && typeof plan.composerAnswers?.audience === 'string'
+    && typeof plan.composerAnswers?.minutes === 'number'
+    && plan.composerAnswers.minutes > 0,
+    JSON.stringify(plan?.kind === 'smart_build' ? plan.composerAnswers : null));
+}
+
+// ── The two existing paths are byte-identical to before ──────────────────────
+//
+// Snapshotted explicitly rather than trusted: the smart-build arm shares this
+// reducer, and a regression in it would otherwise only surface as a template
+// path that quietly stopped personalising.
+console.log('\n── smart build: the existing paths are untouched ──');
+
+{
+  const scratch = run({ type: 'setName', name: 'מרוץ' }, { type: 'next' }, { type: 'choosePath', path: 'scratch' });
+  check('scratch still finishes immediately', scratch.step === 'done' && scratch.path === 'scratch',
+    JSON.stringify(scratch));
+  check('scratch still yields exactly a blank plan',
+    JSON.stringify(buildCreationPlan(scratch, UNTITLED)) === JSON.stringify({ kind: 'blank', title: 'מרוץ' }),
+    JSON.stringify(buildCreationPlan(scratch, UNTITLED)));
+
+  const guided = run(
+    { type: 'setName', name: 'מרוץ' }, { type: 'next' }, { type: 'choosePath', path: 'guided' },
+    { type: 'setAnswer', key: 'type', value: 'missions' },
+    { type: 'setAnswer', key: 'people', value: 24 },
+    { type: 'setAnswer', key: 'duration', value: 120 },
+    { type: 'setAnswer', key: 'age', value: 'band-11-13' },
+    { type: 'next' },
+  );
+  check('guided still yields exactly the template plan it always did',
+    JSON.stringify(buildCreationPlan(guided, UNTITLED)) === JSON.stringify({
+      kind: 'template',
+      title: 'מרוץ',
+      gameType: 'missions',
+      personalize: { groupSize: 24, durationMinutes: 120, minAge: 11 },
+      answers: { people: 24, minutes: 120, ageBandId: 'band-11-13' },
+    }),
+    JSON.stringify(buildCreationPlan(guided, UNTITLED)));
+
+  // An unknown path must still be ignored, now that there are three of them.
+  const bogus = run({ type: 'setName', name: 'x' }, { type: 'next' }, { type: 'choosePath', path: 'nonsense' as never });
+  check('an unknown path is still ignored', bogus.step === 'path' && bogus.path === null, JSON.stringify(bogus));
 }
 
 console.log(`\n${failures === 0 ? 'ALL NEW-GAME-WIZARD TESTS PASSED' : failures + ' FAILED'}`);

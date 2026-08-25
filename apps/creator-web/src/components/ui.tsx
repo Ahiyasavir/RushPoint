@@ -256,3 +256,76 @@ export function EmptyState({ icon, title, body, action }: {
     </div>
   );
 }
+
+/**
+ * A row of single-select option chips (change: guided-new-game-wizard; hoisted
+ * here by change: smart-game-composer so the new-game wizard and the smart-build
+ * questionnaire share ONE copy rather than drifting apart).
+ *
+ * Deliberately WRAPS rather than scrolls — a horizontally scrolling option row
+ * hides options on a phone, and a hidden option is an unasked question.
+ */
+export function ChipRow<T extends string | number>({ label, options, value, onChange, render }: {
+  label: string;
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+  render: (v: T) => string;
+}) {
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = o === value;
+          return (
+            <button key={String(o)} type="button" onClick={() => onChange(o)} aria-pressed={on}
+              className={`min-h-[40px] px-3 rounded-lg border text-[13px] transition-colors ${
+                on ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                   : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+              {render(o)}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A row of MULTI-select option chips (change: smart-game-composer).
+ *
+ * A sibling of ChipRow rather than a `multi` flag on it: the two differ in what
+ * a tap MEANS (choose vs toggle), which is exactly the thing `aria-pressed` and
+ * the visual state have to communicate, and a boolean prop threading through
+ * both would make the single-select case — used on every other question — carry
+ * a branch it never takes.
+ */
+export function MultiChipRow<T extends string>({ label, options, values, onToggle, render, hint }: {
+  label: string;
+  options: readonly T[];
+  values: readonly T[];
+  onToggle: (v: T) => void;
+  render: (v: T) => string;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
+      <div className="flex flex-wrap gap-1.5">
+        {options.map((o) => {
+          const on = values.includes(o);
+          return (
+            <button key={String(o)} type="button" onClick={() => onToggle(o)} aria-pressed={on}
+              className={`min-h-[40px] px-3 rounded-lg border text-[13px] transition-colors ${
+                on ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                   : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+              {render(o)}
+            </button>
+          );
+        })}
+      </div>
+      {hint && <p className="text-[11px] text-[--ink-3] mt-1.5">{hint}</p>}
+    </div>
+  );
+}
