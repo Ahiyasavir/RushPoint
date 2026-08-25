@@ -1015,6 +1015,67 @@ interface Slot {
   requiredTag?: BookendTagId;
 }
 
+/**
+ * The missions this answer set can actually use.
+ *
+ * Shared by `composeGame` and `previewComposition` so the count a creator is
+ * shown BEFORE pressing the button is produced by the same filter that then
+ * builds the game. A preview derived independently would drift the first time
+ * either side was tuned, and the creator would be told one number and handed
+ * another — which is worse than showing nothing at all.
+ */
+export function usableBankFor(bank: readonly TaskBankEntry[], ctx: FitContext): TaskBankEntry[] {
+  if (!Array.isArray(bank)) return [];
+  return bank.filter((e) =>
+    e
+    && typeof e === 'object'
+    && typeof e.key === 'string'
+    && e.key !== ''
+    && typeof e.build === 'function'
+    && fitScore(e, { ...ctx, stageTarget: 5 }) > -Infinity);
+}
+
+/** What a set of answers is worth, without minting a game. */
+export interface CompositionPreview {
+  /**
+   * How many missions the composed game will hold.
+   *
+   * Deterministic given the answers — the budget depends only on the requested
+   * duration, the eligible pool and its average cost, none of which involve the
+   * rng. Which missions get chosen, and the stage shape, are NOT deterministic,
+   * which is why neither is previewed here.
+   */
+  missionCount: number;
+  /** False when the bank cannot make a game from these answers at all. */
+  possible: boolean;
+}
+
+/**
+ * What the creator is about to get.
+ *
+ * Answers the one question the questionnaire could not: "how big is this
+ * going to be?" Six questions then a finished game in the Builder is a lot of
+ * commitment on faith; a single honest number on the last screen makes the
+ * final tap an informed one.
+ *
+ * Deliberately reports ONLY the mission count. Stage count comes from a
+ * randomly drawn blueprint and the mission list from band sampling, so
+ * previewing either would show the creator a game they are not going to get.
+ */
+export function previewComposition(
+  bank: readonly TaskBankEntry[],
+  answers: ComposerAnswers,
+): CompositionPreview {
+  const ctx = buildFitContext(answers, { recentBankKeys: [] });
+  const usable = usableBankFor(bank, ctx);
+  if (usable.length === 0) return { missionCount: 0, possible: false };
+
+  const walk = walkMinutesFor(ctx.setting);
+  const minutes = num((answers ?? {} as Partial<ComposerAnswers>).minutes);
+  const budget = targetTaskCount(minutes, usable.length, averageMissionCost(usable, walk));
+  return { missionCount: Math.max(0, budget), possible: budget > 0 };
+}
+
 export function composeGame(
   bank: readonly TaskBankEntry[],
   answers: ComposerAnswers,
@@ -1032,13 +1093,7 @@ export function composeGame(
   const minutes = num(a.minutes);
   const ageBandId = str(a.ageBandId);
 
-  const usable = bank.filter((e) =>
-    e
-    && typeof e === 'object'
-    && typeof e.key === 'string'
-    && e.key !== ''
-    && typeof e.build === 'function'
-    && fitScore(e, { ...ctx, stageTarget: 5 }) > -Infinity);
+  const usable = usableBankFor(bank, ctx);
 
   if (usable.length === 0) return null;
 

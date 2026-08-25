@@ -31,6 +31,15 @@ export interface SteppedWizardProps {
   onNext: () => void;
   /** False disables Next — for a question that genuinely cannot be skipped. */
   canAdvance?: boolean;
+  /**
+   * Rendered between the step body and the buttons, on the LAST step only.
+   *
+   * The shell's one concession to "what happens when I press this": a caller
+   * that wants to tell the creator what the final tap will produce needs it
+   * adjacent to the button, not buried above the options. Still content-free
+   * here — the shell decides only WHERE it goes, never what it says.
+   */
+  finalNote?: ReactNode;
   busy?: boolean;
   labels: {
     back: string;
@@ -43,7 +52,7 @@ export interface SteppedWizardProps {
 }
 
 export default function SteppedWizard({
-  steps, index, onBack, onNext, canAdvance = true, busy, labels,
+  steps, index, onBack, onNext, canAdvance = true, busy, labels, finalNote,
 }: SteppedWizardProps) {
   const total = steps.length;
   const step = steps[index];
@@ -85,6 +94,12 @@ export default function SteppedWizard({
       </div>
 
       <div className="flex flex-col gap-4">{step.render()}</div>
+
+      {isLast && finalNote && (
+        <div className="rounded-xl border border-[--rp-border] bg-[--surface-1] px-3 py-2.5 text-[12px] text-[--ink-2] leading-relaxed">
+          {finalNote}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Button variant="ghost" onClick={onBack} className="min-h-[44px]">

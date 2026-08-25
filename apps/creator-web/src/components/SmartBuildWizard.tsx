@@ -10,7 +10,7 @@
 // leaking into the product, and `bankTagLabel` returns '' for an unknown id
 // rather than falling back to the id itself, so that leak cannot happen even by
 // accident.
-import { useReducer } from 'react';
+import { useMemo, useReducer } from 'react';
 import { ChipRow, MultiChipRow } from './ui';
 import SteppedWizard, { type WizardStepConfig } from './SteppedWizard';
 import { useLanguage, useT } from './LanguageContext';
@@ -29,7 +29,8 @@ import {
   smartBuildAnswers,
   smartBuildReducer,
 } from '../lib/smartBuildWizard';
-import type { ComposerAnswers } from '../lib/composeGame';
+import { previewComposition, type ComposerAnswers } from '../lib/composeGame';
+import { TASK_BANK } from '../taskBank';
 
 // A plain yes/no ChipRow, not a boolean switch component: every other question
 // in this wizard is a ChipRow, so the location-missions toggle reads as one more
@@ -48,6 +49,12 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
   const [state, dispatch] = useReducer(smartBuildReducer, undefined, initialSmartBuildState);
 
   const a = state.answers;
+
+  // What we are about to build, from the answers so far. Recomputed as they
+  // change and shown on the LAST screen only: earlier it would be noise (the
+  // number moves with every tap), and on the last screen it is the one fact
+  // that makes the final tap an informed decision instead of an act of faith.
+  const preview = useMemo(() => previewComposition(TASK_BANK, smartBuildAnswers(state)), [state]);
 
   const tagLabel = (id: BankTagId): string => bankTagLabel(id, lang === 'en' ? 'en' : 'he');
 
@@ -158,6 +165,11 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
     },
   ];
 
+  // Sits below the last question's chips, above the CTA.
+  const previewLine = preview.possible
+    ? w.previewCount(preview.missionCount)
+    : w.previewNone;
+
   function handleNext() {
     const next = smartBuildReducer(state, { type: 'next' });
     // The reducer is the single source of "are we done" — asking it, rather than
@@ -181,6 +193,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       onBack={handleBack}
       onNext={handleNext}
       busy={busy}
+      finalNote={previewLine}
       labels={{
         back: w.back,
         next: w.next,

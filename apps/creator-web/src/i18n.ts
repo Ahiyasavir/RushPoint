@@ -355,6 +355,12 @@ const HE = {
       preferredSub:     'אפשר לדלג. נשלב יותר ממה שתבחרו.',
       preferredLabel:   'סוגי משימות',
       preferredHint:    'אפשר לבחור כמה, או כלום.',
+      // The last screen tells the creator how big the game will be, so the final
+      // tap is informed rather than an act of faith. Only the mission COUNT is
+      // promised — the stage shape and the mission list are drawn at random, so
+      // naming either would describe a game they are not going to get.
+      previewCount:     (missions: number) => `נרכיב לכם משחק של בערך ${missions} משימות`,
+      previewNone:      'לא נצליח להרכיב משחק מהתשובות האלה. נסו לשנות מקום או משך.',
       // The composed game's own description and tags.
       composedLead: (people: number, minutes: number, ageLabel: string) =>
         `משחק שדה שהורכב עבור ${people} משתתפים בגילאי ${ageLabel}, בסביבות ${minutes} דקות`,
@@ -2460,6 +2466,9 @@ const EN: typeof HE = {
       preferredSub:     'Skippable. We will lean into whatever you pick.',
       preferredLabel:   'Kinds of mission',
       preferredHint:    'Pick a few, or none at all.',
+      // See the note on the Hebrew entry — only the mission count is promised.
+      previewCount:     (missions: number) => `We will compose a game of about ${missions} missions`,
+      previewNone:      'We cannot compose a game from these answers. Try changing the place or the length.',
       // The composed game's own description and tags.
       composedLead: (people: number, minutes: number, ageLabel: string) =>
         `A field game composed for ${people} players aged ${ageLabel}, about ${minutes} minutes`,
