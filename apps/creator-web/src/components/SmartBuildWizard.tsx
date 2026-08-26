@@ -11,11 +11,12 @@
 // rather than falling back to the id itself, so that leak cannot happen even by
 // accident.
 import { useMemo, useReducer } from 'react';
-import { ChipRow, MultiChipRow } from './ui';
+import { ChipRow, MultiChipRow, RatingRow } from './ui';
 import SteppedWizard, { type WizardStepConfig } from './SteppedWizard';
 import { useLanguage, useT } from './LanguageContext';
 import { bankTagLabel, type BankTagId } from '../bankTags';
 import {
+  SMART_BUILD_OCCASIONS,
   SMART_BUILD_WHO,
   SMART_BUILD_DIFFICULTIES,
   SMART_BUILD_PREP_LEVELS,
@@ -32,11 +33,6 @@ import {
 } from '../lib/smartBuildWizard';
 import { previewComposition, type ComposerAnswers } from '../lib/composeGame';
 import { TASK_BANK } from '../taskBank';
-
-// A plain yes/no ChipRow, not a boolean switch component: every other question
-// in this wizard is a ChipRow, so the location-missions toggle reads as one more
-// question rather than a different kind of control on the same screen.
-const LOCATION_MISSIONS_OPTIONS = ['no', 'yes'] as const;
 
 export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
   busy?: boolean;
@@ -59,18 +55,10 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
 
   const tagLabel = (id: BankTagId): string => bankTagLabel(id, lang === 'en' ? 'en' : 'he');
 
-  const prepLabel = (id: string): string =>
-    id === 'none' ? w.prepNone
-      : id === 'full' ? w.prepFull
-        : w.prepLight;
-
-  // The hint for whichever level is selected. Shown under the chips rather than
-  // on each one: the difference between the tiers is a sentence, not a word, and
-  // three sentences side by side on a phone is a wall.
-  const prepHint = (id: string): string =>
-    id === 'none' ? w.prepNoneHint
-      : id === 'full' ? w.prepFullHint
-        : w.prepLightHint;
+  // Keyed on the level itself, so a sixth level added to PREP_SCALE shows up as
+  // a missing label rather than as a silently wrong one.
+  const prepLabel = (level: number): string => w.prepLevels[String(level)] ?? '';
+  const prepHint = (level: number): string => w.prepLevelHints[String(level)] ?? '';
 
   const difficultyLabel = (id: string): string =>
     id === 'easy' ? w.difficultyEasy
@@ -80,6 +68,23 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
   // One entry per SMART_BUILD_QUESTION_ORDER id, in the same order — the shell
   // indexes into this array with the reducer's index, so the two must not drift.
   const steps: WizardStepConfig[] = [
+    {
+      id: 'occasion',
+      title: w.occasionTitle,
+      subtitle: w.occasionSub,
+      render: () => (
+        <div className="flex flex-col gap-2">
+          <ChipRow
+            label={w.occasionLabel}
+            options={SMART_BUILD_OCCASIONS}
+            value={a.occasion}
+            onChange={(v) => dispatch({ type: 'setAnswer', key: 'occasion', value: v })}
+            render={(v) => w.occasionOptions[v] ?? ''}
+          />
+          <p className="text-[11px] text-[--ink-3]">{w.occasionHint}</p>
+        </div>
+      ),
+    },
     {
       id: 'who',
       title: w.whoTitle,
@@ -99,24 +104,17 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       title: w.areasTitle,
       subtitle: w.areasSub,
       render: () => (
-        <div className="flex flex-col gap-5">
-          <MultiChipRow
-            label={w.areasLabel}
-            options={SMART_BUILD_AREAS}
-            values={a.areas}
-            onToggle={(area) => dispatch({ type: 'toggleArea', area })}
-            render={(v) => tagLabel(v)}
-            hint={w.areasHint}
-          />
-          <ChipRow
-            label={w.locationMissionsLabel}
-            options={LOCATION_MISSIONS_OPTIONS}
-            value={a.locationMissions ? 'yes' : 'no'}
-            onChange={(v) => dispatch({ type: 'setLocationMissions', value: v === 'yes' })}
-            render={(v) => (v === 'yes' ? w.locationMissionsYes : w.locationMissionsNo)}
-          />
-          <p className="text-[11px] text-[--ink-3] -mt-3">{w.locationMissionsHint}</p>
-        </div>
+        // Just the places now. Whether missions get PINNED to real spots used to
+        // be a second question here — it is a preparation level, and it is asked
+        // as one (see the prep step below).
+        <MultiChipRow
+          label={w.areasLabel}
+          options={SMART_BUILD_AREAS}
+          values={a.areas}
+          onToggle={(area) => dispatch({ type: 'toggleArea', area })}
+          render={(v) => tagLabel(v)}
+          hint={w.areasHint}
+        />
       ),
     },
     {
@@ -167,16 +165,14 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       title: w.prepTitle,
       subtitle: w.prepSub,
       render: () => (
-        <div className="flex flex-col gap-2">
-          <ChipRow
-            label={w.prepLabel}
-            options={SMART_BUILD_PREP_LEVELS}
-            value={a.prepEffort}
-            onChange={(v) => dispatch({ type: 'setAnswer', key: 'prepEffort', value: v })}
-            render={(v) => prepLabel(v)}
-          />
-          <p className="text-[11px] text-[--ink-3] leading-relaxed">{prepHint(a.prepEffort)}</p>
-        </div>
+        <RatingRow
+          label={w.prepLabel}
+          options={SMART_BUILD_PREP_LEVELS}
+          value={a.prepEffort}
+          onChange={(v) => dispatch({ type: 'setAnswer', key: 'prepEffort', value: v })}
+          render={(v) => prepLabel(v)}
+          hint={prepHint(a.prepEffort)}
+        />
       ),
     },
     {

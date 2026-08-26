@@ -30,6 +30,8 @@ import {
   BAND_EPSILON,
   RECENCY_WINDOW,
   RECENCY_MAX_PENALTY,
+  OCCASION_BONUS,
+  PLACED_PREFERENCE_BONUS,
   seededRng,
   type FitContext,
 } from '../apps/creator-web/src/lib/composeGame';
@@ -68,6 +70,8 @@ function ctx(over: Partial<FitContext> = {}): FitContext {
     stageTarget: 5,
     ageFrom: 14,
     preferredTags: [],
+    favouredTags: [],
+    placedPreference: false,
     usedKeys: new Set<string>(),
     recentIndex: new Map<string, number>(),
     ...over,
@@ -293,6 +297,60 @@ console.log('\n── 10. exactly one draw per pick, and stable ties ───�
   ok('tied candidates resolve the same way regardless of input order', true);
 }
 
+console.log('\n── 12. the two ADDITIVE bonuses ────────────────────────────');
+{
+  // (change: smart-build-occasion-and-prep-scale.)
+  //
+  // Both of these sit OUTSIDE the normalized sum, in the same position the
+  // recency penalty already occupies. Making either one a seventh TERM_WEIGHTS
+  // member would mean re-weighting the other six — which would move every score
+  // the composer has ever produced, and would make "the neutral occasion changes
+  // nothing" impossible to state, let alone assert.
+  ok('the weights still sum to 1 with both bonuses in play',
+    Math.abs(Object.values(TERM_WEIGHTS).reduce((a, w) => a + w, 0) - 1) < 1e-9);
+  ok('neither bonus can dominate a perfect score',
+    OCCASION_BONUS > 0 && OCCASION_BONUS < 0.25
+    && PLACED_PREFERENCE_BONUS > 0 && PLACED_PREFERENCE_BONUS < 0.25);
+
+  // ── the occasion bias ──
+  const plain = ctx({ favouredTags: [] });
+  const biased = ctx({ favouredTags: ['camera', 'creative'] });
+  const base = entry('m', ['youth', 'fromAnywhere']);
+  const favoured = entry('m', ['youth', 'fromAnywhere', 'camera']);
+  const both = entry('m', ['youth', 'fromAnywhere', 'camera', 'creative']);
+
+  eq('a neutral occasion changes NOTHING',
+    fitScore(base, plain), fitScore(base, ctx({ favouredTags: [] })));
+  eq('…and leaves a favoured mission scoring exactly what it always did',
+    fitScore(favoured, plain), fitScore(base, plain));
+
+  ok('a favoured mission outranks an identical unfavoured one',
+    fitScore(favoured, biased) > fitScore(base, biased));
+  ok('carrying BOTH favoured tags scores highest',
+    fitScore(both, biased) > fitScore(favoured, biased));
+  ok(`the whole bias is bounded by OCCASION_BONUS (${OCCASION_BONUS})`,
+    fitScore(both, biased) - fitScore(base, biased) <= OCCASION_BONUS + 1e-9);
+
+  // Soft, never a filter: an unfavoured mission must still be eligible, or the
+  // occasion could empty a pool a creator's other answers had already narrowed.
+  ok('an unfavoured mission is still eligible', Number.isFinite(fitScore(base, biased)));
+
+  // ── level 4: "I'll go there beforehand and set it up" ──
+  const flat = ctx({ placedPreference: false });
+  const prefers = ctx({ placedPreference: true });
+  const anywhere = entry('a', ['youth', 'fromAnywhere']);
+  const placed = entry('a', ['youth', 'fromAnywhere', 'locationBased']);
+
+  eq('below level 4 a located mission has no edge',
+    fitScore(placed, flat), fitScore(anywhere, flat));
+  ok('at level 4 a located mission is preferred',
+    fitScore(placed, prefers) > fitScore(anywhere, prefers));
+  ok(`the edge is exactly PLACED_PREFERENCE_BONUS (${PLACED_PREFERENCE_BONUS})`,
+    Math.abs((fitScore(placed, prefers) - fitScore(anywhere, prefers)) - PLACED_PREFERENCE_BONUS) < 1e-9);
+  ok('a play-from-anywhere mission is still eligible at level 4',
+    Number.isFinite(fitScore(anywhere, prefers)));
+}
+
 console.log('\n── 11. buildFitContext turns answers into a context ────────');
 {
   const c = buildFitContext({
@@ -305,6 +363,19 @@ console.log('\n── 11. buildFitContext turns answers into a context ───
   ok('the age band resolves to a numeric floor', typeof c.ageFrom === 'number' && Number.isFinite(c.ageFrom));
   eq('recency becomes a position lookup', [c.recentIndex.get('x'), c.recentIndex.get('y')], [0, 1]);
   ok('nothing is used yet', c.usedKeys.size === 0);
+  eq('no occasion means no bias', buildFitContext({}, {}).favouredTags, []);
+  eq('a neutral occasion means no bias either',
+    buildFitContext({ occasion: 'other' }, {}).favouredTags, []);
+  ok('a real occasion supplies favoured tags',
+    buildFitContext({ occasion: 'wedding' }, {}).favouredTags.length > 0);
+  eq('an unknown occasion biases nothing',
+    buildFitContext({ occasion: 'nope' as never }, {}).favouredTags, []);
+  eq('prep level 3 does not prefer located missions',
+    buildFitContext({ prepEffort: 3 }, {}).placedPreference, false);
+  eq('prep level 4 does', buildFitContext({ prepEffort: 4 }, {}).placedPreference, true);
+  eq('prep level 5 does too', buildFitContext({ prepEffort: 5 }, {}).placedPreference, true);
+  eq('a malformed prep level prefers nothing',
+    buildFitContext({ prepEffort: 'full' as never }, {}).placedPreference, false);
 
   const junk = buildFitContext({
     audience: 'nope' as never, setting: 'nope' as never, people: NaN, minutes: NaN,

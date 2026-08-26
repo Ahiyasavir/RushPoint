@@ -416,6 +416,10 @@ export default function DashboardPage() {
     // role yields [], and the composer leaves that stage's title empty rather
     // than inventing one.
     stageNames: (role) => d.wizard.composedStageNames[role] ?? [],
+    // Per-OCCASION titles, same DATA shape one level deeper. A missing occasion
+    // or a missing role yields [], and the composer falls straight back to the
+    // generic list above — so this map may stay partial on purpose.
+    occasionStageNames: (occasion, role) => d.wizard.occasionStageNames[occasion]?.[role] ?? [],
     // Asked only for a mission the composer just pinned — see siteableInPlacedGame.
     placeMissionPrompt: () => d.wizard.placeMissionPrompt,
   };

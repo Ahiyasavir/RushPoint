@@ -18,6 +18,18 @@
 // a business" is a statement about the creator's world, not a scoring nudge:
 // there is no amount of good fit that makes such a mission acceptable to them.
 //
+// ─── The answer is a 1-5 rating; the bank still has three tiers ────────────────
+//
+// (change: smart-build-occasion-and-prep-scale.) The creator now answers on a
+// CUMULATIVE 1-5 scale, because the three chips missed a step creators kept
+// naming out loud: "I'll just put the missions on real spots". That costs
+// something real, and it is not the same as preparing props. The MISSION bank is
+// unchanged — still three tiers — so this file pins the mapping between the two:
+// 1,2 -> noPrep only · 3,4 -> self-prep · 5 -> outside partner. Levels 3 and 4
+// deliberately admit the SAME missions; 4 differs only by PREFERRING missions
+// pinned to real spots, which is a scoring nudge, not a fourth tier the bank has
+// no tag for.
+//
 // Runs via `npm test` (scripts/run-unit-tests.mjs auto-discovers scripts/test-*.ts).
 import {
   composeGame,
@@ -26,7 +38,9 @@ import {
   type ComposerDescriptionCopy,
 } from '../apps/creator-web/src/lib/composeGame';
 import { TASK_BANK } from '../apps/creator-web/src/taskBank';
-import { PREP_LEVELS, PREP_TAG_IDS, prepTierOf, prepToleranceOf } from '../apps/creator-web/src/bankTags';
+import {
+  PREP_SCALE, PREP_TAG_IDS, prepTierOf, prepToleranceOf, prepWantsPlacedMissions,
+} from '../apps/creator-web/src/bankTags';
 
 let failures = 0;
 function ok(label: string, cond: boolean): void {
@@ -55,23 +69,40 @@ const BASE: ComposerAnswers = {
 const byKey = new Map(TASK_BANK.map((e) => [e.key, e]));
 const tierOfKey = (k: string) => prepTierOf(byKey.get(k)?.tags);
 
-console.log('\n── 1. the tier model itself ────────────────────────────────');
+console.log('\n── 1. the scale, and how it maps onto the tiers ───────────');
 {
   eq('the tiers are ordered cheapest first', [...PREP_TAG_IDS], ['noPrep', 'needsSetup', 'needsPartner']);
-  eq('there is one answer level per tier', PREP_LEVELS.length, PREP_TAG_IDS.length);
+  eq('the answer scale is 1-5', [...PREP_SCALE], [1, 2, 3, 4, 5]);
 
-  eq('"none" tolerates only free missions', prepToleranceOf('none'), 0);
-  eq('"light" tolerates self-prep', prepToleranceOf('light'), 1);
-  eq('"full" tolerates an outside partner', prepToleranceOf('full'), 2);
+  // The whole mapping, in one table. Cumulative: a level never tolerates LESS
+  // than the level below it.
+  eq('1 - no prep at all', prepToleranceOf(1), 0);
+  eq('2 - places missions, but prepares nothing', prepToleranceOf(2), 0);
+  eq('3 - prepares things at home', prepToleranceOf(3), 1);
+  eq('4 - sets up on site', prepToleranceOf(4), 1);
+  eq('5 - coordinates with an outside party', prepToleranceOf(5), 2);
+  ok('the mapping is monotone', PREP_SCALE.every((l, i) =>
+    i === 0 || prepToleranceOf(l) >= prepToleranceOf(PREP_SCALE[i - 1])));
 
-  // A malformed answer must never silently buy the most expensive tier.
-  for (const junk of [undefined, null, '', 'nope', 42, {}, []]) {
+  // The step the scale exists for: "just put them on the map".
+  eq('level 1 pins nothing', prepWantsPlacedMissions(1), false);
+  for (const level of [2, 3, 4, 5]) {
+    eq(`level ${level} pins missions to real spots`, prepWantsPlacedMissions(level), true);
+  }
+
+  // A malformed answer must never silently buy the most expensive tier — and
+  // must never silently impose work either.
+  for (const junk of [undefined, null, '', 'nope', 'full', 0, 9, -3, 2.5, NaN, {}, []]) {
     if (prepToleranceOf(junk) >= 2) {
       failures++;
-      console.error(`  ✗ junk tolerance ${JSON.stringify(junk)} allowed an outside partner`);
+      console.error(`  ✗ junk level ${JSON.stringify(junk)} allowed an outside partner`);
+    }
+    if (prepWantsPlacedMissions(junk) !== false) {
+      failures++;
+      console.error(`  ✗ junk level ${JSON.stringify(junk)} silently demanded placed missions`);
     }
   }
-  ok('no junk answer ever buys the outside-partner tier', true);
+  ok('no junk answer buys the outside-partner tier or imposes placing', true);
 
   eq('an untagged mission costs nothing', prepTierOf([]), 0);
   eq('a mission carrying two tiers costs the HIGHER one',
@@ -93,12 +124,12 @@ console.log('\n── 2. the bank really has all three tiers ──────�
   eq('every mission declares what it costs the creator', untagged, []);
 }
 
-console.log('\n── 3. "no prep" never yields a mission that needs prep ─────');
+console.log('\n── 3. level 1 never yields a mission that needs prep ───────');
 {
   let violation = '';
   let composed = 0;
   for (let seed = 1; seed <= 40; seed++) {
-    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 'none' }, COPY, seededRng(seed), { recentBankKeys: [] });
+    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 1 }, COPY, seededRng(seed), { recentBankKeys: [] });
     if (!r) continue;
     composed++;
     for (const k of r.usedBankKeys) {
@@ -109,12 +140,12 @@ console.log('\n── 3. "no prep" never yields a mission that needs prep ──
   eq('not one mission asks the creator to prepare anything', violation, '');
 }
 
-console.log('\n── 4. "light" allows self-prep but never an outside partner ');
+console.log('\n── 4. level 3 allows self-prep, never an outside partner ───');
 {
   let violation = '';
   let sawSelfPrep = false;
   for (let seed = 1; seed <= 40; seed++) {
-    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 'light' }, COPY, seededRng(seed), { recentBankKeys: [] });
+    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 3 }, COPY, seededRng(seed), { recentBankKeys: [] });
     if (!r) continue;
     for (const k of r.usedBankKeys) {
       const t = tierOfKey(k);
@@ -126,11 +157,11 @@ console.log('\n── 4. "light" allows self-prep but never an outside partner '
   ok('self-prep missions ARE offered at this level', sawSelfPrep);
 }
 
-console.log('\n── 5. "full" opens the whole bank ──────────────────────────');
+console.log('\n── 5. level 5 opens the whole bank ──────────────────────────');
 {
   const seen = new Set<number>();
   for (let seed = 1; seed <= 60; seed++) {
-    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 'full' }, COPY, seededRng(seed), { recentBankKeys: [] });
+    const r = composeGame(TASK_BANK, { ...BASE, prepEffort: 5 }, COPY, seededRng(seed), { recentBankKeys: [] });
     if (!r) continue;
     for (const k of r.usedBankKeys) seen.add(tierOfKey(k));
   }
@@ -139,7 +170,7 @@ console.log('\n── 5. "full" opens the whole bank ─────────
 
 console.log('\n── 6. the default is safe ──────────────────────────────────');
 {
-  // An ABSENT answer must behave like "light": a creator who never saw the
+  // An ABSENT answer must behave like level 3: a creator who never saw the
   // question is never handed a mission that requires paying a third party.
   let violation = '';
   for (let seed = 1; seed <= 40; seed++) {
@@ -156,7 +187,7 @@ console.log('\n── 7. a tighter budget still yields a real game ────�
 {
   // The filter must not starve the composer. Zero-prep is the tightest setting
   // and it still has to produce a complete, populated game.
-  for (const prepEffort of PREP_LEVELS) {
+  for (const prepEffort of PREP_SCALE) {
     const r = composeGame(TASK_BANK, { ...BASE, prepEffort }, COPY, seededRng(3), { recentBankKeys: [] });
     if (!r) { failures++; console.error(`  ✗ "${prepEffort}" produced no game at all`); continue; }
     if (r.stages.some((s) => s.tasks.length === 0)) {
@@ -166,7 +197,7 @@ console.log('\n── 7. a tighter budget still yields a real game ────�
   ok('every prep level composes a complete game', true);
 
   // Tightening the budget must never INCREASE the mission count.
-  const counts = PREP_LEVELS.map((prepEffort) => {
+  const counts = PREP_SCALE.map((prepEffort) => {
     const r = composeGame(TASK_BANK, { ...BASE, prepEffort }, COPY, seededRng(3), { recentBankKeys: [] });
     return r ? r.usedBankKeys.length : 0;
   });
@@ -174,10 +205,34 @@ console.log('\n── 7. a tighter budget still yields a real game ────�
     counts.every((v, i) => i === 0 || v >= counts[i - 1]));
 }
 
+console.log('\n── 7b. levels 3 and 4 admit the SAME missions ──────────');
+{
+  // Level 4 ("I'll go there beforehand and set it up") is a PREFERENCE for
+  // missions pinned to real spots, not a new tier. If it ever unlocked a mission
+  // level 3 could not receive, the scale would have grown a fourth tier the bank
+  // has no tag for — and a creator at level 3 would be silently denied something
+  // they had already agreed to.
+  const seenAt = (level: number): Set<string> => {
+    const keys = new Set<string>();
+    for (let seed = 1; seed <= 60; seed++) {
+      const r = composeGame(TASK_BANK, { ...BASE, prepEffort: level as never }, COPY,
+        seededRng(seed), { recentBankKeys: [] });
+      for (const k of r?.usedBankKeys ?? []) keys.add(k);
+    }
+    return keys;
+  };
+  const three = seenAt(3);
+  const four = seenAt(4);
+  const beyondThree = [...four].filter((k) => tierOfKey(k) > prepToleranceOf(3));
+  eq('level 4 unlocks no tier level 3 was denied', beyondThree, []);
+  ok(`both levels draw on a real pool (${three.size} / ${four.size} missions)`,
+    three.size >= 10 && four.size >= 10);
+}
+
 console.log('\n── 8. total — junk prep answers never throw ────────────────');
 {
   let threw = '';
-  for (const junk of [undefined, null, '', 'nope', 42, {}, [], true]) {
+  for (const junk of [undefined, null, '', 'nope', 'full', 0, 9, NaN, {}, [], true]) {
     try {
       const r = composeGame(TASK_BANK, { ...BASE, prepEffort: junk as never }, COPY, seededRng(1), { recentBankKeys: [] });
       if (r) {

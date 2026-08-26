@@ -317,6 +317,21 @@ const HE = {
       smartBody:    'עונים על כמה שאלות, ומקבלים משחק שנבנה במיוחד לאירוע שלכם. כל פעם יוצא אחר.',
       smartFinish:  'הרכיבו לי משחק',
       smartProgress: (step: number, total: number) => `שאלה ${step} מתוך ${total}`,
+      // The OCCASION — asked first. Keys are OCCASION_IDS (lib/occasions.ts).
+      // It shapes the missions, the stage structure and the stage titles, and it
+      // deliberately does NOT decide who is playing: that is the next question.
+      occasionTitle: 'מה האירוע?',
+      occasionSub:   'נתאים את סוג המשימות, את מבנה השלבים ואת שמות השלבים.',
+      occasionLabel: 'סוג האירוע',
+      occasionOptions: {
+        birthday:     'יום הולדת',
+        mitzvah:      'בר / בת מצווה',
+        wedding:      'חתונה',
+        teamBuilding: 'יום גיבוש',
+        youthGroup:   'פעולה בתנועת נוער',
+        other:        'משהו אחר',
+      } as Record<string, string>,
+      occasionHint:  'לא בטוחים? בחרו "משהו אחר" ונרכיב משחק כללי.',
       // WHO is playing — audience and age in ONE question. They used to be two,
       // which asked the same fact twice and let a creator pick "kids" and then
       // "18+". Keys are SMART_BUILD_WHO ids (lib/smartBuildWizard.ts).
@@ -336,13 +351,6 @@ const HE = {
       areasSub:      'סמנו את המקומות שיש לכם. בלי לסמן, נבנה משחק שאפשר לשחק מכל מקום.',
       areasLabel:    'סוגי מקומות',
       areasHint:     'אפשר לסמן כמה. נתאים משימות למקומות שבחרתם.',
-      // Whether to PIN missions to real spots, as its own explicit question —
-      // never inferred from the places named above. Keys are 'no'/'yes'
-      // (lib/smartBuildWizard.ts SmartBuildAnswers.locationMissions).
-      locationMissionsLabel: 'מיקומים קבועים לכל משימה',
-      locationMissionsYes:   'כן, תנחו אותי להוסיף מיקום לכל משימה',
-      locationMissionsNo:    'לא, מכל מקום',
-      locationMissionsHint:  'אפשר להוסיף מיקום למשימה בודדת גם מאוחר יותר, בעורך.',
       // Shown in Quick Setup for a mission that can be played מכל מקום, in a game
       // that does have real places — the creator picks its spot.
       placeMissionPrompt: 'המשימה הזאת יכולה לקרות בכל מקום. בחרו לה נקודה על המפה.',
@@ -356,19 +364,29 @@ const HE = {
       difficultyEasy:     'קליל',
       difficultyBalanced: 'מאוזן',
       difficultyHard:     'מאתגר',
-      // ── How much prep the creator will do (change: smart-game-composer) ──
-      // The tiers differ in KIND, not amount: the top one means going to a
-      // business, paying, and relying on the owner to play along. Said plainly
-      // so nobody picks it by accident.
+      // ── How much prep the creator will do — a CUMULATIVE 1-5 rating
+      // (change: smart-build-occasion-and-prep-scale). Keys are the levels
+      // themselves; each one includes everything below it, so the labels are
+      // written to be read top to bottom as a ladder. Level 2 is the step the
+      // three old chips had no room for, and level 5 is said plainly so nobody
+      // picks it by accident — it depends on somebody who is not the creator.
       prepTitle:        'כמה בא לכם להתכונן מראש?',
-      prepSub:          'זה קובע אילו משימות נציע. אפשר לשנות אחר כך בעורך.',
+      prepSub:          'כל דרגה כוללת את מה שמתחתיה. זה קובע אילו משימות נציע.',
       prepLabel:        'רמת הכנה',
-      prepNone:         'בלי הכנה בכלל',
-      prepNoneHint:     'משימות שאפשר לשחק מיד, בלי שתכינו כלום מראש.',
-      prepLight:        'מוכנים להכין לבד',
-      prepLightHint:    'למשל להחביא חפץ, לספור מסלול מראש או להכין משהו לכל צוות.',
-      prepFull:         'מוכנים גם לתאם מראש',
-      prepFullHint:     'כולל להגיע לבית עסק, לשלם מראש ולתאם שהם ימסרו קוד למשתתפים. דורש עבודה מראש.',
+      prepLevels: {
+        1: 'בלי כלום',
+        2: 'רק מיקומים',
+        3: 'גם להכין מהבית',
+        4: 'גם להגיע מראש',
+        5: 'גם לתאם עם גורם חיצוני',
+      } as Record<string, string>,
+      prepLevelHints: {
+        1: 'משימות שאפשר לשחק מיד, מכל מקום, בלי שתכינו כלום.',
+        2: 'נדריך אתכם לסמן לכל משימה נקודה על המפה. שום הכנה פיזית.',
+        3: 'למשל להחביא חפץ, להכין משהו לכל צוות או לספור מסלול מראש.',
+        4: 'להגיע למקום לפני המשחק ולהציב שם דברים בעצמכם.',
+        5: 'למשל להגיע לבית עסק, לשלם מראש ולתאם שהם ימסרו קוד למשתתפים.',
+      } as Record<string, string>,
       preferredTitle:   'משהו שאתם אוהבים במיוחד?',
       preferredSub:     'אפשר לדלג. נשלב יותר ממה שתבחרו.',
       preferredLabel:   'סוגי משימות',
@@ -378,6 +396,37 @@ const HE = {
       // promised — the stage shape and the mission list are drawn at random, so
       // naming either would describe a game they are not going to get.
       previewCount:     (missions: number) => `נרכיב לכם משחק של בערך ${missions} משימות`,
+      // Stage titles per OCCASION — keyed occasion → role (opener/middle/finale),
+      // read by ComposerDescriptionCopy.occasionStageNames. An occasion with no
+      // entry here falls back to the generic stageNames list, so this map may
+      // stay partial without anything breaking.
+      occasionStageNames: {
+        birthday: {
+          opener: ['יוצאים לחגוג', 'מתחילים במסיבה', 'הפתיחה החגיגית'],
+          middle: ['מרימים הילוך', 'ממשיכים בכיף', 'עוד סיבוב'],
+          finale: ['הפתעת הסיום', 'הרגע הגדול', 'סוגרים במסיבה'],
+        },
+        mitzvah: {
+          opener: ['יוצאים לדרך', 'הפתיחה', 'מתחילים במסע'],
+          middle: ['ממשיכים במסע', 'האתגר הבא', 'עולים שלב'],
+          finale: ['הרגע הגדול', 'סוגרים במעמד', 'הסיום החגיגי'],
+        },
+        wedding: {
+          opener: ['מכירים את החתן והכלה', 'פותחים את הערב', 'הפתיחה'],
+          middle: ['ממשיכים לחגוג', 'סיבוב שני', 'עוד רגע מהערב'],
+          finale: ['לחיים', 'סוגרים את הערב', 'הרגע האחרון'],
+        },
+        teamBuilding: {
+          opener: ['מתחממים', 'הכרות מהירה', 'פתיחת היום'],
+          middle: ['עובדים ביחד', 'האתגר הבא', 'מעלים הילוך'],
+          finale: ['האתגר הגדול', 'סוגרים ביחד', 'המבחן האחרון'],
+        },
+        youthGroup: {
+          opener: ['פתיחת הפעולה', 'מתחילים', 'הכרות'],
+          middle: ['אתגר הביניים', 'ממשיכים', 'עולים שלב'],
+          finale: ['השלב המכריע', 'סיום הפעולה', 'האתגר האחרון'],
+        },
+      } as Record<string, Record<string, string[]>>,
       previewNone:      'לא נצליח להרכיב משחק מהתשובות האלה. נסו לשנות מקום או משך.',
       // The composed game's own description and tags.
       composedLead: (people: number, minutes: number, ageLabel: string) =>
@@ -2453,6 +2502,18 @@ const EN: typeof HE = {
       whoTitle:      'Who is playing?',
       whoSub:        'We match the missions and the challenge level.',
       whoLabel:      'Audience',
+      occasionTitle: 'What is the occasion?',
+      occasionSub:   'We will match the missions, the stage structure and the stage titles.',
+      occasionLabel: 'Kind of event',
+      occasionOptions: {
+        birthday:     'Birthday',
+        mitzvah:      'Bar / bat mitzvah',
+        wedding:      'Wedding',
+        teamBuilding: 'Team building day',
+        youthGroup:   'Youth movement activity',
+        other:        'Something else',
+      } as Record<string, string>,
+      occasionHint:  'Not sure? Pick "Something else" and we will build a general game.',
       whoOptions: {
         kids:      'Kids, 8 to 10',
         preteens:  'Youth, 11 to 13',
@@ -2467,10 +2528,6 @@ const EN: typeof HE = {
       areasLabel:    'Kinds of places',
       areasHint:     'Pick as many as you like. We match missions to them.',
       /** Whether to pin missions to real spots — see the note on the Hebrew entry. */
-      locationMissionsLabel: 'Fixed locations per mission',
-      locationMissionsYes:   'Yes, walk me through adding a location to each mission',
-      locationMissionsNo:    'No, anywhere',
-      locationMissionsHint:  'You can add a location to a single mission later, in the editor.',
       placeMissionPrompt: 'This mission works anywhere. Pick a spot for it on the map.',
       smartPeopleTitle: 'How many players?',
       smartPeopleSub:   'We will size each station to match.',
@@ -2484,20 +2541,55 @@ const EN: typeof HE = {
       difficultyHard:     'Challenging',
       // ── How much prep the creator will do — see the Hebrew note. ──
       prepTitle:        'How much do you want to prepare in advance?',
-      prepSub:          'This decides which missions we offer. You can change it later in the editor.',
+      prepSub:          'Each level includes the ones below it. This decides which missions we offer.',
       prepLabel:        'Prep level',
-      prepNone:         'No prep at all',
-      prepNoneHint:     'Missions you can play right away, with nothing to prepare beforehand.',
-      prepLight:        'Happy to prepare things myself',
-      prepLightHint:    'Such as hiding an object, walking a route in advance, or preparing something per team.',
-      prepFull:         'Happy to arrange things in advance',
-      prepFullHint:     'Includes going to a business, paying up front and arranging that they hand a code to players. Real work in advance.',
+      prepLevels: {
+        1: 'Nothing at all',
+        2: 'Just the locations',
+        3: 'Also prepare things at home',
+        4: 'Also go there beforehand',
+        5: 'Also coordinate with an outside party',
+      } as Record<string, string>,
+      prepLevelHints: {
+        1: 'Missions you can play right away, anywhere, with nothing to prepare.',
+        2: 'We will walk you through pinning each mission to a spot on the map. No physical prep.',
+        3: 'Such as hiding an object, preparing something per team, or walking a route in advance.',
+        4: 'Going to the place before the game and setting things up there yourself.',
+        5: 'Such as going to a business, paying up front and arranging that they hand a code to players.',
+      } as Record<string, string>,
       preferredTitle:   'Anything you especially want?',
       preferredSub:     'Skippable. We will lean into whatever you pick.',
       preferredLabel:   'Kinds of mission',
       preferredHint:    'Pick a few, or none at all.',
       // See the note on the Hebrew entry — only the mission count is promised.
       previewCount:     (missions: number) => `We will compose a game of about ${missions} missions`,
+      occasionStageNames: {
+        birthday: {
+          opener: ['Let the party begin', 'Opening act', 'Warming up'],
+          middle: ['Turning it up', 'Keep the party going', 'Another round'],
+          finale: ['The big surprise', 'The grand finale', 'Last dance'],
+        },
+        mitzvah: {
+          opener: ['Setting out', 'The opening', 'The journey begins'],
+          middle: ['The journey continues', 'The next challenge', 'Level up'],
+          finale: ['The big moment', 'The closing ceremony', 'The final step'],
+        },
+        wedding: {
+          opener: ['Meet the couple', 'Opening the evening', 'The welcome'],
+          middle: ['Keep celebrating', 'Second round', 'Another moment'],
+          finale: ['A toast', 'Closing the evening', 'The last dance'],
+        },
+        teamBuilding: {
+          opener: ['Warming up', 'Quick introductions', 'Kicking off'],
+          middle: ['Working together', 'The next challenge', 'Stepping it up'],
+          finale: ['The big challenge', 'Finishing together', 'The final test'],
+        },
+        youthGroup: {
+          opener: ['Getting started', 'The opening', 'Breaking the ice'],
+          middle: ['The middle challenge', 'Carrying on', 'Level up'],
+          finale: ['The decisive stage', 'Wrapping up', 'The last challenge'],
+        },
+      } as Record<string, Record<string, string[]>>,
       previewNone:      'We cannot compose a game from these answers. Try changing the place or the length.',
       // The composed game's own description and tags.
       composedLead: (people: number, minutes: number, ageLabel: string) =>
