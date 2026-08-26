@@ -259,11 +259,52 @@ export interface TaskBankEntry {
    * `preferredTags` answer accidentally target it.
    */
   family?: string;
+  /**
+   * True ONLY for a mission built around one physical, non-duplicable resource
+   * that a team must take possession of and later free up — a single hidden key,
+   * a single vendor/person who can talk to one team at a time. `build()` for such
+   * an entry MUST set `maxConcurrentTeams: 1`, and this flag is the declared
+   * (never inferred) reason why: it lets scripts/test-task-bank.ts tell "capacity
+   * 1 because the physical world only has one of these" apart from "capacity 1
+   * because nobody set it", which look identical on the built Task alone.
+   *
+   * Declared, never inferred, for the same reason `family` is (see the file
+   * header, rule 13): the composer's whole bank used to inherit one blanket
+   * `maxConcurrentTeams` regardless of what a mission actually needed, which let
+   * three teams get routed at once to search for a single physical key that only
+   * one of them could ever find. A mission with NO real scarcity (a public
+   * landmark, a street sign, a park bench) should never carry this flag — it
+   * would falsely queue teams behind each other for a spot that has room for all
+   * of them, and `build()` should set a capacity high enough that the platform's
+   * own `UNLIMITED_CAPACITY_THRESHOLD` convention treats it as "no queue here".
+   */
+  exclusiveStation?: boolean;
   /** Which template this content came from. Traceability only — nothing reads it. */
   sourceTemplateKey: string;
 }
 
-/** Everything every harvested mission shares. Keeps each entry to what differs. */
+/**
+ * The capacity a located mission declares when there is genuinely no shared
+ * resource to queue behind — a public bench, a street sign, a landmark, a
+ * gathering point every team passes through. Matches
+ * `@rushpoint/shared`'s `UNLIMITED_CAPACITY_THRESHOLD`: the platform already
+ * reads any capacity at or above it as "the author said no queue here" (real
+ * templates use exactly this number on their own no-contention tasks), so a
+ * second, drifting constant here would just be the same number typed twice.
+ */
+export const OPEN_SPACE_CAPACITY = 100;
+
+/**
+ * Everything every harvested mission shares. Keeps each entry to what differs.
+ *
+ * `maxConcurrentTeams: 1` is the SAFE floor, not a considered answer for any
+ * particular mission — it used to be 3, a number that fit nothing: too low for
+ * the gathering points every team passes through, and too high for a mission
+ * built around one physical object only one team can hold at a time (see
+ * `TaskBankEntry.exclusiveStation`). Every located entry below overrides this
+ * explicitly, one way or the other; scripts/test-task-bank.ts refuses one that
+ * silently relies on the fallback either way.
+ */
 function base(over: Partial<Task> & Pick<Task, 'title' | 'type'>): Task {
   return {
     id: uuid(),
@@ -271,7 +312,7 @@ function base(over: Partial<Task> & Pick<Task, 'title' | 'type'>): Task {
     difficulty: 5,
     estimatedMinutes: 10,
     pointValue: 100,
-    maxConcurrentTeams: 3,
+    maxConcurrentTeams: 1,
     ...over,
   };
 }
@@ -307,19 +348,37 @@ const ATTACH_PHOTO: TaskBankSetup = {
 };
 
 
-/** A station the team reaches and reads a secret code off. The creator sets the code. */
+/**
+ * A station the team reaches and reads a secret code off. The creator sets the
+ * code.
+ *
+ * `maxConcurrentTeams: 1`: every mission built on this helper needs a real
+ * person — a vendor, a contact standing at a spot — to hand the code to one
+ * team at a time. That person is the exclusive resource (see
+ * `TaskBankEntry.exclusiveStation`), not a decoration a busier event can afford
+ * to raise.
+ */
 const codeStation = (over: Partial<Task> & Pick<Task, 'title'>): Task =>
   sited({
     type: 'smart_station',
     smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+    maxConcurrentTeams: 1,
     ...over,
   });
 
-/** Asks the creator for the secret code a station hands out. */
+/**
+ * Asks the creator for the secret code a station hands out.
+ *
+ * `smart.secretCode`, not bare `smart`: only the LEAF is registered in
+ * QUICK_SETUP_FIELDS, so a step pointing at the parent object rendered fine and
+ * then focused nothing — the creator was told to set the code and never shown
+ * the code box. scripts/test-task-bank-setup-quality.ts now refuses any field
+ * Quick Setup cannot navigate to.
+ */
 const SET_CODE: TaskBankSetup = {
-  field: 'smart',
+  field: 'smart.secretCode',
   required: true,
-  prompt: 'קבעו את הקוד שהמשימה מחכה לו, ותאמו אותו מראש עם מי שנותן אותו בשטח.',
+  prompt: 'קבעו את הקוד שהמשימה מחכה לו, ותאמו אותו מראש עם מי שנותן אותו בשטח.\n\nSet the code this mission waits for, and agree it in advance with whoever hands it out on the ground.',
 };
 
 export const TASK_BANK: TaskBankEntry[] = [
@@ -340,6 +399,9 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 2,
       estimatedMinutes: 1,
       pointValue: 10,
+      // Every team is expected to gather at this exact point at once — the
+      // opposite of a scarce resource.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
 
@@ -404,6 +466,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       description: 'הביטו היטב בתמונה שצורפה למשימה, ונווטו אל המקום שהיא מציגה.',
       type: 'geofence',
       estimatedMinutes: 8,
+      // A public spot, not a shared object — any number of teams can arrive.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -428,6 +492,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 5,
       pointValue: 120,
       hint: 'רמז: עברו על הרמז לאט. כל אימוג\'י מייצג מילה אחת, וביחד הן מרכיבות משפט שמתאר מקום מוכר בסביבה.',
+      // A public spot, not a shared object — any number of teams can arrive.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -458,6 +524,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 8,
       pointValue: 50,
       smart: upload({ longInstructions: 'מצאו מישהו ששותה עכשיו קולה וצלמו אותו' }),
+      // Opportunistic and unlimited by nature — no object to share or queue for.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -498,6 +566,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       description: 'הביטו היטב בתמונה שצורפה למשימה, ונווטו אל המקום שהיא מציגה.',
       type: 'geofence',
       estimatedMinutes: 5,
+      // A public spot, not a shared object — any number of teams can arrive.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -514,6 +584,9 @@ export const TASK_BANK: TaskBankEntry[] = [
       type: 'photo',
       estimatedMinutes: 5,
       smart: upload(),
+      // Needs a crowd, not a scarce object — several teams can collect
+      // signatures in the same busy area at once.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
 
@@ -547,6 +620,9 @@ export const TASK_BANK: TaskBankEntry[] = [
       description: 'נווטו אל נקודת הסיום של המירוץ',
       type: 'field',
       estimatedMinutes: 5,
+      // Every team finishes here, often at the same time — the opposite of a
+      // scarce resource.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
 
@@ -765,29 +841,67 @@ export const TASK_BANK: TaskBankEntry[] = [
     // back for the next team turns the same "guide without touching" mechanic
     // into a real puzzle with a stake — and gives the bank a mission built
     // around real advance preparation the creator actually sets up in the field.
+    //
+    // Rebuilt (2026-08-26) after three separate loose ends surfaced in play:
+    //   1. A visible map pin defeated the entire "hidden" premise — the same
+    //      loophole rule 9 in the file header warns about. Fixed with
+    //      `hideLocation` + a separate, honestly-rough `locationClue`, the exact
+    //      pattern `human-gps`/`corporate-landmark-navigate` already use.
+    //   2. The single `description` edit asked the creator to fold BOTH "what is
+    //      locked" and "roughly where the key is" into one free-text rewrite,
+    //      which could as easily overwrite the blindfold/return-the-key rules as
+    //      preserve them. Split into two steps, each pointed at one field, one
+    //      job — and the built-in description now names the exact spot to edit
+    //      with a bracketed placeholder instead of asking for a silent rewrite.
+    //   3. The blindfold's start and end were never stated, so "find the key,
+    //      open it, photograph" left open whether the photo itself is taken
+    //      blindfolded. Now explicit: eyes stay closed until the key is
+    //      physically in hand, then open for the unlock and the photo.
+    // A single physical key also means only one team can ever be searching at
+    // once (see `exclusiveStation`) — the-hidden-key was the mission that
+    // first exposed the composer handing three teams at once to a mission with
+    // exactly one real object.
     key: 'the-hidden-key',
     sourceTemplateKey: 'authored',
+    exclusiveStation: true,
     tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
       'park', 'forest', 'neighborhood', 'office', 'school',
       'mixed', 'youth', 'adults', 'corporate', 'hard'],
     difficulty: 6,
     transitMinutes: 5,
     setup: [
-      PLACE_IT,
+      {
+        field: 'coordinates',
+        required: true,
+        prompt: 'לפני המשחק: סמנו את המקום שבו תחביאו מפתח אמיתי ותנעלו איתו משהו ספציפי (תיבה, מנעול, שער). בחרו מקום בטוח ויציב — לא ליד כביש, מים או גובה מסוכן.\n\nBefore the game: mark where you will hide a real key that locks something specific (a box, a padlock, a gate). Pick a safe, stable spot — not near a road, water, or a height.',
+      },
+      {
+        field: 'locationClue',
+        required: true,
+        prompt: 'כתבו רמז כללי לאזור שבו המפתח מוסתר — לא את המקום המדויק. אין סיכה על המפה. שימו לב: קבוצה אחת משחקת כאן בכל רגע; לאירוע גדול הכינו כמה מפתחות ומנעולים במקומות שונים.\n\nWrite a general clue to the area, not the exact spot. There is no pin on the map. Note: only one team plays this at a time — for a big event, prepare several keys and locks at different spots.',
+      },
       {
         field: 'description',
         required: true,
-        prompt: 'לפני המשחק: החביאו כאן מפתח אמיתי, ונעלו איתו משהו ספציפי (תיבה, מנעול, שער). עדכנו את התיאור כך שיתאר בדיוק מה נעול ואיפה בערך המפתח מוסתר, בלי לגלות מראש.',
+        prompt: 'השלימו בסוגריים המרובעים מה בדיוק המפתח פותח (תיבה, מנעול, שער) — והשאירו את שאר ההוראות כפי שהן, כולל ההנחיה להחזיר את המפתח.\n\nFill the square brackets with exactly what the key opens (a box, a padlock, a gate) — leave the rest of the instructions as they are, including returning the key.',
       },
     ],
     build: () => sited({
       title: 'המפתח החבוי',
-      description: 'הוחבא כאן מפתח, והוא פותח משהו ספציפי. עצמו עיניים לאחד מכם. השאר מדריכים אותו אליו רק בקול, בלי לגעת. מצאו את המפתח, פתחו איתו את מה שנועד, וצלמו. בסיום, החזירו את המפתח בדיוק למקום שמצאתם אותו — הקבוצה הבאה תזדקק לו.',
+      description: 'הוחבא כאן מפתח, שפותח [הוראות ליוצר: מה בדיוק נעול]. אחד מכם עוצם עיניים ונשאר עצום-עיניים עד שהמפתח ממש ביד שלו — השאר מדריכים אותו אליו רק בקול, בלי לגעת בו ובלי לגעת בחפצים בשבילו. ברגע שהמפתח ביד, מותר לפקוח עיניים, לפתוח איתו את המנעול, ולצלם את התוצאה הפתוחה. בסיום: החזירו את המפתח בדיוק למקום שבו מצאתם אותו — הקבוצה הבאה תזדקק לו בדיוק כמוכם.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 9,
       pointValue: 150,
       smart: upload(),
+      hideLocation: true,
+      locationClue: '',
+      hint: 'רמז: תנו הוראות קצרות וברורות — ימינה, שמאלה, קרוב, רחוק — במקום משפטים ארוכים, ותנו לעוצם־העיניים לגשש בידיים בעצמו כשהוא כבר קרוב.\n\nHint: give short, clear directions — left, right, closer, further — instead of long sentences, and let the blindfolded teammate feel around with their own hands once they are close.',
+      hintPenalty: 20,
+      // The one real, physical key: only one team can ever be searching for it
+      // at a time, no matter how many teams the event has. See
+      // TaskBankEntry.exclusiveStation.
+      maxConcurrentTeams: 1,
     }),
   },
   {
@@ -860,12 +974,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'כתבו מה בדיוק סופרים, כך שאין שתי דרכים להבין את זה. ספרו בעצמכם פעם אחת לפני המשחק.',
+        prompt: 'כתבו מה בדיוק סופרים, כך שאין שתי דרכים להבין את זה. ספרו בעצמכם פעם אחת לפני המשחק.\n\nWrite exactly what is being counted, so there is only one way to read it. Count it yourself once before the game.',
       },
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'הזינו את המספר הנכון. אם קשה לספור בדיוק, הגדילו את טווח הסטייה בהגדרות המשימה.',
+        prompt: 'הזינו את המספר הנכון. אם קשה לספור בדיוק, הגדילו את טווח הסטייה בהגדרות המשימה.\n\nEnter the correct number. If an exact count is hard, widen the tolerance in the mission settings.',
       },
     ],
     build: () => sited({
@@ -877,6 +991,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 120,
       numericAnswer: 0,
       numericTolerance: 1,
+      // Nothing here is scarce — every team counts the same benches independently.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -892,12 +1008,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'כתבו מאילו שלטים בדיוק לאסוף אותיות, לפי הסדר, ובאיזה מסלול.',
+        prompt: 'כתבו מאילו שלטים בדיוק לאסוף אותיות, לפי הסדר, ובאיזה מסלול.\n\nWrite exactly which signs the letters come from, in order, and along which route.',
       },
       {
         field: 'answers',
         required: true,
-        prompt: 'הזינו את המילה שיוצאת. בדקו אותה בשטח לפני המשחק, שלטים מתחלפים.',
+        prompt: 'הזינו את המילה שיוצאת. בדקו אותה בשטח לפני המשחק, שלטים מתחלפים.\n\nEnter the word it spells. Check it on the ground before the game — signs get replaced.',
       },
     ],
     build: () => sited({
@@ -910,6 +1026,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       answers: ['רשפוינט'],
       hint: 'אם המילה לא מסתדרת, בדקו שלא דילגתם על שלט קטן, ושאתם קוראים מימין לשמאל.',
       hintPenalty: 20,
+      // The signs stay put and readable for every team — nothing to queue for.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -925,7 +1043,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'החביאו חפץ אחד שלא שייך למקום, וכתבו כאן רמז אחד בלבד עליו.',
+        prompt: 'החביאו חפץ אחד שלא שייך למקום, וכתבו כאן רמז אחד בלבד עליו.\n\nHide one object that does not belong here, and write a single clue about it.',
       },
     ],
     build: () => sited({
@@ -936,6 +1054,9 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 8,
       pointValue: 130,
       smart: upload(),
+      // The planted object is never taken — it stays in place for the next
+      // team, so there is nothing to queue behind (unlike the-hidden-key).
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
 
@@ -988,7 +1109,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'description',
       required: true,
-      prompt: 'קבעו מה החפץ שכל קבוצה מקבלת בהתחלה, וכמה זמן יש להם. הכינו אותו מראש לכל קבוצה.',
+      prompt: 'קבעו מה החפץ שכל קבוצה מקבלת בהתחלה, וכמה זמן יש להם. הכינו אותו מראש לכל קבוצה.\n\nDecide what object each team starts with, and how long they get. Prepare one per team in advance.',
     }],
     build: () => anywhere({
       title: 'סחר חליפין',
@@ -1019,7 +1140,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו את הכתובת המדויקת של הנקודה כרמז. זה כל מה שהמשתתפים יראו — אין להם סיכה על המפה, רק את מה שתכתבו כאן.',
+        prompt: 'כתבו את הכתובת המדויקת של הנקודה כרמז. זה כל מה שהמשתתפים יראו — אין להם סיכה על המפה, רק את מה שתכתבו כאן.\n\nWrite the exact address of the spot as the clue. This is all the players get — there is no pin on their map, only what you write here.',
       },
     ],
     build: () => sited({
@@ -1031,6 +1152,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 150,
       hideLocation: true,
       locationClue: '',
+      // A public address, not a shared object — any number of teams can arrive.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
 
@@ -1039,7 +1162,10 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'vendor-secret-code',
     sourceTemplateKey: 'authored',
     family: 'vendor-code',
-    tags: ['action', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
+    // The vendor is the exclusive resource: one person can only hand the code
+    // to one team at a time (see TaskBankEntry.exclusiveStation).
+    exclusiveStation: true,
+    tags: ['action', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor',
       'cityCenter', 'mall', 'neighborhood', 'beach',
       'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy', 'crowded'],
     difficulty: 3,
@@ -1050,7 +1176,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'כתבו לאיזה דוכן להגיע ומה בדיוק לבקש. שלמו מראש ותאמו עם בעל הדוכן שיחלק את הקוד, אחרת המשימה תיתקע.',
+        prompt: 'כתבו לאיזה דוכן להגיע ומה בדיוק לבקש. שלמו מראש ותאמו עם בעל הדוכן שיחלק את הקוד, אחרת המשימה תיתקע.\n\nWrite which stall to go to and exactly what to ask for. Pay in advance and agree with the owner that they will hand out the code, or the mission will stall.',
       },
     ],
     build: () => codeStation({
@@ -1268,7 +1394,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'steps',
       required: true,
-      prompt: 'בצעד השני, הזינו את שם הקבוצה או כל מילה שתרצו שיקלידו.',
+      prompt: 'בצעד השני, הזינו את שם הקבוצה או כל מילה שתרצו שיקלידו.\n\nIn step two, enter the team name, or any word you want them to type.',
     }],
   },
   {
@@ -1291,12 +1417,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'תארו נקודת התחלה ברורה וקבועה (למשל "משער בית הספר"), כדי שהצוות ידע בדיוק מאיפה לספור עד הסיכה.',
+        prompt: 'תארו נקודת התחלה ברורה וקבועה (למשל "משער בית הספר"), כדי שהצוות ידע בדיוק מאיפה לספור עד הסיכה.\n\nDescribe a clear, fixed starting point (for example "from the school gate"), so the team knows exactly where to count from.',
       },
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'לפני המשחק: הלכו בעצמכם מנקודת ההתחלה עד כאן וספרו את הצעדים. הזינו את המספר האמיתי.',
+        prompt: 'לפני המשחק: הלכו בעצמכם מנקודת ההתחלה עד כאן וספרו את הצעדים. הזינו את המספר האמיתי.\n\nBefore the game: walk it yourself from the starting point to here and count the steps. Enter the real number.',
       },
     ],
     build: () => sited({
@@ -1308,6 +1434,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 90,
       numericAnswer: 40,
       numericTolerance: 8,
+      // The pin stays put for every team — nothing to queue for.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -1412,12 +1540,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'הגדירו בדיוק מה נספר ואיפה הקטע מתחיל ונגמר, כך שאין שתי דרכים להבין את זה.',
+        prompt: 'הגדירו בדיוק מה נספר ואיפה הקטע מתחיל ונגמר, כך שאין שתי דרכים להבין את זה.\n\nDefine exactly what is counted and where the stretch starts and ends, so there is only one way to read it.',
       },
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'לפני המשחק: עברו בעצמכם את הקטע וספרו. הזינו את המספר שקיבלתם.',
+        prompt: 'לפני המשחק: עברו בעצמכם את הקטע וספרו. הזינו את המספר שקיבלתם.\n\nBefore the game: walk the stretch yourself and count. Enter the number you got.',
       },
     ],
     build: () => sited({
@@ -1429,6 +1557,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 110,
       numericAnswer: 20,
       numericTolerance: 2,
+      // The shops stay put and countable for every team — nothing to queue for.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
@@ -1498,12 +1628,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'כתבו איזה מבנה או עץ בדיוק מודדים, כך שאי אפשר לטעות בזיהוי שלו מהנקודה הזאת.',
+        prompt: 'כתבו איזה מבנה או עץ בדיוק מודדים, כך שאי אפשר לטעות בזיהוי שלו מהנקודה הזאת.\n\nWrite exactly which building or tree is being measured, so it cannot be mistaken for another one from this spot.',
       },
       {
         field: 'numericAnswer',
         required: true,
-        prompt: 'בררו מראש את הגובה האמיתי במטרים והזינו אותו. אם אין מספר מדויק, ספרו קומות והכפילו בשלוש.',
+        prompt: 'בררו מראש את הגובה האמיתי במטרים והזינו אותו. אם אין מספר מדויק, ספרו קומות והכפילו בשלוש.\n\nFind out the real height in metres in advance and enter it. If there is no exact figure, count the floors and multiply by three.',
       },
     ],
     build: () => sited({
@@ -1515,6 +1645,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 110,
       numericAnswer: 15,
       numericTolerance: 3,
+      // The building or tree stays put for every team — nothing to queue for.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   // ── Closing narrow gaps the profile found ─────────────────────────────────
@@ -1540,7 +1672,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו את הרמז למקום, בלי לנקוב בשמו. זה כל מה שהצוות יראה — אין סיכה על המפה. ודאו שאפשר לפענח אותו מנקודת הפתיחה.',
+        prompt: 'כתבו את הרמז למקום, בלי לנקוב בשמו. זה כל מה שהצוות יראה — אין סיכה על המפה. ודאו שאפשר לפענח אותו מנקודת הפתיחה.\n\nWrite the clue to the place without naming it. This is all the team sees — there is no pin on the map. Make sure it can be worked out from the starting point.',
       },
     ],
     build: () => sited({
@@ -1554,13 +1686,18 @@ export const TASK_BANK: TaskBankEntry[] = [
       locationClue: '',
       hint: 'קראו את הרמז שוב בקול. לרוב התשובה כבר שם.',
       hintPenalty: 25,
+      // A public spot, not a shared object — any number of teams can arrive.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },
   {
     key: 'vendor-order-by-number',
     sourceTemplateKey: 'authored',
     family: 'vendor-code',
-    tags: ['action', 'teamwork', 'needsSetup', 'locationBased', 'indoor', 'outdoor',
+    // The vendor is the exclusive resource: one person can only hand the code
+    // to one team at a time (see TaskBankEntry.exclusiveStation).
+    exclusiveStation: true,
+    tags: ['action', 'teamwork', 'needsPartner', 'locationBased', 'indoor', 'outdoor',
       'mall', 'cityCenter', 'neighborhood',
       'mixed', 'youth', 'adults', 'corporate', 'medium', 'crowded'],
     difficulty: 4,
@@ -1571,7 +1708,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'כתבו לאיזה בית עסק להגיע ומה בדיוק להזמין "לפי המספר". תאמו עם בעל העסק מראש שיחלק את הקוד כשמזמינים בשם הזה.',
+        prompt: 'כתבו לאיזה בית עסק להגיע ומה בדיוק להזמין "לפי המספר". תאמו עם בעל העסק מראש שיחלק את הקוד כשמזמינים בשם הזה.\n\nWrite which business to go to and exactly what to order "by the number". Agree in advance with the owner that they will hand out the code for that order.',
       },
     ],
     build: () => codeStation({
@@ -1592,7 +1729,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'steps',
       required: true,
-      prompt: 'בצעד השני, החליפו את התשובה בערך שרלוונטי אצלכם — ערך ארגוני, מוצר, או כל מילה שהצוות אמור להגיע אליה יחד.',
+      prompt: 'בצעד השני, החליפו את התשובה בערך שרלוונטי אצלכם — ערך ארגוני, מוצר, או כל מילה שהצוות אמור להגיע אליה יחד.\n\nIn step two, replace the answer with something that matters to you — a company value, a product, or any word the team should arrive at together.',
     }],
     build: () => anywhere({
       title: 'תרגיל ההחלטה',
@@ -1637,7 +1774,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'numericAnswer',
       required: true,
-      prompt: 'קבעו את סכום היעד בשקלים והזינו אותו כאן. סכום שדורש לצרף כמה מוצרים עובד הכי טוב.',
+      prompt: 'קבעו את סכום היעד בשקלים והזינו אותו כאן. סכום שדורש לצרף כמה מוצרים עובד הכי טוב.\n\nSet the target amount in shekels and enter it here. An amount that needs a few items combined works best.',
     }],
     build: () => anywhere({
       title: 'סכום היעד',
@@ -1654,7 +1791,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'passphrase-handoff',
     sourceTemplateKey: 'authored',
     family: 'vendor-code',
-    tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
+    // The contact standing at the spot is the exclusive resource: one person
+    // can only hand the code to one team at a time (see
+    // TaskBankEntry.exclusiveStation).
+    exclusiveStation: true,
+    tags: ['thinking', 'teamwork', 'needsPartner', 'locationBased', 'outdoor', 'indoor',
       'park', 'school', 'mall', 'neighborhood',
       'kids', 'youth', 'easy'],
     difficulty: 3,
@@ -1665,7 +1806,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'description',
         required: true,
-        prompt: 'סכמו מראש עם אדם שיעמוד בנקודה: מה הסיסמה שהצוות אומר לו, ואיזה קוד הוא מוסר בתמורה. עדכנו כאן את הסיסמה.',
+        prompt: 'סכמו מראש עם אדם שיעמוד בנקודה: מה הסיסמה שהצוות אומר לו, ואיזה קוד הוא מוסר בתמורה. עדכנו כאן את הסיסמה.\n\nArrange in advance with someone who will be standing at the spot: what passphrase the team says, and which code they hand back. Set the passphrase here.',
       },
     ],
     build: () => codeStation({

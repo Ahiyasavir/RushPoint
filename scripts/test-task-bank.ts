@@ -27,7 +27,7 @@
 //     end in the creator's very first flow.
 //
 // Runs via `npm test` (scripts/run-unit-tests.mjs auto-discovers scripts/test-*.ts).
-import { TASK_BANK, type TaskBankEntry } from '../apps/creator-web/src/taskBank';
+import { TASK_BANK, OPEN_SPACE_CAPACITY, type TaskBankEntry } from '../apps/creator-web/src/taskBank';
 import { BANK_TAGS, AUDIENCE_TAG_IDS } from '../apps/creator-web/src/bankTags';
 import type { Task } from '@rushpoint/shared';
 import { gameStructureProblems } from '@rushpoint/shared';
@@ -225,7 +225,20 @@ console.log('\n── 7. declared Quick Setup points at real, settable fields �
       // ships media (it would point at the source template's storage folder).
       // So the bar is that the name is a settable Task field, not that a value
       // is already sitting in it.
-      const present = s.field in (task as unknown as Record<string, unknown>);
+      // A DOTTED PATH is a real field name here — `smart.secretCode` addresses
+      // the leaf inside `smart`, and that is the form Quick Setup registers and
+      // can focus. A flat `field in task` lookup rejected it, so this walks the
+      // path the way the platform's own resolver does.
+      const present = (() => {
+        if (typeof s.field !== 'string' || s.field === '') return false;
+        let node: unknown = task;
+        for (const part of s.field.split('.')) {
+          if (!node || typeof node !== 'object') return false;
+          if (!(part in (node as Record<string, unknown>))) return false;
+          node = (node as Record<string, unknown>)[part];
+        }
+        return true;
+      })();
       if (typeof s.field !== 'string' || !(present || SETTABLE_TASK_FIELDS.has(s.field))) {
         badField.push(`${e.key}:${String(s.field)}`);
       }
@@ -392,6 +405,40 @@ console.log('\n── 12. family groups are real clusters ───────�
 
   console.log(`  ℹ ${bySize.size} famil${bySize.size === 1 ? 'y' : 'ies'}: `
     + [...bySize.entries()].map(([f, keys]) => `${f}(${keys.length})`).join(', '));
+}
+
+// ─── 13. Station capacity matches physical reality, on every located mission ─
+//
+// A blanket `maxConcurrentTeams` (once 3 for every entry, located or not) let
+// the composer route three teams at once to search for one physical hidden
+// key, and left the two gathering points (start/finish, where every team is
+// meant to be at once) capped as if they were scarce. `exclusiveStation` is
+// the one declared signal for "this mission is built around a single physical
+// resource" (see the field's own doc in taskBank.ts) — every OTHER located
+// mission must instead say, explicitly, "no queue here"
+// (`OPEN_SPACE_CAPACITY`). Neither may rely on `base()`'s bare fallback: this
+// is the assertion that makes "forgot to think about capacity" impossible to
+// ship silently.
+console.log('\n── 13. station capacity matches the mission, on every located mission');
+{
+  const located = TASK_BANK.filter((e) => e.tags.includes('locationBased'));
+
+  const exclusiveNotOne = located
+    .filter((e) => e.exclusiveStation === true)
+    .filter((e) => built.get(e.key)?.maxConcurrentTeams !== 1)
+    .map((e) => `${e.key}: ${built.get(e.key)?.maxConcurrentTeams}`);
+  eq('every exclusiveStation mission caps at exactly 1 team', exclusiveNotOne, []);
+
+  const openNotUnlimited = located
+    .filter((e) => e.exclusiveStation !== true)
+    .filter((e) => (built.get(e.key)?.maxConcurrentTeams ?? 0) < OPEN_SPACE_CAPACITY)
+    .map((e) => `${e.key}: ${built.get(e.key)?.maxConcurrentTeams}`);
+  eq('every non-exclusive located mission declares "no queue here"', openNotUnlimited, []);
+
+  const exclusiveOnAnywhere = TASK_BANK
+    .filter((e) => e.exclusiveStation === true && !e.tags.includes('locationBased'))
+    .map((e) => e.key);
+  eq('exclusiveStation is only meaningful on a located mission', exclusiveOnAnywhere, []);
 }
 
 console.log('');

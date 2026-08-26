@@ -69,6 +69,9 @@ import {
   type SettingTagId,
   AREA_TAG_IDS,
   type AreaTagId,
+  prepTierOf,
+  prepToleranceOf,
+  type PrepLevel,
 } from '../bankTags';
 import type { TaskBankEntry } from '../taskBank';
 import { uuid } from '../taskShorthands';
@@ -106,6 +109,19 @@ export interface ComposerAnswers {
    * for why this must be an explicit ask, not inferred from the venue.
    */
   locationMissions?: boolean;
+  /**
+   * How much work the creator is willing to do BEFORE the game.
+   *
+   * A hard budget, not a preference. Missions are not equally expensive to run:
+   * most cost nothing, some cost an afternoon (hide a key, walk a route and
+   * count), and a few require going to a business, PAYING them, and getting the
+   * owner to hand a code to strangers. No amount of good fit makes that last
+   * kind acceptable to a creator who did not sign up for it, which is why the
+   * tolerance excludes rather than merely penalises.
+   *
+   * Absent behaves as `light` — never `full`. See `prepToleranceOf`.
+   */
+  prepEffort?: PrepLevel;
 }
 
 /**
@@ -217,6 +233,8 @@ export interface FitContext {
   recentIndex: Map<string, number>;
   /** When set, only missions carrying this tag are eligible (a bookend slot). */
   requiredTag?: BookendTagId;
+  /** The highest prep tier this creator accepts. See `prepToleranceOf`. */
+  prepTolerance: number;
 }
 
 /** The minimum a candidate needs to be sampled. */
@@ -481,6 +499,7 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     stageTarget: 5,
     ageFrom: ageFloorFor(a.ageBandId),
     preferredTags: safeTags(a.preferredTags),
+    prepTolerance: prepToleranceOf(a.prepEffort),
     // Sanitised the same way as preferredTags, then narrowed to real area ids, so
     // a stray tag in the answers cannot silently become an area filter.
     areas: safeTags(a.areas).filter((t): t is AreaTagId =>
@@ -519,6 +538,10 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
   // composer visibly repeating itself, not a fit issue a lower score fixes.
   if (entry.family && ctx.usedFamilies?.has(entry.family)) return -Infinity;
   if (ctx.requiredTag && !tags.includes(ctx.requiredTag)) return -Infinity;
+  // The creator's prep budget. A hard exclusion because "I am not coordinating
+  // with a business" describes their world, not their taste — see
+  // ComposerAnswers.prepEffort.
+  if (prepTierOf(tags) > (num(ctx.prepTolerance) ?? 1)) return -Infinity;
   // "No venue" makes a location-only mission literally unplayable.
   if (ctx.setting === 'fromAnywhere' && tags.includes('locationBased') && !tags.includes('fromAnywhere')) {
     return -Infinity;

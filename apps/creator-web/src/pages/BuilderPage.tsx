@@ -66,7 +66,7 @@ import { initDraft, editDraft, isDirty, commit, type DraftState } from '../lib/t
 import { blankTask, shouldAutoOpenFirstTask } from '../lib/wizardLogic';
 // ONE readiness computation, shared by the persistent panel and the launch guard
 // (change: builder-first-task-flow), so the two can never drift.
-import { computeGameReadiness, canLaunchGame, shouldAutoOpenReadiness, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
+import { computeGameReadiness, canLaunchGame, splitTestDriveReadiness, shouldAutoOpenReadiness, type ReadinessCode, type ReadinessIssue } from '../lib/gameReadiness';
 import { storyFieldCount } from '../lib/wizardSections';
 import { stageSettingsState, stageChips } from '../lib/stageSettings';
 import type { StageSettingsState } from '../lib/stageSettings';
@@ -581,40 +581,39 @@ export default function BuilderPage() {
     // indistinguishable from a real launch. The Builder tab is left exactly where
     // it was so the creator can keep editing after looking.
     //
-    // The tab is opened HERE, before any await, because a popup opened after an
-    // async gap is blocked by Safari and Firefox. It is parked on about:blank and
-    // pointed at the run once the code exists; every failure path below closes it
-    // rather than leaving a blank tab behind.
-    // NOT `noopener`: with that feature the browser returns null by design, and
-    // we need the handle to point the tab at the run once the code exists. The
-    // opener link is severed immediately after navigating instead.
-    const playTab = testDrive ? window.open('about:blank', '_blank') : null;
-    // True once the tab has been sent somewhere real. Every path that ends
-    // WITHOUT handing off closes it, so a refused save/readiness check can't
-    // strand the creator on a blank tab.
-    let handedOff = false;
-    // The one time "am I sure" gate before a creator's FIRST real launch ever
-    // (change: creator-first-launch-confirm). Only the real launch is gated, never
-    // Test run, and only when the game is actually launchable (a broken game gets
-    // the readiness alert below instead, so the confirm never nags on top of it).
-    // A cancel just aborts before any liftoff overlay shows.
-    // Ask, but do NOT burn the one-time flag yet — a save/readiness/launch failure
-    // below must leave the gate intact for the creator's next attempt. Marked only
-    // after launchRun actually succeeds.
-    const needFirstLaunchConfirm = !testDrive && canLaunchGame(game) && !hasConfirmedFirstLaunch(user?.uid);
-    if (needFirstLaunchConfirm) {
-      const ok = await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta);
-      if (!ok) return;
-    }
-    window.clearTimeout(saveTimer.current);
-    // Show the liftoff overlay for the whole save+launch wait, and always clear it
-    // in a `finally` so a save/readiness refusal or an error can never leave it
-    // stuck open (change: creator-launch-liftoff). On success `nav(...)` unmounts
-    // the Builder before the flag would matter.
-    setLaunching(true);
-    try {
-      // Don't launch on top of a failed save — the run would use stale/unsaved data.
-      if (!(await save())) { await dialog.alert(b.saveFailed); return; }
+    // ── Every refusal is decided BEFORE the play tab is opened ────────────────
+    // These checks are pure functions of `game`, which is already in state, so
+    // they cost nothing to run first — and running them first is the whole point:
+    // a tab parked on about:blank steals focus the moment it opens, so a creator
+    // whose game was not ready used to land on a blank page while the explanation
+    // sat in the tab they were no longer looking at. The readiness dialog now
+    // happens with the Builder still in front, and the tab opens only once the
+    // rehearsal is actually going to happen.
+    const quickSetupMissing = quickSetupLaunchBlockers(game);
+    let needFirstLaunchConfirm = false;
+    if (testDrive) {
+      // A rehearsal is for looking at an UNFINISHED game, so an unplaced pin or a
+      // stage that can't be fully won is a warning, not a wall (change:
+      // test-drive-not-ready-warning). Only what launchRun itself refuses is fatal.
+      const { hard, soft } = splitTestDriveReadiness(game);
+      if (hard.length > 0) {
+        if (shouldAutoOpenReadiness('launchBlocked')) setReadinessOpen(true);
+        await dialog.alert(b.launchBlockedSeeReadiness);
+        return;
+      }
+      if (soft.length > 0 || quickSetupMissing.length > 0) {
+        const ok = await dialog.confirm(
+          b.testDriveNotReadyBody(soft.length + quickSetupMissing.length),
+          b.testDriveNotReadyCta,
+        );
+        // Declined ⇒ show them exactly what to fix, in the surface that lists it.
+        if (!ok) {
+          if (soft.length > 0 && shouldAutoOpenReadiness('launchBlocked')) setReadinessOpen(true);
+          else if (quickSetupMissing.length > 0) setQsBlockers(quickSetupMissing);
+          return;
+        }
+      }
+    } else {
       // ONE launch rule (change: builder-first-task-flow). This used to be four
       // sequential guards, each naming a single offender in its own alert and
       // returning, so three broken tasks cost three failed launch attempts. The
@@ -623,7 +622,8 @@ export default function BuilderPage() {
       // launch points at the panel instead of naming one offender.
       if (!canLaunchGame(game)) {
         if (shouldAutoOpenReadiness('launchBlocked')) setReadinessOpen(true);
-        await dialog.alert(b.launchBlockedSeeReadiness); return;
+        await dialog.alert(b.launchBlockedSeeReadiness);
+        return;
       }
       // הקמה מהירה (change: quick-setup-wizard). SECOND, deliberately: a structural
       // readiness blocker still reports first, so the two refusals never interleave
@@ -631,8 +631,45 @@ export default function BuilderPage() {
       // catches what readiness structurally cannot — a template placeholder is a
       // perfectly VALID answer key, and a mission whose media was never replaced is
       // perfectly complete.
-      const missing = quickSetupLaunchBlockers(game);
-      if (missing.length > 0) { setQsBlockers(missing); return; }
+      if (quickSetupMissing.length > 0) { setQsBlockers(quickSetupMissing); return; }
+      // The one time "am I sure" gate before a creator's FIRST real launch ever
+      // (change: creator-first-launch-confirm). Only the real launch is gated, never
+      // Test run. A cancel just aborts before any liftoff overlay shows.
+      // Ask, but do NOT burn the one-time flag yet — a save/launch failure below
+      // must leave the gate intact for the creator's next attempt. Marked only
+      // after launchRun actually succeeds.
+      if (!hasConfirmedFirstLaunch(user?.uid)) {
+        if (!(await dialog.confirm(b.firstLaunchConfirmBody, b.firstLaunchConfirmCta))) return;
+        needFirstLaunchConfirm = true;
+      }
+    }
+
+    // Opened only now that nothing left can refuse the launch, and still before
+    // the `save()` await, because a popup opened after an async gap is blocked by
+    // Safari and Firefox. It is parked on about:blank and pointed at the run once
+    // the code exists; the remaining failure paths below close it rather than
+    // leaving a blank tab behind.
+    // NOT `noopener`: with that feature the browser returns null by design, and
+    // we need the handle to point the tab at the run once the code exists. The
+    // opener link is severed immediately after navigating instead.
+    const playTab = testDrive ? window.open('about:blank', '_blank') : null;
+    // True once the tab has been sent somewhere real. Every path that ends
+    // WITHOUT handing off closes it, so a failed save can't strand the creator on
+    // a blank tab.
+    let handedOff = false;
+    // A late failure explains itself in the Builder tab, so close the blank one
+    // FIRST — otherwise the alert is invisible behind the tab the browser just
+    // focused, which is the exact trap this whole ordering exists to avoid.
+    const closePlayTab = () => { if (!handedOff) { try { playTab?.close(); } catch { /* already gone */ } } };
+    window.clearTimeout(saveTimer.current);
+    // Show the liftoff overlay for the whole save+launch wait, and always clear it
+    // in a `finally` so a save/readiness refusal or an error can never leave it
+    // stuck open (change: creator-launch-liftoff). On success `nav(...)` unmounts
+    // the Builder before the flag would matter.
+    setLaunching(true);
+    try {
+      // Don't launch on top of a failed save — the run would use stale/unsaved data.
+      if (!(await save())) { closePlayTab(); await dialog.alert(b.saveFailed); return; }
       try {
         const { runId, accessCode } = await launchRun({ gameId: game.id, testDrive });
         // Launch succeeded — now it's safe to burn the one-time first-launch gate.
@@ -654,6 +691,7 @@ export default function BuilderPage() {
         }
         nav(`/run/${game.id}/${runId}`);
       } catch (e) {
+        closePlayTab();
         const msg = e instanceof Error ? e.message : '';
         // Out of free runs + credits → offer to open the wallet. In free mode
         // launches never fail for billing, so just surface any other error.
@@ -667,7 +705,7 @@ export default function BuilderPage() {
         }
       }
     } finally {
-      if (!handedOff) { try { playTab?.close(); } catch { /* already gone */ } }
+      closePlayTab();
       setLaunching(false);
     }
   }

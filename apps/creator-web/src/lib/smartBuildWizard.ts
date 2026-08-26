@@ -37,6 +37,8 @@ import {
 import {
   isBankTagId,
   settingForAreas,
+  PREP_LEVELS,
+  type PrepLevel,
   ACTIVITY_TAG_IDS,
   type AudienceTagId,
   type BankTagId,
@@ -52,6 +54,7 @@ export const SMART_BUILD_QUESTION_ORDER = [
   'people',
   'duration',
   'difficulty',
+  'prep',
   'preferred',
 ] as const;
 export type SmartBuildQuestion = typeof SMART_BUILD_QUESTION_ORDER[number];
@@ -87,6 +90,17 @@ export function whoChoice(id: unknown): typeof SMART_BUILD_WHO[number] {
   return SMART_BUILD_WHO.find((w) => w.id === id) ?? SMART_BUILD_WHO[5];
 }
 export const SMART_BUILD_DIFFICULTIES: readonly DifficultyPreference[] = ['easy', 'balanced', 'hard'];
+
+/**
+ * How much the creator is willing to prepare before the game.
+ *
+ * Asked out loud rather than inferred, because the tiers differ in KIND, not
+ * just in amount: the top one means going to a business, paying them, and
+ * relying on the owner to hand a code to strangers. A creator who wanted to
+ * press a button and run a game the same evening must never be handed that by
+ * default, and nothing about their other answers reveals which kind they are.
+ */
+export const SMART_BUILD_PREP_LEVELS: readonly PrepLevel[] = PREP_LEVELS;
 export const SMART_BUILD_GROUP_SIZES = GROUP_SIZE_BANDS;
 export const SMART_BUILD_DURATIONS = DURATION_BANDS;
 
@@ -117,6 +131,8 @@ export interface SmartBuildAnswers {
   minutes: number;
   difficultyPreference: DifficultyPreference;
   preferredTags: BankTagId[];
+  /** How much prep the creator will do before the game. See SMART_BUILD_PREP_LEVELS. */
+  prepEffort: PrepLevel;
   /**
    * The kinds of place this event has. EMPTY means no fixed venue — there is no
    * separate indoor/outdoor question, because naming a mall already said it.
@@ -161,6 +177,10 @@ export function smartBuildDefaults(): SmartBuildAnswers {
     minutes: DEFAULT_DURATION_MINUTES,
     difficultyPreference: 'balanced',
     preferredTags: [],
+    // Self-prep, never an outside partner. The middle tier is what most games
+    // already expected of a creator, and the top one has to be chosen on
+    // purpose — it depends on somebody who is not the creator turning up.
+    prepEffort: 'light',
     // Empty means no fixed venue — the setting the composer can always satisfy,
     // because it never hard-filters a mission out for being unplayable.
     areas: [],
@@ -251,6 +271,7 @@ function sanitizeAnswers(answers: Partial<SmartBuildAnswers>): SmartBuildAnswers
     people: positive(answers.people, d.people),
     minutes: positive(answers.minutes, d.minutes),
     difficultyPreference: oneOf(answers.difficultyPreference, SMART_BUILD_DIFFICULTIES, d.difficultyPreference),
+    prepEffort: oneOf(answers.prepEffort, SMART_BUILD_PREP_LEVELS, d.prepEffort),
     preferredTags: Array.isArray(answers.preferredTags)
       ? answers.preferredTags.filter((t, i, arr) => isBankTagId(t) && arr.indexOf(t) === i)
       : [],
@@ -307,5 +328,6 @@ export function smartBuildAnswers(state: SmartBuildState): ComposerAnswers {
     ...(a.preferredTags.length > 0 ? { preferredTags: a.preferredTags } : {}),
     ...(a.areas.length > 0 ? { areas: a.areas } : {}),
     locationMissions: a.locationMissions,
+    prepEffort: a.prepEffort,
   };
 }

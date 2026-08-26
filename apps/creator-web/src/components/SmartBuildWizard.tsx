@@ -18,6 +18,7 @@ import { bankTagLabel, type BankTagId } from '../bankTags';
 import {
   SMART_BUILD_WHO,
   SMART_BUILD_DIFFICULTIES,
+  SMART_BUILD_PREP_LEVELS,
   SMART_BUILD_DURATIONS,
   SMART_BUILD_GROUP_SIZES,
   SMART_BUILD_PREFERRED_TAGS,
@@ -57,6 +58,19 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
   const preview = useMemo(() => previewComposition(TASK_BANK, smartBuildAnswers(state)), [state]);
 
   const tagLabel = (id: BankTagId): string => bankTagLabel(id, lang === 'en' ? 'en' : 'he');
+
+  const prepLabel = (id: string): string =>
+    id === 'none' ? w.prepNone
+      : id === 'full' ? w.prepFull
+        : w.prepLight;
+
+  // The hint for whichever level is selected. Shown under the chips rather than
+  // on each one: the difference between the tiers is a sentence, not a word, and
+  // three sentences side by side on a phone is a wall.
+  const prepHint = (id: string): string =>
+    id === 'none' ? w.prepNoneHint
+      : id === 'full' ? w.prepFullHint
+        : w.prepLightHint;
 
   const difficultyLabel = (id: string): string =>
     id === 'easy' ? w.difficultyEasy
@@ -146,6 +160,23 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
           onChange={(v) => dispatch({ type: 'setAnswer', key: 'difficultyPreference', value: v })}
           render={(v) => difficultyLabel(v)}
         />
+      ),
+    },
+    {
+      id: 'prep',
+      title: w.prepTitle,
+      subtitle: w.prepSub,
+      render: () => (
+        <div className="flex flex-col gap-2">
+          <ChipRow
+            label={w.prepLabel}
+            options={SMART_BUILD_PREP_LEVELS}
+            value={a.prepEffort}
+            onChange={(v) => dispatch({ type: 'setAnswer', key: 'prepEffort', value: v })}
+            render={(v) => prepLabel(v)}
+          />
+          <p className="text-[11px] text-[--ink-3] leading-relaxed">{prepHint(a.prepEffort)}</p>
+        </div>
       ),
     },
     {

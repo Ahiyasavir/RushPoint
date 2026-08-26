@@ -71,9 +71,18 @@ export const BANK_TAGS = {
   crowded: { he: 'מקום עם הרבה אנשים', en: 'Crowded' },
   historic: { he: 'מקום ישן / היסטורי', en: 'Historic' },
 
-  // ── Preparation — what the creator has to do before the game ──────────────
-  needsSetup: { he: 'דורש הכנה', en: 'Needs setup' },
+  // ── Preparation — what the creator has to do BEFORE the game ──────────────
+  //
+  // Three tiers, not two. The old pair collapsed "write down what you are
+  // counting" and "go to a stall, pay the owner, and arrange that they hand out
+  // a code" into one `needsSetup` bucket, and the composer scored on neither —
+  // so a creator who wanted a zero-effort game could be handed a mission that
+  // required them to strike a deal with a business. `needsPartner` is the tier
+  // that has to be OPT-IN, because it depends on somebody who is not the creator
+  // actually showing up and playing along.
   noPrep: { he: 'ללא הכנה', en: 'No prep' },
+  needsSetup: { he: 'הכנה עצמית', en: 'Prep it yourself' },
+  needsPartner: { he: 'תיאום עם גורם חיצוני', en: 'Needs an outside partner' },
 
   // ── Location — whether a map pin is required ──────────────────────────────
   // `fromAnywhere` is also a SETTING answer ("no venue"), which is why a
@@ -162,6 +171,42 @@ export type ActivityTagId = typeof ACTIVITY_TAG_IDS[number];
  * historic) does not belong here: a crowded place can be an indoor mall or an
  * outdoor square, so it cannot answer "is this outdoor" on its own.
  */
+/**
+ * The preparation tiers, CHEAPEST FIRST. Order is meaningful: a creator who
+ * accepts tier N accepts everything below it.
+ */
+export const PREP_TAG_IDS = ['noPrep', 'needsSetup', 'needsPartner'] as const;
+export type PrepTagId = typeof PREP_TAG_IDS[number];
+
+/** How much prep a creator is willing to do. Same order as PREP_TAG_IDS. */
+export const PREP_LEVELS = ['none', 'light', 'full'] as const;
+export type PrepLevel = typeof PREP_LEVELS[number];
+
+/**
+ * How much work this mission asks of the creator before the game.
+ *
+ * Reads the HIGHEST tier the mission carries, so a mission tagged both
+ * `needsSetup` and `needsPartner` costs what the partner costs. An untagged
+ * mission is treated as free — the honest default, since the bank's own test
+ * requires every entry to declare a prep tag.
+ */
+export function prepTierOf(tags: readonly string[] | undefined): number {
+  if (!Array.isArray(tags)) return 0;
+  let tier = 0;
+  for (let i = 0; i < PREP_TAG_IDS.length; i++) {
+    if (tags.includes(PREP_TAG_IDS[i])) tier = Math.max(tier, i);
+  }
+  return tier;
+}
+
+/** How much prep this answer tolerates, as an index into PREP_TAG_IDS. */
+export function prepToleranceOf(level: unknown): number {
+  const i = PREP_LEVELS.indexOf(level as PrepLevel);
+  // An unknown answer tolerates self-prep but never an outside partner: that
+  // one must be chosen on purpose, never inherited from a malformed value.
+  return i < 0 ? 1 : i;
+}
+
 export const AREA_KIND_TAG_IDS = [
   'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school',
 ] as const;

@@ -272,8 +272,12 @@ const HE = {
       pathTitle:    'איך תרצו להתחיל?',
       scratchTitle: 'להתחיל מאפס',
       scratchBody:  'דף ריק. אתם בונים הכל בעצמכם.',
-      guidedTitle:  'שנבנה לכם משחק',
-      guidedBody:   'כמה שאלות קצרות, ואתם מקבלים משחק מוכן לעריכה.',
+      // "שנבנה" vs "שנרכיב" was a one-word difference between two cards that
+      // then looked identical, so a creator could not tell them apart at a
+      // glance. This one now says what it actually is: an EXISTING authored
+      // plot, picked and fitted — not something composed for them.
+      guidedTitle:  'משחק עלילה מוכן',
+      guidedBody:   'בוחרים עלילה שכתבנו, ואנחנו מתאימים אותה לגודל הקבוצה ולזמן שלכם.',
       detailsTitle: 'ספרו לנו על המשחק',
       detailsSub:   'אפשר לדלג על הכל, יש ברירות מחדל.',
       typeLabel:    'סוג המשחק',
@@ -308,6 +312,7 @@ const HE = {
         `משחק שדה עבור ${people} משתתפים בגילאי ${ageLabel}, בסביבות ${minutes} דקות`,
 
       // ── Smart build (change: smart-game-composer) ─────────────────────────
+      smartRecommended: 'מומלץ',
       smartTitle:   'שנרכיב לכם משחק',
       smartBody:    'עונים על כמה שאלות, ומקבלים משחק שנבנה במיוחד לאירוע שלכם. כל פעם יוצא אחר.',
       smartFinish:  'הרכיבו לי משחק',
@@ -351,6 +356,19 @@ const HE = {
       difficultyEasy:     'קליל',
       difficultyBalanced: 'מאוזן',
       difficultyHard:     'מאתגר',
+      // ── How much prep the creator will do (change: smart-game-composer) ──
+      // The tiers differ in KIND, not amount: the top one means going to a
+      // business, paying, and relying on the owner to play along. Said plainly
+      // so nobody picks it by accident.
+      prepTitle:        'כמה בא לכם להתכונן מראש?',
+      prepSub:          'זה קובע אילו משימות נציע. אפשר לשנות אחר כך בעורך.',
+      prepLabel:        'רמת הכנה',
+      prepNone:         'בלי הכנה בכלל',
+      prepNoneHint:     'משימות שאפשר לשחק מיד, בלי שתכינו כלום מראש.',
+      prepLight:        'מוכנים להכין לבד',
+      prepLightHint:    'למשל להחביא חפץ, לספור מסלול מראש או להכין משהו לכל צוות.',
+      prepFull:         'מוכנים גם לתאם מראש',
+      prepFullHint:     'כולל להגיע לבית עסק, לשלם מראש ולתאם שהם ימסרו קוד למשתתפים. דורש עבודה מראש.',
       preferredTitle:   'משהו שאתם אוהבים במיוחד?',
       preferredSub:     'אפשר לדלג. נשלב יותר ממה שתבחרו.',
       preferredLabel:   'סוגי משימות',
@@ -2392,8 +2410,9 @@ const EN: typeof HE = {
       pathTitle:    'How would you like to start?',
       scratchTitle: 'Start from scratch',
       scratchBody:  'A blank page. You build all of it yourself.',
-      guidedTitle:  'Build one for me',
-      guidedBody:   'A few quick questions, and you get a game ready to edit.',
+      // See the note on the Hebrew entry — this card names an EXISTING plot.
+      guidedTitle:  'A ready story game',
+      guidedBody:   'Pick a plot we wrote, and we fit it to your group size and time.',
       detailsTitle: 'Tell us about the game',
       detailsSub:   'Skip anything you like, everything has a default.',
       typeLabel:    'Game type',
@@ -2425,6 +2444,7 @@ const EN: typeof HE = {
         `A field game for ${people} players aged ${ageLabel}, about ${minutes} minutes`,
 
       // ── Smart build (change: smart-game-composer) ─────────────────────────
+      smartRecommended: 'Recommended',
       smartTitle:   'Compose one for me',
       smartBody:    'Answer a few questions and get a game built for your event. Different every time.',
       smartFinish:  'Compose my game',
@@ -2462,6 +2482,16 @@ const EN: typeof HE = {
       difficultyEasy:     'Light',
       difficultyBalanced: 'Balanced',
       difficultyHard:     'Challenging',
+      // ── How much prep the creator will do — see the Hebrew note. ──
+      prepTitle:        'How much do you want to prepare in advance?',
+      prepSub:          'This decides which missions we offer. You can change it later in the editor.',
+      prepLabel:        'Prep level',
+      prepNone:         'No prep at all',
+      prepNoneHint:     'Missions you can play right away, with nothing to prepare beforehand.',
+      prepLight:        'Happy to prepare things myself',
+      prepLightHint:    'Such as hiding an object, walking a route in advance, or preparing something per team.',
+      prepFull:         'Happy to arrange things in advance',
+      prepFullHint:     'Includes going to a business, paying up front and arranging that they hand a code to players. Real work in advance.',
       preferredTitle:   'Anything you especially want?',
       preferredSub:     'Skippable. We will lean into whatever you pick.',
       preferredLabel:   'Kinds of mission',

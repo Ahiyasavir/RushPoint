@@ -24,7 +24,7 @@ import {
 import {
   TASK_SAMPLES, applySample, samplesForType, sampleWouldOverwrite,
 } from '../taskTemplates';
-import { computeGameReadiness, canLaunchGame, firstLaunchBlocker } from '../gameReadiness';
+import { computeGameReadiness, canLaunchGame, firstLaunchBlocker, splitTestDriveReadiness } from '../gameReadiness';
 import { defaultActiveGroups, groupSummary } from '../taskOptInGroups';
 
 function task(p: Partial<Task> = {}): Task {
@@ -460,6 +460,52 @@ describe('computeGameReadiness reports every blocking issue at once', () => {
     const g = game([stage({ tasks: [readyTask()] })]);
     expect(computeGameReadiness(g)).toEqual([]);
     expect(canLaunchGame(g)).toBe(true);
+  });
+
+  // Test drive (change: test-drive-not-ready-warning). A rehearsal exists to look
+  // at an UNFINISHED game, so readiness splits into what the creator may wave
+  // through and what launchRun itself would reject anyway.
+  describe('test-drive readiness split', () => {
+    it('treats an unplaced pin as a warning, not a refusal', () => {
+      const g = game([stage({ tasks: [readyTask({ id: 'a', coordinates: { lat: 0, lng: 0 } })] })]);
+      const { hard, soft } = splitTestDriveReadiness(g);
+      expect(hard).toEqual([]);
+      expect(soft.map((i) => i.code)).toEqual(['taskNotPlaced']);
+    });
+
+    it('treats an unwinnable stage as a warning, not a refusal', () => {
+      const g = game([stage({
+        requiredTaskCount: 2,
+        tasks: [readyTask({ id: 'a' }), readyTask({ id: 'b', unlockAfterTaskIds: ['missing'] })],
+      })]);
+      const { hard, soft } = splitTestDriveReadiness(g);
+      expect(hard).toEqual([]);
+      expect(soft.map((i) => i.code)).toContain('stageUnwinnable');
+    });
+
+    // launchRun rejects both of these server-side, so offering "rehearse anyway"
+    // would hand the creator a launch that cannot succeed.
+    it('keeps a missing answer key and an empty stage fatal', () => {
+      expect(splitTestDriveReadiness(game([stage({ tasks: [task({ id: 'a', type: 'quiz' })] })]))
+        .hard.map((i) => i.code)).toContain('taskNotCompletable');
+      expect(splitTestDriveReadiness(game([stage({ tasks: [] })]))
+        .hard.map((i) => i.code)).toEqual(['stageHasNoTask']);
+      expect(splitTestDriveReadiness(game([])).hard.map((i) => i.code)).toEqual(['stageHasNoTask']);
+    });
+
+    it('is empty on both sides for a ready game', () => {
+      expect(splitTestDriveReadiness(game([stage({ tasks: [readyTask()] })])))
+        .toEqual({ hard: [], soft: [] });
+    });
+
+    it('partitions the full readiness surface without losing an issue', () => {
+      const g = game([
+        stage({ id: 's1', order: 0, tasks: [task({ id: 'a', type: 'quiz' })] }),
+        stage({ id: 's2', order: 1, title: 'Stage two', tasks: [] }),
+      ]);
+      const { hard, soft } = splitTestDriveReadiness(g);
+      expect([...hard, ...soft]).toHaveLength(computeGameReadiness(g).length);
+    });
   });
 });
 

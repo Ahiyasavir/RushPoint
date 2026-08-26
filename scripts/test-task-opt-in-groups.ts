@@ -88,7 +88,7 @@ ok('a prerequisite expands the rules group',
 ok('a presence gate expands the rules group', groupHasContent('rules', withT({ requirePresence: true })));
 ok('a tag expands the rules group', groupHasContent('rules', withT({ tags: ['night'] })));
 ok('a non-default station capacity expands the rules group',
-  groupHasContent('rules', withT({ maxConcurrentTeams: 1 })));
+  groupHasContent('rules', withT({ maxConcurrentTeams: 3 })));
 ok('an expiry expands the timer group', groupHasContent('timerPoints', withT({ expiresAfterMinutes: 30 })));
 ok('a paused clock expands the timer group', groupHasContent('timerPoints', withT({ pausesTimer: true })));
 ok('a non-default difficulty expands the timer group', groupHasContent('timerPoints', withT({ difficulty: 9 })));
