@@ -445,7 +445,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'פירמידה אנושית',
-      description: 'בואו נראה את היציבות שלכם! תבנו פירמידה אנושית עם בסיס של 3 חברים, העלו תמונה ברגע שהיא עומדת ויציבה!',
+      description: 'תבנו פירמידה אנושית עם בסיס של 3 חברים. צלמו אותה ברגע שהיא יציבה.',
       type: 'photo',
       smart: upload(),
     }),
