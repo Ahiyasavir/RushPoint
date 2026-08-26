@@ -1936,8 +1936,14 @@ export const TASK_BANK: TaskBankEntry[] = [
     // undisputed chronological order, same "ask around, no Googling" rule the
     // other trivia missions use so it stays a field-game beat, not a quiz app.
     key: 'invention-order',
+    // NOT tagged family: 'trivia-fact' — that family groups the pick-an-answer
+    // quizzes (trivia-bones, trivia-longest-river), which really are one
+    // mechanic with different questions. Dragging five items into
+    // chronological order is a different verb entirely; excluding it from
+    // appearing alongside a fact quiz would remove a pairing that adds
+    // variety, not one that repeats it (see rule 12 — family is for true
+    // mechanical duplicates, not shared theming).
     sourceTemplateKey: 'authored',
-    family: 'trivia-fact',
     tags: ['thinking', 'noPrep', 'fromAnywhere', 'crowded',
       'school', 'office', 'mall', 'park',
       'mixed', 'youth', 'adults', 'corporate', 'medium', 'educational'],
