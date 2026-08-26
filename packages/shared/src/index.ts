@@ -125,3 +125,4 @@ export * from './adminUserActivity';
 // produce (capacity, mode, consent, pacing), applied server-side inside
 // createGameFromTemplate (change: guided-new-game-wizard).
 export * from './gamePersonalization';
+export * from './docCachePolicy';

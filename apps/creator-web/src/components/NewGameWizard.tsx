@@ -12,7 +12,8 @@
 // template, so renaming or reordering a template can never silently change what
 // the wizard builds.
 import { useMemo, useReducer, useState } from 'react';
-import { Button, Input } from './ui';
+import { Button, ChipRow, Input } from './ui';
+import SmartBuildWizard from './SmartBuildWizard';
 import { useT } from './LanguageContext';
 import {
   AGE_BANDS, DURATION_BANDS, GROUP_SIZE_BANDS, ADULT_AGE,
@@ -23,6 +24,7 @@ import {
   templateForGameType, type CreationPlan, type GameTypeId, type WizardTemplateOption,
 } from '../lib/newGameWizard';
 import { blendGameDescription, derivedGameTags, type NewGameDescriptionCopy } from '../lib/describeNewGame';
+import type { ComposerAnswers } from '../lib/composeGame';
 
 /** What the wizard needs to know about each available template. */
 export interface WizardTemplate extends WizardTemplateOption {
@@ -42,35 +44,6 @@ export interface WizardSubmission {
   template?: WizardTemplate;
   description?: string;
   tags?: string[];
-}
-
-/** A chip row. Deliberately wraps rather than scrolls — a horizontally scrolling
- *  option row hides options on a phone, and a hidden option is an unasked question. */
-function ChipRow<T extends string | number>({ label, options, value, onChange, render }: {
-  label: string;
-  options: readonly T[];
-  value: T;
-  onChange: (v: T) => void;
-  render: (v: T) => string;
-}) {
-  return (
-    <div>
-      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map((o) => {
-          const on = o === value;
-          return (
-            <button key={String(o)} type="button" onClick={() => onChange(o)} aria-pressed={on}
-              className={`min-h-[40px] px-3 rounded-lg border text-[13px] transition-colors ${
-                on ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
-                   : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
-              {render(o)}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 export default function NewGameWizard({ templates, busy, onSubmit }: {
@@ -124,7 +97,9 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
     const next = wizardReducer(state, action);
     const plan = buildCreationPlan(next, d.untitledGame);
     if (!plan) { dispatch(action); return; }
-    if (plan.kind === 'blank') { onSubmit({ plan }); return; }
+    // Both of these carry everything the Dashboard needs on their own; only the
+    // template arm needs a resolved template and composed copy alongside it.
+    if (plan.kind === 'blank' || plan.kind === 'smart_build') { onSubmit({ plan }); return; }
     onSubmit({
       plan,
       template,
@@ -160,12 +135,28 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
         ) : (
           <>
             <div className="text-[13px] font-medium text-[--ink-2]">{w.pathTitle}</div>
-            {/* Equal weight, side by side on a wide screen and stacked on a phone.
-                Neither may look like the other's fallback. */}
-            <div className="grid gap-2.5 sm:grid-cols-2">
+            {/* ONE emphasised card, not two. The compose and story cards used to
+                share the same orange treatment, so of three genuinely different
+                options two read as a matched pair and the blank one read as the
+                odd one out — the opposite of the real hierarchy. Compose is the
+                recommended path and carries the accent alone; the other two are
+                neutral peers. On a phone they stack, on a wide screen they sit
+                side by side. */}
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'smart_build' })}
+                className="text-start rounded-xl border-2 border-rp-fire bg-rp-fire/5 p-3.5 hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-2xl leading-none">🧠</span>
+                  <span className="rounded-full bg-rp-fire/15 text-rp-fire text-[10px] font-medium px-2 py-0.5">
+                    {w.smartRecommended}
+                  </span>
+                </div>
+                <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.smartTitle}</div>
+                <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.smartBody}</div>
+              </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'guided' })}
-                className="text-start rounded-xl border-2 border-rp-fire/60 bg-rp-fire/5 p-3.5 hover:border-rp-fire hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
-                <div className="text-2xl leading-none">✨</div>
+                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-3.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
+                <div className="text-2xl leading-none">📖</div>
                 <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.guidedTitle}</div>
                 <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.guidedBody}</div>
               </button>
@@ -188,6 +179,26 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
           <p className="text-[11px] text-[--ink-3]">{d.untitledGame}</p>
         )}
       </div>
+    );
+  }
+
+  // ── The smart-build questionnaire ─────────────────────────────────────────
+  // Its own state machine, so nothing here knows what it asks; this file only
+  // decides what happens when it finishes or is backed out of.
+  if (state.step === 'smartBuildDetails') {
+    return (
+      <SmartBuildWizard
+        busy={busy}
+        onLeave={() => dispatch({ type: 'back' })}
+        onFinish={(answers: ComposerAnswers) => {
+          // Record the answers, THEN finish — `buildCreationPlan` reads them off
+          // the state, so finishing first would compose from the defaults.
+          const withAnswers = wizardReducer(state, { type: 'setComposerAnswers', answers });
+          const done = wizardReducer(withAnswers, { type: 'next' });
+          const plan = buildCreationPlan(done, d.untitledGame);
+          if (plan) onSubmit({ plan });
+        }}
+      />
     );
   }
 

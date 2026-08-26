@@ -36,6 +36,8 @@ import {
 } from '@rushpoint/shared';
 import type { TemplateGenre } from '@rushpoint/shared';
 import type { NewGameAnswers } from './describeNewGame';
+import type { ComposerAnswers } from './composeGame';
+import { initialSmartBuildState, smartBuildAnswers } from './smartBuildWizard';
 
 /** The questions, in the order they are asked. Position 0 and 1 are load-bearing. */
 export const WIZARD_QUESTION_ORDER = ['name', 'path', 'type', 'people', 'duration', 'age'] as const;
@@ -80,11 +82,18 @@ export function availableGameTypes(templates: readonly WizardTemplateOption[]): 
   return GAME_TYPES.map((t) => t.id).filter((id) => templateForGameType(templates, id) !== null);
 }
 
-/** Which path the creator took. */
-export type WizardPath = 'scratch' | 'guided';
+/**
+ * Which path the creator took.
+ *
+ * `smart_build` (change: smart-game-composer) is a PEER of the other two, not a
+ * mode of `guided`: it asks a different set of questions, through a different
+ * state machine (lib/smartBuildWizard.ts), and produces a game composed here on
+ * the client rather than personalised on the server.
+ */
+export type WizardPath = 'scratch' | 'guided' | 'smart_build';
 
 /** Where the wizard is. `closed` is a cancelled wizard; `done` is a finished one. */
-export type WizardStep = 'name' | 'path' | 'details' | 'done' | 'closed';
+export type WizardStep = 'name' | 'path' | 'details' | 'smartBuildDetails' | 'done' | 'closed';
 
 export interface WizardAnswers {
   type: GameTypeId;
@@ -98,6 +107,15 @@ export interface WizardState {
   name: string;
   path: WizardPath | null;
   answers: WizardAnswers;
+  /**
+   * The smart-build questionnaire's result, once it has one.
+   *
+   * `null` until the creator finishes that path — the smart-build questions live
+   * in their OWN reducer, and this field is only where its finished answers are
+   * handed back so `buildCreationPlan` can stay the single "what do we create"
+   * decision for all three paths.
+   */
+  composerAnswers: ComposerAnswers | null;
 }
 
 export type WizardAction =
@@ -106,6 +124,7 @@ export type WizardAction =
   | { type: 'back' }
   | { type: 'choosePath'; path: WizardPath }
   | { type: 'setAnswer'; key: 'type' | 'people' | 'duration' | 'age'; value: string | number }
+  | { type: 'setComposerAnswers'; answers: ComposerAnswers }
   | { type: 'cancel' };
 
 /** What the wizard hands to the Dashboard to actually create something. */
@@ -119,6 +138,12 @@ export type CreationPlan =
       personalize: { groupSize: number; durationMinutes: number; minAge?: number };
       /** The same answers, for the client-side description blend. */
       answers: NewGameAnswers;
+    }
+  | {
+      kind: 'smart_build';
+      title: string;
+      /** Everything the composer needs. Composition itself happens at the call site. */
+      composerAnswers: ComposerAnswers;
     };
 
 /** The answer every question falls back to when the creator skips it. */
@@ -138,6 +163,7 @@ export function initialWizardState(): WizardState {
     name: '',
     path: null,
     answers: { type: 'missions', people: d.people, duration: d.minutes, age: d.ageBandId },
+    composerAnswers: null,
   };
 }
 
@@ -164,17 +190,24 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     case 'choosePath':
       if (a.path === 'scratch') return { ...s, path: 'scratch', step: 'done' };
       if (a.path === 'guided') return { ...s, path: 'guided', step: 'details' };
+      if (a.path === 'smart_build') return { ...s, path: 'smart_build', step: 'smartBuildDetails' };
       return s;
     case 'setAnswer': {
       if (!a.key) return s;
       return { ...s, answers: { ...s.answers, [a.key]: a.value } as WizardAnswers };
     }
+    case 'setComposerAnswers': {
+      if (!a.answers || typeof a.answers !== 'object') return s;
+      return { ...s, composerAnswers: a.answers };
+    }
     case 'next':
       if (s.step === 'name') return { ...s, step: 'path' };
       if (s.step === 'details') return { ...s, step: 'done' };
+      if (s.step === 'smartBuildDetails') return { ...s, step: 'done' };
       return s;
     case 'back':
       if (s.step === 'details') return { ...s, step: 'path', path: null };
+      if (s.step === 'smartBuildDetails') return { ...s, step: 'path', path: null };
       if (s.step === 'path') return { ...s, step: 'name' };
       return s;
     case 'cancel':
@@ -205,6 +238,18 @@ export function buildCreationPlan(state: WizardState, untitledFallback = ''): Cr
 
   const title = resolveGameTitle(state.name, untitledFallback);
   if (state.path === 'scratch') return { kind: 'blank', title };
+
+  if (state.path === 'smart_build') {
+    // A creator who tapped straight through never dispatched `setComposerAnswers`,
+    // so fall back to the questionnaire's OWN defaults rather than inventing a
+    // set here — one definition of "the default game", in the reducer that owns
+    // those questions (rule 4: no question can dead-end the flow).
+    return {
+      kind: 'smart_build',
+      title,
+      composerAnswers: state.composerAnswers ?? smartBuildAnswers(initialSmartBuildState()),
+    };
+  }
 
   const d = defaultAnswers();
   const people = positive(state.answers?.people, d.people);

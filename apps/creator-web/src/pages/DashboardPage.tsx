@@ -4,13 +4,16 @@ import { useNavigate } from 'react-router-dom';
 import type { Game, GameMode, Stage, GameFile } from '@rushpoint/shared';
 import {
   GAME_TRASH_RETENTION_DAYS, PAYMENTS_ENABLED, resolvePlayOrigin, CANONICAL_PLAY_URL,
-  DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile,
+  DEFAULT_WRONG_ANSWER_LEVEL, parseGameFile, AGE_BANDS,
 } from '@rushpoint/shared';
 import {
   createGame, updateGame, listGames, launchRun, deleteGame, publishGame,
   createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
+import { composeGame, type ComposerDescriptionCopy } from '../lib/composeGame';
+import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
+import { TASK_BANK } from '../taskBank';
 import NewGameWizard, { type WizardSubmission, type WizardTemplate } from '../components/NewGameWizard';
 import { Badge, Button, Card, EmptyState, Input, Label, Skeleton } from '../components/ui';
 import { LaunchLiftoff } from '../components/LaunchLiftoff';
@@ -22,7 +25,7 @@ import { dialog } from '../components/dialog';
 import { toast } from '../components/toast';
 import { ShareSheet } from '../components/ShareSheet';
 import { orderTemplatesForPicker, type ResolvedTemplate } from '../lib/templatePicker';
-import { firstLaunchBlocker, type ReadinessIssue } from '../lib/gameReadiness';
+import { firstLaunchBlocker, splitTestDriveReadiness, type ReadinessIssue } from '../lib/gameReadiness';
 import { useAsyncAction } from '../hooks/useAsyncAction';
 import { useModalDismiss } from '../hooks/useModalDismiss';
 import { useAuth } from '../components/AuthGate';
@@ -375,6 +378,49 @@ export default function DashboardPage() {
   }, [picking]);
 
   /**
+   * The localized copy the composer writes a game's description and tags from
+   * (change: smart-game-composer).
+   *
+   * lib/composeGame.ts holds no Hebrew and no English of its own — the same rule
+   * lib/describeNewGame.ts lives by — so every human-readable word a composed
+   * game carries comes from here, through `t.*`.
+   */
+  const composerCopy: ComposerDescriptionCopy = {
+    lead: ({ people, minutes, ageLabel }) => d.wizard.descriptionLead(people, minutes, ageLabel),
+    ageLabel: (bandId) => {
+      const band = AGE_BANDS.find((b) => b.id === bandId);
+      if (!band) return '';
+      // Spelled out in words: the copy standard forbids every hyphen, so a band
+      // id can never be shown (scripts/test-no-dashes.ts).
+      return band.to === undefined ? d.wizard.agePlus(band.from) : d.wizard.ageRange(band.from, band.to);
+    },
+    ageTag: (bandId) => {
+      const band = AGE_BANDS.find((b) => b.id === bandId);
+      if (!band) return '';
+      const label = band.to === undefined ? d.wizard.agePlus(band.from) : d.wizard.ageRange(band.from, band.to);
+      return d.wizard.ageTag(label);
+    },
+    durationTag: (minutes) => d.wizard.durationTag(minutes),
+    composedLead: ({ people, minutes, ageLabel }) => d.wizard.composedLead(people, minutes, ageLabel),
+    // The dictionary holds these as DATA (one checkable string per activity), so
+    // the lookup lives here rather than inside i18n.ts. An unknown id yields '',
+    // which the composer drops — never a raw tag id on a creator's screen.
+    activityPhrase: (tag) => d.wizard.activityPhrases[tag] ?? '',
+    // The connector is written ONCE, in front of the joined phrases — not baked
+    // into each one, which read "with photo missions and with riddles".
+    activityJoin: (phrases) => (phrases.length === 0
+      ? ''
+      : `${d.wizard.activityPrefix} ${phrases.join(d.wizard.activityJoinSeparator)}`),
+    activityTag: (tag) => d.wizard.activityTags[tag] ?? '',
+    // Also DATA: a list per position, which the composer picks from. An unknown
+    // role yields [], and the composer leaves that stage's title empty rather
+    // than inventing one.
+    stageNames: (role) => d.wizard.composedStageNames[role] ?? [],
+    // Asked only for a mission the composer just pinned — see siteableInPlacedGame.
+    placeMissionPrompt: () => d.wizard.placeMissionPrompt,
+  };
+
+  /**
    * Create whatever the wizard asked for (change: guided-new-game-wizard).
    *
    * ONE call per path, and the guided path is a single atomic
@@ -400,6 +446,76 @@ export default function DashboardPage() {
         nav(`/build/${gameId}`);
       } catch (e) {
         console.error('[dashboard] create blank game failed:', e);
+        await dialog.alert(d.templateFailed);
+        setPicking(true);
+      }
+      return;
+    }
+
+    if (plan.kind === 'smart_build') {
+      // Compose FIRST, entirely on the client, before either network call — a
+      // composition problem can then never leave a half-built game on the server.
+      const result = composeGame(
+        TASK_BANK,
+        plan.composerAnswers,
+        composerCopy,
+        Math.random,
+        readRecentPicks(user?.uid),
+      );
+
+      // `null` means the mission bank could not make a game at all. Hand the
+      // creator a blank one and SAY SO, rather than silently degrading a smart
+      // build into an empty page they did not ask for.
+      if (!result) {
+        console.error('[dashboard] composer produced no game');
+        try {
+          const { gameId } = await createGame({ title: plan.title, mode: BLANK_MODE, tags: [] });
+          await updateGame({
+            gameId, stages: [blankStage()], scoringPreset: 'smart_weighted',
+            scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
+          });
+          _gamesCache = null;
+          await dialog.alert(d.wizard.smartFailed);
+          nav(`/build/${gameId}`);
+        } catch (e) {
+          console.error('[dashboard] blank fallback failed:', e);
+          await dialog.alert(d.templateFailed);
+          setPicking(true);
+        }
+        return;
+      }
+
+      try {
+        const { gameId } = await createGame({ title: plan.title, mode: result.mode, tags: [] });
+        await updateGame({
+          gameId,
+          stages: result.stages,
+          scoringPreset: result.scoringPreset,
+          description: result.description,
+          tags: result.tags,
+          wizardSteps: result.wizardSteps,
+          scoringOptions: { wrongAnswerPenalty: DEFAULT_WRONG_ANSWER_LEVEL },
+        });
+        _gamesCache = null;
+        // Only after BOTH calls succeeded: recording a generation the creator
+        // never received would push good missions out of the recency window for
+        // nothing.
+        recordRecentPicks(user?.uid, result.usedBankKeys);
+        // A game materially shorter than the creator asked for is told BEFORE the
+        // Builder opens, and told as advice rather than as a number: the usual
+        // cause is that no places were named, and that is something they can fix
+        // in one answer. Silence here is how someone finds out on the day.
+        if (result.shortfall) {
+          const { askedMinutes, estimatedMinutes, namedPlaces } = result.shortfall;
+          const say = namedPlaces ? d.wizard.shortWithPlaces : d.wizard.shortNoPlaces;
+          await dialog.alert(say({ asked: askedMinutes, got: estimatedMinutes }));
+        }
+        nav(`/build/${gameId}`);
+      } catch (e) {
+        // Same rule as every other path here: the wizard already closed, so a
+        // silent failure would leave the creator on an unchanged dashboard with
+        // no game and no error. Re-open so the answers are not lost.
+        console.error('[dashboard] compose game failed:', e);
         await dialog.alert(d.templateFailed);
         setPicking(true);
       }
@@ -465,10 +581,26 @@ export default function DashboardPage() {
     // would happily launch a game the Builder refused. `lib/gameReadiness` is
     // now the single source of truth for both. The Dashboard has no readiness
     // panel to point at, so it still names one offender, exactly as before.
-    const blocker = firstLaunchBlocker(g);
-    if (blocker) {
-      await dialog.alert(launchBlockedMessage(blocker));
-      return;
+    if (opts?.testDrive) {
+      // A rehearsal is for looking at an UNFINISHED game (change:
+      // test-drive-not-ready-warning): an unplaced pin or a stage that can't be
+      // fully won is a warning the creator may accept, not a wall. Only what
+      // launchRun itself refuses stays fatal.
+      const { hard, soft } = splitTestDriveReadiness(g);
+      if (hard[0]) { await dialog.alert(launchBlockedMessage(hard[0])); return; }
+      if (soft.length > 0) {
+        const ok = await dialog.confirm(
+          t.builder.testDriveNotReadyBody(soft.length),
+          t.builder.testDriveNotReadyCta,
+        );
+        if (!ok) return;
+      }
+    } else {
+      const blocker = firstLaunchBlocker(g);
+      if (blocker) {
+        await dialog.alert(launchBlockedMessage(blocker));
+        return;
+      }
     }
     // The one time "am I sure" gate before a creator's FIRST real launch ever
     // (change: creator-first-launch-confirm). Only the real launch is gated, never

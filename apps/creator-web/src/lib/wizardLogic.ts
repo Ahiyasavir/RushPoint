@@ -48,7 +48,11 @@ export function blankTask(id: string = genId()): Task {
     coordinates: { lat: 0, lng: 0 },
     difficulty: 5,
     pointValue: 100,
-    maxConcurrentTeams: 3,
+    // 1, not 3: nobody has said this mission has room for more than one team
+    // at a time yet, and 1 is the safe assumption until the creator says
+    // otherwise. Mirrors TASK_FIELD_DEFAULTS (lib/taskOptInGroups.ts) — the two
+    // must never disagree (see that file's header for what happens when they do).
+    maxConcurrentTeams: 1,
     tags: [] as string[],
   };
   return {

@@ -11,7 +11,8 @@ import { randomInt, randomBytes } from 'node:crypto';
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from '../obs/log';
 import { enforceRateLimit } from '../rateLimitStore';
-import { db } from '../firebase';
+import { db, docCachePolicy } from '../firebase';
+import { cachedGetDoc, cachedGetCollection } from '../docCache';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import {
@@ -669,9 +670,12 @@ export const startTeams = loggedCallable('startTeams', async (data, context) => 
 
   if (!gameId || !runId) throw new functions.https.HttpsError('invalid-argument', 'gameId and runId required');
 
-  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
-  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
-  if ((runSnap.data() as Run).ownerUid !== uid) {
+  // Read through the process cache (change: vps-firestore-read-offload). The ownership
+  // gate below is UNCHANGED and still runs on every call — serving the run document from
+  // memory must never widen access, only avoid re-fetching a document this process wrote.
+  const runDoc = await cachedGetDoc<Run>(db, docCachePolicy, runPath(uid, gameId, runId));
+  if (!runDoc.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  if (runDoc.data!.ownerUid !== uid) {
     throw new functions.https.HttpsError('permission-denied', 'Not your run');
   }
 
@@ -2414,6 +2418,12 @@ async function finalizeRunCore(
     updatedAt: now,
   });
 
+  // Release this run's cached documents (change: vps-firestore-read-offload). A finished
+  // run's teams are never on a hot path again, so holding them only consumes the bound
+  // that live runs need. Dropping is never a correctness risk — the worst case is one
+  // Firestore read if something does read the run again.
+  docCachePolicy.dropPrefix(runPath(ownerUid, gameId, runId));
+
   // Post-finalize consolidation, INLINE (change: run-email-scope-and-digest).
   // The `onRunFinalized` trigger below is not invoked at all on a callable-only
   // host, which is why the summary email, the player-profile folds and the
@@ -3522,26 +3532,30 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
   // held" (silence) rather than failing the organizer's only view of the field.
   let consentConfig: { requiresGuardianConsent?: boolean } = {};
   try {
-    const gs = await db.doc(gamePath(uid, gameId)).get();
-    consentConfig = { requiresGuardianConsent: (gs.data() as Game | undefined)?.requiresGuardianConsent };
+    const gs = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(uid, gameId));
+    consentConfig = { requiresGuardianConsent: gs.data?.requiresGuardianConsent };
   } catch { /* best-effort: every row degrades to heldForConsent: false */ }
 
   const locationUpdatedAt = new Map<string, string>();
   try {
-    const locSnap = await db
-      .collection(`${runPath(uid, gameId, runId)}/${COLLECTIONS.TEAM_LOCATIONS}`)
-      .get();
-    for (const d of locSnap.docs) {
-      const at = (d.data() as { updatedAt?: unknown }).updatedAt;
+    const locRows = await cachedGetCollection<{ updatedAt?: unknown }>(
+      db, docCachePolicy, `${runPath(uid, gameId, runId)}/${COLLECTIONS.TEAM_LOCATIONS}`,
+    );
+    for (const d of locRows) {
+      const at = d.data.updatedAt;
       if (typeof at === 'string' && at) locationUpdatedAt.set(d.id, at);
     }
   } catch { /* best-effort: the row simply carries lastLocationAt: null */ }
 
-  const snap = await db.collection(teamsCol(uid, gameId, runId)).get();
-  const teams = snap.docs.map((d) => {
-    const t = d.data() as RunTeam & {
-      taskSubmissions?: Record<string, { status?: string }>;
-    };
+  // The dominant cost of this callable, and the reason the change exists: with 29 teams
+  // this collection read alone was 29 of the ~60 Firestore reads it made, on a poll the
+  // Run Console fires every 5s. Membership survives the `update`-shaped team progress
+  // writes of a live run, so a warm poll re-reads only the teams that actually changed.
+  const teamRows = await cachedGetCollection<RunTeam & {
+    taskSubmissions?: Record<string, { status?: string }>;
+  }>(db, docCachePolicy, teamsCol(uid, gameId, runId));
+  const teams = teamRows.map((d) => {
+    const t = d.data;
     const activeStageOrder = t.stages.find((s) => s.status === 'active')?.order ?? null;
     // Pending photo/audio station reviews awaiting staff action (WO-4): without
     // this signal a non-console consumer is blind to why a team has stalled.
@@ -5088,12 +5102,16 @@ export const getMyTeamState = loggedCallable('getMyTeamState', async (data, cont
   // Read-only: any attached device (controller or viewer) sees the same state.
   const { ctx, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
 
-  const [gameSnap, runSnap] = await Promise.all([
-    db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get(),
-    db.doc(runPath(ctx.ownerUid, ctx.gameId, ctx.runId)).get(),
+  // The participant hot path (change: vps-firestore-read-offload). This callable ran
+  // 1,516 times in nine minutes of the 2026-08-26 run; these two documents change rarely
+  // and are written only by this process, so they are served from memory. Everything the
+  // payload is built from below — including sanitizeTaskForParticipant — is unchanged.
+  const [gameDoc, runDoc] = await Promise.all([
+    cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId)),
+    cachedGetDoc<Run>(db, docCachePolicy, runPath(ctx.ownerUid, ctx.gameId, ctx.runId)),
   ]);
-  const game = gameSnap.data() as Game;
-  const run = runSnap.data() as Run;
+  const game = gameDoc.data as Game;
+  const run = runDoc.data as Run;
 
   // Advance the team on this poll — scheduled-release unlock (change:
   // scheduled-release) + task-expiry sweep (change: task-expiry) — but WITHOUT

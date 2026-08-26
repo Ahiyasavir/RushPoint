@@ -503,6 +503,19 @@ const HE = {
     gameGone: 'המשחק הזה הסתיים או הוסר.',
     reconnecting: 'מתחבר מחדש…',
     progressLabel: ({ done, total }: { done: number; total: number }) => `${done} מתוך ${total} שלבים`,
+    // Mission-level progress (change: test-mode-game-feel). `progressLabel` above
+    // counts STAGES and still serves the sequence-step bar; a 24-question run is
+    // one stage, so the player's own bar counts missions instead.
+    missionProgressLabel: ({ done, total }: { done: number; total: number }) => `${done} מתוך ${total} משימות`,
+    missionCounter: ({ current, total }: { current: number; total: number }) => `משימה ${current} מתוך ${total}`,
+    // Milestone beats. Each measures PERSISTENCE, never knowledge — identical for
+    // a player answering everything right and everything wrong. Kept SHORT on
+    // purpose: a beat takes the counter's place on the progress row for a few
+    // seconds, so copy much wider than the counter would resize the bar next to it.
+    milestoneQuarter: 'רבע הדרך ✓',
+    milestoneHalf: 'חצי הדרך!',
+    milestoneThreeQuarters: 'שלושה רבעים ✓',
+    milestoneLastFive: 'עוד חמש!',
     mapView: 'מפה',
     satelliteView: 'לוויין',
     recenter: 'מרכוז למיקום שלי',
@@ -1204,6 +1217,14 @@ const EN: typeof HE = {
     gameGone: 'This game has ended or was removed.',
     reconnecting: 'Reconnecting…',
     progressLabel: ({ done, total }: { done: number; total: number }) => `${done} of ${total} stages`,
+    // Mission-level progress (change: test-mode-game-feel) — see the note in the
+    // Hebrew dictionary above.
+    missionProgressLabel: ({ done, total }: { done: number; total: number }) => `${done} of ${total} missions`,
+    missionCounter: ({ current, total }: { current: number; total: number }) => `Mission ${current} of ${total}`,
+    milestoneQuarter: 'A quarter done ✓',
+    milestoneHalf: 'Halfway there!',
+    milestoneThreeQuarters: 'Three quarters ✓',
+    milestoneLastFive: 'Five to go!',
     mapView: 'Map',
     satelliteView: 'Satellite',
     recenter: 'Center on me',

@@ -80,6 +80,11 @@ export default {
         'finish-pulse':'finish-pulse 2s ease-in-out infinite',
         'shimmer':     'shimmer 2.5s ease-in-out infinite',
         'fade-up':     'fade-up 0.4s ease-out both',
+        // Squash-and-stretch receipt for the answer the player just tapped
+        // (change: test-mode-game-feel). Unlike score-pop this is NOT an
+        // entrance — the element is already on screen, so it starts and ends at
+        // scale 1 and only dips and overshoots in between.
+        'answer-pop':  'answer-pop 0.4s cubic-bezier(0.34,1.56,0.64,1) both',
       },
       keyframes: {
         'race-in': {
@@ -105,6 +110,12 @@ export default {
         'fade-up': {
           '0%':   { opacity: '0', transform: 'translateY(12px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'answer-pop': {
+          '0%':   { transform: 'scale(1)' },
+          '30%':  { transform: 'scale(0.94)' },
+          '60%':  { transform: 'scale(1.04)' },
+          '100%': { transform: 'scale(1)' },
         },
       },
     },

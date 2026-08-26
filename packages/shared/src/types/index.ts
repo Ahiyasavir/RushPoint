@@ -301,7 +301,9 @@ export interface Task {
   estimatedMinutes: number;
   expectedDurationMinutes?: number;  // for Dynamic Time Bonus calculation
   pointValue: number;
-  maxConcurrentTeams: number;   // default 3
+  maxConcurrentTeams: number;   // real station contention — 1 for a single physical
+                                 // resource, high ("no queue here") for an open space;
+                                 // never a blanket default (see taskBank.ts's own note)
   currentTeamCount?: number;    // runtime counter maintained per run (not on template)
   status?: StationStatus;       // operator override: paused/closed
   maxDurationMinutes?: number;  // staff warning threshold

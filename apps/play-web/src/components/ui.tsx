@@ -16,12 +16,12 @@ export const Button = forwardRef<
       text-white font-bold tracking-wide
       shadow-[0_4px_16px_rgba(255,87,34,0.40),0_1px_4px_rgba(255,87,34,0.25)]
       hover:shadow-[0_6px_24px_rgba(255,87,34,0.55),0_2px_8px_rgba(255,87,34,0.30)]
-      active:brightness-90 active:scale-[0.98]
+      active:brightness-90 active:scale-[0.96]
     `,
     ghost: `
       bg-white/80 text-zinc-400 font-semibold
       border border-glass-border
-      active:bg-glass-hover
+      active:bg-glass-hover active:scale-[0.96]
       shadow-[0_1px_4px_rgba(26,10,0,0.06)]
     `,
     // The fill is the darkened ink-alert, not the brand #EF4444: white on the
@@ -51,7 +51,7 @@ export const Button = forwardRef<
       // tap that does nothing. Verifying this needs `backgroundImage`, not just
       // `backgroundColor`: reading the colour alone reports a contrast ratio for
       // a layer the user never sees.
-      className={`inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-150 disabled:bg-none disabled:bg-zinc-800 disabled:text-zinc-400 disabled:shadow-none disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${map[variant]} ${className}`}
+      className={`inline-flex items-center justify-center w-full py-3.5 rounded-2xl text-base transition-all duration-100 motion-reduce:transition-none motion-reduce:active:scale-100 disabled:bg-none disabled:bg-zinc-800 disabled:text-zinc-400 disabled:shadow-none disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60 focus-visible:ring-offset-2 focus-visible:ring-offset-app-bg ${map[variant]} ${className}`}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...rest}
@@ -98,30 +98,54 @@ export function Card({ children, className = '', style, ...rest }: {
   );
 }
 
-export function Progress({ done, total }: { done: number; total: number }) {
+// Above this many steps the segmented bar stops reading as progress: a
+// 24-question assessment drew 24 hairlines with 1.5px gaps, which at a glance is
+// a texture, not a measure. Past the cap it becomes one continuous filled bar
+// (change: test-mode-game-feel).
+const MAX_SEGMENTS = 12;
+
+export function Progress({ done, total, label }: { done: number; total: number; label?: string }) {
   const { colorblind, t } = useT();
+  // Defensive, because this renders on the participant's only screen from a
+  // server-written document: a NaN `total` used to reach Array.from as a length.
+  const max = Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
+  const at = Number.isFinite(done) ? Math.min(Math.max(0, Math.floor(done)), max) : 0;
+  const pct = max > 0 ? (at / max) * 100 : 0;
+  const fill = 'bg-gradient-to-r from-rp-fire to-rp-amber shadow-[0_0_8px_rgba(255,87,34,0.5)]';
   return (
     <div
       className="flex items-center gap-1.5"
       role="progressbar"
-      aria-valuenow={done}
+      aria-valuenow={at}
       aria-valuemin={0}
-      aria-valuemax={total}
-      aria-label={t.play.progressLabel({ done, total })}
+      aria-valuemax={max}
+      // `label` lets the caller say what is being counted. The default still says
+      // "stages" because the sequence-step bar in TaskRunner really is counting
+      // steps of one task, not missions of a run.
+      aria-label={label ?? t.play.progressLabel({ done: at, total: max })}
     >
-      {Array.from({ length: total }).map((_, i) => (
-        <div
-          key={i}
-          className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-            i < done
-              ? 'bg-gradient-to-r from-rp-fire to-rp-amber shadow-[0_0_8px_rgba(255,87,34,0.5)]'
-              : `bg-app-raised ${colorblind ? 'border border-dashed border-zinc-500' : ''}`
-          }`}
-        />
-      ))}
+      {max > MAX_SEGMENTS ? (
+        <div className="h-1.5 flex-1 rounded-full bg-app-raised overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none ${fill} ${colorblind ? 'border border-dashed border-zinc-500' : ''}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      ) : (
+        Array.from({ length: max }).map((_, i) => (
+          <div
+            key={i}
+            className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
+              i < at
+                ? fill
+                : `bg-app-raised ${colorblind ? 'border border-dashed border-zinc-500' : ''}`
+            }`}
+          />
+        ))
+      )}
       {/* Colorblind cue: a numeric readout so progress doesn't rely on color alone. */}
       {colorblind && (
-        <span className="ms-1 text-xs font-mono text-zinc-400 tabular-nums shrink-0">{done}/{total}</span>
+        <span className="ms-1 text-xs font-mono text-zinc-400 tabular-nums shrink-0">{at}/{max}</span>
       )}
     </div>
   );

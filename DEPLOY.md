@@ -243,7 +243,7 @@ work exactly once.
 
 ## 8. Post-deploy smoke test
 
-1. Open the **creator** site, sign up (email), create a game (try a Quick-start template), Launch a run.
+1. Open the **creator** site, sign up (email), create a game (try a template, or the smart-build path), Launch a run.
 2. Open the **participant** site on your phone, join with the access code, play a task.
 3. In the creator Run Console: **Start all teams**, push an announcement, **Refresh standings**, **Finalize**.
 4. **Payments:** with a `sk_test_…` key, add wallet credit on the Wallet page — Stripe Checkout opens;

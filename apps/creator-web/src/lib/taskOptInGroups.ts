@@ -55,7 +55,12 @@ export type OptInGroupKey = (typeof OPT_IN_GROUP_KEYS)[number];
 export const TASK_FIELD_DEFAULTS = {
   difficulty: 5,
   pointValue: 100,
-  maxConcurrentTeams: 3,
+  // 1, not 3: a freshly-added task declares no station contention of its own,
+  // and 1 is the SAFE assumption (a mission the creator has not thought about
+  // capacity for is more likely a one-at-a-time stop than a wide-open space).
+  // Mirrors `blankTask()` (lib/wizardLogic.ts) — see the note above on why the
+  // two must never disagree.
+  maxConcurrentTeams: 1,
 } as const;
 
 const filled = (s: string | undefined | null): boolean => typeof s === 'string' && s.trim() !== '';

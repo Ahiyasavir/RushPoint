@@ -31,7 +31,11 @@ function toTask(pt: PublicTask): Task {
     difficulty: pt.difficulty,
     estimatedMinutes: pt.estimatedMinutes,
     pointValue: pt.pointValue,
-    maxConcurrentTeams: 3,
+    // 1, not 3: a copied task's real capacity is a property of the ORIGINAL
+    // creator's venue, which does not travel with the copy. 1 is the safe
+    // assumption until the new creator says otherwise — matches
+    // TASK_FIELD_DEFAULTS / blankTask() (lib/taskOptInGroups.ts, lib/wizardLogic.ts).
+    maxConcurrentTeams: 1,
     tags: pt.tags ?? [],
   };
 }

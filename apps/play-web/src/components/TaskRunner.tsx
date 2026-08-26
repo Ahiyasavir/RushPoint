@@ -778,7 +778,12 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
         // branch would read undefined as falsy and show "not quite" on EVERY
         // answer — announcing a wrong verdict on the correct ones, in the one mode
         // whose entire purpose is to announce nothing.
-        if (res.recorded) { showProgress(t.task.testModeAnswerRecorded); advanceWithCardExit(); }
+        // The cue fires on EVERY sealed submission, and it is the SAME cue a
+        // correct answer gets in a normal game — which is exactly why it leaks
+        // nothing: in test mode there is no other branch to contrast it with.
+        // Without it a sealed run answered twenty questions in total silence,
+        // with a grey line of text as the only receipt (change: test-mode-game-feel).
+        if (res.recorded) { feedback('task'); showProgress(t.task.testModeAnswerRecorded); advanceWithCardExit(); }
         else if (res.correct) { feedback('task'); advanceWithCardExit(); }
         else applyAnswerCost(res, t.task.notQuite);
       } catch (e) {
@@ -797,7 +802,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       try {
         const res = await submitTaskAnswer({ ...ctx, taskId: task!.id, orderedAnswer: items, ...(coords ?? {}) });
         // Same ordering rule as `answer()` above — `recorded` first (test mode).
-        if (res.recorded) { showProgress(t.task.testModeAnswerRecorded); advanceWithCardExit(); }
+        if (res.recorded) { feedback('task'); showProgress(t.task.testModeAnswerRecorded); advanceWithCardExit(); }
         else if (res.correct) advanceWithCardExit();
         else applyAnswerCost(res, t.task.orderingWrong);
       } catch (e) {
@@ -820,6 +825,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       // the normal branch would read undefined as falsy and call every step wrong —
       // announcing a verdict in the one mode built to announce none.
       if (res.recorded) {
+        feedback('task');
         onChanged();
         if (!res.taskComplete) showProgress(t.task.stepOf({ step: res.stepsDone, total: res.totalSteps }));
         return true;
@@ -1369,8 +1375,12 @@ function QuizEntry({ task, busy, wrongSoFar, prefill, onSubmit }: {
           // rules in ui.tsx are plain declarations, so importance is what wins,
           // not source order. `ink-fire` (not the brand `rp-fire`) because this
           // now carries white LABEL text: 6.08:1 vs 3.16:1, read in sunlight.
+          // The pop is a SQUASH-AND-STRETCH receipt, not an entrance: the button
+          // is already on screen, so `answer-pop` dips and overshoots from scale 1
+          // rather than growing from nothing (change: test-mode-game-feel). It
+          // carries no verdict — it fires on the tap, before the server answers.
           const skin = isPicked
-            ? ' !bg-ink-fire !text-white !shadow-cta-glow ring-2 ring-rp-fire'
+            ? ' !bg-ink-fire !text-white !shadow-cta-glow ring-2 ring-rp-fire animate-answer-pop motion-reduce:animate-none'
             : isAnswer ? ' ring-2 ring-rp-amber' : '';
           return (
             <Button key={c} variant="ghost" disabled={busy} loading={isPicked} onClick={() => choose(c)}
@@ -1422,7 +1432,7 @@ function SurveyEntry({ task, busy, onSubmit }: { task: SafeTask; busy: boolean; 
           return (
             <Button key={c} variant="ghost" disabled={busy} loading={isPicked} aria-pressed={isPicked || undefined}
               onClick={() => { setPicked(c); onSubmit(c); }}
-              className={`w-full${isPicked ? ' !bg-ink-fire !text-white !shadow-cta-glow ring-2 ring-rp-fire' : ''}`}
+              className={`w-full${isPicked ? ' !bg-ink-fire !text-white !shadow-cta-glow ring-2 ring-rp-fire animate-answer-pop motion-reduce:animate-none' : ''}`}
               data-testid="survey-choice" data-choice={c} data-picked={isPicked || undefined}>
               <span dir="auto">{c}</span>
             </Button>
