@@ -1795,6 +1795,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 170,
       numericAnswer: 100,
       numericTolerance: 5,
+      hint: 'רמז: מצאו קודם שני מוצרים שסכומם קרוב ליעד, ואז השלימו עם מוצר שלישי וזול שמצמצם את הפער.',
+      hintPenalty: 25,
     }),
   },
   {
