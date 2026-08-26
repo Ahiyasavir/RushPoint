@@ -189,6 +189,216 @@
 // to a corporate offsite, and it is usually false. Same for `noPrep`: if a
 // creator has to arrange, hide, buy or pre-walk anything, it is `needsSetup`.
 //
+// ═════════════════════════════════════════════════════════════════════════════
+// RULES 14+ — added after a full curation pass (2026-08-26) drafted 18 candidate
+// missions from public scavenger-hunt/team-building sources and had most of them
+// sent back. Every rule below names the draft that produced it, same as 1-13.
+// The pattern across almost all of them: a mission was designed to a MECHANIC
+// ("a memory game", "an anagram", "a combination lock") before its actual,
+// checkable, schema-real content existed — so read 14-17 as one family (verify
+// the thing is buildable and complete) before reading the rest.
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ─── 14. Verification must match what the type can actually check — never
+//         assume a live human is watching ─────────────────────────────────────
+//
+// A bank mission is `autoApprove`: nothing adjudicates it mid-play. The first
+// draft of "החדר שהשתנה" (memory vault) needed an adult to swap an object at
+// exactly the moment the team looked away — a real-time facilitator action no
+// field in this schema declares or triggers. "איפה הכדור" (shell game) had the
+// same disease from the other side: whoever shuffles the cups controls the
+// "answer," so there is nothing for the app to check.
+//
+// Two honest fixes, not a third option:
+//   • Move the trick to ADVANCE, STATIC creator prep with a real, committed
+//     answer — memory vault's fix: the creator photographs a "before" state,
+//     attaches it via `ATTACH_PHOTO`, changes one item, and the team compares the
+//     photo to the real scene now in front of them. Same trick
+//     `youth-find-place-one` already uses; nothing new to build.
+//   • Accept it as fully honesty-based, like `do-someone-a-favour` already is in
+//     this bank, and say so — back it with a video for the only accountability
+//     an honesty mission can have (shell game's fix).
+// What never survives: quietly requiring a human to do something in real time
+// that no field in the mission declares.
+//
+// ─── 15. A mechanic label is not a mission — ship the real content ───────────
+//
+// "An anagram tied to the spot" and "three clues eliminate an answer" were both
+// genres, not missions: no word was ever actually scrambled, no clue was ever
+// actually written. A mission is done when the Hebrew a player would read
+// exists and could be typed into `answers`/`orderItems` today — not when its
+// category has been named. (חידת ההיגיון never got there and was cut instead of
+// invented on the spot; האותיות המעורבבות did, and shipped as three real,
+// authored anagrams instead of one unwritten idea.)
+//
+// ─── 16. Don't design past what the schema does ──────────────────────────────
+//
+// "ניווט בהיסק" assumed clues could be revealed one at a time as the team
+// progresses — this bank has exactly one `locationClue` string and one `hint`
+// per mission, no staged reveal. Once the imaginary feature is subtracted, the
+// mission collapses into `corporate-landmark-navigate` with different words.
+// Check `TaskBankSetup`'s real fields and `QUICK_SETUP_FIELDS`
+// (apps/creator-web/src/lib/quickSetup.ts) BEFORE designing the mechanic around
+// them, not after — a mechanic invented against a feature that doesn't exist
+// isn't a new mission, it's this problem waiting to be found in review.
+//
+// ─── 17. A constraint must cost something, not just exist ────────────────────
+//
+// "מבחן הטיסה"'s first draft passed if the paper airplane cleared the team's own
+// arm-span — a bar nobody can fail, which made the "constraint" decorative (this
+// is rule 4 again, sharpened with a concrete test). The fix ties pass/fail to
+// something the team does not get to set for free: a fixed shoe-length count
+// they must clear, the same discipline `waiter's race`'s fixed 20-step count
+// uses. Before shipping any numeric or self-reported bar, ask what a team that
+// does not care would do, and check that it actually fails.
+//
+// ─── 18. Materials the creator must bring are `needsSetup` — "no map pin" is
+//         not "no prep" ──────────────────────────────────────────────────────
+//
+// Paper for the airplane trial, a tray and small object for the waiter's race, a
+// wrapped gift, balloons and paper slips — none of these need a pin on the map,
+// and all four were first tagged as if that made them free. `noPrep` means the
+// creator does nothing at all before the game; if they must bring, wrap, wave,
+// or pre-arrange a physical object, it is `needsSetup`, full stop, with a Quick
+// Setup step naming exactly what to bring (rule 6 already says "a step for every
+// single thing" — the miss here was treating "no location" as a stand-in for
+// "no prep").
+//
+// ─── 19. Don't leave "which one is correct" for the players to guess ─────────
+//
+// "הודעת הבלון"'s first draft hid a code inside ONE balloon among many
+// identical-looking ones, with no stated way to tell it apart. The real fix:
+// every balloon of one chosen color carries the SAME code, so any one the team
+// grabs is correct — no identification puzzle needed, and the creator's setup
+// steps say so explicitly. Whenever a mission plants something among several
+// look-alikes, either make every qualifying instance correct, or give an
+// explicit rule for which one is (a mark, a position, a count) — never leave it
+// implicit and hope the creator invents a fair rule on their own.
+//
+// ─── 20. Real and specific beats generic and "adaptable" ─────────────────────
+//
+// "ספירת האות"'s first draft ("count any repeating thing you pick") was more
+// portable than the shipped version but worse: genericizing a good concrete idea
+// into an abstract template threw away what made it memorable. The shipped
+// version names one real, specific, recognizable device (an accessible
+// pedestrian-crossing signal) and asks how many WORDS its announcement speaks —
+// something a creator can point at, survey once, and hand to players with total
+// confidence. Rule 3 ("name the real thing") already says this; the addition
+// is: don't retreat toward "works at any venue" for its own sake. A mission that
+// only fits venues with the right real feature is fine, same as rule 8 — the
+// creator surveys it, same discipline `how-many-steps` already uses.
+//
+// ─── 21. A personal fact only has an ORDER if you ask for the right relation ──
+//
+// "ציר הזמן של החוגג/ת" first asked the creator to put the birthday child's
+// favorite things in chronological order — favorite things aren't chronological,
+// so there was never a real answer to author. The fix asks for a RANKING (most
+// to least loved), a relation the creator — who actually knows the celebrant —
+// can truthfully commit to. Before building an `orderItems` mission around
+// someone's personal data, check that the ordering relation you're asking for is
+// one an author can honestly declare, not one bent to fit the mechanic.
+//
+// ─── 22. State the physical byproduct as an instruction, not an afterthought ──
+//
+// Popping a balloon leaves rubber and confetti on the ground. The fix adds an
+// explicit line the PLAYERS read — clean up after yourselves — inside the
+// mission copy itself, not left to the creator's own judgment off-screen. Any
+// mission with a physical byproduct (torn paper, popped balloons, chalk marks,
+// borrowed objects — see rule 7 for the shared-object case) states what happens
+// to it, in the instruction a player actually sees.
+//
+// ─── 23. Riddle and wordplay content needs an actual payoff ──────────────────
+//
+// An anagram is a mechanic; a good one's answer means something once you get
+// there. The three shipped in this pass (פתרון / תגלית / הרפתקה) were each
+// chosen because the solved word describes the act of playing itself — a free
+// "aha" stacked on top of the mechanical difficulty, not just three arbitrary
+// words that happened to fit a letter count. A technically-valid puzzle with a
+// meaningless answer is padding wearing a costume (rule 11).
+//
+// ─── 24. Every entry ships launch-valid AS AUTHORED — Quick Setup replaces a
+//         working default, it never supplies a missing one ───────────────────
+//
+// Mechanically enforced by scripts/test-task-bank.ts §10 via
+// `gameStructureProblems`: a quiz with an empty `answers` array, or a station
+// with an empty `secretCode`, fails that check, and a composed game built from
+// it would not save — the creator gets an error with nothing to act on. Every
+// new entry needs a real placeholder value (a real default code, a real default
+// answer) even when its whole point is that Quick Setup asks the creator to
+// replace it.
+//
+// ─── 25. A Quick Setup prompt is a short, warm instruction, not a spec dump ───
+//
+// The Builder's own guided-setup flow was sent back once as "robotic,
+// disorienting, overwhelming" for leading with dense operational prose instead
+// of one clear line — the exact failure mode a bank mission's `setup[].prompt`
+// can fall into. `scripts/test-task-bank-setup-quality.ts` enforces a hard
+// ceiling (240 chars) and floor (15); treat the ceiling as a warning sign, not a
+// target to fill. If a step genuinely needs a worked example to be unambiguous
+// (מנעול המספרים's three-digit walk-through — "Digit 1: count X. Digit 2: read
+// the last two digits of Y…"), put the plain instruction FIRST and the example
+// after, so a creator skimming on a phone gets the instruction even if they read
+// no further.
+//
+// ─── 26. One step, one job, one field ─────────────────────────────────────────
+//
+// Restates rule 6/the-hidden-key's own history (splitting "what's locked" from
+// "roughly where" into two steps) because it's exactly what "הודעת הבלון" and
+// "מתנת התעלומה" needed: "wrap it AND set the answer" is two decisions wearing
+// one Quick Setup step. Give each decision its own field and its own step, even
+// when the underlying mission feels like one idea to the author — the creator
+// experiences them one at a time regardless.
+//
+// ─── 27. Lukewarm feedback on a mission means cut it, not polish it once more ─
+//
+// "המעבר המדויק", "שלושת התפקידים" and "המוזיאון של [שם]" each survived one
+// rewrite before being cut — every time, sharpening it further either converged
+// it onto a mission already in the bank, or produced something no more
+// compelling than the draft it replaced. The standing preference across this
+// product is the bold cut over the incremental patch (see the Builder's own
+// simplification history). A mission that needs a third defense after "I don't
+// see the point" or "not sure this lands" is one that should have been cut on
+// the second.
+//
+// Rule 27 has an explicit exception: the user's own "not thrilled but ship it
+// anyway for variety" is a deliberate override, not a trigger for this rule.
+// "איפה הכדור" shipped exactly that way — cut it only if TOLD to, never on your
+// own reading of lukewarm.
+//
+// ─── 28. Don't manufacture a Quick Setup field for something every player in
+//         the room already knows ──────────────────────────────────────────────
+//
+// "מבחן המראה" and "איחול לחוגג/ת" both first shipped with a bracketed
+// placeholder for "the celebrant's name" and a required setup step to fill it
+// in — manufacturing a decision nobody needed to make. At a birthday party,
+// every player already knows whose birthday it is; the app never validates
+// that name against anything, so "החוגג/ת" written plainly in the fixed
+// description is already exact enough — a human reads it and fills it in from
+// context the instant they say or write it. The real test is not "is this
+// personalization required or optional" (an earlier, wrong version of this
+// rule) — it's: does THE PLATFORM need to know this value to check, store, or
+// route something? If yes (a real surveyed count, a hidden code, a chosen
+// ranking, an actual map pin), it doesn't exist until the creator supplies it,
+// and it earns a Quick Setup field. If the value is just ambient knowledge
+// every player physically present already shares (who the party is for, what
+// team they're on, what day it is), write it directly and generically — adding
+// a field only adds friction for the creator with no gain for the player.
+//
+// ─── 29. self_report's legitimacy depends on the mission's real supervision
+//         context, not a blanket "back it with video" rule ───────────────────
+//
+// Rule 14 says an honesty-based mission should be backed by video for
+// accountability — right for a mission played unsupervised, a team wandering a
+// neighborhood alone with nobody realistic watching. "איפה הכדור" is the
+// counter-case: it's built for a birthday-party context where an
+// organizer/parent is naturally circulating nearby, and that live presence
+// already IS the accountability a video would otherwise exist to fake — a
+// video requirement there is friction pretending to be rigor. Before requiring
+// video-backed honesty, ask what the mission's actual deployment context is:
+// a home/party or facilitated-corporate mission with someone realistically
+// on-site tolerates plain `self_report`; a from-anywhere mission with nobody
+// around to notice does not.
+//
 import type { Task } from '@rushpoint/shared';
 import type { BankTagId } from './bankTags';
 import { uuid } from './taskShorthands';
@@ -1955,6 +2165,12 @@ export const TASK_BANK: TaskBankEntry[] = [
     // appearing alongside a fact quiz would remove a pairing that adds
     // variety, not one that repeats it (see rule 12 — family is for true
     // mechanical duplicates, not shared theming).
+    //
+    // IS tagged family: 'ordering-quiz', added 2026-08-26 alongside
+    // celebrants-favorites-ranking — that IS the same mechanic (orderItems),
+    // just ranking a preference instead of a chronology (see rule 21), so a
+    // composed game must never show both.
+    family: 'ordering-quiz',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'noPrep', 'fromAnywhere', 'crowded',
       'school', 'office', 'mall', 'park',
@@ -2027,6 +2243,458 @@ export const TASK_BANK: TaskBankEntry[] = [
       hideLocation: true,
       locationClue: '',
       // A written code is read, never taken — every team finds the same sign.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Curated 2026-08-26 from public scavenger-hunt/team-building design sources
+  // (mechanic-level inspiration only — see the curation log for what was
+  // reviewed, rejected, and why). Every entry here was rewritten at least once
+  // against rules 14-29 above before shipping; see those rules for the specific
+  // draft that produced each one.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── A real named practice, not a generic "build something" (rule 3) ───────
+  {
+    key: 'paper-airplane-trial',
+    sourceTemplateKey: 'authored',
+    tags: ['action', 'creative', 'camera', 'needsSetup', 'fromAnywhere',
+      'home', 'park', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    difficulty: 3,
+    minAge: 6,
+    setup: [{
+      field: 'description',
+      required: false,
+      prompt: 'המשימה דורשת דף נייר לכל קבוצה — חלקו אותו מראש בהרשמה או בעמדת פתיחה. אפשר גם לערוך את המשימה כך שהיעד יהיה להטיס את המטוס מנקודה אחת לשנייה שתבחרו, במקום מדידה בכפות רגליים.\n\nThis mission needs one sheet of paper per team — hand it out at registration or a start station. You can also edit it so the goal is flying the plane from one point to another you choose, instead of measuring in foot-lengths.',
+    }],
+    build: () => anywhere({
+      title: 'מבחן הטיסה',
+      description: 'קפלו מטוס נייר וזרקו אותו. הטיסה חייבת לעבור לפחות חמישה אורכי כף רגל, עקב לבוהן, נמדדים מנקודת הזריקה. צלמו את הזריקה ואת המדידה בווידאו.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 6,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    // The real fix per rule 17: the pass/fail bar ties to something the team
+    // does not control for free (a fixed step count), same discipline as
+    // how-many-steps. And per rule 3: a real, named practice, not "carry a
+    // thing" — the waiter's race is a genuine restaurant tradition.
+    key: 'waiters-race',
+    sourceTemplateKey: 'authored',
+    tags: ['action', 'needsSetup', 'fromAnywhere',
+      'home', 'park', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    difficulty: 3,
+    minAge: 6,
+    setup: [{
+      field: 'description',
+      required: false,
+      prompt: 'המשימה עובדת הכי טוב עם מגש, צלחת או ספר וחפץ קטן ולא שביר לכל קבוצה — אפשר לחלק אותם מראש, או לתת לקבוצות למצוא בעצמן משהו מתאים.\n\nWorks best with a tray, plate, or book and a small unbreakable object per team — hand them out in advance, or let teams find something suitable on their own.',
+    }],
+    build: () => anywhere({
+      title: 'מרוץ המלצרים',
+      description: 'הושיטו יד אחת קדימה לגמרי, כף היד פונה למעלה. הניחו עליה משטח שטוח (מגש, צלחת או ספר) ועליו חפץ קטן. היד השנייה נשארת בכיס. הלכו 20 צעדים בקול רם, בלי לרוץ ובלי לייצב עם היד השנייה — נפל? התחילו מצעד 0. צלמו הכול בווידאו.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 6,
+      pointValue: 90,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+    }),
+  },
+
+  // ── A real named memory practice — "Kim's Game," not a generic vault ──────
+  {
+    // The live-swap version this drew from is unshippable per rule 14 (no field
+    // declares a real-time facilitator action). Fixed by moving the trick to
+    // advance, static creator prep — the same ATTACH_PHOTO trick
+    // youth-find-place-one already uses — so nothing needs to happen live.
+    key: 'kims-game',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'locationBased', 'indoor', 'outdoor',
+      'home', 'kids', 'youth', 'adults', 'corporate', 'mixed', 'medium'],
+    difficulty: 5,
+    transitMinutes: 3,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'media',
+        required: true,
+        prompt: 'סדרו 5-6 חפצים אמיתיים במקום קבוע וצלמו אותם — זו תמונת ה"לפני". אחר כך שנו דבר אחד (הזיזו, החליפו או הוציאו חפץ) והשאירו את המצב החדש במקום.\n\nArrange 5-6 real objects in a fixed spot and photograph them — this is the "before" photo. Then change one thing (move, swap, or remove an object) and leave the new state in place.',
+      },
+      {
+        field: 'choices',
+        required: true,
+        prompt: 'רשמו את שמות כל החפצים שהופיעו בתמונה, אחד לכל אפשרות.\n\nList the name of every object that appeared in the photo, one per option.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'הזינו את שם החפץ שהחלטתם לשנות — חייב להתאים בדיוק לאחת האפשרויות שכתבתם.\n\nEnter the name of the object you changed — must exactly match one of the options above.',
+      },
+    ],
+    build: () => sited({
+      title: 'משחק קים',
+      description: 'הביטו בתמונה שצורפה למשימה — כך נראה המקום קודם. עכשיו הביטו במציאות שלפניכם ומצאו מה השתנה.',
+      type: 'quiz',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 120,
+      choices: ['כוס', 'ספר', 'שעון'],
+      answers: ['ספר'],
+      hint: 'רמז: עברו על הרשימה חפץ־חפץ והשוו לתמונה, לא הפוך.',
+      hintPenalty: 15,
+      // A fixed display, not a shared object anyone takes — every team compares
+      // the same real scene.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+
+  // ── Honesty-based by design — see rule 29 on why no video is required here ─
+  {
+    // The shell game itself has no server-checkable answer (rule 14) — accepted
+    // as fully honesty-based, same footing as do-someone-a-favour. Backed by
+    // real supervision context rather than a video requirement: a birthday
+    // party has an organizer naturally nearby, which is the actual
+    // accountability here (rule 29).
+    key: 'wheres-the-ball',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'action', 'noPrep', 'fromAnywhere',
+      'home', 'kids', 'youth', 'mixed', 'easy'],
+    difficulty: 4,
+    build: () => anywhere({
+      title: 'איפה הכדור',
+      description: 'שחקו במשחק הכוסות: אחד מכם מניח חפץ קטן מתחת לאחת משלוש כוסות, מערבב לפחות חמש פעמים, והשאר מנחשים איפה הוא. שחקו שלושה סיבובים, ואשרו כאן שסיימתם.',
+      type: 'self_report',
+      difficulty: 4,
+      estimatedMinutes: 6,
+      pointValue: 90,
+    }),
+  },
+
+  // ── Real, specific, and survey-able — not genericized away (rule 20) ──────
+  {
+    key: 'crossing-signal-words',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor',
+      'neighborhood', 'cityCenter', 'youth', 'adults', 'mixed', 'medium'],
+    difficulty: 6,
+    transitMinutes: 5,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'numericAnswer',
+        required: true,
+        prompt: 'לחצו בעצמכם על כפתור הרמזור הנגיש שסימנתם, וספרו כמה מילים ההכרזה הקולית אומרת. הזינו כאן את המספר האמיתי.\n\nPress the accessible crossing signal button you marked yourself, and count how many words its voice announcement speaks. Enter the real number here.',
+      },
+    ],
+    build: () => sited({
+      title: 'כמה מילים אומר הרמזור',
+      description: 'מצאו את הרמזור הנגיש שסומן לכם ולחצו על הכפתור שלו. ספרו בקול כמה מילים ההכרזה הקולית אומרת, והזינו את המספר.',
+      type: 'numeric',
+      difficulty: 6,
+      estimatedMinutes: 5,
+      pointValue: 130,
+      numericAnswer: 4,
+      numericTolerance: 1,
+      hint: 'רמז: יש רעש רקע? בקשו מהעוברים והשבים לשתוק לרגע ולחצו שוב.',
+      hintPenalty: 20,
+      // A public fixture, not a shared object — any number of teams can press it.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+
+  // ── A ranking, not a fake timeline — rule 21 ────────────────────────────────
+  {
+    key: 'celebrants-favorites-ranking',
+    // Same real mechanic as invention-order (orderItems), different content and
+    // a genuinely different ordering RELATION (preference, not chronology) —
+    // family groups them so a composed game never shows both.
+    family: 'ordering-quiz',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'fromAnywhere',
+      'home', 'kids', 'youth', 'mixed', 'medium'],
+    difficulty: 5,
+    setup: [{
+      field: 'orderItems',
+      required: true,
+      prompt: 'רשמו 4-5 דברים שהחוגג/ת אוהב/ת (צבע, מאכל, סרט, חיה, משחק), מהכי אהוב עד הכי פחות אהוב — לפי מה שאתם באמת יודעים עליו/ה.\n\nList 4-5 things the celebrant loves (a color, food, movie, animal, game), ranked from most to least loved — based on what you actually know about them.',
+    }],
+    build: () => anywhere({
+      title: 'דירוג האהובים של החוגג/ת',
+      description: 'דרגו את הדברים האהובים על החוגג/ת מהכי אהוב עד הכי פחות אהוב, לפי מה שאתם יודעים עליו/ה.',
+      type: 'quiz',
+      difficulty: 5,
+      estimatedMinutes: 6,
+      pointValue: 110,
+      orderItems: ['פיצה', 'שוקולד', 'ברוקולי'],
+      hint: 'רמז: לא בטוחים בסדר המדויק? שאלו את ההורים של החוגג/ת.',
+      hintPenalty: 15,
+    }),
+  },
+
+  // ── Ambient knowledge needs no Quick Setup field at all — rule 28 ──────────
+  {
+    key: 'backwards-name',
+    sourceTemplateKey: 'authored',
+    tags: ['action', 'camera', 'noPrep', 'fromAnywhere',
+      'home', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'מבחן המראה',
+      description: 'אמרו את השם של החוגג/ת הפוך, אות אחר אות, בקול רם מול המצלמה. טעיתם? נסו שוב.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 3,
+      pointValue: 70,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
+    }),
+  },
+  {
+    // Same rule 28 principle as backwards-name: no bracket, no setup step — the
+    // celebrant's identity is ambient knowledge, not data the platform needs.
+    key: 'birthday-wish',
+    sourceTemplateKey: 'authored',
+    tags: ['finish', 'creative', 'camera', 'teamwork', 'noPrep', 'fromAnywhere',
+      'home', 'kids', 'youth', 'adults', 'mixed', 'easy'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'איחול לחוגג/ת',
+      description: 'כתבו יחד איחול קצר וחם לחוגג/ת, וקראו אותו בקול, ביחד, מול המצלמה.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
+    }),
+  },
+  {
+    key: 'count-the-candles',
+    sourceTemplateKey: 'authored',
+    tags: ['camera', 'noPrep', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'ספירת הנרות',
+      description: 'מצאו את העוגה האמיתית של החוגג/ת. צלמו אותה בווידאו, ותוך כדי הצילום ספרו בקול רם כמה נרות יש עליה.',
+      type: 'photo',
+      difficulty: 2,
+      estimatedMinutes: 3,
+      pointValue: 70,
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 20 }),
+    }),
+  },
+
+  // ── A real payoff behind the puzzle, not an arbitrary word (rule 23) ──────
+  // Three difficulty levels of the same mechanic, one real authored anagram
+  // each (rule 15 — a mechanic label is not a mission). Named by length, not by
+  // a spoiler of the answer.
+  {
+    key: 'anagram-easy',
+    family: 'anagram-riddle',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'kids', 'youth', 'mixed', 'easy'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'חידת האותיות הקצרה',
+      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ן־ו־ר־ת־פ. אסור לחפש בגוגל — התייעצו ביניכם.',
+      type: 'quiz',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 80,
+      answers: ['פתרון'],
+      hint: 'רמז: זו המילה שמתארת בדיוק את מה שאתם מחפשים ברגע זה.',
+      hintPenalty: 15,
+    }),
+  },
+  {
+    key: 'anagram-medium',
+    family: 'anagram-riddle',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'adults', 'mixed', 'medium'],
+    difficulty: 5,
+    build: () => anywhere({
+      title: 'חידת האותיות',
+      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ת־י־ג־ת־ל. אסור לחפש בגוגל — התייעצו ביניכם.',
+      type: 'quiz',
+      difficulty: 5,
+      estimatedMinutes: 5,
+      pointValue: 110,
+      answers: ['תגלית'],
+      hint: 'רמז: זו בדיוק המילה שמתארת מה שקורה כשמוצאים דבר חדש.',
+      hintPenalty: 20,
+    }),
+  },
+  {
+    key: 'anagram-hard',
+    family: 'anagram-riddle',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'adults', 'corporate', 'mixed', 'hard'],
+    difficulty: 7,
+    build: () => anywhere({
+      title: 'חידת האותיות הארוכה',
+      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ק־ה־ת־ר־ה־פ. אסור לחפש בגוגל — התייעצו ביניכם.',
+      type: 'quiz',
+      difficulty: 7,
+      estimatedMinutes: 6,
+      pointValue: 150,
+      answers: ['הרפתקה'],
+      hint: 'רמז: זו בדיוק המילה שמתארת את כל המשחק שאתם משחקים עכשיו.',
+      hintPenalty: 25,
+    }),
+  },
+
+  // ── A worked, unambiguous instruction — rule 25's standard ────────────────
+  {
+    key: 'the-combination-lock',
+    family: 'combination-lock',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor',
+      'cityCenter', 'neighborhood', 'adults', 'corporate', 'hard'],
+    difficulty: 7,
+    transitMinutes: 6,
+    setup: [
+      PLACE_IT,
+      {
+        field: 'description',
+        required: true,
+        prompt: 'החליפו את הסוגריים בתיאור מדויק של שלוש התצפיות שבחרתם (למשל: חלונות בקיר X, שתי הספרות האחרונות בשלט Y, עצים בטווח הראייה). אל תמחקו את שאר ההוראות.\n\nReplace the brackets with an exact description of the three observations you chose (e.g. windows on wall X, the last two digits on sign Y, trees in view). Don\'t delete the rest of the instructions.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'בחרו 3 תצפיות באתר וסקרו אותן בעצמכם: ספרה 1 = חלונות בקיר שבחרתם. ספרה 2 = שתי הספרות האחרונות בשלט שבחרתם. ספרה 3 = עצים או ספסלים בטווח ראייה. חברו לקוד, למשל 483, והזינו כאן.\n\nChoose 3 real observations on-site and survey them yourself: digit 1 = windows on a wall you choose. Digit 2 = the last two digits on a sign you choose. Digit 3 = trees or benches in view. Combine into a code, e.g. 483, and enter it here.',
+      },
+    ],
+    build: () => sited({
+      title: 'מנעול המספרים',
+      description: 'בשטח מוסתרות שלוש תצפיות: [הוראות ליוצר: תארו כאן בדיוק מה לספור או לקרוא בכל אחת]. בצעו את כולן וחברו את התוצאות לקוד תלת-ספרתי אחד.',
+      type: 'quiz',
+      difficulty: 7,
+      estimatedMinutes: 12,
+      pointValue: 170,
+      answers: ['483'],
+      hint: 'רמז: התחילו מהתצפית הכי קלה לספור, ורשמו כל ספרה בצד לפני שמחברים.',
+      hintPenalty: 25,
+      // A public spot, not a shared object — any number of teams can arrive.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
+  {
+    // Identical-kit-per-team, same precedent as challenge-shampoo-pitch — no
+    // hunting, no scarcity, every team assembles their own copy.
+    key: 'puzzle-code',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'teamwork', 'needsSetup', 'fromAnywhere', 'adults', 'corporate', 'hard'],
+    difficulty: 7,
+    setup: [{
+      field: 'answers',
+      required: true,
+      prompt: 'הדפיסו תמונה זהה לכל קבוצה וגזרו ל-6-8 חלקים. כתבו תו אחד בפינת הגב של כל חלק, וקבעו מראש סדר קריאה. הזינו כאן את הקוד שמתקבל מהרכבה נכונה.\n\nPrint an identical image per team and cut it into 6-8 pieces. Write one character in the back corner of each piece, and decide a reading order in advance. Enter the code a correct assembly produces here.',
+    }],
+    build: () => anywhere({
+      title: 'פאזל הקוד',
+      description: 'הרכיבו את הפאזל שקיבלתם לתמונה שלמה. הפכו את החלקים וקראו את התווים בגב, לפי סדר ההרכבה. הקלידו את הקוד שמתקבל.',
+      type: 'quiz',
+      difficulty: 7,
+      estimatedMinutes: 10,
+      pointValue: 160,
+      answers: ['ABCD1234'],
+      hint: 'רמז: הרכיבו קודם לפי הצבעים והצורות שבתמונה, ורק אז הפכו לקרוא את הקוד.',
+      hintPenalty: 20,
+    }),
+  },
+  {
+    key: 'mystery-gift',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    difficulty: 3,
+    minAge: 6,
+    setup: [{
+      field: 'answers',
+      required: true,
+      prompt: 'עטפו חפץ קטן, לא שביר ולא מסוכן, בעטיפה אטומה. כתבו כאן בדיוק מה זה, במילה אחת או שתיים.\n\nWrap a small, unbreakable, safe object in opaque wrapping. Write here exactly what it is, in one or two words.',
+    }],
+    build: () => anywhere({
+      title: 'מתנת התעלומה',
+      description: 'קיבלתם חבילה עטופה. מותר למשש, לשקול ולטלטל בעדינות — אסור לפתוח את העטיפה. לקבוצה ניחוש אחד בלבד: הקלידו מה אתם חושבים שיש בפנים.',
+      type: 'quiz',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      answers: ['כדור'],
+      hint: 'רמז: המשקל והקול בטלטול אומרים יותר מהצורה.',
+      hintPenalty: 15,
+    }),
+  },
+  {
+    // Rule 19: every balloon of the ONE chosen color carries the same code, so
+    // there is never a "which one is correct" ambiguity for the team.
+    key: 'balloon-message',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    difficulty: 4,
+    setup: [
+      {
+        field: 'description',
+        required: true,
+        prompt: 'החליפו את הסוגריים בצבע הבלונים שבחרתם. אל תמחקו את שאר ההוראות.\n\nReplace the brackets with the balloon color you chose. Don\'t delete the rest of the instructions.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'נפחו כמות גדולה של בלונים. בחרו צבע אחד (זה שכתבתם בתיאור). לתוך כל בלון מהצבע הזה, ורק בצבע הזה, הכניסו פתק עם אותו קוד. ערבבו עם בלונים בצבעים אחרים. הזינו כאן את הקוד שכתבתם.\n\nInflate a large batch of balloons. Choose one color (the one in the description). Inside every balloon of that color only, place a note with the same code. Mix them with other-colored balloons. Enter the code you wrote here.',
+      },
+    ],
+    build: () => anywhere({
+      title: 'הודעת הבלון',
+      description: 'בין כל הבלונים, מצאו בלון בצבע [הוראות ליוצר: כתבו כאן את הצבע שבחרתם]. פתחו אותו — בניפוץ או בפתיחת הקשר, לבחירתכם — והוציאו את הפתק. נקו את השאריות אחריכם. הקלידו כאן את הקוד שרשום על הפתק.',
+      type: 'quiz',
+      difficulty: 4,
+      estimatedMinutes: 5,
+      pointValue: 100,
+      answers: ['1234'],
+      hint: 'רמז: הבלון שלכם תמיד יהיה בצבע שנכתב למעלה — אין צורך לבדוק בלונים בצבעים אחרים.',
+      hintPenalty: 15,
+    }),
+  },
+  {
+    // Fixed color order baked into the mission itself (not creator-configurable)
+    // so there is never ambiguity about which order the digits combine in —
+    // rule 19.
+    key: 'color-code-trail',
+    family: 'combination-lock',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
+      'home', 'park', 'kids', 'mixed', 'medium'],
+    difficulty: 5,
+    transitMinutes: 5,
+    setup: [
+      {
+        field: 'locationClue',
+        required: true,
+        prompt: 'כתבו רמז כללי לאזור שבו מוחבאים ארבעת החפצים (למשל "בחצר" או "בבית") — אין סיכה מדויקת על המפה.\n\nWrite a general clue to the area where the four objects are hidden (e.g. "in the yard" or "in the house") — there is no exact pin on the map.',
+      },
+      {
+        field: 'answers',
+        required: true,
+        prompt: 'החביאו ארבעה חפצים, אחד בכל צבע, תמיד באותו סדר: אדום, כחול, צהוב, ירוק. כתבו ספרה (0-9) על כל חפץ. חברו לפי הסדר הזה, למשל 3719, והזינו כאן.\n\nHide four objects, one per color, always in this order: red, blue, yellow, green. Write a digit (0-9) on each. Combine in that order, e.g. 3719, and enter it here.',
+      },
+    ],
+    build: () => sited({
+      title: 'שביל הצבעים הסודי',
+      description: 'ארבעה חפצים צבעוניים מוחבאים כאן, כל אחד עם ספרה. מצאו את כולם וחברו את הספרות לקוד אחד, תמיד לפי הסדר: אדום, כחול, צהוב, ירוק.',
+      type: 'quiz',
+      difficulty: 5,
+      estimatedMinutes: 10,
+      pointValue: 130,
+      answers: ['3719'],
+      hint: 'רמז: שכחתם את הסדר? הצבעים תמיד: אדום, כחול, צהוב, ירוק.',
+      hintPenalty: 20,
+      hideLocation: true,
+      locationClue: '',
+      // The objects stay hidden and readable for every team — nothing is taken.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
   },

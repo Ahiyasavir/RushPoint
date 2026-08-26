@@ -34,6 +34,7 @@
 import {
   composeGame,
   seededRng,
+  MIN_TASKS,
   type ComposerAnswers,
   type ComposerDescriptionCopy,
 } from '../apps/creator-web/src/lib/composeGame';
@@ -196,13 +197,41 @@ console.log('\n── 7. a tighter budget still yields a real game ────�
   }
   ok('every prep level composes a complete game', true);
 
-  // Tightening the budget must never INCREASE the mission count.
+  // ─── What this used to assert, and why it was wrong ────────────────────────
+  //
+  // This block used to require the mission COUNT to be monotone in prep level
+  // ("a looser budget never yields fewer missions"). That reads like a product
+  // promise and is not one: the composer sizes a game as
+  // `minutes / averageMissionCost(eligible pool)`, so the count moves with the
+  // AVERAGE COST of what the level unlocks, not with the pool's size.
+  //
+  // Zero-prep missions are short by nature — say a name backwards, count the
+  // candles on the cake, solve an anagram — while prep missions (hide four
+  // coded objects, survey a signal, assemble a cut-up puzzle) are longer
+  // because they genuinely take longer to play. So a zero-prep game correctly
+  // packs MORE, shorter missions into the same 120 minutes, and a prep-heavy
+  // game correctly gets fewer, richer ones. Both fill the requested duration;
+  // neither is a smaller game in the sense a creator would care about.
+  //
+  // It surfaced (2026-08-26) when a birthday-mission batch pulled the no-prep
+  // pool's average from just above to just below the 12.5 rounding boundary:
+  // levels 1-2 went 12.504 -> 13 missions while levels 3-5 sat at 12.43/12.30
+  // -> 12. A one-mission difference on a knife-edge, with nothing broken —
+  // exactly the kind of false alarm an over-strong invariant produces. Forcing
+  // monotonicity here would mean handing a level-5 creator a mission their
+  // clock has no room for.
+  //
+  // What IS worth guarding is the real risk: the prep filter must never starve
+  // the composer into a stunted game. That is asserted directly, per level.
   const counts = PREP_SCALE.map((prepEffort) => {
     const r = composeGame(TASK_BANK, { ...BASE, prepEffort }, COPY, seededRng(3), { recentBankKeys: [] });
     return r ? r.usedBankKeys.length : 0;
   });
-  ok(`a looser budget never yields fewer missions (${counts.join(' <= ')})`,
-    counts.every((v, i) => i === 0 || v >= counts[i - 1]));
+  const starved = PREP_SCALE
+    .map((level, i) => ({ level, n: counts[i] }))
+    .filter(({ n }) => n < MIN_TASKS)
+    .map(({ level, n }) => `level ${level}: ${n}`);
+  eq(`no prep level composes a stunted game (${counts.join(', ')})`, starved, []);
 }
 
 console.log('\n── 7b. levels 3 and 4 admit the SAME missions ──────────');
