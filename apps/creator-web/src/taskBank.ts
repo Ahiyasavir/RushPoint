@@ -1928,4 +1928,68 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload({ captureKind: 'audio' }),
     }),
   },
+  {
+    // Every quiz in the bank so far is answers/choices; `orderItems` (change:
+    // quiz-ordering) is a real, shipped mechanic with zero representation.
+    // Chosen content is deliberately checkable general knowledge, not local
+    // trivia a bank mission cannot know — five inventions with a real,
+    // undisputed chronological order, same "ask around, no Googling" rule the
+    // other trivia missions use so it stays a field-game beat, not a quiz app.
+    key: 'invention-order',
+    sourceTemplateKey: 'authored',
+    family: 'trivia-fact',
+    tags: ['thinking', 'noPrep', 'fromAnywhere', 'crowded',
+      'school', 'office', 'mall', 'park',
+      'mixed', 'youth', 'adults', 'corporate', 'medium', 'educational'],
+    difficulty: 6,
+    build: () => anywhere({
+      title: 'לפי הסדר הנכון',
+      description: 'סדרו את חמשת ההמצאות לפי סדר ההמצאה שלהן, מהוותיקה לחדשה. אסור לחפש בגוגל — התייעצו בקול עד שכולכם מסכימים.',
+      type: 'quiz',
+      difficulty: 6,
+      estimatedMinutes: 6,
+      pointValue: 140,
+      // The authored order IS the answer key (server-secret; sanitized to a
+      // per-team shuffled copy) — oldest first, exactly as it must be graded.
+      orderItems: ['הדפוס', 'הטלגרף', 'הטלפון', 'הרדיו', 'הטלוויזיה'],
+      hint: 'רמז: המצאה שרץ עליה חשמל קדמה למצאה ששולחים דרכה קול, שקדמה למצאה ששולחים דרכה תמונה.',
+      hintPenalty: 20,
+    }),
+  },
+  {
+    // A self-serve `smart_station`: the code lives on a sign/sticker the
+    // creator writes and hides themselves — no business owner, no staff
+    // member, no `needsPartner`. Distinguishes the mechanic from every OTHER
+    // smart_station in this bank, which all need an outside partner (see
+    // `codeStation`'s doc) — and proves `exclusiveStation` is a real signal,
+    // not a synonym for "this task type": a written code is never taken away,
+    // so unlike the-hidden-key or a vendor, any number of teams can read the
+    // same sign at once.
+    key: 'chalk-code',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
+      'park', 'neighborhood', 'school', 'office',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
+    difficulty: 3,
+    transitMinutes: 4,
+    setup: [
+      {
+        field: 'coordinates',
+        required: true,
+        prompt: 'לפני המשחק: כתבו קוד בן ארבע ספרות במקום קבוע (מדבקה, גיר, פתק בעמיד למים) וסמנו כאן איפה. בחרו מקום שיישאר קריא וישרוד עד סוף כל המשחק.\n\nBefore the game: write a four-digit code somewhere fixed (a sticker, chalk, a laminated note) and mark it here. Pick a spot that stays legible and survives to the end of the last run.',
+      },
+      SET_CODE,
+    ],
+    build: () => sited({
+      title: 'הקוד הנסתר',
+      description: 'איפשהו כאן מוסתר קוד בן ארבע ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו אותו כאן. אל תזיזו ואל תסירו אותו — הקבוצה הבאה צריכה למצוא אותו במקום.',
+      type: 'smart_station',
+      difficulty: 3,
+      estimatedMinutes: 6,
+      pointValue: 100,
+      smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+      // A written code is read, never taken — every team finds the same sign.
+      maxConcurrentTeams: OPEN_SPACE_CAPACITY,
+    }),
+  },
 ];
