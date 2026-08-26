@@ -534,7 +534,14 @@ export const TASK_BANK: TaskBankEntry[] = [
     tags: ['thinking', 'noPrep', 'fromAnywhere', 'youth', 'hard', 'cityCenter', 'mall', 'neighborhood'],
     difficulty: 8,
     setup: [
-      ATTACH_PHOTO,
+      // NOT the shared ATTACH_PHOTO constant: its prompt is written for a photo
+      // players navigate BY ("one the team can recognise, to know where to
+      // go") — this photo is a math riddle to solve, nothing about a place.
+      {
+        field: 'media',
+        required: true,
+        prompt: 'צרפו תמונה של החידה המתמטית שהקבוצה צריכה לפתור.\n\nAttach a photo of the math riddle the team needs to solve.',
+      },
       {
         field: 'numericAnswer',
         required: true,
