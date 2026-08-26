@@ -413,7 +413,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'ראפ מנצח',
-      description: 'בואו נשמע את האנרגיות שלכם! בחרו שם קבוצה והקליטו סרטון של 30 שניות שכולל ראפ על הקבוצה שלכם. הקבוצה עם הביצוע הכי מקורי תקבל ניקוד בונוס!',
+      description: 'בחרו שם לקבוצה, והקליטו סרטון של 30 שניות עם ראפ על הקבוצה שלכם. ביצוע מקורי מקבל ניקוד בונוס.',
       type: 'photo',
       estimatedMinutes: 15,
       smart: upload({ captureKind: 'video', videoMinSeconds: 20, videoMaxSeconds: 40 }),
@@ -1070,7 +1070,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'ראיון של שלושים שניות',
-      description: 'מצאו אדם זר, בקשו רשות, ושאלו אותו שאלה אחת: מה הייעוץ הכי גרוע שהוא קיבל אי פעם, ומי נתן לו אותו. צלמו את התשובה. אם הוא מסרב, תודו לו ותמצאו אחר.',
+      description: 'מצאו אדם זר, בקשו רשות ושאלו: מה הייעוץ הכי גרוע שהוא קיבל אי פעם, וממי? צלמו את התשובה. אם הוא מסרב, תודו לו ותמצאו אחר.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 7,
