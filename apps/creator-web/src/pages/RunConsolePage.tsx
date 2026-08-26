@@ -67,6 +67,7 @@ import { buildRunSignals, type RunSignal } from '../lib/runConsoleSignals';
 // total "is the teams board stale" verdict, so a failed poll surfaces instead of
 // freezing the board silently.
 import { isTeamsStale, secondsSinceSync } from '../lib/streamFreshness';
+import { teamsFingerprint, teamsPollDelayFor } from '../lib/runConsolePolling';
 import { panelCopy } from '../lib/runConsolePanelMeta';
 // "Is anyone in trouble right now?" (change: run-console-attention) — a pure,
 // quiet-by-default verdict over the row data listRunTeams already returns.
@@ -246,6 +247,12 @@ export default function RunConsolePage() {
     };
   }, []);
 
+  // Poll pacing (perf: run-console-poll-cost) — policy in lib/runConsolePolling.ts.
+  // Refs, not state: the scheduler must read the latest values without re-rendering
+  // the console or re-subscribing its effect on every poll.
+  const teamsFingerprintRef = useRef<string | null>(null);
+  const quietPollsRef = useRef(0);
+
   const loadTeams = useCallback(async () => {
     if (!gameId || !runId) return;
     // The teams poll is the console's SINGLE live picture (the table, every score,
@@ -255,20 +262,67 @@ export default function RunConsolePage() {
     // (do NOT call setTeams on failure) and mark the board stale instead.
     try {
       const { teams } = await listRunTeams({ gameId, runId });
+      // Did anything actually move? Only a provably unchanged board accrues back-off.
+      const fingerprint = teamsFingerprint(teams);
+      quietPollsRef.current = teamsFingerprintRef.current === fingerprint
+        ? quietPollsRef.current + 1
+        : 0;
+      teamsFingerprintRef.current = fingerprint;
       setTeams(teams);            // last-known replaced only on SUCCESS
       setLastTeamsSyncAt(Date.now());
       setTeamsStale(false);
     } catch (e) {
       console.warn('[RunConsole] teams poll failed', e);
+      // A failed poll says nothing about whether the field moved, so it must not
+      // accrue back-off — that would slow the console down exactly when it is
+      // already struggling to see the run.
+      quietPollsRef.current = 0;
       setTeamsStale(true);        // keep the last board on screen, just mark it stale
     }
   }, [gameId, runId]);
 
+  // Self-rescheduling instead of a flat setInterval, because the delay is a function
+  // of what the last poll saw. Pauses entirely on a hidden tab and on a finished run;
+  // returning to the tab polls immediately at full speed rather than waiting out a
+  // back-off that was earned while nobody was watching.
   useEffect(() => {
-    void loadTeams();
-    const id = setInterval(() => void loadTeams(), 5000);
-    return () => clearInterval(id);
-  }, [loadTeams]);
+    if (!gameId || !runId) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+
+    const schedule = () => {
+      if (cancelled) return;
+      const delay = teamsPollDelayFor({
+        hidden: isHidden(), runStatus: run?.status, quietPolls: quietPollsRef.current,
+      });
+      // null = paused. The visibilitychange listener and this effect's own
+      // run?.status dependency are what re-arm it.
+      if (delay === null) return;
+      timer = setTimeout(() => void tick(), delay);
+    };
+
+    const tick = async () => {
+      await loadTeams();
+      schedule();
+    };
+
+    const onVisibility = () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (isHidden()) return;
+      quietPollsRef.current = 0;
+      void tick();
+    };
+
+    void tick();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [loadTeams, gameId, runId, run?.status]);
 
   // Keep the leaderboard snapshot fresh mid-run so the teams table + live
   // standings panel (both read the snapshot, the SAME source the TV/public board
