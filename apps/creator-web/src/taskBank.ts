@@ -1998,7 +1998,16 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'כתבו רמז כללי לאזור שבו הקוד מוסתר — לא את המקום המדויק. אין סיכה על המפה.\n\nWrite a general clue to the area the code is hidden in — not the exact spot. There is no pin on the map.',
       },
-      SET_CODE,
+      {
+        // NOT the shared SET_CODE constant: its second half ("coordinate it in
+        // advance with whoever hands it out on the ground") describes a vendor
+        // or contact this mission deliberately has none of — the whole point of
+        // a self-serve station. Reusing it here would tell the creator to
+        // arrange a handoff that doesn't exist.
+        field: 'smart.secretCode',
+        required: true,
+        prompt: 'קבעו את הקוד שכתבתם על המדבקה או הגיר, כדי שהאפליקציה תזהה אותו.\n\nSet the code you wrote on the sticker or chalk, so the app recognises it.',
+      },
     ],
     build: () => sited({
       title: 'הקוד הנסתר',
