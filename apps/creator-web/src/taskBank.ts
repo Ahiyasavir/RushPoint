@@ -1513,8 +1513,10 @@ export const TASK_BANK: TaskBankEntry[] = [
   // player would miss, and dressing it up as a viewpoint photo op instead was
   // considered and rejected too: forcing a mission to exist just to keep the
   // `survey` type represented in the bank is exactly the padding this bank is
-  // trying not to be. Nothing currently fills `survey`; that is an honest gap,
-  // not a stat to fake.
+  // trying not to be. `survey` stayed an honest, unfilled gap until
+  // `best-moment-so-far` (near the end of this file) gave it a real reason to
+  // exist: a mid-run read on what the team is actually enjoying, which no
+  // post-run feedback screen recovers as accurately.
 
   // ── Indoor depth: a mall and a school are not just "not outdoors" ─────────
   {
@@ -1866,6 +1868,64 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 7,
       pointValue: 110,
       smart: upload(),
+    }),
+  },
+
+  // ── Two mission kinds the bank never actually filled ──────────────────────
+  //
+  // `survey` had zero entries (see the removal note on "רגע של אוויר" earlier
+  // in this file — that gap was left open on purpose rather than faked), and
+  // no entry anywhere used `captureKind: 'audio'`, even though both are real,
+  // shipped platform capabilities. Filling a gap ONLY counts when the content
+  // earns its place per rule 4 (the constraint IS the mission) — a survey with
+  // a real creator payoff, and an audio mission that could not just be a photo
+  // mission with the word "record" swapped in.
+  {
+    // A real payoff for the CREATOR, not just a stat filled in: every other
+    // mission scores the team, but this is the one moment the platform asks
+    // the team what they actually enjoyed, mid-run, while it is still fresh —
+    // data no post-run feedback survey ever recovers as accurately. No-prep by
+    // definition (`survey` type has no answer key to configure) and it plays
+    // from literally any stage of any game, which is exactly why the bank
+    // could not skip it any longer.
+    key: 'best-moment-so-far',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'noPrep', 'fromAnywhere',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
+    difficulty: 2,
+    build: () => anywhere({
+      title: 'הרגע הכי טוב עד עכשיו',
+      description: 'עצרו לרגע: מה היה הרגע הכי כיף במשחק עד עכשיו? אין תשובה נכונה, רק הדעה שלכם.',
+      type: 'survey',
+      difficulty: 2,
+      estimatedMinutes: 2,
+      pointValue: 50,
+      surveyChoices: [
+        'משימה עם זרים ברחוב',
+        'המשימה הכי יצירתית',
+        'התחרות הפנימית בינינו',
+        'סתם להיות ביחד בחוץ',
+      ],
+    }),
+  },
+  {
+    // A photo asks "what did this look like"; this asks "what did this sound
+    // like" — a genuinely different sense, not a video mission wearing a
+    // different label. The two-different-sounds rule keeps "record five
+    // seconds of silence and call it done" from being the easy way out.
+    key: 'soundscape',
+    sourceTemplateKey: 'authored',
+    tags: ['thinking', 'creative', 'noPrep', 'fromAnywhere',
+      'mixed', 'kids', 'youth', 'adults', 'corporate', 'easy'],
+    difficulty: 3,
+    build: () => anywhere({
+      title: 'נוף הקול',
+      description: 'הקליטו כעשר שניות מהצליל האמיתי של המקום הזה עכשיו — בלי לדבר ובלי מוזיקה, רק מה שבאמת נשמע כאן. בהקלטה צריך להיות אפשר להבחין בלפחות שני צלילים שונים.',
+      type: 'photo',
+      difficulty: 3,
+      estimatedMinutes: 4,
+      pointValue: 90,
+      smart: upload({ captureKind: 'audio' }),
     }),
   },
 ];
