@@ -100,7 +100,7 @@ fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin`
 real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
 run: it introspects the callables the emulator serves and fails if any was never invoked (bar an
 explicit `EXEMPT` list, itself checked for stale entries), so a **new callable ships RED until it
-has a test** — add a scenario, don't just add the callable. The table below lists **99** callables
+has a test** — add a scenario, don't just add the callable. The table below lists **108** callables
 (plus `stripeWebhook`, the `pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which
 are not callables). Keep it green; extend the relevant scenario (not just the lifecycle).
 `functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
@@ -326,6 +326,7 @@ helpers are **internal** (not triggers) — never re-export them.
 | `users/index.ts` | updateMyProfile · exportMyData · deleteMyAccount |
 | `maintenance/index.ts` | pruneExpiredRunDataNow · purgeDeletedGamesNow · **backfillPublicTaskCoordinatesNow** · pruneRunNow · pruneExpiredRunData (pubsub schedule, not a callable) |
 | `admin/index.ts` | **listPlatformUsers** (admin-only creator activity rollup: games created, runs launched, derived last-active, time on site, activation stage — see `apps/creator-web` `/admin/users`) · **recordEngagement** (NOT admin-only: every creator flushes their OWN engaged time; uid from the token, value clamped by `clampEngagementDelta`, stored in the server-only `userEngagement/{uid}`) · **setUserNote** (admin-only private note ABOUT a creator, server-only `userNotes/{uid}`; empty CLEARS the doc. Both collections are deleted by `deleteMyAccount` — they live OUTSIDE `users/{uid}` so the recursiveDelete does not reach them) |
+| `admin/templates.ts` | **listGameTemplates** (the new-game menu: every admin-authored template, to any authenticated caller — projected through `TEMPLATE_LIST_FIELDS`, see the field-mask gotcha below) · **createGameFromTemplate** (instantiate one into the caller's own games) · **listAdminTemplates** · **setGameTemplateFlag** (admin-only authoring/curation) |
 | `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · **sendTeamChatMessage** · acknowledgeAlert · **clearTeamOutOfBounds** · pushAnnouncement · deactivateAnnouncement · pushFlashMission · **reactToFeedItem** · **reportFeedItem** · **hideFeedItem** · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore ·
 **setRunTaskStatus** (pause/close/resume ONE task for ONE run) · listAuditLogs |
 | `routing/assignNextTask.ts` | (internal) `assignTask` · `buildRecommendations` · `computeSkillRatio` · `releaseTask` |
@@ -410,8 +411,23 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
 - **Creator UI** → `apps/creator-web/src/pages/*` (Dashboard, Builder, Gallery, Wallet, RunConsole,
   RunsOverview, Settings, Trash);
   shared kit in `components/ui.tsx`; data layer `services/api.ts` (`callable()`) + `services/calls.ts`.
-  Builder is tile + modal (`BuilderPage` `TaskEditor`); quick-start templates in `templates.ts`;
-  whole-route `RoutePreviewMap` on the Preview step. New-game flow seeds a template via updateGame.
+  Builder is tile + modal (`BuilderPage` `TaskEditor`); whole-route `RoutePreviewMap` on the
+  Preview step. **The new-game flow has THREE paths** — `WizardPath` in `lib/newGameWizard.ts` is
+  `scratch` | `guided` | `smart_build`:
+  · `scratch` = blank, a client-side special case that is always first and is NOT an admin-editable
+  template. · `guided` = an **admin-authored template**. There is no longer a hardcoded
+  `src/templates.ts`; templates are Firestore documents listed by the `listGameTemplates` callable
+  and instantiated by `createGameFromTemplate`. `lib/templateCache.ts` serves that menu through
+  three strictly-faster layers (in-flight promise → module memo → `localStorage`,
+  stale-while-revalidate) because the list is identical for every creator and changes rarely;
+  `lib/templatePicker.ts` is the pure ordering + language-variant resolution (a template group
+  carries HE/EN variants). · `smart_build` = "compose one for me": the pure `lib/composeGame.ts`
+  assembles stages from the tagged mission bank (`taskBank.ts` + `bankTags.ts`) against a
+  questionnaire (`lib/smartBuildWizard.ts`, rendered by `components/SteppedWizard.tsx`), with
+  `lib/recentBankPicks.ts` biasing away from what this creator was handed recently so two
+  generations don't match. A composed game is launch-valid by construction — it satisfies the same
+  structural validators `updateGame` enforces. Mission shorthands shared by the bank and the seeded
+  templates live in `taskShorthands.ts` (extracted so the two cannot drift).
   The Run Console's layout is DATA, not inline JSX conditions — `lib/runConsoleLayout.ts`
   (`buildRunConsolePlan` → `pinnedPanels` + `buildRunConsoleSections` + `assignPanelColumns`) drives
   a Builder-style section rail; `lib/teamAttention.ts` and `lib/photoReviewQueue.ts` are the pure
@@ -692,6 +708,35 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   `apps/creator-web/src/lib/geocode.ts`: Nominatim first (biased by `viewbox` to the current map
   view, never `bounded`), MapTiler only as a fallback, and it throws only when EVERY provider failed
   so "search is down" stays distinguishable from "no such place".
+- **A process-local cache is only correct if you know how many processes there are — and that is
+  a property of the DEPLOYMENT, not of the code.** `functions/src/docCache.ts` serves repeat reads
+  of game/run/team documents from the API process's own memory, because `firestore.rules` denies
+  client writes on runs/teams (`allow write: if false`) and the Builder saves through the
+  `updateGame` callable — so the API is the SOLE writer — and the VPS runs it as ONE Node process
+  (`functions/server.js`, no `cluster`). Both halves are load-bearing. The Firebase Functions
+  emulator runs callables through a **`RuntimeWorkerPool`** (firebase-tools
+  `lib/emulator/functionsRuntimeWorker.js:228`) — several Node processes — so a write handled by
+  one worker cannot invalidate another worker's copy; real Cloud Functions is worse, auto-scaling
+  to many instances. Turning the cache on there failed 11 e2e scenarios with *correct* invalidation
+  logic: `listRunTeams` returned a row 10s stale, a started team still showed as held, a published
+  leaderboard never reached the participant. So the read cache is **opt-in and off by default** —
+  only `docker-compose.api.yml` sets `RUSHPOINT_DOC_CACHE=1`. **Never set it anywhere the API runs
+  as more than one process, and remove it before giving that service `replicas > 1`.** Write
+  invalidation runs regardless, so the two paths don't diverge. Consequence to remember: the
+  emulator lane **cannot** cover the enabled read path — it is covered by the pure suites
+  (`scripts/test-doc-cache.ts`, `scripts/test-doc-cache-interception.ts`) plus a post-deploy check
+  on the VPS. Writes are intercepted on the single exported `db` handle rather than at the 216
+  write call sites, and `scripts/test-doc-cache-interception.ts` fails the build if a module builds
+  its own `admin.firestore()`.
+- **`enforceRateLimit` no longer persists anything.** It used to run a Firestore transaction (1
+  read + 1 WRITE) on EVERY rate-limited callable — ~1,516 of each in nine minutes of one 29-person
+  run, against a 50,000-read / 20,000-write daily quota, which is how the 2026-08-26 exam run hit
+  `8 RESOURCE_EXHAUSTED` mid-play. It is now an in-process `Map`
+  (`functions/src/rateLimitStore.ts`); budgets are per-process and reset on restart, deliberately.
+  Existing `rateLimits/*` documents are inert pending a prune. When adding reclamation to any
+  keyed limiter, store each key's OWN window beside its state — looking the window back up by
+  bucket name returns `undefined` for override budgets and unknown buckets, which reads as
+  "elapsed" and deletes a LIVE exhausted key, turning the cap off for whoever is hammering hardest.
 - **`text-zinc-*` is REVERSED in creator-web** (`tailwind.config.js` maps `zinc-700` → `#d6d3d1`),
   a leftover from the dark theme. On the light "Warm Trail" surfaces that is pale grey on beige
   (~1.2:1) — the map search results looked like a disabled control, which is most of why search

@@ -38,7 +38,7 @@
 19. [UI/UX, Branding & Game Juice](#19-uiux-branding--game-juice)
 20. [Maps](#20-maps)
 21. [Offline, PWA & Resilience](#21-offline-pwa--resilience)
-22. [Quick-Start Templates](#22-quick-start-templates)
+22. [Game Creation Paths](#22-game-creation-paths)
 23. [Conventions & Footguns](#23-conventions--footguns)
 24. [Testing & Gates](#24-testing--gates)
 25. [Deployment](#25-deployment)
@@ -1083,22 +1083,67 @@ verified via the preview tools and the build gate as those changes ship.
 
 ---
 
-## 22. Quick-Start Templates
+## 22. Game Creation Paths
 
-`apps/creator-web/src/templates.ts` — Hebrew-first, pre-fill the Builder with a runnable structure
-(fresh ids each build). Targeted at launch wedges first:
+A creator starts a game one of **three** ways. `WizardPath` in
+`apps/creator-web/src/lib/newGameWizard.ts` is the single source of truth:
+`'scratch' | 'guided' | 'smart_build'`.
 
-| Key | Label | Mode / Preset | Shape |
-|---|---|---|---|
-| `bar_mitzvah` | בר / בת מצווה 🎉 | team / fixed_points_speed | photo + trivia + creative photo + final dance photo |
-| `youth_trip` | טיול שכבה / תנועת נוער 🏕️ | team / smart_weighted | check-in + trail riddle + group photo + final check-in |
-| `team_gibush` | גיבוש צוות 🤝 | team / smart_weighted | sequence opener + creative photo + final quiz |
-| `blank` | דף ריק 📄 | team / smart_weighted | one empty stage |
-| `riddle` | ציד חידות 🗝️ | team / smart_weighted | 3 locationless quiz riddles |
-| `photo` | מסע צילום 📸 | team / fixed_points_speed | 3 auto-approve photo tasks |
-| `trivia` | שביל טריוויה ❓ | individual / fixed_points_speed | 3 multiple-choice quizzes |
+| Path | What it is | Where it lives |
+|---|---|---|
+| `scratch` | A blank game — one empty stage. A client-side special case, always listed first, deliberately **not** an admin-editable template. | `DashboardPage.tsx` |
+| `guided` | Clone an **admin-authored template**. | `listGameTemplates` → `createGameFromTemplate` |
+| `smart_build` | "Compose one for me" — answer a short questionnaire, get a personalized game assembled from a tagged mission bank. | `lib/composeGame.ts` |
 
-Shorthand builders: `photo()` (auto-approve photo), `quiz()` (locationless), `checkin()` (field).
+### 22.1 Templates are Firestore documents, not source code
+
+There is no `src/templates.ts` any more (change: `admin-manage-game-templates`). A template is an
+ordinary game document — `users/{ownerUid}/games/{gameId}` — carrying `isTemplate: true` plus its
+`template*` fields (`templateGroupKey`, `templateLang`, `templateEmoji`, `templateOrder`,
+`templateGenre`, `templateStageCount`, `templateTaskCount`). Admins author and curate them through
+`listAdminTemplates` / `setGameTemplateFlag`; every authenticated creator reads the same menu.
+
+- **`listGameTemplates`** runs a `collectionGroup('games').where('isTemplate','==',true)` projected
+  through `TEMPLATE_LIST_FIELDS`. That constant is a Firestore **field mask** — a field missing from
+  it is absent from every returned document no matter how faithfully the projection copies it. Adding
+  a field to the picker/wizard payload means adding it there too. (See §23.)
+- **Grouping and language.** Templates with the same `templateGroupKey` are language variants of one
+  offering; `lib/templatePicker.ts` is the pure ordering + variant-resolution logic (show the
+  creator's own language if the admin authored it, else fall back).
+- **`createGameFromTemplate`** instantiates the chosen template into the caller's own games.
+
+### 22.2 The picker menu is cached client-side, not server-side
+
+`lib/templateCache.ts` — the list is identical for every creator and changes maybe once a month, so
+it is served through three strictly-faster layers: an **in-flight promise** (a mount prefetch and the
+picker open share one network call instead of racing two), a **module memo**, and **`localStorage`**
+with stale-while-revalidate. The deciding logic (`templateCacheVerdict`, `parseStoredTemplates`) is
+pure and unit-tested. Note the *server* deliberately does **not** memoize this: the Firebase runtime
+is multi-process, so one worker could invalidate while another kept serving a stale menu.
+
+### 22.3 Smart build composes from a tagged mission bank
+
+`smart_build` asks audience, setting, group size, duration, age band, difficulty and preferred
+activity kinds (`lib/smartBuildWizard.ts`, a pure reducer, rendered by the generic
+`components/SteppedWizard.tsx`), then `lib/composeGame.ts` — pure, client-side, no network and no
+LLM — assembles stages and missions from `taskBank.ts` against the closed tag vocabulary in
+`bankTags.ts`.
+
+Two independent variety layers keep repeat generations from feeling templated: **structural**, the
+stage shape is drawn from hand-authored blueprints; **content**, each slot is filled by
+weighted-random sampling among near-best-fitting bank entries, biased away from what this creator
+was handed recently (`lib/recentBankPicks.ts`, one `localStorage` key per uid — no server state).
+The first mission is drawn only from entries tagged as openers and the last only from finales, both
+still fit-scored rather than inserted as filler.
+
+Two guarantees hold **by construction**, not by review: a composed game satisfies the same
+structural validators `updateGame` enforces on save (so Launch can never refuse what the composer
+just handed over), and every emitted Quick Setup step resolves to a real, settable field on the game
+that was just created.
+
+Mission shorthands (`task`/`stage`/`photo`/`quiz`/`numeric`/`selfReport`/`survey`/`sequence`) live in
+`src/taskShorthands.ts`, imported by both the bank and the seeded template content so the two cannot
+drift.
 
 ---
 
