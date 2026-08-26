@@ -6,7 +6,8 @@
       "Bash(npx openspec *)",
       "Bash(echo \"EXIT: $?\")",
       "PowerShell(npm run typecheck 2>&1)",
-      "Bash(openspec status *)"
+      "Bash(openspec status *)",
+      "Bash(npm test *)"
     ]
   }
 }
