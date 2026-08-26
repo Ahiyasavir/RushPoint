@@ -126,6 +126,14 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   // Values follow the existing split: polls generous, doc-writing actions tight.
   listLiveRuns: { max: 60, windowMs: MIN }, // dashboard poll
   getMyProfile: { max: 60, windowMs: MIN },
+  // Run history + the post-run report (change: post-run-player-report). Neither
+  // polls: a human opens the history, picks a run, and reads it. Both are
+  // MULTI-DOCUMENT reads (every run the owner has; every team of one run), so the
+  // budgets are deliberately below the browse-poll tier — generous for a creator
+  // clicking between several runs, tight enough to bound a stuck client re-fetching
+  // an entire run's teams in a loop.
+  listMyRuns: { max: 30, windowMs: MIN },
+  getRunPlayerReport: { max: 30, windowMs: MIN },
   // Time on site flush (change: admin-engagement-and-outreach). The client flushes on a
   // multi-minute cadence and on tab hide, so a legitimate session sends only a handful an
   // hour; 20/min is far above that and still bounds a client stuck in a write loop. Each

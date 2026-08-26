@@ -18,8 +18,8 @@
 //    reason both of these are reducers over explicit state rather than a pile of
 //    component `useState`s: "have we created anything yet" has to be answerable
 //    without rendering anything.
-// 3. ANSWERS SURVIVE NAVIGATION. Six questions is enough that going back to check
-//    one is normal; losing the other five for it is not.
+// 3. ANSWERS SURVIVE NAVIGATION. Eight questions is enough that going back to
+//    check one is normal; losing the other seven for it is not.
 // 4. BACK FROM THE FIRST QUESTION MEANS "LEAVE", signalled as index -1. The host
 //    wizard reads it and returns to the path fork, so a creator who picked the
 //    wrong card is never trapped.
@@ -37,7 +37,8 @@ import {
 import {
   isBankTagId,
   settingForAreas,
-  PREP_LEVELS,
+  PREP_SCALE,
+  prepWantsPlacedMissions,
   type PrepLevel,
   ACTIVITY_TAG_IDS,
   type AudienceTagId,
@@ -46,9 +47,11 @@ import {
   type AreaTagId,
 } from '../bankTags';
 import type { ComposerAnswers, DifficultyPreference } from './composeGame';
+import { OCCASION_IDS, type OccasionId } from './occasions';
 
 /** The questions, in the order they are asked. */
 export const SMART_BUILD_QUESTION_ORDER = [
+  'occasion',
   'who',
   'areas',
   'people',
@@ -92,15 +95,32 @@ export function whoChoice(id: unknown): typeof SMART_BUILD_WHO[number] {
 export const SMART_BUILD_DIFFICULTIES: readonly DifficultyPreference[] = ['easy', 'balanced', 'hard'];
 
 /**
- * How much the creator is willing to prepare before the game.
+ * What KIND of event this is. See lib/occasions.ts for what each one changes.
  *
- * Asked out loud rather than inferred, because the tiers differ in KIND, not
+ * Asked FIRST, before anything else. It is the question that frames every answer
+ * after it — a creator describing their event only after they have already sized
+ * it is answering in the wrong order — and it is the one question they can
+ * always answer instantly, which is a good way to open.
+ *
+ * It deliberately does NOT decide who is playing. A bar mitzvah with an adult
+ * crowd and a birthday for eight-year-olds are both real, and inferring the
+ * audience from the occasion would recreate exactly the contradiction that
+ * merging the audience and age questions was meant to remove.
+ */
+export const SMART_BUILD_OCCASIONS: readonly OccasionId[] = OCCASION_IDS;
+
+/**
+ * How much the creator is willing to prepare before the game — a cumulative 1-5
+ * rating. See PREP_SCALE in bankTags.ts for what each level means and why it is
+ * a number.
+ *
+ * Asked out loud rather than inferred, because the levels differ in KIND, not
  * just in amount: the top one means going to a business, paying them, and
  * relying on the owner to hand a code to strangers. A creator who wanted to
  * press a button and run a game the same evening must never be handed that by
  * default, and nothing about their other answers reveals which kind they are.
  */
-export const SMART_BUILD_PREP_LEVELS: readonly PrepLevel[] = PREP_LEVELS;
+export const SMART_BUILD_PREP_LEVELS: readonly PrepLevel[] = PREP_SCALE;
 export const SMART_BUILD_GROUP_SIZES = GROUP_SIZE_BANDS;
 export const SMART_BUILD_DURATIONS = DURATION_BANDS;
 
@@ -125,26 +145,30 @@ export const SMART_BUILD_PREFERRED_TAGS: readonly BankTagId[] = ACTIVITY_TAG_IDS
 export const SMART_BUILD_AREAS: readonly AreaTagId[] = AREA_TAG_IDS;
 
 export interface SmartBuildAnswers {
+  /** What kind of event this is. See SMART_BUILD_OCCASIONS. */
+  occasion: OccasionId;
   /** Audience and age, answered once. See SMART_BUILD_WHO. */
   who: SmartBuildWhoId;
   people: number;
   minutes: number;
   difficultyPreference: DifficultyPreference;
   preferredTags: BankTagId[];
-  /** How much prep the creator will do before the game. See SMART_BUILD_PREP_LEVELS. */
+  /**
+   * How much prep the creator will do before the game, 1-5. See
+   * SMART_BUILD_PREP_LEVELS.
+   *
+   * There is no separate `locationMissions` answer any more: whether missions
+   * are pinned to real spots is DERIVED from this rating (level 2 and up),
+   * because "I'll just put them on the map" IS a preparation level. It used to
+   * be a yes/no chip inside the `areas` question, which asked the creator about
+   * their own effort a second time, on a different scale, in a different place.
+   */
   prepEffort: PrepLevel;
   /**
    * The kinds of place this event has. EMPTY means no fixed venue — there is no
    * separate indoor/outdoor question, because naming a mall already said it.
    */
   areas: AreaTagId[];
-  /**
-   * Should the composer PIN play-from-anywhere missions to real spots and guide
-   * the creator through placing each one? Defaults to false — see
-   * ComposerAnswers.locationMissions for why this is an explicit ask rather than
-   * something inferred from the places named above.
-   */
-  locationMissions: boolean;
 }
 
 export interface SmartBuildState {
@@ -161,8 +185,7 @@ export type SmartBuildAction =
   | { type: 'back' }
   | { type: 'setAnswer'; key: keyof SmartBuildAnswers; value: string | number }
   | { type: 'togglePreferred'; tag: BankTagId }
-  | { type: 'toggleArea'; area: AreaTagId }
-  | { type: 'setLocationMissions'; value: boolean };
+  | { type: 'toggleArea'; area: AreaTagId };
 
 /** The index that means "the creator backed out of the questionnaire". */
 export const SMART_BUILD_LEFT = -1;
@@ -170,6 +193,10 @@ export const SMART_BUILD_LEFT = -1;
 /** The answer every question falls back to when the creator skips it. */
 export function smartBuildDefaults(): SmartBuildAnswers {
   return {
+    // The neutral occasion: we have not been told what the event is, so nothing
+    // is biased and the composer behaves exactly as it did before the question
+    // existed.
+    occasion: 'other',
     // "Everyone" is the honest default: we have not been told who is playing, and
     // it is the one answer that keeps every mission eligible.
     who: 'mixed',
@@ -177,16 +204,15 @@ export function smartBuildDefaults(): SmartBuildAnswers {
     minutes: DEFAULT_DURATION_MINUTES,
     difficultyPreference: 'balanced',
     preferredTags: [],
-    // Self-prep, never an outside partner. The middle tier is what most games
-    // already expected of a creator, and the top one has to be chosen on
-    // purpose — it depends on somebody who is not the creator turning up.
-    prepEffort: 'light',
+    // The bottom of the scale: a creator who taps straight through is asked for
+    // NOTHING — no props to prepare, no pins to place. Every level above this
+    // one obliges them to do something before the game, and a default must never
+    // be the thing that obliges them. (This is stricter than the old `light`
+    // default, which quietly bought self-prep missions on their behalf.)
+    prepEffort: 1,
     // Empty means no fixed venue — the setting the composer can always satisfy,
     // because it never hard-filters a mission out for being unplayable.
     areas: [],
-    // Playable from anywhere is the default everywhere, indoors and out, until
-    // the creator explicitly asks to route missions to real spots.
-    locationMissions: false,
   };
 }
 
@@ -250,9 +276,6 @@ export function smartBuildReducer(state: SmartBuildState, action: SmartBuildActi
       return { ...s, answers: { ...s.answers, areas: next } };
     }
 
-    case 'setLocationMissions':
-      return { ...s, answers: { ...s.answers, locationMissions: a.value === true } };
-
     default:
       return s;
   }
@@ -267,11 +290,14 @@ export function smartBuildReducer(state: SmartBuildState, action: SmartBuildActi
 function sanitizeAnswers(answers: Partial<SmartBuildAnswers>): SmartBuildAnswers {
   const d = smartBuildDefaults();
   return {
+    occasion: oneOf(answers.occasion, SMART_BUILD_OCCASIONS, d.occasion),
     who: oneOf(answers.who, SMART_BUILD_WHO.map((w) => w.id), d.who),
     people: positive(answers.people, d.people),
     minutes: positive(answers.minutes, d.minutes),
     difficultyPreference: oneOf(answers.difficultyPreference, SMART_BUILD_DIFFICULTIES, d.difficultyPreference),
-    prepEffort: oneOf(answers.prepEffort, SMART_BUILD_PREP_LEVELS, d.prepEffort),
+    prepEffort: (SMART_BUILD_PREP_LEVELS as readonly unknown[]).includes(answers.prepEffort)
+      ? answers.prepEffort as PrepLevel
+      : d.prepEffort,
     preferredTags: Array.isArray(answers.preferredTags)
       ? answers.preferredTags.filter((t, i, arr) => isBankTagId(t) && arr.indexOf(t) === i)
       : [],
@@ -279,7 +305,6 @@ function sanitizeAnswers(answers: Partial<SmartBuildAnswers>): SmartBuildAnswers
       ? answers.areas.filter((t, i, arr) =>
         (AREA_TAG_IDS as readonly string[]).includes(t) && arr.indexOf(t) === i)
       : [],
-    locationMissions: answers.locationMissions === true,
   };
 }
 
@@ -319,6 +344,7 @@ export function smartBuildAnswers(state: SmartBuildState): ComposerAnswers {
   // places named — neither is asked for separately, so neither can contradict.
   const who = whoChoice(a.who);
   return {
+    occasion: a.occasion,
     audience: who.audience,
     setting: settingForAreas(a.areas),
     people: a.people,
@@ -327,7 +353,8 @@ export function smartBuildAnswers(state: SmartBuildState): ComposerAnswers {
     difficultyPreference: a.difficultyPreference,
     ...(a.preferredTags.length > 0 ? { preferredTags: a.preferredTags } : {}),
     ...(a.areas.length > 0 ? { areas: a.areas } : {}),
-    locationMissions: a.locationMissions,
+    // DERIVED, never answered: level 2 IS "put the missions on real spots".
+    locationMissions: prepWantsPlacedMissions(a.prepEffort),
     prepEffort: a.prepEffort,
   };
 }

@@ -25,6 +25,10 @@ export * from './hiddenSearchArea';
 // (change: public-task-coordinates-backfill).
 export * from './publicTaskBackfill';
 export * from './answerAttempts';
+// What a participant actually SUBMITTED, right and wrong (change:
+// post-run-player-report). Bounded, owner-only by construction (never added to
+// sanitizeTeamForParticipant's allow-list), destroyed after 30 days.
+export * from './answerLog';
 // What a wrong answer costs (change: wrong-answer-cost) — escalating, capped,
 // preset-aware. Shared by the charge, the participant display and the Builder.
 export * from './wrongAnswerPenalty';
@@ -126,3 +130,6 @@ export * from './adminUserActivity';
 // createGameFromTemplate (change: guided-new-game-wizard).
 export * from './gamePersonalization';
 export * from './docCachePolicy';
+// The OWNER-ONLY per-player run report (change: post-run-player-report) — who
+// played, how they did, and mission by mission what they actually answered.
+export * from './runPlayerReport';

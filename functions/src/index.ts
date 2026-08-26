@@ -9,8 +9,50 @@ import { db } from './firebase';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
 import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
+// The recorded answer sheet (change: post-run-player-report) — every submission,
+// right and wrong, on every run. Owner-only by construction: `answerLog` is never
+// added to sanitizeTeamForParticipant's allow-list.
+import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
+
+/**
+ * Record ONE station-code attempt on the team's stored task record.
+ *
+ * A correct code records itself through `completeTaskForTeam`'s existing
+ * transaction; a WRONG code never reaches that path, so it needs its own append.
+ * The stages array is rewritten WHOLE inside a transaction — a dotted path into an
+ * array element would coerce the array to a map and break the run, and a
+ * non-transactional whole-array write could clobber a concurrent one.
+ *
+ * Returns quietly when the team has no record for that task (nothing to attach
+ * the attempt to) — recording is bookkeeping and must never fail a submission.
+ */
+async function recordStationCodeAttempt(
+  teamRef: FirebaseFirestore.DocumentReference,
+  taskId: string,
+  code: string,
+  correct: boolean,
+): Promise<void> {
+  const entry = buildAnswerLogEntry({ kind: 'station_code', answer: code, correct, at: new Date().toISOString() });
+  if (!entry) return;
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(teamRef);
+    if (!snap.exists) return;
+    const stages = (snap.data() as RunTeam).stages;
+    if (!Array.isArray(stages)) return;
+    for (const stage of stages) {
+      const recs = stage?.tasks;
+      if (!Array.isArray(recs)) continue;
+      for (const rec of recs) {
+        if (rec?.taskId !== taskId) continue;
+        rec.answerLog = appendAnswerLog(rec.answerLog, entry);
+        tx.update(teamRef, { stages, updatedAt: new Date().toISOString() });
+        return;
+      }
+    }
+  });
+}
 
 /** Cryptographic 6-digit staff PIN (replaces Math.random — anti-cheat row 40). */
 function generatePin(): string {
@@ -41,6 +83,10 @@ export {
 // setTeamHold parks/resumes ONE team (its clock stops and it cannot advance);
 // forceAssignTask sends ONE team to a SPECIFIC task in its current stage
 // (change: staff-console-field-ops).
+// listMyRuns + getRunPlayerReport are the run-history and post-run per-player
+// report surfaces (change: post-run-player-report) — the only way back into a run
+// that has already ENDED, since every other post-run callable is keyed by an
+// access code that only the live console holds.
 export {
   launchRun, joinRun, getJoinInfo, startTeams, skipStage, skipTaskForTeam, finalizeRun,
   setTeamHold, forceAssignTask,
@@ -48,6 +94,7 @@ export {
   listRunTeams, completeTask, requestNextTask, requestTaskHint, reportArrival,
   submitTaskAnswer, submitSequenceStep, getRecommendedTasks, revealTaskAnswer,
   checkOutTask, getMyTeamState, listLiveRuns, getMyProfile,
+  listMyRuns, getRunPlayerReport,
   createTrackable, getRunTrackables, pickUpTrackable, dropTrackable,
   startInstantPlay,
   createZone, deleteZone, getRunZones, captureZone,
@@ -1245,6 +1292,11 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
         { merge: true },
       );
     }
+    // post-run-player-report: the wrong code is recorded too. Best-effort and
+    // AFTER the attempt counter: a bookkeeping failure must not turn a wrong code
+    // into a 500 — the participant still gets the same 'Incorrect code' refusal.
+    await recordStationCodeAttempt(teamRef, taskId, code, false)
+      .catch(() => { /* recording is never allowed to fail a submission */ });
     throw new functions.https.HttpsError('failed-precondition', 'Incorrect code');
   }
 
@@ -1264,7 +1316,12 @@ export const verifyStationCode = loggedCallable('verifyStationCode', async (data
   // the next team gets {taskId:null} forever. Guarded on `completed` (idempotent
   // replay must not over-release) and `heldSlot` (never drain a slot this team
   // never reserved). `verifyStationCode` carries no lat/lng → route locationless.
-  const { completed } = await completeTaskForTeam(ownerUid, gameId, runId, resolvedTeamId, taskId, now);
+  const { completed } = await completeTaskForTeam(
+    ownerUid, gameId, runId, resolvedTeamId, taskId, now,
+    // post-run-player-report: the accepted code rides the completion transaction
+    // that already rewrites this stage — no extra read, no extra transaction.
+    { answerLog: buildAnswerLogEntry({ kind: 'station_code', answer: code, correct: true, at: now }) },
+  );
   if (!completed) return { verified: true, already: true, nextTaskId: null };
   // WO Fix 1: the held station slot is released atomically inside completeTaskForTeam.
   const next = await assignNextInActiveStage(ownerUid, gameId, runId, resolvedTeamId, { lat: 0, lng: 0 }, now);

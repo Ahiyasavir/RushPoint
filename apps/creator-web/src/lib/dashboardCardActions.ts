@@ -5,20 +5,20 @@
 // inline set plus an overflow, decided by a PURE function so the "which action
 // sits where" call is unit testable and no action can ever be silently dropped.
 //
-// The card keeps Edit + Launch as its two primary verbs inline; Test run,
-// Publish-or-Unpublish, Share and Delete collapse into the "⋯" overflow menu,
+// The card keeps Edit + Launch as its two primary verbs inline; Test run, Run
+// history, Publish-or-Unpublish, Share and Delete collapse into the "⋯" overflow,
 // Delete last as the destructive one (the same least-to-most-destructive ordering
 // TEAM_ROW_OVERFLOW uses). The component maps each id to its existing handler and
 // its existing `d.card*` label; this helper owns only the ordering + the
 // publish/unpublish visibility decision, never the wiring.
 
 export type DashboardCardActionId =
-  | 'edit' | 'launch' | 'testRun' | 'publish' | 'unpublish' | 'share' | 'delete';
+  | 'edit' | 'launch' | 'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'delete';
 
 export interface DashboardCardActions {
   /** Always ['edit', 'launch']. */
   inline: DashboardCardActionId[];
-  /** Always [testRun, <publish|unpublish>, share, delete] — delete last. */
+  /** Always [testRun, history, <publish|unpublish>, share, delete] — delete last. */
   overflow: DashboardCardActionId[];
 }
 
@@ -39,6 +39,6 @@ export function dashboardCardActions(
   const publishToggle: DashboardCardActionId = isPublic ? 'unpublish' : 'publish';
   return {
     inline: [...CARD_INLINE],
-    overflow: ['testRun', publishToggle, 'share', 'delete'],
+    overflow: ['testRun', 'history', publishToggle, 'share', 'delete'],
   };
 }

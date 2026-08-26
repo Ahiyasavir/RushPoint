@@ -17,8 +17,14 @@
 //     reason both of these are reducers over explicit state rather than a pile of
 //     component `useState`s: "have we created anything yet" has to be answerable
 //     without rendering.
-//   • ANSWERS SURVIVE NAVIGATION. Six questions is enough that going back to
-//     check one is normal, and losing the other five for it is not.
+//   • ANSWERS SURVIVE NAVIGATION. Eight questions is enough that going back to
+//     check one is normal, and losing the other seven for it is not.
+//
+// (change: smart-build-occasion-and-prep-scale.) Two questions changed shape:
+// `prep` is now a cumulative 1-5 rating that ALSO decides whether missions get
+// pinned to real spots — §10 — and a new FIRST question asks what the occasion
+// is, §11. The rules above are unchanged; there are simply two more of them to
+// hold.
 //   • TOTAL. An unknown action or a malformed state yields a usable state, never
 //     a throw — the same contract `wizardReducer` holds.
 //
@@ -26,6 +32,8 @@
 import { AGE_BANDS } from '@rushpoint/shared';
 import {
   SMART_BUILD_QUESTION_ORDER,
+  SMART_BUILD_OCCASIONS,
+  SMART_BUILD_PREP_LEVELS,
   SMART_BUILD_WHO,
   whoChoice,
   SMART_BUILD_DIFFICULTIES,
@@ -45,6 +53,8 @@ import {
 } from '../apps/creator-web/src/lib/composeGame';
 import { TASK_BANK } from '../apps/creator-web/src/taskBank';
 import { BANK_TAGS, AUDIENCE_TAG_IDS, SETTING_TAG_IDS } from '../apps/creator-web/src/bankTags';
+import { OCCASION_IDS } from '../apps/creator-web/src/lib/occasions';
+import { translations } from '../apps/creator-web/src/i18n';
 
 let failures = 0;
 function ok(label: string, cond: boolean): void {
@@ -77,11 +87,19 @@ console.log('\n── 1. the question table ────────────
   eq('every question id is unique',
     SMART_BUILD_QUESTION_ORDER.length - new Set(SMART_BUILD_QUESTION_ORDER).size, 0);
 
-  // Six questions, not eight. `who` carries audience AND age; the setting is
-  // derived from the places named, so neither is asked for on its own.
-  const required = ['who', 'areas', 'people', 'duration', 'difficulty'];
+  // `who` carries audience AND age; the setting is derived from the places
+  // named; whether missions are pinned is derived from the prep rating. None of
+  // those three is asked for on its own.
+  const required = ['occasion', 'who', 'areas', 'people', 'duration', 'difficulty', 'prep'];
   const missing = required.filter((q) => !(SMART_BUILD_QUESTION_ORDER as readonly string[]).includes(q));
   eq('every answer the composer needs is asked for', missing, []);
+
+  // The occasion is asked FIRST — before who is playing. It is the question that
+  // frames every answer after it, and a creator who has to describe their event
+  // after already sizing it is answering in the wrong order.
+  eq('the occasion is the first question', SMART_BUILD_QUESTION_ORDER[0], 'occasion');
+  eq('the occasion options are exactly the registry occasions',
+    [...SMART_BUILD_OCCASIONS].sort(), [...OCCASION_IDS].sort());
 
   // Options must come from the canonical registry, or a chip renders an id.
   // Every audience the registry knows must be reachable through some who-option,
@@ -131,7 +149,7 @@ console.log('\n── 3. every default really composes ────────�
   // And so does every single option of every question, one at a time.
   let bad = '';
   for (const who of SMART_BUILD_WHO.map((o) => o.id)) {
-    for (const areas of [[], ['mall'], ['park'], ['park', 'mall']] as const) {
+    for (const areas of [[], ['mall'], ['park'], ['home'], ['park', 'mall']] as const) {
       for (const difficultyPreference of SMART_BUILD_DIFFICULTIES) {
         const a = { ...answers, who, areas: [...areas], difficultyPreference };
         if (composeGame(TASK_BANK, a, COPY, seededRng(1), { recentBankKeys: [] }) === null) {
@@ -141,6 +159,19 @@ console.log('\n── 3. every default really composes ────────�
     }
   }
   eq('every combination of offered options composes', bad, '');
+
+  // The two questions this change touched, across every offered value. A prep
+  // level that composes nothing would be a chip the creator can pick to break
+  // their own game.
+  let badNew = '';
+  for (const occasion of SMART_BUILD_OCCASIONS) {
+    for (const prepEffort of SMART_BUILD_PREP_LEVELS) {
+      const a = { ...answers, occasion, prepEffort };
+      const r = composeGame(TASK_BANK, a, COPY, seededRng(1), { recentBankKeys: [] });
+      if (r === null || r.usedBankKeys.length === 0) badNew ||= `${occasion}/level ${prepEffort}`;
+    }
+  }
+  eq('every occasion at every prep level composes a populated game', badNew, '');
 }
 
 console.log('\n── 4. navigation ───────────────────────────────────────────');
@@ -246,6 +277,131 @@ console.log('\n── 8. progress is reportable ──────────�
 
   const first = smartBuildProgress(initialSmartBuildState());
   eq('the first question reads as step 1', first.step, 1);
+}
+
+console.log('\n── 10. prep is ONE cumulative rating ───────────────────────');
+{
+  const d = smartBuildDefaults();
+  eq('the offered levels are 1-5', [...SMART_BUILD_PREP_LEVELS], [1, 2, 3, 4, 5]);
+  eq('the default asks nothing of the creator', d.prepEffort, 1);
+
+  // Pinning missions to real spots is no longer its own answer. It was asked in
+  // the "where" question, on a different scale, about the same thing — and it was
+  // exactly the middle step the three prep chips had no room for.
+  ok('there is no separate locationMissions answer', !('locationMissions' in d));
+
+  const payloadAt = (prepEffort: number) => {
+    let st = initialSmartBuildState();
+    st = smartBuildReducer(st, { type: 'setAnswer', key: 'prepEffort', value: prepEffort });
+    return smartBuildAnswers(runToEnd(st));
+  };
+  eq('level 1 leaves missions playable from anywhere', payloadAt(1).locationMissions, false);
+  for (const level of [2, 3, 4, 5]) {
+    eq(`level ${level} pins missions to real spots`, payloadAt(level).locationMissions, true);
+  }
+  eq('the level itself reaches the composer', payloadAt(4).prepEffort, 4);
+
+  // A malformed level must land back inside the scale rather than reaching the
+  // composer as junk or throwing on the way.
+  for (const junk of [0, 9, -1, 2.5, NaN, 'full', null, undefined, {}]) {
+    let st = initialSmartBuildState();
+    st = smartBuildReducer(st, { type: 'setAnswer', key: 'prepEffort', value: junk as never });
+    const level = st.answers.prepEffort;
+    if (!(SMART_BUILD_PREP_LEVELS as readonly number[]).includes(level)) {
+      failures++;
+      console.error(`  ✗ prep level ${JSON.stringify(junk)} survived as ${JSON.stringify(level)}`);
+    }
+  }
+  ok('every malformed level is coerced back into 1-5', true);
+
+  // The action that drove the old chip is gone. Dispatching it must be inert,
+  // not a way to reach a state the rating cannot express.
+  const stale = smartBuildReducer(initialSmartBuildState(),
+    { type: 'setLocationMissions', value: true } as never);
+  eq('the retired setLocationMissions action changes nothing',
+    stale.answers, smartBuildDefaults());
+}
+
+console.log('\n── 11. the occasion ───────────────────────────────────────');
+{
+  const d = smartBuildDefaults();
+  eq('the default occasion is the neutral one', d.occasion, 'other');
+  ok('the default is a real option', (SMART_BUILD_OCCASIONS as readonly string[]).includes(d.occasion));
+
+  let st = initialSmartBuildState();
+  st = smartBuildReducer(st, { type: 'setAnswer', key: 'occasion', value: 'wedding' });
+  eq('the occasion is answerable', st.answers.occasion, 'wedding');
+  eq('…and reaches the composer payload', smartBuildAnswers(runToEnd(st)).occasion, 'wedding');
+
+  // The occasion must NOT decide who is playing. A bar mitzvah with an adult
+  // crowd is a real event, and silently rewriting either answer to agree with
+  // the other is the contradiction the merged who-question was built to avoid.
+  let both = initialSmartBuildState();
+  both = smartBuildReducer(both, { type: 'setAnswer', key: 'occasion', value: 'mitzvah' });
+  both = smartBuildReducer(both, { type: 'setAnswer', key: 'who', value: 'adults' });
+  const a = smartBuildAnswers(runToEnd(both));
+  eq('occasion and audience are independent',
+    [a.occasion, a.audience], ['mitzvah', 'adults']);
+
+  // Backing out of the FIRST question is still the "leave" signal — the occasion
+  // inherited that role from `who` when it moved to the front.
+  const left = smartBuildReducer(initialSmartBuildState(), { type: 'back' });
+  eq('back from the occasion question signals "leave"', left.index, -1);
+
+  for (const junk of ['nope', '', null, undefined, 42, {}]) {
+    let bad = initialSmartBuildState();
+    bad = smartBuildReducer(bad, { type: 'setAnswer', key: 'occasion', value: junk as never });
+    if (!(SMART_BUILD_OCCASIONS as readonly string[]).includes(bad.answers.occasion)) {
+      failures++;
+      console.error(`  ✗ occasion ${JSON.stringify(junk)} survived as ${JSON.stringify(bad.answers.occasion)}`);
+    }
+  }
+  ok('an unknown occasion falls back to a real one', true);
+}
+
+console.log('\n── 12. every offered option has copy in BOTH languages ─────');
+{
+  // The component has no test runner, so this is where "a chip renders an id"
+  // gets caught. `bankTagLabel` protects the tag-derived questions by returning
+  // '' for an unknown id — but the occasion and the prep rating are keyed on
+  // their own dictionaries, and a missing key there is a blank chip a creator
+  // cannot pick their event from.
+  for (const lang of ['he', 'en'] as const) {
+    const w = translations[lang].dashboard.wizard;
+
+    const missingOccasion = SMART_BUILD_OCCASIONS.filter((id) => !w.occasionOptions[id]);
+    eq(`[${lang}] every occasion has a label`, missingOccasion, []);
+
+    const missingLevel = SMART_BUILD_PREP_LEVELS.filter((l) => !w.prepLevels[String(l)]);
+    eq(`[${lang}] every prep level has a label`, missingLevel, []);
+    const missingHint = SMART_BUILD_PREP_LEVELS.filter((l) => !w.prepLevelHints[String(l)]);
+    eq(`[${lang}] every prep level has an explanation`, missingHint, []);
+
+    // Occasion stage titles are deliberately OPTIONAL — the composer falls back
+    // to the generic list. What is not optional is that a declared entry is
+    // well-formed, or a stage silently loses its title.
+    const malformed = Object.entries(w.occasionStageNames).flatMap(([id, roles]) => {
+      const problems: string[] = [];
+      if (!(SMART_BUILD_OCCASIONS as readonly string[]).includes(id)) problems.push(`${id}: not an occasion`);
+      for (const role of ['opener', 'middle', 'finale']) {
+        const list = (roles as Record<string, string[]>)[role];
+        if (!Array.isArray(list) || list.length === 0) problems.push(`${id}.${role}: empty`);
+        else if (list.some((n) => typeof n !== 'string' || n.trim() === '')) problems.push(`${id}.${role}: a blank title`);
+      }
+      return problems;
+    });
+    eq(`[${lang}] every declared occasion stage-title set is well-formed`, malformed, []);
+  }
+
+  // The retired keys must be GONE, not merely unused. A dictionary entry nothing
+  // reads is the next reader's false lead about how the question works.
+  for (const lang of ['he', 'en'] as const) {
+    const w = translations[lang].dashboard.wizard as unknown as Record<string, unknown>;
+    const stale = ['prepNone', 'prepLight', 'prepFull', 'prepNoneHint', 'prepLightHint',
+      'prepFullHint', 'locationMissionsLabel', 'locationMissionsYes', 'locationMissionsNo',
+      'locationMissionsHint'].filter((k) => k in w);
+    eq(`[${lang}] the retired prep/location keys are gone`, stale, []);
+  }
 }
 
 console.log('\n── 9. the reducer is TOTAL ─────────────────────────────────');

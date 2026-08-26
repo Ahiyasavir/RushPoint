@@ -131,7 +131,12 @@ console.log('\n── settingForAreas ──────────────
     ['only nulls', [null], 'fromAnywhere'],
     ['one indoor place', ['mall'], 'indoor'],
     ['indoor plus junk', ['mall', null], 'indoor'],
-    ['every indoor place', ['mall', 'office', 'school'], 'indoor'],
+    ['every indoor place', ['home', 'mall', 'office', 'school'], 'indoor'],
+    // A home is where most birthday parties and youth-movement activities
+    // actually happen, and the list had no way to say so — a creator running a
+    // game in a living room had to answer "mall" or nothing at all.
+    ['a home is indoor', ['home'], 'indoor'],
+    ['a home plus an outdoor place is outdoor', ['home', 'park'], 'outdoor'],
     ['one outdoor place', ['park'], 'outdoor'],
     ['outdoor plus junk', ['park', 'junk'], 'outdoor'],
     ['mixed indoor and outdoor is outdoor', ['mall', 'park'], 'outdoor'],
@@ -152,6 +157,10 @@ console.log('\n── settingForAreas ──────────────
   // Every KIND of place must classify, or a new one silently reads as indoor.
   // A QUALITY (crowded, historic) deliberately carries no such classification —
   // see the note on AREA_QUALITY_TAG_IDS — so the invariant is scoped to kinds.
+  ok('a home is one of the kinds of place on offer',
+    (AREA_KIND_TAG_IDS as readonly string[]).includes('home'));
+  eq('a home is indoor', AREA_SETTING.home, 'indoor');
+
   eq('every area KIND has a setting',
     AREA_KIND_TAG_IDS.filter((a) => AREA_SETTING[a] !== 'indoor' && AREA_SETTING[a] !== 'outdoor'), []);
   eq('the classification covers exactly the area KINDS, no more',

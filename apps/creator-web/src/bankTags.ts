@@ -64,6 +64,10 @@ export const BANK_TAGS = {
   park: { he: 'פארק', en: 'Park' },
   neighborhood: { he: 'שכונה', en: 'Neighborhood' },
   cityCenter: { he: 'מרכז העיר', en: 'City center' },
+  // Where most birthday parties and youth-movement activities actually happen.
+  // Before it existed a creator running a game in a living room had to answer
+  // "mall" or leave the question blank, and both answers were lies.
+  home: { he: 'בית', en: 'Home' },
   mall: { he: 'קניון', en: 'Mall' },
   office: { he: 'משרד', en: 'Office' },
   school: { he: 'בית ספר', en: 'School' },
@@ -178,9 +182,36 @@ export type ActivityTagId = typeof ACTIVITY_TAG_IDS[number];
 export const PREP_TAG_IDS = ['noPrep', 'needsSetup', 'needsPartner'] as const;
 export type PrepTagId = typeof PREP_TAG_IDS[number];
 
-/** How much prep a creator is willing to do. Same order as PREP_TAG_IDS. */
-export const PREP_LEVELS = ['none', 'light', 'full'] as const;
-export type PrepLevel = typeof PREP_LEVELS[number];
+/**
+ * How much prep a creator is willing to do, as a CUMULATIVE 1-5 rating.
+ *
+ * Five answer levels over three mission tiers, on purpose. The old three chips
+ * ("none" / "light" / "full") mapped one-to-one onto `PREP_TAG_IDS`, which made
+ * the code tidy and the QUESTION wrong: creators kept naming a step that was
+ * not on it — "I'm not preparing anything, I'll just put the missions on real
+ * spots". That effort is real, it is strictly less than preparing props, and it
+ * was being collected somewhere else entirely (a yes/no chip inside the "where
+ * does it happen" question), so the creator was asked about their own effort
+ * twice, on two scales, and neither admitted the middle.
+ *
+ * Each level includes everything below it:
+ *   1  nothing at all
+ *   2  + pin the missions to real spots on the map
+ *   3  + prepare things at home
+ *   4  + go to the site beforehand and set up there
+ *   5  + coordinate with an outside party
+ *
+ * A NUMBER rather than five string ids because both readings below —
+ * `prepToleranceOf` and `prepWantsPlacedMissions` — are monotone functions of
+ * it. With ids each would be a lookup table, and two tables can disagree about
+ * the ordering; here they cannot. It also makes "coerce anything into range" a
+ * single clamp, which is what keeps the questionnaire's reducer total.
+ */
+export const PREP_SCALE = [1, 2, 3, 4, 5] as const;
+export type PrepLevel = typeof PREP_SCALE[number];
+
+/** The level a malformed answer behaves as. Never the top — see `prepToleranceOf`. */
+const PREP_FALLBACK_LEVEL: PrepLevel = 3;
 
 /**
  * How much work this mission asks of the creator before the game.
@@ -199,16 +230,46 @@ export function prepTierOf(tags: readonly string[] | undefined): number {
   return tier;
 }
 
-/** How much prep this answer tolerates, as an index into PREP_TAG_IDS. */
+/** The rating, coerced into 1-5. Total — anything else becomes the fallback. */
+export function prepLevelOf(level: unknown): PrepLevel {
+  return (PREP_SCALE as readonly number[]).includes(level as number)
+    ? (level as PrepLevel)
+    // An unknown answer never inherits the top level: coordinating with an
+    // outside party has to be chosen on purpose, never arrived at by accident.
+    : PREP_FALLBACK_LEVEL;
+}
+
+/**
+ * How much prep this answer tolerates, as an index into PREP_TAG_IDS.
+ *
+ * The five levels collapse onto three mission tiers — 1,2 → free · 3,4 →
+ * self-prep · 5 → outside partner — because the BANK has three tiers and this
+ * change did not re-tag it. Levels 3 and 4 therefore admit exactly the same
+ * missions; 4 differs only in `wantsPlacedMissions` and in a scoring nudge
+ * toward missions pinned to real spots. Do not "fix" that by inventing a fourth
+ * tier here: a tier no mission carries would silently shrink the pool to nothing.
+ */
 export function prepToleranceOf(level: unknown): number {
-  const i = PREP_LEVELS.indexOf(level as PrepLevel);
-  // An unknown answer tolerates self-prep but never an outside partner: that
-  // one must be chosen on purpose, never inherited from a malformed value.
-  return i < 0 ? 1 : i;
+  const l = prepLevelOf(level);
+  if (l >= 5) return 2;
+  if (l >= 3) return 1;
+  return 0;
+}
+
+/**
+ * Does this answer mean "put the missions on real spots"?
+ *
+ * Level 2 is exactly that answer and nothing else, which is the whole reason the
+ * scale has five points. A malformed value reads as FALSE: pinning obliges the
+ * creator to place every mission in Quick Setup, and a default must never impose
+ * work nobody asked for.
+ */
+export function prepWantsPlacedMissions(level: unknown): boolean {
+  return (PREP_SCALE as readonly number[]).includes(level as number) && (level as number) >= 2;
 }
 
 export const AREA_KIND_TAG_IDS = [
-  'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'mall', 'office', 'school',
+  'forest', 'beach', 'park', 'neighborhood', 'cityCenter', 'home', 'mall', 'office', 'school',
 ] as const;
 
 /**
@@ -239,6 +300,7 @@ export const AREA_SETTING: Record<AreaKindTagId, 'indoor' | 'outdoor'> = {
   park: 'outdoor',
   neighborhood: 'outdoor',
   cityCenter: 'outdoor',
+  home: 'indoor',
   mall: 'indoor',
   office: 'indoor',
   school: 'indoor',

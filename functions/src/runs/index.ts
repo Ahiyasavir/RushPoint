@@ -124,6 +124,12 @@ import { taskExcludedMs, teamExcludedMs, teamHeldExclusionMs, adjustedElapsedSec
 // team projection (the SECURITY boundary for the sealed payload, not chrome) and the
 // stored-answer bound.
 import { sealsScoreFromParticipant, sanitizeTeamForParticipant, boundStoredAnswer } from '@rushpoint/shared';
+// The recorded answer sheet (change: post-run-player-report) — every submission a
+// participant makes, right and wrong, on EVERY run. Bounded here, owner-only by
+// construction (never allow-listed by sanitizeTeamForParticipant above), and
+// destroyed after ANSWER_LOG_RETENTION_DAYS by the maintenance sweep.
+import { buildAnswerLogEntry, appendAnswerLog, buildRunPlayerReport } from '@rushpoint/shared';
+import type { AnswerLogEntry } from '@rushpoint/shared';
 import { shouldEmailRunSummary } from '@rushpoint/shared';
 import { requireString, MAX_ID_LEN, normalizeAccessCode } from '@rushpoint/shared';
 import { shouldRefreshLeaderboard, leaderboardRefreshFields } from './leaderboardThrottle';
@@ -782,6 +788,37 @@ export const grantGuardianConsent = loggedCallable('grantGuardianConsent', async
 });
 
 
+// ─── Recorded answers on a WRONG submission ───────────────────────────────────
+//
+// A correct answer records itself through `completeTaskForTeam`'s existing
+// transaction (it is already rewriting that stage). A WRONG answer never reaches
+// that path — it is the one submission the server graded and then forgot — so it
+// needs its own append, and the stages array must be rewritten WHOLE (a dotted
+// path into an array element coerces the array to a map and breaks the run).
+//
+// Mutates the stages array a transaction just read, and reports whether it found
+// the record: `false` means the team has no record for that task yet (it was never
+// assigned), in which case there is nothing to attach the answer to and the caller
+// simply skips the rewrite rather than inventing a record.
+function appendAnswerLogToStages(
+  stages: RunStageRecord[] | undefined,
+  taskId: string,
+  entry: AnswerLogEntry | null,
+): boolean {
+  if (!entry || !Array.isArray(stages)) return false;
+  for (const stage of stages) {
+    const recs = stage?.tasks;
+    if (!Array.isArray(recs)) continue;
+    for (const rec of recs) {
+      if (rec?.taskId !== taskId) continue;
+      rec.answerLog = appendAnswerLog(rec.answerLog, entry);
+      return true;
+    }
+  }
+  return false;
+}
+
+
 // ─── completeTask ─────────────────────────────────────────────────────────────
 // Called (server-side, by verify/photo callables) when a task is verified.
 // Scores the task, advances the stage, unlocks the next stage if all tasks done.
@@ -795,7 +832,17 @@ export async function completeTaskForTeam(
   now: string,
   // survey-tasks: optional per-completion extras stamped onto the team's task
   // record INSIDE the existing transaction (no new transaction, no new reads).
-  extras?: { surveyResponse?: string; submittedAnswer?: string; wasCorrect?: boolean },
+  // post-run-player-report: `answerLog` is ONE recorded submission, appended to
+  // this record's bounded log. Unlike `submittedAnswer` above (the single
+  // test-mode slot, which stays exactly as it was because accuracySkillRatio
+  // reads its verdict), this is written on EVERY run — it is the creator's
+  // post-event answer sheet.
+  extras?: {
+    surveyResponse?: string;
+    submittedAnswer?: string;
+    wasCorrect?: boolean;
+    answerLog?: AnswerLogEntry | null;
+  },
 ): Promise<{ completed: boolean; heldSlot: boolean }> {
   // Returns { completed, heldSlot }. `completed` is TRUE only when this call
   // actually transitioned the task to completed; a duplicate/idempotent no-op
@@ -1065,6 +1112,17 @@ export async function completeTaskForTeam(
     }
     if (extras?.wasCorrect != null) {
       taskRec.wasCorrect = extras.wasCorrect;
+    }
+    // post-run-player-report: append the recorded submission through the SAME
+    // whole-object stage rewrite (never a dotted array path — that coerces the
+    // array to a map). Inside this transaction because the record and its verdict
+    // must commit together; `appendAnswerLog` is total and bounded, so a corrupt
+    // stored log or an unusable answer degrades to "record nothing" rather than
+    // failing a legitimate submission. Unlike the two fields above, this is NOT
+    // gated on the already-completed guard being first: the wrong answers that
+    // preceded this completion were appended by the grading path on their way past.
+    if (extras?.answerLog) {
+      taskRec.answerLog = appendAnswerLog(taskRec.answerLog, extras.answerLog);
     }
 
     // Power-ups (change: power-ups) — ALL inside this existing transaction; no new
@@ -4740,6 +4798,15 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       {
         submittedAnswer: boundStoredAnswer(ordering ? JSON.stringify(orderedAnswer) : answer),
         wasCorrect: correctSealed,
+        // post-run-player-report: the same submission also joins the recorded
+        // answer sheet. Both are written here, from THIS verdict, so the single
+        // test-mode slot and the log can never disagree about what happened.
+        answerLog: buildAnswerLogEntry({
+          kind: ordering ? 'ordering' : 'answer',
+          answer: ordering ? JSON.stringify(orderedAnswer) : answer,
+          correct: correctSealed,
+          at: nowSealed,
+        }),
       },
     );
     // `recorded` is the whole verdict the participant gets. `correct` is OMITTED,
@@ -4854,13 +4921,34 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       (attemptLimit != null && attemptLimit > 0) ||
       (task.hintAutoRevealAttempts ?? 0) > 0 ||
       costActive;
+    // post-run-player-report: record the wrong submission. Built ONCE here and
+    // reused by both branches below, from the verdict that was just computed, so
+    // a stored entry can never disagree with how the answer was graded.
+    const wrongEntry = buildAnswerLogEntry({
+      kind: ordering ? 'ordering' : 'answer',
+      answer: ordering ? JSON.stringify(orderedAnswer) : String(answer),
+      correct: false,
+      at: new Date().toISOString(),
+    });
     if (!costActive) {
-      if (trackAttempts) {
-        await teamRef.set(
-          { taskAttempts: { [taskId]: admin.firestore.FieldValue.increment(1) } },
-          { merge: true },
-        );
-      }
+      // This branch used to be a single `FieldValue.increment` merge-set (or, with
+      // nothing tracking attempts, no write at all). Appending to the log needs a
+      // read-modify-write of the stages ARRAY, so it becomes a transaction — the
+      // one genuine cost increase in this change. It is bounded by the callable's
+      // rate limit and by MAX_ANSWER_LOG_ENTRIES, and it is still only taken on a
+      // WRONG answer, never on the completion hot path.
+      if (!trackAttempts && !wrongEntry) return { correct: false };
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(teamRef);
+        if (!snap.exists) return;
+        const t = snap.data() as RunTeam;
+        const patch: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+        if (trackAttempts) {
+          patch.taskAttempts = { ...(t.taskAttempts ?? {}), [taskId]: (t.taskAttempts?.[taskId] ?? 0) + 1 };
+        }
+        if (appendAnswerLogToStages(t.stages, taskId, wrongEntry)) patch.stages = t.stages;
+        tx.update(teamRef, patch);
+      });
       return { correct: false };
     }
 
@@ -4901,7 +4989,12 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
       // and manual adjustments use, so buildRankings is untouched and the live
       // and final boards cannot drift. applyPenalties already floors the score
       // at 0, so no charge can push a team negative.
+      // post-run-player-report: the charged wrong answer joins the record too,
+      // inside the SAME transaction that charges for it — so the penalty and the
+      // submission that earned it commit together or not at all.
+      const loggedStages = appendAnswerLogToStages(t.stages, taskId, wrongEntry);
       tx.update(teamRef, {
+        ...(loggedStages ? { stages: t.stages } : {}),
         taskAttempts: { ...(t.taskAttempts ?? {}), [taskId]: priorAttempts + 1 },
         answerPenalties: {
           ...(t.answerPenalties ?? {}),
@@ -4939,7 +5032,20 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   }
 
   const now = new Date().toISOString();
-  const { completed } = await completeTaskForTeam(ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now);
+  // post-run-player-report: the winning answer is recorded too — it rides the
+  // completion transaction that already rewrites this stage, so the correct-answer
+  // hot path costs no extra read and no extra transaction.
+  const { completed } = await completeTaskForTeam(
+    ctx.ownerUid, ctx.gameId, ctx.runId, teamId, taskId, now,
+    {
+      answerLog: buildAnswerLogEntry({
+        kind: ordering ? 'ordering' : 'answer',
+        answer: ordering ? JSON.stringify(orderedAnswer) : answer,
+        correct: true,
+        at: now,
+      }),
+    },
+  );
   if (!completed) return { correct: true, nextTaskId: null };
   // WO Fix 1: slot release is atomic inside completeTaskForTeam.
   const teamLoc = lat != null && lng != null ? { lat, lng } : { lat: 0, lng: 0 };
@@ -5014,13 +5120,44 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   const now = new Date().toISOString();
   const taskComplete = newDone >= task.steps.length;
 
-  await teamRef.update({
-    [`taskStepProgress.${taskId}`]: newDone,
-    // Dotted path on a MAP field, which IS a real nested path — the documented
-    // footgun is dotted-updating an ARRAY element, which this is not.
-    ...(seqSealed && !ok ? { [`taskAttempts.${taskId}`]: admin.firestore.FieldValue.increment(1) } : {}),
-    updatedAt: now,
+  // post-run-player-report: record THIS step's submission. A sequence's answers
+  // span several calls and no single one of them is "the answer" — which is why
+  // the single `submittedAnswer` slot below is still deliberately left unwritten
+  // for a sequence — but the LOG is a list, so each step is recorded on its own
+  // with its `stepIndex` and its own verdict.
+  const stepEntry = buildAnswerLogEntry({
+    kind: 'sequence_step',
+    answer: answer ?? '',
+    correct: ok,
+    stepIndex,
+    at: now,
   });
+  if (stepEntry) {
+    // A transaction rather than the plain update below, because appending needs a
+    // read-modify-write of the stages ARRAY and a stale array written wholesale
+    // could clobber a concurrent write. One transaction REPLACES the update — the
+    // cost is a single extra read, on a path that fires once per sequence step.
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(teamRef);
+      if (!snap.exists) return;
+      const t = snap.data() as RunTeam;
+      const patch: Record<string, unknown> = {
+        [`taskStepProgress.${taskId}`]: newDone,
+        ...(seqSealed && !ok ? { [`taskAttempts.${taskId}`]: admin.firestore.FieldValue.increment(1) } : {}),
+        updatedAt: now,
+      };
+      if (appendAnswerLogToStages(t.stages, taskId, stepEntry)) patch.stages = t.stages;
+      tx.update(teamRef, patch);
+    });
+  } else {
+    await teamRef.update({
+      [`taskStepProgress.${taskId}`]: newDone,
+      // Dotted path on a MAP field, which IS a real nested path — the documented
+      // footgun is dotted-updating an ARRAY element, which this is not.
+      ...(seqSealed && !ok ? { [`taskAttempts.${taskId}`]: admin.firestore.FieldValue.increment(1) } : {}),
+      updatedAt: now,
+    });
+  }
 
   if (taskComplete) {
     const { completed } = await completeTaskForTeam(
@@ -5458,6 +5595,121 @@ export const listLiveRuns = loggedCallable('listLiveRuns', async (_data, context
   const visible = runs.filter((r): r is NonNullable<typeof r> => r !== null);
   visible.sort((a, b) => (b.launchedAt ?? '').localeCompare(a.launchedAt ?? ''));
   return { runs: visible };
+});
+
+
+// ─── listMyRuns (run history) ─────────────────────────────────────────────────
+//
+// Every run the caller owns, LIVE OR FINISHED — the thing `listLiveRuns` above
+// deliberately is not. Without it a run that ended falls off every navigation path
+// the console has: the per-run surfaces all resolve by ACCESS CODE, which is
+// revoked when a game is trashed and is not something a creator still holds weeks
+// later, so "show me last month's event" was simply unreachable.
+//
+// Same query shape as listLiveRuns (collection group + `ownerUid`), minus the
+// status filter, so it needs NO new composite index. Ordering and the cap are
+// applied in memory for the same reason.
+export const MAX_LISTED_RUNS = 100;
+
+export const listMyRuns = loggedCallable('listMyRuns', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'listMyRuns');
+  const { gameId, limit } = (data ?? {}) as { gameId?: string; limit?: number };
+  const cap = typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+    ? Math.min(Math.floor(limit), MAX_LISTED_RUNS)
+    : MAX_LISTED_RUNS;
+
+  // `ownerUid` is the authorization, not `gameId`: the filter below narrows what
+  // the owner sees, it never widens it. A payload naming somebody else's game
+  // returns that owner's runs only if this owner owns them, i.e. never.
+  const snap = await db.collectionGroup('runs').where('ownerUid', '==', uid).get();
+
+  // One read per distinct game rather than per run — a creator replays one game
+  // many times, and the title/tombstone answer is identical for every run of it.
+  const gameCache = new Map<string, Game | undefined>();
+  const loadGame = async (id: string): Promise<Game | undefined> => {
+    if (!gameCache.has(id)) {
+      try {
+        const gs = await db.doc(gamePath(uid, id)).get();
+        gameCache.set(id, gs.exists ? (gs.data() as Game) : undefined);
+      } catch { gameCache.set(id, undefined); /* title is best-effort */ }
+    }
+    return gameCache.get(id);
+  };
+
+  const rows = [];
+  for (const d of snap.docs) {
+    const r = d.data() as Run;
+    const parts = d.ref.path.split('/'); // users/{ownerUid}/games/{gameId}/runs/{runId}
+    const runGameId = parts[3];
+    if (gameId && runGameId !== gameId) continue;
+    const g = await loadGame(runGameId);
+    // A trashed game's runs are hidden, exactly as the GM overview hides them:
+    // the game is in the trash and its history goes with it until it is restored.
+    if (isGameDeleted(g)) continue;
+    const top = r.leaderboard?.rankings?.[0];
+    rows.push({
+      ownerUid: uid,
+      gameId: runGameId,
+      runId: r.id ?? parts[5] ?? d.id,
+      gameTitle: g?.title ?? '',
+      accessCode: r.accessCode ?? '',
+      status: r.status ?? 'live',
+      launchedAt: r.launchedAt ?? null,
+      finishedAt: r.finishedAt ?? null,
+      createdAt: r.createdAt ?? null,
+      participantCount: r.participantCount ?? 0,
+      isTestDrive: r.isTestDrive ?? false,
+      leaderboardPublished: !!r.leaderboard?.published,
+      topTeamName: top?.teamName ?? null,
+      topScore: typeof top?.score === 'number' ? top.score : null,
+    });
+  }
+
+  // Newest first on the best timestamp each row has: an abandoned run never got a
+  // `finishedAt` and a draft never got a `launchedAt`, and either sorting to the
+  // bottom forever would bury exactly the runs a creator is hunting for.
+  const when = (row: { finishedAt: string | null; launchedAt: string | null; createdAt: string | null }) =>
+    row.launchedAt ?? row.createdAt ?? row.finishedAt ?? '';
+  rows.sort((a, b) => when(b).localeCompare(when(a)));
+  return { runs: rows.slice(0, cap), truncated: rows.length > cap };
+});
+
+
+// ─── getRunPlayerReport (post-run per-player analysis) ─────────────────────────
+//
+// OWNER ONLY, and addressed by `{gameId, runId}` rather than by an access code —
+// see listMyRuns above for why the code is the wrong handle for a finished run.
+//
+// This is the one surface that returns team-level identity together with what each
+// player SUBMITTED, so the gate is the run document's own `ownerUid` (the same one
+// listRunTeams uses) and nothing else: not a staff claim, not a published board.
+// `getRunAnalytics` stays anonymous and unchanged; this is a second, narrower door.
+export const getRunPlayerReport = loggedCallable('getRunPlayerReport', async (data, context) => {
+  const uid = requireAuth(context);
+  await enforceRateLimit(uid, 'getRunPlayerReport');
+  const { gameId, runId } = data as { gameId: string; runId: string };
+  requireString(gameId, 'gameId', MAX_ID_LEN);
+  requireString(runId, 'runId', MAX_ID_LEN);
+
+  const runSnap = await db.doc(runPath(uid, gameId, runId)).get();
+  if (!runSnap.exists) throw new functions.https.HttpsError('not-found', 'Run not found');
+  const run = runSnap.data() as Run;
+  if (run.ownerUid !== uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Not your run');
+  }
+
+  const [gameSnap, teamsSnap] = await Promise.all([
+    db.doc(gamePath(uid, gameId)).get(),
+    db.collection(teamsCol(uid, gameId, runId)).get(),
+  ]);
+  const game = gameSnap.exists ? (gameSnap.data() as Game) : null;
+  // A trashed game's report is refused rather than served from the trash — the
+  // same rule the recap and the GM overview follow.
+  assertGameNotDeleted(game);
+  const teams = teamsSnap.docs.map((d) => d.data() as RunTeam);
+
+  return buildRunPlayerReport({ game, run, teams });
 });
 
 

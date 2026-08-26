@@ -1245,7 +1245,17 @@ export default function RunConsolePage() {
         );
       case 'staffInvite': return <StaffInviteCard ctx={ctx} pin={staffPin!} />;
 
-      case 'runSummary': return <RunSummaryPanel accessCode={activeRun.accessCode} />;
+      case 'runSummary': return (
+        <RunSummaryPanel
+          accessCode={activeRun.accessCode}
+          // Per-player report (change: post-run-player-report). The summary panel
+          // is an AGGREGATE — standings, completion rate, a feedback digest — and
+          // the question it always raised next was "what did THIS player actually
+          // answer?". That lives on its own route, which unlike this console is
+          // still reachable once the run is over and the console is closed.
+          reportHref={`/report/${gameId}/${runId}`}
+        />
+      );
       case 'analytics': return <AnalyticsPanel accessCode={activeRun.accessCode} />;
       case 'heatmap': return <HeatmapPanel accessCode={activeRun.accessCode} />;
       case 'feedback': return <FeedbackPanel gameId={gameId} runId={runId} />;
@@ -2875,7 +2885,7 @@ function HeatmapPanel({ accessCode }: { accessCode: string }) {
 // Auto-loads once the run is finished: a one-glance organizer report folding
 // standings + completion + feedback digest, plus a note that the same summary is
 // emailed to the organizer. Mirrors AnalyticsPanel's load pattern.
-function RunSummaryPanel({ accessCode }: { accessCode: string }) {
+function RunSummaryPanel({ accessCode, reportHref }: { accessCode: string; reportHref: string }) {
   const t = useT();
   const [data, setData] = useState<RunSummary | null>(null);
   const [err, setErr] = useState('');
@@ -2897,6 +2907,17 @@ function RunSummaryPanel({ accessCode }: { accessCode: string }) {
 
   return (
     <PanelShell panel="runSummary">
+      {/* The way through to the per-player report and its spreadsheet export
+          (change: post-run-player-report). Rendered ABOVE the aggregate and
+          regardless of whether the aggregate loaded: this link is the only route
+          into the report from inside the console, and a failed summary fetch must
+          not take it down with it. */}
+      <a
+        href={reportHref}
+        className="inline-flex items-center gap-1.5 mb-3 text-sm font-medium text-rp-fire hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+      >
+        📊 {t.runConsole.summaryOpenReport}
+      </a>
       {/* A failed load and an empty report are different things and used to be
           the same grey line (change: run-console-clarity). */}
       {err && !data && <div className="text-sm text-danger" role="status">{err}</div>}

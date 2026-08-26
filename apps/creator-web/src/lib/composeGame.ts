@@ -71,9 +71,11 @@ import {
   type AreaTagId,
   prepTierOf,
   prepToleranceOf,
+  prepWantsPlacedMissions,
   type PrepLevel,
 } from '../bankTags';
 import type { TaskBankEntry } from '../taskBank';
+import { isOccasionId, occasionProfile, type OccasionId } from './occasions';
 import { uuid } from '../taskShorthands';
 import {
   MAX_BLENDED_DESCRIPTION_LEN,
@@ -89,6 +91,14 @@ export type DifficultyPreference = 'easy' | 'balanced' | 'hard';
 
 /** What the questionnaire collected. Every field is treated as untrusted. */
 export interface ComposerAnswers {
+  /**
+   * What KIND of event this is — see lib/occasions.ts.
+   *
+   * Optional, and ABSENT must behave exactly as the neutral occasion does: every
+   * other composer suite composes without one, and if the two ever drift apart
+   * they are all quietly testing a path no creator takes.
+   */
+  occasion?: OccasionId;
   audience: AudienceTagId;
   setting: SettingTagId;
   people: number;
@@ -119,7 +129,12 @@ export interface ComposerAnswers {
    * kind acceptable to a creator who did not sign up for it, which is why the
    * tolerance excludes rather than merely penalises.
    *
-   * Absent behaves as `light` — never `full`. See `prepToleranceOf`.
+   * A cumulative 1-5 rating, not a tier — see PREP_SCALE in bankTags.ts. The
+   * five levels collapse onto the bank's three tiers, and level 2 ("I'll put
+   * them on real spots") is the reason the scale exists at all: it also decides
+   * `locationMissions`, which is why that field is derived rather than answered.
+   *
+   * Absent never buys the top level. See `prepToleranceOf`.
    */
   prepEffort?: PrepLevel;
 }
@@ -154,6 +169,15 @@ export interface ComposerDescriptionCopy extends NewGameDescriptionCopy {
    * behind a function does not).
    */
   stageNames(role: StageRole): string[];
+  /**
+   * Stage titles for THIS occasion, if the caller has any.
+   *
+   * Optional on purpose: every existing caller keeps compiling and keeps
+   * behaving identically, so the occasion work cannot regress the generic path.
+   * Absent, throwing or malformed all fall back to `stageNames` — a stage with
+   * the wrong flavour of title is a cosmetic miss; a nameless one is a bug.
+   */
+  occasionStageNames?(occasion: OccasionId, role: StageRole): string[];
   /**
    * The Quick Setup prompt shown for a play-from-anywhere mission that this game
    * pinned to a place (see `siteableInPlacedGame`).
@@ -235,6 +259,17 @@ export interface FitContext {
   requiredTag?: BookendTagId;
   /** The highest prep tier this creator accepts. See `prepToleranceOf`. */
   prepTolerance: number;
+  /**
+   * Activity tags the occasion favours. EMPTY means no bias whatsoever — see
+   * `occasionBonus` for why that has to be exactly zero and not merely small.
+   */
+  favouredTags: readonly BankTagId[];
+  /**
+   * Does this creator prefer missions pinned to real spots? True from prep level
+   * 4 ("I'll go to the site beforehand and set it up there"). A PREFERENCE, not
+   * a filter: level 4 admits exactly the missions level 3 admits.
+   */
+  placedPreference: boolean;
 }
 
 /** The minimum a candidate needs to be sampled. */
@@ -260,6 +295,19 @@ export const TERM_WEIGHTS = {
   age: 0.08,
   preferred: 0.12,
 } as const;
+
+/**
+ * The two ADDITIVE bonuses — deliberately NOT members of TERM_WEIGHTS.
+ *
+ * That object sums to exactly 1 by contract, so a seventh weight would mean
+ * re-weighting the other six: every score the composer has ever produced would
+ * move, and "the neutral occasion changes nothing" would become impossible to
+ * state. These sit outside the normalized sum, in the same position the recency
+ * penalty already occupies, and both are bounded well below any single term so
+ * neither can overrule a real mismatch.
+ */
+export const OCCASION_BONUS = 0.10;
+export const PLACED_PREFERENCE_BONUS = 0.08;
 
 /** How far below the best a candidate may score and still be sampled. */
 export const TOP_K_MARGIN = 0.15;
@@ -500,6 +548,13 @@ export function buildFitContext(answers: unknown, recent: unknown): FitContext {
     ageFrom: ageFloorFor(a.ageBandId),
     preferredTags: safeTags(a.preferredTags),
     prepTolerance: prepToleranceOf(a.prepEffort),
+    // Neutral, unknown and absent all resolve to an EMPTY list — see
+    // `occasionProfile`, which never guesses a bias from a malformed answer.
+    favouredTags: occasionProfile(a.occasion).favouredTags,
+    // Level 4 and up. Level 2-3 pin missions too (`prepWantsPlacedMissions`),
+    // but only level 4 says the creator is going there beforehand, which is what
+    // makes a located mission worth preferring rather than merely tolerable.
+    placedPreference: prepWantsPlacedMissions(a.prepEffort) && (num(a.prepEffort) ?? 0) >= 4,
     // Sanitised the same way as preferredTags, then narrowed to real area ids, so
     // a stray tag in the answers cannot silently become an area filter.
     areas: safeTags(a.areas).filter((t): t is AreaTagId =>
@@ -591,7 +646,29 @@ export function fitScore(entry: TaskBankEntry, ctx: FitContext): number {
     + TERM_WEIGHTS.age * ageFit
     + TERM_WEIGHTS.preferred * preferredOverlap;
 
-  return base - recencyPenalty(entry.key, ctx.recentIndex);
+  return base
+    + occasionBonus(tags, ctx.favouredTags)
+    + (ctx.placedPreference === true && tags.includes('locationBased') ? PLACED_PREFERENCE_BONUS : 0)
+    - recencyPenalty(entry.key, ctx.recentIndex);
+}
+
+/**
+ * How much this mission suits the occasion.
+ *
+ * The share of the occasion's favoured tags the mission carries, times a bounded
+ * bonus. Exactly ZERO when nothing is favoured — not a small number, zero — so
+ * the neutral occasion reproduces the pre-occasion score bit for bit, which is
+ * what keeps every other composer suite (all of which compose with no occasion)
+ * meaningful.
+ *
+ * Additive and soft. It lifts a favoured mission; it never excludes an
+ * unfavoured one. The creator's other answers have already narrowed the pool,
+ * and a mere preference that empties it drops the whole game.
+ */
+function occasionBonus(tags: readonly string[], favoured: readonly BankTagId[] | undefined): number {
+  if (!Array.isArray(favoured) || favoured.length === 0) return 0;
+  const hits = favoured.filter((t) => tags.includes(t)).length;
+  return (OCCASION_BONUS * hits) / favoured.length;
 }
 
 /**
@@ -841,6 +918,24 @@ export function pickBlueprint(eligible: StageBlueprint[], rng: () => number): St
   return eligible[i];
 }
 
+/**
+ * The occasion's own stage shape, when the budget can hold it.
+ *
+ * A wedding is not a team-building day: guests are dressed up and not walking
+ * far, so it wants few stages holding many missions each, while a team-building
+ * day wants a real arc with a twist in the middle. Held to the SAME eligibility
+ * rule as the authored blueprints, so an occasion can never force a stage the
+ * budget cannot fill.
+ *
+ * Returns null for the neutral occasion, an unknown one, or a budget too small —
+ * all three mean "keep the random pick".
+ */
+export function occasionBlueprint(occasion: unknown, budget: unknown): StageBlueprint | null {
+  const b = occasionProfile(occasion).blueprint;
+  if (!b) return null;
+  return b.stageCount * MIN_MISSIONS_PER_STAGE <= (num(budget) ?? 0) ? b : null;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 7. Description and tags
 // ═══════════════════════════════════════════════════════════════════════════
@@ -922,15 +1017,36 @@ function composerDescription(
  * the title `''` and the Builder's existing fallback covers it — a nameless
  * stage is a cosmetic miss, and is never worth taking the game down for.
  */
-function nameStages(stages: Stage[], copy: ComposerDescriptionCopy, rng: () => number): void {
-  const listFor = (role: StageRole): string[] => {
+function nameStages(
+  stages: Stage[],
+  copy: ComposerDescriptionCopy,
+  rng: () => number,
+  occasion?: OccasionId,
+): void {
+  /** The occasion's titles first, the generic ones when it has none. */
+  const rawFor = (role: StageRole): unknown => {
+    if (occasion !== undefined && typeof copy?.occasionStageNames === 'function') {
+      try {
+        const own = copy.occasionStageNames(occasion, role);
+        // A short-but-present list is honoured; only an absent or empty one
+        // falls through, so a caller with titles for three of the five occasions
+        // still gets the generic set for the other two.
+        if (Array.isArray(own) && own.length > 0) return own;
+      } catch {
+        // Fall through to the generic list — a throwing copy callback is never
+        // worth taking a stage's title down for.
+      }
+    }
     if (typeof copy?.stageNames !== 'function') return [];
-    let raw: unknown;
     try {
-      raw = copy.stageNames(role);
+      return copy.stageNames(role);
     } catch {
       return [];
     }
+  };
+
+  const listFor = (role: StageRole): string[] => {
+    const raw = rawFor(role);
     if (!Array.isArray(raw)) return [];
     const seen = new Set<string>();
     const out: string[] = [];
@@ -1148,7 +1264,12 @@ export function composeGame(
   // keeps stages worth entering — as many stages as the budget can feed at
   // MIN_MISSIONS_PER_STAGE, never one mission each.
   const synthStages = clamp(Math.floor(budget / MIN_MISSIONS_PER_STAGE), 1, 3);
-  const blueprint = eligible.length > 0
+  // The draw happens FIRST and unconditionally, even when the occasion is about
+  // to override it. Every later decision — band sampling, stage naming — reads
+  // the same seeded stream, so a branch that consumed one fewer draw would shift
+  // all of them, and two occasions would then differ in ways that have nothing
+  // to do with the occasion.
+  const drawn = eligible.length > 0
     ? pickBlueprint(eligible, rng)
     : {
       key: `compact-${synthStages}`,
@@ -1157,6 +1278,7 @@ export function composeGame(
       difficultyCurve: Array.from({ length: synthStages }, (_, i) =>
         clamp(3 + Math.round((i * 5) / Math.max(1, synthStages - 1)), 1, 10)),
     };
+  const blueprint = occasionBlueprint(a.occasion, budget) ?? drawn;
   if (!blueprint) return null;
 
   // ── 5. Per-stage counts ───────────────────────────────────────────────────
@@ -1307,7 +1429,7 @@ export function composeGame(
   // ── 10. Presentation ──────────────────────────────────────────────────────
   // Named last, so every draw above kept the sequence it had before stages had
   // names at all (see nameStages).
-  nameStages(stages, copy, rng);
+  nameStages(stages, copy, rng, isOccasionId(a.occasion) ? a.occasion : undefined);
 
   const activities = namedActivities(usedEntries);
 

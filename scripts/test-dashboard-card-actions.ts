@@ -29,8 +29,8 @@ function eq<T>(label: string, got: T, want: T): void {
     `got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 }
 
-const ALL_SIX: DashboardCardActionId[] = ['edit', 'launch', 'testRun', 'share', 'delete'];
-// (publish|unpublish counts as the sixth; asserted per-case below.)
+const ALL_SIX: DashboardCardActionId[] = ['edit', 'launch', 'testRun', 'history', 'share', 'delete'];
+// (publish|unpublish counts as the remaining one; asserted per-case below.)
 
 // ── inline is always Edit + Launch ───────────────────────────────────────────
 console.log('\n── inline ──');
@@ -41,15 +41,17 @@ for (const g of [undefined, null, {}, { visibility: 'public' }, { visibility: 'p
 
 // ── overflow order + visibility ──────────────────────────────────────────────
 console.log('\n── overflow ──');
-eq('a private game overflows [testRun, publish, share, delete]',
+// `history` (change: post-run-player-report) sits with the other post-launch
+// verbs and BEFORE share/delete: it is a read, not a publication or a destruction.
+eq('a private game overflows [testRun, history, publish, share, delete]',
   dashboardCardActions({ visibility: 'private' }).overflow,
-  ['testRun', 'publish', 'share', 'delete']);
+  ['testRun', 'history', 'publish', 'share', 'delete']);
 eq('a game with no visibility overflows the publish variant',
   dashboardCardActions({}).overflow,
-  ['testRun', 'publish', 'share', 'delete']);
-eq('a public game overflows [testRun, unpublish, share, delete]',
+  ['testRun', 'history', 'publish', 'share', 'delete']);
+eq('a public game overflows [testRun, history, unpublish, share, delete]',
   dashboardCardActions({ visibility: 'public' }).overflow,
-  ['testRun', 'unpublish', 'share', 'delete']);
+  ['testRun', 'history', 'unpublish', 'share', 'delete']);
 
 // ── delete is always last ────────────────────────────────────────────────────
 console.log('\n── delete last ──');
@@ -67,12 +69,12 @@ function coverageOk(g: unknown): boolean {
   // Normalize the publish/unpublish slot to a single "publishToggle" bucket so
   // the six actions can be counted regardless of visibility.
   const norm = all.map((id) => (id === 'publish' || id === 'unpublish' ? 'publishToggle' : id));
-  const want = ['edit', 'launch', 'testRun', 'publishToggle', 'share', 'delete'];
+  const want = ['edit', 'launch', 'testRun', 'history', 'publishToggle', 'share', 'delete'];
   if (norm.length !== want.length) return false;
   return want.every((id) => norm.filter((x) => x === id).length === 1);
 }
 for (const g of [{}, { visibility: 'public' }, { visibility: 'private' }]) {
-  check(`each of the six actions appears exactly once for ${JSON.stringify(g)}`, coverageOk(g));
+  check(`each action appears exactly once for ${JSON.stringify(g)}`, coverageOk(g));
 }
 void ALL_SIX;
 
@@ -86,7 +88,7 @@ for (const g of garbage) {
     const r = dashboardCardActions(g as never);
     wellFormed = Array.isArray(r.inline) && Array.isArray(r.overflow)
       && JSON.stringify(r.inline) === JSON.stringify(['edit', 'launch'])
-      && r.overflow.length === 4 && r.overflow[r.overflow.length - 1] === 'delete'
+      && r.overflow.length === 5 && r.overflow[r.overflow.length - 1] === 'delete'
       && coverageOk(g);
   } catch { threw = true; }
   check(`${JSON.stringify(g)} does not throw and is well formed`, !threw && wellFormed);

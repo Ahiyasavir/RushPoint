@@ -28,6 +28,7 @@ import type {
   GalleryTaskFacets,
   AdminUserSummary,
   TemplateGenre,
+  RunPlayerReport,
 } from '@rushpoint/shared';
 
 // ── Games ──
@@ -125,6 +126,42 @@ export const getRunSurveyResults = callable<
 export const translateGame   = callable<{ gameId: string; targetLang: string }, { gameId: string; targetLang: string }>('translateGame');
 // Multi-run GM overview (change: multi-run-gm-panel).
 export const listLiveRuns    = callable<Record<string, never>, { runs: LiveRunSummary[] }>('listLiveRuns');
+
+// ── Run history + the post-run report (change: post-run-player-report) ──
+// Addressed by {gameId, runId}, NOT by access code, on purpose: every other
+// post-run surface resolves through `accessCodes/{CODE}`, and a code is revoked
+// when a game is trashed and is not something a creator still holds weeks later —
+// which is exactly why a finished run used to be unreachable.
+export interface MyRunRow {
+  ownerUid: string;
+  gameId: string;
+  runId: string;
+  gameTitle: string;
+  accessCode: string;
+  status: string;
+  launchedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string | null;
+  participantCount: number;
+  isTestDrive: boolean;
+  leaderboardPublished: boolean;
+  topTeamName: string | null;
+  topScore: number | null;
+}
+export const listMyRuns = callable<
+  { gameId?: string; limit?: number },
+  { runs: MyRunRow[]; truncated: boolean }
+>('listMyRuns');
+
+// OWNER-ONLY. The response deliberately carries team-level identity AND the answer
+// keys AND what each player submitted — everything `getRunAnalytics` is careful to
+// keep out of an anonymous aggregate — so it must never be surfaced anywhere but
+// the owner's own console.
+export type { RunPlayerReport } from '@rushpoint/shared';
+export const getRunPlayerReport = callable<
+  { gameId: string; runId: string },
+  RunPlayerReport
+>('getRunPlayerReport');
 // Trackable collectibles (change: trackable-collectibles).
 export const createTrackable  = callable<{ gameId: string; runId: string; name: string; description?: string; homeTaskId?: string }, { trackable: Trackable }>('createTrackable');
 export const getRunTrackables = callable<{ ownerUid?: string; gameId?: string; runId?: string; code?: string }, { trackables: Trackable[] }>('getRunTrackables');

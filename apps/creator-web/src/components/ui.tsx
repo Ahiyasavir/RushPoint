@@ -301,6 +301,54 @@ export function ChipRow<T extends string | number>({ label, options, value, onCh
  * both would make the single-select case — used on every other question — carry
  * a branch it never takes.
  */
+/**
+ * An ordered 1-to-N RATING (change: smart-build-occasion-and-prep-scale).
+ *
+ * A third sibling of ChipRow, not a mode of it, because it answers a different
+ * shape of question. Chips are a set of alternatives: picking one says nothing
+ * about the others. A rating is a LADDER — picking level 4 says levels 1-3 are
+ * also true — and that is exactly what the control has to communicate, which is
+ * why every step up to the selection is filled rather than just the chosen one.
+ *
+ * Only the selected level's sentence is shown. Five explanations side by side is
+ * a wall on a phone, and the difference between adjacent levels is a sentence,
+ * not a word.
+ */
+export function RatingRow<T extends number>({ label, options, value, onChange, render, hint }: {
+  label: string;
+  options: readonly T[];
+  value: T;
+  onChange: (v: T) => void;
+  /** The full text of a level — the button's accessible name, never just its number. */
+  render: (v: T) => string;
+  /** The selected level's explanation. */
+  hint?: string;
+}) {
+  return (
+    <div>
+      <div className="text-[12px] font-medium text-[--ink-2] mb-1.5">{label}</div>
+      <div className="flex gap-1.5" role="radiogroup" aria-label={label}>
+        {options.map((o) => {
+          const reached = o <= value;
+          const exact = o === value;
+          return (
+            <button key={o} type="button" role="radio" aria-checked={exact}
+              onClick={() => onChange(o)} aria-label={render(o)}
+              className={`min-h-[44px] flex-1 rounded-lg border text-[15px] font-medium transition-colors ${
+                exact ? 'border-rp-fire bg-rp-fire text-white'
+                  : reached ? 'border-rp-fire bg-rp-fire/10 text-rp-fire'
+                    : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[13px] font-medium text-[--ink-1] mt-2">{render(value)}</p>
+      {hint && <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{hint}</p>}
+    </div>
+  );
+}
+
 export function MultiChipRow<T extends string>({ label, options, values, onToggle, render, hint }: {
   label: string;
   options: readonly T[];
