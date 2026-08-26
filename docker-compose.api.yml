@@ -59,6 +59,16 @@ services:
       RUN_DIGEST_OWNER_UID: "wTYDwnEZP6MhGyaGINbumaYqKem1,demo-spy-academy,demo-creator,qa-creator,sansana-creator"
       # NOTE: payments are hard-disabled in code (PAYMENTS_ENABLED=false) — no
       # Stripe/APP_URL/QR env is needed. RUSHPOINT_APP_ID defaults to the project id.
+      # Serve repeat reads of game/run/team documents from THIS process's memory instead of
+      # re-reading Firestore (change: vps-firestore-read-offload). Only correct because this
+      # container is a SINGLE Node process and the sole writer of those documents — which is
+      # why it is opt-in rather than the default. Do NOT set it anywhere the API runs as more
+      # than one process (the Functions emulator's RuntimeWorkerPool, real Cloud Functions,
+      # or any scaled-out deployment): a write in one process cannot invalidate another's
+      # copy, and reads would go silently stale mid-game.
+      # ⚠️ If this service is ever given `deploy.replicas > 1` or put behind a second
+      # container, REMOVE this line first.
+      RUSHPOINT_DOC_CACHE: "1"
       VPS_UPLOAD_ORIGIN: "https://api.rush-point.com"
       UPLOAD_DIR: "/data/uploads"
     volumes:

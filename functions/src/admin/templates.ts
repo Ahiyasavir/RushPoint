@@ -282,11 +282,12 @@ export const listGameTemplates = loggedCallable('listGameTemplates', async (_dat
   const uid = requireAuth(context);
 
   // The limiter and the query run CONCURRENTLY (perf: template-picker-latency).
-  // They are independent — the limiter's transaction reads a counter document the
-  // query never touches — and awaiting them in sequence put a whole Firestore
-  // round trip in front of every open of the new-game picker. The limit is still
-  // enforced exactly as before: the query's result is thrown away unread if the
-  // limiter refuses, and the refusal is what this function returns.
+  // They are independent — the limiter touches only its own in-process counter
+  // (change: vps-firestore-read-offload moved it out of Firestore), the query
+  // touches only Firestore — and awaiting them in sequence used to put a whole
+  // Firestore round trip in front of every open of the new-game picker. The limit
+  // is still enforced exactly as before: the query's result is thrown away unread
+  // if the limiter refuses, and the refusal is what this function returns.
   //
   // `queryPromise` is caught defensively so a query failure that loses the race to
   // a rate-limit rejection cannot surface as an unhandled rejection and take the
