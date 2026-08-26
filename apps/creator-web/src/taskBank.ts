@@ -1152,6 +1152,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 150,
       hideLocation: true,
       locationClue: '',
+      hint: 'רמז: אם שני אנשים נותנים כיוונים סותרים, תשאלו שלישי — לרוב זה מכריע.',
+      hintPenalty: 20,
       // A public address, not a shared object — any number of teams can arrive.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
@@ -1250,12 +1252,16 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'הדבר הכי ותיק כאן',
-      description: 'מצאו את החפץ הוותיק ביותר שאתם מצליחים במקום הזה, וצלמו אותו. בהודעה כתבו בן כמה אתם חושבים שהוא, ולמה.',
+      // "Write in the message how old you think it is" used to ask for a text
+      // field the photo-submission flow never had — the guess and the reason
+      // were never captured anywhere. Saying it on camera, appraiser-style,
+      // keeps the same content and actually makes it more fun to watch back.
+      description: 'מצאו את החפץ הוותיק ביותר שאתם מצליחים למצוא במקום הזה. צלמו אותו בווידאו, ותוך כדי הצילום הגידו בקול רם בן כמה אתם חושבים שהוא, ולמה — כמו שמאי אמיתי.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
       pointValue: 110,
-      smart: upload(),
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
     }),
   },
 
@@ -1339,6 +1345,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 12,
       pointValue: 160,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
+      hint: 'רמז: מישהו שעובד בעסק ותיק במקום בדרך כלל יודע יותר מעובר אורח מזדמן.',
+      hintPenalty: 20,
     }),
   },
   {
@@ -1778,7 +1786,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'סכום היעד',
-      description: 'בלי לקנות כלום ובלי להוציא שקל. מצאו שלושה מוצרים שסכום המחירים שלהם הכי קרוב לסכום היעד שקיבלתם. צלמו את תוויות המחיר, והזינו את הסכום שהגעתם אליו.',
+      description: 'בלי לקנות כלום ובלי להוציא שקל. מצאו שלושה מוצרים שסכום המחירים שלהם הכי קרוב לסכום היעד שקיבלתם, והזינו את הסכום שהגעתם אליו.',
       type: 'numeric',
       difficulty: 7,
       estimatedMinutes: 12,
