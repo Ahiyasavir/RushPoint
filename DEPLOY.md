@@ -51,6 +51,41 @@ In the [Firebase Console](https://console.firebase.google.com) for your project:
 5. **Project settings → Your apps → Web app** — register a web app (or two) and copy the config
    (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId) for the next step.
 
+### 2b. DNS — the four hostnames
+
+Recorded here because it was not written down anywhere and the records are NOT uniform.
+`deploy/CLOUDFLARE.md` covers **only** `api.rush-point.com`; these are the rest.
+
+| Hostname | Serves | Records | Cloudflare |
+|---|---|---|---|
+| `rush-point.com` | participant app (play-web) | `A 199.36.158.100` — **no AAAA** | DNS-only |
+| `www.rush-point.com` | 301 → apex | Cloudflare addresses | proxied |
+| `creator.rush-point.com` | creator console | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
+| `api.rush-point.com` | self-hosted API (VPS) | see `deploy/CLOUDFLARE.md` | proxied |
+
+`199.36.158.100` / `2620:0:890::100` are Firebase Hosting's own published custom-domain records,
+so a Firebase-served host should carry **both**.
+
+> ⚠️ **OPEN: the apex is missing its AAAA record.** `creator.` has one and the apex does not, so an
+> IPv6-only client with no NAT64/DNS64 can reach the creator console but not the participant app —
+> and the failure path is reachable: `www.` resolves over IPv6 (it is Cloudflare-proxied) and 301s
+> to an apex that then has no IPv6 address to connect to. Most mobile carriers run DNS64/NAT64, which
+> is why this has not shown up as an outage. **Fix:** add `AAAA  @  2620:0:890::100`, DNS-only (grey
+> cloud) to match the existing apex `A` record.
+>
+> Verifying IPv6 from Windows is misleading — `curl` on schannel fails the handshake against
+> Firebase Hosting even when the host is perfectly healthy. Use openssl, which is honest:
+> ```bash
+> printf 'GET / HTTP/1.1
+Host: creator.rush-point.com
+Connection: close
+
+' >   | openssl s_client -6 -quiet -connect creator.rush-point.com:443 >       -servername creator.rush-point.com 2>/dev/null | head -1   # expect HTTP/1.1 200 OK
+> ```
+> Also expect the served certificate's CN to be some **unrelated** domain: Firebase Hosting puts
+> many customers on one Google Trust Services cert and our hostnames appear in its SAN list, not its
+> CN. That is normal and not a misconfiguration.
+
 ---
 
 ## 3. Environment files
