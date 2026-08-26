@@ -9,6 +9,8 @@ import {
   CUE_HAPTIC,
   isRankUp,
   shouldFeedback,
+  withinQuietWindow,
+  QUIET_WINDOW_MS,
   type Cue,
 } from '../apps/play-web/src/lib/sound';
 import { loadSound } from '../apps/play-web/src/store';
@@ -25,6 +27,21 @@ ok(loadSound() === true, 'loadSound() defaults to true (sound on)');
 // ── Mute gate ───────────────────────────────────────────────────────────────
 ok(shouldFeedback(true) === true, 'shouldFeedback(true) → true');
 ok(shouldFeedback(false) === false, 'shouldFeedback(false) → false (muted)');
+
+// ── withinQuietWindow (change: test-mode-game-feel) ──────────────────────────
+// Two paths cue the same completion (the submit handler, then the poll effect on
+// the next refresh). The backstop one is swallowed by time — and only ever the
+// backstop, so a cue nobody else fired still plays.
+ok(withinQuietWindow(1000, 1000 + QUIET_WINDOW_MS - 1) === true, 'inside the window → suppress');
+ok(withinQuietWindow(1000, 1000 + QUIET_WINDOW_MS) === false, 'at the window edge → play');
+ok(withinQuietWindow(1000, 5000) === false, 'well past the window → play');
+ok(withinQuietWindow(null, 1000) === false, 'nothing cued yet → play');
+// Fails OPEN in every degenerate case: a missed cue is worse than a doubled one.
+for (const [last, now] of [[NaN, 1000], [1000, NaN], [Infinity, 1000], [1000, Infinity], [2000, 1000]] as const) {
+  ok(withinQuietWindow(last as number, now as number) === false,
+    `degenerate (${String(last)}, ${String(now)}) → play`);
+}
+ok(withinQuietWindow(undefined as unknown as number, 1000) === false, 'undefined last cue → play');
 
 // ── Every cue maps to a synthesizable envelope + a haptic pattern ───────────
 const expectedCues: Cue[] = ['task', 'stage', 'alert', 'rankUp'];

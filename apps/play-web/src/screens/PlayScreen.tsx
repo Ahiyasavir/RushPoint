@@ -36,7 +36,9 @@ import LiveOps, { LeaderboardPeek } from '../components/LiveOps';
 import { planMoreDrawer, type DrawerTabId } from '../lib/moreDrawer';
 import FinalScreen from './FinalScreen';
 import { formatDuration } from '../lib/boardTime';
-import { feedback, isRankUp } from '../lib/sound';
+import { feedback, feedbackIfQuiet, isRankUp } from '../lib/sound';
+import { missionProgress, type MissionProgress } from '../lib/missionProgress';
+import { crossedMilestone, type Milestone } from '../lib/milestones';
 
 // Creator app — viral CTA baked into every shared progress card.
 const CREATOR_URL = import.meta.env.DEV
@@ -119,6 +121,16 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   const taskDoneCount = useRef<number | null>(null);
   const stageDoneCount = useRef<number | null>(null);
   const lastRank = useRef<number | undefined>(undefined);
+  // Milestone beats (change: test-mode-game-feel). A sealed run has no score, no
+  // streak and no board, so these are the only mid-run acknowledgement a player
+  // gets — and they are legitimate in test mode precisely because they measure
+  // persistence, identically for a player getting everything right and everything
+  // wrong. Ref-compared across polls like the cue baselines above: the first
+  // observation only records where the player already is, so a mid-run reload
+  // replays nothing.
+  const milestoneDone = useRef<number | null>(null);
+  // Named `beat`, not `milestone` — computeStreak already owns that name below.
+  const [beat, setBeat] = useState<Milestone | null>(null);
   // Whether the team is currently launched/active — read by the geolocation
   // watcher (which mounts once) to decide if it should ping the live map.
   const activeRef = useRef(false);
@@ -326,7 +338,12 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     const done = state?.team.stages.reduce(
       (n, s) => n + s.tasks.filter((tk) => tk.status === 'completed').length, 0) ?? 0;
     if (taskDoneCount.current === null) { taskDoneCount.current = done; return; }
-    if (done > taskDoneCount.current) feedback('task');
+    // BACKSTOP only. The submit handlers in TaskRunner cue the moment the server
+    // answers; this poll sees the same completion again one refresh later, which
+    // in a question-after-question run means two blips per answer. `feedbackIfQuiet`
+    // swallows the echo and still cues a completion this device did not submit —
+    // a staff photo approval, a geofence auto check-in (change: test-mode-game-feel).
+    if (done > taskDoneCount.current) feedbackIfQuiet('task');
     taskDoneCount.current = done;
   }, [state?.team.stages]);
 
@@ -348,6 +365,28 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     if (isRankUp(lastRank.current, rank)) feedback('rankUp');
     lastRank.current = rank;
   }, [state?.run.leaderboard, state?.team.id]);
+
+  // Milestone banner: fires when the mission counter crosses a threshold. One
+  // banner per crossing even when a partial stage auto-skips several siblings at
+  // once, and never at the finish — that celebration belongs to FinalScreen.
+  useEffect(() => {
+    const { done, total } = missionProgress(state?.team.stages);
+    const prev = milestoneDone.current;
+    milestoneDone.current = done;
+    if (prev === null) return;
+    const hit = crossedMilestone(prev, done, total);
+    if (hit) setBeat(hit);
+  }, [state?.team.stages]);
+
+  // The dismiss timer is keyed on the banner itself, NOT on the effect above.
+  // Hung off that effect it was cancelled by its cleanup on the very next poll —
+  // a few seconds later, with no crossing to arm a replacement — and the banner
+  // then sat on screen for the rest of the run.
+  useEffect(() => {
+    if (!beat) return;
+    const id = window.setTimeout(() => setBeat(null), 3_000);
+    return () => window.clearTimeout(id);
+  }, [beat]);
 
   async function leave() {
     // A finished run has nothing left to lose, so skip the "are you sure" prompt
@@ -471,7 +510,14 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     ?? t.devices.deviceFallbackName;
   const hasTeammateDevices = (team.deviceUids?.length ?? 1) > 1 || game.mode === 'team';
   const accent = game.branding?.primaryColor ?? '#F97316';
-  const completedStages = team.stages.filter((s) => s.status === 'completed').length;
+  // Progress is counted in MISSIONS, not stages (change: test-mode-game-feel). A
+  // 24-question assessment is authored as ONE stage, so the stage count drew a
+  // single empty segment that never moved until the run ended — twenty answers with
+  // no way to tell question 3 from question 17. `missionProgress` is also what makes
+  // the "mission 8 of 20" counter honest, which incidentally fixes the OTHER half of
+  // that complaint: adaptive routing hands missions out in fit order, so their
+  // TITLES jump around; a position in the player's own run never does.
+  const progress = missionProgress(team.stages);
 
   if (team.status === 'finished') {
     return <FinalScreen state={state} session={session} onLeave={leave} />;
@@ -612,7 +658,9 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         onSos={() => void sosAction.run()} sosBusy={sosAction.busy}
         isTestDrive={session.isTestDrive}
         streak={streak} streakMilestone={milestone}
-        progress={<Progress done={completedStages} total={team.stages.length} />}
+        progress={progress.total > 0 ? (
+          <MissionProgressRow progress={progress} beat={beat} accent={accent} />
+        ) : undefined}
         howToPlay={<HowToPlayButton instructions={game.instructions} lang={lang} />}
         onShare={game.testMode === true ? undefined : () => void shareAction.run()} sharing={sharing}
       />
@@ -1309,6 +1357,54 @@ function Header({
         </div>
       </div>
       {progress && <div className="mt-2">{progress}</div>}
+    </div>
+  );
+}
+
+// The progress line: a counter and a bar, on ONE row (change: test-mode-game-feel).
+//
+// A milestone beat takes over the COUNTER for a few seconds instead of arriving as
+// its own banner. That was deliberate: this screen already stacks header, live-ops,
+// alerts, map and mission on a phone, and a past playtest buried the mission under
+// exactly that kind of status row. Two floating pills (power-up, reconnecting) also
+// already share the top of the screen, so a third would have had to dodge them.
+// Reusing the line progress already owns costs no space, shifts no layout and can
+// collide with nothing — and it puts the beat where the player is already looking to
+// see how far along they are.
+//
+// The copy is kept about as wide as the counter it replaces so the bar beside it
+// doesn't visibly resize for the three seconds the beat is up.
+function MissionProgressRow({ progress, beat, accent }: {
+  progress: MissionProgress; beat: Milestone | null; accent: string;
+}) {
+  const { t } = useT();
+  const beatLabel: Record<Milestone, string> = {
+    quarter: t.play.milestoneQuarter,
+    half: t.play.milestoneHalf,
+    threeQuarters: t.play.milestoneThreeQuarters,
+    lastFive: t.play.milestoneLastFive,
+  };
+  return (
+    <div className="flex items-center gap-2">
+      {beat ? (
+        <span
+          key={beat}
+          role="status"
+          data-testid="milestone-beat"
+          className="text-[11px] font-bold shrink-0 animate-answer-pop motion-reduce:animate-none"
+          style={{ color: accent }}
+        >
+          {beatLabel[beat]}
+        </span>
+      ) : (
+        <span data-testid="mission-counter" className="text-[11px] tabular-nums text-zinc-500 shrink-0">
+          {t.play.missionCounter({ current: progress.current, total: progress.total })}
+        </span>
+      )}
+      <div className="flex-1 min-w-0">
+        <Progress done={progress.done} total={progress.total}
+          label={t.play.missionProgressLabel({ done: progress.done, total: progress.total })} />
+      </div>
     </div>
   );
 }

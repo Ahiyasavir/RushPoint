@@ -58,6 +58,29 @@ export function shouldFeedback(soundEnabled: boolean): boolean {
   return soundEnabled === true;
 }
 
+/** How long after a cue a REDUNDANT one is swallowed (change: test-mode-game-feel). */
+export const QUIET_WINDOW_MS = 1_500;
+
+/**
+ * Should a backstop cue be swallowed because one just played?
+ *
+ * Two paths cue the same completion: the submit handler fires the moment the
+ * server answers, and PlayScreen's poll effect fires when the completed-task count
+ * grows on the next refresh. The poll effect has to stay — it is the only cue for a
+ * completion this device did not submit (a staff photo approval, a geofence auto
+ * check-in) — so the duplicate is suppressed at the cue instead, by time.
+ *
+ * Total, and fails OPEN: an unknown/nonsense last-cue time means "nothing played
+ * recently", so a missing cue is never traded for a suppressed one.
+ */
+export function withinQuietWindow(lastAt: number | null, now: number, windowMs = QUIET_WINDOW_MS): boolean {
+  if (typeof lastAt !== 'number' || !Number.isFinite(lastAt)) return false;
+  if (typeof now !== 'number' || !Number.isFinite(now)) return false;
+  const since = now - lastAt;
+  if (since < 0) return false; // clock moved backwards — treat as quiet
+  return since < windowMs;
+}
+
 // ── Web Audio plumbing (DOM-bound; not imported by the pure test) ────────────
 
 let ctx: AudioContext | null = null;
@@ -120,8 +143,23 @@ export function playCue(cue: Cue): void {
  * Fire the unified cue: sound + vibration, gated by the persistent mute toggle.
  * When sound is off, neither plays.
  */
+let lastCueAt: number | null = null;
+
 export function feedback(cue: Cue): void {
   if (!shouldFeedback(loadSound())) return;
+  lastCueAt = Date.now();
   playCue(cue);
   haptic(CUE_HAPTIC[cue]);
+}
+
+/**
+ * Fire a cue only if nothing cued in the last `QUIET_WINDOW_MS`.
+ *
+ * For BACKSTOP cues — the poll-driven ones that exist to catch a change this
+ * device did not cause. A cue the player's own tap earned should call `feedback`
+ * directly and always play.
+ */
+export function feedbackIfQuiet(cue: Cue): void {
+  if (withinQuietWindow(lastCueAt, Date.now())) return;
+  feedback(cue);
 }
