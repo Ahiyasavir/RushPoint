@@ -25,6 +25,11 @@ const GalleryPage    = lazyWithRetry('gallery', () => import('./pages/GalleryPag
 const WalletPage     = lazyWithRetry('wallet', () => import('./pages/WalletPage'));
 const RunConsolePage = lazyWithRetry('runConsole', () => import('./pages/RunConsolePage'));
 const RunsOverviewPage = lazyWithRetry('runsOverview', () => import('./pages/RunsOverviewPage'));
+// Run history + the post-run per-player analysis (change: post-run-player-report).
+// The report route also owns the spreadsheet export, which dynamic-imports
+// `write-excel-file` — so that library is confined to this chunk, not the entry one.
+const RunHistoryPage = lazyWithRetry('runHistory', () => import('./pages/RunHistoryPage'));
+const RunReportPage  = lazyWithRetry('runReport', () => import('./pages/RunReportPage'));
 const SettingsPage   = lazyWithRetry('settings', () => import('./pages/SettingsPage'));
 // Recently deleted games (change: recoverable-game-deletion).
 const TrashPage      = lazyWithRetry('trash', () => import('./pages/TrashPage'));
@@ -201,6 +206,8 @@ export default function App() {
                 still registered: the floating bar's "+N more" navigates here and
                 bookmarks must keep resolving. */}
             <Route path="/live"                element={<RunsOverviewPage />} />
+            <Route path="/history"             element={<RunHistoryPage />} />
+            <Route path="/report/:gameId/:runId" element={<RunReportPage />} />
             <Route path="/run/:gameId/:runId"  element={<RunConsolePage />} />
             <Route path="/settings"            element={<SettingsPage />} />
             <Route path="/trash"               element={<TrashPage />} />

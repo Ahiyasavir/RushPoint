@@ -99,6 +99,14 @@ const fullTeam = {
       scoreBreakdown: { total: 100, base: 80, speedBonus: 20 },
       submittedAnswer: 'the player typed this',
       wasCorrect: false,
+      // Recorded submissions (change: post-run-player-report). Present on EVERY
+      // run now, not just a sealed one — which is exactly why it has to be pinned
+      // here: a per-question wrong-answer history is the single most revealing
+      // thing test mode withholds, and it rides the same document.
+      answerLog: [
+        { at: '2026-01-01T00:04:30.000Z', answer: 'first guess', correct: false, kind: 'answer' },
+        { at: '2026-01-01T00:05:00.000Z', answer: 'the player typed this', correct: false, kind: 'answer' },
+      ],
       arrivedAt: '2026-01-01T00:04:00.000Z',
     }],
   }],
@@ -122,10 +130,16 @@ for (const k of ['earnedScore', 'scoreBreakdown']) {
 
 // The whole point of the feature: a stored verdict must never reach ANY
 // participant, in ANY game. Sealed-only would leak it on every normal run.
-for (const k of ['submittedAnswer', 'wasCorrect']) {
+for (const k of ['submittedAnswer', 'wasCorrect', 'answerLog']) {
   check(`sealed record omits ${k}`, !(k in sealedRec));
   check(`OPEN record also omits ${k} (never participant-visible, in any game)`, !(k in openRec));
 }
+// Belt and braces: the recorded text must not survive ANYWHERE in the payload,
+// not just as a top-level key on the record we happen to inspect.
+check('no recorded answer text appears anywhere in the sealed payload',
+  !JSON.stringify(sealed).includes('first guess'));
+check('no recorded answer text appears anywhere in the OPEN payload',
+  !JSON.stringify(open).includes('first guess'));
 
 // Allow-list by construction, not a delete-list.
 check('unknown team field is dropped when sealed', !('unknownFutureField' in (sealed as object)));

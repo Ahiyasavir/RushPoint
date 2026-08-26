@@ -10,6 +10,12 @@
 //   • pruneExpiredRunDataNow — admin callable, runs the same sweep on demand
 //   • pruneRunNow          — admin callable, prunes one named run (e2e-testable)
 //
+// A SECOND, SHORTER window lives here too (change: post-run-player-report):
+// recorded answers — the free-typed text a participant submitted — are destroyed
+// after ANSWER_LOG_RETENTION_DAYS (30), by `sweepExpiredAnswerLogs`, well before
+// the 90-day PII prune. It reuses the same `evaluateRunPrune` predicate rather
+// than deciding age a second way; see the comment on that sweep for why.
+//
 // Storage deletion is best-effort (catch + continue) so the job is safe whether
 // or not a run actually had photo uploads, and is idempotent.
 
@@ -19,6 +25,8 @@ import { db, storage } from '../firebase';
 import {
   RUN_DATA_RETENTION_DAYS,
   GAME_TRASH_RETENTION_DAYS, isPurgeDue, type Game,
+  // Recorded answers (change: post-run-player-report) — their own, SHORTER window.
+  ANSWER_LOG_RETENTION_DAYS, stripAnswerLogsFromStages, type RunStageRecord,
 } from '@rushpoint/shared';
 import { deleteDocsInChunks } from '../batchUtil';
 import { runPhotoPrefix } from '../storagePaths';
@@ -71,6 +79,9 @@ interface PruneResult {
   locationsDeleted: number;
   photoUrlsCleared: number;
   consentCleared: number;
+  /** Recorded answers destroyed here (change: post-run-player-report). Normally 0 —
+   *  the 30-day answer-log sweep gets to them first; this is the backstop. */
+  answerLogsCleared: number;
   storagePurged: boolean;
 }
 
@@ -101,10 +112,12 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
   const teamsSnap = await db.collection(`${runPath}/teams`).get();
   let photoUrlsCleared = 0;
   let consentCleared = 0;
+  let answerLogsCleared = 0;
   for (const teamDoc of teamsSnap.docs) {
     const data = teamDoc.data() as {
       taskSubmissions?: Record<string, { photoUrl?: string }>;
       guardianConsent?: { guardianName?: string | null; grantedAt?: string };
+      stages?: RunStageRecord[];
     };
     const subs = data.taskSubmissions;
     const cleared: Record<string, { photoUrl: null; pruned: true }> = {};
@@ -120,6 +133,18 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
       // Keep the grantedAt fact (aggregate), drop the name (PII).
       patch.guardianConsent = { guardianName: null, grantedAt: data.guardianConsent.grantedAt ?? null, pruned: true };
       consentCleared++;
+    }
+    // Recorded answers (change: post-run-player-report). Their own sweep runs at
+    // 30 days, so by 90 they are normally long gone — this makes the PII prune a
+    // strict SUPERSET rather than assuming the earlier sweep succeeded, because
+    // "we promised to delete it and something skipped it" is not a failure mode
+    // worth leaving open. Scores, verdicts and timings survive the strip.
+    const strippedStages = stripAnswerLogsFromStages(data.stages);
+    if (strippedStages.removed > 0) {
+      // A whole-ARRAY rewrite (never a dotted array path). `set({merge:true})`
+      // replaces an array field wholesale, which is what is wanted here.
+      patch.stages = strippedStages.stages;
+      answerLogsCleared += strippedStages.removed;
     }
     if (Object.keys(patch).length > 0) {
       await teamDoc.ref.set(patch, { merge: true });
@@ -141,10 +166,13 @@ export async function pruneRunPII({ ownerUid, gameId, runId }: RunRef): Promise<
     functions.logger.warn(`pruneRunPII: storage purge failed for run ${runId}`, e);
   }
 
-  // 4) Stamp the run so the scheduled sweep skips it next time.
-  await db.doc(runPath).set({ piiPrunedAt: new Date().toISOString() }, { merge: true });
+  // 4) Stamp the run so the scheduled sweep skips it next time. `answerLogPrunedAt`
+  //    is stamped too: this prune is a superset of the 30-day answer sweep, so the
+  //    shorter sweep must not come back and re-scan a run that is already clean.
+  const prunedAt = new Date().toISOString();
+  await db.doc(runPath).set({ piiPrunedAt: prunedAt, answerLogPrunedAt: prunedAt }, { merge: true });
 
-  return { runId, locationsDeleted, photoUrlsCleared, consentCleared, storagePurged };
+  return { runId, locationsDeleted, photoUrlsCleared, consentCleared, answerLogsCleared, storagePurged };
 }
 
 // Finds runs past the retention window that have not yet been pruned, and prunes
@@ -221,6 +249,102 @@ export async function sweepExpiredRuns(
 }
 
 
+// ─── Answer-log sweep (change: post-run-player-report) ───────────────────────
+//
+// Recorded answers are the free-typed text a participant submitted — the most
+// sensitive thing a run captures after location — and the creator's stated need
+// for it is "read the report after the event", not "keep it forever". So it has
+// its OWN, SHORTER window: ANSWER_LOG_RETENTION_DAYS (30) against the 90 days the
+// PII prune above runs on.
+//
+// It reuses `evaluateRunPrune` rather than re-deciding eligibility, by passing
+// `answerLogPrunedAt` into the tombstone slot and 30 as the window. That is the
+// whole point: every fail-closed rule that predicate already encodes — a finalized
+// run anchors on `finishedAt`, an UNFINALIZED one anchors on the MAXIMUM of all
+// its timestamps so a single recent write vetoes destruction, clock skew refuses,
+// an unparseable timestamp refuses — is inherited, not reimplemented. A second
+// implementation of "is this run old enough to destroy data from" is exactly how
+// the two windows would drift apart, and the failure mode is wiping a game that is
+// still being played.
+//
+// The queries are a cheap FILTER; the predicate is the authority. No new index:
+// these are the same two collection-group queries the PII sweep runs, widened to
+// the shorter cutoff.
+
+/** Strip every recorded answer from one run's teams. Idempotent. */
+export async function pruneRunAnswerLogs(
+  { ownerUid, gameId, runId }: RunRef,
+): Promise<{ runId: string; teamsTouched: number; logsRemoved: number }> {
+  const path = `users/${ownerUid}/games/${gameId}/runs/${runId}`;
+  const teamsSnap = await db.collection(`${path}/teams`).get();
+  let teamsTouched = 0;
+  let logsRemoved = 0;
+  for (const teamDoc of teamsSnap.docs) {
+    const { stages, removed } = stripAnswerLogsFromStages(
+      (teamDoc.data() as { stages?: RunStageRecord[] }).stages,
+    );
+    if (removed === 0) continue;
+    // The whole stages ARRAY is rewritten — a dotted path into an array element
+    // would coerce it to a map and destroy the team's progress, which is a far
+    // worse outcome than keeping the text one more day.
+    await teamDoc.ref.update({ stages, updatedAt: new Date().toISOString() });
+    teamsTouched++;
+    logsRemoved += removed;
+  }
+  // Stamp regardless of whether anything was found, so a run with no recorded
+  // answers is not re-scanned every night for the rest of its life.
+  await db.doc(path).set({ answerLogPrunedAt: new Date().toISOString() }, { merge: true });
+  return { runId, teamsTouched, logsRemoved };
+}
+
+export async function sweepExpiredAnswerLogs(
+  now = new Date(),
+  maxRuns: number = RUN_SWEEP_MAX_RUNS,
+): Promise<Array<{ runId: string; teamsTouched: number; logsRemoved: number }>> {
+  const cutoff = new Date(now.getTime() - ANSWER_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  const [finishedSnap, abandonedSnap] = await Promise.all([
+    db.collectionGroup('runs').where('status', '==', 'finished').where('finishedAt', '<', cutoff).get(),
+    db.collectionGroup('runs')
+      .where('status', 'in', [...ABANDONABLE_RUN_STATUSES])
+      .where('createdAt', '<', cutoff)
+      .orderBy('createdAt', 'asc')
+      .get(),
+  ]);
+
+  const results: Array<{ runId: string; teamsTouched: number; logsRemoved: number }> = [];
+  const seen = new Set<string>();
+  for (const runDoc of [...finishedSnap.docs, ...abandonedSnap.docs]) {
+    if (seen.has(runDoc.ref.path)) continue;
+    seen.add(runDoc.ref.path);
+
+    const facts = runDoc.data() as RunRetentionFacts & { answerLogPrunedAt?: string | null };
+    // The tombstone SUBSTITUTION described above — this sweep's own idempotence
+    // marker, judged by the same predicate.
+    const decision = evaluateRunPrune(
+      { ...facts, piiPrunedAt: facts.answerLogPrunedAt ?? null },
+      now,
+      ANSWER_LOG_RETENTION_DAYS,
+    );
+    if (!decision.prune) continue;
+
+    const ref = parseRunPath(runDoc.ref.path);
+    if (!ref) {
+      functions.logger.warn('sweepExpiredAnswerLogs: skipping unrecognised run path', { path: runDoc.ref.path });
+      continue;
+    }
+    if (results.length >= maxRuns) {
+      functions.logger.warn(
+        `sweepExpiredAnswerLogs: stopped early at the ${maxRuns}-run cap; the rest resume next sweep`,
+      );
+      break;
+    }
+    results.push(await pruneRunAnswerLogs(ref));
+  }
+  return results;
+}
+
+
 // ─── Game trash purge sweep (change: recoverable-game-deletion) ──────────────
 //
 // deleteGame no longer destroys anything: it writes a `deletedAt` tombstone and
@@ -277,6 +401,15 @@ export const pruneExpiredRunData = functions.pubsub
   .schedule('every 24 hours')
   .timeZone('Asia/Jerusalem')
   .onRun(async () => {
+    // Recorded answers first, on their own 30-day window (change:
+    // post-run-player-report). Before the 90-day PII prune on purpose: the runs it
+    // covers are a SUPERSET, and doing it first means the PII prune below usually
+    // finds nothing left to strip.
+    const answerResults = await sweepExpiredAnswerLogs();
+    functions.logger.info(
+      `pruneExpiredRunData: cleared recorded answers on ${answerResults.length} run(s)`,
+      { answerResults, stoppedEarly: answerResults.length >= RUN_SWEEP_MAX_RUNS },
+    );
     const results = await sweepExpiredRuns();
     functions.logger.info(
       `pruneExpiredRunData: pruned ${results.length} run(s)`,
@@ -292,6 +425,10 @@ export const pruneExpiredRunData = functions.pubsub
 // ─── On-demand admin callables (testable) ─────────────────────────────────────
 export const pruneExpiredRunDataNow = loggedCallable('pruneExpiredRunDataNow', async (_data, context) => {
   const operatorId = assertAdmin(context);
+  // The 30-day recorded-answer sweep runs here too, so the on-demand callable and
+  // the nightly schedule do the SAME work — a divergence between them is how an
+  // operator proves a retention promise against a code path nobody actually runs.
+  const answerResults = await sweepExpiredAnswerLogs();
   const results = await sweepExpiredRuns();
   // ONE record per invocation, not per run: this can prune 100 runs in a call, and
   // a row each would bury the actual event in the collection listAuditLogs reads.
@@ -308,6 +445,8 @@ export const pruneExpiredRunDataNow = loggedCallable('pruneExpiredRunDataNow', a
   return {
     ok: true,
     prunedCount: results.length,
+    answerLogRunsCleared: answerResults.length,
+    answerLogsCleared: answerResults.reduce((n, r) => n + r.logsRemoved, 0),
     stoppedEarly: results.length >= RUN_SWEEP_MAX_RUNS,
     results,
   };

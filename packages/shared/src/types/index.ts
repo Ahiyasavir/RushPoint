@@ -839,6 +839,14 @@ export interface Run {
   // Routing resolves it via effectiveTaskStatus(); the completion path never reads
   // it, so a team already holding a paused task still finishes and scores it.
   taskStatusOverrides?: Record<string, StationStatus>;
+  // Retention tombstones, written by the maintenance sweeps (server only). Both
+  // make their sweep idempotent — a stamped run is never re-scanned.
+  //   piiPrunedAt       raw participant PII destroyed (90 days)
+  //   answerLogPrunedAt recorded answer TEXT destroyed (30 days,
+  //                     change: post-run-player-report). The PII prune stamps this
+  //                     too, because it is a strict superset of the shorter sweep.
+  piiPrunedAt?: string;
+  answerLogPrunedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -994,6 +1002,23 @@ export interface RunTaskRecord {
   // thing standing between this field and the player's devtools.
   submittedAnswer?: string;
   wasCorrect?: boolean;
+  // Recorded submissions (change: post-run-player-report): EVERY answer this team
+  // gave for this mission — right and wrong — with the verdict the grading path
+  // acted on. Written on every run, unlike `submittedAnswer` above, which is the
+  // single test-mode slot and stays exactly as it was (accuracySkillRatio reads
+  // `wasCorrect`, so widening THAT write would silently move routing).
+  //
+  // SERVER + OWNER ONLY, by the same construction: `sanitizeTeamForParticipant` is
+  // an allow-list, and this key is deliberately never added to it. A per-question
+  // wrong-answer history is precisely what test mode exists to withhold, and the
+  // team document is returned WHOLE by getMyTeamState — "not allow-listed" is the
+  // only thing between this field and the player's devtools.
+  //
+  // Bounded by `appendAnswerLog` (MAX_ANSWER_LOG_ENTRIES per mission,
+  // MAX_ANSWER_LOG_ANSWER_LEN per entry) because it is the one field here whose
+  // SIZE a client chooses. Destroyed after ANSWER_LOG_RETENTION_DAYS (30) by the
+  // maintenance sweep — scores, verdicts and timings above survive that strip.
+  answerLog?: import('./../answerLog').AnswerLogEntry[];
 }
 
 export interface RunStageRecord {

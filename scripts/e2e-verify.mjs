@@ -7347,6 +7347,16 @@ async function main() {
       ['participant', pl, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['stranger', str, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
       ['other-run staff', staffB, 'forceAssignTask', { ownerUid: OWNER, gameId: ag, runId: ar, teamId: plUid, taskId: 'az-t' }],
+      // post-run-player-report: getRunPlayerReport returns team-level identity
+      // TOGETHER with what each player submitted and the game's answer keys —
+      // everything getRunAnalytics is careful to keep out of an anonymous
+      // aggregate. So it is owner-only on the run document's own ownerUid, and
+      // NOT reachable by a run's own staff either: a marshal reviewing photos has
+      // no business reading every team's answer sheet. The ALLOWED side (the
+      // owner) is proven in the 'recorded answers' scenario; only denials here.
+      ['participant', pl, 'getRunPlayerReport', { gameId: ag, runId: ar }],
+      ['stranger', str, 'getRunPlayerReport', { gameId: ag, runId: ar }],
+      ['other-run staff', staffB, 'getRunPlayerReport', { gameId: ag, runId: ar }],
       // admin-manage-game-templates: setGameTemplateFlag is platform-admin-only,
       // same trust level as listPlatformUsers/setUserNote above — a mere game
       // owner (even flagging their OWN game) and a participant must both be denied.
@@ -10726,6 +10736,161 @@ async function main() {
     const sqLeak = findKeysDeep(sqState?.team, ['wasCorrect', 'score', 'earnedScore', 'taskAttempts']);
     check('test mode: no verdict, score or wrong-step count reaches the sequence player',
       sqLeak.length === 0, sqLeak.join(','));
+  });
+
+  // ═══ Recorded answers + run history + the per-player report ═════════════════
+  // change: post-run-player-report.
+  //
+  // The three things this scenario has to prove, because each one was previously
+  // impossible and each fails SILENTLY rather than loudly if it regresses:
+  //
+  //   1. A wrong answer on an ORDINARY run is now RECORDED, not just counted.
+  //      Before this, `submittedAnswer`/`wasCorrect` were written only when the
+  //      game sealed scoring, so on every normal run the server graded the answer,
+  //      possibly charged for it, and threw the text away.
+  //   2. `listMyRuns` finds a FINISHED run. Every other post-run surface resolves
+  //      by access code and is reachable only from the live console, so a run that
+  //      ended had no route back to it at all.
+  //   3. `getRunPlayerReport` hands the OWNER the per-player answer sheet, with
+  //      the empty cells honestly labelled.
+  //
+  // It also pins the thing most likely to break by accident: recording must not
+  // change what the participant sees. A wrong answer still answers `correct:false`
+  // and a right one still completes the mission.
+  await scenario('recorded answers + run history + per-player report', async () => {
+    const OWNER = creatorCred.user.uid;
+    const { gameId: gR } = await creator.call('createGame', { title: 'Answer Sheet Game', mode: 'individual' });
+    await creator.call('updateGame', {
+      gameId: gR,
+      scoringPreset: 'fixed_points_speed',
+      stages: [
+        {
+          id: 'rp-s1', order: 0, title: 'Questions',
+          tasks: [
+            { id: 'rp-quiz', title: 'Capital', type: 'quiz', locationless: true, triggerMode: 'locationless',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 2, estimatedMinutes: 3, pointValue: 50,
+              maxConcurrentTeams: 9, description: 'What is the capital?', answers: ['Jerusalem'] },
+          ],
+        },
+        {
+          id: 'rp-s2', order: 1, title: 'Arrival', isFinal: true,
+          tasks: [
+            // A mission with NO answer channel, so the report has to distinguish
+            // "nothing to answer here" from "the answer was not recorded".
+            { id: 'rp-checkin', title: 'Check in', type: 'self_report', locationless: true, triggerMode: 'locationless',
+              coordinates: { lat: 0, lng: 0 }, difficulty: 1, estimatedMinutes: 1, pointValue: 20,
+              maxConcurrentTeams: 9 },
+          ],
+        },
+      ],
+    });
+    const { runId: rR, accessCode: cR } = await creator.call('launchRun', { gameId: gR });
+    const CR = { ownerUid: OWNER, gameId: gR, runId: rR };
+    const playerR = makeParty('playerReport');
+    await signInAnonymously(playerR.auth);
+    await playerR.call('joinRun', { code: cR, displayName: 'Answer Sheet Team' });
+    const playerRUid = playerR.auth.currentUser.uid;
+    await creator.call('startTeams', { gameId: gR, runId: rR });
+    await playerR.call('requestNextTask', CR);
+
+    // 1. A wrong answer, then the right one, on a NORMAL (non-testMode) run.
+    const wrongR = await playerR.call('submitTaskAnswer', { ...CR, taskId: 'rp-quiz', answer: 'Tel Aviv' });
+    check('recording did not change the wrong-answer response',
+      wrongR?.correct === false, JSON.stringify(wrongR));
+    const rightR = await playerR.call('submitTaskAnswer', { ...CR, taskId: 'rp-quiz', answer: 'jerusalem  ' });
+    check('recording did not change the correct-answer response',
+      rightR?.correct === true, JSON.stringify(rightR));
+
+    // The log lives on the server-only team document. Read it directly first, so a
+    // failure here is unambiguous about WHERE it broke (the write, or the report).
+    const teamR = await creator.getDocAt(`users/${OWNER}/games/${gR}/runs/${rR}/teams/${playerRUid}`);
+    const quizRec = (teamR.data?.stages ?? []).flatMap((st) => st?.tasks ?? [])
+      .find((rec) => rec?.taskId === 'rp-quiz');
+    const logged = quizRec?.answerLog ?? [];
+    check('both submissions are recorded on the team document, in order',
+      logged.length === 2 && logged[0]?.answer === 'Tel Aviv' && logged[1]?.answer === 'jerusalem',
+      JSON.stringify(logged));
+    check('each recorded submission carries the verdict the server acted on',
+      logged[0]?.correct === false && logged[1]?.correct === true, JSON.stringify(logged));
+
+    // 2. The recorded answers must NOT reach the participant. The team document is
+    // returned WHOLE by getMyTeamState, so the sanitizer allow-list is the only
+    // thing between a per-question wrong-answer history and the player's devtools.
+    const stateR = await playerR.call('getMyTeamState', { code: cR });
+    const wireR = JSON.stringify(stateR);
+    check('the participant payload carries no recorded answers at all',
+      !wireR.includes('answerLog') && !wireR.includes('Tel Aviv'),
+      'answerLog or the submitted text leaked to the player');
+
+    // Finish the run so the history has a FINISHED row to find.
+    await playerR.call('requestNextTask', CR);
+    await playerR.call('completeTask', { ...CR, taskId: 'rp-checkin' });
+    await creator.call('finalizeRun', { gameId: gR, runId: rR });
+
+    // 3. listMyRuns finds the finished run.
+    const allRuns = await creator.call('listMyRuns', {});
+    check('listMyRuns returns runs regardless of status (the finished one is there)',
+      (allRuns?.runs ?? []).some((row) => row.runId === rR && row.status === 'finished'),
+      JSON.stringify((allRuns?.runs ?? []).map((r) => [r.runId, r.status])));
+    const oneGame = await creator.call('listMyRuns', { gameId: gR });
+    check('listMyRuns filters to one game',
+      (oneGame?.runs ?? []).length > 0 && (oneGame?.runs ?? []).every((row) => row.gameId === gR),
+      JSON.stringify((oneGame?.runs ?? []).map((r) => r.gameId)));
+    const rowR = (oneGame?.runs ?? []).find((row) => row.runId === rR);
+    check('a history row carries what the card renders',
+      rowR?.accessCode === cR && rowR?.gameTitle === 'Answer Sheet Game' && rowR?.participantCount >= 1,
+      JSON.stringify(rowR));
+    // ownerUid is the authorization, not gameId: a payload naming somebody else's
+    // game must return nothing rather than that owner's runs.
+    const strangerRuns = await playerR.call('listMyRuns', { gameId: gR });
+    check('listMyRuns never returns another creator runs',
+      (strangerRuns?.runs ?? []).length === 0, JSON.stringify(strangerRuns));
+
+    // 4. getRunPlayerReport: the owner's answer sheet.
+    const report = await creator.call('getRunPlayerReport', { gameId: gR, runId: rR });
+    check('the report has one row per player', (report?.players ?? []).length === 1,
+      JSON.stringify((report?.players ?? []).map((p) => p.playerName)));
+    check('the player row carries the name and score',
+      report?.players?.[0]?.playerName === 'Answer Sheet Team' && report?.players?.[0]?.score > 0,
+      JSON.stringify(report?.players?.[0]));
+    check('the report reuses the finalized ranking (not a provisional one)',
+      report?.meta?.rankingProvisional === false, JSON.stringify(report?.meta));
+    check('the report discloses the answer retention window',
+      report?.meta?.answerRetentionDays === 30, JSON.stringify(report?.meta));
+
+    const quizRow = (report?.answers ?? []).find((row) => row.taskId === 'rp-quiz');
+    check('the report exposes BOTH submissions, in order',
+      (quizRow?.answers ?? []).length === 2
+      && quizRow.answers[0].answer === 'Tel Aviv' && quizRow.answers[0].correct === false
+      && quizRow.answers[1].correct === true,
+      JSON.stringify(quizRow?.answers));
+    check('the report carries the authored question for context',
+      quizRow?.question === 'What is the capital?', JSON.stringify(quizRow?.question));
+    check('the report carries the answer key (an owner-only surface)',
+      quizRow?.expectedAnswer === 'Jerusalem', JSON.stringify(quizRow?.expectedAnswer));
+    check('a recorded row is not flagged unavailable', quizRow?.answersUnavailable === false,
+      JSON.stringify(quizRow));
+
+    const checkinRow = (report?.answers ?? []).find((row) => row.taskId === 'rp-checkin');
+    check('a mission with no answer channel is reported as such, NOT as a missing answer',
+      checkinRow?.answerChannel === 'none' && checkinRow?.answersUnavailable === false,
+      JSON.stringify(checkinRow));
+
+    // 5. Retention: the sweep destroys the TEXT and nothing else. Driven through
+    // the admin prune callable rather than waited out. `pruneRunNow` runs the whole
+    // PII prune, which is a strict SUPERSET of the 30-day answer sweep — so this
+    // proves the backstop path, and the pure suite proves the 30-day boundary.
+    const scoreBefore = report?.players?.[0]?.score;
+    await platformAdmin.call('pruneRunNow', { ownerUid: OWNER, gameId: gR, runId: rR });
+    const afterPrune = await creator.call('getRunPlayerReport', { gameId: gR, runId: rR });
+    const quizAfter = (afterPrune?.answers ?? []).find((row) => row.taskId === 'rp-quiz');
+    check('the prune destroyed the recorded answer text',
+      (quizAfter?.answers ?? []).length === 0, JSON.stringify(quizAfter?.answers));
+    check('the pruned row says NOT RECORDED rather than looking unanswered',
+      quizAfter?.answersUnavailable === true, JSON.stringify(quizAfter));
+    check('the prune left scores untouched',
+      afterPrune?.players?.[0]?.score === scoreBefore,
+      JSON.stringify({ before: scoreBefore, after: afterPrune?.players?.[0]?.score }));
   });
 
   await scenario('callable coverage guard', async () => {

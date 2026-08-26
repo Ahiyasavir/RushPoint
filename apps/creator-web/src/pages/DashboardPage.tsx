@@ -799,24 +799,48 @@ export default function DashboardPage() {
         {/* Stats row */}
         {games.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-8">
+            {/* The runs tile is a LINK (change: post-run-player-report). It counted
+                the one thing a creator most wants to look back at and did nothing
+                when clicked, while finished runs had no route into them at all.
+                The other two tiles stay inert — they summarise what is already on
+                this page, so there is nowhere for them to lead. */}
             {[
-              { label: d.statGamesBuilt, value: games.length, icon: '🗺️', tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30' },
-              { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: '🌐', tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30' },
-              { label: d.statTotalPlays, value: games.reduce((s, g) => s + (g.playCount ?? 0), 0), icon: '🏁', tint: 'from-rp-signal/12 to-rp-signal/5', ring: 'group-hover:border-rp-signal/30' },
-            ].map((s) => (
-              <div key={s.label}
-                className={`group relative overflow-hidden rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`}
-              >
-                <div className={`absolute inset-0 bg-gradient-to-br ${s.tint} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
-                <div className="relative flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
-                  <div className="min-w-0">
-                    <div className="font-brand text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
-                    <div className="text-[11px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
+              { label: d.statGamesBuilt, value: games.length, icon: '🗺️', tint: 'from-rp-fire/12 to-rp-amber/5', ring: 'group-hover:border-rp-fire/30', to: null as string | null },
+              { label: d.statPublished, value: games.filter(g => g.visibility === 'public').length, icon: '🌐', tint: 'from-rp-plasma/12 to-rp-plasma/5', ring: 'group-hover:border-rp-plasma/30', to: null as string | null },
+              { label: d.statTotalPlays, value: games.reduce((s, g) => s + (g.playCount ?? 0), 0), icon: '🏁', tint: 'from-rp-signal/12 to-rp-signal/5', ring: 'group-hover:border-rp-signal/30', to: '/history' as string | null },
+            ].map((s) => {
+              const inner = (
+                <>
+                  <div className={`absolute inset-0 bg-gradient-to-br ${s.tint} opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
+                  <div className="relative flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
+                    <div className="min-w-0 text-start">
+                      <div className="font-brand text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
+                      <div className="text-[11px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
+                    </div>
+                    {s.to && (
+                      <div className="relative ms-auto text-[11px] text-[--ink-3] group-hover:text-rp-signal transition-colors shrink-0">
+                        {d.statTotalPlaysCta}
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-            ))}
+                </>
+              );
+              const shell = `group relative overflow-hidden w-full rounded-2xl border border-[--rp-border] bg-[--surface-0]/80 dark:bg-white/[0.03] backdrop-blur-sm px-4 py-3.5 transition-all duration-200 hover:-translate-y-0.5 ${s.ring}`;
+              return s.to ? (
+                <button
+                  key={s.label}
+                  type="button"
+                  onClick={() => nav(s.to as string)}
+                  title={d.statTotalPlaysHint}
+                  className={`${shell} cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-signal/60`}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <div key={s.label} className={shell}>{inner}</div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -919,7 +943,7 @@ export default function DashboardPage() {
                       </Button>
                       <OverflowMenu label="⋯" ariaLabel={d.cardMoreActions}>
                         {dashboardCardActions(g).overflow.map((id) => {
-                          const items: Record<'testRun' | 'publish' | 'unpublish' | 'share' | 'delete', {
+                          const items: Record<'testRun' | 'history' | 'publish' | 'unpublish' | 'share' | 'delete', {
                             label: string; title: string | undefined; disabled: boolean;
                             onClick: () => void; destructive: boolean;
                           }> = {
@@ -928,6 +952,18 @@ export default function DashboardPage() {
                               title: d.cardTestRunHint,
                               disabled: busy,
                               onClick: () => void launchAction.run(g, { testDrive: true }),
+                              destructive: false,
+                            },
+                            // Run history (change: post-run-player-report): the way back
+                            // into a run that has already ENDED. Every other post-run
+                            // surface is keyed by access code and reachable only from
+                            // the live console, so without this a finished run has no
+                            // door at all.
+                            history: {
+                              label: d.cardHistory,
+                              title: d.cardHistoryHint,
+                              disabled: false,
+                              onClick: () => nav(`/history?game=${encodeURIComponent(g.id)}`),
                               destructive: false,
                             },
                             publish: {

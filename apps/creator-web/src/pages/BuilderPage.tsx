@@ -1034,6 +1034,22 @@ export default function BuilderPage() {
           {b.saveNow}
         </button>
 
+        {/* Past runs (change: post-run-player-report). The Builder is where a
+            creator sits when they wonder how the last group did with a mission
+            they are about to change, and until now the only route back to a
+            FINISHED run was a live console that had already closed. Desktop only:
+            at phone width the header is already fighting for pixels, and the same
+            surface is one tap away from the dashboard card's overflow. */}
+        {!isMobile && (
+          <button
+            onClick={() => nav(`/history?game=${encodeURIComponent(gameId ?? '')}`)}
+            title={b.pastRunsHint}
+            className="shrink-0 min-h-[28px] px-2.5 py-1 rounded-lg text-xs font-medium border border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+          >
+            🏁 {b.pastRuns}
+          </button>
+        )}
+
         {/* Undo / redo — also bound to Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z.
             Desktop only: at phone width these live in the header overflow menu
             below (change: builder-simplification-round-3). */}
