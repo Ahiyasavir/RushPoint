@@ -1966,6 +1966,10 @@ export const TASK_BANK: TaskBankEntry[] = [
     // so unlike the-hidden-key or a vendor, any number of teams can read the
     // same sign at once.
     key: 'chalk-code',
+    // A visible pin on a mission called "the hidden code" would point straight
+    // at the sticker and remove the hunt — the exact loophole rule 9 in the
+    // file header warns about, and the same fix as the-hidden-key:
+    // `hideLocation` + a separate, honestly-rough `locationClue`.
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
       'park', 'neighborhood', 'school', 'office',
@@ -1978,16 +1982,23 @@ export const TASK_BANK: TaskBankEntry[] = [
         required: true,
         prompt: 'לפני המשחק: כתבו קוד בן ארבע ספרות במקום קבוע (מדבקה, גיר, פתק בעמיד למים) וסמנו כאן איפה. בחרו מקום שיישאר קריא וישרוד עד סוף כל המשחק.\n\nBefore the game: write a four-digit code somewhere fixed (a sticker, chalk, a laminated note) and mark it here. Pick a spot that stays legible and survives to the end of the last run.',
       },
+      {
+        field: 'locationClue',
+        required: true,
+        prompt: 'כתבו רמז כללי לאזור שבו הקוד מוסתר — לא את המקום המדויק. אין סיכה על המפה.\n\nWrite a general clue to the area the code is hidden in — not the exact spot. There is no pin on the map.',
+      },
       SET_CODE,
     ],
     build: () => sited({
       title: 'הקוד הנסתר',
-      description: 'איפשהו כאן מוסתר קוד בן ארבע ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו אותו כאן. אל תזיזו ואל תסירו אותו — הקבוצה הבאה צריכה למצוא אותו במקום.',
+      description: 'איפשהו באזור הזה מוסתר קוד בן ארבע ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו אותו כאן. אל תזיזו ואל תסירו אותו — הקבוצה הבאה צריכה למצוא אותו במקום.',
       type: 'smart_station',
       difficulty: 3,
       estimatedMinutes: 6,
       pointValue: 100,
       smart: { enabled: true, verificationType: 'code_verification', secretCode: '2468' },
+      hideLocation: true,
+      locationClue: '',
       // A written code is read, never taken — every team finds the same sign.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
