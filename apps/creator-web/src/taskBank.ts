@@ -427,7 +427,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'המילוט הגדול',
-      description: 'עצרו הכל! אתם בסצנת שיא של סרט פעולה: הרגע חילצתם חבר משוטרים ועכשיו אתם בורחים! הקבוצה כולה חייבת ליצור תמונה קפואה (Freeze Frame) של רגע הבריחה. תהיו יצירתיים: מי מרים את החבר המחולץ? מי מסתכל אחורה בפחד? מי צועק "קדימה לרוץ!"?',
+      description: 'אתם בסצנת שיא של סרט פעולה: הרגע חילצתם חבר ואתם בורחים. צרו תמונה קפואה (Freeze Frame) של רגע הבריחה. חלקו תפקידים: מי מרים את החבר, מי מביט אחורה בפחד, מי צועק "לרוץ!".',
       type: 'photo',
       estimatedMinutes: 4,
       smart: upload({ captureKind: 'photo' }),
@@ -503,7 +503,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'כתבת חדשות דחופה 📰',
-      description: 'אחד מכם הוא כתב טלוויזיה שמדווח "בשידור חי" על אירוע מוזר שקרה עכשיו במקום! השאר משמשים כניצבים, עוברי אורח מזועזעים, או גיבורי האירוע. יש לכם 40 שניות לכתבה מלאה עם פתיחה וסיום. אולי תקבלו בונוס נקודות על השתתפות אנשים זרים!',
+      description: 'אחד מכם כתב טלוויזיה שמדווח בשידור חי על אירוע מוזר שקרה כאן. השאר משחקים ניצבים, עוברי אורח או גיבורי האירוע. סרטון של 40 שניות, עם פתיחה וסיום. בונוס אם זרים אמיתיים משתתפים.',
       type: 'photo',
       smart: upload({ captureKind: 'video', videoMaxSeconds: 40 }),
     }),
@@ -580,7 +580,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [PLACE_IT],
     build: () => sited({
       title: 'העצומה האבסורדית',
-      description: 'השיגו דף וכתבו עליו: "מפסיקים את האבסורד: חותמים עכשיו על העצומה לביטול חובת הרישיון לרכיבה על חמורים ומחזירים את ההיגיון לרחובות!" אספו עליו 30 חתימות מאנשים ברחוב, ולאחר מכן צלמו את הדף.',
+      description: 'כתבו על דף: "מפסיקים את האבסורד: חותמים עכשיו על העצומה לביטול חובת הרישיון לרכיבה על חמורים ומחזירים את ההיגיון לרחובות!" אספו 30 חתימות מאנשים ברחוב, וצלמו את הדף.',
       type: 'photo',
       estimatedMinutes: 5,
       smart: upload(),
@@ -827,7 +827,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'תדרוך בלי מילים',
-      description: 'אחד מכם קורא בשקט: "בנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי להגיד את זה בקול, רק בציור, תעבירו את ההוראה לשאר הצוות. הם מבצעים לפי מה שהבינו. צלמו את התוצאה.',
+      description: 'אחד מכם קורא בשקט: "בנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי מילים, רק בציור, העבירו את ההוראה לצוות. הם מבצעים לפי מה שהבינו — צלמו את התוצאה.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 8,
@@ -873,22 +873,22 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'coordinates',
         required: true,
-        prompt: 'לפני המשחק: סמנו את המקום שבו תחביאו מפתח אמיתי ותנעלו איתו משהו ספציפי (תיבה, מנעול, שער). בחרו מקום בטוח ויציב — לא ליד כביש, מים או גובה מסוכן.\n\nBefore the game: mark where you will hide a real key that locks something specific (a box, a padlock, a gate). Pick a safe, stable spot — not near a road, water, or a height.',
+        prompt: 'סמנו איפה תחביאו מפתח אמיתי, ומה הוא נועל (תיבה, מנעול, שער). בחרו מקום בטוח — לא ליד כביש, מים או גובה.\n\nMark where you\'ll hide a real key, and what it locks (a box, a padlock, a gate). Pick a safe spot — not near a road, water, or a height.',
       },
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז כללי לאזור שבו המפתח מוסתר — לא את המקום המדויק. אין סיכה על המפה. שימו לב: קבוצה אחת משחקת כאן בכל רגע; לאירוע גדול הכינו כמה מפתחות ומנעולים במקומות שונים.\n\nWrite a general clue to the area, not the exact spot. There is no pin on the map. Note: only one team plays this at a time — for a big event, prepare several keys and locks at different spots.',
+        prompt: 'כתבו רמז כללי לאזור, לא את המקום המדויק — אין סיכה במפה. לאירוע גדול, הכינו כמה מפתחות במקומות שונים.\n\nWrite a general area clue, not the exact spot — there\'s no pin on the map. For a big event, prepare several keys at different spots.',
       },
       {
         field: 'description',
         required: true,
-        prompt: 'השלימו בסוגריים המרובעים מה בדיוק המפתח פותח (תיבה, מנעול, שער) — והשאירו את שאר ההוראות כפי שהן, כולל ההנחיה להחזיר את המפתח.\n\nFill the square brackets with exactly what the key opens (a box, a padlock, a gate) — leave the rest of the instructions as they are, including returning the key.',
+        prompt: 'החליפו את הסוגריים במה שהמפתח פותח (תיבה, מנעול, שער). אל תמחקו את שאר ההוראות.\n\nReplace the brackets with what the key opens (a box, a padlock, a gate). Don\'t delete the rest of the instructions.',
       },
     ],
     build: () => sited({
       title: 'המפתח החבוי',
-      description: 'הוחבא כאן מפתח, שפותח [הוראות ליוצר: מה בדיוק נעול]. אחד מכם עוצם עיניים ונשאר עצום-עיניים עד שהמפתח ממש ביד שלו — השאר מדריכים אותו אליו רק בקול, בלי לגעת בו ובלי לגעת בחפצים בשבילו. ברגע שהמפתח ביד, מותר לפקוח עיניים, לפתוח איתו את המנעול, ולצלם את התוצאה הפתוחה. בסיום: החזירו את המפתח בדיוק למקום שבו מצאתם אותו — הקבוצה הבאה תזדקק לו בדיוק כמוכם.',
+      description: 'מוחבא כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. אחד מכם עוצם עיניים. השאר מדריכים אותו בקול בלבד, בלי לגעת, עד שהמפתח ביד. אז פותחים ומצלמים. בסיום מחזירים את המפתח בדיוק למקום — הקבוצה הבאה צריכה אותו.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 9,
@@ -896,7 +896,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       smart: upload(),
       hideLocation: true,
       locationClue: '',
-      hint: 'רמז: תנו הוראות קצרות וברורות — ימינה, שמאלה, קרוב, רחוק — במקום משפטים ארוכים, ותנו לעוצם־העיניים לגשש בידיים בעצמו כשהוא כבר קרוב.\n\nHint: give short, clear directions — left, right, closer, further — instead of long sentences, and let the blindfolded teammate feel around with their own hands once they are close.',
+      hint: 'רמז: הוראות קצרות (ימינה, שמאלה, קרוב) עובדות יותר טוב ממשפטים ארוכים.\n\nHint: short directions (left, right, closer) work better than long sentences.',
       hintPenalty: 20,
       // The one real, physical key: only one team can ever be searching for it
       // at a time, no matter how many teams the event has. See
@@ -951,7 +951,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'שרשרת הפעולות',
-      description: 'בנו שרשרת פעולות מציוד שיש לכם: פעולה אחת מפעילה את הבאה, לפחות שלוש פעולות ברצף בלי לגעת בידיים אחרי שהתחלתם (חפץ שנופל, מגלגל כדור, שמפיל בקבוק — הרעיון שלכם). צלמו אותה עובדת ברצף אחד, בלי לעצור.',
+      description: 'בנו שרשרת של שלוש פעולות לפחות מציוד שיש לכם: כל פעולה מפעילה את הבאה (חפץ נופל, מגלגל כדור, מפיל בקבוק — הרעיון שלכם). בלי לגעת בידיים אחרי שהתחלתם. צלמו ברצף אחד, בלי לעצור.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,
@@ -1113,7 +1113,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'סחר חליפין',
-      description: 'קיבלתם חפץ קטן. הציעו אותו לאנשים ברחוב בתמורה לכל דבר שהם מוכנים להחליף בו. אתם חייבים לקבל כל הצעת חילופין שמוצעת לכם, לא משנה מה היא. המשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
+      description: 'קיבלתם חפץ קטן. הציעו אותו לאנשים ברחוב, וקבלו כל הצעת חילופין — לא משנה מה. המשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 15,
@@ -1140,7 +1140,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו את הכתובת המדויקת של הנקודה כרמז. זה כל מה שהמשתתפים יראו — אין להם סיכה על המפה, רק את מה שתכתבו כאן.\n\nWrite the exact address of the spot as the clue. This is all the players get — there is no pin on their map, only what you write here.',
+        prompt: 'כתבו את הכתובת המדויקת כרמז. זה כל מה שהמשתתפים יראו — אין סיכה על המפה.\n\nWrite the exact address as the clue. This is all the players get — there is no pin on the map.',
       },
     ],
     build: () => sited({
@@ -1201,7 +1201,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 3,
     build: () => anywhere({
       title: 'חמישה דברים, צבע אחד',
-      description: 'בחרו צבע, לא שחור ולא לבן. אספו חמישה חפצים באותו צבע בדיוק וסדרו אותם בפריים אחד. ככל שהצבע מדויק יותר, כך טוב יותר. אם חסר לכם חפץ, אפשר לבקש בהשאלה מאנשים בסביבה, לא לקחת בלי לשאול.',
+      description: 'בחרו צבע — לא שחור ולא לבן. אספו חמישה חפצים באותו צבע וצלמו אותם בפריים אחד. ככל שהצבע מדויק יותר, כך טוב יותר. חסר חפץ? בקשו בהשאלה, אל תיקחו בלי לשאול.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -1280,7 +1280,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 2,
     build: () => anywhere({
       title: 'הליכת הגיבורים',
-      description: 'תזמנו הליכה אחת מסונכרנת, כמו בסרט אקשן: כל הקבוצה צועדת יחד לאט ובביטחון, כאילו הרגע יצאתם מפיצוץ מאחוריכם. תוסיפו משפט קליט אחד שכולם אומרים באותו רגע. צלמו בווידאו.',
+      description: 'צעדו יחד לאט ובביטחון, כמו בסצנת אקשן אחרי פיצוץ מאחוריכם. כולם אומרים באותו רגע משפט קליט אחד. צלמו בווידאו.',
       type: 'photo',
       difficulty: 2,
       estimatedMinutes: 5,
@@ -1339,7 +1339,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 7,
     build: () => anywhere({
       title: 'האגדה המקומית',
-      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן, ובקשו ממנו את הסיפור הכי מוזר או מפתיע שהוא מכיר על המקום — עם פרט קונקרטי שאפשר לבדוק (שם, שנה, אירוע). עכשיו מצאו אדם שני, שלא קשור לראשון, ושאלו אם הוא שמע את אותו סיפור. צלמו את שתי התגובות.',
+      description: 'מצאו מישהו שגר או עובד כאן הרבה זמן. בקשו סיפור מוזר או מפתיע על המקום, עם פרט שאפשר לבדוק (שם, שנה, אירוע). מצאו אדם שני ושאלו אם שמע את אותו סיפור. צלמו את שתי התשובות.',
       type: 'photo',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -1528,7 +1528,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'הסיפור שבחלון',
-      description: 'מצאו חלון ראווה שיש בו פריט אחד שממש לא מתאים לשאר — כאילו מישהו הניח אותו שם בטעות. צלמו את החלון, וספרו בשלושים שניות מי קנה דווקא אותו ולמה. הסיפור חייב להסביר פרט אחד שרואים בתמונה.',
+      description: 'מצאו חלון ראווה עם פריט אחד שלא מתאים לשאר, כאילו הונח שם בטעות. צלמו את החלון וספרו בווידאו של 30 שניות: מי קנה דווקא אותו ולמה. הסבירו פרט אחד שרואים בתמונה.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 7,
@@ -1682,7 +1682,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו את הרמז למקום, בלי לנקוב בשמו. זה כל מה שהצוות יראה — אין סיכה על המפה. ודאו שאפשר לפענח אותו מנקודת הפתיחה.\n\nWrite the clue to the place without naming it. This is all the team sees — there is no pin on the map. Make sure it can be worked out from the starting point.',
+        prompt: 'כתבו רמז למקום בלי לנקוב בשמו — אין סיכה על המפה. ודאו שאפשר לפענח אותו מנקודת הפתיחה.\n\nWrite a clue to the place without naming it — there is no pin on the map. Make sure it can be worked out from the starting point.',
       },
     ],
     build: () => sited({
@@ -1847,12 +1847,15 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'השלט השבור',
-      description: 'מצאו במקום הזה שלט אמיתי שמשהו בו לא עובד: תרגום עקום, הוראה שסותרת את עצמה, חץ שמצביע לכיוון הלא נכון או מידע שפג תוקפו מזמן. צלמו אותו, וכתבו במשפט אחד מה בדיוק שבור בו. אסור לביים שלט בעצמכם.',
+      // "Write in one sentence what's broken" asked for a text field a photo
+      // submission never had (same bug class as oldest-thing-here / price-target).
+      // Saying it on camera fixes that and fits the mission just as well.
+      description: 'מצאו שלט אמיתי עם טעות: תרגום עקום, הוראה סותרת, חץ לכיוון הלא נכון, או מידע שפג תוקפו. צלמו אותו בווידאו והסבירו בקול מה בדיוק שבור בו. אסור לביים שלט בעצמכם.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
       pointValue: 120,
-      smart: upload(),
+      smart: upload({ captureKind: 'video', videoMaxSeconds: 25 }),
     }),
   },
   {
@@ -1864,7 +1867,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'מסלול המילוט',
-      description: 'מצאו את מפת המילוט התלויה על הקיר. הסתכלו עליה שלושים שניות, ואז סגרו אותה מהעיניים ולכו יחד ליציאת החירום הקרובה ביותר — בלי לחזור להסתכל ובלי לשאול אף אחד. צלמו את היציאה שהגעתם אליה.',
+      description: 'מצאו את מפת המילוט על הקיר. הסתכלו עליה 30 שניות, ואז לכו יחד ליציאת החירום הקרובה — בלי להסתכל שוב ובלי לשאול. צלמו את היציאה שהגעתם אליה.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
@@ -1988,7 +1991,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'coordinates',
         required: true,
-        prompt: 'לפני המשחק: כתבו קוד בן ארבע ספרות במקום קבוע (מדבקה, גיר, פתק בעמיד למים) וסמנו כאן איפה. בחרו מקום שיישאר קריא וישרוד עד סוף כל המשחק.\n\nBefore the game: write a four-digit code somewhere fixed (a sticker, chalk, a laminated note) and mark it here. Pick a spot that stays legible and survives to the end of the last run.',
+        prompt: 'כתבו קוד בן 4 ספרות במקום קבוע (מדבקה, גיר, פתק עמיד למים), וסמנו כאן איפה. בחרו מקום שישרוד עד סוף המשחק.\n\nWrite a 4-digit code somewhere fixed (a sticker, chalk, a laminated note), and mark it here. Pick a spot that survives to the end of the game.',
       },
       {
         field: 'locationClue',
@@ -1999,7 +2002,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'הקוד הנסתר',
-      description: 'איפשהו באזור הזה מוסתר קוד בן ארבע ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו אותו כאן. אל תזיזו ואל תסירו אותו — הקבוצה הבאה צריכה למצוא אותו במקום.',
+      description: 'איפשהו כאן מוסתר קוד בן 4 ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו כאן. אל תזיזו אותו — הקבוצה הבאה צריכה אותו במקום.',
       type: 'smart_station',
       difficulty: 3,
       estimatedMinutes: 6,
