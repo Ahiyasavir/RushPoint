@@ -11,8 +11,16 @@
 // rather than falling back to the id itself, so that leak cannot happen even by
 // accident.
 import { useMemo, useReducer } from 'react';
-import { ChipRow, MultiChipRow, RatingRow } from './ui';
+// `ChipRow` and `RatingRow` are deliberately still here. The card grid is for
+// questions whose options are KINDS of thing — an occasion, an audience, a place,
+// a difficulty — where a picture carries meaning. `people` and `duration` are
+// numeric bands and `prep` is an ordered 1-5 scale: a drawing of "up to 20
+// people" would be decoration, and illustrating a rating would fight the very
+// ordering that makes it readable (change: smart-build-delight).
+import { ChipRow, RatingRow } from './ui';
+import { ChoiceCardRow, MultiChoiceCardRow } from './ChoiceCardRow';
 import SteppedWizard, { type WizardStepConfig } from './SteppedWizard';
+import SmartBuildShapePanel from './SmartBuildShapePanel';
 import { useLanguage, useT } from './LanguageContext';
 import { bankTagLabel, type BankTagId } from '../bankTags';
 import {
@@ -31,14 +39,26 @@ import {
   smartBuildAnswers,
   smartBuildReducer,
 } from '../lib/smartBuildWizard';
-import { previewComposition, type ComposerAnswers } from '../lib/composeGame';
+import { previewComposition, previewShape, type ComposerAnswers } from '../lib/composeGame';
 import { TASK_BANK } from '../taskBank';
 
-export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
+export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKeys }: {
   busy?: boolean;
   /** The creator backed out through the first question. */
   onLeave: () => void;
-  onFinish: (answers: ComposerAnswers) => void;
+  /**
+   * Finished. The SEED travels with the answers because the live shape panel
+   * predicted this game's shape from it — composing under a different one hands
+   * the creator a different shape from the one they just watched being built.
+   */
+  onFinish: (answers: ComposerAnswers, seed: number) => void;
+  /**
+   * This creator's recently-handed missions — the SAME list the composer will be
+   * given. Recent keys feed `fitScore` → `usableBankFor` → the budget, so a
+   * preview defaulted to empty while the composer got a real list quietly
+   * disagrees with the delivered game for any creator who has composed before.
+   */
+  recentBankKeys?: string[];
 }) {
   const t = useT();
   const { lang } = useLanguage();
@@ -47,11 +67,31 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
 
   const a = state.answers;
 
+  // Passed to BOTH the preview and (via onFinish) the composer — see the prop's
+  // own note for why defaulting this to empty on one side only is a real bug.
+  const recent = useMemo(
+    () => ({ recentBankKeys: Array.isArray(recentBankKeys) ? recentBankKeys : [] }),
+    [recentBankKeys],
+  );
+
   // What we are about to build, from the answers so far. Recomputed as they
   // change and shown on the LAST screen only: earlier it would be noise (the
   // number moves with every tap), and on the last screen it is the one fact
   // that makes the final tap an informed decision instead of an act of faith.
-  const preview = useMemo(() => previewComposition(TASK_BANK, smartBuildAnswers(state)), [state]);
+  const preview = useMemo(
+    () => previewComposition(TASK_BANK, smartBuildAnswers(state), recent),
+    [state, recent],
+  );
+
+  // The SHAPE of that game — stages and empty slots — shown from the first
+  // question onward (change: smart-build-delight). Seeded from the state's own
+  // seed, which is the same one `composeGame` will be handed, so what the creator
+  // watches accumulate is what they get. Carries no mission identity: the reveal
+  // is where missions first appear.
+  const shape = useMemo(
+    () => previewShape(TASK_BANK, smartBuildAnswers(state), state.seed, recent),
+    [state, recent],
+  );
 
   const tagLabel = (id: BankTagId): string => bankTagLabel(id, lang === 'en' ? 'en' : 'he');
 
@@ -74,7 +114,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       subtitle: w.occasionSub,
       render: () => (
         <div className="flex flex-col gap-2">
-          <ChipRow
+          <ChoiceCardRow
             label={w.occasionLabel}
             options={SMART_BUILD_OCCASIONS}
             value={a.occasion}
@@ -90,7 +130,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       title: w.whoTitle,
       subtitle: w.whoSub,
       render: () => (
-        <ChipRow
+        <ChoiceCardRow
           label={w.whoLabel}
           options={SMART_BUILD_WHO.map((o) => o.id)}
           value={a.who}
@@ -107,7 +147,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
         // Just the places now. Whether missions get PINNED to real spots used to
         // be a second question here — it is a preparation level, and it is asked
         // as one (see the prep step below).
-        <MultiChipRow
+        <MultiChoiceCardRow
           label={w.areasLabel}
           options={SMART_BUILD_AREAS}
           values={a.areas}
@@ -151,7 +191,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       title: w.difficultyTitle,
       subtitle: w.difficultySub,
       render: () => (
-        <ChipRow
+        <ChoiceCardRow
           label={w.difficultyLabel}
           options={SMART_BUILD_DIFFICULTIES}
           value={a.difficultyPreference}
@@ -180,7 +220,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
       title: w.preferredTitle,
       subtitle: w.preferredSub,
       render: () => (
-        <MultiChipRow
+        <MultiChoiceCardRow
           label={w.preferredLabel}
           options={SMART_BUILD_PREFERRED_TAGS}
           values={a.preferredTags}
@@ -201,7 +241,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
     const next = smartBuildReducer(state, { type: 'next' });
     // The reducer is the single source of "are we done" — asking it, rather than
     // comparing indexes here, is what keeps that rule in one place.
-    if (isSmartBuildComplete(next)) { onFinish(smartBuildAnswers(next)); return; }
+    if (isSmartBuildComplete(next)) { onFinish(smartBuildAnswers(next), next.seed); return; }
     dispatch({ type: 'next' });
   }
 
@@ -214,19 +254,48 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish }: {
   }
 
   return (
-    <SteppedWizard
-      steps={steps}
-      index={Math.min(state.index, SMART_BUILD_QUESTION_ORDER.length - 1)}
-      onBack={handleBack}
-      onNext={handleNext}
-      busy={busy}
-      finalNote={previewLine}
-      labels={{
-        back: w.back,
-        next: w.next,
-        finish: w.smartFinish,
-        progress: (step, total) => w.smartProgress(step, total),
-      }}
-    />
+    // The panel sits BESIDE the shell, never inside it: SteppedWizard is
+    // presentational-only and the story path is due to move onto it, so a shell
+    // that had learned what a game's shape is would have to be untangled first.
+    //
+    // Order is deliberate. On a phone the panel is a scrollable strip ABOVE the
+    // question (a second column at 390px would squeeze both into uselessness);
+    // from `lg` it becomes the trailing column, which in the RTL default leaves
+    // the questions in the reading-start position.
+    <div className="flex flex-col gap-4 lg:flex-row-reverse lg:items-start lg:gap-5">
+      <div className="lg:w-64 lg:shrink-0">
+        <SmartBuildShapePanel
+          stages={shape.stages}
+          possible={shape.possible}
+          labels={{
+            title: w.shapeTitle,
+            hint: w.shapeHint,
+            stage: (n) => w.shapeStage(n),
+            slots: (n) => w.shapeSlots(n),
+            empty: w.shapeEmpty,
+            slotPending: w.shapeSlotPending,
+          }}
+        />
+      </div>
+
+      {/* min-w-0 so a long question cannot push the flex row wider than the
+          viewport and start the page scrolling sideways. */}
+      <div className="flex-1 min-w-0">
+        <SteppedWizard
+          steps={steps}
+          index={Math.min(state.index, SMART_BUILD_QUESTION_ORDER.length - 1)}
+          onBack={handleBack}
+          onNext={handleNext}
+          busy={busy}
+          finalNote={previewLine}
+          labels={{
+            back: w.back,
+            next: w.next,
+            finish: w.smartFinish,
+            progress: (step, total) => w.smartProgress(step, total),
+          }}
+        />
+      </div>
+    </div>
   );
 }

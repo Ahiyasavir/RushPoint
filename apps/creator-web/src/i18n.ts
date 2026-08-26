@@ -516,9 +516,28 @@ const HE = {
       preferredHint:    'אפשר לבחור כמה, או כלום.',
       // The last screen tells the creator how big the game will be, so the final
       // tap is informed rather than an act of faith. Only the mission COUNT is
-      // promised — the stage shape and the mission list are drawn at random, so
-      // naming either would describe a game they are not going to get.
+      // promised here — the mission LIST is drawn at random, so naming it would
+      // describe a game they are not going to get. (The stage SHAPE is now shown
+      // live by the panel below, which is honest because it shares the composer's
+      // seed — change: smart-build-delight.)
       previewCount:     (missions: number) => `נרכיב לכם משחק של בערך ${missions} משימות`,
+      // ── The live shape panel (change: smart-build-delight) ─────────────────
+      // Stages are labelled BY POSITION, never by their composed name: the names
+      // are drawn after every mission is chosen, so no preview can know them.
+      // They are part of the reveal.
+      shapeTitle:       'המשחק שלכם מתחיל להיבנות',
+      shapeHint:        'כל תשובה מוסיפה עוד. המשימות עצמן ייחשפו בסוף.',
+      shapeStage:       (n: number) => `שלב ${n}`,
+      shapeSlots:       (n: number) => (n === 1 ? 'משימה אחת' : `${n} משימות`),
+      shapeEmpty:       'עוד רגע נדע איך המשחק ייראה.',
+      shapeSlotPending: 'משימה שתיחשף בסוף',
+      // ── The reveal (change: smart-build-delight) ───────────────────────────
+      revealTitle:      'המשחק שלכם מוכן',
+      revealSub:        'הנה מה שהרכבנו לכם. אפשר לשנות הכול בעורך.',
+      revealMissions:   (n: number) => (n === 1 ? 'משימה אחת' : `${n} משימות`),
+      revealContinue:   'לעריכת המשחק',
+      revealShare:      'שיתוף',
+      revealAria:       'המשחק שהורכב',
       // Stage titles per OCCASION — keyed occasion → role (opener/middle/finale),
       // read by ComposerDescriptionCopy.occasionStageNames. An occasion with no
       // entry here falls back to the generic stageNames list, so this map may
@@ -2812,6 +2831,20 @@ const EN: typeof HE = {
       preferredHint:    'Pick a few, or none at all.',
       // See the note on the Hebrew entry — only the mission count is promised.
       previewCount:     (missions: number) => `We will compose a game of about ${missions} missions`,
+      // The live shape panel. Stages are labelled by POSITION — see the Hebrew note.
+      shapeTitle:       'Your game is taking shape',
+      shapeHint:        'Every answer adds to it. The missions themselves are revealed at the end.',
+      shapeStage:       (n: number) => `Stage ${n}`,
+      shapeSlots:       (n: number) => (n === 1 ? '1 mission' : `${n} missions`),
+      shapeEmpty:       'In a moment we will know what your game looks like.',
+      shapeSlotPending: 'A mission revealed at the end',
+      // The reveal. See the note on the Hebrew entries.
+      revealTitle:      'Your game is ready',
+      revealSub:        'Here is what we composed. You can change any of it in the editor.',
+      revealMissions:   (n: number) => (n === 1 ? '1 mission' : `${n} missions`),
+      revealContinue:   'Open the editor',
+      revealShare:      'Share',
+      revealAria:       'The composed game',
       occasionStageNames: {
         birthday: {
           opener: ['Let the party begin', 'Opening act', 'Warming up'],

@@ -39,6 +39,7 @@ import {
   SMART_BUILD_DIFFICULTIES,
   SMART_BUILD_PREFERRED_TAGS,
   initialSmartBuildState,
+  drawSmartBuildSeed,
   smartBuildReducer,
   smartBuildDefaults,
   smartBuildProgress,
@@ -460,6 +461,63 @@ console.log('\n── 10. a junk numeric answer never reaches the composer ─�
   ok('a negative duration falls back to a positive default', Number.isFinite(a.minutes) && a.minutes > 0);
   ok('…and the result still composes',
     composeGame(TASK_BANK, a, COPY, seededRng(1), { recentBankKeys: [] }) !== null);
+}
+
+console.log('\n── 11. the seed is fixed for the questionnaire\'s life ──────');
+{
+  // The live shape panel predicts the game by seeding a stream with this value,
+  // and `composeGame` is later handed `seededRng(seed)`. If the seed moved while
+  // the creator answered, the panel would re-roll the blueprint on every tap and
+  // the shape they watched accumulate would not be the shape they were handed.
+  // (change: smart-build-delight)
+  const start = initialSmartBuildState();
+
+  let s = start;
+  let drifted = '';
+  const touch = (label: string, next: SmartBuildState) => {
+    if (next.seed !== start.seed) drifted ||= `${label}: ${start.seed} → ${next.seed}`;
+    return next;
+  };
+
+  s = touch('setAnswer occasion', smartBuildReducer(s, { type: 'setAnswer', key: 'occasion', value: 'birthday' }));
+  s = touch('setAnswer who', smartBuildReducer(s, { type: 'setAnswer', key: 'who', value: 'teens' }));
+  s = touch('setAnswer minutes', smartBuildReducer(s, { type: 'setAnswer', key: 'minutes', value: 120 }));
+  s = touch('togglePreferred', smartBuildReducer(s, { type: 'togglePreferred', tag: SMART_BUILD_PREFERRED_TAGS[0] }));
+  s = touch('toggleArea', smartBuildReducer(s, { type: 'toggleArea', area: 'mall' }));
+  for (let i = 0; i < SMART_BUILD_QUESTION_ORDER.length; i++) {
+    s = touch(`next ${i}`, smartBuildReducer(s, { type: 'next' }));
+  }
+  for (let i = 0; i < SMART_BUILD_QUESTION_ORDER.length; i++) {
+    s = touch(`back ${i}`, smartBuildReducer(s, { type: 'back' }));
+  }
+  s = touch('unknown action', smartBuildReducer(s, { type: 'nonsense' } as never));
+  eq('the seed survives every action, forwards and backwards', drifted, '');
+
+  // A malformed seed is COERCED, never re-drawn: safeState runs on every action,
+  // so re-drawing would hand the panel a new blueprint on every tap.
+  const coerced = smartBuildReducer({ index: 0, answers: smartBuildDefaults(), seed: NaN } as never, { type: 'next' });
+  ok('a malformed seed is coerced to a usable number',
+    typeof coerced.seed === 'number' && Number.isFinite(coerced.seed) && coerced.seed >= 0);
+  const twice = smartBuildReducer(coerced, { type: 'next' });
+  eq('…and coercing is stable, not a fresh draw each action', twice.seed, coerced.seed);
+
+  // A fresh questionnaire must be able to differ, or the same answers would
+  // always yield the same game and the seed would be decorative.
+  const seeds = new Set(Array.from({ length: 40 }, () => initialSmartBuildState().seed));
+  ok(`a fresh questionnaire draws a fresh seed (${seeds.size} distinct in 40)`, seeds.size > 1);
+
+  // Total: an injected rng that misbehaves must still yield a usable seed.
+  let seedThrew = '';
+  for (const bad of [() => NaN, () => Infinity, () => -1, () => 2, (() => { throw new Error('x'); })]) {
+    try {
+      const v = drawSmartBuildSeed(bad as () => number);
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) seedThrew ||= `bad seed ${String(v)}`;
+    } catch (e) {
+      // A throwing rng is the caller's problem, but must not be OURS to crash on.
+      if (String(e).includes('x')) seedThrew ||= 'a throwing rng escaped drawSmartBuildSeed';
+    }
+  }
+  eq('a misbehaving rng still yields a usable seed', seedThrew, '');
 }
 
 console.log('');

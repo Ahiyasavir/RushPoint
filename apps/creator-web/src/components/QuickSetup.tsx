@@ -20,10 +20,11 @@
 // template author's note: nothing authored is thrown away, it just stops being the
 // voice the product itself speaks in. That authored text IS content, not a
 // dictionary key, so it alone renders with dir="auto".
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import type { TemplateWizardStep } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
 import { Button } from './ui';
+import ConfettiBurst from './ConfettiBurst';
 import type { QuickSetupCopyKey } from '../lib/quickSetup';
 
 /** How long the ring stays on the target after we focus it. */
@@ -336,37 +337,9 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
   );
 }
 
-/** One confetti piece: a randomized fall, deterministic only in its CSS shape. */
-function ConfettiPiece({ index }: { index: number }) {
-  const seed = useRef(Math.random());
-  const left = (seed.current * 94 + (index * 37) % 94) % 96;
-  const hue = [0, 32, 48, 200, 260][index % 5];
-  const delay = (index % 10) * 0.06;
-  const duration = 1.7 + (index % 5) * 0.22;
-  const drift = ((index % 7) - 3) * 14;
-  return (
-    <span
-      className="rp-confetti-piece"
-      style={{
-        left: `${left}%`,
-        background: `hsl(${hue} 85% 60%)`,
-        animationDelay: `${delay}s`,
-        animationDuration: `${duration}s`,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ['--rp-confetti-drift' as any]: `${drift}px`,
-      }}
-    />
-  );
-}
-
-/** A confetti burst — CSS-driven, no charting/animation dependency. */
-function ConfettiBurst() {
-  return (
-    <div className="rp-confetti-field" aria-hidden>
-      {Array.from({ length: 28 }, (_, i) => <ConfettiPiece key={i} index={i} />)}
-    </div>
-  );
-}
+// The confetti now lives in components/ConfettiBurst.tsx so the smart build's
+// reveal fires the SAME burst rather than a second copy of it
+// (change: smart-build-delight).
 
 /**
  * The finish-line moment.

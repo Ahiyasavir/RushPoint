@@ -1181,8 +1181,9 @@ export interface CompositionPreview {
    *
    * Deterministic given the answers — the budget depends only on the requested
    * duration, the eligible pool and its average cost, none of which involve the
-   * rng. Which missions get chosen, and the stage shape, are NOT deterministic,
-   * which is why neither is previewed here.
+   * rng. WHICH missions get chosen is not deterministic and is never previewed.
+   * The stage SHAPE is deterministic given the answers AND a seed — see
+   * `previewShape`.
    */
   missionCount: number;
   /** False when the bank cannot make a game from these answers at all. */
@@ -1190,75 +1191,63 @@ export interface CompositionPreview {
 }
 
 /**
- * What the creator is about to get.
+ * The stage plan: how many stages, and how many missions each one is to hold.
  *
- * Answers the one question the questionnaire could not: "how big is this
- * going to be?" Six questions then a finished game in the Builder is a lot of
- * commitment on faith; a single honest number on the last screen makes the
- * final tap an informed one.
- *
- * Deliberately reports ONLY the mission count. Stage count comes from a
- * randomly drawn blueprint and the mission list from band sampling, so
- * previewing either would show the creator a game they are not going to get.
+ * Everything `composeGame` decides BEFORE it starts choosing missions. Returned
+ * by `planStages` and consumed by both the composer and the preview, so the two
+ * cannot disagree about the shape of the game.
  */
-export function previewComposition(
-  bank: readonly TaskBankEntry[],
-  answers: ComposerAnswers,
-): CompositionPreview {
-  const ctx = buildFitContext(answers, { recentBankKeys: [] });
-  const usable = usableBankFor(bank, ctx);
-  if (usable.length === 0) return { missionCount: 0, possible: false };
-
-  const walk = walkMinutesFor(ctx.setting);
-  const minutes = num((answers ?? {} as Partial<ComposerAnswers>).minutes);
-  const budget = targetTaskCount(minutes, usable.length, averageMissionCost(usable, walk));
-  return { missionCount: Math.max(0, budget), possible: budget > 0 };
+export interface StagePlan {
+  blueprint: StageBlueprint;
+  /** Planned mission count per stage, index-aligned with the stages. */
+  counts: number[];
+  /** The missions these answers can actually use. */
+  usable: TaskBankEntry[];
+  /** Total planned missions. */
+  budget: number;
 }
 
-export function composeGame(
+/**
+ * Plan the stages — the composer's steps 1-5, and nothing after them.
+ *
+ * ⚠️ THE SINGLE SOURCE OF THE GAME'S SHAPE. `composeGame` calls this and then
+ * fills the slots; `previewShape` calls this and stops. They are one function
+ * apart on purpose: a preview that re-derived the shape would drift the first
+ * time either side was tuned, and the creator would watch a four-stage game
+ * accumulate and be handed a three-stage one. This is the same rule
+ * `usableBankFor` already lives by, applied one level up.
+ *
+ * ⚠️ CONSUMES EXACTLY ONE DRAW — the blueprint — and it is the composer's FIRST
+ * draw (see the module header's draw sequence). That is what lets `previewShape`
+ * seed a fresh stream, take the same blueprint, and stop, without ever
+ * disturbing the sequence the composer will consume. Adding a draw here, or
+ * moving this call later, silently re-rolls every seeded game.
+ *
+ * Returns null when these answers cannot make a game at all.
+ */
+export function planStages(
   bank: readonly TaskBankEntry[],
   answers: ComposerAnswers,
-  copy: ComposerDescriptionCopy,
-  rng: () => number = Math.random,
+  rng: () => number,
   recent: RecentPickState = { recentBankKeys: [] },
-): ComposerResult | null {
-  // ── 1. The usable bank ────────────────────────────────────────────────────
+): StagePlan | null {
   if (!Array.isArray(bank)) return null;
 
-  const ctx = buildFitContext(answers, recent);
-  const a = (answers ?? {}) as Partial<ComposerAnswers>;
-  const preference = safePreference(a.difficultyPreference);
-  const people = Math.max(1, Math.floor(num(a.people) ?? 1));
-  const minutes = num(a.minutes);
-  const ageBandId = str(a.ageBandId);
-
+  const a = (answers ?? {} as Partial<ComposerAnswers>);
+  const ctx = buildFitContext(answers, recent ?? { recentBankKeys: [] });
   const usable = usableBankFor(bank, ctx);
-
   if (usable.length === 0) return null;
 
-  // ── 2. Budget ─────────────────────────────────────────────────────────────
+  // ── Budget ────────────────────────────────────────────────────────────────
   // Priced from the ELIGIBLE pool, not a global constant: the same answer asks
   // for more missions when they are played from anywhere (no walking) than when
   // each one costs a walk to reach it.
-  // Does the creator want missions put on a map? An explicit answer, not an
-  // inference from setting (see wantsPlacedMissions) — it changes what a
-  // mission costs (a pinned mission gains a walk) and therefore how many fit.
-  const locationMissions = a.locationMissions === true;
-  const placedGame = wantsPlacedMissions(ctx.setting, locationMissions);
-  // NOT gated on `placedGame`. Walking is a property of the VENUE, not of
-  // whether the creator opted into pinning: a team crosses the mall between
-  // missions whether or not each one carries a map pin. Gating it here made an
-  // hour-long indoor game price every mission as if it were played standing
-  // still, so it asked for more missions than the bank could supply and reported
-  // a shortfall that was really a costing error. Only `fromAnywhere` — no venue
-  // at all — genuinely has nowhere to walk to, and `walkMinutesFor` already
-  // returns 0 for it.
   const walk = walkMinutesFor(ctx.setting);
-  const placePrompt = oneParagraph(copyCall(copy?.placeMissionPrompt));
+  const minutes = num(a.minutes);
   const budget = targetTaskCount(minutes, usable.length, averageMissionCost(usable, walk));
   if (budget <= 0) return null;
 
-  // ── 3-4. Blueprint (one draw) ─────────────────────────────────────────────
+  // ── Blueprint (ONE draw, first and unconditional) ─────────────────────────
   const eligible = eligibleBlueprints(budget);
   // A budget too small for any authored blueprint: synthesize the shape that
   // keeps stages worth entering — as many stages as the budget can feed at
@@ -1281,8 +1270,127 @@ export function composeGame(
   const blueprint = occasionBlueprint(a.occasion, budget) ?? drawn;
   if (!blueprint) return null;
 
-  // ── 5. Per-stage counts ───────────────────────────────────────────────────
-  const counts = distributeTaskCounts(blueprint, budget);
+  return { blueprint, counts: distributeTaskCounts(blueprint, budget), usable, budget };
+}
+
+/**
+ * What the creator is about to get.
+ *
+ * Answers the one question the questionnaire could not: "how big is this
+ * going to be?" Six questions then a finished game in the Builder is a lot of
+ * commitment on faith; a single honest number on the last screen makes the
+ * final tap an informed one.
+ *
+ * Reports the mission COUNT only. Which missions get chosen comes from band
+ * sampling, so previewing them would show the creator a game they are not going
+ * to get. For the stage shape — which IS predictable once a seed is shared —
+ * see `previewShape`.
+ *
+ * `recent` must be the SAME recent-picks state the composer will be handed:
+ * recent keys feed `fitScore`, which feeds `usableBankFor`, which feeds the
+ * budget. Defaulting it to empty here while the composer got a real list is how
+ * this number silently disagreed with the delivered game for any creator who
+ * had composed before.
+ */
+export function previewComposition(
+  bank: readonly TaskBankEntry[],
+  answers: ComposerAnswers,
+  recent: RecentPickState = { recentBankKeys: [] },
+): CompositionPreview {
+  const ctx = buildFitContext(answers, recent ?? { recentBankKeys: [] });
+  const usable = usableBankFor(bank, ctx);
+  if (usable.length === 0) return { missionCount: 0, possible: false };
+
+  const walk = walkMinutesFor(ctx.setting);
+  const minutes = num((answers ?? {} as Partial<ComposerAnswers>).minutes);
+  const budget = targetTaskCount(minutes, usable.length, averageMissionCost(usable, walk));
+  return { missionCount: Math.max(0, budget), possible: budget > 0 };
+}
+
+/** One stage's place in the shape: how many missions it plans to hold. */
+export interface ShapeStage {
+  /** Planned mission count. A PLAN — the composer may drop a slot it cannot fill. */
+  slots: number;
+}
+
+/**
+ * The shape of the game these answers describe: stages and how many missions
+ * each holds, with no mission chosen.
+ *
+ * What the smart-build panel renders while the creator answers. It carries NO
+ * mission identity by construction — it never reaches the fill step — so the
+ * reveal still has something to reveal, and a hidden mission's identity is never
+ * sitting in a rendered payload.
+ *
+ * ⚠️ HONEST ONLY UNDER A SHARED SEED. The stage count is not a function of the
+ * answers alone: unless the occasion supplies a blueprint, the composer draws one
+ * at random. Callers MUST pass the same seed they will later hand
+ * `composeGame` via `seededRng`, or this predicts a game the creator will not
+ * receive. `scripts/test-preview-shape.ts` is the assertion that it does.
+ *
+ * ⚠️ A PLAN, NOT A PROMISE. The composer drops a planned slot whose candidate
+ * pool is exhausted, so the delivered game can hold FEWER missions than this
+ * says. It never holds more. The reveal reconciles the difference.
+ *
+ * Stage NAMES are deliberately absent: `nameStages` runs after every mission is
+ * chosen, so no preview can know them without running the whole fill sequence.
+ * The panel labels stages by position; the names are part of the reveal.
+ *
+ * Total: any answers, any seed, any bank yields a usable result, never a throw.
+ */
+export function previewShape(
+  bank: readonly TaskBankEntry[],
+  answers: ComposerAnswers,
+  seed: number,
+  recent: RecentPickState = { recentBankKeys: [] },
+): { stages: ShapeStage[]; possible: boolean } {
+  const plan = planStages(bank, answers, seededRng(seed), recent ?? { recentBankKeys: [] });
+  if (!plan) return { stages: [], possible: false };
+  return {
+    stages: plan.counts.map((slots) => ({ slots: Math.max(0, Math.floor(slots)) })),
+    possible: true,
+  };
+}
+
+export function composeGame(
+  bank: readonly TaskBankEntry[],
+  answers: ComposerAnswers,
+  copy: ComposerDescriptionCopy,
+  rng: () => number = Math.random,
+  recent: RecentPickState = { recentBankKeys: [] },
+): ComposerResult | null {
+  // ── 1-5. The usable bank, the budget, the blueprint and the per-stage counts
+  // All of it lives in `planStages`, which the smart-build preview also calls —
+  // see its header for why that sharing is load-bearing rather than tidy. It
+  // consumes exactly one draw (the blueprint), and it must stay the FIRST draw.
+  if (!Array.isArray(bank)) return null;
+
+  const ctx = buildFitContext(answers, recent);
+  const a = (answers ?? {}) as Partial<ComposerAnswers>;
+  const preference = safePreference(a.difficultyPreference);
+  const people = Math.max(1, Math.floor(num(a.people) ?? 1));
+  const minutes = num(a.minutes);
+  const ageBandId = str(a.ageBandId);
+
+  // Does the creator want missions put on a map? An explicit answer, not an
+  // inference from setting (see wantsPlacedMissions) — it changes what a
+  // mission costs (a pinned mission gains a walk) and therefore how many fit.
+  const locationMissions = a.locationMissions === true;
+  const placedGame = wantsPlacedMissions(ctx.setting, locationMissions);
+  // NOT gated on `placedGame`. Walking is a property of the VENUE, not of
+  // whether the creator opted into pinning: a team crosses the mall between
+  // missions whether or not each one carries a map pin. Gating it here made an
+  // hour-long indoor game price every mission as if it were played standing
+  // still, so it asked for more missions than the bank could supply and reported
+  // a shortfall that was really a costing error. Only `fromAnywhere` — no venue
+  // at all — genuinely has nowhere to walk to, and `walkMinutesFor` already
+  // returns 0 for it.
+  const walk = walkMinutesFor(ctx.setting);
+  const placePrompt = oneParagraph(copyCall(copy?.placeMissionPrompt));
+
+  const plan0 = planStages(bank, answers, rng, recent);
+  if (!plan0) return null;
+  const { blueprint, counts, usable } = plan0;
   const stageCount = counts.length;
 
   // ── 6. Slot order — bookends FIRST (see the module header) ────────────────

@@ -116,6 +116,16 @@ export interface WizardState {
    * decision for all three paths.
    */
   composerAnswers: ComposerAnswers | null;
+  /**
+   * The smart-build seed, handed back with the answers (change: smart-build-delight).
+   *
+   * Carried alongside `composerAnswers` rather than inside them because it is not
+   * an answer — the composer takes it as its rng, not as part of its payload. It
+   * has to survive this far because the live shape panel predicted the game's
+   * shape from it, and composing under a different seed would hand the creator a
+   * different shape from the one they watched being built.
+   */
+  composerSeed: number | null;
 }
 
 export type WizardAction =
@@ -124,7 +134,7 @@ export type WizardAction =
   | { type: 'back' }
   | { type: 'choosePath'; path: WizardPath }
   | { type: 'setAnswer'; key: 'type' | 'people' | 'duration' | 'age'; value: string | number }
-  | { type: 'setComposerAnswers'; answers: ComposerAnswers }
+  | { type: 'setComposerAnswers'; answers: ComposerAnswers; seed?: number }
   | { type: 'cancel' };
 
 /** What the wizard hands to the Dashboard to actually create something. */
@@ -144,6 +154,12 @@ export type CreationPlan =
       title: string;
       /** Everything the composer needs. Composition itself happens at the call site. */
       composerAnswers: ComposerAnswers;
+      /**
+       * The rng seed to compose under — the SAME one the live shape panel used.
+       * The call site must pass `seededRng(composerSeed)`, not `Math.random`, or
+       * the creator is handed a different shape from the one they watched.
+       */
+      composerSeed: number;
     };
 
 /** The answer every question falls back to when the creator skips it. */
@@ -164,6 +180,7 @@ export function initialWizardState(): WizardState {
     path: null,
     answers: { type: 'missions', people: d.people, duration: d.minutes, age: d.ageBandId },
     composerAnswers: null,
+    composerSeed: null,
   };
 }
 
@@ -198,7 +215,11 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
     }
     case 'setComposerAnswers': {
       if (!a.answers || typeof a.answers !== 'object') return s;
-      return { ...s, composerAnswers: a.answers };
+      // An absent or malformed seed leaves the stored one alone rather than
+      // writing null over it: losing the seed here would silently drop the
+      // questionnaire back to composing a game nobody previewed.
+      const seed = typeof a.seed === 'number' && Number.isFinite(a.seed) ? a.seed : s.composerSeed;
+      return { ...s, composerAnswers: a.answers, composerSeed: seed };
     }
     case 'next':
       if (s.step === 'name') return { ...s, step: 'path' };
@@ -243,11 +264,17 @@ export function buildCreationPlan(state: WizardState, untitledFallback = ''): Cr
     // A creator who tapped straight through never dispatched `setComposerAnswers`,
     // so fall back to the questionnaire's OWN defaults rather than inventing a
     // set here — one definition of "the default game", in the reducer that owns
-    // those questions (rule 4: no question can dead-end the flow).
+    // those questions (rule 4: no question can dead-end the flow). The same
+    // applies to the seed: a fresh one composes a valid game, it just was not the
+    // one any panel predicted — which is correct, because no panel ran.
+    const fallback = initialSmartBuildState();
     return {
       kind: 'smart_build',
       title,
-      composerAnswers: state.composerAnswers ?? smartBuildAnswers(initialSmartBuildState()),
+      composerAnswers: state.composerAnswers ?? smartBuildAnswers(fallback),
+      composerSeed: typeof state.composerSeed === 'number' && Number.isFinite(state.composerSeed)
+        ? state.composerSeed
+        : fallback.seed,
     };
   }
 

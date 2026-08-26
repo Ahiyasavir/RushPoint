@@ -46,10 +46,12 @@ export interface WizardSubmission {
   tags?: string[];
 }
 
-export default function NewGameWizard({ templates, busy, onSubmit }: {
+export default function NewGameWizard({ templates, busy, onSubmit, recentBankKeys }: {
   templates: readonly WizardTemplate[];
   busy?: boolean;
   onSubmit: (submission: WizardSubmission) => void;
+  /** Passed straight through to the smart build — see its own prop note. */
+  recentBankKeys?: string[];
 }) {
   const t = useT();
   const d = t.dashboard;
@@ -189,11 +191,14 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
     return (
       <SmartBuildWizard
         busy={busy}
+        recentBankKeys={recentBankKeys}
         onLeave={() => dispatch({ type: 'back' })}
-        onFinish={(answers: ComposerAnswers) => {
-          // Record the answers, THEN finish — `buildCreationPlan` reads them off
-          // the state, so finishing first would compose from the defaults.
-          const withAnswers = wizardReducer(state, { type: 'setComposerAnswers', answers });
+        onFinish={(answers: ComposerAnswers, seed: number) => {
+          // Record the answers AND the seed, THEN finish — `buildCreationPlan`
+          // reads them off the state, so finishing first would compose from the
+          // defaults. The seed rides along so the game composed at the call site
+          // is the one the live shape panel predicted.
+          const withAnswers = wizardReducer(state, { type: 'setComposerAnswers', answers, seed });
           const done = wizardReducer(withAnswers, { type: 'next' });
           const plan = buildCreationPlan(done, d.untitledGame);
           if (plan) onSubmit({ plan });
