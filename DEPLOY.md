@@ -58,7 +58,7 @@ Recorded here because it was not written down anywhere and the records are NOT u
 
 | Hostname | Serves | Records | Cloudflare |
 |---|---|---|---|
-| `rush-point.com` | participant app (play-web) | `A 199.36.158.100` — **no AAAA** | DNS-only |
+| `rush-point.com` | participant app (play-web) | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `www.rush-point.com` | 301 → apex | Cloudflare addresses | proxied |
 | `creator.rush-point.com` | creator console | `A 199.36.158.100` + `AAAA 2620:0:890::100` | DNS-only |
 | `api.rush-point.com` | self-hosted API (VPS) | see `deploy/CLOUDFLARE.md` | proxied |
@@ -66,21 +66,21 @@ Recorded here because it was not written down anywhere and the records are NOT u
 `199.36.158.100` / `2620:0:890::100` are Firebase Hosting's own published custom-domain records,
 so a Firebase-served host should carry **both**.
 
-> ⚠️ **OPEN: the apex is missing its AAAA record.** `creator.` has one and the apex does not, so an
-> IPv6-only client with no NAT64/DNS64 can reach the creator console but not the participant app —
-> and the failure path is reachable: `www.` resolves over IPv6 (it is Cloudflare-proxied) and 301s
-> to an apex that then has no IPv6 address to connect to. Most mobile carriers run DNS64/NAT64, which
-> is why this has not shown up as an outage. **Fix:** add `AAAA  @  2620:0:890::100`, DNS-only (grey
-> cloud) to match the existing apex `A` record.
+> ✅ **RESOLVED 2026-08-26** — the apex was missing its AAAA record (`creator.` had one, the apex
+> didn't), and the failure path was reachable: `www.` resolves over IPv6 (Cloudflare-proxied) and
+> 301s to the apex, which then had no IPv6 address to connect to. Most mobile carriers run
+> DNS64/NAT64, which is why it never showed up as an outage. Fixed by adding
+> `AAAA  @  2620:0:890::100`, DNS-only (grey cloud), matching the existing apex `A` record. Verified
+> both by DNS (`1.1.1.1` / Cloudflare DoH — `8.8.8.8` took roughly an hour to pick up the new record,
+> which is normal propagation lag, not a sign anything was wrong) and by a live request straight to
+> the new address returning `HTTP/1.1 200 OK` over IPv6.
 >
 > Verifying IPv6 from Windows is misleading — `curl` on schannel fails the handshake against
 > Firebase Hosting even when the host is perfectly healthy. Use openssl, which is honest:
 > ```bash
-> printf 'GET / HTTP/1.1
-Host: creator.rush-point.com
-Connection: close
-
-' >   | openssl s_client -6 -quiet -connect creator.rush-point.com:443 >       -servername creator.rush-point.com 2>/dev/null | head -1   # expect HTTP/1.1 200 OK
+> printf 'GET / HTTP/1.1\r\nHost: creator.rush-point.com\r\nConnection: close\r\n\r\n' \
+>   | openssl s_client -6 -quiet -connect creator.rush-point.com:443 \
+>       -servername creator.rush-point.com 2>/dev/null | head -1   # expect HTTP/1.1 200 OK
 > ```
 > Also expect the served certificate's CN to be some **unrelated** domain: Firebase Hosting puts
 > many customers on one Google Trust Services cert and our hostnames appear in its SAN list, not its
