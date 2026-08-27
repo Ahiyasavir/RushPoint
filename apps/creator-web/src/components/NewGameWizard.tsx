@@ -164,11 +164,11 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
                 <div className="flex items-center gap-1.5">
                   <span className="text-lg leading-none shrink-0">🧠</span>
                   <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.smartTitle}</span>
-                  <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-rp-fire text-[10px] font-medium px-1.5 py-0.5">
+                  <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-ink-fire text-[12px] font-medium px-1.5 py-0.5">
                     {w.smartRecommended}
                   </span>
                 </div>
-                <div className="text-[11px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.smartBody}</div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.smartBody}</div>
               </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'guided' })}
                 className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
@@ -176,7 +176,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
                   <span className="text-lg leading-none shrink-0">📖</span>
                   <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.guidedTitle}</span>
                 </div>
-                <div className="text-[11px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.guidedBody}</div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.guidedBody}</div>
               </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'scratch' })}
                 className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
@@ -184,7 +184,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
                   <span className="text-lg leading-none shrink-0">📄</span>
                   <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.scratchTitle}</span>
                 </div>
-                <div className="text-[11px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.scratchBody}</div>
+                <div className="text-[13px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.scratchBody}</div>
               </button>
             </div>
             <button type="button" onClick={() => dispatch({ type: 'back' })}
@@ -196,7 +196,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
         {/* Only shown once the creator has typed something, so an untouched field
             never looks like an error. */}
         {nameTouched && !state.name.trim() && (
-          <p className="text-[11px] text-[--ink-3]">{d.untitledGame}</p>
+          <p className="text-[13px] text-[--ink-3]">{d.untitledGame}</p>
         )}
       </div>
     );
@@ -267,7 +267,7 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
         render={(v) => ageBandLabel(v)} />
 
       {showConsentNotice && (
-        <p className="text-[11px] text-[--ink-2] bg-[--surface-2] rounded-lg px-3 py-2 leading-relaxed">
+        <p className="text-[13px] text-[--ink-2] bg-[--surface-2] rounded-lg px-3 py-2 leading-relaxed">
           {w.consentNotice}
         </p>
       )}
@@ -278,14 +278,14 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
           back in the creation RESPONSE. */}
       {template && (
         <div className="rounded-xl border border-[--rp-border] bg-[--surface-1] p-3">
-          <div className="text-[11px] text-[--ink-3]">{w.previewTitle}</div>
+          <div className="text-[13px] text-[--ink-3]">{w.previewTitle}</div>
           <div className="flex items-center gap-2 mt-1">
             <span className="text-xl leading-none">{template.templateEmoji || '🧩'}</span>
             <span className="font-brand font-semibold text-[--ink-1] text-sm min-w-0 truncate" dir="auto">
               {template.title}
             </span>
           </div>
-          <div className="text-[11px] text-[--ink-3] mt-1">
+          <div className="text-[13px] text-[--ink-3] mt-1">
             {w.previewMeta(template.stageCount, template.taskCount)}
           </div>
         </div>

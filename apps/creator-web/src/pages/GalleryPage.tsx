@@ -243,7 +243,7 @@ export default function GalleryPage() {
           {(['games', 'tasks'] as const).map((tb) => (
             <button key={tb} onClick={() => setTab(tb)}
               className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                tab === tb ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
+                tab === tb ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
               {tb === 'games' ? gl.tabGames : gl.tabTasks}
             </button>
           ))}
@@ -252,7 +252,7 @@ export default function GalleryPage() {
           {(['list', 'map'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                view === v ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
+                view === v ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}>
               {v === 'list' ? gl.viewList : gl.viewMap}
             </button>
           ))}
@@ -269,13 +269,13 @@ export default function GalleryPage() {
       <div className="mb-5 flex flex-col gap-3">
         {popularTags.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-semibold text-[--ink-3] me-1">{gl.filterPopularTags}</span>
+            <span className="text-[13px] font-semibold text-[--ink-3] me-1">{gl.filterPopularTags}</span>
             {popularTags.map((tag) => {
               const on = activeTags.includes(tag);
               return (
                 <button key={tag} type="button" onClick={() => toggleTag(tag)} aria-pressed={on}
-                  className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
-                    on ? 'border-rp-fire/40 bg-rp-fire/12 text-rp-fire'
+                  className={`rounded-full border px-2.5 py-0.5 text-[13px] font-semibold transition-colors ${
+                    on ? 'border-rp-fire/40 bg-rp-fire/12 text-ink-fire'
                        : 'border-[--rp-border] text-[--ink-3] hover:text-[--ink-1]'}`}>
                   {tag}
                 </button>
@@ -307,7 +307,7 @@ export default function GalleryPage() {
           )}
           {filtersActive && (
             <button type="button" onClick={clearFilters}
-              className="text-[11px] font-semibold text-[--ink-3] underline-offset-2 hover:text-rp-fire hover:underline">
+              className="text-[13px] font-semibold text-[--ink-3] underline-offset-2 hover:text-ink-fire hover:underline">
               {gl.filterClear}
             </button>
           )}
@@ -366,7 +366,7 @@ export default function GalleryPage() {
                   <Badge color="cyan">{MODE_LABEL[pg.mode] ?? pg.mode}</Badge>
                 </div>
                 <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{pg.description}</p>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[--ink-3] font-medium">
                   <span>{gl.stages(pg.stageCount)}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.tasks(pg.taskCount)}</span>
@@ -379,7 +379,7 @@ export default function GalleryPage() {
                     the gallery existed; nothing had ever rendered them. */}
                 <TagChips tags={pg.tags} more={gl.moreTags} />
                 <div><LikeButton {...likeProps('game', pg.id)} /></div>
-                {pg.approxLocation?.label && <span className="text-[11px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
+                {pg.approxLocation?.label && <span className="text-[13px] text-[--ink-3]">📍 {pg.approxLocation.label}</span>}
                 {/* stopPropagation so a Copy tap duplicates the game WITHOUT also
                     opening the detail behind it. */}
                 <Button disabled={copyAction.busy} loading={copyAction.isBusy(pg.id)} className="mt-auto !py-2 !text-xs !font-semibold" onClick={(e) => { e.stopPropagation(); void copyAction.run(pg); }}>{gl.copyBtn}</Button>
@@ -417,7 +417,7 @@ export default function GalleryPage() {
               >
                 <h3 id={`task-${tk.id}`} className="font-brand font-bold text-sm text-[--ink-1] leading-snug">{tk.title}</h3>
                 <p className="text-xs text-[--ink-3] line-clamp-2 min-h-[2rem] leading-relaxed">{tk.description}</p>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[--ink-3] font-medium">
                   <span>{TASK_TYPE_LABEL[tk.type] ?? tk.type}</span>
                   <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                   <span>{gl.metaDiff(tk.difficulty)}</span>
@@ -430,7 +430,7 @@ export default function GalleryPage() {
                     them; TaskLibrary only ever copied them into the new task. */}
                 <TagChips tags={tk.tags} more={gl.moreTags} />
                 <div className="flex items-center justify-between gap-2 mt-auto">
-                  <span className="text-[11px] text-[--ink-3]">{gl.from(tk.sourceGameTitle ?? '')}</span>
+                  <span className="text-[13px] text-[--ink-3]">{gl.from(tk.sourceGameTitle ?? '')}</span>
                   <LikeButton {...likeProps('task', tk.id)} />
                 </div>
               </div>
@@ -481,8 +481,8 @@ function LikeButton({ view, busy, gl, onToggle }: {
       aria-pressed={view.liked}
       aria-label={label}
       title={label}
-      className={`inline-flex items-center gap-1 rounded-full border border-[--rp-border] px-2 py-0.5 text-[11px] font-semibold transition-colors disabled:opacity-60 ${
-        view.liked ? 'bg-rp-fire/12 text-rp-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}
+      className={`inline-flex items-center gap-1 rounded-full border border-[--rp-border] px-2 py-0.5 text-[13px] font-semibold transition-colors disabled:opacity-60 ${
+        view.liked ? 'bg-rp-fire/12 text-ink-fire' : 'text-[--ink-3] hover:text-[--ink-1]'}`}
     >
       <span aria-hidden="true">{view.liked ? '♥' : '♡'}</span>
       <span>{gl.likes(view.likeCount)}</span>
@@ -505,7 +505,7 @@ function FacetSelect({ label, value, onChange, options, title }: {
   title?: string;
 }) {
   return (
-    <label title={title} className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[--ink-3]">
+    <label title={title} className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[--ink-3]">
       <span>{label}</span>
       <select value={value} onChange={(e) => onChange(e.target.value)}
         className="rounded-lg border border-[--rp-border] bg-[--surface-0]/70 dark:bg-white/[0.03] px-2 py-1 text-xs font-medium text-[--ink-1] focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">

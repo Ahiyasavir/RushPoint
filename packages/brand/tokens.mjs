@@ -63,6 +63,31 @@ export const FONTS = {
   },
 };
 
+// ── Type scale ───────────────────────────────────────────────────────────────
+//
+// Tailwind's stock scale (xs 12px, sm 14px) was never overridden, and `xs`/`sm`
+// are by far the two most reached-for sizes in both apps — a plain count across
+// creator-web found ~700 combined uses of xs/sm/arbitrary-10-11px against just
+// 14 uses of `base` (16px, the size actually meant for reading). That is not a
+// handful of small labels; it is most of the interface's text sitting at or
+// under 14px, which is why the product reads as "everything got tiny" even
+// though no single component looks wrong in isolation — the smallness is
+// systemic, not local, so the fix has to be too.
+//
+// Bumped rather than replaced: `xs`/`sm` still mean "smaller than base", the
+// hierarchy nothing in either app was rebuilt, only the floor moved up to
+// where 13px+ and 15px+ stay comfortably readable (the 16px-for-body rule of
+// thumb is for the reading size itself; a still-smaller UI label reads fine a
+// couple of px under that, unlike the 10-12px this scale used to bottom out
+// at). `base`/`lg`/`xl` are unchanged — they were never the problem.
+export const FONT_SIZE = {
+  xs: ['0.8125rem', { lineHeight: '1.125rem' }],  // 13px / 18px, was 12/16
+  sm: ['0.9375rem', { lineHeight: '1.375rem' }],  // 15px / 22px, was 14/20
+};
+
+/** Tailwind `fontSize` override for `xs`/`sm`. `base` and up are Tailwind's own. */
+export const tailwindFontSize = () => ({ ...FONT_SIZE });
+
 // ── Colour ───────────────────────────────────────────────────────────────────
 // Unchanged from what the apps already shipped: this file adopts the product's
 // palette rather than inventing one.
@@ -82,6 +107,44 @@ export const COLORS = {
    */
   fireText: '#C03D14',
 };
+
+/**
+ * Darkened text-safe variants of the brand accents.
+ *
+ * `COLORS` (and the accent tokens both apps expose as `rp-*`) are tuned for
+ * FILLS, borders and glows — full saturation reads correctly there because a
+ * fill has area and weight behind it. As TEXT on a light surface the same
+ * colours fail WCAG outright: `#FF5722` measures 3.16:1 on white, `#FFB300`
+ * 1.79:1, `#10B981` 2.54:1 — all short of the 4.5:1 body text needs, on the
+ * exact tokens carrying prices, statuses and CTAs across both apps.
+ *
+ * play-web found this first (participants read it outdoors, in direct sun,
+ * where a failing contrast is not a technicality) and built this scale as the
+ * fix: keep every fill/border/ring/gradient on the original brand colour, and
+ * route only TEXT through a same-hue, darkened variant. This is that scale,
+ * promoted from play-web's own tailwind config to here so creator-web can
+ * finally use it too — it never adopted it, and carried ~150 raw accent-as-text
+ * usages as a result (measured 2026-08-27).
+ *
+ * Every value clears 4.5:1 on the worst surface EITHER app puts it over
+ * (white, and each app's own card/raised tone); `ink-go` is one shade darker
+ * than play-web's original because creator-web's card (#E3E6F0) is lighter
+ * than play-web's (#FFF0E6) and the original fell to 4.29:1 there. One shared
+ * value, chosen to work everywhere, beats two per-app values that can drift.
+ */
+export const INK = {
+  fire:   '#B03A0B', // replaces text-accent, text-rp-fire
+  warm:   '#8A4B00', // replaces text-accent-warm (the #FF8A00 CTA accent)
+  amber:  '#7A5200', // replaces text-rp-amber
+  alert:  '#C21414', // replaces text-rp-alert
+  go:     '#0A714F', // replaces text-rp-go
+  plasma: '#046D7F', // replaces text-rp-plasma
+  signal: '#5D2CB2', // replaces text-rp-signal
+};
+
+/** Tailwind `colors` for the ink (text-safe brand) scale, as `ink-<name>`. */
+export const tailwindInkColors = () =>
+  Object.fromEntries(Object.entries(INK).map(([name, hex]) => [`ink-${name}`, hex]));
 
 export const SURFACES = {
   page: '#FBF7F0',

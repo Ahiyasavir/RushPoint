@@ -335,7 +335,7 @@ export default function FeedPanel({
               </div>
 
               {moderate && (isHidden || reportCount > 0) && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[13px]">
                   {isHidden && (
                     <span className="rounded-full bg-danger/15 border border-danger/40 px-2 py-0.5 font-semibold text-danger">
                       {item.hiddenBy === 'auto:reports' ? t.feed.feedAutoHidden : t.feed.feedHiddenBadge}

@@ -83,7 +83,7 @@ export default function ExclusiveGroupsModal({ stage, onAssign, onRemoveGroup, o
         title={title}
         aria-label={title}
         onClick={onSelect}
-        className={`inline-flex items-center justify-center min-w-[26px] h-[22px] px-1 rounded border text-[11px] font-bold leading-none
+        className={`inline-flex items-center justify-center min-w-[26px] h-[22px] px-1 rounded border text-[13px] font-bold leading-none
           transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
           ${styleClass ?? 'border-[--rp-border] text-[--ink-3]'}
           ${checked ? 'ring-2 ring-rp-fire/70' : 'opacity-50 hover:opacity-100'}`}

@@ -906,7 +906,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
       <span aria-hidden="true" className="shrink-0">🧪</span>
       {/* min-w keeps the text from collapsing into a one-word column; below it
           the button wraps instead. */}
-      <span className="text-[11px] text-ink-warm flex-1 min-w-[7rem] leading-snug">{t.task.rehearseHelp}</span>
+      <span className="text-[13px] text-ink-warm flex-1 min-w-[7rem] leading-snug">{t.task.rehearseHelp}</span>
       <button
         type="button"
         disabled={rehearsing || frozen}
@@ -946,7 +946,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
               {task.locationClueHe || task.locationClue}
             </p>
           )}
-          <p className="text-[11px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
+          <p className="text-[13px] text-zinc-500 mt-1">{t.task.sealedHelp}</p>
         </div>
 
         {task.media && task.media.length > 0 && <TaskMediaGallery media={task.media} />}
@@ -999,7 +999,7 @@ export default function TaskRunner({ session, state, stage, onChanged, readOnly 
           {(task.locationClueHe || task.locationClue) && (
             <p dir="auto" className="text-sm text-zinc-200">{task.locationClueHe || task.locationClue}</p>
           )}
-          <p className="text-[11px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
+          <p className="text-[13px] text-zinc-500 mt-1">{t.task.hiddenHelp}</p>
         </div>
       ) : (
         // Distance stays PRIMARY: on a located mission it is the one number that
@@ -1232,7 +1232,7 @@ function NavigateHereLink({ task }: { task: SafeTask }) {
         target="_blank"
         rel="noreferrer"
         data-testid="task-navigate-waze"
-        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-[11px] text-zinc-500 hover:underline"
+        className="inline-flex items-center min-h-[44px] px-2 py-2 rounded-lg text-[13px] text-zinc-500 hover:underline"
       >
         {t.task.navigateMaps}
       </a>

@@ -146,7 +146,7 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
         <div className="flex flex-col min-h-0 flex-1 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
             <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-wide text-[--ink-3] font-semibold">{gl.gameDetailTitle}</p>
+              <p className="text-[13px] uppercase tracking-wide text-[--ink-3] font-semibold">{gl.gameDetailTitle}</p>
               <h3 id={titleId} className="font-brand font-bold text-lg text-[--ink-1] leading-snug" dir="auto">
                 {detail.title}
               </h3>
@@ -171,7 +171,7 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
 
             {/* The card's own combined meta chips, reused verbatim (change:
                 gallery-game-card-preview) so the detail and the card read alike. */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[--ink-3] font-medium">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-[--ink-3] font-medium">
               <span>{gl.stages(detail.stageCount)}</span>
               <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
               <span>{gl.tasks(detail.taskCount)}</span>
@@ -192,7 +192,7 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
 
             {/* The missions themselves — the whole point of opening a game. */}
             <section>
-              <h4 className="text-[11px] uppercase tracking-wide text-[--ink-3] font-semibold mb-1.5">
+              <h4 className="text-[13px] uppercase tracking-wide text-[--ink-3] font-semibold mb-1.5">
                 {gl.detailMissions}
               </h4>
               {missions === null ? (
@@ -206,15 +206,15 @@ export default function GalleryGameDetailModal({ game, onClose, onCopy, copyBusy
                   {missions.map((m, i) => (
                     <li key={m.id || i}
                       className="flex items-baseline gap-2 rounded-lg bg-[--surface-2] px-2.5 py-1.5">
-                      <span className="text-[11px] text-[--ink-3] tabular-nums shrink-0">{i + 1}</span>
+                      <span className="text-[13px] text-[--ink-3] tabular-nums shrink-0">{i + 1}</span>
                       <span className="text-sm text-[--ink-1] min-w-0 flex-1 truncate" dir="auto">
                         {m.title || gl.detailMissionUntitled}
                       </span>
-                      <span className="text-[11px] text-[--ink-3] shrink-0">
+                      <span className="text-[13px] text-[--ink-3] shrink-0">
                         {MISSION_TYPE_LABEL[m.type] ?? gl.rowTypeUnknown}
                       </span>
                       {m.estimatedMinutes !== null && (
-                        <span className="text-[11px] text-[--ink-3] shrink-0">{gl.valMinutes(m.estimatedMinutes)}</span>
+                        <span className="text-[13px] text-[--ink-3] shrink-0">{gl.valMinutes(m.estimatedMinutes)}</span>
                       )}
                     </li>
                   ))}

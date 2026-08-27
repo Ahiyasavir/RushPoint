@@ -119,7 +119,7 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
         >⠿</span>
         {/* Type chip: a small filled dot carries the family hue (the only saturated
             pixel); the label stays neutral + legible, so the grid reads calm. */}
-        <span className="inline-flex items-center gap-1.5 shrink-0 text-[10px] font-semibold uppercase tracking-wide
+        <span className="inline-flex items-center gap-1.5 shrink-0 text-[12px] font-semibold uppercase tracking-wide
           px-2 py-0.5 rounded bg-[--surface-2] text-[--ink-2] border border-[--rp-border]">
           <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} aria-hidden="true" />
           {typeLabel[task.type]}
@@ -131,7 +131,7 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
             title={b.exclusiveBadgeAria(group.letter, group.size)}
             aria-label={b.exclusiveBadgeAria(group.letter, group.size)}
             className={`shrink-0 inline-flex items-center justify-center w-[18px] h-[18px] rounded border
-              text-[10px] font-bold leading-none ${style.badge}`}
+              text-[12px] font-bold leading-none ${style.badge}`}
           >{group.letter}</span>
         )}
         <span className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{task.title || b.untitledTask}</span>
@@ -159,7 +159,7 @@ export default function TaskCard({ task, active, onClick, dragging, moveTargets,
             // the labelled version ate; opacity reveals it on hover or focus while
             // the reserved width keeps the row from shifting.
             className="shrink-0 w-8 appearance-none text-center cursor-pointer rounded border border-[--rp-border]
-              bg-[--surface-2] text-[--ink-3] text-[11px] leading-none px-0 py-0.5 opacity-60
+              bg-[--surface-2] text-[--ink-3] text-[13px] leading-none px-0 py-0.5 opacity-60
               transition-opacity group-hover/card:opacity-100 focus:opacity-100 focus-visible:opacity-100"
           >
             <option value="">⋯</option>

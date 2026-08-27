@@ -22,7 +22,7 @@ const TRIGGER_GAP = 4; // gap between the trigger and the menu (was mt-1)
 
 type Coords = { top: number; left: number };
 
-export function OverflowMenu({ label, ariaLabel, children, triggerClassName = 'min-h-0 px-2.5 py-1 text-[11px] rounded-lg' }: {
+export function OverflowMenu({ label, ariaLabel, children, triggerClassName = 'min-h-0 px-2.5 py-1 text-[13px] rounded-lg' }: {
   label: string; ariaLabel: string; children: ReactNode;
   // Optional trigger styling. Defaults to the dense row style the Dashboard card
   // and Run Console team row use, so those callers stay byte-identical; the

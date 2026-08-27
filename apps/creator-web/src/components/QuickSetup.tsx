@@ -173,7 +173,7 @@ export function QuickSetupWelcome({ remaining, onBegin, onSkip }: {
         <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-rp-fire to-rp-amber flex items-center justify-center text-2xl shadow-[0_4px_16px_rgba(255,87,34,0.35)]" aria-hidden>
           ✨
         </div>
-        <p className="text-xs font-semibold text-rp-fire mt-4">{q.welcomeEyebrow}</p>
+        <p className="text-xs font-semibold text-ink-fire mt-4">{q.welcomeEyebrow}</p>
         <h2 className="text-xl font-bold text-[--ink-1] mt-1">{q.welcomeTitle}</h2>
         <p className="text-sm text-[--ink-1] leading-relaxed mt-2">{q.welcomeBody(remaining)}</p>
         <div className="flex flex-col gap-2 mt-5">
@@ -225,10 +225,10 @@ export function QuickSetupIntro({ step, index, total, taskTitle, summary, scope,
       className={`fixed z-50 top-2 mx-auto w-[min(30rem,calc(100%-1rem))] p-4 ${GLASS_CARD}`}
       style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
     >
-      <div className="flex items-center gap-2 text-[11px] font-semibold text-rp-fire">
+      <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">
         <span aria-hidden>🧭</span>
         <span>{q.introEyebrow(index + 1, total)}</span>
-        <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-rp-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
+        <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-ink-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
           {step.isRequired ? q.requiredBadge : q.optionalBadge}
         </span>
       </div>
@@ -298,9 +298,9 @@ export function QuickSetupBar({ step, index, total, copyKey, onNext, onDefer, on
       style={{ insetInlineStart: 0, insetInlineEnd: 0 }}
     >
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 text-[11px] font-semibold text-rp-fire">
+        <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-fire">
           <span>{q.title}</span>
-          <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-rp-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
+          <span className={`rounded px-1.5 py-0.5 ${step.isRequired ? 'bg-rp-fire/10 text-ink-fire' : 'bg-[--surface-2] text-[--ink-1]'}`}>
             {step.isRequired ? q.requiredBadge : q.optionalBadge}
           </span>
         </div>
@@ -390,8 +390,8 @@ export function QuickSetupPill({ remaining, total, onResume }: {
       aria-label={done ? q.allDoneTitle : q.remaining(remaining)}
       className={`shrink-0 flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1.5 text-xs font-medium border backdrop-blur-sm transition-colors ${
         done
-          ? 'border-rp-go/40 text-rp-go hover:bg-rp-go/10'
-          : 'border-rp-fire/40 text-rp-fire hover:bg-rp-fire/10'}`}
+          ? 'border-rp-go/40 text-ink-go hover:bg-rp-go/10'
+          : 'border-rp-fire/40 text-ink-fire hover:bg-rp-fire/10'}`}
     >
       <span aria-hidden>{done ? '✓' : '⚡'}</span>
       {/* The pill carries the SHORT name; the full sentence stays in the tooltip
@@ -436,7 +436,7 @@ export function QuickSetupBlocked({ blockers, labelFor, onGo, onClose }: {
                 <span className="block text-sm text-[--ink-1] leading-snug" dir="auto">
                   {step.instructionPrompt || labelFor(step)}
                 </span>
-                <span className="block text-[11px] text-[--ink-1] mt-0.5" dir="auto">{labelFor(step)}</span>
+                <span className="block text-[13px] text-[--ink-1] mt-0.5" dir="auto">{labelFor(step)}</span>
               </button>
             </li>
           ))}

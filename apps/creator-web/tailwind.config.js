@@ -1,4 +1,24 @@
-import { tailwindFontFamily } from '@rushpoint/brand';
+import { tailwindFontFamily, tailwindFontSize } from '@rushpoint/brand';
+
+/**
+ * The "ink" text-safe accent scale, wired to CSS variables rather than
+ * `tailwindInkColors()`'s flat hex (which is what play-web uses). This app has
+ * a real dark mode, and the light-mode-only darkened values that fix WCAG on a
+ * light surface would make text unreadable on this app's near-black one — the
+ * `--rp-ink-*` variables in src/index.css carry a DIFFERENT value per mode
+ * (light-mode values still sourced from packages/brand/tokens.mjs, just not
+ * spread here), so `html.dark` picks the right one automatically. See the
+ * comment beside the variables themselves for the full reasoning.
+ */
+const INK_VARS = {
+  'ink-fire':   'var(--rp-ink-fire)',
+  'ink-warm':   'var(--rp-ink-warm)',
+  'ink-amber':  'var(--rp-ink-amber)',
+  'ink-alert':  'var(--rp-ink-alert)',
+  'ink-go':     'var(--rp-ink-go)',
+  'ink-plasma': 'var(--rp-ink-plasma)',
+  'ink-signal': 'var(--rp-ink-signal)',
+};
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -10,7 +30,13 @@ export default {
       // here. Both faces carry Hebrew AND Latin; the previous pairing loaded
       // latin only, so Hebrew fell through to the system font.
       fontFamily: tailwindFontFamily(),
+      // Also from the brand package: xs/sm bumped so "secondary text" stops
+      // meaning "barely readable" (packages/brand/tokens.mjs has the full story).
+      fontSize: tailwindFontSize(),
       colors: {
+        // ── Ink (text-safe brand) tokens ────────────────────────────────────
+        ...INK_VARS,
+
         // ── Brand accent tokens ───────────────────────────────────────────────
         'rp-fire':   '#FF5722',
         'rp-amber':  '#FFB300',

@@ -112,7 +112,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
         </div>
         <h1 dir="auto" className="font-brand text-2xl font-extrabold" style={{ color: accent }}>{data.title}</h1>
         {isLive && (
-          <div className="flex items-center justify-center gap-2 mt-2 text-[11px] text-zinc-500">
+          <div className="flex items-center justify-center gap-2 mt-2 text-[13px] text-zinc-500">
             <span>
               {/* Age is measured from the SERVER snapshot time (data.updatedAt),
                   not the client fetch, so a throttled/stale board reads honestly. */}
@@ -160,7 +160,7 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                 </span>
                 <div className="flex-1 min-w-0">
                   <div dir="auto" className="truncate font-semibold text-zinc-100">{r.teamName}</div>
-                  <div className="text-[11px] text-zinc-500">{t.board.stagesCount({ n: r.completedStages })}</div>
+                  <div className="text-[13px] text-zinc-500">{t.board.stagesCount({ n: r.completedStages })}</div>
                 </div>
                 <div className="flex flex-col items-end">
                   {(() => {
@@ -197,8 +197,8 @@ export default function PublicLeaderboardScreen({ code, onJoin }: { code: string
                             aria-label={final ? t.board.finalTime : t.board.elapsed}
                             className={
                               final
-                                ? 'text-[11px] text-zinc-500 font-mono tabular-nums'
-                                : 'text-[11px] text-zinc-500 italic font-mono tabular-nums opacity-80'
+                                ? 'text-[13px] text-zinc-500 font-mono tabular-nums'
+                                : 'text-[13px] text-zinc-500 italic font-mono tabular-nums opacity-80'
                             }
                           >
                             {final ? '' : '⏱ '}{formatDuration(sec)}

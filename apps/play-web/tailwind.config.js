@@ -1,4 +1,4 @@
-import { tailwindFontFamily } from '@rushpoint/brand';
+import { tailwindFontFamily, tailwindFontSize, tailwindInkColors } from '@rushpoint/brand';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -9,6 +9,9 @@ export default {
       // here. Both faces carry Hebrew AND Latin; the previous pairing loaded
       // latin only, so Hebrew fell through to the system font.
       fontFamily: tailwindFontFamily(),
+      // Also from the brand package: xs/sm bumped so "secondary text" stops
+      // meaning "barely readable" (packages/brand/tokens.mjs has the full story).
+      fontSize: tailwindFontSize(),
       colors: {
         // ── Brand tokens ──────────────────────────────────────────────────────
         'rp-fire':   '#FF5722',
@@ -36,13 +39,11 @@ export default {
         // direct sun, so these are the darkened variants used for TEXT ONLY —
         // every fill, border, ring and gradient keeps the original brand colour,
         // which is why they are separate tokens and not a retune.
-        // Ratios vs #FFFFFF / #FFFCF7 / #FFF0E6, asserted in
-        // scripts/test-play-a11y-scan.ts:
-        'ink-fire':  '#B03A0B', // 6.08 / 5.95 / 5.46  (replaces text-accent, text-rp-fire)
-        'ink-warm':  '#8A4B00', // 6.80 / 6.66 / 6.11  (replaces text-accent-warm)
-        'ink-amber': '#7A5200', // 6.92 / 6.78 / 6.21  (replaces text-rp-amber)
-        'ink-alert': '#C21414', // 6.17 / 6.04 / 5.54  (replaces text-rp-alert)
-        'ink-go':    '#067A55', // 5.35 / 5.24 / 4.81  (replaces text-rp-go)
+        //
+        // Moved to packages/brand/tokens.mjs (the single source, so creator-web
+        // can share it instead of drifting): scripts/test-play-a11y-scan.ts now
+        // reads the hex values from THERE, not from this file's text.
+        ...tailwindInkColors(),
 
         // Reversed/warm text scale — dark text on light background.
         zinc: {

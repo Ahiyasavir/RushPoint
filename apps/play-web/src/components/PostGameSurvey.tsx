@@ -113,7 +113,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
         {/* Was a bare ~16px line of text: the only way out of this card. */}
         <button onClick={dismiss} className="inline-flex items-center justify-center min-h-[44px] px-3 -me-3 text-xs text-zinc-500 hover:text-zinc-400">{t.survey.dismiss}</button>
       </div>
-      <div className="text-[11px] text-zinc-500 mb-3">
+      <div className="text-[13px] text-zinc-500 mb-3">
         {t.survey.intro} · {t.survey.progress({ cur: Math.min(stepIdx + 1, total), total })}
       </div>
 
@@ -164,7 +164,7 @@ export default function PostGameSurvey({ session, lang }: { session: Session; la
       {step === 'issues' && (
         <div>
           <p dir="auto" className="text-base font-semibold text-zinc-100 mb-1">{t.survey.issuesPrompt}</p>
-          <p className="text-[11px] text-zinc-500 mb-3">{t.survey.issuesHint}</p>
+          <p className="text-[13px] text-zinc-500 mb-3">{t.survey.issuesHint}</p>
           <div className="flex flex-wrap gap-2 mb-4">
             {FEEDBACK_ISSUES.map((issue) => (
               <button
@@ -236,7 +236,7 @@ function Scale5({ prompt, low, high, selected, onPick }: {
           );
         })}
       </div>
-      <div className="flex justify-between text-[11px] text-zinc-500 px-1">
+      <div className="flex justify-between text-[13px] text-zinc-500 px-1">
         <span>{low}</span><span>{high}</span>
       </div>
     </div>

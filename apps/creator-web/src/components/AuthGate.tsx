@@ -298,7 +298,7 @@ function LoginScreen() {
           {mode === 'in' && (
             <div className="text-end -mt-1.5">
               <button type="button" onClick={forgotPassword} disabled={busy}
-                className="text-xs text-[--ink-3] hover:text-rp-fire transition-colors disabled:opacity-40">
+                className="text-xs text-[--ink-3] hover:text-ink-fire transition-colors disabled:opacity-40">
                 {t.auth.forgotPassword}
               </button>
             </div>
@@ -312,14 +312,14 @@ function LoginScreen() {
                 onKeyDown={(e) => e.key === 'Enter' && submit()}
                 className={confirm && confirm !== password ? '!border-rp-alert/60 !ring-rp-alert/20' : ''} />
               {confirm && confirm !== password && (
-                <p className="text-[11px] text-rp-alert mt-1">{t.auth.passwordsMismatch}</p>
+                <p className="text-[13px] text-ink-alert mt-1">{t.auth.passwordsMismatch}</p>
               )}
             </div>
           )}
 
           {err && (
             <div className="rounded-lg bg-rp-alert/8 border border-rp-alert/20 px-3 py-2">
-              <p className="text-rp-alert text-xs font-medium">{err}</p>
+              <p className="text-ink-alert text-xs font-medium">{err}</p>
             </div>
           )}
 
@@ -332,17 +332,17 @@ function LoginScreen() {
           </Button>
 
           {mode === 'up' && (
-            <p className="text-center text-[10px] text-[--ink-3] leading-relaxed pt-1">
+            <p className="text-center text-[12px] text-[--ink-3] leading-relaxed pt-1">
               {t.auth.agreeToTermsLead}
-              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.termsLink}</a>
+              <a href="/terms" target="_blank" rel="noreferrer" className="underline hover:text-ink-fire">{l.termsLink}</a>
               {t.auth.agreeToTermsBetween}
-              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-rp-fire">{l.privacyLink}</a>
+              <a href="/privacy" target="_blank" rel="noreferrer" className="underline hover:text-ink-fire">{l.privacyLink}</a>
             </p>
           )}
 
           <p className="text-center text-xs text-[--ink-3] pt-1">
             {mode === 'in' ? t.auth.noAccount : t.auth.haveAccount}{' '}
-            <button className="text-rp-fire font-semibold hover:underline"
+            <button className="text-ink-fire font-semibold hover:underline"
               onClick={() => switchMode(mode === 'in' ? 'up' : 'in')}>
               {mode === 'in' ? t.auth.signUpFree : t.auth.signIn}
             </button>
@@ -402,7 +402,7 @@ function Landing({ authCard }: { authCard: ReactNode }) {
         <div className="grid md:grid-cols-2 gap-12 items-center min-h-[calc(100vh-4rem)] pb-16">
           <div className="animate-fade-up">
             {incomingRef ? (
-              <div className="inline-flex items-center gap-2 rounded-full border border-rp-fire/40 bg-rp-fire/8 px-3.5 py-1.5 text-xs text-rp-fire font-semibold mb-5">
+              <div className="inline-flex items-center gap-2 rounded-full border border-rp-fire/40 bg-rp-fire/8 px-3.5 py-1.5 text-xs text-ink-fire font-semibold mb-5">
                 {l.referralBadge(REFERRAL_BONUS_FREE_RUNS)}
               </div>
             ) : (
@@ -434,19 +434,19 @@ function Landing({ authCard }: { authCard: ReactNode }) {
                 Deliberately the bare join screen, not the demo — they have a code. */}
             <p className="mt-4 text-sm text-[--ink-3]">
               {l.playerCta}{' '}
-              <a href={PLAY_URL} className="font-semibold text-rp-fire underline underline-offset-2 hover:opacity-80">
+              <a href={PLAY_URL} className="font-semibold text-ink-fire underline underline-offset-2 hover:opacity-80">
                 {l.playerLink}
               </a>
             </p>
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-7 text-xs text-[--ink-3] font-medium">
-              <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustNoCc}</span>
-              <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustDemo}</span>
-              <span className="flex items-center gap-1.5"><span className="text-rp-go">✓</span> {l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustNoCc}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustDemo}</span>
+              <span className="flex items-center gap-1.5"><span className="text-ink-go">✓</span> {l.trustFreePlayers(FREE_PARTICIPANTS_PER_FREE_RUN)}</span>
             </div>
 
             {/* Use-case strip — leads with the launch wedges (events) */}
             <div className="mt-8">
-              <p className="text-[11px] uppercase tracking-widest text-[--ink-3] font-semibold mb-2.5">{l.useCasesTitle}</p>
+              <p className="text-[13px] uppercase tracking-widest text-[--ink-3] font-semibold mb-2.5">{l.useCasesTitle}</p>
               <div className="flex flex-wrap gap-2">
                 {l.useCases.map((u) => (
                   <span key={u.label}
@@ -543,7 +543,7 @@ function PhoneMockup() {
           </div>
           <div className="px-4 pt-1 pb-3">
             <div className="text-[13px] font-extrabold text-orange-600">מסע אוצר העיר העתיקה</div> {/* i18n-ignore mockup sample */}
-            <div className="text-[10px] text-[#3D4259]">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] text-[#3D4259]">ניקוד: <span className="font-mono text-orange-600">690</span></div> {/* i18n-ignore mockup sample */}
             <div className="mt-2 flex gap-1">
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
               <div className="h-1.5 flex-1 rounded-full bg-orange-500" />
@@ -560,14 +560,14 @@ function PhoneMockup() {
             <div className="absolute bottom-1.5 right-1.5 text-[9px] bg-white/80 rounded px-1.5 py-0.5 text-[#3D4259]">240מ להמשך</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="m-4 mt-3 rounded-xl border border-orange-200 bg-white p-3">
-            <div className="text-[11px] font-semibold text-[#0A0C1A]">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
-            <div className="text-[10px] text-[#3D4259] mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
-            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[10px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[13px] font-semibold text-[#0A0C1A]">📷 תמונה בשער יפו</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] text-[#3D4259] mt-0.5">צלמו את כל הקבוצה מתחת לקשת.</div> {/* i18n-ignore mockup sample */}
+            <div className="mt-2 h-6 rounded-lg bg-orange-500 text-white text-[12px] font-bold flex items-center justify-center">שלח תמונה</div> {/* i18n-ignore mockup sample */}
           </div>
           <div className="mx-4 mb-4 rounded-xl bg-white border border-orange-100 p-2.5">
-            <div className="text-[10px] font-semibold text-[#0A0C1A] mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
+            <div className="text-[12px] font-semibold text-[#0A0C1A] mb-1.5">🏆 לוח תוצאות</div> {/* i18n-ignore mockup sample */}
             {board.map((r) => (
-              <div key={r.rank} className={`flex items-center justify-between text-[10px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-[#3D4259]'}`}>
+              <div key={r.rank} className={`flex items-center justify-between text-[12px] py-0.5 ${r.me ? 'text-orange-600 font-bold' : 'text-[#3D4259]'}`}>
                 <span className="truncate"><span className="font-mono me-1.5">{r.rank}</span>{r.name}</span>
                 <span className="font-mono">{r.score}</span>
               </div>

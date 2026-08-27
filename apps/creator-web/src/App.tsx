@@ -137,7 +137,7 @@ export default function App() {
                 className={({ isActive }) =>
                   `px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-150 ${
                     isActive
-                      ? 'bg-rp-fire/10 text-rp-fire dark:bg-rp-fire/15'
+                      ? 'bg-rp-fire/10 text-ink-fire dark:bg-rp-fire/15'
                       : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'
                   }`
                 }
@@ -167,7 +167,7 @@ export default function App() {
           >
             {dark ? '☀️' : '🌙'}
           </button>
-          <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-rp-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
+          <button onClick={() => signOut()} className="text-xs text-[--ink-3] hover:text-ink-alert transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60">
             {t.common.signOut}
           </button>
         </div>
@@ -183,7 +183,7 @@ export default function App() {
                 className={({ isActive }) =>
                   `px-3 py-2 rounded-lg text-sm font-medium text-start transition-all duration-150 ${
                     isActive
-                      ? 'bg-rp-fire/10 text-rp-fire dark:bg-rp-fire/15'
+                      ? 'bg-rp-fire/10 text-ink-fire dark:bg-rp-fire/15'
                       : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'
                   }`
                 }

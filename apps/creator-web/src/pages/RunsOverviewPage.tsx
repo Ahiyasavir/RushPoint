@@ -42,7 +42,7 @@ export default function RunsOverviewPage() {
 
       {errored && (
         <div className="flex items-center gap-3 mb-4">
-          <p className="text-rp-alert text-sm">{r.loadError}</p>
+          <p className="text-ink-alert text-sm">{r.loadError}</p>
           <Button variant="ghost" onClick={() => void load()}>{r.retry}</Button>
         </div>
       )}
@@ -71,14 +71,14 @@ export default function RunsOverviewPage() {
                       onClick={() => void copyCode(run.accessCode)}
                       aria-label={r.copyCode}
                       title={r.copyCode}
-                      className="inline-flex items-center gap-1 font-mono text-[--ink-2] hover:text-rp-fire rounded px-1 -mx-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+                      className="inline-flex items-center gap-1 font-mono text-[--ink-2] hover:text-ink-fire rounded px-1 -mx-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
                     >
-                      {run.accessCode}<span aria-hidden="true" className="text-[10px] opacity-70">📋</span>
+                      {run.accessCode}<span aria-hidden="true" className="text-[12px] opacity-70">📋</span>
                     </button>
                   </span>
                   <span>👥 {r.participants({ n: run.participantCount })}</span>
                   {run.unackedAlerts > 0 && (
-                    <span className="inline-flex items-center rounded-full bg-rp-alert/15 border border-rp-alert/40 text-rp-alert px-2 py-0.5 font-bold">
+                    <span className="inline-flex items-center rounded-full bg-rp-alert/15 border border-rp-alert/40 text-ink-alert px-2 py-0.5 font-bold">
                       🆘 {r.alerts({ n: run.unackedAlerts })}
                     </span>
                   )}

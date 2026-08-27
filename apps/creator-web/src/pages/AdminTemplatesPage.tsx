@@ -306,7 +306,7 @@ export default function AdminTemplatesPage() {
       </button>
 
       {failed && (
-        <p className="text-sm text-rp-alert" role="alert">
+        <p className="text-sm text-ink-alert" role="alert">
           {at.loadFailed}
           <span className="block text-xs opacity-80 break-words" dir="auto">{failed}</span>
         </p>
@@ -325,8 +325,8 @@ export default function AdminTemplatesPage() {
                   <div className="text-2xl leading-none shrink-0">{g.templateEmoji || '🧩'}</div>
                   <div className="min-w-0">
                     <div className="font-medium text-[--ink-1] truncate" dir="auto">{g.title}</div>
-                    <div className="text-[11px] text-[--ink-3]">{at.templateMeta(stageCount, taskCount)}</div>
-                    {g.templateLang && <div className="text-[10px] text-[--ink-3]">{at.langBadge(g.templateLang)}</div>}
+                    <div className="text-[13px] text-[--ink-3]">{at.templateMeta(stageCount, taskCount)}</div>
+                    {g.templateLang && <div className="text-[12px] text-[--ink-3]">{at.langBadge(g.templateLang)}</div>}
                   </div>
                 </div>
 
@@ -367,7 +367,7 @@ export default function AdminTemplatesPage() {
                     <button
                       onClick={() => void removeTemplate(g)}
                       disabled={deletingId === g.id}
-                      className="text-xs px-2 py-1 rounded-lg border border-[--rp-border] text-rp-alert disabled:opacity-40"
+                      className="text-xs px-2 py-1 rounded-lg border border-[--rp-border] text-ink-alert disabled:opacity-40"
                     >
                       {deletingId === g.id ? at.deleting : at.deleteBtn}
                     </button>

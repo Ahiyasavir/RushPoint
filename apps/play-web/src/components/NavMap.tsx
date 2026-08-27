@@ -364,7 +364,7 @@ export default function NavMap({
         disabled={!rc.enabled}
         aria-label={rc.enabled ? t.play.recenter : t.play.recenterNoFix}
         title={rc.enabled ? t.play.recenter : t.play.recenterNoFix}
-        className="absolute bottom-14 start-2 z-10 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border shadow-soft text-[11px] font-medium text-zinc-100 disabled:opacity-50"
+        className="absolute bottom-14 start-2 z-10 inline-flex items-center gap-1.5 min-h-[44px] px-3 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border shadow-soft text-[13px] font-medium text-zinc-100 disabled:opacity-50"
       >
         <span aria-hidden="true">◎</span>
         {t.play.recenter}
@@ -375,7 +375,7 @@ export default function NavMap({
           `pointer-events-none` so it can never eat a map drag. */}
       {(searchAreas ?? []).length > 0 && (
         <div className="absolute bottom-2 inset-x-0 z-10 flex justify-center pointer-events-none">
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border px-2 py-1 text-[11px] font-medium text-zinc-400">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-app-card/90 backdrop-blur border border-glass-border px-2 py-1 text-[13px] font-medium text-zinc-400">
             <span aria-hidden="true" className="inline-block w-3 h-3 rounded-full border-2 border-dashed" style={{ borderColor: SEARCH_COLOR }} />
             {t.play.searchAreaLegend}
           </span>

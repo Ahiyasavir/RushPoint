@@ -133,7 +133,7 @@ export default function GalleryMap({
             {emptyLabel}
           </span>
           {emptyDetail && (
-            <span className="bg-app-bg/80 text-zinc-400 text-[11px] leading-relaxed px-3 py-1.5 rounded-xl max-w-md text-center">
+            <span className="bg-app-bg/80 text-zinc-400 text-[13px] leading-relaxed px-3 py-1.5 rounded-xl max-w-md text-center">
               {emptyDetail}
             </span>
           )}
@@ -142,7 +142,7 @@ export default function GalleryMap({
       {/* A pin a creator can see is a pin a creator will believe. Say out loud
           that a task pin is an area, so it is never read as a location fix. */}
       {notice && (
-        <p className="mt-1.5 text-[11px] text-[--ink-3] text-start">{notice}</p>
+        <p className="mt-1.5 text-[13px] text-[--ink-3] text-start">{notice}</p>
       )}
     </div>
   );

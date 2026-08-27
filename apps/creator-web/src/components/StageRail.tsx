@@ -114,11 +114,11 @@ function RailEntry({ stage, index, active, onSelect, taskDragging }: {
             flex items-center justify-center w-11 h-11 -mx-1.5 -my-2.5
             focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
         >⠿</span>
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-[--ink-3]">{b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-[--ink-3]">{b.stageLabel(index + 1)}{stage.isFinal ? ` · ${b.finalTag}` : ''}</span>
       </div>
       <div className="text-sm font-medium text-[--ink-1] truncate" dir="auto">{stage.title || b.untitledStage}</div>
       <div className="mt-1.5"><PacingBar tasks={stage.tasks} /></div>
-      <div className="text-[10px] text-[--ink-3] mt-1">{b.taskCount(stage.tasks.length)}</div>
+      <div className="text-[12px] text-[--ink-3] mt-1">{b.taskCount(stage.tasks.length)}</div>
     </div>
   );
 }
@@ -137,8 +137,8 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
     // canvas. Desktop (≥sm): the classic vertical side rail.
     <aside data-tour="builder-stages" className="w-full sm:w-52 shrink-0 sm:h-full sm:space-y-2 sm:overflow-y-auto pe-0.5">
       <div className="flex items-center justify-between px-1 mb-1 sm:mb-0">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
-        <span className="text-[10px] text-[--ink-4]">{stages.length}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3]">{b.stagesHeader}</span>
+        <span className="text-[12px] text-[--ink-4]">{stages.length}</span>
       </div>
       <div className="flex sm:flex-col items-stretch gap-2 overflow-x-auto sm:overflow-visible pb-1 sm:pb-0">
         <SortableContext items={stages.map((s) => s.id)} strategy={verticalListSortingStrategy}>
@@ -155,7 +155,7 @@ export default function StageRail({ stages, activeStageId, onSelect, onAdd, task
         </SortableContext>
         <button
           onClick={onAdd}
-          className="shrink-0 w-32 sm:w-full rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] text-sm px-3 py-2 whitespace-nowrap hover:border-rp-fire/60 hover:text-rp-fire transition-colors"
+          className="shrink-0 w-32 sm:w-full rounded-xl border border-dashed border-[--rp-border] text-[--ink-3] text-sm px-3 py-2 whitespace-nowrap hover:border-rp-fire/60 hover:text-ink-fire transition-colors"
         >
           ＋ {b.addStage}
         </button>

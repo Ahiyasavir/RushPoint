@@ -128,7 +128,7 @@ export default function RunReportPage() {
       <button
         type="button"
         onClick={() => nav(`/history?game=${encodeURIComponent(meta.gameId)}`)}
-        className="text-xs text-[--ink-3] hover:text-rp-fire mb-3 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+        className="text-xs text-[--ink-3] hover:text-ink-fire mb-3 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
       >
         ← {r.back}
       </button>
@@ -150,7 +150,7 @@ export default function RunReportPage() {
       </div>
 
       {meta.rankingProvisional && (
-        <p className="text-xs text-rp-amber mb-3">⚠︎ {r.provisional}</p>
+        <p className="text-xs text-ink-amber mb-3">⚠︎ {r.provisional}</p>
       )}
 
       {/* Export. Given its own card rather than tucked into a toolbar: it is the
@@ -182,7 +182,7 @@ export default function RunReportPage() {
           <Card className="p-0 mb-6 overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-[--ink-3] border-b border-[--rp-border]">
+                <tr className="text-[13px] uppercase tracking-wide text-[--ink-3] border-b border-[--rp-border]">
                   <th className="text-start font-semibold px-3 py-2">{r.rank}</th>
                   <th className="text-start font-semibold px-3 py-2">{r.player}</th>
                   <th className="text-end font-semibold px-3 py-2">{r.score}</th>
@@ -230,7 +230,7 @@ function Stat({ label, value, mono = false }: { label: string; value: string; mo
   return (
     <div className="rounded-xl border border-[--rp-border] bg-[--surface-1] px-3 py-2">
       <div className={`text-[--ink-1] font-semibold text-sm truncate ${mono ? 'font-mono' : ''}`}>{value}</div>
-      <div className="text-[10px] text-[--ink-3] mt-0.5 truncate">{label}</div>
+      <div className="text-[12px] text-[--ink-3] mt-0.5 truncate">{label}</div>
     </div>
   );
 }
@@ -314,7 +314,7 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
             {row.answers.map((a, i) => (
               <li key={`${a.at}-${i}`} className="text-sm flex items-baseline gap-2 flex-wrap">
                 {a.stepIndex >= 0 && (
-                  <span className="text-[10px] text-[--ink-3] shrink-0">
+                  <span className="text-[12px] text-[--ink-3] shrink-0">
                     {r.stepLabel({ n: a.stepIndex + 1 })}
                   </span>
                 )}
@@ -324,8 +324,8 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
                 >
                   {a.answer}
                 </span>
-                {a.correct === true && <span className="text-rp-go text-xs">✓ {r.correct}</span>}
-                {a.correct === false && <span className="text-rp-alert text-xs">✗ {r.wrong}</span>}
+                {a.correct === true && <span className="text-ink-go text-xs">✓ {r.correct}</span>}
+                {a.correct === false && <span className="text-ink-alert text-xs">✗ {r.wrong}</span>}
               </li>
             ))}
           </ul>
@@ -342,7 +342,7 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
         )}
 
         {row.expectedAnswer && !noChannel && (
-          <p className="text-[11px] text-[--ink-3] ps-3 mt-1" dir="auto">
+          <p className="text-[13px] text-[--ink-3] ps-3 mt-1" dir="auto">
             {r.expected}: {row.expectedAnswer}
           </p>
         )}
@@ -352,7 +352,7 @@ function MissionRow({ row }: { row: ReportAnswerRow }) {
             href={row.mediaUrl}
             target="_blank"
             rel="noreferrer"
-            className="inline-block ps-3 mt-1 text-xs text-rp-plasma hover:underline"
+            className="inline-block ps-3 mt-1 text-xs text-ink-plasma hover:underline"
           >
             📷 {r.viewMedia}
           </a>

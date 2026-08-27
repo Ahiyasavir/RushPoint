@@ -104,7 +104,7 @@ export default function TrashPage() {
                 <div className="min-w-0 flex-1">
                   <div className="font-brand font-bold text-[--ink-1] text-base truncate" dir="auto">{g.title}</div>
                   <div className="text-xs text-[--ink-3] mt-1">{tr.deletedOn(formatDate(g.deletedAt))}</div>
-                  <div className={`text-xs mt-0.5 font-medium ${left <= 3 ? 'text-rp-alert' : 'text-[--ink-3]'}`}>
+                  <div className={`text-xs mt-0.5 font-medium ${left <= 3 ? 'text-ink-alert' : 'text-[--ink-3]'}`}>
                     {tr.daysLeft(left)}
                   </div>
                 </div>
@@ -174,7 +174,7 @@ function PurgeDialog({ game, busy, onCancel, onConfirm }: {
         className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="font-brand font-bold text-rp-alert text-lg mb-1">{tr.purgeDialogTitle}</div>
+        <div className="font-brand font-bold text-ink-alert text-lg mb-1">{tr.purgeDialogTitle}</div>
         <p className="text-xs text-[--ink-2] leading-relaxed mb-4">{untitled ? tr.purgeDialogBodyUntitled : tr.purgeDialogBody(game.title)}</p>
         <Label>{untitled ? tr.purgeDialogHintUntitled : tr.purgeDialogHint}</Label>
         <Input

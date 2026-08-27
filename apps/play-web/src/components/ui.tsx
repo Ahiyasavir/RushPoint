@@ -180,11 +180,11 @@ export function TagChips({ tags, max = 8, more, className = '' }: {
     <div className={`flex flex-wrap items-center gap-1.5 ${className}`}>
       {shown.map((tag) => (
         <span key={tag} dir="auto"
-          className="inline-flex items-center max-w-full truncate rounded-full border border-glass-border bg-app-card px-2.5 py-1 text-[11px] font-medium text-zinc-400">
+          className="inline-flex items-center max-w-full truncate rounded-full border border-glass-border bg-app-card px-2.5 py-1 text-[13px] font-medium text-zinc-400">
           {tag}
         </span>
       ))}
-      {hidden > 0 && more && <span className="text-[11px] font-medium text-zinc-500">{more(hidden)}</span>}
+      {hidden > 0 && more && <span className="text-[13px] font-medium text-zinc-500">{more(hidden)}</span>}
     </div>
   );
 }

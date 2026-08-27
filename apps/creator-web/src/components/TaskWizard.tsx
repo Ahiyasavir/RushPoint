@@ -198,9 +198,9 @@ export default function TaskWizard({
           return (
             <button key={key} role="tab" aria-selected={active} onClick={() => setStep(s)}
               className={`flex-1 min-w-0 rounded-lg border px-2 py-1.5 flex items-center justify-center gap-1.5 transition-colors ${
-                active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire'
-                  : done ? 'border-rp-go/40 text-rp-go' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
-              <span className="text-[10px] font-semibold shrink-0">{done ? '✓' : s}</span>
+                active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire'
+                  : done ? 'border-rp-go/40 text-ink-go' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+              <span className="text-[12px] font-semibold shrink-0">{done ? '✓' : s}</span>
               <span className="text-[12px] font-medium truncate">{STEP_LABEL[key]}</span>
             </button>
           );
@@ -224,7 +224,7 @@ export default function TaskWizard({
       {/* Footer. The "this task cannot be completed" line is a response to an
           edit or to a finish attempt, never a greeting on a brand new task. */}
       {stepKey === 'execution' && !isTaskInteractionValid(task) && blockers.some(revealed) && (
-        <p className="text-[11px] text-rp-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
+        <p className="text-[13px] text-ink-fire leading-snug pt-1 shrink-0">{b.interactionIncomplete}</p>
       )}
       <div className="flex items-center gap-2 pt-2 shrink-0 border-t border-[--rp-border] mt-2">
         {canGoBack(step) ? (
@@ -272,7 +272,7 @@ function OptInChip({ label, count, onClick, b }: {
       <span aria-hidden className="text-[--ink-3]">+</span>
       <span>{label}</span>
       {count > 0 && (
-        <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(count)}</span>
+        <span className="rounded-full bg-rp-fire/10 text-ink-fire px-1.5 py-px text-[12px]">{b.sectionSetCount(count)}</span>
       )}
     </button>
   );
@@ -316,7 +316,7 @@ function OptInGroup({ title, onHide, hideLabel, children }: {
 // describe this as server-enforced until a save/launch door actually calls it.
 function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task>) => void; b: B }) {
   if (skipsGpsCheck(task)) {
-    return <p className="text-[11px] text-[--ink-3] leading-snug">{b.locHideNeedsGps}</p>;
+    return <p className="text-[13px] text-[--ink-3] leading-snug">{b.locHideNeedsGps}</p>;
   }
   return (
     <div>
@@ -327,7 +327,7 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
             : { hideLocation: undefined, locationClue: undefined, locationClueHe: undefined })} />
         <span>
           <span className="text-[13px] font-medium text-[--ink-1]">{b.hideLocation}</span>
-          <span className="block text-[11px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
+          <span className="block text-[13px] text-[--ink-3] leading-snug">{b.hideLocationDesc}</span>
         </span>
       </label>
       {task.hideLocation && (
@@ -339,9 +339,9 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
             // A hidden task is still a located task — the placement step's
             // "not placed yet" state and the readiness surface are what
             // guarantee real coordinates exist before the run launches.
-            <p className="text-[11px] text-rp-fire mt-1">{b.hideLocationNeedsCoords}</p>
+            <p className="text-[13px] text-ink-fire mt-1">{b.hideLocationNeedsCoords}</p>
           ) : !task.locationClue?.trim() && (
-            <p className="text-[11px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
+            <p className="text-[13px] text-[--ink-3] mt-1">{b.hideLocationNeedsClue}</p>
           )}
           {/* Leak guard (change: hidden-location-leak-guard): title/description
               still ship to players, so warn if they name the place. Advisory only. */}
@@ -349,7 +349,7 @@ function HideLocationField({ task, set, b }: { task: Task; set: (p: Partial<Task
             const leaks = locationLeakWarnings(task);
             if (leaks.length === 0) return null;
             return (
-              <p className="text-[11px] text-rp-fire mt-1">
+              <p className="text-[13px] text-ink-fire mt-1">
                 {leaks.length === 2 ? b.hideLocationLeakBoth
                   : leaks[0] === 'title' ? b.hideLocationLeakTitle
                   : b.hideLocationLeakDesc}
@@ -416,11 +416,11 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
                 <button key={c.choice} type="button" onClick={() => set(locationChoicePatch(task, c.choice))}
                   className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 py-4 px-2 transition-colors ${
                     active
-                      ? 'border-rp-fire bg-rp-fire/10 text-rp-fire shadow-soft'
+                      ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
                       : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
                   <BuilderIcon name={TRIGGER_ICON_NAME[CHOICE_ICON_MODE[c.choice]]} className="w-7 h-7" />
                   <span className="text-[14px] font-semibold leading-tight text-center">{c.label}</span>
-                  <span className="text-[11px] leading-tight text-center opacity-70">{c.sub}</span>
+                  <span className="text-[13px] leading-tight text-center opacity-70">{c.sub}</span>
                 </button>
               );
             })}
@@ -430,14 +430,14 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
               title={b.locAdvanced}
               className={`shrink-0 w-20 sm:w-24 flex flex-col items-center justify-center gap-1.5 rounded-xl border-2 px-1.5 transition-colors ${
                 advOpen
-                  ? 'border-rp-fire bg-rp-fire/10 text-rp-fire shadow-soft'
+                  ? 'border-rp-fire bg-rp-fire/10 text-ink-fire shadow-soft'
                   : 'border-[--rp-border] text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] hover:border-[--ink-3]'}`}>
               <span aria-hidden className="text-xl leading-none">⚙</span>
-              <span className="text-[11px] font-medium leading-tight text-center">{b.locAdvancedShort}</span>
+              <span className="text-[13px] font-medium leading-tight text-center">{b.locAdvancedShort}</span>
             </button>
           )}
         </div>
-        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">
+        <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">
           {choice === 'anywhere' ? b.locAnywhereDesc : b.locSpecificDesc}
         </p>
       </div>
@@ -457,16 +457,16 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
                 <div className="flex items-center gap-1.5" data-qs-field="geofenceRadiusMeters">
                   <Input dense type="number" min={1} className="w-24" value={radius}
                     onChange={(e) => set(radiusPatch(task, Math.max(1, parseInt(e.target.value) || DEFAULT_RADIUS_M)))} />
-                  <span className="text-[11px] text-[--ink-3]">{b.metersShort}</span>
+                  <span className="text-[13px] text-[--ink-3]">{b.metersShort}</span>
                   {/* The two old top-level buttons, demoted to one-tap presets. */}
                   <div className="flex gap-1 ms-auto">
-                    <Button variant="ghost" className="text-[11px] px-2 py-1"
+                    <Button variant="ghost" className="text-[13px] px-2 py-1"
                       onClick={() => set(radiusPatch(task, TIGHT_RADIUS_M))}>{b.locRadiusPresetTight}</Button>
-                    <Button variant="ghost" className="text-[11px] px-2 py-1"
+                    <Button variant="ghost" className="text-[13px] px-2 py-1"
                       onClick={() => set(radiusPatch(task, DEFAULT_RADIUS_M))}>{b.locRadiusPresetDefault}</Button>
                   </div>
                 </div>
-                <p className="text-[11px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
+                <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.locRadiusHelp}</p>
               </div>
 
               <label className="flex items-start gap-2 cursor-pointer">
@@ -474,7 +474,7 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
                   onChange={(e) => set(skipGpsPatch(task, e.target.checked))} />
                 <span>
                   <span className="text-[13px] font-medium text-[--ink-1]">{b.locSkipGps}</span>
-                  <span className="block text-[11px] text-[--ink-3] leading-snug">{b.locSkipGpsDesc}</span>
+                  <span className="block text-[13px] text-[--ink-3] leading-snug">{b.locSkipGpsDesc}</span>
                 </span>
               </label>
 
@@ -498,8 +498,8 @@ function LocationStepBody({ task, set, b, advOpen, setAdvOpen }: {
       {choice === 'specific' && taskPlacementState(task) === 'unplaced' && (
         <div className="shrink-0 flex items-center gap-2 rounded-lg bg-[--surface-2] px-2.5 py-1.5">
           <span aria-hidden className="text-xs leading-none">📍</span>
-          <p className="text-[11px] text-[--ink-2] min-w-0 flex-1 truncate">{b.notPlacedTitle}</p>
-          <Button variant="ghost" className="text-[11px] shrink-0 px-2 py-0.5" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
+          <p className="text-[13px] text-[--ink-2] min-w-0 flex-1 truncate">{b.notPlacedTitle}</p>
+          <Button variant="ghost" className="text-[13px] shrink-0 px-2 py-0.5" onClick={() => setExpanded(true)}>{b.notPlacedAction}</Button>
         </div>
       )}
 
@@ -590,7 +590,7 @@ function QuizModeSection({ task, set, b, revealed, touch }: {
             onClick={() => void switchMode(mode)}
             className={`flex-1 rounded-lg border py-1.5 text-xs transition-colors ${
               ordering === mode
-                ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                 : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
             {mode ? b.quizModeOrdering : b.quizModeChoices}
           </button>
@@ -655,7 +655,7 @@ function OrderingItemsEditor({ task, set, b, revealError, onTouch }: {
       <div className="space-y-1">
         {rows.map((row, i) => (
           <div key={row.id} className="flex items-center gap-1.5">
-            <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
+            <span className="text-[13px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
             <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
               onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
             <button onClick={() => move(i, -1)} disabled={i === 0} aria-label={`${b.mediaMoveUp} ${i + 1}`}
@@ -672,8 +672,8 @@ function OrderingItemsEditor({ task, set, b, revealError, onTouch }: {
         onClick={() => apply([...rows, { id: uuid(), text: '' }])}>
         + {b.orderingAddItem}
       </Button>
-      <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{ORDER_ITEMS_MAX}</span>
-      {error && <p className="text-[11px] text-rp-amber">{error}</p>}
+      <span className="text-[13px] text-[--ink-3] ms-2">{clean.length}/{ORDER_ITEMS_MAX}</span>
+      {error && <p className="text-[13px] text-ink-amber">{error}</p>}
     </div>
   );
 }
@@ -706,7 +706,7 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
 
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-[--ink-3] leading-snug">{b.surveyLead}</p>
+      <p className="text-[13px] text-[--ink-3] leading-snug">{b.surveyLead}</p>
       <div className="flex gap-1.5" role="tablist">
         {([false, true] as const).map((mode) => (
           <button key={String(mode)} role="tab" aria-selected={choices === mode}
@@ -717,7 +717,7 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
             }}
             className={`flex-1 rounded-lg border py-1.5 text-xs transition-colors ${
               choices === mode
-                ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                 : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
             {mode ? b.surveyModeChoices : b.surveyModeText}
           </button>
@@ -729,7 +729,7 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
           <div className="space-y-1">
             {rows.map((row, i) => (
               <div key={row.id} className="flex items-center gap-1.5">
-                <span className="text-[11px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
+                <span className="text-[13px] text-[--ink-3] w-4 text-end shrink-0">{i + 1}.</span>
                 <Input dense value={row.text} dir="auto" className="flex-1 min-w-0"
                   placeholder={b.surveyChoicePlaceholder(i + 1)}
                   onChange={(e) => apply(rows.map((r) => (r.id === row.id ? { ...r, text: e.target.value } : r)))} />
@@ -743,8 +743,8 @@ function SurveyChoicesSection({ task, set, b, revealError, touch }: {
             onClick={() => apply([...rows, { id: uuid(), text: '' }])}>
             + {b.surveyAddChoice}
           </Button>
-          <span className="text-[11px] text-[--ink-3] ms-2">{clean.length}/{SURVEY_CHOICES_MAX}</span>
-          {error && revealError && <p className="text-[11px] text-rp-amber">{b.surveyChoicesError}</p>}
+          <span className="text-[13px] text-[--ink-3] ms-2">{clean.length}/{SURVEY_CHOICES_MAX}</span>
+          {error && revealError && <p className="text-[13px] text-ink-amber">{b.surveyChoicesError}</p>}
         </div>
       )}
     </div>
@@ -823,7 +823,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
         {/* The naming gate is the wizard's ONLY forward gate, so it states its
             reason beside the field. Calm register: this is a hint, not an error. */}
         {task.title.trim() === '' && (
-          <p className="text-[11px] text-[--ink-3] leading-snug mt-1">{b.titleRequiredHint}</p>
+          <p className="text-[13px] text-[--ink-3] leading-snug mt-1">{b.titleRequiredHint}</p>
         )}
       </div>
       <div>
@@ -859,9 +859,9 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                       : { type: ty },
                   )}
                   className={`w-full flex items-center gap-1.5 rounded-lg border px-2 pe-12 py-1.5 text-start transition-colors ${
-                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
+                    active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire' : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                   <BuilderIcon name={TYPE_ICON_NAME[ty]} className="w-4 h-4 shrink-0" />
-                  <span className="text-[11px] font-medium truncate">{TYPE_META[ty].label}</span>
+                  <span className="text-[13px] font-medium truncate">{TYPE_META[ty].label}</span>
                 </button>
                 <span className="absolute top-1/2 -translate-y-1/2 end-1 z-10 flex items-center gap-0.5">
                   {/* Load an authored, immediately completable example of this
@@ -869,7 +869,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                   <button type="button" onClick={() => onSampleClick(ty)}
                     aria-label={b.loadSampleFor(TYPE_META[ty].label)} title={b.loadSampleFor(TYPE_META[ty].label)}
                     aria-expanded={samplePickerFor === ty}
-                    className="w-6 h-6 rounded-full bg-[--surface-2] text-[--ink-3] text-[11px] leading-none flex items-center justify-center hover:text-rp-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
+                    className="w-6 h-6 rounded-full bg-[--surface-2] text-[--ink-3] text-[13px] leading-none flex items-center justify-center hover:text-ink-fire focus:outline-none focus:ring-1 focus:ring-rp-fire">
                     ✨
                   </button>
                   <RichTooltip title={TYPE_META[ty].label} body={TYPE_META[ty].desc} svg={TYPE_ANIM[ty]} />
@@ -877,11 +877,11 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
                 {/* A type with several samples offers its labelled list. */}
                 {samplePickerFor === ty && (
                   <div className="absolute z-20 top-full mt-1 start-0 min-w-full w-max max-w-[15rem] rounded-lg border border-[--rp-border] bg-[--surface-1] shadow-soft p-1">
-                    <p className="px-1.5 py-1 text-[10px] text-[--ink-3]">{b.samplePickTitle(TYPE_META[ty].label)}</p>
+                    <p className="px-1.5 py-1 text-[12px] text-[--ink-3]">{b.samplePickTitle(TYPE_META[ty].label)}</p>
                     {samplesForType(ty).map((sample) => (
                       <button key={sample.label} type="button" dir="auto"
                         onClick={() => void applyTypeSample(ty, sample)}
-                        className="w-full text-start rounded px-1.5 py-1 text-[11px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] truncate">
+                        className="w-full text-start rounded px-1.5 py-1 text-[13px] text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1] truncate">
                         {sample.label}
                       </button>
                     ))}
@@ -893,7 +893,7 @@ function DetailsStepBody({ task, set, b, replace, gameId }: {
         </div>
         {/* The CAPTION takes the short form; the tooltip above and Step 3's note
             keep the full sentence (change: builder-ux-round-2). */}
-        <p className="text-[11px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].short}</p>
+        <p className="text-[13px] text-[--ink-3] leading-snug mt-1.5">{TYPE_META[task.type].short}</p>
       </div>
     </>
   );
@@ -927,9 +927,9 @@ function UnlockSection({ task, siblings, set, b }: {
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
+      <p className="text-[13px] text-[--ink-3] leading-snug">{b.unlockAfterHint}</p>
       {others.length === 0 ? (
-        <p className="text-[11px] text-[--ink-3]">{b.unlockAfterNone}</p>
+        <p className="text-[13px] text-[--ink-3]">{b.unlockAfterNone}</p>
       ) : (
         <div className="space-y-1">
           {others.map((s) => {
@@ -1049,7 +1049,7 @@ function MediaSection({ task, set, b, gameId, replace }: {
                     : <span className="text-2xl" aria-hidden>▶</span>}
               </div>
               <div className="flex-1 min-w-0 space-y-1">
-                <div className="text-[11px] text-[--ink-3] truncate">
+                <div className="text-[13px] text-[--ink-3] truncate">
                   {m.kind === 'youtube' ? b.mediaKindYouTube : m.kind === 'video' ? b.mediaKindVideo : b.mediaKindImage}
                 </div>
                 <Input dense value={m.caption ?? ''} onChange={(e) => setCaption(i, e.target.value)}
@@ -1070,12 +1070,12 @@ function MediaSection({ task, set, b, gameId, replace }: {
 
       {/* Upload from computer */}
       <div className="flex items-center gap-2">
-        <label className="cursor-pointer self-start text-xs text-rp-fire hover:underline">
+        <label className="cursor-pointer self-start text-xs text-ink-fire hover:underline">
           + {b.mediaUpload}
           <input type="file" accept="image/*,video/*" className="hidden" onChange={onPickFile} disabled={uploadPct !== null} />
         </label>
-        {uploadPct !== null && <span className="text-[11px] text-[--ink-3]">{uploadPct}%</span>}
-        {uploadError && <span className="text-[11px] text-neon-red">{b.mediaUploadError}</span>}
+        {uploadPct !== null && <span className="text-[13px] text-[--ink-3]">{uploadPct}%</span>}
+        {uploadError && <span className="text-[13px] text-neon-red">{b.mediaUploadError}</span>}
       </div>
 
       {/* YouTube link */}
@@ -1085,7 +1085,7 @@ function MediaSection({ task, set, b, gameId, replace }: {
             placeholder={b.mediaYouTubePlaceholder} dir="ltr" className="flex-1 min-w-0" />
           <Button variant="ghost" onClick={addYouTube} disabled={!ytUrl.trim()}>{b.mediaAddYouTube}</Button>
         </div>
-        {ytError && <span className="text-[11px] text-neon-red">{b.mediaYouTubeError}</span>}
+        {ytError && <span className="text-[13px] text-neon-red">{b.mediaYouTubeError}</span>}
       </div>
     </OptInGroup>
   );
@@ -1294,7 +1294,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                     <button key={k} type="button"
                       onClick={() => setSmart({ verificationType: 'photo_upload', captureKind: k })}
                       className={`px-3 py-1.5 rounded-lg text-sm border ${active
-                        ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                        ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                         : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
                       {label}
                     </button>
@@ -1474,7 +1474,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                 onChange={(e) => set({ requirePresence: e.target.checked || undefined })} />
               <span>
                 <span className="text-[13px] font-medium text-[--ink-1]">{b.requirePresence}</span>
-                <span className="block text-[11px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
+                <span className="block text-[13px] text-[--ink-3] leading-snug">{b.requirePresenceDesc}</span>
               </span>
             </label>
           )}
@@ -1518,7 +1518,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               return (
                 <button key={d.key} onClick={() => set({ difficulty: d.value })}
                   className={`flex-1 min-w-0 rounded-lg border py-1 text-[13px] transition-colors ${
-                    active ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
+                    active ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium' : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
                   {DIFF_LABEL[d.key]}
                 </button>
               );
@@ -1567,7 +1567,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                   </button>
                 )}
               </div>
-              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
+              <p className="text-[13px] text-[--ink-3]" dir="auto">{b.estimateHelp}</p>
             </div>
           );
         })()}
@@ -1608,7 +1608,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
                     });
                   }} />
               </div>
-              <p className="text-[11px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
+              <p className="text-[13px] text-[--ink-3]" dir="auto">{b.durationHelp}</p>
             </div>
           );
         })()}
@@ -1628,7 +1628,7 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
             <span>{b.expiryAfterUnit}</span>
           </div>
           {validateAvailabilityWindow(task) !== null && (
-            <p className="text-[11px] text-rp-fire mt-1">{b.expiryWindowError}</p>
+            <p className="text-[13px] text-ink-fire mt-1">{b.expiryWindowError}</p>
           )}
           {/* Scheduled release disclosure (change: builder-first-task-flow).
               `releaseAt` / `releaseAfterMinutes` are honored by the server but the
@@ -1637,12 +1637,12 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               any expiry, so a task is never gated shut at a time nothing in the
               interface mentions. The advanced badge counts them too. */}
           {task.releaseAt && (
-            <p className="text-[11px] text-[--ink-3] mt-1">
+            <p className="text-[13px] text-[--ink-3] mt-1">
               🕒 {b.expiryReleaseAtWarn(new Date(task.releaseAt).toLocaleString())}
             </p>
           )}
           {typeof task.releaseAfterMinutes === 'number' && task.releaseAfterMinutes > 0 && (
-            <p className="text-[11px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
+            <p className="text-[13px] text-[--ink-3] mt-1">🕒 {b.releaseAfterDisclosure(task.releaseAfterMinutes)}</p>
           )}
         </div>
 
@@ -1665,11 +1665,11 @@ function ExecutionStepBody({ task, set, setSmart, replace, b, groups, revealed, 
               <span className="ms-1.5 align-middle text-[9px] font-semibold text-[--ink-3] uppercase tracking-wider">
                 {b.advancedTag}
               </span>
-              <span className="block text-[11px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
+              <span className="block text-[13px] text-[--ink-3] leading-snug">{b.pauseClockDesc}</span>
             </span>
           </label>
           {task.pausesTimer && located && (
-            <p className="text-[11px] text-rp-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
+            <p className="text-[13px] text-ink-amber mt-1 ms-6">{b.pauseClockLocatedWarn}</p>
           )}
         </div>
         </OptInGroup>
@@ -1719,7 +1719,7 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
       <TagChips tags={task.tags} className="mt-1.5" more={b.moreTags} max={20} />
       {suggestions.length > 0 && (
         <div className="mt-2">
-          <p className="text-[11px] text-[--ink-3] mb-1">{b.popularTags}</p>
+          <p className="text-[13px] text-[--ink-3] mb-1">{b.popularTags}</p>
           <div className="flex flex-wrap items-center gap-1">
             {suggestions.map((tag) => (
               <button
@@ -1727,7 +1727,7 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
                 type="button"
                 dir="auto"
                 onClick={() => set({ tags: normalizeTags([...current, tag]) })}
-                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-rp-fire hover:bg-rp-fire/10"
+                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[13px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-ink-fire hover:bg-rp-fire/10"
               >
                 + {tag}
               </button>
@@ -1735,7 +1735,7 @@ function TaskTagsField({ task, set, b }: { task: Task; set: (p: Partial<Task>) =
           </div>
         </div>
       )}
-      <p className="text-[11px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
+      <p className="text-[13px] text-[--ink-3] mt-1">{b.tagsHelp}</p>
     </div>
   );
 }

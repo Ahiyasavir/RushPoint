@@ -22,7 +22,7 @@ export default function LegalFooter() {
   const { t } = useT();
   const linkClass = 'underline underline-offset-2 hover:text-zinc-300 transition-colors';
   return (
-    <p className="text-center text-[11px] text-zinc-500 mt-4">
+    <p className="text-center text-[13px] text-zinc-500 mt-4">
       <a href="/terms" target="_blank" rel="noopener noreferrer" className={linkClass}>
         {t.join.legalTerms}
       </a>

@@ -282,7 +282,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
                     style={{ animationDelay: `${place * 80}ms` }}>
                     <div className="text-2xl leading-none">{MEDAL[place - 1]}</div>
                     <div dir="auto" className={`text-xs font-semibold truncate max-w-full ${isMe ? 'text-ink-fire' : 'text-zinc-200'}`}>{e.teamName}</div>
-                    <div className="text-[11px] text-zinc-400 mb-1">
+                    <div className="text-[13px] text-zinc-400 mb-1">
                       {isTimeOnly
                         ? (() => { const d = board?.rankings.find((x) => x.teamId === e.teamId)?.durationSeconds; return d != null ? fmtDuration(d) : '—'; })()
                         : e.score}
@@ -355,7 +355,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
       {run.billingType !== 'pro' && (
         <a href={PAYMENTS_ENABLED ? `${creatorUrl()}/?ref=${team.ownerUid}` : creatorUrl()} target="_blank" rel="noreferrer"
           className="block mt-2 rounded-2xl border border-glass-border bg-white/70 px-4 py-3 text-center hover:bg-white transition-colors">
-          <div className="flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 mb-0.5">
+          <div className="flex items-center justify-center gap-1.5 text-[13px] text-zinc-500 mb-0.5">
             <span>⚡</span> {t.final.poweredBy}
           </div>
           <div className="text-sm font-semibold" style={{ color: accent }}>
@@ -375,7 +375,7 @@ export default function FinalScreen({ state, session, onLeave }: { state: MyTeam
 function Stat({ label, value, accent }: { label: string; value: string; accent: string }) {
   return (
     <div className="bg-app-raised rounded-xl px-3 py-2.5 text-start">
-      <div className="text-[11px] text-zinc-500 mb-0.5">{label}</div>
+      <div className="text-[13px] text-zinc-500 mb-0.5">{label}</div>
       <div className="text-base font-semibold font-brand" style={{ color: accent }}>{value}</div>
     </div>
   );
@@ -457,7 +457,7 @@ function BadgesCard({ finalized }: { finalized: boolean }) {
           >
             <span aria-hidden>{BADGE_EMOJI[b] ?? '🏅'}</span>
             <span dir="auto">{label(b)}</span>
-            {fresh.has(b) && <span className="text-[10px] font-bold uppercase">{t.badges.new}</span>}
+            {fresh.has(b) && <span className="text-[12px] font-bold uppercase">{t.badges.new}</span>}
           </div>
         ))}
       </div>

@@ -16,7 +16,7 @@ export default function MapModeToggle({ mode, onChange }: {
           key={m}
           type="button"
           onClick={() => onChange(m)}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition ${
+          className={`px-2.5 py-1 rounded-md text-[13px] font-medium transition ${
             mode === m ? 'bg-neon-green text-black' : 'text-zinc-500'
           }`}
         >

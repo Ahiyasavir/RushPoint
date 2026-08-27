@@ -73,7 +73,7 @@ export default function SmartBuildShapePanel({ stages, possible, labels }: Smart
     // treat, where it sits beside the question instead of above it.
     <>
       {hasShape && (
-        <div className="flex lg:hidden items-center gap-1.5 w-fit rounded-full border border-[--rp-border] bg-[--surface-1] px-3 py-1 text-[11px] text-[--ink-2]" aria-live="polite">
+        <div className="flex lg:hidden items-center gap-1.5 w-fit rounded-full border border-[--rp-border] bg-[--surface-1] px-3 py-1 text-[13px] text-[--ink-2]" aria-live="polite">
           <span aria-hidden="true">🧩</span>
           <span>{labels.slots(totalSlots)}</span>
         </div>
@@ -88,10 +88,10 @@ export default function SmartBuildShapePanel({ stages, possible, labels }: Smart
         <div className="flex items-baseline justify-between gap-2">
           <h4 className="font-brand font-bold text-[--ink-1] text-sm">{labels.title}</h4>
           {hasShape && (
-            <span className="shrink-0 text-[11px] text-[--ink-3]">{labels.slots(totalSlots)}</span>
+            <span className="shrink-0 text-[13px] text-[--ink-3]">{labels.slots(totalSlots)}</span>
           )}
         </div>
-        <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{labels.hint}</p>
+        <p className="text-[13px] text-[--ink-3] mt-0.5 leading-relaxed">{labels.hint}</p>
 
         {!hasShape ? (
           <p className="text-[12px] text-[--ink-3] mt-2 text-center">{labels.empty}</p>
@@ -113,7 +113,7 @@ export default function SmartBuildShapePanel({ stages, possible, labels }: Smart
                   title={`${labels.stage(i + 1)} · ${labels.slots(slots)}`}
                   className={[
                     'flex h-6 min-w-[1.5rem] items-center justify-center rounded-md border border-[--rp-border]',
-                    'bg-[--surface-0] px-1.5 text-[11px] font-semibold text-[--ink-2]',
+                    'bg-[--surface-0] px-1.5 text-[13px] font-semibold text-[--ink-2]',
                     // The app's own keyframe, not a bespoke one; `motion-safe`
                     // is what honours a reduced-motion preference.
                     isNew ? 'motion-safe:animate-fade-up' : '',

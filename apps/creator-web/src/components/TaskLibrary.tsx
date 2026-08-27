@@ -118,7 +118,7 @@ export default function TaskLibrary({ onInsert, onClose }: {
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-[--ink-1] truncate">{t.title}</div>
                 <div className="text-xs text-[--ink-2] truncate">{t.description}</div>
-                <div className="flex gap-2 text-[11px] text-[--ink-3] mt-0.5">
+                <div className="flex gap-2 text-[13px] text-[--ink-3] mt-0.5">
                   <span>{TASK_TYPE_LABEL[t.type] ?? t.type}</span>·<span>{gl.metaDiff(t.difficulty)}</span>·<span>{gl.metaPts(t.pointValue)}</span>·<span>{gl.metaCopies(t.copyCount)}</span>
                   {t.sourceGameTitle && <span className="truncate">{b.libraryFrom(t.sourceGameTitle)}</span>}
                 </div>

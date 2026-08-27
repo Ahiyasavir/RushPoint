@@ -137,7 +137,7 @@ function OnboardingChecklist({ checklist, onDismiss, onStep }: {
           </span>
           <button
             onClick={onDismiss}
-            className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            className="text-[13px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
           >
             {o.dismiss}
           </button>
@@ -152,13 +152,13 @@ function OnboardingChecklist({ checklist, onDismiss, onStep }: {
             <>
               <span aria-hidden="true"
                 className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                  step.done ? 'bg-rp-go/20 text-rp-go' : 'bg-[--surface-2] text-[--ink-3]'}`}
+                  step.done ? 'bg-rp-go/20 text-ink-go' : 'bg-[--surface-2] text-[--ink-3]'}`}
               >
                 {step.done ? '✓' : i + 1}
               </span>
               <div className="min-w-0 text-start">
                 <div className="text-sm font-semibold text-[--ink-1]">{copy.title}</div>
-                <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{copy.body}</p>
+                <p className="text-[13px] text-[--ink-3] mt-0.5 leading-relaxed">{copy.body}</p>
                 {step.done && <span className="sr-only">{o.stepDone}</span>}
               </div>
             </>
@@ -825,7 +825,7 @@ export default function DashboardPage() {
                 with Build/Gallery/Wallet in the top nav. */}
             <button
               onClick={() => nav('/trash')}
-              className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+              className="text-[13px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
             >
               {d.trashLink}
             </button>
@@ -852,10 +852,10 @@ export default function DashboardPage() {
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg bg-[--surface-2] shrink-0">{s.icon}</div>
                     <div className="min-w-0 text-start">
                       <div className="font-brand text-2xl font-extrabold text-[--ink-1] leading-none tabular-nums">{s.value}</div>
-                      <div className="text-[11px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
+                      <div className="text-[13px] text-[--ink-3] mt-1 font-medium truncate">{s.label}</div>
                     </div>
                     {s.to && (
-                      <div className="relative ms-auto text-[11px] text-[--ink-3] group-hover:text-rp-signal transition-colors shrink-0">
+                      <div className="relative ms-auto text-[13px] text-[--ink-3] group-hover:text-ink-signal transition-colors shrink-0">
                         {d.statTotalPlaysCta}
                       </div>
                     )}
@@ -930,14 +930,14 @@ export default function DashboardPage() {
                     {allTaskTypes.length > 0 && (
                       <div className="flex gap-1.5 flex-wrap">
                         {allTaskTypes.map(type => (
-                          <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[10px] font-medium">
+                          <span key={type} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[--surface-2] text-[--ink-3] text-[12px] font-medium">
                             {TASK_TYPE_EMOJI[type] ?? '●'} {TASK_TYPE_LABEL[type] ?? type}
                           </span>
                         ))}
                       </div>
                     )}
 
-                    <div className="flex items-center gap-3 text-[11px] text-[--ink-3] font-medium">
+                    <div className="flex items-center gap-3 text-[13px] text-[--ink-3] font-medium">
                       <span>{d.cardStages(g.stages.length)}</span>
                       <span className="w-1 h-1 rounded-full bg-[--rp-border] inline-block" />
                       <span>{d.cardTasks(taskCount)}</span>
@@ -948,7 +948,7 @@ export default function DashboardPage() {
                     {live && (
                       <button
                         onClick={() => nav(`/run/${live.gameId}/${live.runId}`)}
-                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-rp-alert bg-rp-alert/10 hover:bg-rp-alert/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
+                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-ink-alert bg-rp-alert/10 hover:bg-rp-alert/15 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-alert/40"
                       >
                         <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rp-alert animate-pulse" />
                         {d.cardOpenRun}
@@ -1039,9 +1039,9 @@ export default function DashboardPage() {
                               disabled={item.disabled}
                               title={item.title}
                               onClick={item.onClick}
-                              className={`w-full justify-start text-start min-h-[36px] px-2.5 py-2 rounded-lg text-[11px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                              className={`w-full justify-start text-start min-h-[36px] px-2.5 py-2 rounded-lg text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 disabled:opacity-40 disabled:cursor-not-allowed ${
                                 item.destructive
-                                  ? 'text-rp-alert/80 hover:text-rp-alert hover:bg-rp-alert/8 focus-visible:ring-rp-alert/40'
+                                  ? 'text-ink-alert/80 hover:text-ink-alert hover:bg-rp-alert/8 focus-visible:ring-rp-alert/40'
                                   : 'text-[--ink-2] hover:text-[--ink-1] hover:bg-[--surface-2] focus-visible:ring-rp-fire/50'
                               }`}
                             >
@@ -1068,8 +1068,8 @@ export default function DashboardPage() {
               ＋
             </div>
             <div>
-              <div className="font-brand font-bold text-sm text-[--ink-2] group-hover:text-rp-fire transition-colors">{d.newAdventureLabel}</div>
-              <div className="text-[11px] text-[--ink-3] mt-0.5">{d.newAdventureSub}</div>
+              <div className="font-brand font-bold text-sm text-[--ink-2] group-hover:text-ink-fire transition-colors">{d.newAdventureLabel}</div>
+              <div className="text-[13px] text-[--ink-3] mt-0.5">{d.newAdventureSub}</div>
             </div>
           </button>
         </div>
@@ -1218,7 +1218,7 @@ function DeleteGameDialog({ game, busy, onCancel, onConfirm }: {
         className="relative bg-[--surface-0] dark:bg-[--surface-1] border border-rp-alert/30 rounded-2xl w-full max-w-md p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="font-brand font-bold text-rp-alert text-lg mb-1">{d.deleteDialogTitle}</div>
+        <div className="font-brand font-bold text-ink-alert text-lg mb-1">{d.deleteDialogTitle}</div>
         <p className="text-xs text-[--ink-2] leading-relaxed mb-1">{d.deleteDialogBody(game.title)}</p>
         <p className="text-xs text-[--ink-3] leading-relaxed mb-4">{d.deleteDialogRecoverable(GAME_TRASH_RETENTION_DAYS)}</p>
 

@@ -134,7 +134,7 @@ export function Select({ className = '', children, ...rest }: SelectHTMLAttribut
 export function Label({ children, dense = false }: { children: ReactNode; dense?: boolean }) {
   return (
     <label className={`block font-semibold text-[--ink-3] uppercase tracking-wider ${
-      dense ? 'text-[10px] mb-0.5' : 'text-xs mb-1.5'}`}>{children}</label>
+      dense ? 'text-[12px] mb-0.5' : 'text-xs mb-1.5'}`}>{children}</label>
   );
 }
 
@@ -146,14 +146,14 @@ export function Badge({
     // NOTE: color="green" intentionally maps to rp-fire (the orange brand accent),
     // NOT a green. The actual green token is rp-go — don't assume green === green here.
     zinc:   'bg-[--surface-2] text-[--ink-2] border-[--rp-border]',
-    green:  'bg-rp-fire/10 text-rp-fire border-rp-fire/20 dark:bg-rp-fire/15',
-    gold:   'bg-rp-amber/10 text-rp-amber border-rp-amber/20',
-    red:    'bg-rp-alert/10 text-rp-alert border-rp-alert/20',
-    cyan:   'bg-rp-plasma/10 text-rp-plasma border-rp-plasma/20',
-    purple: 'bg-rp-signal/10 text-rp-signal border-rp-signal/20',
+    green:  'bg-rp-fire/10 text-ink-fire border-rp-fire/20 dark:bg-rp-fire/15',
+    gold:   'bg-rp-amber/10 text-ink-amber border-rp-amber/20',
+    red:    'bg-rp-alert/10 text-ink-alert border-rp-alert/20',
+    cyan:   'bg-rp-plasma/10 text-ink-plasma border-rp-plasma/20',
+    purple: 'bg-rp-signal/10 text-ink-signal border-rp-signal/20',
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-semibold border ${map[color]}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-lg text-[13px] font-semibold border ${map[color]}`}>
       {children}
     </span>
   );
@@ -183,12 +183,12 @@ export function TagChips({ tags, max = 6, more, className = '' }: {
     <div className={`flex flex-wrap items-center gap-1 ${className}`}>
       {shown.map((tag) => (
         <span key={tag} dir="auto"
-          className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border bg-[--surface-2] text-[--ink-2] border-[--rp-border]">
+          className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[13px] font-medium border bg-[--surface-2] text-[--ink-2] border-[--rp-border]">
           {tag}
         </span>
       ))}
       {hidden > 0 && more && (
-        <span className="text-[11px] font-medium text-[--ink-3]">{more(hidden)}</span>
+        <span className="text-[13px] font-medium text-[--ink-3]">{more(hidden)}</span>
       )}
     </div>
   );
@@ -212,7 +212,7 @@ export function Advanced({ title, children, open, onToggle, dense = false, meta 
         onClick={onToggle}
         aria-expanded={open}
         className={`w-full flex items-center gap-2 font-semibold text-[--ink-3] uppercase tracking-wider hover:bg-[--surface-2] transition-colors text-start ${
-          dense ? 'px-2.5 py-1.5 text-[11px]' : 'px-3.5 py-2.5 text-xs'}`}
+          dense ? 'px-2.5 py-1.5 text-[13px]' : 'px-3.5 py-2.5 text-xs'}`}
       >
         <span className="min-w-0 truncate">{title}</span>
         {meta && <span className="shrink-0 normal-case tracking-normal font-medium text-[--ink-3]">{meta}</span>}
@@ -281,7 +281,7 @@ export function ChipRow<T extends string | number>({ label, options, value, onCh
           return (
             <button key={String(o)} type="button" onClick={() => onChange(o)} aria-pressed={on}
               className={`min-h-[40px] px-3 rounded-lg border text-[13px] transition-colors ${
-                on ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                on ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                    : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
               {render(o)}
             </button>
@@ -336,7 +336,7 @@ export function RatingRow<T extends number>({ label, options, value, onChange, r
               onClick={() => onChange(o)} aria-label={render(o)}
               className={`min-h-[44px] flex-1 rounded-lg border text-[15px] font-medium transition-colors ${
                 exact ? 'border-rp-fire bg-rp-fire text-white'
-                  : reached ? 'border-rp-fire bg-rp-fire/10 text-rp-fire'
+                  : reached ? 'border-rp-fire bg-rp-fire/10 text-ink-fire'
                     : 'border-[--rp-border] text-[--ink-3] hover:bg-[--surface-2]'}`}>
               {o}
             </button>
@@ -344,7 +344,7 @@ export function RatingRow<T extends number>({ label, options, value, onChange, r
         })}
       </div>
       <p className="text-[13px] font-medium text-[--ink-1] mt-2">{render(value)}</p>
-      {hint && <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{hint}</p>}
+      {hint && <p className="text-[13px] text-[--ink-3] mt-0.5 leading-relaxed">{hint}</p>}
     </div>
   );
 }
@@ -366,14 +366,14 @@ export function MultiChipRow<T extends string>({ label, options, values, onToggl
           return (
             <button key={String(o)} type="button" onClick={() => onToggle(o)} aria-pressed={on}
               className={`min-h-[40px] px-3 rounded-lg border text-[13px] transition-colors ${
-                on ? 'border-rp-fire bg-rp-fire/10 text-rp-fire font-medium'
+                on ? 'border-rp-fire bg-rp-fire/10 text-ink-fire font-medium'
                    : 'border-[--rp-border] text-[--ink-2] hover:bg-[--surface-2]'}`}>
               {render(o)}
             </button>
           );
         })}
       </div>
-      {hint && <p className="text-[11px] text-[--ink-3] mt-1.5">{hint}</p>}
+      {hint && <p className="text-[13px] text-[--ink-3] mt-1.5">{hint}</p>}
     </div>
   );
 }

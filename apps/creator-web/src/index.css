@@ -44,6 +44,28 @@
   --rp-go:     #10B981;
   --rp-alert:  #EF4444;
 
+  /* "Ink" text tokens (change: brand-design-system) — darkened, TEXT ONLY
+     variants of the accents above, same idea play-web already shipped
+     (packages/brand/tokens.mjs INK). Every FILL/border/ring/gradient keeps
+     the raw --rp-* colour; only text routes through these, because the raw
+     accents fail WCAG as text on a light surface (--rp-fire is 3.16:1 on
+     white; body text needs 4.5:1).
+     Why these are CSS variables and not a flat tailwind.config.js colour like
+     play-web's: creator-web has a REAL dark mode, and the light-mode fix is
+     the wrong fix there — on this app's near-black surfaces the raw accents
+     already clear AA on their own (5 of 6 do, comfortably), and darkening
+     them further for "text safety" would make them close to unreadable
+     dark-on-dark. A static hex can only be one of those; a variable that
+     the dark-mode block overrides can be both. Values and their worst-surface ratio,
+     scripts/test-creator-a11y-scan.ts asserts every one: */
+  --rp-ink-fire:   #B03A0B; /* 4.87:1 on --rp-card (shared with play-web's ink-fire) */
+  --rp-ink-warm:   #8A4B00; /* 5.46:1 (shared ink-warm) */
+  --rp-ink-amber:  #7A5200; /* 5.55:1 (shared ink-amber) */
+  --rp-ink-alert:  #C21414; /* 4.95:1 (shared ink-alert) */
+  --rp-ink-go:     #0A714F; /* 4.83:1 (shared ink-go) */
+  --rp-ink-plasma: #046D7F; /* 4.81:1 (shared ink-plasma) */
+  --rp-ink-signal: #5D2CB2; /* 6.82:1 (shared ink-signal) */
+
   /* legacy compat */
   --rp-bg: #F6F7FB;
   --rp-bg-elevated: #FFFFFF;
@@ -104,6 +126,22 @@ html.dark {
   --rp-text-muted: #464D6E;
   --rp-glass-bg: rgba(13,14,26,0.70);
   --rp-glass-border: rgba(255,255,255,0.07);
+
+  /* Ink text tokens, dark-mode half. Mostly the RAW accent: on a near-black
+     surface the saturated brand colours already read as light-on-dark and
+     clear AA on their own — darkening them again (the light-mode fix) would
+     push them toward the background instead of away from it. --rp-ink-signal
+     and --rp-ink-alert are the two exceptions: raw --rp-signal is 2.89:1 on
+     --rp-card here, and raw --rp-alert is 4.38:1, both short of 4.5:1 — so
+     those two are LIGHTENED instead, the mirror of what light mode does.
+     Ratios against the worst dark surface (--rp-card, #1B1E30): */
+  --rp-ink-fire:   #FF5722; /* raw, 5.21:1 */
+  --rp-ink-warm:   #FF8A00; /* raw, 6.97:1 */
+  --rp-ink-amber:  #FFB300; /* raw, 9.18:1 */
+  --rp-ink-alert:  #F15656; /* lightened, 4.87:1 (raw --rp-alert is 4.38:1) */
+  --rp-ink-go:     #10B981; /* raw, 6.49:1 */
+  --rp-ink-plasma: #06B6D4; /* raw, 6.78:1 */
+  --rp-ink-signal: #A87CF3; /* lightened, 5.37:1 (raw --rp-signal is 2.89:1) */
 }
 
 /* ── Base ────────────────────────────────────────────────────────────────── */

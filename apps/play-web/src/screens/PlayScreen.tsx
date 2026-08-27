@@ -1020,7 +1020,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
             // The number alone is meaningless to a screen reader sitting next to
             // "עוד" — aria-label supplies the sentence the visible digit implies.
             <span data-testid="more-drawer-badge" aria-label={t.more.unread({ n: plan.totalBadge })}
-              className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-ink-fire text-white text-[11px] font-bold">
+              className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-ink-fire text-white text-[13px] font-bold">
               {plan.totalBadge}
             </span>
           )}
@@ -1050,7 +1050,7 @@ function MoreDrawer({ plan, renderTab, onActiveTabChange }: {
                   {label[tab.id]}
                   {tab.badge > 0 && (
                     <span aria-label={t.more.unread({ n: tab.badge })}
-                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-ink-fire text-white text-[10px] font-bold">
+                      className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-ink-fire text-white text-[12px] font-bold">
                       {tab.badge}
                     </span>
                   )}
@@ -1223,7 +1223,7 @@ function LockedTasksList({ stage, state }: { stage: RunStageRecord; state: MyTea
             <div className="flex items-center gap-2 text-sm text-zinc-300">
               <span aria-hidden>🔒</span>
               <span className="font-medium truncate">{c!.title}</span>
-              <span className="ms-auto text-[10px] uppercase tracking-wide text-zinc-500 shrink-0">{t.play.lockedTaskLabel}</span>
+              <span className="ms-auto text-[12px] uppercase tracking-wide text-zinc-500 shrink-0">{t.play.lockedTaskLabel}</span>
             </div>
             {names && <p className="text-xs text-zinc-500 mt-0.5">{t.play.lockedCompleteFirst({ names })}</p>}
           </div>
@@ -1318,19 +1318,19 @@ function Header({
               <span
                 key={streakMilestone ?? streak}
                 data-testid="streak-chip"
-                className={`inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-2 py-0.5 text-[11px] font-bold text-ink-fire ${streakMilestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
+                className={`inline-flex items-center rounded-full bg-rp-fire/15 border border-rp-fire/30 px-2 py-0.5 text-[13px] font-bold text-ink-fire ${streakMilestone ? 'animate-score-pop motion-reduce:animate-none' : ''}`}
               >
                 {t.play.streak({ n: streak })}
               </span>
             )}
             {!sealed && powerUpArmed && (
-              <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[11px] font-bold text-ink-fire">
+              <span className="inline-flex items-center rounded-full bg-accent/15 border border-accent/40 px-2 py-0.5 text-[13px] font-bold text-ink-fire">
                 {t.play.powerUpArmedChip}
               </span>
             )}
             {isTestDrive && (
               <span data-testid="test-run-chip"
-                className="inline-flex items-center rounded-full bg-app-raised border border-rp-amber/40 px-2 py-0.5 text-[11px] font-bold text-ink-amber">
+                className="inline-flex items-center rounded-full bg-app-raised border border-rp-amber/40 px-2 py-0.5 text-[13px] font-bold text-ink-amber">
                 🧪 {t.play.testRunBanner}
               </span>
             )}
@@ -1391,13 +1391,13 @@ function MissionProgressRow({ progress, beat, accent }: {
           key={beat}
           role="status"
           data-testid="milestone-beat"
-          className="text-[11px] font-bold shrink-0 animate-answer-pop motion-reduce:animate-none"
+          className="text-[13px] font-bold shrink-0 animate-answer-pop motion-reduce:animate-none"
           style={{ color: accent }}
         >
           {beatLabel[beat]}
         </span>
       ) : (
-        <span data-testid="mission-counter" className="text-[11px] tabular-nums text-zinc-500 shrink-0">
+        <span data-testid="mission-counter" className="text-[13px] tabular-nums text-zinc-500 shrink-0">
           {t.play.missionCounter({ current: progress.current, total: progress.total })}
         </span>
       )}

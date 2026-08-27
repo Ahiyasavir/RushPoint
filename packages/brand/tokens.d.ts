@@ -46,6 +46,18 @@ export declare const COLORS: {
   readonly fireText: string;
 };
 
+export declare const INK: {
+  readonly fire: string;
+  readonly warm: string;
+  readonly amber: string;
+  readonly alert: string;
+  readonly go: string;
+  readonly plasma: string;
+  readonly signal: string;
+};
+
+export declare function tailwindInkColors(): Record<string, string>;
+
 export declare const SURFACES: {
   readonly page: string;
   readonly surface: string;
@@ -55,7 +67,13 @@ export declare const SURFACES: {
   readonly line: string;
 };
 
+export declare const FONT_SIZE: {
+  readonly xs: readonly [string, { readonly lineHeight: string }];
+  readonly sm: readonly [string, { readonly lineHeight: string }];
+};
+
 export declare function tailwindFontFamily(): Record<string, string[]>;
+export declare function tailwindFontSize(): typeof FONT_SIZE;
 export declare function tailwindBrandColors(): Record<string, string>;
 
 export declare const ALL_FONTS: readonly [DisplayFont, BodyFont, MonoFont];

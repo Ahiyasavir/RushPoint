@@ -121,7 +121,7 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
             onChange={(v) => dispatch({ type: 'setAnswer', key: 'occasion', value: v })}
             render={(v) => w.occasionOptions[v] ?? ''}
           />
-          <p className="text-[11px] text-[--ink-3]">{w.occasionHint}</p>
+          <p className="text-[13px] text-[--ink-3]">{w.occasionHint}</p>
         </div>
       ),
     },

@@ -129,7 +129,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             </div>
           )}
           {/* Badge */}
-          <div className="absolute top-3 start-3 bg-black/50 backdrop-blur-sm text-white text-[11px] font-medium px-2.5 py-1 rounded-full">
+          <div className="absolute top-3 start-3 bg-black/50 backdrop-blur-sm text-white text-[13px] font-medium px-2.5 py-1 rounded-full">
             {t.promo.badge}
           </div>
         </div>
@@ -183,7 +183,7 @@ export default function GamePromoScreen({ gameId, onPlay, onInstantPlay }: { gam
             <div key={s.label} className="bg-app-card border border-glass-border rounded-xl px-2 py-3 text-center shadow-task-card">
               <div className="text-base mb-0.5">{s.emoji}</div>
               <div className="text-lg font-brand font-bold text-ink-fire">{s.value}</div>
-              <div className="text-[10px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
+              <div className="text-[12px] text-zinc-500 uppercase tracking-wide">{s.label}</div>
             </div>
           ))}
         </div>

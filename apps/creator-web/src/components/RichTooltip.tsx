@@ -162,7 +162,7 @@ export default function RichTooltip({ concept, title: titleProp, body: bodyProp,
         onMouseLeave={hide}
         onFocus={show}
         onBlur={hide}
-        className="w-4 h-4 rounded-full bg-[--surface-2] text-[--ink-3] text-[10px] leading-none flex items-center justify-center hover:text-[--ink-1] focus:outline-none focus:ring-1 focus:ring-rp-fire"
+        className="w-4 h-4 rounded-full bg-[--surface-2] text-[--ink-3] text-[12px] leading-none flex items-center justify-center hover:text-[--ink-1] focus:outline-none focus:ring-1 focus:ring-rp-fire"
       >
         {children ?? '?'}
       </button>
@@ -183,7 +183,7 @@ export default function RichTooltip({ concept, title: titleProp, body: bodyProp,
         >
           <div className="text-xs font-semibold text-[--ink-1] mb-1">{d.title}</div>
           {d.svg && <div className="rounded-lg bg-[--surface-2] text-[--ink-2] mb-1.5">{d.svg}</div>}
-          <div className="text-[11px] text-[--ink-3] leading-snug">{d.body}</div>
+          <div className="text-[13px] text-[--ink-3] leading-snug">{d.body}</div>
         </div>,
         document.body,
       )}

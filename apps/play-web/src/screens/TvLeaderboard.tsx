@@ -73,7 +73,7 @@ export default function TvLeaderboard({ code }: { code: string }) {
       <div className="min-h-screen flex flex-col items-center justify-center text-center gap-4 bg-app-bg p-8">
         <div className="text-7xl">📺</div>
         <h1 className="font-brand text-4xl font-extrabold text-zinc-200">{data?.title ?? 'RushPoint'}</h1>
-        <p className={`text-2xl ${loadError ? 'text-rp-fire font-semibold' : 'text-zinc-500'}`}>
+        <p className={`text-2xl ${loadError ? 'text-ink-fire font-semibold' : 'text-zinc-500'}`}>
           {loadError ? t.tv.loadError : t.tv.notAvailable}
         </p>
       </div>

@@ -321,14 +321,14 @@ export default function CreatorTour() {
         style={{ top: pos.top, left: pos.left }}
       >
         <div className="flex items-start justify-between gap-3 mb-2">
-          <span className="text-[11px] font-semibold uppercase tracking-widest text-rp-fire tabular-nums">
+          <span className="text-[13px] font-semibold uppercase tracking-widest text-ink-fire tabular-nums">
             {tour.progress({ step: stepNumber, total })}
           </span>
           <button
             onClick={() => dispatch({ type: 'skip' })}
             aria-label={tour.skip}
             title={tour.skip}
-            className="text-[11px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
+            className="text-[13px] font-medium text-[--ink-3] hover:text-[--ink-1] underline underline-offset-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/50"
           >
             {tour.skip}
           </button>
@@ -338,7 +338,7 @@ export default function CreatorTour() {
         <p className="text-sm text-[--ink-3] mt-1.5 leading-relaxed text-start">{copy.body}</p>
 
         {awaitPrompt && (
-          <p className="mt-3 flex items-start gap-1.5 text-xs font-semibold text-rp-fire text-start">
+          <p className="mt-3 flex items-start gap-1.5 text-xs font-semibold text-ink-fire text-start">
             <span aria-hidden>👆</span>
             <span>{awaitPrompt}</span>
           </p>

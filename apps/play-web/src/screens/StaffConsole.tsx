@@ -645,12 +645,12 @@ function TeamOpsCard({
               name rather than inside the collapsed actions. */}
           <div className="flex flex-wrap items-center gap-1.5 mt-1">
             {team.held && (
-              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">
+              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">
                 ⏸ {t.staff.heldBadge}
               </span>
             )}
             {team.outOfBounds && (
-              <span className="inline-flex items-center rounded-full bg-danger/20 border border-danger/50 px-2 py-0.5 text-[11px] font-semibold text-danger">
+              <span className="inline-flex items-center rounded-full bg-danger/20 border border-danger/50 px-2 py-0.5 text-[13px] font-semibold text-danger">
                 {t.staff.outOfBoundsBadge}
               </span>
             )}
@@ -763,7 +763,7 @@ function TeamOpsCard({
             aria-label={t.staff.customAmount}
             className="text-center text-lg"
           />
-          <div className="text-[11px] text-zinc-500 mt-2 mb-1">{t.staff.reasonLabel}</div>
+          <div className="text-[13px] text-zinc-500 mt-2 mb-1">{t.staff.reasonLabel}</div>
           <div className="flex flex-wrap gap-1.5">
             {[...presets, OTHER_REASON].map((id) => (
               <button
@@ -815,7 +815,7 @@ function TeamOpsCard({
           stop a team in one tap without composing a sentence first. */}
       {openPanel === 'hold' && (
         <div className="mt-2.5 pt-2.5 border-t border-glass-border">
-          <div className="text-[11px] text-zinc-500 mb-1.5">{t.staff.holdReasonPrompt}</div>
+          <div className="text-[13px] text-zinc-500 mb-1.5">{t.staff.holdReasonPrompt}</div>
           <Input
             value={holdReason}
             onChange={(e) => setHoldReason(e.target.value)}
@@ -856,7 +856,7 @@ function TeamOpsCard({
           accident. */}
       {openPanel === 'assign' && (
         <div className="mt-2.5 pt-2.5 border-t border-glass-border">
-          <div className="text-[11px] text-zinc-500 mb-1.5">{t.staff.forceAssignPick}</div>
+          <div className="text-[13px] text-zinc-500 mb-1.5">{t.staff.forceAssignPick}</div>
           {(team.assignableTaskIds ?? []).length === 0 ? (
             <p className="text-zinc-500 text-xs">{t.staff.forceAssignNoTasks}</p>
           ) : (
@@ -871,7 +871,7 @@ function TeamOpsCard({
                     {taskId.slice(0, 18)}
                   </button>
                   <button
-                    className="shrink-0 min-h-[44px] px-2.5 rounded-lg text-[11px] font-semibold bg-transparent border border-danger/50 text-danger disabled:opacity-40"
+                    className="shrink-0 min-h-[44px] px-2.5 rounded-lg text-[13px] font-semibold bg-transparent border border-danger/50 text-danger disabled:opacity-40"
                     disabled={busy}
                     title={t.staff.forceAssignOverrideWarn}
                     onClick={() => {
@@ -988,7 +988,7 @@ function StaffChatSection({
           <>
             💬 {t.chat.chatTitle}
             {totalUnread > 0 && (
-              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{totalUnread}</span>
+              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{totalUnread}</span>
             )}
           </>
         )}
@@ -1005,7 +1005,7 @@ function StaffChatSection({
                 <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages)}>
                   <div className="flex items-center justify-between gap-2">
                     <div dir="auto" className="text-sm font-medium text-zinc-100 truncate">{nameFor(th.teamId)}</div>
-                    {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{t.chat.chatUnread}</span>}
+                    {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{t.chat.chatUnread}</span>}
                   </div>
                   {last && <div dir="auto" className="text-xs text-zinc-500 truncate mt-0.5">{last.from === 'hq' ? `${t.chat.chatHq}: ` : ''}{last.text}</div>}
                 </button>
@@ -1023,7 +1023,7 @@ function StaffChatSection({
                           : m.senderName;
                         return (
                           <div key={m.id} className={`flex flex-col ${hqSide ? 'items-end' : 'items-start'}`}>
-                            <span className="text-[11px] text-zinc-500">{label}</span>
+                            <span className="text-[13px] text-zinc-500">{label}</span>
                             <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${hqSide ? 'bg-accent/15 border border-accent/40 text-zinc-100' : 'bg-app-raised border border-glass-border text-zinc-200'}`}>{m.text}</div>
                           </div>
                         );
@@ -1129,7 +1129,7 @@ function StaffAdminChannelSection({
           <>
             📻 {t.staff.channelTitle}
             {unread > 0 && (
-              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-black">{unread}</span>
+              <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-[13px] font-semibold text-black">{unread}</span>
             )}
           </>
         )}
@@ -1144,7 +1144,7 @@ function StaffAdminChannelSection({
                 const mine = side === 'me';
                 return (
                   <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-                    <span className="text-[11px] text-zinc-500">
+                    <span className="text-[13px] text-zinc-500">
                       {mine ? t.devices.youTag : side === 'admin' ? t.staff.channelAdmin : m.senderName}
                     </span>
                     <div

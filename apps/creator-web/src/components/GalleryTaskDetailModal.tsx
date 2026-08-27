@@ -126,7 +126,7 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
         <div className="flex flex-col min-h-0 flex-1 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
             <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-wide text-[--ink-3] font-semibold">{gl.detailTitle}</p>
+              <p className="text-[13px] uppercase tracking-wide text-[--ink-3] font-semibold">{gl.detailTitle}</p>
               <h3 id={titleId} className="font-brand font-bold text-lg text-[--ink-1] leading-snug" dir="auto">
                 {detail.title}
               </h3>
@@ -194,14 +194,14 @@ export default function GalleryTaskDetailModal({ task, onClose, onUse, useBusy }
 
             {/* A creator evaluating a quiz mission will otherwise read the missing
                 answer list as a bug in this view rather than as the contract. */}
-            <p className="text-[11px] text-[--ink-3] leading-relaxed">{gl.detailSecretNote}</p>
+            <p className="text-[13px] text-[--ink-3] leading-relaxed">{gl.detailSecretNote}</p>
           </div>
 
           <div className="mt-3 pt-3 border-t border-[--rp-border] flex items-center gap-3 shrink-0">
             {onUse ? (
               <Button loading={useBusy} onClick={onUse} className="!py-2 !text-xs !font-semibold">{gl.detailUse}</Button>
             ) : (
-              <p className="text-[11px] text-[--ink-3] leading-relaxed">{gl.detailUseHint}</p>
+              <p className="text-[13px] text-[--ink-3] leading-relaxed">{gl.detailUseHint}</p>
             )}
             <Button variant="ghost" onClick={onClose} className="ms-auto !py-2 !text-xs">{gl.detailClose}</Button>
           </div>

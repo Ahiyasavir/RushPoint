@@ -89,7 +89,7 @@ export default function SettingsPage() {
 // ── Section eyebrow ─────────────────────────────────────────────────────────────
 function SectionHeader({ children }: { children: ReactNode }) {
   return (
-    <div className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3] pt-2 text-start">
+    <div className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3] pt-2 text-start">
       {children}
     </div>
   );
@@ -113,19 +113,19 @@ function LanguageCard({ lang, setLang, s }: { lang: 'he' | 'en'; setLang: (l: 'h
             onClick={() => handle(l)}
             className={`relative rounded-xl border-2 p-4 text-center transition-all duration-150 ${
               lang === l
-                ? 'border-rp-fire bg-rp-fire/8 text-rp-fire'
+                ? 'border-rp-fire bg-rp-fire/8 text-ink-fire'
                 : 'border-[--rp-border] text-[--ink-2] hover:border-rp-fire/40 hover:bg-rp-fire/4'
             }`}
           >
             <div className="text-2xl mb-1.5">{l === 'he' ? '🇮🇱' : '🇺🇸'}</div>
             <div className="font-semibold text-sm">{l === 'he' ? s.languageHe : s.languageEn}</div>
             {lang === l && (
-              <div className="absolute top-2 end-2 w-5 h-5 rounded-full bg-rp-fire text-white text-[10px] flex items-center justify-center font-bold">✓</div>
+              <div className="absolute top-2 end-2 w-5 h-5 rounded-full bg-rp-fire text-white text-[12px] flex items-center justify-center font-bold">✓</div>
             )}
           </button>
         ))}
       </div>
-      {saved && <p className="text-rp-go text-sm mt-3 text-center font-medium animate-fade-up">{s.savedMsg}</p>}
+      {saved && <p className="text-ink-go text-sm mt-3 text-center font-medium animate-fade-up">{s.savedMsg}</p>}
     </Card>
   );
 }
@@ -414,7 +414,7 @@ function MethodRow({ s, name, active }: { s: T['settings']; name: string; active
     <div className="flex items-center justify-between gap-3 rounded-lg bg-[--surface-2] px-3 py-2.5">
       <span className="text-sm font-medium text-[--ink-1] text-start">{name}</span>
       <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-        active ? 'bg-rp-go/10 text-rp-go' : 'bg-[--surface-1] text-[--ink-3]'
+        active ? 'bg-rp-go/10 text-ink-go' : 'bg-[--surface-1] text-[--ink-3]'
       }`}>
         {active ? s.methodsActive : s.methodsInactive}
       </span>
@@ -464,7 +464,7 @@ function DataCard({ s }: { s: T['settings'] }) {
 // target="_blank" (not <Link>) is deliberate: a creator opening the policy from
 // Settings is usually checking one clause, and shouldn't lose their place.
 function LegalCard({ s, t }: { s: T['settings']; t: T }) {
-  const linkClass = 'text-sm text-rp-fire hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60';
+  const linkClass = 'text-sm text-ink-fire hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60';
   return (
     <Card className="p-6">
       <div className="text-sm font-semibold text-[--ink-1] mb-1">{s.legalLabel}</div>
@@ -499,7 +499,7 @@ function DangerCard({ s, onDeleted }: { s: T['settings']; onDeleted: () => Promi
 
   return (
     <Card className="p-6 border-rp-alert/30">
-      <div className="text-sm font-semibold text-rp-alert mb-1">{s.dangerLabel}</div>
+      <div className="text-sm font-semibold text-ink-alert mb-1">{s.dangerLabel}</div>
       <p className="text-xs text-[--ink-3] mb-4">{s.dangerDesc}</p>
 
       {!open ? (
@@ -531,7 +531,7 @@ function DangerCard({ s, onDeleted }: { s: T['settings']; onDeleted: () => Promi
 function StatusLine({ status }: { status: Status }) {
   if (!status) return null;
   return (
-    <p className={`text-sm mt-2 font-medium ${status.kind === 'ok' ? 'text-rp-go' : 'text-rp-alert'}`}>
+    <p className={`text-sm mt-2 font-medium ${status.kind === 'ok' ? 'text-ink-go' : 'text-ink-alert'}`}>
       {status.msg}
     </p>
   );

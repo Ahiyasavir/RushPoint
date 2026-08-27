@@ -1001,7 +1001,7 @@ export default function BuilderPage() {
         <EditableTitle title={game.title} onCommit={(t) => patch({ title: t })} />
         {/* A FAILED save gets its own colour and its own word — it can never be
             read as an ordinary pending save (change: creator-no-silent-failures). */}
-        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${status === 'failed' ? 'text-rp-alert font-semibold' : 'text-[--ink-3]'}`}>
+        <span className={`text-xs flex items-center gap-1.5 shrink-0 ${status === 'failed' ? 'text-ink-alert font-semibold' : 'text-[--ink-3]'}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${
             status === 'failed' ? 'bg-rp-alert'
               : status === 'saving' ? 'bg-rp-amber animate-pulse'
@@ -1133,7 +1133,7 @@ export default function BuilderPage() {
               onClick={() => { void save(); setTab(id); if (id === 'preview' && gameId) markGamePreviewed(gameId); }}
               className={`shrink-0 whitespace-nowrap px-2.5 xl:px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 activeTab === id
-                  ? 'bg-rp-fire/10 text-rp-fire'
+                  ? 'bg-rp-fire/10 text-ink-fire'
                   : 'text-[--ink-3] hover:text-[--ink-1] hover:bg-[--surface-2]'}`}
             >
               {TAB_LABEL[id]}
@@ -1250,12 +1250,12 @@ export default function BuilderPage() {
           role="status"
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-alert/40 bg-rp-alert/10 px-4 py-2 text-xs text-[--ink-1]"
         >
-          <span className="font-semibold text-rp-alert">{b.saveFailedBanner}</span>
+          <span className="font-semibold text-ink-alert">{b.saveFailedBanner}</span>
           <span className="text-[--ink-2] text-start">{t.callFailure[saveError.key]}</span>
           {saveError.retryable && (
             <Button
               variant="ghost"
-              className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg ms-auto"
+              className="min-h-0 px-2.5 py-1 text-[13px] rounded-lg ms-auto"
               onClick={() => { void save(); }}
             >
               {b.saveFailedRetry}
@@ -1276,13 +1276,13 @@ export default function BuilderPage() {
           className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rp-go/40 bg-rp-go/10 px-4 py-2 text-xs text-[--ink-1]"
         >
           <span aria-hidden>✓</span>
-          <span className="font-semibold text-rp-go">{b.readinessReadyTitle}</span>
+          <span className="font-semibold text-ink-go">{b.readinessReadyTitle}</span>
           <span className="text-[--ink-2] text-start">{b.readyNudge}</span>
           <button
             type="button"
             onClick={() => setReadyNudgeDismissed(true)}
             aria-label={t.common.dismiss}
-            className="ms-auto shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 text-[11px] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
+            className="ms-auto shrink-0 rounded-lg border border-[--rp-border] px-2 py-1 text-[13px] text-[--ink-3] hover:bg-[--surface-2] hover:text-[--ink-1] transition-colors"
           >
             {t.common.dismiss}
           </button>
@@ -1363,8 +1363,8 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
         aria-label={b.readinessAria(issues.length)}
         className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
           issues.length === 0
-            ? 'border-rp-go/40 text-rp-go hover:bg-[--surface-2]'
-            : 'border-rp-amber/50 text-rp-amber hover:bg-[--surface-2]'}`}
+            ? 'border-rp-go/40 text-ink-go hover:bg-[--surface-2]'
+            : 'border-rp-amber/50 text-ink-amber hover:bg-[--surface-2]'}`}
       >
         <span aria-hidden>{issues.length === 0 ? '✓' : '⚠'}</span>
         <span className="hidden 2xl:inline">{b.readinessTitle}</span>
@@ -1378,7 +1378,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
               <EmptyState icon="🚀" title={b.readinessReadyTitle} body={b.readinessReadyBody} />
             ) : (
               <div className="space-y-1">
-                <p className="text-[11px] text-[--ink-3] leading-snug">{b.readinessIntro}</p>
+                <p className="text-[13px] text-[--ink-3] leading-snug">{b.readinessIntro}</p>
                 <ul className="space-y-1 max-h-72 overflow-y-auto">
                   {issues.map((issue, i) => (
                     <li key={`${issue.code}-${issue.stageId}-${issue.taskId ?? ''}-${i}`}>
@@ -1390,7 +1390,7 @@ function ReadinessPanel({ issues, open, onToggle, onActivate }: {
                       >
                         <span className="block text-[12px] text-[--ink-1]">{ISSUE_LABEL[issue.code]}</span>
                         {issue.stageId && (
-                          <span dir="auto" className="block text-[11px] text-[--ink-3] truncate">{where(issue)}</span>
+                          <span dir="auto" className="block text-[13px] text-[--ink-3] truncate">{where(issue)}</span>
                         )}
                       </button>
                     </li>
@@ -1425,7 +1425,7 @@ function StepDetails({ game, patch, qsAnchor }: {
           {(['individual', 'team'] as GameMode[]).map((m) => (
             <button key={m} onClick={() => patch({ mode: m })}
               className={`flex-1 py-2 rounded-lg text-sm border ${
-                game.mode === m ? 'border-rp-fire/50 bg-rp-fire/10 text-rp-fire' : 'border-[--rp-border] text-[--ink-3]'}`}>
+                game.mode === m ? 'border-rp-fire/50 bg-rp-fire/10 text-ink-fire' : 'border-[--rp-border] text-[--ink-3]'}`}>
               {modeLabel[m]}
             </button>
           ))}
@@ -1726,7 +1726,7 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
       <TagChips tags={game.tags} className="mt-1.5" more={b.moreTags} max={20} />
       {suggestions.length > 0 && (
         <div className="mt-2">
-          <p className="text-[11px] text-[--ink-3] mb-1">{b.popularTags}</p>
+          <p className="text-[13px] text-[--ink-3] mb-1">{b.popularTags}</p>
           <div className="flex flex-wrap items-center gap-1">
             {suggestions.map((tag) => (
               <button
@@ -1734,7 +1734,7 @@ function TagsField({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
                 type="button"
                 dir="auto"
                 onClick={() => patch({ tags: normalizeTags([...game.tags, tag]) })}
-                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[11px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-rp-fire hover:bg-rp-fire/10"
+                className="inline-flex items-center max-w-full truncate px-2 py-0.5 rounded-full text-[13px] font-medium border border-dashed border-rp-fire/40 bg-rp-fire/5 text-ink-fire hover:bg-rp-fire/10"
               >
                 + {tag}
               </button>
@@ -1769,7 +1769,7 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
       open={open}
       onToggle={() => setOpen(!open)}
       meta={configured
-        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(1)}</span>
+        ? <span className="rounded-full bg-rp-fire/10 text-ink-fire px-1.5 py-px text-[12px]">{b.sectionSetCount(1)}</span>
         : undefined}
     >
       <Input
@@ -1781,7 +1781,7 @@ function WebhookField({ game, patch }: { game: Game; patch: (p: Partial<Game>) =
         dir="ltr"
       />
       {err
-        ? <p className="text-rp-alert text-xs mt-1">{err}</p>
+        ? <p className="text-ink-alert text-xs mt-1">{err}</p>
         : <p className="text-xs text-[--ink-3] mt-1">{b.webhookHelp}</p>}
     </Advanced>
   );
@@ -1856,14 +1856,14 @@ function SafeZoneField({ game, patch }: { game: Game; patch: (p: Partial<Game>) 
                 dir="ltr"
               />
               {err
-                ? <p className="text-rp-alert text-xs mt-1">{err}</p>
+                ? <p className="text-ink-alert text-xs mt-1">{err}</p>
                 : <p className="text-xs text-[--ink-3] mt-1">{b.safeZoneRadiusHint}</p>}
             </div>
             <p className="text-xs text-[--ink-3]" dir="ltr">
               {zone.center.lat.toFixed(5)}, {zone.center.lng.toFixed(5)}
             </p>
             {suggestion && suggestion.coversAllTasks === false && (
-              <p className="text-xs text-rp-amber">{b.safeZoneTooSpread}</p>
+              <p className="text-xs text-ink-amber">{b.safeZoneTooSpread}</p>
             )}
             <div className="flex gap-2">
               <Button variant="ghost" onClick={enable} disabled={!suggestion}>
@@ -1906,7 +1906,7 @@ function StageStory({ stage, onChange }: { stage: Stage; onChange: (n: Stage['na
       open={open}
       onToggle={() => setOpen(!open)}
       meta={filledCount > 0
-        ? <span className="rounded-full bg-rp-fire/10 text-rp-fire px-1.5 py-px text-[10px]">{b.sectionSetCount(filledCount)}</span>
+        ? <span className="rounded-full bg-rp-fire/10 text-ink-fire px-1.5 py-px text-[12px]">{b.sectionSetCount(filledCount)}</span>
         : undefined}
     >
       <div className="space-y-2" title={b.storyHint}>
@@ -1966,7 +1966,7 @@ function RegFields({ game, patch }: { game: Game; patch: (p: Partial<Game>) => v
           <label className="flex items-center gap-1 text-xs text-[--ink-3]">
             <input type="checkbox" checked={f.required} onChange={(e) => update(f.id, { required: e.target.checked })} />{b.regRequired}
           </label>
-          {f.id !== 'name' && <button className="text-rp-alert text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
+          {f.id !== 'name' && <button className="text-ink-alert text-xs" aria-label={`${b.removeItem} ${f.label}`} onClick={() => remove(f.id)}>✕</button>}
         </div>
       ))}
       <Button variant="subtle" onClick={add}>+ {b.regAddField}</Button>
@@ -1986,7 +1986,7 @@ function StatusChip({ title, children }: { title: string; children: ReactNode })
     <span
       title={title}
       className="inline-flex items-center gap-1 rounded-full border border-[--rp-border] bg-[--surface-2]/40
-        ps-2 pe-2.5 py-1 text-[11px] font-medium text-[--ink-2] tabular-nums"
+        ps-2 pe-2.5 py-1 text-[13px] font-medium text-[--ink-2] tabular-nums"
     >
       {children}
     </span>
@@ -2016,7 +2016,7 @@ function AddTile({ label, onClick }: { label: string; onClick: () => void }) {
       onClick={onClick}
       className="flex-1 h-11 rounded-xl border border-dashed border-[--rp-border] text-[--ink-3]
                  flex items-center justify-center gap-1.5 text-sm
-                 hover:border-rp-fire/60 hover:text-rp-fire transition"
+                 hover:border-rp-fire/60 hover:text-ink-fire transition"
     >
       <span className="text-lg leading-none">＋</span>{label}
     </button>
@@ -2413,16 +2413,16 @@ function StepStages({ game, setGame, activeStageId, setActiveStageId, focusIssue
                   onClick={() => { setEditing(null); setSettingsOpen((o) => !o); }}
                   aria-expanded={settingsOpen}
                   aria-label={b.stageSettingsAria(settings.activeCount)}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[13px] font-medium transition-colors
                     focus:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60
                     ${settingsOpen
-                      ? 'border-rp-fire/50 bg-rp-fire/10 text-rp-fire'
+                      ? 'border-rp-fire/50 bg-rp-fire/10 text-ink-fire'
                       : 'border-[--rp-border] bg-[--surface-2]/60 text-[--ink-2] hover:bg-[--surface-2] hover:text-[--ink-1]'}`}
                 >
                   <span aria-hidden>⚙</span>
                   <span>{b.stageSettings}</span>
                   {settings.activeCount > 0 && (
-                    <span aria-hidden className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rp-fire text-white text-[10px] font-bold leading-none tabular-nums">{settings.activeCount}</span>
+                    <span aria-hidden className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-rp-fire text-white text-[12px] font-bold leading-none tabular-nums">{settings.activeCount}</span>
                   )}
                   <span aria-hidden className={`transition-transform duration-200 ${settingsOpen ? 'rotate-90' : ''}`}>›</span>
                 </button>
@@ -2902,7 +2902,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
                       title={b.exclusiveChipAria(letter, members.length)}
                       className="inline-flex items-center gap-1.5 rounded-full border border-[--rp-border] ps-1 pe-2 py-0.5"
                     >
-                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[10px] font-bold leading-none ${st.badge}`}>{letter}</span>
+                      <span className={`inline-flex items-center justify-center w-[18px] h-[18px] rounded border text-[12px] font-bold leading-none ${st.badge}`}>{letter}</span>
                       <span className="tabular-nums">{b.taskCount(members.length)}</span>
                     </span>
                   );
@@ -2910,7 +2910,7 @@ function StageSettingsPanel({ stage, settings, effectiveGroups, onUpdateStage, o
                 {effectiveGroups.length === 0 && <span className="text-[--ink-4]">{b.exclusiveNoGroups}</span>}
                 <button
                   type="button"
-                  className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-rp-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
+                  className="rounded-full border border-rp-fire/40 bg-rp-fire/10 text-ink-fire px-2.5 py-0.5 hover:bg-rp-fire/15 transition-colors"
                   onClick={onOpenGroups}
                 >{b.exclusiveOpenEditor}</button>
               </div>
@@ -2947,7 +2947,7 @@ function StepPreview({ game }: { game: Game }) {
       <ol className="space-y-2">
         {game.stages.map((s, i) => (
           <li key={s.id} className="flex items-center gap-3">
-            <span className="w-6 h-6 rounded-full bg-rp-fire/15 text-rp-fire text-xs flex items-center justify-center">{i + 1}</span>
+            <span className="w-6 h-6 rounded-full bg-rp-fire/15 text-ink-fire text-xs flex items-center justify-center">{i + 1}</span>
             <span className="text-sm text-[--ink-2]" dir="auto">{s.title}</span>
             <span className="text-xs text-[--ink-3]">
               {b.taskCount(s.tasks.length)}{s.tasks.length > 1 ? b.routedSuffix : ''}

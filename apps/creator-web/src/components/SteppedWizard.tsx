@@ -46,7 +46,7 @@ function ProgressRing({ step, total, label }: { step: number; total: number; lab
       <circle
         cx="12" cy="12" r={r}
         fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-        className="text-rp-fire transition-[stroke-dashoffset] duration-300 motion-reduce:transition-none"
+        className="text-ink-fire transition-[stroke-dashoffset] duration-300 motion-reduce:transition-none"
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - fraction)}
       />
@@ -134,7 +134,7 @@ export default function SteppedWizard({
       <div>
         <div className="flex items-center gap-2">
           <ProgressRing step={index + 1} total={total} label={labels.progress(index + 1, total)} />
-          <span className="text-[11px] text-[--ink-3]">{labels.progress(index + 1, total)}</span>
+          <span className="text-[13px] text-[--ink-3]">{labels.progress(index + 1, total)}</span>
         </div>
         {/* The bar stays: the ring reads as "how far", the bar as "how much is
             left", and on a narrow screen the bar is the one visible at a glance.

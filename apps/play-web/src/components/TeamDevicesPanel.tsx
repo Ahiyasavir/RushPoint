@@ -71,7 +71,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
           {team.deviceJoinCode && (
             <div className="flex items-center justify-between gap-2 rounded-lg bg-app-raised px-3 py-2">
               <div>
-                <div className="text-[11px] text-zinc-500">{t.devices.inviteHint}</div>
+                <div className="text-[13px] text-zinc-500">{t.devices.inviteHint}</div>
                 <div className="font-mono font-bold text-lg tracking-[0.3em] text-zinc-100">{team.deviceJoinCode}</div>
               </div>
               <button onClick={copyCode} className="inline-flex items-center min-h-[44px] px-2 text-xs font-semibold text-ink-fire hover:underline shrink-0">
@@ -88,7 +88,7 @@ export default function TeamDevicesPanel({ team, myUid, ctx, onChanged }: {
                   {d.uid === myUid && <span className="text-zinc-500 text-xs ms-1">{t.devices.youTag}</span>}
                 </span>
                 {d.uid === controllerUid ? (
-                  <span className="shrink-0 text-[11px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
+                  <span className="shrink-0 text-[13px] font-bold text-ink-go bg-rp-go/10 border border-rp-go/30 rounded-full px-2 py-0.5">
                     ✏️ {t.devices.controllerBadge}
                   </span>
                 ) : isController ? (

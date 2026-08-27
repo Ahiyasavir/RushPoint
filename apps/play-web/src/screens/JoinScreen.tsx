@@ -321,7 +321,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               aria-checked={colorblind}
               aria-label={t.common.colorblindMode}
               title={t.common.colorblindMode}
-              className={`text-[10px] rounded-full w-11 h-11 flex items-center justify-center transition-colors opacity-60 hover:opacity-100 ${
+              className={`text-[12px] rounded-full w-11 h-11 flex items-center justify-center transition-colors opacity-60 hover:opacity-100 ${
                 colorblind ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
@@ -412,7 +412,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
           {/* Whole groups were signing in phone-by-phone and then could not work
               out why they were separate teams (change: one-device-per-team-clarity).
               Say it BEFORE the code is entered, not in the registration step. */}
-          <p className="text-[11px] text-zinc-500 text-center mb-3 leading-snug px-2">
+          <p className="text-[13px] text-zinc-500 text-center mb-3 leading-snug px-2">
             {t.join.oneDeviceNote}
           </p>
 
@@ -438,7 +438,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               >
                 <span aria-hidden="true">🎭</span> {t.join.tryDemo}
               </button>
-              <p className="text-[11px] text-zinc-500 mt-2 leading-snug px-4">{t.join.tryDemoSub}</p>
+              <p className="text-[13px] text-zinc-500 mt-2 leading-snug px-4">{t.join.tryDemoSub}</p>
             </div>
           )}
 
@@ -452,7 +452,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
               The 🔑 emoji is gone: it also marks the "join" how-to card, and these
               are precisely the two things players already confuse. */}
           <div className="mt-5 pt-3 border-t border-glass-border text-center space-y-1.5">
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[13px] text-zinc-500">
                 {t.join.createOwnCta}{' '}
                 <a
                   href={creatorUrl()}
@@ -462,7 +462,7 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
                 </a>
               </p>
               {onStaff && (
-                <p className="text-[11px] text-zinc-500">
+                <p className="text-[13px] text-zinc-500">
                   {/* Visually 11px to stay quiet, but a REAL 44px tap target:
                       organizers hit this outdoors, one-handed. Styling it down
                       to inline text shrank it to 17px. */}
@@ -493,11 +493,11 @@ export default function JoinScreen({ initialCode, autoJoin, onJoined, onStaff, o
                 >
                   <div className="text-xl mb-1">{s.icon}</div>
                   <div className="text-[13px] font-bold text-zinc-200">{s.label}</div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5 leading-tight">{s.sub}</div>
+                  <div className="text-[12px] text-zinc-500 mt-0.5 leading-tight">{s.sub}</div>
                 </div>
               ))}
             </div>
-            <p className="text-center text-[11px] text-zinc-500 mt-2 flex items-center justify-center gap-1.5">
+            <p className="text-center text-[13px] text-zinc-500 mt-2 flex items-center justify-center gap-1.5">
               <span className="text-ink-go">●</span> {t.join.noAccountNeeded}
             </p>
             <LegalFooter />

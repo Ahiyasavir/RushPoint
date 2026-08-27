@@ -919,7 +919,7 @@ export default function RunConsolePage() {
                 <div key={a.id} className="flex flex-wrap items-center gap-3 text-sm">
                   {/* A new alert type must not reach a human as its stored enum
                       value in whatever language the database holds it. */}
-                  <span className="text-rp-alert font-medium">
+                  <span className="text-ink-alert font-medium">
                     {resolveEnumLabel(a.type, ALERT_TYPE_LABELS, (id) => rc.unknownAlertType({ id }))}
                   </span>
                   {/* A host cannot act on a truncated document id: show the team's name. */}
@@ -928,7 +928,7 @@ export default function RunConsolePage() {
                   </span>
                   {a.message && <span dir="auto" className="text-[--ink-2] flex-1 truncate">{a.message}</span>}
                   {a.lat != null && a.lng != null && (
-                    <a className="text-rp-fire text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{rc.map}</a>
+                    <a className="text-ink-fire text-xs underline" href={`https://www.google.com/maps?q=${a.lat},${a.lng}`} target="_blank" rel="noreferrer">{rc.map}</a>
                   )}
                   <Button
                     variant={runActionVariant('acknowledgeAlert')}
@@ -978,7 +978,7 @@ export default function RunConsolePage() {
                 rows below and only marks the board out of date. Unobtrusive,
                 role="status", never gates or disables anything. */}
             {isTeamsStale(lastTeamsSyncAt, nowMs, teamsStale) && (
-              <p role="status" className="text-[11px] text-rp-amber mb-2 px-1">
+              <p role="status" className="text-[13px] text-ink-amber mb-2 px-1">
                 {rc.teamsReconnecting}
                 {(() => {
                   const secs = secondsSinceSync(lastTeamsSyncAt, nowMs);
@@ -994,7 +994,7 @@ export default function RunConsolePage() {
                   <div key={team.id} className="flex flex-wrap items-center gap-3 p-2 rounded-lg bg-[--surface-2]">
                     <div className="flex-1 min-w-[10rem]">
                       <div dir="auto" className="text-sm text-[--ink-2]">{team.displayName}</div>
-                      <div className="text-[11px] text-[--ink-3]">
+                      <div className="text-[13px] text-[--ink-3]">
                         {team.finished
                           ? rc.teamStatusFinished
                           : !team.launched
@@ -1005,7 +1005,7 @@ export default function RunConsolePage() {
                         {' · '}{rc.stageDone({ n: team.completedStages })}
                       </div>
                       {team.outOfBounds && (
-                        <div className="mt-1 text-[11px] text-rp-amber">{rc.outOfBoundsBadge}</div>
+                        <div className="mt-1 text-[13px] text-ink-amber">{rc.outOfBoundsBadge}</div>
                       )}
                       {/* Held-team visibility (change: held-team-visibility).
                           `startTeams` reports how MANY teams it held back; a count
@@ -1014,7 +1014,7 @@ export default function RunConsolePage() {
                           is not a temporal signal, and it applies to unlaunched
                           teams, which the attention classifier suppresses by design. */}
                       {team.heldForConsent && (
-                        <div className="mt-1 text-[11px] text-rp-amber">{rc.heldForConsentBadge}</div>
+                        <div className="mt-1 text-[13px] text-ink-amber">{rc.heldForConsentBadge}</div>
                       )}
                       {/* One badge, carrying the REASON: "needs attention" with
                           no cause is a puzzle, not a signal. Suppressed when the
@@ -1039,7 +1039,7 @@ export default function RunConsolePage() {
                     {/* Ranked score from the leaderboard snapshot — identical to
                         the live-standings panel + TV. Falls back to the raw earned
                         tally only until the first snapshot exists for this activeRun. */}
-                    <div className="text-rp-fire font-mono font-semibold">
+                    <div className="text-ink-fire font-mono font-semibold">
                       {rankedScoreById.get(team.id) ?? team.score}
                     </div>
                     {/* WHICH control sits on the row and which goes behind the
@@ -1082,7 +1082,7 @@ export default function RunConsolePage() {
                             key={id}
                             variant={runActionVariant(id)}
                             role={inMenu ? 'menuitem' : undefined}
-                            className={`min-h-0 px-2.5 py-1 text-[11px] rounded-lg ${inMenu ? 'w-full justify-start text-start' : ''}`}
+                            className={`min-h-0 px-2.5 py-1 text-[13px] rounded-lg ${inMenu ? 'w-full justify-start text-start' : ''}`}
                             aria-label={props.aria}
                             disabled={props.disabled}
                             onClick={props.run}
@@ -1145,12 +1145,12 @@ export default function RunConsolePage() {
                 <div key={r.teamId} className="flex items-center gap-3 text-sm">
                   <span className="w-6 text-[--ink-3]">{r.rank}</span>
                   <span dir="auto" className="flex-1 text-[--ink-2]">{r.teamName}</span>
-                  <span className="text-[11px] text-[--ink-3]">{rc.stageDone({ n: r.completedStages })}</span>
-                  <span className="text-rp-fire font-mono">{r.score}</span>
+                  <span className="text-[13px] text-[--ink-3]">{rc.stageDone({ n: r.completedStages })}</span>
+                  <span className="text-ink-fire font-mono">{r.score}</span>
                 </div>
               ))}
             </div>
-            <div className="text-[11px] text-[--ink-3] mt-2">
+            <div className="text-[13px] text-[--ink-3] mt-2">
               {rc.organizerOnlyUpdated({ time: new Date(activeRun.leaderboard!.updatedAt).toLocaleTimeString() })}
             </div>
           </PanelShell>
@@ -1179,14 +1179,14 @@ export default function RunConsolePage() {
             ) : undefined}
           >
             {!activeRun.leaderboard!.published && (
-              <div className="text-[11px] text-rp-amber mb-3">{rc.standingsHiddenUntilReveal}</div>
+              <div className="text-[13px] text-ink-amber mb-3">{rc.standingsHiddenUntilReveal}</div>
             )}
             <div className="space-y-1">
               {activeRun.leaderboard!.rankings.map((r) => (
                 <div key={r.teamId} className="flex items-center gap-3 text-sm">
                   <span className="w-6 text-[--ink-3]">{r.rank}</span>
                   <span dir="auto" className="flex-1 text-[--ink-2]">{r.teamName}</span>
-                  <span className="text-rp-fire font-mono">{r.score}</span>
+                  <span className="text-ink-fire font-mono">{r.score}</span>
                 </div>
               ))}
             </div>
@@ -1273,7 +1273,7 @@ export default function RunConsolePage() {
         <div>
           <h1 dir="auto" className="font-brand text-2xl font-extrabold tracking-tight text-[--ink-1]">{gameTitle || rc.liveRun}</h1>
           {gameTitle && (
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-[--ink-3] mt-0.5">{rc.liveRun}</div>
+            <div className="text-[13px] font-semibold uppercase tracking-wider text-[--ink-3] mt-0.5">{rc.liveRun}</div>
           )}
           <div className="flex flex-wrap items-center gap-2 mt-1.5">
             <Badge color={finished ? 'zinc' : 'green'}>
@@ -1318,7 +1318,7 @@ export default function RunConsolePage() {
           <p className="sr-only" role="status" aria-live="polite">
             {criticalSignal ? signalLabel(criticalSignal) : ''}
           </p>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.signalsTitle}</span>
+          <span className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.signalsTitle}</span>
           {signals.map((s) => (
             <button
               key={s.id}
@@ -1326,11 +1326,11 @@ export default function RunConsolePage() {
               onClick={() => goToPanel(s.panel)}
               aria-label={rc.goToSignal({ label: signalLabel(s) })}
               title={rc.goToSignal({ label: signalLabel(s) })}
-              className={`inline-flex items-center gap-1 cursor-pointer rounded-full border px-3 py-1 text-[11px] font-semibold transition-colors ${
+              className={`inline-flex items-center gap-1 cursor-pointer rounded-full border px-3 py-1 text-[13px] font-semibold transition-colors ${
                 s.severity === 'critical'
-                  ? 'border-rp-alert/40 bg-rp-alert/10 text-rp-alert hover:bg-rp-alert/20'
+                  ? 'border-rp-alert/40 bg-rp-alert/10 text-ink-alert hover:bg-rp-alert/20'
                   : s.severity === 'warn'
-                    ? 'border-rp-amber/40 bg-rp-amber/10 text-rp-amber hover:bg-rp-amber/20'
+                    ? 'border-rp-amber/40 bg-rp-amber/10 text-ink-amber hover:bg-rp-amber/20'
                     : 'border-[--rp-border] bg-[--surface-2] text-[--ink-2] hover:bg-[--surface-0]'
               }`}
             >
@@ -1353,7 +1353,7 @@ export default function RunConsolePage() {
           state in the always-rendered pinned zone (change:
           run-console-live-stream-resilience). */}
       {alertsStreamError && (
-        <p role="status" className="text-xs text-rp-alert rounded-lg border border-rp-alert/40 bg-rp-alert/5 px-3 py-2">
+        <p role="status" className="text-xs text-ink-alert rounded-lg border border-rp-alert/40 bg-rp-alert/5 px-3 py-2">
           {rc.alertsStreamInterrupted}
         </p>
       )}
@@ -1373,8 +1373,8 @@ export default function RunConsolePage() {
         <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-start">
           <aside className="w-full lg:w-52 shrink-0 lg:sticky lg:top-4">
             <div className="flex items-center justify-between px-1 mb-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.sectionsHeader}</span>
-              <span className="text-[10px] text-[--ink-4]">{sections.length}</span>
+              <span className="text-[12px] font-semibold uppercase tracking-wider text-[--ink-3]">{rc.sectionsHeader}</span>
+              <span className="text-[12px] text-[--ink-4]">{sections.length}</span>
             </div>
             <nav
               aria-label={rc.sectionsHeader}
@@ -1406,7 +1406,7 @@ export default function RunConsolePage() {
                 organizer's feet was replaced with no explanation, which reads as
                 the app losing their place (change: run-console-clarity). */}
             {resolution.reason === 'sectionEmptied' && (
-              <p role="status" className="text-[11px] text-[--ink-3] px-1">
+              <p role="status" className="text-[13px] text-[--ink-3] px-1">
                 {rc.sectionEmptiedNotice({ section: groupTitles[activeSection] })}
               </p>
             )}
@@ -1496,12 +1496,12 @@ function PanelShell({ panel, badge, actions, tone, children }: {
     <Card className={`p-4 ${tone === 'alert' ? 'border-rp-alert/40' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className={`text-sm font-medium flex flex-wrap items-center gap-1.5 ${tone === 'alert' ? 'text-rp-alert' : 'text-[--ink-1]'}`}>
+          <div className={`text-sm font-medium flex flex-wrap items-center gap-1.5 ${tone === 'alert' ? 'text-ink-alert' : 'text-[--ink-1]'}`}>
             <span aria-hidden="true">{meta.icon}</span>
             <span>{copy.title}</span>
             {badge}
           </div>
-          <p className="text-[11px] text-[--ink-3] leading-relaxed mt-1">{copy.help}</p>
+          <p className="text-[13px] text-[--ink-3] leading-relaxed mt-1">{copy.help}</p>
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
       </div>
@@ -1536,10 +1536,10 @@ function JoinShare({ accessCode }: { accessCode: string }) {
   return (
     <PanelShell panel="joinShare">
       <div className="text-center">
-      <div className="text-2xl font-mono font-bold text-rp-fire tracking-[0.3em] mb-2">{accessCode}</div>
+      <div className="text-2xl font-mono font-bold text-ink-fire tracking-[0.3em] mb-2">{accessCode}</div>
       {qr && <img src={qr} alt={t.runConsole.joinQrCode} className="mx-auto rounded-lg bg-white p-1.5 w-36 h-36" />}
       <div className="mt-2 flex flex-col gap-1">
-        <button className="text-xs text-rp-fire hover:underline" onClick={copy}>
+        <button className="text-xs text-ink-fire hover:underline" onClick={copy}>
           {copied ? t.runConsole.linkCopied : t.runConsole.copyJoinLink}
         </button>
       </div>
@@ -1547,7 +1547,7 @@ function JoinShare({ accessCode }: { accessCode: string }) {
           constant the server enforces, so the number is always correct; hides
           itself automatically once the cap is raised to Infinity (removed). */}
       {isRunDeviceCapActive() && (
-        <p dir="auto" className="mt-3 pt-3 border-t border-[--rp-border] text-[11px] leading-relaxed text-rp-amber flex items-start gap-1.5">
+        <p dir="auto" className="mt-3 pt-3 border-t border-[--rp-border] text-[13px] leading-relaxed text-ink-amber flex items-start gap-1.5">
           <span aria-hidden="true">⚠️</span>
           <span>{t.runConsole.deviceCapNote({ max: MAX_RUN_DEVICES })}</span>
         </p>
@@ -1585,9 +1585,9 @@ function StaffInviteCard({ ctx, pin }: { ctx: { ownerUid: string; gameId: string
         {qr && <img src={qr} alt={t.runConsole.staffLinkQrAlt} className="rounded-lg bg-white p-1.5 w-28 h-28 shrink-0" />}
         <div className="flex-1 min-w-[12rem] space-y-1.5">
           <div>
-            {t.runConsole.staffPinLabel} <span className="font-mono text-rp-fire text-lg tracking-widest">{pin}</span>
+            {t.runConsole.staffPinLabel} <span className="font-mono text-ink-fire text-lg tracking-widest">{pin}</span>
           </div>
-          <button className="text-xs text-rp-fire hover:underline" onClick={copy}>
+          <button className="text-xs text-ink-fire hover:underline" onClick={copy}>
             {copied ? t.runConsole.linkCopied : t.runConsole.staffLinkCopy}
           </button>
           <div className="text-[--ink-3] text-xs leading-relaxed">{t.runConsole.staffLinkNote}</div>
@@ -1744,7 +1744,7 @@ function FlashMissionCard({ ctx }: { ctx: { ownerUid: string; gameId: string; ru
   return (
     <PanelShell panel="flashMission" actions={<RichTooltip concept="flashMission" />}>
       <div className="space-y-2">
-        <p className="text-[11px] text-[--ink-3]">{t.runConsole.flashMissionTtlNote({ minutes: FLASH_MISSION_TTL_MINUTES })}</p>
+        <p className="text-[13px] text-[--ink-3]">{t.runConsole.flashMissionTtlNote({ minutes: FLASH_MISSION_TTL_MINUTES })}</p>
         <Input value={flash} onChange={(e) => setFlash(e.target.value)} placeholder={t.runConsole.flashMissionPlaceholder} dir="auto" />
         <div className="flex gap-2">
           <Input type="number" min="0" value={pts} onChange={(e) => setPts(Math.max(0, parseInt(e.target.value) || 0))} />
@@ -1799,7 +1799,7 @@ function HotZonePanel({ ctx, hotZone }: { ctx: { ownerUid: string; gameId: strin
       <div className="space-y-3">
       {active && hotZone ? (
         <div className="space-y-2 text-sm">
-          <div className="text-rp-fire font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
+          <div className="text-ink-fire font-medium">{t.runConsole.hotZoneActive({ mult: hotZone.multiplier })}</div>
           <div className="text-[--ink-3]">{t.runConsole.hotZoneExpires({ time: new Date(hotZone.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })}</div>
           {/* Switching the zone off is CAUTIONARY, not destructive: it was
               rendered `danger` while classified `cautionary`, so the console's
@@ -1869,15 +1869,15 @@ function ShareScreens({ accessCode, ctx, status, published, hasStaffPin, onShare
           <div key={entry.id} className="rounded-lg bg-[--surface-2] p-3 flex flex-wrap items-center gap-2">
             <div className="flex-1 min-w-[12rem]">
               <div className="text-sm text-[--ink-2]">{NAME[entry.id]}</div>
-              <div className="text-[11px] text-[--ink-3] leading-relaxed">{DESC[entry.id]}</div>
+              <div className="text-[13px] text-[--ink-3] leading-relaxed">{DESC[entry.id]}</div>
               {/* Copying the TV link to preview it used to publish the standings
                   to every player, silently. Say so BEFORE the click
                   (change: run-console-clarity). */}
               {entry.publishesOnShare && (
-                <div className="text-[11px] text-rp-amber/90 mt-0.5">{rc.sharePublishesNote}</div>
+                <div className="text-[13px] text-ink-amber/90 mt-0.5">{rc.sharePublishesNote}</div>
               )}
               {!entry.available && (
-                <div className="text-[11px] text-rp-amber/90 mt-0.5">
+                <div className="text-[13px] text-ink-amber/90 mt-0.5">
                   {entry.unavailableUntilFinished ? rc.shareAfterRunOnly
                     : entry.unavailableAfterFinish ? rc.shareWhileOpenOnly
                     : rc.shareStaffLocked}
@@ -1885,7 +1885,7 @@ function ShareScreens({ accessCode, ctx, status, published, hasStaffPin, onShare
               )}
             </div>
             {entry.id === 'accessCode' && (
-              <span className="font-mono text-rp-fire tracking-[0.2em] text-sm">{accessCode}</span>
+              <span className="font-mono text-ink-fire tracking-[0.2em] text-sm">{accessCode}</span>
             )}
             <Button
               variant={runActionVariant('copyShareLink')}
@@ -2048,7 +2048,7 @@ function ZonesConsole({ ownerUid, gameId, runId }: { ownerUid: string; gameId: s
               </span>
               <Button
                 variant={runActionVariant('deleteZone')}
-                className="min-h-0 px-2.5 py-1 text-[11px] rounded-lg"
+                className="min-h-0 px-2.5 py-1 text-[13px] rounded-lg"
                 aria-label={rc.zonesDeleteAria({ name: z.title })}
                 onClick={() => remove(z.id)}
               >
@@ -2139,7 +2139,7 @@ function TaskAvailabilityConsole({ ctx, overrides }: {
         <div className="space-y-3">
           {stages.filter((st) => st.tasks.length > 0).map((st) => (
             <div key={st.id} className="space-y-1.5">
-              <div dir="auto" className="text-[11px] uppercase tracking-widest text-[--ink-3]">{st.title}</div>
+              <div dir="auto" className="text-[13px] uppercase tracking-widest text-[--ink-3]">{st.title}</div>
               {st.tasks.map((tk) => {
                 const status = effectiveTaskStatus(tk, overrides);
                 const label = status === 'paused' ? rc.taskAvailStatusPaused
@@ -2265,7 +2265,7 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
 
   function Media({ row }: { row: SubmissionRow }) {
     if (!isRenderableMedia(row.photoUrl)) {
-      return <div className="text-[11px] text-[--ink-3]">{rc.photoReviewNoPhoto}</div>;
+      return <div className="text-[13px] text-[--ink-3]">{rc.photoReviewNoPhoto}</div>;
     }
     if (row.mediaKind === 'audio') {
       return <audio controls preload="none" src={row.photoUrl} className="w-full" aria-label={rc.photoReviewAudio} />;
@@ -2306,8 +2306,8 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
   }
   const WAIT_TONE = {
     fresh: 'text-[--ink-3]',
-    waiting: 'text-rp-amber',
-    overdue: 'text-rp-alert font-medium',
+    waiting: 'text-ink-amber',
+    overdue: 'text-ink-alert font-medium',
   } as const;
 
   // Keyboard, scoped to the queue container and NEVER to `document`: a creator
@@ -2335,14 +2335,14 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
       {/* A failed load must NOT look like an empty queue: at a live event that is
           a manager silently missing submissions (change: run-console-clarity). */}
       {loadError && (
-        <p className="text-[11px] text-rp-alert mb-3" role="status">{rc.photoReviewLoadError}</p>
+        <p className="text-[13px] text-ink-alert mb-3" role="status">{rc.photoReviewLoadError}</p>
       )}
 
       {items.length === 0
         ? (loadError ? null : <PanelEmpty panel="photoReview" />)
         : (
           <>
-            <p className="text-[11px] text-[--ink-3] mb-2">{rc.photoReviewKeyboardHint}</p>
+            <p className="text-[13px] text-[--ink-3] mb-2">{rc.photoReviewKeyboardHint}</p>
             <div
               role="list"
               aria-label={rc.photoReviewQueueLabel}
@@ -2365,25 +2365,25 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
                     <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
                     {/* One formatter, not a bare prefix glued to a name: the old
                         concatenation rendered "task Old Market". */}
-                    <div dir="auto" className="text-[11px] text-[--ink-3] truncate">
+                    <div dir="auto" className="text-[13px] text-[--ink-3] truncate">
                       {rc.photoReviewTaskLine({ name: taskLabel(row.taskId) })}
                     </div>
-                    <div className={`text-[11px] ${WAIT_TONE[item.tier]}`}>
+                    <div className={`text-[13px] ${WAIT_TONE[item.tier]}`}>
                       {waitLabel(item.waitMinutes)}
                     </div>
                     {item.tier === 'overdue' && !item.teamFinished && (
-                      <div className="text-[11px] text-rp-alert">{rc.photoReviewOverdue}</div>
+                      <div className="text-[13px] text-ink-alert">{rc.photoReviewOverdue}</div>
                     )}
                     {item.teamFinished && (
-                      <div className="text-[11px] text-[--ink-3]">{rc.photoReviewTeamFinished}</div>
+                      <div className="text-[13px] text-[--ink-3]">{rc.photoReviewTeamFinished}</div>
                     )}
                     {row.submittedAt && (
-                      <div className="text-[11px] text-[--ink-3]">
+                      <div className="text-[13px] text-[--ink-3]">
                         {rc.photoReviewSubmittedAt({ time: clock(row.submittedAt) })}
                       </div>
                     )}
                     {item.failure && (
-                      <p dir="auto" className="text-[11px] text-rp-alert mt-1" role="alert">{item.failure}</p>
+                      <p dir="auto" className="text-[13px] text-ink-alert mt-1" role="alert">{item.failure}</p>
                     )}
                     <div className="flex items-center gap-2 mt-2">
                       <Button
@@ -2412,7 +2412,7 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
 
       {reviewed.length > 0 && (
         <div className="mt-4">
-          <div className="text-[11px] text-[--ink-3] mb-2">{rc.photoReviewRecent}</div>
+          <div className="text-[13px] text-[--ink-3] mb-2">{rc.photoReviewRecent}</div>
           <div className="space-y-1">
             {reviewed.map((row) => {
               const key = submissionKey(row);
@@ -2425,8 +2425,8 @@ function PhotoReviewConsole({ ctx, pending, reviewed, pendingCount, loadError, t
                 ? rc.photoReviewRejectDisabled
                 : rc.photoReviewAlreadyRejected;
               return (
-                <div key={key} className="flex items-center gap-2 text-[11px]">
-                  <span className={row.status === 'approved' ? 'text-rp-fire' : 'text-rp-alert'}>
+                <div key={key} className="flex items-center gap-2 text-[13px]">
+                  <span className={row.status === 'approved' ? 'text-ink-fire' : 'text-ink-alert'}>
                     {row.status === 'approved' ? rc.photoReviewTagApproved : rc.photoReviewTagRejected}
                   </span>
                   <span dir="auto" className="text-[--ink-2] truncate flex-1">{row.displayName}</span>
@@ -2493,9 +2493,9 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
             )}
             <div className="p-2">
               <div dir="auto" className="text-xs text-[--ink-2] truncate">{item.teamName}</div>
-              <div dir="auto" className="text-[11px] text-[--ink-3] truncate">{item.taskTitle}</div>
+              <div dir="auto" className="text-[13px] text-[--ink-3] truncate">{item.taskTitle}</div>
               <div className="flex items-center justify-between mt-1">
-                <span className="text-[11px] text-[--ink-3] font-mono">
+                <span className="text-[13px] text-[--ink-3] font-mono">
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) || ''}
                   {Object.values(item.reactions ?? {}).reduce((a, n) => a + n, 0) > 0 ? ' ❤' : ''}
                 </span>
@@ -2503,7 +2503,7 @@ function FeedConsole({ ownerUid, gameId, runId, items }: { ownerUid: string; gam
                     like every other console control rather than styled ad hoc. */}
                 <Button
                   variant={runActionVariant('hideFeedPhoto')}
-                  className="min-h-0 px-2 py-0.5 text-[11px] rounded-lg"
+                  className="min-h-0 px-2 py-0.5 text-[13px] rounded-lg"
                   onClick={() => void hide(item.id)}
                 >
                   {rc.feedHideAction}
@@ -2537,9 +2537,9 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
     rejected: rc.mediaGalleryStatusRejected,
   };
   const STATUS_TONE: Record<SubmissionRow['status'], string> = {
-    pending: 'text-rp-amber',
-    approved: 'text-rp-fire',
-    rejected: 'text-rp-alert',
+    pending: 'text-ink-amber',
+    approved: 'text-ink-fire',
+    rejected: 'text-ink-alert',
   };
 
   // One file at a time, spaced out: a burst of same-tick downloads reads to some
@@ -2567,7 +2567,7 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
 
   function Media({ row }: { row: SubmissionRow }) {
     if (!isRenderableMedia(row.photoUrl)) {
-      return <div className="text-[11px] text-[--ink-3]">{rc.mediaGalleryNoMedia}</div>;
+      return <div className="text-[13px] text-[--ink-3]">{rc.mediaGalleryNoMedia}</div>;
     }
     if (row.mediaKind === 'audio') {
       return <audio controls preload="none" src={row.photoUrl} className="w-full" />;
@@ -2612,17 +2612,17 @@ function RunMediaGalleryConsole({ rows, taskTitles }: { rows: SubmissionRow[]; t
                 <div key={key} className="rounded-lg bg-[--surface-2] p-2">
                   <Media row={row} />
                   <div dir="auto" className="text-xs text-[--ink-2] truncate mt-2">{row.displayName}</div>
-                  <div dir="auto" className="text-[11px] text-[--ink-3] truncate">
+                  <div dir="auto" className="text-[13px] text-[--ink-3] truncate">
                     {rc.mediaGalleryTaskLine({ name: taskLabel(row.taskId) })}
                   </div>
                   <div className="flex items-center justify-between mt-1">
-                    <span className={`text-[11px] ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
+                    <span className={`text-[13px] ${STATUS_TONE[row.status]}`}>{STATUS_LABEL[row.status]}</span>
                     {isRenderableMedia(row.photoUrl) && (
                       <a
                         href={row.photoUrl}
                         download={`${row.teamId}-${row.taskId}`}
                         rel="noreferrer"
-                        className="text-[11px] font-semibold text-ink-fire hover:underline"
+                        className="text-[13px] font-semibold text-ink-fire hover:underline"
                       >
                         {rc.mediaGalleryDownloadOne}
                       </a>
@@ -2715,16 +2715,16 @@ function ChatConsole({ ctx, teams, threads, selfUid, markerFor, onRead }: {
               <button className="w-full text-start" onClick={() => expand(th.teamId, th.messages)}>
                 <div className="flex items-center justify-between gap-2">
                   <span dir="auto" className="text-sm font-medium text-[--ink-2] truncate">{nameFor(th.teamId)}</span>
-                  {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-neon-blue/20 text-neon-blue px-2 py-0.5 text-[11px] font-semibold">{rc.chatUnread}</span>}
+                  {unread && <span className="shrink-0 inline-flex items-center rounded-full bg-neon-blue/20 text-neon-blue px-2 py-0.5 text-[13px] font-semibold">{rc.chatUnread}</span>}
                 </div>
-                {last && <div dir="auto" className="text-[11px] text-[--ink-3] truncate mt-0.5">{last.from === 'hq' ? `${rc.chatHq}: ` : ''}{last.text}</div>}
+                {last && <div dir="auto" className="text-[13px] text-[--ink-3] truncate mt-0.5">{last.from === 'hq' ? `${rc.chatHq}: ` : ''}{last.text}</div>}
               </button>
               {expanded && (
                 <div className="mt-2 space-y-2">
                   <div className="max-h-56 overflow-y-auto flex flex-col gap-1.5">
                     {th.messages.map((m) => (
                       <div key={m.id} className={`flex flex-col ${m.from === 'hq' ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[11px] text-[--ink-3]">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
+                        <span className="text-[13px] text-[--ink-3]">{m.from === 'hq' ? rc.chatHq : m.senderName}</span>
                         <div dir="auto" className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${m.from === 'hq' ? 'bg-neon-blue/15 border border-neon-blue/40 text-[--ink-1]' : 'bg-app-card border border-[--rp-border] text-[--ink-2]'}`}>{m.text}</div>
                       </div>
                     ))}
@@ -2807,7 +2807,7 @@ function StaffChannelConsole({ ctx, selfUid }: {
               const mine = staffChannelMessageSide(m, selfUid) === 'me';
               return (
                 <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-                  <span className="text-[11px] text-[--ink-3]">{mine ? rc.chatHq : m.senderName}</span>
+                  <span className="text-[13px] text-[--ink-3]">{mine ? rc.chatHq : m.senderName}</span>
                   <div
                     dir="auto"
                     className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${
@@ -2914,7 +2914,7 @@ function RunSummaryPanel({ accessCode, reportHref }: { accessCode: string; repor
           not take it down with it. */}
       <a
         href={reportHref}
-        className="inline-flex items-center gap-1.5 mb-3 text-sm font-medium text-rp-fire hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+        className="inline-flex items-center gap-1.5 mb-3 text-sm font-medium text-ink-fire hover:underline rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
       >
         📊 {t.runConsole.summaryOpenReport}
       </a>
@@ -3145,15 +3145,15 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
       ) : (
         <div className="space-y-4">
           {s.ratings.recommend && (
-            <div className="text-sm text-rp-fire">{t.runConsole.feedbackRecommend({ pct: Math.round(s.recommendScore * 100) })}</div>
+            <div className="text-sm text-ink-fire">{t.runConsole.feedbackRecommend({ pct: Math.round(s.recommendScore * 100) })}</div>
           )}
 
           {/* 1–5 dimension tiles */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {FIVE_DIMS.filter((k) => s.ratings[k]).map((k) => (
               <div key={k} className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
-                <div className="text-[11px] text-[--ink-3] mb-0.5">{dimLabel[k]}</div>
-                <div className="text-lg font-bold text-rp-fire">
+                <div className="text-[13px] text-[--ink-3] mb-0.5">{dimLabel[k]}</div>
+                <div className="text-lg font-bold text-ink-fire">
                   {s.ratings[k]!.avg.toFixed(1)}
                   <span className="text-xs font-normal text-[--ink-3]"> / 5 · {s.ratings[k]!.count}</span>
                 </div>
@@ -3191,7 +3191,7 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
               <div className="text-xs text-[--ink-3] mb-1.5">{t.runConsole.feedbackIssuesTitle}</div>
               <div className="flex flex-wrap gap-2">
                 {FEEDBACK_ISSUES.filter((i) => (s.issueCounts[i] ?? 0) > 0).map((i) => (
-                  <span key={i} className="rounded-full bg-rp-alert/10 border border-rp-alert/30 text-rp-alert text-xs px-2.5 py-1">
+                  <span key={i} className="rounded-full bg-rp-alert/10 border border-rp-alert/30 text-ink-alert text-xs px-2.5 py-1">
                     {issueLabel[i]} · {s.issueCounts[i]}
                   </span>
                 ))}
@@ -3244,7 +3244,7 @@ function FeedbackPanel({ gameId, runId }: { gameId?: string; runId?: string }) {
             {open.issues && open.issues.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {open.issues.map((i) => (
-                  <span key={i} className="rounded-full bg-rp-alert/10 border border-rp-alert/30 text-rp-alert text-xs px-2 py-0.5">{issueLabel[i]}</span>
+                  <span key={i} className="rounded-full bg-rp-alert/10 border border-rp-alert/30 text-ink-alert text-xs px-2 py-0.5">{issueLabel[i]}</span>
                 ))}
               </div>
             )}
@@ -3261,7 +3261,7 @@ function Distribution({ title, bars }: { title: string; bars: [string, number][]
   const max = Math.max(1, ...bars.map(([, n]) => (Number.isFinite(n) ? n : 0)));
   return (
     <div className="bg-[--rp-raised] rounded-xl px-3 py-2.5">
-      <div className="text-[11px] text-[--ink-3] mb-2">{title}</div>
+      <div className="text-[13px] text-[--ink-3] mb-2">{title}</div>
       <div className="space-y-1.5">
         {bars.map(([label, rawN]) => {
           const n = Number.isFinite(rawN) ? rawN : 0;

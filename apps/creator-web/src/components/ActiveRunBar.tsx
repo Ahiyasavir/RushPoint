@@ -82,13 +82,13 @@ export default function ActiveRunBar() {
     >
       <span aria-hidden="true" className="w-2 h-2 rounded-full bg-rp-alert animate-pulse shrink-0" />
       <div className="min-w-0 flex-1">
-        <div className="text-[10px] uppercase tracking-wide text-rp-alert font-bold">{r.barBadge}</div>
+        <div className="text-[12px] uppercase tracking-wide text-ink-alert font-bold">{r.barBadge}</div>
         <div className="text-sm font-semibold text-[--ink-1] truncate" dir="auto">{title}</div>
         {extra > 0 && (
           <button
             type="button"
             onClick={() => nav('/live')}
-            className="text-[11px] text-[--ink-3] hover:text-rp-fire transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
+            className="text-[13px] text-[--ink-3] hover:text-ink-fire transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60"
           >
             {r.moreRuns({ n: extra })}
           </button>

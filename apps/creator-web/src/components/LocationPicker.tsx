@@ -174,7 +174,7 @@ export default function LocationPicker({
             {searching ? '…' : b.searchBtn}
           </button>
         </div>
-        {searchErr && <p className="text-rp-alert text-xs mt-1">{searchErr}</p>}
+        {searchErr && <p className="text-ink-alert text-xs mt-1">{searchErr}</p>}
         {/* Result rows use the app's --ink/--surface tokens, NOT `text-zinc-700`.
             creator-web REVERSES the zinc scale (tailwind.config.js) so that class
             resolves to #d6d3d1 — pale grey on the beige `app-raised` panel, about
@@ -193,7 +193,7 @@ export default function LocationPicker({
                   className={`w-full text-start px-3 py-2.5 min-h-[44px] border-b border-[--rp-border] last:border-b-0 transition-colors ${i === activeIndex ? 'bg-rp-fire/10' : 'hover:bg-[--surface-2]'}`}
                 >
                   <span className="block text-sm text-[--ink-1] font-medium">📍 {r.label}</span>
-                  {r.detail && <span className="block text-[11px] text-[--ink-3] mt-0.5">{r.detail}</span>}
+                  {r.detail && <span className="block text-[13px] text-[--ink-3] mt-0.5">{r.detail}</span>}
                 </button>
               </li>
             ))}

@@ -18,7 +18,7 @@ export default function MapModeToggle({ mode, onChange }: {
           role="switch"
           aria-checked={mode === m}
           aria-label={label(m)}
-          className={`inline-flex items-center justify-center min-h-[44px] px-3 rounded-md text-[11px] font-medium transition ${
+          className={`inline-flex items-center justify-center min-h-[44px] px-3 rounded-md text-[13px] font-medium transition ${
             mode === m ? 'bg-ink-fire text-white' : 'text-zinc-500'
           }`}
         >

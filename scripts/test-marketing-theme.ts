@@ -17,7 +17,7 @@
  * itself while both sides drift.
  */
 import { readFileSync } from 'node:fs';
-import { FONTS, WEB_FONTS } from '@rushpoint/brand';
+import { FONTS, WEB_FONTS, INK } from '@rushpoint/brand';
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -74,9 +74,12 @@ const plasma = tailwindToken(creatorTw, 'rp-plasma');
 // The darkened variant brand-coloured TEXT is drawn in. play-web introduced this
 // scale with the rule beside it: fills, borders, rings and gradients keep the
 // brand orange, and text uses this, because #FF5722 is 3.16:1 on a light surface.
-// Read from the app rather than restated, for the same reason as everything else
-// here: a second copy is a second opinion waiting to disagree.
-const inkFire = tailwindToken(playTw, 'ink-fire');
+// Read from packages/brand/tokens.mjs — the scale's actual single source since
+// creator-web adopted it too (change: brand-design-system) — rather than
+// regex-scraping play-web's config text, which no longer contains the literal
+// hex: it now spreads `tailwindInkColors()` instead of listing the tokens
+// inline. Still "read from the source, not restated", just one hop closer to it.
+const inkFire = INK.fire.toLowerCase();
 const ink1 = cssToken(creatorCss, '--ink-1');
 const ink3 = cssToken(creatorCss, '--ink-3');
 const warmBg = tailwindToken(playTw, 'app-bg');

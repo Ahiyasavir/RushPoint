@@ -166,7 +166,7 @@ export default function AdminUsersPage() {
         {tiles.map((tile) => (
           <div key={tile.label} className="rounded-xl border border-[--rp-border] bg-[--surface-2] p-3">
             <div className="text-lg font-semibold text-[--ink-1]">{tile.value}</div>
-            <div className="text-[11px] text-[--ink-3] leading-tight">{tile.label}</div>
+            <div className="text-[13px] text-[--ink-3] leading-tight">{tile.label}</div>
           </div>
         ))}
       </div>
@@ -225,7 +225,7 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      {failed && <p className="text-sm text-rp-alert" role="alert">{ta.loadFailed}</p>}
+      {failed && <p className="text-sm text-ink-alert" role="alert">{ta.loadFailed}</p>}
       {truncated && <p className="text-sm text-[--ink-3]">{ta.truncatedNotice(users.length)}</p>}
       <p className="text-xs text-[--ink-3]">{ta.engagementNote}</p>
 
@@ -248,8 +248,8 @@ export default function AdminUsersPage() {
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <Badge color={STAGE_COLOR[stage]}>{ta.stage[stage]}</Badge>
                       {/* So an annotated creator is identifiable without opening each card. */}
-                      {u.note && <span className="text-[11px] text-[--ink-3]" title={u.note}>📝 {ta.hasNote}</span>}
-                      {u.emailed && <span className="text-[11px] text-[--ink-3]">✉️ {ta.emailedShort}</span>}
+                      {u.note && <span className="text-[13px] text-[--ink-3]" title={u.note}>📝 {ta.hasNote}</span>}
+                      {u.emailed && <span className="text-[13px] text-[--ink-3]">✉️ {ta.emailedShort}</span>}
                     </div>
                   </div>
                   <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-[--ink-3]">
@@ -419,7 +419,7 @@ function NoteEditor({ user, ta, onSaved }: {
           {state === 'saving' ? ta.noteSaving : ta.noteSave}
         </Button>
         {state === 'saved' && <span className="text-xs text-[--ink-3]">{ta.noteSaved}</span>}
-        {state === 'failed' && <span className="text-xs text-rp-alert" role="alert">{ta.noteFailed}</span>}
+        {state === 'failed' && <span className="text-xs text-ink-alert" role="alert">{ta.noteFailed}</span>}
         {user.noteUpdatedAt && state !== 'failed' && (
           <span className="text-xs text-[--ink-3]">{ta.noteUpdated(formatTxDate(user.noteUpdatedAt))}</span>
         )}

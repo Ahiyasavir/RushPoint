@@ -126,7 +126,7 @@ export default function ChallengeTeaser({
     <Screen>
       <div className="flex-1 flex flex-col animate-race-in gap-4">
         <div className="text-center">
-          <div className="inline-block text-[11px] font-semibold uppercase tracking-widest text-ink-fire bg-rp-fire/10 rounded-full px-3 py-1">
+          <div className="inline-block text-[13px] font-semibold uppercase tracking-widest text-ink-fire bg-rp-fire/10 rounded-full px-3 py-1">
             {t.challenge.badge}
           </div>
           <p className="text-zinc-500 text-sm mt-2">{t.challenge.tagline}</p>

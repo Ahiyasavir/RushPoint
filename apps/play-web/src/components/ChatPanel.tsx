@@ -108,7 +108,7 @@ export default function ChatPanel({ ctx, teamId }: { ctx: Ctx; teamId: string })
               : m.senderName;
             return (
               <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'}`}>
-                <span className="text-[11px] text-zinc-500 mb-0.5">{label}</span>
+                <span className="text-[13px] text-zinc-500 mb-0.5">{label}</span>
                 <div
                   dir="auto"
                   className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm text-start ${

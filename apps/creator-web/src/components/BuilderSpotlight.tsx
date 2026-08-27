@@ -124,7 +124,7 @@ export default function BuilderSpotlight({ quickSetupActive }: { quickSetupActiv
         <p className="text-[12px] text-[--ink-2] mt-1 leading-relaxed">{stepCopy?.body}</p>
         <div className="flex items-center justify-between gap-2 mt-3">
           {/* Clamped, not `index + 1`: see the click guard below. */}
-          <span className="text-[11px] text-[--ink-3] tabular-nums">{stepNumber}/{steps.length}</span>
+          <span className="text-[13px] text-[--ink-3] tabular-nums">{stepNumber}/{steps.length}</span>
           <button
             type="button"
             // `last` is read from THIS render, so a burst of taps (an impatient
