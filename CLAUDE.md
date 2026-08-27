@@ -172,6 +172,17 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   single game. `dist-playtest` is deliberately NOT covered — it is emulator-bound by design.
   An unbuilt directory is skipped, never failed. Decisions are pure in
   `scripts/lib/backendOriginGuard.mjs`, unit-tested by `scripts/test-backend-origin-guard.ts`.
+- **`scripts/check-env-present.mjs`** (`npm run env:check -- <hosting|backend|all>`) — the
+  FAIL-FAST tripwire, wired as the FIRST step of `deploy:hosting` and `deploy:backend`, **before
+  any build**. Reads the gitignored source `.env` files directly and refuses to proceed if a
+  required one (`apps/creator-web/.env`, `apps/play-web/.env`, `functions/.env`) is missing, empty,
+  or still carries the `emulator-key` fallback. Exists because on 2026-08-27 a deploy ran from a
+  **git worktree** (which, like a fresh clone or a CI runner, carries none of those files) and
+  creator.rush-point.com shipped `apiKey: "emulator-key"` — nobody could sign in. `origin:check`
+  catches the same thing but only after ~4 full app builds and only if the deploy went through the
+  npm script; this is the cheap early check, `origin:check` stays as the post-build backstop.
+  **Only ever deploy from the main checkout**, or provision those `.env` files first. Pure logic in
+  `scripts/lib/envPresenceGuard.mjs`, unit-tested by `scripts/test-env-presence-guard.ts`.
 - **`scripts/backfill-public-tasks.mjs`** (`npm run backfill:public-tasks`) — operator entry point
   that drives the admin callable `backfillPublicTaskCoordinatesNow` to completion, repairing
   legacy `publicTasks` docs that still carry exact `coordinates`. **DRY-RUN by default**; a real
@@ -260,7 +271,8 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   `test-play-web-i18n-dictionary` · `test-i18n-leak` (the shared leak predicate + that both checkers
   import it) · `test-legal-routes` · `test-join-code` · `test-held-team-notice` ·
   `test-task-duration-defaults` · `test-build-artifact-guard` (asset base vs. serve path + the
-  playtest build/serve wiring) · `test-emulator-ports` (the offset resolver + the generated config) ·
+  playtest build/serve wiring) · `test-env-presence-guard` (the fail-fast deploy `.env`-presence
+  tripwire) · `test-emulator-ports` (the offset resolver + the generated config) ·
   `test-emulator-gate-isolation` (private hub locator + the free-ports sweep verdicts) ·
   `test-task-media-durability` (stored media survives a runtime whose accept-set refuses it) ·
   `test-task-media-repair` (the orphan-recovery planner) · `test-upload-origin-parity` (the
