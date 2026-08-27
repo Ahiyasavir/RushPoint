@@ -18,7 +18,7 @@
 //
 // Pure static source analysis — no emulator, no admin-SDK init.
 //   npx tsx scripts/test-callable-exports.ts
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,13 +31,37 @@ function check(label: string, cond: boolean, detail = ''): void {
   if (!cond) failures++;
 }
 
-// ── Domain modules that index.ts re-exports from. routing/assignNextTask.ts is
-//    intentionally absent: its functions are INTERNAL helpers, never triggers. ──
-const MODULES = [
-  'games/index.ts', 'gallery/index.ts', 'runs/index.ts',
-  'payments/index.ts', 'users/index.ts', 'maintenance/index.ts', 'admin/index.ts',
-  'admin/templates.ts',
-];
+// ── The domain modules index.ts re-exports from. DISCOVERED, not declared.
+//
+//    This used to be a hand written list, and a hand written list of "everywhere
+//    to look" has exactly one failure mode: a new module is not in it, so the
+//    check silently stops covering the very code that was just added. That is
+//    what happened when the contact module arrived. The list was not wrong about
+//    anything it named; it was simply not asked about the new file, and a check
+//    that examines nothing reports the same green as a check that passed.
+//
+//    So: every file under functions/src that DEFINES a callable is a module, by
+//    definition. index.ts is excluded because its own callables are handled
+//    separately, and routing/assignNextTask.ts falls out on its own because its
+//    functions are internal helpers, never triggers, so it defines no callable.
+function discoverModules(rel = ''): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(FN(rel), { withFileTypes: true })) {
+    const child = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('__')) continue;
+      out.push(...discoverModules(child));
+    } else if (
+      entry.name.endsWith('.ts')
+      && !entry.name.endsWith('.test.ts')
+      && !entry.name.endsWith('.d.ts')
+      && child !== 'index.ts'
+    ) {
+      if (onCallExports(readFileSync(FN(child), 'utf8')).length > 0) out.push(child);
+    }
+  }
+  return out;
+}
 
 // Internal helpers that must NEVER be re-exported as a Cloud Function trigger.
 const MUST_STAY_INTERNAL = [
@@ -110,6 +134,12 @@ const rootOwnCallables = new Set(onCallExports(rootSrc));
 // ── The reachable export surface = wildcard-module exports + explicit re-exports
 //    + index.ts's own callables. This is "what Firebase will actually deploy". ──
 const reachable = new Set<string>(rootOwnCallables);
+
+// The reach assertion. Discovery replaced a declared list, so the thing that can
+// now go wrong is discovery finding nothing and every per module check below
+// vacuously passing over an empty set.
+const MODULES = discoverModules();
+check('module discovery found the domain modules', MODULES.length >= 8, `${MODULES.length}: ${MODULES.join(', ')}`);
 
 for (const mod of MODULES) {
   const src = read(mod);

@@ -2,7 +2,7 @@
 import PageLayout from '~/layouts/PageLayout.astro';
 import HeroText from '~/components/widgets/HeroText.astro';
 
-import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
+import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, API_ORIGIN, type Language } from '~/utils/i18n';
 import { contactCopy } from '~/copy/contact';
 
 export function getStaticPaths() {
@@ -96,6 +96,7 @@ const metadata = {
 <script
   define:vars={{
     language,
+    apiOrigin: API_ORIGIN,
     messages: {
       success: t.successBody,
       invalid: t.errorInvalid,
@@ -110,8 +111,6 @@ const metadata = {
   const form = document.getElementById('contact-form');
   const status = document.getElementById('contact-status');
   const submit = document.getElementById('contact-submit');
-
-  const API_ORIGIN = 'https://api.rush-point.com';
 
   function show(text, ok) {
     status.textContent = text;
@@ -128,7 +127,7 @@ const metadata = {
 
     const data = new FormData(form);
     try {
-      const response = await fetch(`${API_ORIGIN}/submitContactMessage`, {
+      const response = await fetch(`${apiOrigin}/submitContactMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

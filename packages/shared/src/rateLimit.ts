@@ -79,6 +79,26 @@ export const RATE_LIMITS: Record<string, RateBudget> = {
   claimDiscoveryPoi: { max: 30, windowMs: MIN },
   checkOutTask: { max: 60, windowMs: MIN },
   joinRun: { max: 10, windowMs: MIN },
+  // Marketing site contact form (change: marketing-site). The ONLY write endpoint
+  // a caller with no account at all can reach, and it is keyed on the connection
+  // rather than a uid because there is no uid.
+  //
+  // TWO budgets, on purpose, because they defend against different things and a
+  // single one cannot be both.
+  //
+  //   submitContactMessage — charged only for a message that PASSED validation,
+  //   i.e. one that is about to be stored and announced. Tight, because that is
+  //   the resource worth protecting and a person asking a question sends one,
+  //   maybe two if they think the first failed.
+  //
+  //   submitContactMessageAttempt — charged for every call including refused
+  //   ones. Wide, because the failure mode of a tight limit here is a person who
+  //   mistypes their own email address three times being locked out of the
+  //   contact form for ten minutes, unable to comply and with nowhere else to go.
+  //   A rejected payload is never stored and never mailed, so it costs a few
+  //   string comparisons; it is worth bounding, but not at that price.
+  submitContactMessage: { max: 5, windowMs: 10 * MIN },
+  submitContactMessageAttempt: { max: 120, windowMs: 10 * MIN },
   triggerSOS: { max: 5, windowMs: MIN },
   sendTeamChatMessage: { max: 10, windowMs: MIN }, // per-sender uid; one spammer can't starve teammates/HQ
   // Staff↔admin channel (staff-console-field-ops). Roomier than team chat: this is

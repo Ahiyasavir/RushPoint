@@ -73,6 +73,30 @@ or forging a client supplied identifier.
 - **WHEN** a caller submits without a client supplied identifier, or with a forged one
 - **THEN** the limit is still enforced
 
+### Requirement: A rejected message does not consume the sender's allowance
+
+The budget that governs how many messages a sender may STORE SHALL be charged only after a
+submission has passed validation.
+
+A sender who is refused for a malformed field SHALL still be able to submit a corrected
+message immediately. A person mistyping their own contact address must not thereby lose
+access to the only channel they have, for a cost nobody told them they were paying.
+
+Calls SHALL still be bounded regardless of their outcome, so that a flood of malformed
+submissions is refused rather than served indefinitely. That bound SHALL be wide enough
+that no plausible sequence of human corrections reaches it.
+
+#### Scenario: A correction after several mistakes is accepted
+
+- **WHEN** a sender is rejected for invalid fields several times, up to the number of stored messages the tight budget allows
+- **AND** then submits a well formed message
+- **THEN** the message is accepted
+
+#### Scenario: A flood of malformed submissions is still bounded
+
+- **WHEN** a caller submits far more calls in the window than any person would
+- **THEN** the calls are eventually refused, whether or not they were well formed
+
 ### Requirement: Stored messages are server write only and readable only by the owner
 
 A contact message SHALL be written only by the server. Client writes to the message

@@ -48,6 +48,31 @@ hand. It is accepted because the value taken is the starting design, not ongoing
   `packages/shared` and already served on both existing origins. A second, divergent copy
   is a liability rather than a page.
 
+### What was replaced, because keeping it would have published someone else's brand
+
+Attribution and branding are separate obligations, and only one of them is satisfied by
+this file. Keeping the licence is what we owe the author. Shipping their name, their mark
+or their promotional artwork would be us publishing a page that says it belongs to them.
+
+- **The Open Graph image** (`src/assets/images/default.png`, 4 MB of the template's own
+  artwork). It is what every share of every page renders, so leaving it meant the first
+  thing anyone saw of RushPoint was a picture of a template. Replaced with the same
+  `og.jpg` the two apps use.
+- **The favicons.** Replaced with the apps' icon, so a tab belonging to this site is
+  recognisable beside a tab belonging to the product.
+- **The wordmark** (`src/components/Logo.astro`) carried a rocket emoji beside the site
+  name. An emoji is drawn by the reader's own font, so it is a different shape on every
+  device and sometimes not a mark at all.
+- **The "star us on GitHub" banner** (`src/components/widgets/Announcement.astro`) and the
+  stock app store, play store and hero images. All unreferenced, and the banner pulled an
+  image from a third party host on every page load.
+- **The README**, which was the template's project page.
+
+`scripts/test-marketing-attribution.ts` part F asserts none of this comes back. The
+template's unused *components* were deliberately kept: they are the design vocabulary the
+site is built from, they carry no copy of their own, and they are what makes a new page
+look like the existing ones.
+
 ### What was changed to make it build here
 
 Three of these are workspace hoisting collisions, not template defects. They are recorded

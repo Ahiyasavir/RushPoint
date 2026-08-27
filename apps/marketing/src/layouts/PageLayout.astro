@@ -5,7 +5,7 @@ import Footer from '~/components/widgets/Footer.astro';
 
 import { headerData, footerData } from '~/navigation';
 
-import type { Alternate, Language } from '~/utils/i18n';
+import { HREFLANG, SITE_ORIGIN, otherLanguage, type Alternate, type Language } from '~/utils/i18n';
 import type { MetaData } from '~/types';
 
 export interface Props {
@@ -16,8 +16,23 @@ export interface Props {
 
 const { metadata, language, alternates } = Astro.props;
 
+/**
+ * Where the language switch goes: this page's counterpart, taken from the very
+ * same alternate set the page publishes as hreflang. Reading it from there
+ * rather than recomputing it is the point. The two can then never disagree about
+ * where the other version of this page lives, which is a disagreement neither a
+ * reader nor a crawler would report.
+ *
+ * A page with no counterpart (an unpaired post) has no matching entry, and the
+ * header falls back to the other language's home.
+ */
+const counterpart = (alternates ?? []).find((a) => a.hreflang === HREFLANG[otherLanguage(language)]);
+const counterpartHref = counterpart?.href.startsWith(SITE_ORIGIN)
+  ? counterpart.href.slice(SITE_ORIGIN.length)
+  : undefined;
+
 // Navigation is per language: a Hebrew page must not offer an English menu.
-const header = headerData(language);
+const header = headerData(language, counterpartHref);
 const footer = footerData(language);
 ---
 

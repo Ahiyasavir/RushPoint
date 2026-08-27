@@ -1,65 +1,92 @@
 ---
-// Font family is provided by Astro's native Fonts API (see `fonts` in
-// astro.config.ts and <Font /> in Layout.astro), exposed as `--font-inter`.
-// To switch typefaces, change the `fonts` entry and repoint `--aw-font-*` below.
-
-// 'DM Sans'
-// Nunito
-// Dosis
-// Outfit
-// Roboto
-// Literata
-// 'IBM Plex Sans'
-// Karla
-// Poppins
-// 'Fira Sans'
-// 'Libre Franklin'
-// Inconsolata
-// Raleway
-// Oswald
-// 'Space Grotesk'
-// Urbanist
+/**
+ * The site's palette and typefaces, matched to the product.
+ *
+ * These are not decorative choices made here. Every value below is the same
+ * value one of the two apps already uses, so that a person who clicks through
+ * from this site to the creator console or to a live game does not experience it
+ * as arriving somewhere else. The template shipped a blue primary, a purple
+ * accent and a lavender selection colour, none of which appear anywhere in
+ * RushPoint.
+ *
+ * Where the values come from:
+ *   • The brand accents are IDENTICAL in both apps
+ *     (`apps/creator-web/tailwind.config.js` and `apps/play-web/tailwind.config.js`):
+ *     rp-fire #FF5722, rp-amber #FFB300, rp-plasma #06B6D4.
+ *   • The ink scale is `--ink-1` / `--ink-3` from `apps/creator-web/src/index.css`,
+ *     which were chosen for measured contrast rather than by eye, so they are
+ *     taken as given rather than re-picked here.
+ *   • The page background is play-web's warm #FFFCF7 rather than creator-web's
+ *     cooler #F6F7FB. The two apps genuinely differ here, so one had to be
+ *     chosen: the warm surface is the one a PARTICIPANT sees, which is the far
+ *     larger audience and the thing this site is mostly describing, and it sits
+ *     better under an orange accent than a blue grey does.
+ *
+ * `scripts/test-marketing-theme.ts` asserts these against the apps' own
+ * configuration, so a change to the brand in one place cannot leave this behind.
+ *
+ * DARK MODE. Neither app has one, so there is no product value to copy and the
+ * palette below is authored: a warm near black rather than the template's navy,
+ * because a cool dark under an orange accent reads as two unrelated designs. The
+ * accents are deliberately unchanged between the two modes, since they ARE the
+ * brand.
+ */
 ---
 
 <style is:inline>
   :root {
     --aw-font-sans: var(--font-inter);
     --aw-font-serif: var(--font-inter);
-    --aw-font-heading: var(--font-inter);
+    /* Space Grotesk is the apps' `--rp-font-display` / `font-brand`. */
+    --aw-font-heading: var(--font-space-grotesk), var(--font-inter);
 
-    --aw-color-primary: rgb(1 97 239);
-    --aw-color-secondary: rgb(1 84 207);
-    --aw-color-accent: rgb(109 40 217);
+    /* rp-fire, and a darker press state of the same hue. */
+    --aw-color-primary: #ff5722;
+    --aw-color-secondary: #e64a19;
+    /* rp-plasma. The second brand accent, used for links and highlights. */
+    --aw-color-accent: #06b6d4;
 
-    --aw-color-text-heading: rgb(0 0 0);
-    --aw-color-text-default: rgb(16 16 16);
-    --aw-color-text-muted: rgb(16 16 16 / 66%);
-    --aw-color-bg-page: rgb(255 255 255);
+    /* --ink-1 and --ink-3 from creator-web. */
+    --aw-color-text-heading: #0a0c1a;
+    --aw-color-text-default: #0a0c1a;
+    --aw-color-text-muted: #60657d;
 
-    --aw-color-bg-page-dark: rgb(3 6 32);
+    /* play-web's "Warm Trail" page surface. */
+    --aw-color-bg-page: #fffcf7;
 
+    --aw-color-bg-page-dark: #14110d;
+
+    /* play-web's `glass-border`. A warm hairline, so a divider does not read as
+       a cool grey line drawn across a warm page. */
+    --aw-color-border: rgba(90, 70, 45, 0.16);
+
+    /* A tint of the brand orange. The template used `lavender`, which appears
+       nowhere in the product. */
     ::selection {
-      background-color: lavender;
+      background-color: #ffd9cc;
+      color: #0a0c1a;
     }
   }
 
   .dark {
     --aw-font-sans: var(--font-inter);
     --aw-font-serif: var(--font-inter);
-    --aw-font-heading: var(--font-inter);
+    --aw-font-heading: var(--font-space-grotesk), var(--font-inter);
 
-    --aw-color-primary: rgb(1 97 239);
-    --aw-color-secondary: rgb(1 84 207);
-    --aw-color-accent: rgb(109 40 217);
+    /* Unchanged. The accents are the brand, not a mode. */
+    --aw-color-primary: #ff5722;
+    --aw-color-secondary: #ff8a00;
+    --aw-color-accent: #22d3ee;
 
-    --aw-color-text-heading: rgb(247, 248, 248);
-    --aw-color-text-default: rgb(229 236 246);
-    --aw-color-text-muted: rgb(229 236 246 / 66%);
-    --aw-color-bg-page: rgb(3 6 32);
+    --aw-color-text-heading: #faf7f2;
+    --aw-color-text-default: #f0ece5;
+    --aw-color-text-muted: #b6ada1;
+    --aw-color-bg-page: #14110d;
+    --aw-color-border: rgba(240, 236, 229, 0.16);
 
     ::selection {
-      background-color: black;
-      color: snow;
+      background-color: #ff5722;
+      color: #14110d;
     }
   }
 </style>

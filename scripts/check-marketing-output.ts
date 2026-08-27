@@ -30,6 +30,9 @@ import {
   pageUrl,
   standingPages,
   LANGUAGES,
+  LANGUAGE_NAME,
+  otherLanguage,
+  pagePath,
   type Alternate,
 } from './lib/marketingSite.ts';
 
@@ -378,6 +381,39 @@ for (const language of LANGUAGES) {
   );
 }
 
+// ── F2. The language switch agrees with the hreflang cluster ─────────────────
+//
+// A reader and a crawler must be told the SAME thing about where the other
+// version of this page lives. They were not: the switch pointed at the other
+// language's home from every page, so someone halfway through the story who
+// changed language was returned to the front page to find their place again,
+// while the page's own hreflang correctly named the counterpart. Nothing
+// reported the disagreement, because each half was individually right.
+
+for (const { path, language, subject } of standingPages()) {
+  const page = byPath.get(path);
+  if (!page) continue;
+
+  const expected = pagePath(otherLanguage(language), subject);
+  // The switch is the link whose text is the other language's own name for
+  // itself, which is how a reader identifies it too.
+  const other = otherLanguage(language);
+  const label = LANGUAGE_NAME[other];
+  const anchor = new RegExp(`<a[^>]*href="([^"]+)"[^>]*>[^<]*${label}[^<]*</a>`, 'i');
+  const found = page.html.match(anchor)?.[1];
+
+  check(
+    `F2 · ${path} offers a language switch`,
+    Boolean(found),
+    found ?? `no link labelled ${label}`,
+  );
+  check(
+    `F2 · ${path} switches to its own counterpart, not to a home page`,
+    found === expected,
+    `${found ?? '(none)'} expected ${expected}`,
+  );
+}
+
 // ── G. No framework runtime reaches a content page ───────────────────────────
 //
 // The reason these pages are static is that a crawler and a slow phone both get
@@ -404,6 +440,66 @@ for (const { path } of standingPages()) {
     .replace(/\s+/g, ' ')
     .trim();
   check(`G · ${path} carries readable text without scripts`, text.length > 400, `${text.length} chars`);
+}
+
+// ── G2. Every post carries valid structured data ─────────────────────────────
+//
+// A blog post is the surface structured data was designed for: it is what lets a
+// result carry a date and a publisher rather than a bare title. It is also the
+// easiest thing on the page to break without anyone noticing, because it is
+// invisible to a reader and a malformed block is silently ignored by the crawler
+// rather than reported anywhere.
+//
+// So the block is PARSED, not pattern matched. A regex confirming the tag is
+// present would pass over a truncated object, which is the realistic failure:
+// unescaped content, not a missing tag.
+
+const postPages = pages.filter((p) => /\/(he|en)\/blog\/[^/]+\/$/.test(p.urlPath));
+check('G2 · the built output contains blog posts', postPages.length > 0, `${postPages.length} post(s)`);
+
+for (const page of postPages) {
+  const match = page.html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  if (!match) {
+    check(`G2 · ${page.urlPath} carries structured data`, false, 'no ld+json block');
+    continue;
+  }
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = JSON.parse(match[1]) as Record<string, unknown>;
+  } catch (e) {
+    check(`G2 · ${page.urlPath} structured data parses`, false, String(e));
+    continue;
+  }
+  check(`G2 · ${page.urlPath} structured data parses`, true, String(data['@type']));
+  check(
+    `G2 · ${page.urlPath} structured data declares the page it describes`,
+    data.url === `${SITE_ORIGIN}${page.urlPath}`,
+    String(data.url),
+  );
+  // The language a post is written in is not inferable from a short post, and the
+  // two languages live under different prefixes, so it is stated.
+  const expected = page.urlPath.startsWith('/he/') ? 'he-IL' : 'en';
+  check(
+    `G2 · ${page.urlPath} structured data states the language`,
+    data.inLanguage === expected,
+    `${String(data.inLanguage)} (expected ${expected})`,
+  );
+  // An image in structured data is published VERBATIM. The frontmatter value is an
+  // authoring path, so passing it through emits a reference to a file that exists
+  // nowhere, in a block no reader ever sees. Absent is fine; unresolved is not.
+  if ('image' in data) {
+    check(
+      `G2 · ${page.urlPath} structured data image is a resolvable absolute url`,
+      typeof data.image === 'string' && /^https?:\/\//.test(data.image as string),
+      String(data.image),
+    );
+  }
+  check(
+    `G2 · ${page.urlPath} structured data carries a headline and a date`,
+    typeof data.headline === 'string' && (data.headline as string).length > 0
+      && typeof data.datePublished === 'string',
+    `${String(data.headline).slice(0, 40)} @ ${String(data.datePublished)}`,
+  );
 }
 
 // ── H. The markup a phone needs ──────────────────────────────────────────────

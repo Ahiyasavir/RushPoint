@@ -100,9 +100,12 @@ fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin`
 real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
 run: it introspects the callables the emulator serves and fails if any was never invoked (bar an
 explicit `EXEMPT` list, itself checked for stale entries), so a **new callable ships RED until it
-has a test** — add a scenario, don't just add the callable. The table below lists **108** callables
-(plus `stripeWebhook`, the `pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which
-are not callables). Keep it green; extend the relevant scenario (not just the lifecycle).
+has a test** — add a scenario, don't just add the callable. On the last green run the guard
+introspected **112** deployed HTTPS functions and covered all of them; that number is printed by
+the run itself (`coverage: introspected the deployed callable set`), so read it there rather than
+trusting this line, which is a snapshot and ages. The table below lists them by module, plus the
+`pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which are not callables.
+Keep it green; extend the relevant scenario (not just the lifecycle).
 `functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
 — seeded-random property tests for scoring/ranking/answer/geo/rate-limit; run via `npm test`.
 `npm run simulate` (scripts/simulate-run.mjs, `--teams=N`) is the v2 concurrent load sim — N
@@ -326,6 +329,14 @@ helpers are **internal** (not triggers) — never re-export them.
 | `users/index.ts` | updateMyProfile · exportMyData · deleteMyAccount |
 | `maintenance/index.ts` | pruneExpiredRunDataNow · purgeDeletedGamesNow · **backfillPublicTaskCoordinatesNow** · pruneRunNow · pruneExpiredRunData (pubsub schedule, not a callable) |
 | `admin/index.ts` | **listPlatformUsers** (admin-only creator activity rollup: games created, runs launched, derived last-active, time on site, activation stage — see `apps/creator-web` `/admin/users`) · **recordEngagement** (NOT admin-only: every creator flushes their OWN engaged time; uid from the token, value clamped by `clampEngagementDelta`, stored in the server-only `userEngagement/{uid}`) · **setUserNote** (admin-only private note ABOUT a creator, server-only `userNotes/{uid}`; empty CLEARS the doc. Both collections are deleted by `deleteMyAccount` — they live OUTSIDE `users/{uid}` so the recursiveDelete does not reach them) |
+| `contact/index.ts` | **submitContactMessage** (the marketing site's contact form. The ONLY write endpoint an
+unauthenticated stranger can reach, so it is declared in `PUBLIC_CALLABLES` with its reason; validation,
+a size bound and TWO rate budgets stand in for authentication. The wide `submitContactMessageAttempt`
+budget is charged for every call, the tight `submitContactMessage` one only once a payload has PASSED
+validation, so a person who mistypes their own address is not locked out of the only channel they have.
+The key is derived from the connection, never from the payload) · **listContactMessages** (admin only,
+audit logged, read at `apps/creator-web` `/admin/contact`; the collection is closed to clients in both
+directions) |
 | `admin/templates.ts` | **listGameTemplates** (the new-game menu: every admin-authored template, to any authenticated caller — projected through `TEMPLATE_LIST_FIELDS`, see the field-mask gotcha below) · **createGameFromTemplate** (instantiate one into the caller's own games) · **listAdminTemplates** · **setGameTemplateFlag** (admin-only authoring/curation) |
 | `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · **sendTeamChatMessage** · acknowledgeAlert · **clearTeamOutOfBounds** · pushAnnouncement · deactivateAnnouncement · pushFlashMission · **reactToFeedItem** · **reportFeedItem** · **hideFeedItem** · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore ·
 **setRunTaskStatus** (pause/close/resume ONE task for ONE run) · listAuditLogs |

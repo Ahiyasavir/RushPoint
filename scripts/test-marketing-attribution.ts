@@ -94,6 +94,62 @@ for (const rel of MUST_BE_ABSENT) {
   check(`D · stripped and stays stripped: ${rel}`, !existsSync(join(MARKETING, rel)), rel);
 }
 
+// ── F. The template's BRANDING is gone, not just its licence recorded ────────
+// Attribution and branding are different obligations and only one of them is
+// satisfied by THIRD_PARTY.md. Keeping the licence is what we owe the author;
+// shipping their name, their logo, their promotional artwork or their "star us
+// on GitHub" banner is us publishing a page that says it belongs to someone
+// else. It is also the failure that is hardest to notice from the inside,
+// because a template's own branding looks like a finished site.
+//
+// The artwork matters twice over: the stock Open Graph image is what every share
+// of every page shows, so leaving it in place means the template's picture is
+// what a reader sees before they see anything of ours.
+const BRAND_RESIDUE: Array<[string, RegExp]> = [
+  ['the upstream name in visible source', /astrowind/i],
+  ['the upstream author', /onwidget|arthelokyo/i],
+  ['a GitHub badge or shield', /img\.shields\.io/i],
+];
+
+// The virtual config module is machinery, not branding: `astrowind:config` is
+// the integration's own import specifier and renaming it would be a fork of the
+// template for no reader-visible gain. Excluded by NAME so the exclusion cannot
+// silently widen to cover real branding.
+const MACHINERY = /astrowind:config/g;
+
+function sourceFilesOf(dir: string, out: string[] = []): string[] {
+  if (!existsSync(dir)) return out;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) sourceFilesOf(full, out);
+    else if (/\.(astro|ts|tsx|js|mjs|md|mdx|yaml|json)$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+const sources = sourceFilesOf(join(MARKETING, 'src'))
+  .concat([join(MARKETING, 'README.md')].filter((f) => existsSync(f)));
+
+let scanned = 0;
+for (const [what, pattern] of BRAND_RESIDUE) {
+  const hits: string[] = [];
+  for (const file of sources) {
+    const text = readFileSync(file, 'utf8').replace(MACHINERY, '');
+    if (pattern.test(text)) hits.push(file.slice(MARKETING.length + 1).replace(/\\/g, '/'));
+  }
+  check(`F · no trace of ${what}`, hits.length === 0, hits.slice(0, 6).join(', ') || 'none');
+}
+scanned = sources.length;
+
+// The stock artwork, by file. Present means it is still what a share renders.
+for (const rel of ['src/assets/images/hero-image.png', 'src/assets/images/app-store.png', 'src/assets/images/google-play.png']) {
+  check(`F · the template's stock image is gone: ${rel}`, !existsSync(join(MARKETING, rel)), rel);
+}
+
+// The reach assertion for part F specifically. Every check above is an absence,
+// and an absence over an empty file list is a green nobody earned.
+check('F · the brand scan actually read source files', scanned > 20, `${scanned} file(s)`);
+
 // ── E. The scan actually reached something ───────────────────────────────────
 // Without this, an empty or missing workspace would sail through every check
 // above that is phrased as an absence. Same vacuous-pass class the landing page

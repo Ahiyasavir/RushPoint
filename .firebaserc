@@ -11,6 +11,9 @@
         ],
         "play": [
           "rushpoint-play"
+        ],
+        "marketing": [
+          "rushpoint-marketing"
         ]
       }
     }

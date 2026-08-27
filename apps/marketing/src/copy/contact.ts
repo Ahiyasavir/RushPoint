@@ -29,6 +29,17 @@ export interface ContactCopy {
   otherWaysBody: string;
 }
 
+/**
+ * A note on `errorOffline`. It is shown when `fetch` THROWS, which the browser does
+ * for a genuine network failure AND for a request the server refused at the CORS
+ * layer, because a refused response is unreadable from script and therefore
+ * indistinguishable from never arriving. The two have completely different causes
+ * and only one of them is the reader's fault, so the wording says what we know
+ * ("we could not reach the server") rather than what we are guessing ("you are
+ * offline"). Telling someone to check their connection when the actual cause is a
+ * missing entry in our own allow list sends them to fix something that is not
+ * broken. See DEPLOY.md section 12C.
+ */
 export const contactCopy: Record<Language, ContactCopy> = {
   he: {
     title: 'דברו איתנו',
@@ -65,7 +76,7 @@ export const contactCopy: Record<Language, ContactCopy> = {
     successBody: 'Thank you. We will reply to the address you left.',
     errorInvalid: 'Something in the form is not valid. Check that name, email and message are filled in, and that the message is not too long.',
     errorRateLimited: 'Too many messages have been sent from this device. Try again in a few minutes.',
-    errorOffline: 'There is no connection to the server right now. Your message is still here on screen, try again once you are back online.',
+    errorOffline: 'We could not reach the server. Your message is still here on screen, so nothing is lost. Try again in a moment.',
     errorUnknown: 'The message was not sent. You can try again, and your message stays here meanwhile.',
     otherWaysTitle: 'Looking for something else',
     otherWaysBody: 'If you just want to see how it works, you can open a game and try it without sending anything.',

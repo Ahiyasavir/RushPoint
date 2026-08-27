@@ -31,7 +31,7 @@
 - [x] 5.2 Write the story page in both languages.
 - [x] 5.3 Write the contact page in both languages, with the form.
 - [x] 5.4 Write the blog index and at least two real posts per language, authored in Hebrew rather than translated.
-- [ ] 5.5 Replace the template's branding, navigation, footer, colors and images with RushPoint's, and remove every remaining piece of template placeholder copy.
+- [x] 5.5 Replace the template's branding, navigation, footer, colors and images with RushPoint's, and remove every remaining piece of template placeholder copy.
 
 ## 6. Crawler surfaces (RED first)
 
@@ -51,17 +51,18 @@
 
 ## 9. The contact callable (RED first, coverage guard is the starting state)
 
-- [ ] 9.1 Add the contact scenario to `scripts/e2e-verify.mjs`: accept a valid message, reject missing field, wrong type and oversize with invalid argument, treat null and absent identically for the optional field, refuse past the rate limit with resource exhausted, and refuse `listContactMessages` for a non admin. Run `npm run e2e` and confirm it fails because the callables do not exist.
-- [ ] 9.2 Add the deny rule for `contactMessages` in `firestore.rules` and its rules suite assertions, and confirm client read and write are both denied.
-- [ ] 9.3 Implement `submitContactMessage`: validate and bound every field, rate limit server side, stamp arrival time on the server, and store. Re-export it from `functions/src/index.ts`.
-- [ ] 9.4 Implement `listContactMessages`, admin only and audit logged.
-- [ ] 9.5 Add both to the declared lists in `scripts/lib/callableHardening.mjs`: `submitContactMessage` to `PUBLIC_CALLABLES` with its reason, `listContactMessages` to the audit list. Run `scripts/test-callable-hardening.ts`.
-- [ ] 9.6 Route the contact notification through the existing `deliver` seam in `functions/src/runs/runSummaryEmail.ts`, best effort and a logged no-op without a provider key.
-- [ ] 9.7 Add the typed wrapper and wire the site's contact form to it, posting to the declared API origin. Confirm 9.1 passes and the callable coverage guard is green.
+- [x] 9.1 Add the contact scenario to `scripts/e2e-verify.mjs`: accept a valid message, reject missing field, wrong type and oversize with invalid argument, treat null and absent identically for the optional field, refuse past the rate limit with resource exhausted, and refuse `listContactMessages` for a non admin. Run `npm run e2e` and confirm it fails because the callables do not exist.
+- [x] 9.2 Add the deny rule for `contactMessages` in `firestore.rules` and its rules suite assertions, and confirm client read and write are both denied.
+- [x] 9.3 Implement `submitContactMessage`: validate and bound every field, rate limit server side, stamp arrival time on the server, and store. Re-export it from `functions/src/index.ts`.
+- [x] 9.4 Implement `listContactMessages`, admin only and audit logged.
+- [x] 9.5 Add both to the declared lists in `scripts/lib/callableHardening.mjs`: `submitContactMessage` to `PUBLIC_CALLABLES` with its reason, `listContactMessages` to the audit list. Run `scripts/test-callable-hardening.ts`.
+- [x] 9.6 Route the contact notification through the existing `deliver` seam in `functions/src/runs/runSummaryEmail.ts`, best effort and a logged no-op without a provider key.
+- [x] 9.7 Add the typed wrapper and wire the site's contact form to it, posting to the declared API origin. Confirm 9.1 passes and the callable coverage guard is green.
+  - DEVIATION: the typed wrapper (`services/calls.ts`) exists for the ADMIN side only. The site's own form posts through a page local `fetch`, not a wrapper module, because the page ships zero JavaScript files: its script is inline `define:vars`, which cannot import. A wrapper here would mean a bundled script on every contact page, which contradicts the no framework runtime requirement that section 6.3 asserts. The API origin is still declared once, in `src/utils/i18n.ts`.
 
 ## 10. Owner readable messages
 
-- [ ] 10.1 Add a minimal admin view listing contact messages, following the existing `/admin/users` pattern, rendering message content as text and never as markup.
+- [x] 10.1 Add a minimal admin view listing contact messages, following the existing `/admin/users` pattern, rendering message content as text and never as markup.
 
 ## 11. Deployment wiring
 
@@ -73,11 +74,24 @@
 - [x] 12.1 Write `scripts/test-marketing-cms-config.ts` comparing the Decap field set against the content schema in both directions. Run it and confirm it fails against the template's stock configuration.
 - [x] 12.2 Re-point the Decap collections at our content shape, our two languages and our repository, restricted to the content directory. Confirm 12.1 passes.
 - [x] 12.3 Prove the site does not depend on the CMS: build with the admin assets removed and confirm every published page is still emitted.
-- [ ] 12.4 Write the operator checklist for the GitHub OAuth application and the token exchange endpoint on the VPS, including the exact steps and what stays broken until they are done.
+- [x] 12.4 Write the operator checklist for the GitHub OAuth application and the token exchange endpoint on the VPS, including the exact steps and what stays broken until they are done.
 
 ## 13. Gates
 
-- [ ] 13.1 Run `npm run verify` and confirm every gate is green, including the new marketing build and `i18n:check:strict` with zero new PART B findings.
-- [ ] 13.2 Run `npm run e2e` and confirm it is green, including the new contact scenario and the callable coverage guard.
-- [ ] 13.3 Run the Firestore rules suite and confirm the `contactMessages` denials pass.
-- [ ] 13.4 Serve the built site and verify with the preview tools: a Hebrew page renders RTL with full content, its English counterpart renders LTR, the language switch works, a blog post renders with its image and video, the contact form submits and reports its outcome, and no page logs a console error.
+- [x] 13.1 Run `npm run verify` and confirm every gate is green, including the new marketing build and `i18n:check:strict` with zero new PART B findings.
+- [x] 13.2 Run `npm run e2e` and confirm it is green, including the new contact scenario and the callable coverage guard.
+- [x] 13.3 Run the Firestore rules suite and confirm the `contactMessages` denials pass.
+- [x] 13.4 Serve the built site and verify with the preview tools: a Hebrew page renders RTL with full content, its English counterpart renders LTR, the language switch works, a blog post renders with its image and video, the contact form submits and reports its outcome, and no page logs a console error.
+  - VERIFIED: Hebrew renders `dir="rtl"` with full content, English `dir="ltr"`, both light and dark; the language switch reaches the true counterpart on every standing page and on a paired post (14.7); a post renders its cover image with a responsive srcset and its video in a 16:9 frame; the form posts the correct callable envelope to the declared API origin, reports success and each of the four failure outcomes in the page's own language, keeps what the sender wrote on every failure, and clears the fields only on success; no console errors on any page; zero JavaScript files shipped.
+  - HOW THE MEDIA AND THE FORM WERE VERIFIED WITHOUT SIDE EFFECTS: no shipped post carries media yet, because there is no real photography for these posts and a stock cover would be exactly the template filler that section 5.5 removed. The rendering path was proved by planting an image and a video on one post, confirming the output, and reverting. The form was exercised against a stubbed `fetch` rather than the live API: a real submission would have reached production, and the production origin allow list has not been updated yet (DEPLOY.md section 12C), so it would have proved nothing except that the operator step is outstanding.
+
+## 14. The site wears the product's colours (added mid implementation)
+
+- [x] 14.1 Replace the template's palette with the product's: rp-fire primary, rp-plasma accent, the ink scale, play-web's warm page surface, and a brand tinted selection colour. The template shipped a blue primary, a purple accent and `lavender`.
+- [x] 14.2 Load the product's display face (Space Grotesk, the apps' `font-brand` / `--rp-font-display`) and point `--aw-font-heading` at it. A heading face named but never loaded falls back silently.
+- [x] 14.3 Redefine the `slate`, `gray` and `blue` SCALES rather than only the semantic tokens. The template writes those directly in dozens of class strings, mostly under `dark:`, so token only changes left dark mode on the template's cool navy while light mode was warm.
+- [x] 14.4 Define `text-heading`, which the template's Headline component was already writing with nothing defining it, and give `text-page` a fallback. Both were silently inheriting.
+- [x] 14.5 Replace the remaining unpaired physical direction classes (`ml-2`, `mr-4`) with logical ones. Hebrew is the default language here, so an unpaired `ml-` is a mainline bug.
+- [x] 14.6 Write `scripts/test-marketing-theme.ts`, reading the brand OUT of the apps' own configuration rather than restating it, so a one sided change to the brand fails. Prove it bites by pointing the primary back at the template's blue.
+- [x] 14.7 Fix the language switch, which pointed at the other language's HOME from every page. It now links to the page's own counterpart, taken from the very same alternate set the page publishes as hreflang, so a reader and a crawler cannot be told different things. An unpaired post falls back to the other home, which is the honest answer. Asserted in `check-marketing-output.ts` part F2.
+- [x] 14.8 Add `BlogPosting` structured data to posts, and resolve the cover image to an absolute built URL rather than publishing the raw `~/assets/...` authoring path, which would have named a file that exists nowhere. Asserted in part G2, parsed rather than pattern matched.

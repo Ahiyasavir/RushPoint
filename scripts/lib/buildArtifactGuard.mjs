@@ -55,7 +55,33 @@ export const ARTIFACT_CONTRACT = [
   // play-web is the origin root in BOTH audiences (the proxy's fall-through).
   { app: 'play-web', outDir: GATE_OUT_DIR, base: '/', audience: 'gate' },
   { app: 'play-web', outDir: PLAYTEST_OUT_DIR, base: '/', audience: 'playtest' },
+  // The marketing site (change: marketing-site) is its own Hosting origin, so
+  // base is the root. It has NO playtest audience on purpose: it is static
+  // output with no emulator wiring and nothing to point at a local backend, so
+  // there is no second build of it that could diverge from this one.
+  //
+  // `entries` because this artifact has NO root index.html: `/` is a Hosting
+  // redirect to a language home, so the documents that carry asset references
+  // are the two language homes. Without naming them the guard finds no
+  // index.html, reports "not built", and skips an artifact that is very much
+  // built, which is a silent hole rather than a failure.
+  {
+    app: 'marketing',
+    outDir: GATE_OUT_DIR,
+    base: '/',
+    audience: 'gate',
+    entries: ['he/index.html', 'en/index.html'],
+  },
 ];
+
+/**
+ * The documents to read for an artifact. Defaults to the single root
+ * `index.html` that a Vite app emits; an artifact that has none names its own.
+ */
+export function entryDocuments(artifact) {
+  const entries = artifact && Array.isArray(artifact.entries) ? artifact.entries : null;
+  return entries && entries.length > 0 ? entries : ['index.html'];
+}
 
 // <script …> / <link …> with a quoted src= or href=. Vite always emits quoted
 // attributes; matching unquoted ones would invite false positives on hand-written

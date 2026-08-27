@@ -3,8 +3,9 @@ import { render } from 'astro:content';
 
 import PageLayout from '~/layouts/PageLayout.astro';
 import Image from '~/components/common/Image.astro';
+import { findImage } from '~/utils/images';
 
-import { pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
+import { pagePath, OG_LOCALE, SITE_ORIGIN, type Language } from '~/utils/i18n';
 import { publishedPosts, urlOf, alternatesOfPost } from '~/utils/posts';
 import { blogCopy } from '~/copy/blog';
 
@@ -36,6 +37,48 @@ const metadata = {
   },
 };
 
+/**
+ * The post's cover, resolved to something a crawler can actually fetch.
+ *
+ * The frontmatter value is an authoring path (`~/assets/images/...`), which the
+ * page's own <Image> resolves for rendering. Structured data gets no such
+ * treatment: whatever string is put there is published verbatim, so passing the
+ * authoring path through emits a reference to a file that exists nowhere,
+ * silently, in a block no reader ever sees. It is resolved to the built asset and
+ * made absolute, or omitted, because an absent image is a smaller lie than a
+ * broken one.
+ */
+const cover = await findImage(post.data.image);
+const coverSrc = typeof cover === 'string' ? cover : cover?.src;
+const coverUrl = coverSrc
+  ? (coverSrc.startsWith('http') ? coverSrc : `${SITE_ORIGIN}${coverSrc}`)
+  : undefined;
+
+/**
+ * Structured data for the post.
+ *
+ * The landing pages already carry it and a blog post is the surface it was
+ * designed for: it is what lets a result show a date and an author rather than a
+ * bare title. Emitted as an inline `application/ld+json` block, which is data
+ * rather than behaviour, so the page still ships no executable script.
+ *
+ * `inLanguage` is not decoration here. Half the posts are Hebrew and half are
+ * English, they live under different prefixes, and a crawler that has to infer
+ * the language from the text is one that can get it wrong on a short post.
+ */
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.excerpt,
+  inLanguage: language === 'he' ? 'he-IL' : 'en',
+  datePublished: post.data.publishDate.toISOString(),
+  url: urlOf(post),
+  mainEntityOfPage: { '@type': 'WebPage', '@id': urlOf(post) },
+  publisher: { '@type': 'Organization', name: 'RushPoint', url: `${SITE_ORIGIN}/` },
+  ...(coverUrl ? { image: coverUrl } : {}),
+};
+
 const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB', {
   year: 'numeric',
   month: 'long',
@@ -44,6 +87,8 @@ const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB'
 ---
 
 <PageLayout metadata={metadata} language={language} alternates={alternates}>
+  <script type="application/ld+json" set:html={JSON.stringify(structuredData)} is:inline />
+
   <article class="px-4 py-8 sm:px-6 mx-auto max-w-3xl lg:px-8 lg:py-12">
     <header class="mb-8">
       <p class="text-sm text-muted dark:text-slate-400 mb-2">

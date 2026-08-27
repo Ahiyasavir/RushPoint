@@ -168,6 +168,21 @@ const TEXT_ATTRS = new Set(['placeholder', 'title', 'aria-label', 'alt', 'label'
 // Call names whose string args are shown to the user.
 const TEXT_CALL = /(alert|confirm|prompt|toast|Err|Error|message|Message)$/;
 
+// The two dictionary-driven apps, named EXPLICITLY rather than globbed over
+// `apps/*`. That is deliberate, and so is what it leaves out:
+//
+//   • apps/marketing — a static Astro site. It has no `t.*` dictionary and
+//     cannot have one: its copy lives in per-language modules and in Markdown
+//     content files, neither of which this scanner would understand. Globbing
+//     `apps/*` would flood PART B with every string on the site while still
+//     checking none of them for language correctness.
+//
+// Silence here is therefore not coverage. The marketing site's language rules
+// are enforced by scripts/test-marketing-content.ts, which applies the SAME
+// leak predicate from scripts/lib/i18nLeak.ts that PART A uses, and its no-dash
+// rule by PART E of scripts/test-no-dashes.ts. Adding a new app that DOES use a
+// dictionary means adding it to this list; a new app that does not means giving
+// it its own equivalent, not leaving it uncovered.
 const SCAN_DIRS = [
   join(ROOT, 'apps', 'creator-web', 'src'),
   join(ROOT, 'apps', 'play-web', 'src'),

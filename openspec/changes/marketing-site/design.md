@@ -187,9 +187,22 @@ language }`, validates and bounds each field, rate limits, and writes
 - **Public by declaration.** Added to `PUBLIC_CALLABLES` in
   `scripts/lib/callableHardening.mjs` with its reason, so a callable that later loses an
   auth assertion by accident still fails the hardening check.
-- **Rate limited via `enforceRateLimit`**, keyed on the caller's IP. Note the limiter is an
-  in process `Map` and its budgets are per process and reset on restart — deliberate, and
-  adequate here, where the cost of an occasional extra message is one row.
+- **Rate limited via `enforceRateLimit`**, keyed on the caller's connection, with TWO
+  budgets rather than one. `submitContactMessageAttempt` (wide) is charged for every call
+  including refused ones, so a flood of garbage still ends. `submitContactMessage` (tight)
+  is charged only AFTER validation passes, i.e. only for a message about to be stored and
+  announced.
+
+  The ordering was the whole point, and it changed during implementation. Charged before
+  validation, a single tight budget punishes the wrong person: someone who mistypes their
+  own email address three times is locked out of the only channel they have, for a mistake
+  nobody told them was costing anything, with no way to comply. A rejected payload is never
+  stored and never mailed, so it costs a few string comparisons. Worth bounding, but not at
+  that price.
+
+  Note the limiter is an in process `Map` and its budgets are per process and reset on
+  restart — deliberate, and adequate here, where the cost of an occasional extra message is
+  one row.
 - **Never trusts the client's clock or identifiers.** Arrival time is server stamped; the
   key is derived server side.
 - **Server write only.** `firestore.rules` denies all client read and write on

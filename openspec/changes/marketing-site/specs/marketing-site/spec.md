@@ -284,3 +284,25 @@ answer does not depend on recalling where a file came from.
 
 - **WHEN** the site's third party attribution record is compared with the reused sources present in the workspace
 - **THEN** every reused source is listed with its licence, and every listed licence text is present
+
+### Requirement: Reused third party code does not keep its branding
+
+The site SHALL NOT publish a reused source's name, author, promotional artwork or
+promotional links, whatever its licence permits. Retaining a licence and retaining a brand
+are separate obligations, and satisfying the first does not satisfy the second.
+
+In particular the image a share of any page renders SHALL be the product's own, because it
+is the first thing a reader sees of the site and the last thing anyone thinks to check.
+
+The absence SHALL be asserted mechanically rather than reviewed, because a template's own
+branding is indistinguishable from a finished site to whoever is looking at it.
+
+#### Scenario: The template's branding is gone
+
+- **WHEN** the site's source is scanned for the reused template's name, its author, and its promotional links
+- **THEN** none is present, and the record states what was replaced
+
+#### Scenario: The share image belongs to the product
+
+- **WHEN** the default social sharing image is resolved
+- **THEN** it is the product's own image, not one supplied by the template

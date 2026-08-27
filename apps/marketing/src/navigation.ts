@@ -78,7 +78,19 @@ const COPY: Record<Language, Copy> = {
   },
 };
 
-export const headerData = (language: Language) => {
+/**
+ * @param counterpartHref Where the language switch should go: the SAME page in
+ *   the other language. Passed in rather than derived here, because the only
+ *   thing that knows a page's counterpart is the page, and it already computes
+ *   it for its hreflang cluster. Threading that same value through means the
+ *   switch and the cluster cannot disagree: a reader and a crawler are told the
+ *   same thing about where the other version lives.
+ *
+ *   Omitted for a page that genuinely has no counterpart (an unpaired post), in
+ *   which case the switch falls back to the other language's home. That is the
+ *   honest answer rather than a link to a page that does not exist.
+ */
+export const headerData = (language: Language, counterpartHref?: string) => {
   const t = COPY[language];
   const other = otherLanguage(language);
 
@@ -92,8 +104,15 @@ export const headerData = (language: Language) => {
     ],
     actions: [
       // The language switch is an ordinary link to the counterpart page, so it
-      // works with scripting disabled and reads as a real destination.
-      { text: LANGUAGE_NAME[other], href: pagePath(other, ''), variant: 'secondary' as const },
+      // works with scripting disabled and reads as a real destination. It used to
+      // point at the other language's HOME regardless of where the reader was,
+      // which sent someone halfway through the story back to the front page to
+      // find their place again.
+      {
+        text: LANGUAGE_NAME[other],
+        href: counterpartHref ?? pagePath(other, ''),
+        variant: 'secondary' as const,
+      },
       { text: t.startBuilding, href: CREATOR_APP, target: '_blank' },
     ],
   };

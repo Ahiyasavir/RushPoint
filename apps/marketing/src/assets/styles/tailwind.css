@@ -16,12 +16,78 @@
   --color-accent: var(--aw-color-accent);
   --color-default: var(--aw-color-text-default);
   --color-muted: var(--aw-color-text-muted);
+  /* The hairline between surfaces. Tailwind's default greys are cool, and a cool
+     grey on a warm page beside an orange accent reads as two designs sharing a
+     screen. This is the apps' own `glass-border`. */
+  --color-line: var(--aw-color-border);
 
   --font-sans:
     var(--aw-font-sans, ui-sans-serif), ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
     'Segoe UI Symbol', 'Noto Color Emoji';
   --font-serif: var(--aw-font-serif, ui-serif), ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif;
   --font-heading: var(--aw-font-heading, ui-sans-serif), ui-sans-serif, system-ui, sans-serif;
+
+  /* ── The neutral ramp is WARM ─────────────────────────────────────────────
+     The template reaches for `slate` and `gray` directly in dozens of class
+     strings, mostly under `dark:`. Repointing the tokens would therefore have
+     fixed the palette only where a token happened to be used, and left dark mode
+     as the template's cool navy while light mode was RushPoint's warm one.
+
+     So the SCALES themselves are redefined rather than the call sites. Every
+     `dark:text-slate-400` and `border-gray-200` already written becomes a warm
+     neutral with no component edited, and any future one does too. creator-web
+     does the same thing for the same reason (it reverses the zinc scale in its
+     Tailwind config), so this is the house pattern rather than a novelty.
+
+     The ramp is a neutral warmed toward the brand orange, not a tinted one: it
+     has to sit under #FF5722 without competing with it. 950 is the dark page
+     surface, so a full bleed dark section and the page agree. */
+  --color-slate-50: #faf7f2;
+  --color-slate-100: #f2ece3;
+  --color-slate-200: #e5dcd0;
+  --color-slate-300: #d2c6b6;
+  --color-slate-400: #b6ada1;
+  --color-slate-500: #8c8377;
+  --color-slate-600: #6b6359;
+  --color-slate-700: #4a443c;
+  --color-slate-800: #2e2a24;
+  --color-slate-900: #1e1a15;
+  --color-slate-950: #14110d;
+
+  --color-gray-50: #faf7f2;
+  --color-gray-100: #f2ece3;
+  --color-gray-200: #e5dcd0;
+  --color-gray-300: #d2c6b6;
+  --color-gray-400: #b6ada1;
+  --color-gray-500: #8c8377;
+  --color-gray-600: #6b6359;
+  --color-gray-700: #4a443c;
+  --color-gray-800: #2e2a24;
+  --color-gray-900: #1e1a15;
+  --color-gray-950: #14110d;
+
+  /* ── `blue` IS the brand accent here ──────────────────────────────────────
+     Same reasoning as the neutral ramp above, one step further. Blue was the
+     template's accent, so it is scattered through class strings that have
+     nothing to do with colour choice: a link inside prose, a note panel's
+     background, a hover state on a post title. Chasing each one leaves the next
+     one someone copies from a neighbouring component.
+
+     Remapped to a ramp built around #FF5722 (rp-fire), so a `text-blue-400`
+     written by the template, or by whoever copies a component next month, lands
+     on the brand instead of on a colour the product does not use. 500 is exactly
+     the brand orange; 600 is the press state the buttons already use. */
+  --color-blue-50: #fff3ef;
+  --color-blue-100: #ffe3d9;
+  --color-blue-200: #ffc7b5;
+  --color-blue-300: #ffa285;
+  --color-blue-400: #ff7a50;
+  --color-blue-500: #ff5722;
+  --color-blue-600: #e64a19;
+  --color-blue-700: #c03d14;
+  --color-blue-800: #922e0f;
+  --color-blue-900: #6b220b;
+  --color-blue-950: #3d1306;
 
   --animate-fade: fadeInUp 1s both;
 
@@ -45,12 +111,31 @@
   background-color: var(--aw-color-bg-page-dark);
 }
 
+/* The same surface, translucent, for the sticky header once it lifts off the
+   page. A separate utility rather than `bg-dark/90` because `bg-dark` is a custom
+   utility and the slash opacity modifier does not apply to one. Derived from the
+   token so the two can never disagree about what "the dark surface" is. */
+@utility bg-dark-translucent {
+  background-color: color-mix(in srgb, var(--aw-color-bg-page-dark) 90%, transparent);
+}
+
 @utility bg-light {
   background-color: var(--aw-color-bg-page);
 }
 
 @utility text-page {
-  color: var(--aw-color-text-page);
+  /* `--aw-color-text-page` was never defined, by the template or by us, so this
+     utility silently inherited. It happened to look right because what it
+     inherited was the body colour, which IS the default text colour. Given a
+     fallback so it means something rather than working by accident. */
+  color: var(--aw-color-text-page, var(--aw-color-text-default));
+}
+
+/* Headings. `text-heading` was already being written by the template's Headline
+   component with nothing defining it, so `--aw-color-text-heading` was declared
+   and then never used by anything. */
+@utility text-heading {
+  color: var(--aw-color-text-heading, var(--aw-color-text-default));
 }
 
 @utility text-muted {
@@ -58,7 +143,11 @@
 }
 
 @utility btn {
-  @apply inline-flex items-center justify-center rounded-full border-gray-400 border bg-transparent font-medium text-center text-base text-page leading-snug transition py-3.5 px-6 md:px-8 ease-in duration-200 focus:ring-blue-500 focus:ring-offset-blue-200 focus:ring-2 focus:ring-offset-2 hover:bg-gray-100 hover:border-gray-600 dark:text-slate-300 dark:border-slate-500 dark:hover:bg-slate-800 dark:hover:border-slate-800 cursor-pointer;
+  /* The focus ring is the BRAND colour, not the template's blue. A focus ring is
+     one of the most visible things on a page and it only appears for people
+     navigating by keyboard, which is precisely who should not be shown a
+     different product's colour. */
+  @apply inline-flex items-center justify-center rounded-full border-line border bg-transparent font-medium text-center text-base text-page leading-snug transition py-3.5 px-6 md:px-8 ease-in duration-200 focus:ring-primary focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent hover:bg-black/5 hover:border-primary dark:text-slate-300 dark:hover:bg-white/10 dark:hover:border-primary cursor-pointer;
 }
 
 @utility btn-primary {
@@ -70,7 +159,7 @@
 }
 
 @utility btn-tertiary {
-  @apply btn border-none shadow-none text-muted hover:text-gray-900 dark:text-gray-400 dark:hover:text-white;
+  @apply btn border-none shadow-none text-muted hover:text-default dark:text-gray-400 dark:hover:text-white;
 }
 
 #header.scroll > div:first-child {
@@ -79,7 +168,8 @@
 }
 .dark #header.scroll > div:first-child,
 #header.scroll.dark > div:first-child {
-  @apply bg-page md:bg-[#030621e6] border-b border-gray-500/20;
+  /* The page's own dark surface, not the template's navy. */
+  @apply bg-page md:bg-dark-translucent border-b border-line;
   box-shadow: none;
 }
 

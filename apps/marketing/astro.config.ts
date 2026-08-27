@@ -45,6 +45,18 @@ export default defineConfig({
       subsets: ['latin'],
       fallbacks: ['sans-serif'],
     },
+    {
+      // The apps' display face (`font-brand` in their Tailwind configs,
+      // `--rp-font-display` in creator-web's stylesheet). Headings only, which is
+      // why it carries the heading weights and not the full range.
+      provider: fontProviders.fontsource(),
+      name: 'Space Grotesk',
+      cssVariable: '--font-space-grotesk',
+      weights: ['500 800'],
+      styles: ['normal'],
+      subsets: ['latin'],
+      fallbacks: ['sans-serif'],
+    },
   ],
 
   integrations: [

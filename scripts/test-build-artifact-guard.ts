@@ -64,7 +64,11 @@ ${extra}
 // ── ARTIFACT_CONTRACT ───────────────────────────────────────────────────────
 {
   const c = ARTIFACT_CONTRACT;
-  ok(Array.isArray(c) && c.length === 4, `contract covers both apps x both audiences (got ${c?.length})`);
+  // Both apps x both audiences, plus the marketing site (gate only: it is static
+  // output with no emulator wiring, so it has no playtest build that could
+  // diverge). Asserted as a count so ADDING an artifact is a deliberate act with
+  // a matching thought about which audiences it really has.
+  ok(Array.isArray(c) && c.length === 5, `contract covers both apps x both audiences, plus marketing (got ${c?.length})`);
   const key = (a: { app: string; outDir: string }) => `${a.app}:${a.outDir}`;
   ok(new Set(c.map(key)).size === c.length, 'contract entries are unique (app, outDir)');
   for (const a of c) {

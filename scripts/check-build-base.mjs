@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ARTIFACT_CONTRACT, checkBuiltBase, formatProblems } from './lib/buildArtifactGuard.mjs';
+import { ARTIFACT_CONTRACT, checkBuiltBase, formatProblems, entryDocuments } from './lib/buildArtifactGuard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -31,8 +31,13 @@ let checked = 0;
 let skipped = 0;
 
 for (const artifact of ARTIFACT_CONTRACT) {
-  const label = `${artifact.app}/${artifact.outDir}`;
-  const indexPath = path.join(root, 'apps', artifact.app, artifact.outDir, 'index.html');
+  // Usually one document, the root index.html a Vite app emits. The marketing
+  // site has none (its `/` is a Hosting redirect), so it names its own entry
+  // documents; without that it would look "not built" and be skipped silently.
+  for (const entry of entryDocuments(artifact)) {
+  const suffix = entry === 'index.html' ? '' : ` (${entry})`;
+  const label = `${artifact.app}/${artifact.outDir}${suffix}`;
+  const indexPath = path.join(root, 'apps', artifact.app, artifact.outDir, ...entry.split('/'));
 
   if (!fs.existsSync(indexPath)) {
     skipped += 1;
@@ -57,6 +62,7 @@ for (const artifact of ARTIFACT_CONTRACT) {
     failures += 1;
     console.error(`  ✗  ${label.padEnd(30)} expected base "${artifact.base}" (${artifact.audience})`);
     console.error(formatProblems(res.problems));
+  }
   }
 }
 

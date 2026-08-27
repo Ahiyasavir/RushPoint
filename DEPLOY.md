@@ -437,3 +437,128 @@ npm run backfill:public-tasks -- --project=<id> --execute --confirm-project=<id>
 `--limit=N` (1…1000, default 500) documents per page · `--max-pages=N` (default 200) bound per
 invocation · `RUSHPOINT_BACKFILL_PROJECT` as an alternative to `--project` (it still requires
 `--confirm-project`) · `RUSHPOINT_FUNCTIONS_REGION` (default `us-central1`).
+
+---
+
+## 12. Runbook — the marketing site (`www.rush-point.com`)
+
+The site at `apps/marketing` is static output on its own Hosting target. Everything in this
+section is **off-site configuration**: it cannot be done from the repository, no gate can
+check it, and each item has a specific way of failing that looks like something else.
+
+Read the "what stays broken" column before deciding to skip a step. Two of these fail
+**silently on the visitor's side while every check we own stays green**, which is the
+failure mode that cost us a whole afternoon the last time (see the `.env.local` story in
+CLAUDE.md).
+
+### A. Ship it
+
+```bash
+npm run verify
+npm run deploy:hosting
+```
+
+`deploy:hosting` builds all three sites and deploys all three targets. It is the marketing
+build too, so never hand-run `firebase deploy --only hosting` against a stale
+`apps/marketing/dist`.
+
+To deploy only this site:
+
+```bash
+npm run marketing:build && firebase deploy --only hosting:marketing
+```
+
+### B. DNS and the Hosting site
+
+| Step | Where | What stays broken until it is done |
+|---|---|---|
+| A Hosting site named `rushpoint-marketing` exists in the Firebase console | Firebase → Hosting → Add another site | `firebase deploy` fails with a message about **targets**, not about anything you just changed. `.firebaserc` already maps the `marketing` target to that name. |
+| `www.rush-point.com` is added as a custom domain on that site, and its DNS records are in place | Firebase Hosting → custom domain, then the registrar | The site is live only at its `*.web.app` address. Every canonical, every hreflang entry and every sitemap URL says `www.rush-point.com`, so until DNS resolves, a crawler is being pointed at a host that does not answer, and **the site looks perfectly fine to you** because you are visiting the other address. |
+
+### C. The contact form: allow the site's origin on the API ⚠
+
+`functions/server.js` refuses any browser `Origin` that is not in its `ALLOWED_ORIGINS`
+environment variable, before the request reaches a callable.
+
+On the VPS, add the marketing origin to that list and restart the API container:
+
+```bash
+ssh root@31.70.107.184
+```
+
+Then edit `ALLOWED_ORIGINS` in the API's environment so it contains, comma separated:
+
+```
+https://creator.rush-point.com,https://rush-point.com,https://www.rush-point.com
+```
+
+**What stays broken until it is done:** every contact submission comes back `403` with
+`PERMISSION_DENIED`. Worse, the refusal happens at the CORS layer, so the response carries
+no `Access-Control-Allow-Origin` header and the browser will not let the page read it at
+all. `fetch` throws, exactly as it does when a phone has no signal, and the page therefore
+shows its "we could not reach the server" message. That copy is deliberately worded not to
+blame the reader's connection, but it still cannot tell you which of the two happened.
+
+Until this is done the contact form is the site's ONLY channel and it is silently
+unusable. The site builds, deploys, renders, passes every gate and looks completely
+healthy. Nothing in
+this repository can detect it, because the check has to be made from a browser on the real
+origin. After the restart, confirm from the live contact page rather than from `curl`:
+`curl` sends no `Origin` header and is therefore always allowed through, so it will tell you
+the endpoint is fine when it is not.
+
+Rebuilding the API container drops the public API to `503` for about forty seconds while
+Caddy re-probes. That is expected and self heals.
+
+### D. Where the messages go
+
+| Setting | Where | Effect |
+|---|---|---|
+| `CONTACT_NOTIFY_TO` | the API's environment | The address a new contact message is announced to. Falls back to `RUN_SUMMARY_EMAIL_TO`. With neither set, and with no provider key, notification is a **logged no-op** — by design. |
+
+The message itself is stored either way, and is readable at **`/admin/contact`** on the
+creator console by an account carrying the `admin` claim (§7). That page is the reason
+notification is allowed to be best effort: nothing is lost when an email fails.
+
+### E. The CMS (`/admin/` on the marketing site)
+
+Decap commits content straight to this repository through GitHub. Two things have to exist
+off-site before anyone can sign in, and **neither of them affects the site itself**: until
+they are done the admin page loads and says it cannot authenticate, while every published
+page, every post and every gate is completely unaffected. Content can still be added by
+editing files in `apps/marketing/src/data/post/` and committing.
+
+1. **A GitHub OAuth application.** GitHub → Settings → Developer settings → OAuth Apps →
+   New OAuth App.
+   - Homepage URL: `https://www.rush-point.com`
+   - Authorization callback URL: `https://api.rush-point.com/oauth/callback`
+   - Keep the **Client ID** and generate a **Client secret**. The secret is shown once.
+2. **The token exchange endpoint on the VPS.** Decap's GitHub backend needs a small service
+   at the `base_url` declared in `apps/marketing/public/admin/config.yml`
+   (`https://api.rush-point.com`) serving `/oauth` and `/oauth/callback`. It holds the
+   client secret and swaps GitHub's temporary code for a token; the secret must never be
+   in the built site, which is why this cannot be done in the browser alone.
+
+   Set `OAUTH_GITHUB_CLIENT_ID` and `OAUTH_GITHUB_CLIENT_SECRET` in the API's environment
+   and restart. Confirm by opening `https://www.rush-point.com/admin/` and signing in: a
+   successful sign in lands back on the admin page with the post list.
+
+Two facts worth keeping in mind while configuring it:
+
+- `config.yml` names the branch content is committed to (`topographic-maps`). Content
+  committed to a branch nobody deploys is content nobody sees. If the deployed branch
+  changes, change it here in the same commit.
+- The admin surface is `Disallow`ed in `robots.txt`, carries `noindex`, and is absent from
+  the sitemap. `scripts/check-marketing-output.ts` asserts all three, so it stays that way.
+
+### F. Smoke test after deploying
+
+1. `https://www.rush-point.com/` redirects (302) to `/he/`.
+2. A Hebrew page renders right to left; its English counterpart renders left to right and
+   the language switch moves between them.
+3. `https://www.rush-point.com/sitemap-index.xml` resolves, and a URL taken from it loads.
+4. Send a message through the contact form and confirm it appears at
+   `https://creator.rush-point.com/admin/contact`. If it fails, §C is the first suspect.
+5. A URL that does not exist returns a real **404**, not a page. There is deliberately no
+   catch-all rewrite on this target: a soft 200 is indexable, which is worse than an honest
+   404 for a site whose whole purpose is being crawled correctly.

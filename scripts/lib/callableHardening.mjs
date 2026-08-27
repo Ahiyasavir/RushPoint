@@ -37,6 +37,13 @@ export const PUBLIC_CALLABLES = {
     'Unauthenticated acquisition surface: the "challenge a friend" teaser is answered by '
     + 'signed-out viewers. Published games only (resolved through publicGames), returns ONLY '
     + '{ correct }, and the answer key never leaves the server.',
+  submitContactMessage:
+    'The marketing site\'s contact form. The sender is by definition someone who does not have '
+    + 'an account yet, so requiring one would mean nobody can ask a question before signing up. '
+    + 'What authentication would normally carry is carried instead by field validation, a size '
+    + 'bound, and a rate limit keyed on the CONNECTION rather than on anything the caller sends. '
+    + 'It returns only { ok }, never a document id, and the collection it writes is closed to '
+    + 'clients in both directions.',
 };
 
 /**
@@ -88,6 +95,11 @@ export const PRIVILEGED_CALLABLES = {
     + 'lets an operator purge the whole trash immediately.',
   backfillPublicTaskCoordinatesNow:
     'Bulk-rewrites documents in the world-readable publicTasks collection.',
+  listContactMessages:
+    'Reads a list of names, email addresses and free text belonging to people who are NOT users '
+    + 'of the platform and never agreed to anything beyond "I am sending you a question". They '
+    + 'cannot see this collection, cannot correct it and cannot ask who opened it, so the only '
+    + 'accountability available is a record on our side of who read it and when.',
 };
 
 // ── Markers ──────────────────────────────────────────────────────────────────

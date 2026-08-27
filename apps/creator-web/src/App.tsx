@@ -40,6 +40,9 @@ const AdminUsersPage = lazyWithRetry('adminUsers', () => import('./pages/AdminUs
 // Admin-managed game templates (change: admin-manage-game-templates). Same
 // treatment: not in buildNavDestinations, reachable only by direct URL.
 const AdminTemplatesPage = lazyWithRetry('adminTemplates', () => import('./pages/AdminTemplatesPage'));
+// Contact form messages from the marketing site (change: marketing-site). Same
+// treatment again: admin only, direct URL, gated by the page and by the callable.
+const AdminContactPage = lazyWithRetry('adminContact', () => import('./pages/AdminContactPage'));
 
 function useDarkMode() {
   const [dark, setDark] = useState(() => {
@@ -215,6 +218,7 @@ export default function App() {
                 URL (bookmark it); the page itself gates on the admin claim. */}
             <Route path="/admin/users"         element={<AdminUsersPage />} />
             <Route path="/admin/templates"     element={<AdminTemplatesPage />} />
+            <Route path="/admin/contact"       element={<AdminContactPage />} />
             <Route path="/privacy"             element={<LegalPage type="privacy" />} />
             <Route path="/terms"               element={<LegalPage type="terms" />} />
           </Routes>

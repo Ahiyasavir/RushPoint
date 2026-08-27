@@ -12,6 +12,18 @@
 /** No trailing slash. Every derived URL appends its own leading slash. */
 export const SITE_ORIGIN = 'https://www.rush-point.com';
 
+/**
+ * Where the contact form posts. The self hosted API, the same one the two apps
+ * call, declared here so the site names it ONCE: a host spelled inline in a page
+ * script is a host nobody finds when it moves.
+ *
+ * ⚠ The API refuses a browser origin that is not in its `ALLOWED_ORIGINS`
+ * environment variable (functions/server.js). SITE_ORIGIN has to be in that list
+ * or every submission comes back 403 while the site itself looks perfectly
+ * healthy. That is a VPS step, not a build step, and it is in DEPLOY.md.
+ */
+export const API_ORIGIN = 'https://api.rush-point.com';
+
 /** The two languages the site publishes, in the order menus should offer them. */
 export const LANGUAGES = ['he', 'en'] as const;
 export type Language = (typeof LANGUAGES)[number];

@@ -2232,6 +2232,24 @@ const HE = {
     step3: 'פותחים את השערים',
   },
   // Admin-only platform user activity report (change: admin-user-activity-dashboard).
+  adminContact: {
+    title:            'הודעות מטופס יצירת הקשר',
+    subtitle:         'הודעות שנשלחו מאתר השיווק. הרשימה כוללת כתובות מייל של אנשים שעדיין אין להם חשבון.',
+    deniedTitle:      'הדף הזה מוגבל למנהלי הפלטפורמה',
+    deniedBody:       'לחשבון שלך אין הרשאת מנהל.',
+    loading: [
+      'טוענים את ההודעות',
+    ],
+    loadFailed:       'טעינת ההודעות נכשלה',
+    refreshBtn:       'רענון',
+    empty:            'עדיין לא הגיעו הודעות',
+    emptyHint:        'הודעה שנשלחת מטופס יצירת הקשר באתר תופיע כאן.',
+    colReceived:      'התקבלה',
+    replyBtn:         'מענה במייל',
+    signedInTag:      'מחובר לחשבון',
+    langTag:          (lang: string) => `שפת ההודעה: ${lang}`,
+    countLabel:       (n: number) => `${n} הודעות`,
+  },
   adminUsers: {
     title:            'משתמשי הפלטפורמה',
     subtitle:         'רשימת כל היוצרים: כמה משחקים יצרו, אילו ריצות הפעילו, ומתי היו פעילים לאחרונה.',
@@ -4520,6 +4538,24 @@ const EN: typeof HE = {
     step3: 'Opening the gates',
   },
   // Admin-only platform user activity report (change: admin-user-activity-dashboard).
+  adminContact: {
+    title:            'Contact form messages',
+    subtitle:         'Messages sent from the marketing site. The list includes email addresses of people who do not have an account yet.',
+    deniedTitle:      'This page is restricted to platform admins',
+    deniedBody:       'Your account does not have admin access.',
+    loading: [
+      'Loading the messages',
+    ],
+    loadFailed:       'Could not load the messages',
+    refreshBtn:       'Refresh',
+    empty:            'No messages have arrived yet',
+    emptyHint:        'A message sent from the contact form on the site will show up here.',
+    colReceived:      'Received',
+    replyBtn:         'Reply by email',
+    signedInTag:      'signed in',
+    langTag:          (lang: string) => `Sent in: ${lang}`,
+    countLabel:       (n: number) => `${n} messages`,
+  },
   adminUsers: {
     title:            'Platform users',
     subtitle:         'Every creator: how many games they made, which runs they launched, and when they were last active.',
