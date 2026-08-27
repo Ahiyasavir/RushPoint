@@ -772,6 +772,39 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   on the VPS. Writes are intercepted on the single exported `db` handle rather than at the 216
   write call sites, and `scripts/test-doc-cache-interception.ts` fails the build if a module builds
   its own `admin.firestore()`.
+- **An `INTERNAL` from the load simulator is usually the EMULATOR timing out, not the product.**
+  `scripts/simulate-run.mjs` treats any player-facing `functions/internal` as a hard violation,
+  which is right — but the Functions emulator runs callables through a `RuntimeWorkerPool` on one
+  machine, and at `--teams=16` on a developer laptop it saturates and hits its own **60-second
+  function timeout**. That surfaces to the client as exactly the same opaque INTERNAL a real bug
+  would. Separate them by COUNTING: `grep -c 'Your function timed out' <log>` and
+  `grep -c 'socket hang up'` against the reported INTERNAL count — a 1:1 match across runs means
+  the emulator, not the code. Corroborate with `grep -c '"message":"callable.error"'`: a genuine
+  product error reaches `loggedCallable`'s error path and is logged, an emulator timeout never
+  does (observed: 253 `callable.ok`, 0 `callable.error`, 5 INTERNAL, 5 timeouts). Production is
+  the tiebreaker — a 100-team run against the VPS made ~11,000 callables with zero INTERNAL.
+  Fewer reads means shorter functions means fewer timeouts, so this signal gets BETTER as the
+  read cost drops: the pre-optimisation control timed out 21 times where the optimised build
+  timed out 5.
+- **The most expensive read in the product was invisible, because it was billed to someone else.**
+  `maybeRefreshLeaderboardSnapshot` runs INSIDE player callables on a 20 s throttle and used to
+  do an uncached `db.collection(teamsCol(...)).get()` — every team document, 225 times over a
+  75-minute run, ~27,450 reads at 120 teams against a 50,000/day ceiling. No call site looked
+  expensive; the cost showed up as `submitTaskAnswer` measuring 10.53 reads/call for three
+  documents of work. `listRunTeams` had already solved it with `cachedGetCollection` (which
+  re-reads only documents that were written) and the leaderboard refresh simply never adopted it.
+  Same for `resolveCallerTeam`, the most-CALLED read in the product: every participant callable
+  resolves its team through it, ~23,000 times per run at 120 teams, one uncached document read
+  each. **When a callable's measured read count exceeds the documents it obviously touches, look
+  for work running INSIDE it on a timer.** `scripts/test-hot-path-reads.ts` now declares which
+  hot-path reads must be cached, with the reason each is safe, and fails on a regression or a
+  rename — the same shape as `callableHardening.mjs` and `transactionRetry.mjs`.
+- **A projection built from a COMPRESSED simulation understates anything wall-clock-throttled.**
+  The first read budget measured per-call costs in a sim that packed 75 minutes into 10, so the
+  20 s leaderboard throttle and the 5 s console poll fired a fraction as often per unit of game
+  time as they really do — and the projection came out at 40,600 reads when the honest figure was
+  ~83,000. Per-call costs measured under compression are fine; **call FREQUENCIES must come from
+  the real intervals**, not from the harness's clock.
 - **A location ping is the highest-frequency write in the product, so its cost is a DESIGN
   constraint, not an implementation detail.** `updateLocation` used to cost **2 writes + 3 reads per
   ping** — and the third read was pure waste: `resolveCallerTeam` had already fetched the team

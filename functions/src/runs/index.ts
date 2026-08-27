@@ -13,6 +13,7 @@ import { loggedCallable, logBestEffort } from '../obs/log';
 import { enforceRateLimit } from '../rateLimitStore';
 import { db, docCachePolicy } from '../firebase';
 import { cachedGetDoc, cachedGetCollection } from '../docCache';
+import { getLocationFreshness } from './locationFreshnessCache';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import {
@@ -859,8 +860,10 @@ export async function completeTaskForTeam(
   // THIS team actually reserved this task (activeTaskId/'assigned') so callers
   // release the station slot ONLY for a slot the team held — a permissive/cross-
   // team completion must not decrement another team's reservation (station-cap-bypass).
-  const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
-  const game = gameSnap.data() as Game;
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ownerUid, gameId));
+  const game = gameSnap.data as Game;
   // Hot Zone (if any) is read-only here — used to multiply the earned score for
   // completions inside the zone+window (hot-zone-bonus). Server-decided.
   const runSnap = await db.doc(runPath(ownerUid, gameId, runId)).get();
@@ -2177,15 +2180,32 @@ export async function maybeRefreshLeaderboardSnapshot(
     if (run.leaderboard?.frozen) return;
     if (!opts?.force && !shouldRefreshLeaderboard(run.leaderboard?.updatedAt, Date.now())) return;
 
-    const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
-    if (!gameSnap.exists) return;
-    const game = gameSnap.data() as Game;
+    // The game template cannot change while a run is in flight, and this fires on a 20s
+    // throttle for the run's whole duration (change: hot-path-read-cost).
+    const gameCached = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ownerUid, gameId));
+    if (!gameCached.data) return;
+    const game = gameCached.data;
 
-    const teamsSnap = await db.collection(teamsCol(ownerUid, gameId, runId)).get();
+    // THE MOST EXPENSIVE READ IN THE PRODUCT, before this change. A plain collection get()
+    // read EVERY team document every 20 seconds: at 120 teams over a 75-minute run that is
+    // ~225 x 122 = ~27,450 reads, against a 50,000/day Spark ceiling — and it was invisible,
+    // because the cost is billed to whichever player callable happened to trigger the refresh
+    // (which is why submitTaskAnswer measured 10.53 reads/call for three documents of work).
+    //
+    // `cachedGetCollection` re-reads only the documents that were actually WRITTEN since the
+    // last pass, which is what listRunTeams has always done over this same collection. Cost
+    // now tracks churn instead of field size. Correctness is unchanged: the API is the sole
+    // writer, so a team that just scored has had its entry invalidated and is re-read here —
+    // the board can never rank a team on a score it has already superseded.
+    const teamRows = await cachedGetCollection<unknown>(
+      db, docCachePolicy, teamsCol(ownerUid, gameId, runId),
+    );
     // Quarantine any single poisoned/legacy team doc instead of counting it raw
     // — finalizeRun (:1348) and refreshLeaderboard (:1504) both do this, so the
     // live auto-refresh must too or live vs final standings diverge on a bad row.
-    const teams = parseTeamsQuarantining(teamsSnap.docs);
+    const teams = parseTeamsQuarantining(
+      teamRows.map((r) => ({ id: r.id, data: () => r.data })),
+    );
 
     const now = new Date().toISOString();
     const rankings = buildRankings(game, teams, now);
@@ -3331,9 +3351,11 @@ export const revealTaskAnswer = loggedCallable('revealTaskAnswer', async (data, 
     throw new functions.https.HttpsError('permission-denied', 'This is not a test run');
   }
 
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const game = gameSnap.data() as Game;
+  const game = gameSnap.data as Game;
   const task = findGameTask(game, taskId);
   if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
 
@@ -3600,16 +3622,24 @@ export const listRunTeams = loggedCallable('listRunTeams', async (data, context)
     consentConfig = { requiresGuardianConsent: gs.data?.requiresGuardianConsent };
   } catch { /* best-effort: every row degrades to heldForConsent: false */ }
 
-  const locationUpdatedAt = new Map<string, string>();
-  try {
-    const locRows = await cachedGetCollection<{ updatedAt?: unknown }>(
-      db, docCachePolicy, `${runPath(uid, gameId, runId)}/${COLLECTIONS.TEAM_LOCATIONS}`,
-    );
-    for (const d of locRows) {
-      const at = d.data.updatedAt;
-      if (typeof at === 'string' && at) locationUpdatedAt.set(d.id, at);
-    }
-  } catch { /* best-effort: the row simply carries lastLocationAt: null */ }
+  // Refreshed on its OWN interval, not on every board poll (change: hot-path-read-cost).
+  // Every location ping dirties one of these documents, so the document cache could not help
+  // here: at 120 pinging teams and a 5s poll this read alone was ~10,800 reads per run. It is
+  // a minutes-scale freshness signal, and it gates nothing — see locationFreshnessCache.ts.
+  const locationUpdatedAt = await getLocationFreshness(
+    `${uid}/${gameId}/${runId}`,
+    async () => {
+      const byTeam = new Map<string, string>();
+      const locRows = await cachedGetCollection<{ updatedAt?: unknown }>(
+        db, docCachePolicy, `${runPath(uid, gameId, runId)}/${COLLECTIONS.TEAM_LOCATIONS}`,
+      );
+      for (const d of locRows) {
+        const at = d.data.updatedAt;
+        if (typeof at === 'string' && at) byTeam.set(d.id, at);
+      }
+      return byTeam;
+    },
+  );
 
   // The dominant cost of this callable, and the reason the change exists: with 29 teams
   // this collection read alone was 29 of the ~60 Firestore reads it made, on a poll the
@@ -3727,15 +3757,36 @@ export async function resolveCallerTeam(
 }> {
   const ctx = await resolveTeamContext(uid, ctxIn);
   let teamRef = db.doc(teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, uid));
-  let snap: FirebaseFirestore.DocumentSnapshot = await teamRef.get();
-  if (!snap.exists) {
+
+  // THE MOST-CALLED READ IN THE PRODUCT (change: hot-path-read-cost). Every participant
+  // callable resolves its team through here — the 60s state poll, every location ping, every
+  // arrival, answer and completion. At 120 teams over a 75-minute run that is roughly 23,000
+  // invocations, and it was one uncached document read each time.
+  //
+  // Caching is correct for the same reason the run/game reads are: `firestore.rules` denies
+  // client writes to team documents, so the API is their SOLE writer, and every write goes
+  // through the same intercepted `db` handle that invalidates this entry. A team that just
+  // scored has had its cache entry dropped, so the next read is fresh — there is no path by
+  // which this document changes without the cache learning about it. See docCache.ts for the
+  // single-process precondition that makes that true.
+  //
+  // Transactions are unaffected: they read through the driver by design, so no scoring
+  // decision is ever made on a cached copy.
+  const cached = await cachedGetDoc<RunTeam>(db, docCachePolicy, teamPath(ctx.ownerUid, ctx.gameId, ctx.runId, uid));
+  let team: RunTeam;
+  if (cached.exists && cached.data) {
+    team = cached.data;
+  } else {
+    // A secondary device: its uid is not the team id, so fall back to the membership query.
+    // Deliberately NOT cached — it is a query rather than a document read, it happens once
+    // per attached phone rather than per action, and a stale membership answer would attach
+    // someone to the wrong team.
     const q = await db.collection(teamsCol(ctx.ownerUid, ctx.gameId, ctx.runId))
       .where('deviceUids', 'array-contains', uid).limit(1).get();
     if (q.empty) throw new functions.https.HttpsError('not-found', 'Team not found');
-    snap = q.docs[0];
-    teamRef = snap.ref;
+    teamRef = q.docs[0].ref;
+    team = q.docs[0].data() as RunTeam;
   }
-  const team = snap.data() as RunTeam;
   if (opts.requireController) assertController(team, uid);
   return { ctx, teamId: team.id, team, teamRef };
 }
@@ -4053,9 +4104,11 @@ export async function assignNextInActiveStage(
   if (preloadedGame) {
     game = preloadedGame;
   } else {
-    const gameSnap = await db.doc(gamePath(ownerUid, gameId)).get();
+    // The game template cannot change mid-run, and this is a hot participant path
+    // (change: hot-path-read-cost).
+    const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ownerUid, gameId));
     if (!gameSnap.exists) return {};
-    game = gameSnap.data() as Game;
+    game = gameSnap.data as Game;
   }
   const teamRef = db.doc(teamPath(ownerUid, gameId, runId, teamId));
   const teamSnap = await teamRef.get();
@@ -4270,8 +4323,10 @@ export const completeTask = loggedCallable('completeTask', async (data, context)
   // Trigger-mode gate: radius/exact tasks validate GPS proximity server-side so
   // they can't be spoofed by calling completeTask directly; instant/locationless
   // need no GPS. Legacy `geofence`-type tasks normalize to `radius`.
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
-  const gtask = gameSnap.exists ? findGameTask(gameSnap.data() as Game, taskId) : undefined;
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
+  const gtask = gameSnap.exists ? findGameTask(gameSnap.data as Game, taskId) : undefined;
   // Scheduled-release gate (change: scheduled-release): a not-yet-released task
   // can't be completed even by calling completeTask directly (anti-cheat: the
   // routing filter already hides it, this stops a hand-crafted bypass).
@@ -4414,9 +4469,11 @@ export const requestTaskHint = loggedCallable('requestTaskHint', async (data, co
   // Revealing the current active-stage hidden task's hint pre-arrival stays allowed.
   assertStageActiveForTask(team, taskId);
 
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const game = gameSnap.data() as Game;
+  const game = gameSnap.data as Game;
   let hintTask: Task | undefined;
   for (const stage of game.stages) {
     const t = stage.tasks.find((x) => x.id === taskId);
@@ -4499,9 +4556,11 @@ export const reportArrival = loggedCallable('reportArrival', async (data, contex
   );
   assertTeamNotHeld(team); // staff-console-field-ops — a held team cannot unseal
 
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const task = findGameTask(gameSnap.data() as Game, taskId);
+  const task = findGameTask(gameSnap.data as Game, taskId);
   if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
   // Same stage-scope guard as every answer callable: you can't probe a stage you
   // have not reached (that would be a location oracle on a future chapter).
@@ -4704,9 +4763,11 @@ export const submitTaskAnswer = loggedCallable('submitTaskAnswer', async (data, 
   const { ctx, teamId, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamNotHeld(team); // staff-console-field-ops — no scoring action while held
 
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const game = gameSnap.data() as Game;
+  const game = gameSnap.data as Game;
   const task = findGameTask(game, taskId);
   if (!task) throw new functions.https.HttpsError('not-found', 'Task not found');
   if (task.type !== 'quiz' && task.type !== 'numeric' && task.type !== 'survey') {
@@ -5080,9 +5141,11 @@ export const submitSequenceStep = loggedCallable('submitSequenceStep', async (da
   const { ctx, teamId, team, teamRef } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code }, { requireController: true });
   assertTeamNotHeld(team); // staff-console-field-ops — no step progress while held
 
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
   if (!gameSnap.exists) throw new functions.https.HttpsError('not-found', 'Game not found');
-  const seqGame = gameSnap.data() as Game;
+  const seqGame = gameSnap.data as Game;
   // Test mode (change: test-mode-hidden-scoring): a sequence is a knowledge task
   // like a quiz, so it gets the same treatment — every step advances, no step ever
   // reports a verdict, and the per-task result is recorded for the creator.
@@ -5202,8 +5265,10 @@ export const getRecommendedTasks = loggedCallable('getRecommendedTasks', async (
   // Read-only: any attached device may ask for recommendations.
   const { ctx, team } = await resolveCallerTeam(uid, { ownerUid, gameId, runId, code });
 
-  const gameSnap = await db.doc(gamePath(ctx.ownerUid, ctx.gameId)).get();
-  const game = gameSnap.data() as Game;
+  // The game template cannot change mid-run, and this is a hot participant path
+  // (change: hot-path-read-cost).
+  const gameSnap = await cachedGetDoc<Game>(db, docCachePolicy, gamePath(ctx.ownerUid, ctx.gameId));
+  const game = gameSnap.data as Game;
 
   const activeStageIdx = team.stages.findIndex((s) => s.status === 'active');
   if (activeStageIdx < 0) return { recommendations: [] };

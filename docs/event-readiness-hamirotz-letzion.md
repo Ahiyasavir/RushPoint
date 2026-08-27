@@ -162,38 +162,32 @@ they are not in the table above.
 
 ---
 
-## 7. One open defect, found while testing — not yet fixed
+## 7. A defect I reported here earlier was not real
 
-The 8-team emulator load simulation occasionally reports:
+An earlier version of this document recorded `completeTask` intermittently surfacing an opaque
+`INTERNAL` under load as an open defect. **That was wrong, and this is the correction.**
 
-```
-VIOLATION  no player callable surfaced INTERNAL under load :: 1x [completeTask]
-```
+Running the load simulation at 16 teams and counting carefully:
 
-`completeTask` returns an opaque `internal` error to the player. The harness's own comment
-identifies this class as an un-retried Firestore `ABORTED` under the single-run-document lock.
-**The player sees "something went wrong" on an action that actually succeeded server-side** — a
-reload shows the points banked, which is why it reads as random rather than as a bug.
+| run | INTERNAL errors | emulator "function timed out after ~60s" | "socket hang up" |
+|---|---|---|---|
+| with the read-cost fixes | 5 | 5 | 5 |
+| with the read-cost fixes | 8 | 8 | 8 |
+| **without** them (control) | 21 | 21 | 21 |
 
-Reproduction rate measured tonight, 8 teams:
+A one-to-one correlation in every run. The errors are the **Firebase Functions emulator's
+60-second function timeout**, hit because the emulator runs callables through a worker pool on
+one laptop and saturates at 16 concurrent teams. Two further facts confirm it: the callables
+logged 253 `callable.ok` and **zero** `callable.error`, so nothing ever reached the handler's
+error path; and the 100-team **production** run made ~11,000 callables with not one INTERNAL.
 
-| server code | clean runs | violations |
-|---|---|---|
-| before the location change | 3 | 0 |
-| after the location change | 4 | 1 |
+Note the control column: the version WITHOUT the read reductions timed out four times as often.
+Fewer reads means shorter functions, which means fewer timeouts — the fixes improve this rather
+than causing it.
 
-That is **not enough evidence to attribute it to the location change**, and it did not reproduce
-in the three most recent runs on current code. It is rare (~1 in 5 at 8 teams) and appears to be
-pre-existing. It is recorded here rather than dismissed because the failure rate under lock
-contention should be expected to rise with team count, and at ~100 teams a rare error becomes a
-regular one. Next step is to reproduce at `--teams=16`, where the harness notes it becomes
-reliable, and capture the underlying Firestore error.
-
-Not a launch blocker on its own: the action succeeds, the score is correct, and the player
-recovers by reloading. But it is the most likely source of "the app showed an error" reports on
-the day.
-
----
+**Lesson worth keeping:** an emulator saturating on a developer laptop and a product failing
+under load produce the same red line in the same suite. Counting the emulator's own timeout
+messages is what separated them, and it took three runs plus a control to be sure.
 
 ## 8. The 120-team production rehearsal — what actually happened
 

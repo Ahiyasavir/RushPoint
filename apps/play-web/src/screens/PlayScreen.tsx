@@ -229,13 +229,22 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // team doc) and recovers if the listener can't attach. Gameplay state does NOT depend on
     // it — the onSnapshot listener above refreshes on every change to our own team document.
     //
-    // 45s, not 12s (change: participant-read-budget). getMyTeamState costs 1.63 Firestore
-    // reads per call in production; at 12s that is 375 calls x 100 teams = 61,000 reads for
-    // one 75-minute run, against a Spark ceiling of 50,000 READS PER DAY — the poll alone
-    // exceeded the whole day's budget. At 45s it is ~16,000. If you shorten this, do the
-    // arithmetic for the largest run you intend to support and check it against the plan's
-    // ceiling; this interval is a cost decision, not a preference.
-    timer.current = window.setInterval(() => { void refresh(); }, 45_000);
+    // 60s, not 12s (changes: participant-read-budget, then hot-path-read-cost).
+    //
+    // getMyTeamState costs ~1.54 Firestore reads per call measured under real production load.
+    // At the original 12s that is 375 calls x 120 teams = ~69,000 reads for ONE 75-minute run,
+    // against a Spark ceiling of 50,000 READS PER DAY — the fallback poll alone exceeded the
+    // whole day's budget. 45s brought it to ~18,500; 60s brings it to ~13,900.
+    //
+    // The extra step to 60s is not fine-tuning: the first budget was built from per-call costs
+    // measured in a COMPRESSED simulation, which understates anything wall-clock-throttled.
+    // Re-measured at real time-scale the run needed roughly another 5,000 reads of headroom.
+    //
+    // Gameplay does not wait for this. The onSnapshot listener above refreshes on every change
+    // to this team's own document; the interval exists for the leaderboard and to recover a
+    // listener that never attached. If you shorten it, do the arithmetic for the largest run
+    // you intend to support and check it against the ceiling — this is a cost decision.
+    timer.current = window.setInterval(() => { void refresh(); }, 60_000);
 
     return () => {
       alive = false;
