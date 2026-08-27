@@ -95,7 +95,7 @@
 //
 // ─── 3. Name the real thing ──────────────────────────────────────────────────
 //
-// "מגדל מהשטח" — build the tallest tower from found materials — became "רוגאם":
+// "מגדל מהשטח" — build the tallest tower from found materials — became "רוג׳ום":
 // a cairn. Same act, but a cairn is a real practice with a real name, a real
 // place (a trail, a forest) and a real purpose (marking a route). Generic
 // framing produces generic missions. Reach for the specific noun, the real
@@ -456,7 +456,7 @@ export interface TaskBankEntry {
    * Groups near-duplicate missions — same underlying mechanic, different
    * cosmetic content — so the composer never puts two of them in one game.
    *
-   * "רוגאם" and a photo-riddle navigation mission are both `outdoor`+`thinking`
+   * "רוג׳ום" and a photo-riddle navigation mission are both `outdoor`+`thinking`
    * and would happily coexist; "collect five things one colour" and "collect a
    * whole rainbow" are the SAME mission wearing two skins, and a game landing
    * both reads as the composer repeating itself. `usedKeys` (no exact mission
@@ -701,7 +701,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       difficulty: 8,
       estimatedMinutes: 5,
       pointValue: 120,
-      hint: 'רמז: עברו על הרמז לאט. כל אימוג\'י מייצג מילה אחת, וביחד הן מרכיבות משפט שמתאר מקום מוכר בסביבה.',
+      hint: 'רמז: עברו על הרמז לאט. כל אימוג׳י מייצג מילה אחת, וביחד הן מרכיבות משפט שמתאר מקום מוכר בסביבה.',
       // A public spot, not a shared object — any number of teams can arrive.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
     }),
@@ -767,7 +767,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 150,
       numericAnswer: 50,
       numericTolerance: 0,
-      hint: 'הסוד הוא לא לנסות למצוא כמה שווים a, b ו c בנפרד (הם לא מספרים שלמים, אלא שורשים עם שברים!). נסו לעבוד עם המשוואות כיחידה אחת שלמה',
+      hint: 'הסוד הוא לא לנסות למצוא כמה שווים a, b ו c בנפרד (הם לא מספרים שלמים, אלא שורשים עם שברים!). נסו לעבוד עם המשוואות כיחידה אחת שלמה.',
     }),
   },
   {
@@ -818,7 +818,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'גאווה ישראלית',
-      description: 'תבנו דגל ישראל ענק מדברים שאתם מוצאים וצלמו אותו',
+      description: 'תבנו דגל ישראל ענק מדברים שאתם מוצאים וצלמו אותו.',
       type: 'photo',
       estimatedMinutes: 8,
       smart: upload(),
@@ -834,7 +834,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [PLACE_IT],
     build: () => base({
       title: 'נקודת הסיום',
-      description: 'נווטו אל נקודת הסיום של המירוץ',
+      description: 'נווטו אל נקודת הסיום של המירוץ.',
       type: 'field',
       estimatedMinutes: 5,
       // Every team finishes here, often at the same time — the opposite of a
@@ -860,7 +860,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'שיווק שמפו',
-      description: 'בקופסא שקיבלתם יש שמפו, עליכם למכור אותו לאדם זר בלפחות 10 שקלים ולהצטלם איתו',
+      description: 'בקופסה שקיבלתם יש שמפו, עליכם למכור אותו לאדם זר בלפחות 10 שקלים ולהצטלם איתו.',
       type: 'photo',
       estimatedMinutes: 2,
       smart: upload({ captureKind: 'video', videoMaxSeconds: 30 }),
@@ -880,7 +880,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'הביטלס',
-      description: 'תשחזרו את תמונת מעבר החצייה של הביטלס',
+      description: 'תשחזרו את תמונת מעבר החצייה של הביטלס.',
       type: 'photo',
       estimatedMinutes: 2,
       smart: upload(),
@@ -1004,8 +1004,8 @@ export const TASK_BANK: TaskBankEntry[] = [
       'mixed', 'youth', 'kids', 'corporate', 'medium'],
     difficulty: 5,
     build: () => anywhere({
-      title: 'רוגאם',
-      description: 'בנו רוגאם: ערמו אבנים אחת על השנייה, מהגדולה לקטנה, עד שהוא עומד לבד. ככה מסמנים שביל ביער. תנו לו לעמוד חמש שניות וצלמו אותו.',
+      title: 'רוג׳ום',
+      description: 'בנו רוג׳ום: ערמו אבנים אחת על השנייה, מהגדולה לקטנה, עד שהוא עומד לבד. ככה מסמנים שביל ביער. צלמו אותו.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -1040,11 +1040,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'silent-briefing',
     sourceTemplateKey: 'authored',
     tags: ['teamwork', 'creative', 'thinking', 'noPrep', 'fromAnywhere',
-      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 6,
     build: () => anywhere({
       title: 'תדרוך בלי מילים',
-      description: 'אחד מכם קורא בשקט: "בנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי מילים, רק בציור, העבירו את ההוראה לצוות. הם מבצעים לפי מה שהבינו — צלמו את התוצאה.',
+      description: 'אחד מכם קורא בשקט: "בנו מגדל מחפצים שיש לכם, אבל הפוך: הבסיס הרחב למעלה, לא למטה." בלי מילים, רק בציור, העבירו את ההוראה לצוות. הם מבצעים לפי מה שהבינו. צלמו את התוצאה.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 8,
@@ -1083,19 +1083,19 @@ export const TASK_BANK: TaskBankEntry[] = [
     exclusiveStation: true,
     tags: ['thinking', 'teamwork', 'needsSetup', 'locationBased', 'outdoor', 'indoor',
       'park', 'forest', 'neighborhood', 'office', 'school',
-      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 6,
     transitMinutes: 5,
     setup: [
       {
         field: 'coordinates',
         required: true,
-        prompt: 'סמנו איפה תחביאו מפתח אמיתי, ומה הוא נועל (תיבה, מנעול, שער). בחרו מקום בטוח — לא ליד כביש, מים או גובה.\n\nMark where you\'ll hide a real key, and what it locks (a box, a padlock, a gate). Pick a safe spot — not near a road, water, or a height.',
+        prompt: 'סמנו איפה תחביאו מפתח אמיתי, ומה הוא נועל (תיבה, מנעול, שער).\n\nMark where you\'ll hide a real key, and what it locks (a box, a padlock, a gate).',
       },
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז כללי לאזור, לא את המקום המדויק — אין סיכה במפה. לאירוע גדול, הכינו כמה מפתחות במקומות שונים.\n\nWrite a general area clue, not the exact spot — there\'s no pin on the map. For a big event, prepare several keys at different spots.',
+        prompt: 'כתבו רמז כללי לאזור, לא את המקום המדויק. אין סיכה במפה. לאירוע גדול, הכינו כמה מפתחות במקומות שונים.\n\nWrite a general area clue, not the exact spot. There\'s no pin on the map. For a big event, prepare several keys at different spots.',
       },
       {
         field: 'description',
@@ -1105,7 +1105,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'המפתח החבוי',
-      description: 'מוחבא כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. אחד מכם עוצם עיניים. השאר מדריכים אותו בקול בלבד, בלי לגעת, עד שהמפתח ביד. אז פותחים ומצלמים. בסיום מחזירים את המפתח בדיוק למקום — הקבוצה הבאה צריכה אותו.',
+      description: 'מוחבא כאן מפתח שפותח [הוראות ליוצר: מה בדיוק נעול]. אחד מכם עוצם עיניים. השאר מדריכים אותו בקול בלבד, בלי לגעת, עד שהמפתח ביד. אז פותחים ומצלמים. בסיום מחזירים את המפתח בדיוק למקום, הקבוצה הבאה צריכה אותו.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 9,
@@ -1164,11 +1164,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'chain-reaction',
     sourceTemplateKey: 'authored',
     tags: ['creative', 'thinking', 'teamwork', 'noPrep', 'fromAnywhere',
-      'mixed', 'youth', 'adults', 'corporate', 'hard'],
+      'mixed', 'youth', 'adults', 'corporate', 'medium'],
     difficulty: 6,
     build: () => anywhere({
       title: 'שרשרת הפעולות',
-      description: 'בנו שרשרת של שלוש פעולות לפחות מציוד שיש לכם: כל פעולה מפעילה את הבאה (חפץ נופל, מגלגל כדור, מפיל בקבוק — הרעיון שלכם). בלי לגעת בידיים אחרי שהתחלתם. צלמו ברצף אחד, בלי לעצור.',
+      description: 'בנו שרשרת של שלוש פעולות לפחות מציוד שיש לכם: כל פעולה מפעילה את הבאה (חפץ נופל, מגלגל כדור, מפיל בקבוק, הרעיון שלכם). בלי לגעת בידיים אחרי שהתחלתם. צלמו ברצף אחד, בלי לעצור.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 10,
@@ -1230,7 +1230,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'answers',
         required: true,
-        prompt: 'הזינו את המילה שיוצאת. בדקו אותה בשטח לפני המשחק, שלטים מתחלפים.\n\nEnter the word it spells. Check it on the ground before the game — signs get replaced.',
+        prompt: 'הזינו את המילה שיוצאת. בדקו אותה בשטח לפני המשחק, שלטים מתחלפים.\n\nEnter the word it spells. Check it on the ground before the game, signs get replaced.',
       },
     ],
     build: () => sited({
@@ -1241,7 +1241,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       estimatedMinutes: 9,
       pointValue: 150,
       answers: ['רשפוינט'],
-      hint: 'אם המילה לא מסתדרת, בדקו שלא דילגתם על שלט קטן, ושאתם קוראים מימין לשמאל.',
+      hint: 'רמז: אם המילה לא מסתדרת, בדקו שלא דילגתם על שלט קטן, ושאתם קוראים מימין לשמאל.',
       hintPenalty: 20,
       // The signs stay put and readable for every team — nothing to queue for.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
@@ -1265,7 +1265,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'מה לא שייך לכאן',
-      description: 'מישהו החביא כאן חפץ אחד שלא אמור להיות במקום הזה. מצאו אותו וצלמו אותו במקום שבו מצאתם, בלי להזיז.',
+      description: 'מישהו החביא כאן חפץ אחד שלא אמור להיות במקום הזה. מצאו אותו וצלמו אותו במקום שבו מצאתם, בלי להזיז אותו.',
       type: 'photo',
       difficulty: 5,
       estimatedMinutes: 8,
@@ -1330,7 +1330,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     }],
     build: () => anywhere({
       title: 'סחר חליפין',
-      description: 'קיבלתם חפץ קטן. הציעו אותו לאנשים ברחוב, וקבלו כל הצעת חילופין — לא משנה מה. המשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
+      description: 'קיבלתם חפץ קטן. הציעו אותו לאנשים ברחוב, וקבלו כל הצעת חילופין, לא משנה מה. המשיכו להחליף עד שמישהו נותן לכם טוש. צלמו את הטוש בידכם.',
       type: 'photo',
       difficulty: 6,
       estimatedMinutes: 15,
@@ -1357,7 +1357,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו את הכתובת המדויקת כרמז. זה כל מה שהמשתתפים יראו — אין סיכה על המפה.\n\nWrite the exact address as the clue. This is all the players get — there is no pin on the map.',
+        prompt: 'כתבו את הכתובת המדויקת כרמז. זה כל מה שהמשתתפים יראו. אין סיכה על המפה.\n\nWrite the exact address as the clue. This is all the players get. There is no pin on the map.',
       },
     ],
     build: () => sited({
@@ -1369,7 +1369,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       pointValue: 150,
       hideLocation: true,
       locationClue: '',
-      hint: 'רמז: אם שני אנשים נותנים כיוונים סותרים, תשאלו שלישי — לרוב זה מכריע.',
+      hint: 'רמז: אם שני אנשים נותנים כיוונים סותרים, תשאלו שלישי, לרוב זה מכריע.',
       hintPenalty: 20,
       // A public address, not a shared object — any number of teams can arrive.
       maxConcurrentTeams: OPEN_SPACE_CAPACITY,
@@ -1418,7 +1418,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 3,
     build: () => anywhere({
       title: 'חמישה דברים, צבע אחד',
-      description: 'בחרו צבע — לא שחור ולא לבן. אספו חמישה חפצים באותו צבע וצלמו אותם בפריים אחד. ככל שהצבע מדויק יותר, כך טוב יותר. חסר חפץ? בקשו בהשאלה, אל תיקחו בלי לשאול.',
+      description: 'בחרו צבע, לא שחור ולא לבן. אספו חמישה חפצים באותו צבע וצלמו אותם בפריים אחד. ככל שהצבע מדויק יותר, כך טוב יותר. חסר חפץ? אפשר לבקש בהשאלה מאנשים בסביבה.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -1473,7 +1473,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       // field the photo-submission flow never had — the guess and the reason
       // were never captured anywhere. Saying it on camera, appraiser-style,
       // keeps the same content and actually makes it more fun to watch back.
-      description: 'מצאו את החפץ הוותיק ביותר שאתם מצליחים למצוא במקום הזה. צלמו אותו בווידאו, ותוך כדי הצילום הגידו בקול רם בן כמה אתם חושבים שהוא, ולמה — כמו שמאי אמיתי.',
+      description: 'מצאו את החפץ הוותיק ביותר שאתם מצליחים למצוא במקום הזה. צלמו אותו בווידאו, ותוך כדי הצילום הגידו בקול רם בן כמה אתם חושבים שהוא, ולמה, כמו שמאי אמיתי.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
@@ -1575,12 +1575,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 3,
     build: () => anywhere({
       title: 'שתי אמיתות ושקר',
-      description: 'כל אחד מספר שלושה דברים על עצמו: שניים נכונים ואחד לא. הקבוצה מצביעה על השקר. צלמו את הרגע שבו מתגלה מי שיקר הכי טוב.',
-      type: 'photo',
+      description: 'כל אחד מספר שלושה דברים על עצמו: שניים נכונים ואחד לא. הקבוצה מצביעה על השקר. מה היה השקר הכי טוב בקבוצה?',
+      type: 'survey',
       difficulty: 3,
       estimatedMinutes: 8,
       pointValue: 100,
-      smart: upload(),
     }),
   },
   // ── Mission kinds the bank was missing entirely ───────────────────────────
@@ -1677,14 +1676,14 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'שאלת חימום',
-      description: 'כמה עצמות יש בגוף של אדם מבוגר? אם אתם לא בטוחים, אסור לחפש בגוגל — שאלו אנשים שאתם פוגשים עד שמישהו יודע. תשובה אחת, מספר אחד.',
+      description: 'כמה עצמות יש בגוף של אדם מבוגר? אם אתם לא בטוחים, אסור לחפש בגוגל. שאלו אנשים שאתם פוגשים עד שמישהו יודע. תשובה אחת, מספר אחד.',
       type: 'quiz',
       difficulty: 4,
       estimatedMinutes: 3,
       pointValue: 90,
       answers: ['206'],
       choices: ['201', '206', '215', '224'],
-      hint: 'שאלו רופא, אח, סטודנט לרפואה, או פשוט שלושה אנשים שונים.',
+      hint: 'רמז: שאלו רופא, אח, סטודנט לרפואה, או פשוט שלושה אנשים שונים.',
       hintPenalty: 15,
     }),
   },
@@ -1698,14 +1697,14 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'שאלת הנהר',
-      description: 'איזה נהר נחשב לארוך בעולם? אם אתם לא בטוחים, אסור לחפש בגוגל — שאלו אנשים שאתם פוגשים עד שמישהו יודע.',
+      description: 'איזה נהר נחשב לארוך בעולם? אם אתם לא בטוחים, אסור לחפש בגוגל. שאלו אנשים שאתם פוגשים עד שמישהו יודע.',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 3,
       pointValue: 100,
       answers: ['הנילוס', 'נילוס'],
       choices: ['הנילוס', 'האמזונס', 'הירדן', 'המיסיסיפי'],
-      hint: 'שאלו מישהו שנראה כאילו הוא אוהב גיאוגרפיה, או פשוט כמה אנשים.',
+      hint: 'רמז: שאלו מישהו שנראה כאילו הוא אוהב גיאוגרפיה, או פשוט כמה אנשים.',
       hintPenalty: 15,
     }),
   },
@@ -1816,7 +1815,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'פרספקטיבה כוזבת',
-      description: 'צלמו תמונה אחת שבה אחד מכם נראה ענק והשאר זעירים לידו, רק בעזרת מרחק וזווית מצלמה. בלי עריכה, בלי חיתוך ובלי פילטרים. אם צריך, שכבו על הרצפה.',
+      description: 'צלמו תמונה אחת שבה אחד מכם נראה ענק והשאר זעירים לידו, רק בעזרת מרחק וזווית מצלמה. בלי עריכה, בלי חיתוך ובלי פילטרים.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
@@ -1899,7 +1898,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז למקום בלי לנקוב בשמו — אין סיכה על המפה. ודאו שאפשר לפענח אותו מנקודת הפתיחה.\n\nWrite a clue to the place without naming it — there is no pin on the map. Make sure it can be worked out from the starting point.',
+        prompt: 'כתבו רמז למקום בלי לנקוב בשמו. אין סיכה על המפה. ודאו שאפשר לפענח אותו מנקודת הפתיחה.\n\nWrite a clue to the place without naming it. There is no pin on the map. Make sure it can be worked out from the starting point.',
       },
     ],
     build: () => sited({
@@ -1956,7 +1955,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'steps',
       required: true,
-      prompt: 'בצעד השני, החליפו את התשובה בערך שרלוונטי אצלכם — ערך ארגוני, מוצר, או כל מילה שהצוות אמור להגיע אליה יחד.\n\nIn step two, replace the answer with something that matters to you — a company value, a product, or any word the team should arrive at together.',
+      prompt: 'בצעד השני, החליפו את התשובה בערך שרלוונטי אצלכם: ערך ארגוני, מוצר, או כל מילה שהצוות אמור להגיע אליה יחד.\n\nIn step two, replace the answer with something that matters to you: a company value, a product, or any word the team should arrive at together.',
     }],
     build: () => anywhere({
       title: 'תרגיל ההחלטה',
@@ -1981,13 +1980,13 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 8,
     build: () => anywhere({
       title: 'החידה שלא מוותרת',
-      description: 'יש לי ערים אבל בלי בתים, יערות בלי עצים, ומים בלי דגים. מה אני? אסור לחפש בגוגל. אם נתקעתם, תפסו אנשים ברחוב ותנו להם לנסות — עד שמישהו פותר.',
+      description: 'יש לי ערים אבל בלי בתים, יערות בלי עצים, ומים בלי דגים. מה אני? אסור לחפש בגוגל. אם נתקעתם, תפסו אנשים ברחוב ותנו להם לנסות, עד שמישהו פותר.',
       type: 'quiz',
       difficulty: 8,
       estimatedMinutes: 5,
       pointValue: 150,
       answers: ['מפה', 'מפת עולם'],
-      hint: 'שאלו שלושה אנשים שונים. מישהו מהם ייתן לכם את המילה.',
+      hint: 'רמז: שאלו שלושה אנשים שונים. מישהו מהם ייתן לכם את המילה.',
       hintPenalty: 25,
     }),
   },
@@ -2084,7 +2083,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 4,
     build: () => anywhere({
       title: 'מסלול המילוט',
-      description: 'מצאו את מפת המילוט על הקיר. הסתכלו עליה 30 שניות, ואז לכו יחד ליציאת החירום הקרובה — בלי להסתכל שוב ובלי לשאול. צלמו את היציאה שהגעתם אליה.',
+      description: 'מצאו את מפת המילוט על הקיר. הסתכלו עליה 30 שניות, ואז לכו יחד ליציאת החירום הקרובה, בלי להסתכל שוב ובלי לשאול. צלמו את היציאה שהגעתם אליה.',
       type: 'photo',
       difficulty: 4,
       estimatedMinutes: 7,
@@ -2142,7 +2141,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 3,
     build: () => anywhere({
       title: 'נוף הקול',
-      description: 'הקליטו כעשר שניות מהצליל האמיתי של המקום — בלי לדבר, בלי מוזיקה. חייבים להישמע בהקלטה לפחות שני צלילים שונים.',
+      description: 'הקליטו כעשר שניות מהצליל האמיתי של המקום, בלי לדבר, בלי מוזיקה. חייבים להישמע בהקלטה לפחות שני צלילים שונים.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 4,
@@ -2178,7 +2177,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 6,
     build: () => anywhere({
       title: 'לפי הסדר הנכון',
-      description: 'סדרו את חמשת ההמצאות לפי סדר ההמצאה שלהן, מהוותיקה לחדשה. אסור לחפש בגוגל — התייעצו בקול עד שכולכם מסכימים.',
+      description: 'סדרו את חמשת ההמצאות לפי סדר ההמצאה שלהן, מהוותיקה לחדשה. אסור לחפש בגוגל. פנו לזרים ברחוב ובקשו את עזרתם עד שמישהו עוזר לכם לסדר נכון.',
       type: 'quiz',
       difficulty: 6,
       estimatedMinutes: 6,
@@ -2186,7 +2185,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       // The authored order IS the answer key (server-secret; sanitized to a
       // per-team shuffled copy) — oldest first, exactly as it must be graded.
       orderItems: ['הדפוס', 'הטלגרף', 'הטלפון', 'הרדיו', 'הטלוויזיה'],
-      hint: 'רמז: המצאה שרץ עליה חשמל קדמה למצאה ששולחים דרכה קול, שקדמה למצאה ששולחים דרכה תמונה.',
+      hint: 'רמז: ההמצאה שפועלת בחשמל קדמה להמצאה שמעבירה קול, שקדמה להמצאה שמעבירה תמונה.',
       hintPenalty: 20,
     }),
   },
@@ -2214,12 +2213,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'coordinates',
         required: true,
-        prompt: 'כתבו קוד בן 4 ספרות במקום קבוע (מדבקה, גיר, פתק עמיד למים), וסמנו כאן איפה. בחרו מקום שישרוד עד סוף המשחק.\n\nWrite a 4-digit code somewhere fixed (a sticker, chalk, a laminated note), and mark it here. Pick a spot that survives to the end of the game.',
+        prompt: 'כתבו קוד בן 4 ספרות במקום קבוע (מדבקה, גיר, פתק עמיד למים), וסמנו כאן איפה. בחרו מקום שישרוד עד סוף המשחק.\n\nWrite a four digit code somewhere fixed (a sticker, chalk, a laminated note), and mark it here. Pick a spot that survives to the end of the game.',
       },
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז כללי לאזור שבו הקוד מוסתר — לא את המקום המדויק. אין סיכה על המפה.\n\nWrite a general clue to the area the code is hidden in — not the exact spot. There is no pin on the map.',
+        prompt: 'כתבו רמז כללי לאזור שבו הקוד מוסתר, לא את המקום המדויק. אין סיכה על המפה.\n\nWrite a general clue to the area the code is hidden in, not the exact spot. There is no pin on the map.',
       },
       {
         // NOT the shared SET_CODE constant: its second half ("coordinate it in
@@ -2234,7 +2233,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     ],
     build: () => sited({
       title: 'הקוד הנסתר',
-      description: 'איפשהו כאן מוסתר קוד בן 4 ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו כאן. אל תזיזו אותו — הקבוצה הבאה צריכה אותו במקום.',
+      description: 'איפשהו כאן מוסתר קוד בן 4 ספרות, כתוב או מודבק במקום קבוע. מצאו אותו והקלידו כאן. אל תזיזו אותו, הקבוצה הבאה צריכה אותו במקום.',
       type: 'smart_station',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -2266,7 +2265,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'description',
       required: false,
-      prompt: 'המשימה דורשת דף נייר לכל קבוצה — חלקו אותו מראש בהרשמה או בעמדת פתיחה. אפשר גם לערוך את המשימה כך שהיעד יהיה להטיס את המטוס מנקודה אחת לשנייה שתבחרו, במקום מדידה בכפות רגליים.\n\nThis mission needs one sheet of paper per team — hand it out at registration or a start station. You can also edit it so the goal is flying the plane from one point to another you choose, instead of measuring in foot-lengths.',
+      prompt: 'המשימה דורשת דף נייר לכל קבוצה, חלקו אותו מראש בהרשמה או בעמדת פתיחה. אפשר גם לערוך את המשימה כך שהיעד יהיה להטיס את המטוס מנקודה אחת לשנייה שתבחרו, במקום מדידה בכפות רגליים.\n\nThis mission needs one sheet of paper per team, hand it out at registration or a start station. You can also edit it so the goal is flying the plane from one point to another you choose, instead of measuring in foot lengths.',
     }],
     build: () => anywhere({
       title: 'מבחן הטיסה',
@@ -2292,11 +2291,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'description',
       required: false,
-      prompt: 'המשימה עובדת הכי טוב עם מגש, צלחת או ספר וחפץ קטן ולא שביר לכל קבוצה — אפשר לחלק אותם מראש, או לתת לקבוצות למצוא בעצמן משהו מתאים.\n\nWorks best with a tray, plate, or book and a small unbreakable object per team — hand them out in advance, or let teams find something suitable on their own.',
+      prompt: 'המשימה עובדת הכי טוב עם מגש, צלחת או ספר וחפץ קטן ולא שביר לכל קבוצה. אפשר לחלק אותם מראש, או לתת לקבוצות למצוא בעצמן משהו מתאים.\n\nWorks best with a tray, plate, or book and a small unbreakable object per team. Hand them out in advance, or let teams find something suitable on their own.',
     }],
     build: () => anywhere({
       title: 'מרוץ המלצרים',
-      description: 'הושיטו יד אחת קדימה לגמרי, כף היד פונה למעלה. הניחו עליה משטח שטוח (מגש, צלחת או ספר) ועליו חפץ קטן. היד השנייה נשארת בכיס. הלכו 20 צעדים בקול רם, בלי לרוץ ובלי לייצב עם היד השנייה — נפל? התחילו מצעד 0. צלמו הכול בווידאו.',
+      description: 'הושיטו יד אחת קדימה לגמרי, כף היד פונה למעלה. הניחו עליה משטח שטוח (מגש, צלחת או ספר) ועליו חפץ קטן. היד השנייה נשארת בכיס. הלכו 20 צעדים בקול רם, בלי לרוץ ובלי לייצב עם היד השנייה. נפל? התחילו מצעד 0. צלמו הכול בווידאו.',
       type: 'photo',
       difficulty: 3,
       estimatedMinutes: 6,
@@ -2322,7 +2321,7 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'media',
         required: true,
-        prompt: 'סדרו 5-6 חפצים אמיתיים במקום קבוע וצלמו אותם — זו תמונת ה"לפני". אחר כך שנו דבר אחד (הזיזו, החליפו או הוציאו חפץ) והשאירו את המצב החדש במקום.\n\nArrange 5-6 real objects in a fixed spot and photograph them — this is the "before" photo. Then change one thing (move, swap, or remove an object) and leave the new state in place.',
+        prompt: 'סדרו 5 עד 6 חפצים אמיתיים במקום קבוע וצלמו אותם, זו תמונת ה"לפני". אחר כך שנו דבר אחד (הזיזו, החליפו או הוציאו חפץ) והשאירו את המצב החדש במקום.\n\nArrange 5 to 6 real objects in a fixed spot and photograph them, this is the "before" photo. Then change one thing (move, swap, or remove an object) and leave the new state in place.',
       },
       {
         field: 'choices',
@@ -2332,19 +2331,19 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'answers',
         required: true,
-        prompt: 'הזינו את שם החפץ שהחלטתם לשנות — חייב להתאים בדיוק לאחת האפשרויות שכתבתם.\n\nEnter the name of the object you changed — must exactly match one of the options above.',
+        prompt: 'הזינו את שם החפץ שהחלטתם לשנות. חייב להתאים בדיוק לאחת האפשרויות שכתבתם.\n\nEnter the name of the object you changed. Must exactly match one of the options above.',
       },
     ],
     build: () => sited({
       title: 'משחק קים',
-      description: 'הביטו בתמונה שצורפה למשימה — כך נראה המקום קודם. עכשיו הביטו במציאות שלפניכם ומצאו מה השתנה.',
+      description: 'הביטו בתמונה שצורפה למשימה, כך נראה המקום קודם. עכשיו הביטו במציאות שלפניכם ומצאו מה השתנה.',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 6,
       pointValue: 120,
       choices: ['כוס', 'ספר', 'שעון'],
       answers: ['ספר'],
-      hint: 'רמז: עברו על הרשימה חפץ־חפץ והשוו לתמונה, לא הפוך.',
+      hint: 'רמז: עברו על הרשימה חפץ אחרי חפץ והשוו לתמונה, לא הפוך.',
       hintPenalty: 15,
       // A fixed display, not a shared object anyone takes — every team compares
       // the same real scene.
@@ -2362,7 +2361,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     key: 'wheres-the-ball',
     sourceTemplateKey: 'authored',
     tags: ['thinking', 'action', 'noPrep', 'fromAnywhere',
-      'home', 'kids', 'youth', 'mixed', 'easy'],
+      'home', 'kids', 'youth', 'mixed', 'medium'],
     difficulty: 4,
     build: () => anywhere({
       title: 'איפה הכדור',
@@ -2420,7 +2419,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'orderItems',
       required: true,
-      prompt: 'רשמו 4-5 דברים שהחוגג/ת אוהב/ת (צבע, מאכל, סרט, חיה, משחק), מהכי אהוב עד הכי פחות אהוב — לפי מה שאתם באמת יודעים עליו/ה.\n\nList 4-5 things the celebrant loves (a color, food, movie, animal, game), ranked from most to least loved — based on what you actually know about them.',
+      prompt: 'רשמו 4 עד 5 דברים שהחוגג/ת אוהב/ת (צבע, מאכל, סרט, חיה, משחק), מהכי אהוב עד הכי פחות אהוב, לפי מה שאתם באמת יודעים עליו/ה.\n\nList 4 to 5 things the celebrant loves (a color, food, movie, animal, game), ranked from most to least loved, based on what you actually know about them.',
     }],
     build: () => anywhere({
       title: 'דירוג האהובים של החוגג/ת',
@@ -2498,7 +2497,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 3,
     build: () => anywhere({
       title: 'חידת האותיות הקצרה',
-      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ן־ו־ר־ת־פ. אסור לחפש בגוגל — התייעצו ביניכם.',
+      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ן ו ר ת פ. אסור לחפש בגוגל.',
       type: 'quiz',
       difficulty: 3,
       estimatedMinutes: 4,
@@ -2516,7 +2515,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 5,
     build: () => anywhere({
       title: 'חידת האותיות',
-      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ת־י־ג־ת־ל. אסור לחפש בגוגל — התייעצו ביניכם.',
+      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ת י ג ת ל. אסור לחפש בגוגל.',
       type: 'quiz',
       difficulty: 5,
       estimatedMinutes: 5,
@@ -2534,7 +2533,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     difficulty: 7,
     build: () => anywhere({
       title: 'חידת האותיות הארוכה',
-      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ק־ה־ת־ר־ה־פ. אסור לחפש בגוגל — התייעצו ביניכם.',
+      description: 'סדרו מחדש את האותיות הבאות למילה אחת: ק ה ת ר ה פ. אסור לחפש בגוגל.',
       type: 'quiz',
       difficulty: 7,
       estimatedMinutes: 6,
@@ -2564,12 +2563,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'answers',
         required: true,
-        prompt: 'בחרו 3 תצפיות באתר וסקרו אותן בעצמכם: ספרה 1 = חלונות בקיר שבחרתם. ספרה 2 = שתי הספרות האחרונות בשלט שבחרתם. ספרה 3 = עצים או ספסלים בטווח ראייה. חברו לקוד, למשל 483, והזינו כאן.\n\nChoose 3 real observations on-site and survey them yourself: digit 1 = windows on a wall you choose. Digit 2 = the last two digits on a sign you choose. Digit 3 = trees or benches in view. Combine into a code, e.g. 483, and enter it here.',
+        prompt: 'בחרו 3 תצפיות באתר וסקרו אותן בעצמכם: ספרה 1 = חלונות בקיר שבחרתם. ספרה 2 = שתי הספרות האחרונות בשלט שבחרתם. ספרה 3 = עצים או ספסלים בטווח ראייה. חברו לקוד, למשל 483, והזינו כאן.\n\nChoose 3 real observations on site and survey them yourself: digit 1 = windows on a wall you choose. Digit 2 = the last two digits on a sign you choose. Digit 3 = trees or benches in view. Combine into a code, e.g. 483, and enter it here.',
       },
     ],
     build: () => sited({
       title: 'מנעול המספרים',
-      description: 'בשטח מוסתרות שלוש תצפיות: [הוראות ליוצר: תארו כאן בדיוק מה לספור או לקרוא בכל אחת]. בצעו את כולן וחברו את התוצאות לקוד תלת-ספרתי אחד.',
+      description: 'בשטח מוסתרות שלוש תצפיות: [הוראות ליוצר: תארו כאן בדיוק מה לספור או לקרוא בכל אחת]. בצעו את כולן וחברו את התוצאות לקוד בן שלוש ספרות.',
       type: 'quiz',
       difficulty: 7,
       estimatedMinutes: 12,
@@ -2591,7 +2590,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'answers',
       required: true,
-      prompt: 'הדפיסו תמונה זהה לכל קבוצה וגזרו ל-6-8 חלקים. כתבו תו אחד בפינת הגב של כל חלק, וקבעו מראש סדר קריאה. הזינו כאן את הקוד שמתקבל מהרכבה נכונה.\n\nPrint an identical image per team and cut it into 6-8 pieces. Write one character in the back corner of each piece, and decide a reading order in advance. Enter the code a correct assembly produces here.',
+      prompt: 'הדפיסו תמונה זהה לכל קבוצה וגזרו אותה ל 6 עד 8 חלקים. כתבו תו אחד בפינת הגב של כל חלק, וקבעו מראש סדר קריאה. הזינו כאן את הקוד שמתקבל מהרכבה נכונה.\n\nPrint an identical image per team and cut it into 6 to 8 pieces. Write one character in the back corner of each piece, and decide a reading order in advance. Enter the code a correct assembly produces here.',
     }],
     build: () => anywhere({
       title: 'פאזל הקוד',
@@ -2614,11 +2613,11 @@ export const TASK_BANK: TaskBankEntry[] = [
     setup: [{
       field: 'answers',
       required: true,
-      prompt: 'עטפו חפץ קטן, לא שביר ולא מסוכן, בעטיפה אטומה. כתבו כאן בדיוק מה זה, במילה אחת או שתיים.\n\nWrap a small, unbreakable, safe object in opaque wrapping. Write here exactly what it is, in one or two words.',
+      prompt: 'עטפו חפץ קטן ולא שביר בעטיפה אטומה. כתבו כאן בדיוק מה זה, במילה אחת או שתיים.\n\nWrap a small, unbreakable object in opaque wrapping. Write here exactly what it is, in one or two words.',
     }],
     build: () => anywhere({
       title: 'מתנת התעלומה',
-      description: 'קיבלתם חבילה עטופה. מותר למשש, לשקול ולטלטל בעדינות — אסור לפתוח את העטיפה. לקבוצה ניחוש אחד בלבד: הקלידו מה אתם חושבים שיש בפנים.',
+      description: 'קיבלתם חבילה עטופה. מותר למשש, לשקול ולטלטל בעדינות, אסור לפתוח את העטיפה. לקבוצה ניחוש אחד בלבד: הקלידו מה אתם חושבים שיש בפנים.',
       type: 'quiz',
       difficulty: 3,
       estimatedMinutes: 4,
@@ -2633,7 +2632,7 @@ export const TASK_BANK: TaskBankEntry[] = [
     // there is never a "which one is correct" ambiguity for the team.
     key: 'balloon-message',
     sourceTemplateKey: 'authored',
-    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'easy'],
+    tags: ['thinking', 'needsSetup', 'fromAnywhere', 'home', 'kids', 'mixed', 'medium'],
     difficulty: 4,
     setup: [
       {
@@ -2644,18 +2643,18 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'answers',
         required: true,
-        prompt: 'נפחו כמות גדולה של בלונים. בחרו צבע אחד (זה שכתבתם בתיאור). לתוך כל בלון מהצבע הזה, ורק בצבע הזה, הכניסו פתק עם אותו קוד. ערבבו עם בלונים בצבעים אחרים. הזינו כאן את הקוד שכתבתם.\n\nInflate a large batch of balloons. Choose one color (the one in the description). Inside every balloon of that color only, place a note with the same code. Mix them with other-colored balloons. Enter the code you wrote here.',
+        prompt: 'נפחו כמות גדולה של בלונים. בחרו צבע אחד (זה שכתבתם בתיאור). לתוך כל בלון מהצבע הזה, ורק בצבע הזה, הכניסו פתק עם אותו קוד. ערבבו עם בלונים בצבעים אחרים. הזינו כאן את הקוד שכתבתם.\n\nInflate a large batch of balloons. Choose one color (the one in the description). Inside every balloon of that color only, place a note with the same code. Mix them with balloons of other colors. Enter the code you wrote here.',
       },
     ],
     build: () => anywhere({
       title: 'הודעת הבלון',
-      description: 'בין כל הבלונים, מצאו בלון בצבע [הוראות ליוצר: כתבו כאן את הצבע שבחרתם]. פתחו אותו — בניפוץ או בפתיחת הקשר, לבחירתכם — והוציאו את הפתק. נקו את השאריות אחריכם. הקלידו כאן את הקוד שרשום על הפתק.',
+      description: 'בין כל הבלונים, מצאו בלון בצבע [הוראות ליוצר: כתבו כאן את הצבע שבחרתם]. פתחו אותו (בניפוץ או בפתיחת הקשר, לבחירתכם) והוציאו את הפתק. נקו את השאריות אחריכם. הקלידו כאן את הקוד שרשום על הפתק.',
       type: 'quiz',
       difficulty: 4,
       estimatedMinutes: 5,
       pointValue: 100,
       answers: ['1234'],
-      hint: 'רמז: הבלון שלכם תמיד יהיה בצבע שנכתב למעלה — אין צורך לבדוק בלונים בצבעים אחרים.',
+      hint: 'רמז: הבלון שלכם תמיד יהיה בצבע שנכתב למעלה. אין צורך לבדוק בלונים בצבעים אחרים.',
       hintPenalty: 15,
     }),
   },
@@ -2674,12 +2673,12 @@ export const TASK_BANK: TaskBankEntry[] = [
       {
         field: 'locationClue',
         required: true,
-        prompt: 'כתבו רמז כללי לאזור שבו מוחבאים ארבעת החפצים (למשל "בחצר" או "בבית") — אין סיכה מדויקת על המפה.\n\nWrite a general clue to the area where the four objects are hidden (e.g. "in the yard" or "in the house") — there is no exact pin on the map.',
+        prompt: 'כתבו רמז כללי לאזור שבו מוחבאים ארבעת החפצים (למשל "בחצר" או "בבית"). אין סיכה מדויקת על המפה.\n\nWrite a general clue to the area where the four objects are hidden (e.g. "in the yard" or "in the house"). There is no exact pin on the map.',
       },
       {
         field: 'answers',
         required: true,
-        prompt: 'החביאו ארבעה חפצים, אחד בכל צבע, תמיד באותו סדר: אדום, כחול, צהוב, ירוק. כתבו ספרה (0-9) על כל חפץ. חברו לפי הסדר הזה, למשל 3719, והזינו כאן.\n\nHide four objects, one per color, always in this order: red, blue, yellow, green. Write a digit (0-9) on each. Combine in that order, e.g. 3719, and enter it here.',
+        prompt: 'החביאו ארבעה חפצים, אחד בכל צבע, תמיד באותו סדר: אדום, כחול, צהוב, ירוק. כתבו ספרה (0 עד 9) על כל חפץ. חברו לפי הסדר הזה, למשל 3719, והזינו כאן.\n\nHide four objects, one per color, always in this order: red, blue, yellow, green. Write a digit (0 to 9) on each. Combine in that order, e.g. 3719, and enter it here.',
       },
     ],
     build: () => sited({
