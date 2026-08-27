@@ -42,7 +42,14 @@
 
     /* rp-fire, and a darker press state of the same hue. */
     --aw-color-primary: #ff5722;
-    --aw-color-secondary: #e64a19;
+    /*
+     * One step deeper than the press state the apps use, and deliberately so.
+     * This is the colour small brand-coloured text is drawn in, and #E64A19
+     * measures 3.83:1 on the warm page where small text needs 4.5:1. #C03D14
+     * is the same hue at 5.24:1, and it lifts white-on-hover from 3.92 to
+     * 5.36 as well. Measured, not judged by eye.
+     */
+    --aw-color-secondary: #c03d14;
     /* rp-plasma. The second brand accent, used for links and highlights. */
     --aw-color-accent: #06b6d4;
 

@@ -187,6 +187,86 @@ const cool = ramp
 check('E · no step of the neutral ramp is cool', cool.length === 0, cool.join(', ') || 'none');
 check('E · the neutral ramp was actually read', ramp.length >= 20, `${ramp.length} steps`);
 
+// ── F. The declared palette is actually readable ─────────────────────────────
+//
+// Matching the applications settles which colours the site uses. It does not
+// settle whether a given PAIR of them can be read, and that question has an
+// arithmetic answer, so it is answered here rather than by eye.
+//
+// Source level on purpose: a rendered page can only be measured in a browser,
+// which was done and found four real failures, but the DECISION about which
+// colour sits on which surface lives in the palette, so that is where it is
+// pinned. What a browser catches and this cannot is a pairing nobody declared,
+// so both passes earn their place.
+
+/** WCAG relative luminance. */
+function luminance(hex: string): number {
+  const v = hex.replace('#', '');
+  const channels = [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255);
+  const linear = channels.map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+function contrast(a: string, b: string): number {
+  const l1 = luminance(a);
+  const l2 = luminance(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+
+function paletteToken(name: string): string | null {
+  const m = theme.match(new RegExp(`${name}[ ]*:[ ]*(#[0-9a-f]{6})[ ]*;`));
+  return m ? m[1] : null;
+}
+
+const pageBg = paletteToken('--aw-color-bg-page');
+const inkDefault = paletteToken('--aw-color-text-default');
+const inkMuted = paletteToken('--aw-color-text-muted');
+const brandDeep = paletteToken('--aw-color-secondary');
+const brand = paletteToken('--aw-color-primary');
+
+check(
+  'F · the palette could be read out of the theme',
+  Boolean(pageBg && inkDefault && inkMuted && brandDeep && brand),
+  JSON.stringify({ pageBg, inkDefault, inkMuted, brandDeep, brand }),
+);
+
+if (pageBg && inkDefault && inkMuted && brandDeep && brand) {
+  const PAIRS: Array<[string, string, string, number]> = [
+    ['body text on the page', inkDefault, pageBg, 4.5],
+    ['muted text on the page', inkMuted, pageBg, 4.5],
+    // The deeper brand shade exists precisely so brand coloured TEXT is legible.
+    // The lighter one is 3.09:1 at body size, which is why every link uses this.
+    ['brand coloured body text and links', brandDeep, pageBg, 4.5],
+    // The lighter brand shade is for large text, icons and fills, where 3:1 is
+    // the requirement and it clears it.
+    ['the brand accent as large text or an icon', brand, pageBg, 3],
+  ];
+
+  for (const [label, fg, bg, min] of PAIRS) {
+    const ratio = contrast(fg, bg);
+    check(`F · ${label} meets ${min}:1`, ratio >= min, `${ratio.toFixed(2)}:1 (${fg} on ${bg})`);
+  }
+
+  // ── The one pairing that does NOT meet AA, reported rather than hidden ──────
+  //
+  // White on the brand accent measures 3.16:1, and body sized button text needs
+  // 4.5:1. It is deliberately NOT asserted, because it is not a mistake made
+  // here: it is the applications' own primary button pairing, and the
+  // instruction this palette follows is to match them. Fixing it properly means
+  // changing the product's primary button in creator-web and play-web too, which
+  // is a brand decision rather than a site one.
+  //
+  // Printed on every run so it stays visible. The alternatives were a
+  // permanently red gate that people learn to scroll past, or silence.
+  const ctaRatio = contrast('#ffffff', brand);
+  console.log('');
+  console.log(`NOTE  white on the brand accent is ${ctaRatio.toFixed(2)}:1; body sized button text needs 4.50:1.`);
+  console.log('NOTE  This is the apps own primary button pairing, so it is a product wide brand decision.');
+  console.log(`NOTE  Options: a deeper fill (white on #c03d14 is ${contrast('#ffffff', '#c03d14').toFixed(2)}:1), or`);
+  console.log(`NOTE  dark text on the existing fill (${inkDefault} on ${brand} is ${contrast(inkDefault, brand).toFixed(2)}:1).`);
+  console.log('');
+}
+
 console.log('');
 if (failures > 0) {
   console.log(`MARKETING THEME TESTS FAILED :: ${failures} of ${checks}`);

@@ -38,7 +38,7 @@ export const homeCopy: Record<Language, HomeCopy> = {
     description:
       'פלטפורמה לבניית משחקי שדה: מסלול משימות אמיתי בשטח, ניווט בטלפון, ניקוד אוטומטי. בלי שופטים, בלי דפי נייר, בלי לרוץ אחרי כולם.',
     tagline: 'משחק שדה',
-    headline: 'המשחק יוצא <span class="text-accent">החוצה</span>',
+    headline: 'המשחק יוצא <span class="text-primary">החוצה</span>',
     subhead:
       'אתם בונים את המסלול, הקבוצות משחקות בטלפון שלהן, והניקוד מתעדכן לבד. אתם נשארים עם החלק המהנה, לראות אנשים רצים בשטח ונהנים.',
     primaryAction: 'בונים משחק',
@@ -115,7 +115,7 @@ export const homeCopy: Record<Language, HomeCopy> = {
     description:
       'A platform for building field games: a real route through real places, navigation on the phone, automatic scoring. No judges, no paper, no chasing everyone around.',
     tagline: 'Field game',
-    headline: 'The game goes <span class="text-accent">outside</span>',
+    headline: 'The game goes <span class="text-primary">outside</span>',
     subhead:
       'You design the route, teams play on their own phones, and the scoring takes care of itself. You get to keep the good part, which is watching people run around enjoying it.',
     primaryAction: 'Build a game',

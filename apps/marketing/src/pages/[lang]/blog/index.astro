@@ -41,7 +41,7 @@ const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB'
             <li class="border-b border-gray-200 pb-8 dark:border-slate-700">
               <article>
                 <h2 class="text-2xl font-bold tracking-tight mb-2">
-                  <a class="hover:text-primary transition" href={pathOf(post)}>
+                  <a class="hover:text-secondary transition" href={pathOf(post)}>
                     {post.data.title}
                   </a>
                 </h2>
@@ -53,7 +53,7 @@ const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB'
                 {post.data.excerpt && (
                   <p class="text-lg leading-relaxed text-muted dark:text-slate-400 mb-3">{post.data.excerpt}</p>
                 )}
-                <a class="inline-block py-1 font-medium text-primary hover:underline" href={pathOf(post)}>
+                <a class="inline-block py-1 font-medium text-secondary hover:underline" href={pathOf(post)}>
                   {t.readMore}
                 </a>
               </article>
