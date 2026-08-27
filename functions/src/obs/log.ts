@@ -12,6 +12,7 @@
 
 import * as functions from 'firebase-functions';
 import { sanitizeFinite } from '@rushpoint/shared';
+import { withCallableAttribution, invocationFirestoreCost } from '../opCounter';
 
 export interface CallMeta {
   callable: string;
@@ -234,18 +235,54 @@ function idsFromPayload(data: unknown): Pick<CallMeta, 'runId' | 'gameId'> {
  * runtimeOpts.maxInstances still wins) and resolveRuntimeOpts fills
  * DEFAULT_MAX_INSTANCES into whatever gap is left.
  */
+/**
+ * Emit one invocation's Firestore cost as a structured record (change:
+ * spark-tier-location-load). A no-op unless RUSHPOINT_FS_OPCOUNT=1.
+ *
+ * The marker string is stable and greppable on purpose — it is what an offline aggregator
+ * keys on to total a whole run's cost from the logs, which is the only way to measure a
+ * multi-process runtime (see opCounter.ts). Never throws: instrumentation must not be able
+ * to fail the call it just measured.
+ */
+function logFirestoreCost(callable: string): void {
+  try {
+    const cost = invocationFirestoreCost();
+    if (!cost) return;
+    functions.logger.info('fsops', {
+      callable,
+      reads: cost.reads,
+      writes: cost.writes,
+    });
+  } catch {
+    // Swallowed by design — see above.
+  }
+}
+
 export function loggedCallable(
   name: string,
   handler: CallableHandler,
   runtimeOpts?: functions.RuntimeOptions,
 ) {
   return functions.runWith(resolveRuntimeOpts(withHotPathCeiling(name, runtimeOpts))).https.onCall(async (data, context) =>
-    logCall(
-      { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
-      // Backstop: a callable must never return a non-finite number — one Infinity
-      // crashes the ENTIRE response at JSON-encode. Degrade any to null here so a
-      // computation bug becomes a benign null field, not a failed call.
-      async () => sanitizeFinite(await handler(data, context)),
-    ),
+    // Firestore op attribution (change: spark-tier-location-load) wraps the OUTERMOST
+    // layer so every read and write the invocation performs — including inside logCall's
+    // own work — is charged to this callable. It is an AsyncLocalStorage context, so it
+    // survives every await below; when counting is disabled it calls straight through.
+    withCallableAttribution(name, async () => {
+      try {
+        return await logCall(
+          { callable: name, uid: context.auth?.uid, ...idsFromPayload(data) },
+          // Backstop: a callable must never return a non-finite number — one Infinity
+          // crashes the ENTIRE response at JSON-encode. Degrade any to null here so a
+          // computation bug becomes a benign null field, not a failed call.
+          async () => sanitizeFinite(await handler(data, context)),
+        );
+      } finally {
+        // In `finally`, so a FAILED call still reports what it spent — a callable that
+        // throws after twenty reads has still spent twenty reads of the daily quota, and
+        // that is exactly the sort of cost that otherwise hides.
+        logFirestoreCost(name);
+      }
+    }),
   );
 }

@@ -26,6 +26,7 @@
 // corrupt a live run. Transaction reads always go to the driver.
 
 import type { DocCachePolicy, WriteVerb } from '@rushpoint/shared';
+import { countFirestoreOp } from './opCounter';
 
 /** Retrieves the unwrapped reference a proxy stands for. */
 const RAW = Symbol('rushpoint.rawRef');
@@ -35,6 +36,29 @@ const RAW = Symbol('rushpoint.rawRef');
 /** Hand the driver the real reference, never our proxy. */
 function unwrap<T>(ref: T): T {
   return (ref as any)?.[RAW] ?? ref;
+}
+
+// ── Operation counting (change: spark-tier-location-load) ────────────────────
+// Attribution rides an AsyncLocalStorage context entered by `loggedCallable`; see
+// opCounter.ts. `countFirestoreOp` never throws, so these calls are safe to make inline
+// without a try/catch at each site — instrumentation must never fail a live request.
+//
+// Counting sits HERE for the same reason invalidation does (see the header): wrapping the
+// single `db` handle covers every existing call site and every future one, where asking
+// 216 call sites to remember a counter call is exactly the convention that rots.
+//
+// NOTE this counts reads the CACHE DID NOT SERVE — it sits below `cachedGetDoc`, so a
+// cache hit never reaches the driver and is correctly never counted. That is what makes
+// the number a measure of real quota spend rather than of call volume.
+
+/**
+ * How many document reads a query snapshot cost. Firestore bills a MINIMUM of one read
+ * for a query that matches nothing, so an empty result is charged 1 rather than 0 —
+ * otherwise a run full of empty lookups would project as free.
+ */
+function readsInSnapshot(snap: any): number {
+  const size = snap?.size;
+  return typeof size === 'number' && size > 0 ? size : 1;
 }
 
 const WRITE_VERBS = new Set<string>(['set', 'create', 'update', 'delete']);
@@ -91,8 +115,11 @@ function wrapQuery(raw: any, onWrite: (path: string, verb: WriteVerb) => void): 
         return (...args: unknown[]) => wrapQuery(value.apply(target, args), onWrite);
       }
       if (prop === 'get') {
-        return async (...args: unknown[]) =>
-          wrapQuerySnapshot(await value.apply(target, args), onWrite);
+        return async (...args: unknown[]) => {
+          const snap = await value.apply(target, args);
+          countFirestoreOp('read', readsInSnapshot(snap));
+          return wrapQuerySnapshot(snap, onWrite);
+        };
       }
       return value.bind(target);
     },
@@ -119,8 +146,11 @@ function wrapDocRef(raw: any, onWrite: (path: string, verb: WriteVerb) => void):
         };
       }
       if (prop === 'get' && typeof value === 'function') {
-        return async (...args: unknown[]) =>
-          wrapDocSnapshot(await value.apply(target, args), onWrite);
+        return async (...args: unknown[]) => {
+          const snap = await value.apply(target, args);
+          countFirestoreOp('read', 1);
+          return wrapDocSnapshot(snap, onWrite);
+        };
       }
       if (prop === 'collection' && typeof value === 'function') {
         return (...args: unknown[]) => wrapCollectionRef(value.apply(target, args), onWrite);
@@ -160,8 +190,11 @@ function wrapCollectionRef(raw: any, onWrite: (path: string, verb: WriteVerb) =>
         return (...args: unknown[]) => wrapQuery(value.apply(target, args), onWrite);
       }
       if (prop === 'get' && typeof value === 'function') {
-        return async (...args: unknown[]) =>
-          wrapQuerySnapshot(await value.apply(target, args), onWrite);
+        return async (...args: unknown[]) => {
+          const snap = await value.apply(target, args);
+          countFirestoreOp('read', readsInSnapshot(snap));
+          return wrapQuerySnapshot(snap, onWrite);
+        };
       }
       return typeof value === 'function' ? value.bind(target) : value;
     },
@@ -183,6 +216,18 @@ function wrapTransaction(raw: any, touched: Array<[string, WriteVerb]>): any {
         };
       }
       // `get` (and getAll) must reach the driver — see the note at the top of this file.
+      // Because they ALWAYS reach it, they always cost quota: a transaction read is never
+      // served from memory, so it is counted unconditionally.
+      if (prop === 'get' || prop === 'getAll') {
+        return async (...args: unknown[]) => {
+          const result = await value.apply(target, args.map((a) => unwrap(a)));
+          countFirestoreOp(
+            'read',
+            Array.isArray(result) ? Math.max(1, result.length) : readsInSnapshot(result),
+          );
+          return result;
+        };
+      }
       return (...args: unknown[]) => value.apply(target, args.map((a) => unwrap(a)));
     },
   });
@@ -228,7 +273,16 @@ export function wrapFirestore<T extends object>(
   policy: DocCachePolicy,
   _nowFn: () => number = Date.now,
 ): T {
-  const onWrite = (path: string, verb: WriteVerb) => policy.invalidateWrite(path, verb);
+  // Every write path already funnels through here to invalidate — document verbs, batch
+  // ops (replayed from `touched` at commit) and transaction writes (replayed when
+  // runTransaction settles) — so counting here covers all of them with one hook.
+  //
+  // A retried transaction replays `touched` and will over-count slightly. That is the
+  // honest direction for a quota measurement: the retry's writes were genuinely attempted.
+  const onWrite = (path: string, verb: WriteVerb) => {
+    countFirestoreOp('write', 1);
+    policy.invalidateWrite(path, verb);
+  };
 
   return new Proxy(raw, {
     get(target, prop) {
@@ -266,6 +320,7 @@ export function wrapFirestore<T extends object>(
         // way out — admin/templates.ts writes through a `getAll` result's `.ref`.
         return async (...refs: unknown[]) => {
           const snaps = await (value as any).apply(target, refs.map((r) => unwrap(r)));
+          countFirestoreOp('read', Math.max(1, (snaps as any[])?.length ?? 1));
           return (snaps as any[]).map((sn) => wrapDocSnapshot(sn, onWrite));
         };
       }

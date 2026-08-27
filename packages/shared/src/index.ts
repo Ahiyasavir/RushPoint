@@ -130,6 +130,12 @@ export * from './adminUserActivity';
 // createGameFromTemplate (change: guided-new-game-wizard).
 export * from './gamePersonalization';
 export * from './docCachePolicy';
+// Firestore op accounting + the per-run quota projection (change: spark-tier-location-load)
+// — what a run costs in reads/writes, and whether it fits a fixed daily ceiling.
+export * from './firestoreOpBudget';
+// What a location ping is allowed to cost — the pin-write and track-retention verdicts.
+// The ONLY module that can cause a position to go unrecorded, so it fails open.
+export * from './locationPingEconomy';
 // The OWNER-ONLY per-player run report (change: post-run-player-report) — who
 // played, how they did, and mission by mission what they actually answered.
 export * from './runPlayerReport';

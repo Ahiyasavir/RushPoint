@@ -5,7 +5,11 @@
 import * as functions from 'firebase-functions';
 import { loggedCallable, logBestEffort } from './obs/log';
 import { enforceRateLimit } from './rateLimitStore';
-import { db } from './firebase';
+import { db, docCachePolicy } from './firebase';
+import { cachedGetDoc } from './docCache';
+// Ping economy (change: spark-tier-location-load): the pure write verdicts, plus the
+// in-process store that answers "what did we last write for this team" without a read.
+import { lastFixStore, lastFixKey } from './lastFixStore';
 import * as admin from 'firebase-admin';
 import { randomInt } from 'node:crypto';
 import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF_RUN_LOCKOUT_LIMIT, STAFF_RUN_COOLDOWN_MS, isOutsideSafeZone, evaluateSafeZoneStatus, DEFAULT_OUT_OF_BOUNDS_GRACE_MS, requireString, optionalString, MAX_MESSAGE_LEN, type SafeZone, buildWebhookPayload, isAllowedWebhookUrl, type WebhookEvent, applyReaction, applyReport, FEED_REPORT_REASONS, FIRESTORE_PATHS, COLLECTIONS, type FeedItem, formatScoreNotice, sanitizeChatText, appendCapped, type ChatMessage, type TeamChatDoc, type StaffChannelMessage, type StaffChannelDoc, isAllowedSubmissionContentType, type MediaKind, isReleased, isExpired, attemptLimitReached, isStationStatus, LIVE_TASK_STATUSES, planTaskStatusChange, type StationStatus, type TaskStatusOverrides, type Task } from '@rushpoint/shared';
@@ -13,6 +17,7 @@ import { isValidCoord, requireStorageUrl, shouldLockout, isWithinCooldown, STAFF
 // right and wrong, on every run. Owner-only by construction: `answerLog` is never
 // added to sanitizeTeamForParticipant's allow-list.
 import { buildAnswerLogEntry, appendAnswerLog, type RunTeam } from '@rushpoint/shared';
+import { shouldWritePin, shouldRetainTrackPoint } from '@rushpoint/shared';
 import { validate } from './validation';
 import { storageOriginOpts } from './storageOriginOpts';
 
@@ -357,38 +362,91 @@ export const updateLocation = loggedCallable('updateLocation', async (data, cont
 
   // Shared team devices: the team's map pin follows the CONTROLLING phone (the
   // one actually playing) — viewer devices don't ping, so the pin never flickers.
-  const { teamId } = await resolveCallerTeam(uid, { ownerUid, gameId, runId }, { requireController: true });
+  // `team` and `teamRef` are kept, not discarded (change: spark-tier-location-load): this
+  // call ALREADY reads the team document, and the safe-zone block below used to read the
+  // very same document a second time. Measurement caught it — the callable cost 3 reads per
+  // ping where the code appeared to make 2, and the third was this duplicate. Reusing the
+  // snapshot is strictly better than caching it: it needs no cache to be enabled and cannot
+  // be stale, since nothing writes the document between the two points.
+  const { teamId, team: callerTeam, teamRef } = await resolveCallerTeam(
+    uid, { ownerUid, gameId, runId }, { requireController: true },
+  );
 
   const now = new Date().toISOString();
+  const nowMs = Date.parse(now);
   const locationRef = db.doc(
     `users/${ownerUid}/games/${gameId}/runs/${runId}/teamLocations/${teamId}`,
   );
   const accuracy = typeof accuracyMeters === 'number' && Number.isFinite(accuracyMeters) && accuracyMeters >= 0
     ? accuracyMeters
     : null;
-  await locationRef.set({ teamId, lat, lng, accuracyMeters: accuracy, updatedAt: now }, { merge: true });
+
+  // ── Ping economy (change: spark-tier-location-load) ──────────────────────────
+  // MEASURED: this callable cost 3 reads + 2 writes on EVERY ping, and play-web pings every
+  // 20s per controller device. 225 pings x 120 participants projected to 81,000 reads and
+  // 54,000 writes against Spark ceilings of 50,000 / 20,000 — location alone put a run over
+  // BOTH quotas before a single mission was played.
+  //
+  // The reference fix comes from the API's own memory, never from Firestore: reading
+  // `teamLocations` to decide whether to write `teamLocations` would add back exactly the
+  // read being removed. See functions/src/lastFixStore.ts for the single-process
+  // precondition that makes that authoritative.
+  //
+  // ⚠️ NOTE WHAT IS *NOT* CONDITIONAL: everything below this block. The safe-zone evaluation
+  // runs on every ping regardless of the verdict, so suppressing a write can never suppress
+  // a breach. Keep it that way — a stationary team sitting just outside the boundary is
+  // exactly the case where the write is suppressed and the safety check matters most.
+  const fixKey = lastFixKey(runId, teamId);
+  const known = lastFixStore.get(fixKey);
+
+  const pinVerdict = shouldWritePin({
+    fix: { lat, lng, accuracyMeters: accuracy },
+    lastFix: known?.pin,
+    nowMs,
+  });
+  if (pinVerdict.write) {
+    await locationRef.set({ teamId, lat, lng, accuracyMeters: accuracy, updatedAt: now }, { merge: true });
+    lastFixStore.recordPin(fixKey, { lat, lng, atMs: nowMs }, nowMs);
+  }
 
   // Movement heatmap (change: movement-heatmap): retain an append-only GPS track so the
   // creator can see foot-traffic density after the run. teamLocations keeps only the
   // latest point; this keeps history. CF-write-only; pruned with the run's PII at 90 days.
-  await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
-    .add({ teamId, lat, lng, at: now })
-    .catch(() => undefined); // track is best-effort; never fail the location update
+  //
+  // Retained by DISTANCE TRAVELLED, not per ping (change: spark-tier-location-load). The
+  // aggregator bins onto a ~55m grid, so a point every 20s was far finer than its own
+  // consumer's resolution — and time-sampling a *movement* heatmap grows a hot cell
+  // wherever teams merely stood still, which is the opposite of what it should show.
+  const trackVerdict = shouldRetainTrackPoint({ fix: { lat, lng }, lastRetained: known?.track });
+  if (trackVerdict.retain) {
+    await db.collection(`users/${ownerUid}/games/${gameId}/runs/${runId}/locationTrack`)
+      .add({ teamId, lat, lng, at: now })
+      .catch(() => undefined); // track is best-effort; never fail the location update
+    lastFixStore.recordTrack(fixKey, { lat, lng }, nowMs);
+  }
 
   // Safe-zone breach detection (safe-zone-boundary): server-side only. On a NEW
   // breach raise an alert + flag the team out-of-bounds; on return inside, clear it.
-  const gameSnap = await db.doc(`users/${ownerUid}/games/${gameId}`).get();
-  const safeZone = (gameSnap.data() as { safeZone?: SafeZone } | undefined)?.safeZone;
+  //
+  // Read through the cache: the game template does not change during a run, so re-reading
+  // it once per ping was pure waste (it was ~1 read x 27,000 pings for a 120-person run).
+  const gameCached = await cachedGetDoc<{ safeZone?: SafeZone }>(
+    db, docCachePolicy, `users/${ownerUid}/games/${gameId}`,
+  );
+  const safeZone = gameCached.data?.safeZone;
   if (!safeZone) return { ok: true, outOfBounds: false };
 
-  const teamRef = db.doc(`users/${ownerUid}/games/${gameId}/runs/${runId}/teams/${teamId}`);
-  const teamData = (await teamRef.get()).data() as
+  // Reuse the snapshot `resolveCallerTeam` already fetched rather than re-reading it. See
+  // the note at that call. `teamRef` comes from the same place, so the shared-device path
+  // (where the team is found by `deviceUids` rather than by uid) still writes the right doc.
+  const teamData = callerTeam as
     { outOfBounds?: boolean; outOfBoundsOverrideUntil?: string; lastBreachAlertAt?: string } | undefined;
   const wasOut = teamData?.outOfBounds === true;
   const overrideUntilMs = teamData?.outOfBoundsOverrideUntil
     ? Date.parse(teamData.outOfBoundsOverrideUntil)
     : null;
-  const nowMs = Date.parse(now);
+  // `nowMs` is parsed once, above, and shared with the ping-economy verdict — the two must
+  // reason about the same instant.
 
   // Out-of-bounds recovery: the flag is now decided by the fail-open evaluator, so a
   // low-confidence fix, a malformed one, or a team a human already released can never

@@ -171,7 +171,15 @@ async function expectError(label, promise, opts = {}) {
   }
 }
 
+// DEV AID ONLY (change: spark-tier-location-load): `--only=<substring>` runs just the
+// scenarios whose name matches, so a red-green loop on one scenario does not cost a full
+// suite run. The gate NEVER passes it, and an active filter is announced loudly on both
+// ends of the run — a filtered pass must never be mistakable for a full pass.
+const ONLY = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('=')[1] || '';
+let skippedByFilter = 0;
+
 async function scenario(name, fn) {
+  if (ONLY && !name.toLowerCase().includes(ONLY.toLowerCase())) { skippedByFilter++; return; }
   console.log(`\n━━ ${name} ━━`);
   const rec = { name, ms: 0, checks: 0, failures: 0 };
   currentScenario = rec;
@@ -189,6 +197,10 @@ async function scenario(name, fn) {
 }
 
 function printSummary() {
+  if (ONLY) {
+    console.log(`\n⚠  FILTERED RUN — --only="${ONLY}" skipped ${skippedByFilter} scenario(s).`);
+    console.log('   This is NOT a full pass and must never be reported as one.');
+  }
   console.log('\n── Scenario summary ─────────────────────────────────────────');
   for (const s of scenarios) {
     console.log(
@@ -3946,14 +3958,28 @@ async function main() {
     await creator.call('startTeams', { gameId: gH, runId: rH });
     const CH = { ownerUid: creatorCred.user.uid, gameId: gH, runId: rH };
 
-    // The controlling phone pings a few nearby positions (builds the track).
-    for (const [lat, lng] of [[31.7801, 35.2101], [31.7802, 35.2102], [31.7803, 35.2103]]) {
+    // The controlling phone WALKS: each position is ~111m from the last, comfortably beyond
+    // TRACK_RETENTION_METERS (100m), so every one is a genuine new history point.
+    // Spacing matters — this scenario used to ping three points 11-15m apart and assert three
+    // retained points, which encoded the old per-PING retention. Retention is now per ~100m
+    // TRAVELLED (change: spark-tier-location-load), because a per-ping track made the places
+    // teams stood STILL the hottest cells on a movement heatmap. Points this close now
+    // correctly collapse to one.
+    for (const [lat, lng] of [[31.7800, 35.2100], [31.7810, 35.2100], [31.7820, 35.2100]]) {
       await pH.call('updateLocation', { ...CH, lat, lng });
     }
 
     // Owner reads the density; non-owner is refused.
     const heat = await creator.call('getRunHeatmap', { code: cH });
-    check('heatmap: track retained → non-zero point count', (heat?.pointCount ?? 0) >= 3, JSON.stringify(heat?.pointCount));
+    check('heatmap: walked track retained → one point per ~100m travelled', (heat?.pointCount ?? 0) >= 3, JSON.stringify(heat?.pointCount));
+
+    // The other half of the contract: standing still must NOT keep growing the track.
+    const beforeIdle = heat?.pointCount ?? 0;
+    for (let i = 0; i < 3; i += 1) await pH.call('updateLocation', { ...CH, lat: 31.7820, lng: 35.2100 });
+    const idleHeat = await creator.call('getRunHeatmap', { code: cH });
+    check('heatmap: standing still adds no history points',
+      (idleHeat?.pointCount ?? -1) === beforeIdle,
+      `pointCount ${beforeIdle} → ${idleHeat?.pointCount}`);
     check('heatmap: density cells returned', Array.isArray(heat?.cells) && heat.cells.length >= 1 && heat.cells[0].weight >= 1, JSON.stringify(heat?.cells?.slice(0, 2)));
     await expectError('heatmap: non-owner is denied',
       pH.call('getRunHeatmap', { code: cH }),
@@ -4993,6 +5019,109 @@ async function main() {
     JSON.stringify(noConsentRows.map((t) => [t.id, t.heldForConsent])));
 
   }); // scenario: guardian consent
+
+  await scenario('location ping economy (suppressed pin, sampled track, safety intact)', async () => {
+
+  // ── Location ping economy (change: spark-tier-location-load) ───────────────
+  // MEASURED baseline before this change: updateLocation cost 3 reads + 2 writes on EVERY
+  // ping. At play-web's 20s cadence that is 225 pings per participant, which for 120
+  // participants projected to 81,000 reads / 54,000 writes against Spark ceilings of
+  // 50,000 / 20,000 — location alone put the run over BOTH quotas.
+  //
+  // The pin now writes at most once per minute (or immediately on a real move), and the
+  // history track is retained by distance travelled rather than per ping.
+  //
+  // ⚠️ THE ASSERTION THAT MATTERS MOST is the last one: a stationary team OUTSIDE the safe
+  // zone must still raise a breach alert while its position write is suppressed. Write
+  // suppression must never reach the safety path — if it ever does, this change has traded
+  // a quota problem for a lost-child problem.
+  const { gameId: gLE } = await creator.call('createGame', { title: 'Ping Economy', mode: 'individual' });
+  await creator.call('updateGame', {
+    gameId: gLE, scoringPreset: 'time_only',
+    safeZone: { center: { lat: 31.78, lng: 35.21 }, radiusMeters: 200 },
+    stages: [{ id: 'le-s', order: 0, title: 'Play', isFinal: true, requiredTaskCount: 1, tasks: [
+      { id: 'le-a', title: 'A', type: 'self_report', triggerMode: 'locationless', coordinates: { lat: 0, lng: 0 }, locationless: true, difficulty: 1, estimatedMinutes: 1, pointValue: 10, maxConcurrentTeams: 9 },
+    ] }],
+  });
+  const { runId: rLE, accessCode: cLE } = await creator.call('launchRun', { gameId: gLE });
+  const pinger = makeParty('pinger');
+  await signInAnonymously(pinger.auth);
+  const pingerUid = pinger.auth.currentUser.uid;   // uid == teamId
+  await pinger.call('joinRun', { code: cLE, displayName: 'Pinger' });
+  await creator.call('startTeams', { gameId: gLE, runId: rLE });
+  const CLE = { ownerUid: creatorCred.user.uid, gameId: gLE, runId: rLE };
+
+  const IN = { lat: 31.78, lng: 35.21 };            // centre of the safe zone
+  const locPath = `users/${creatorCred.user.uid}/games/${gLE}/runs/${rLE}/teamLocations/${pingerUid}`;
+  const trackPath = `users/${creatorCred.user.uid}/games/${gLE}/runs/${rLE}/locationTrack`;
+  const pinAt = async () => (await creator.getDocAt(locPath))?.data?.updatedAt;
+  const trackSize = async () => (await creator.getColAt(trackPath)).length;
+
+  // First ping establishes the pin — there is no prior fix, so it must write.
+  const first = await pinger.call('updateLocation', { ...CLE, ...IN, accuracyMeters: 10 });
+  check('ping economy: the return shape is unchanged (ok + outOfBounds)',
+    first?.ok === true && typeof first?.outOfBounds === 'boolean', JSON.stringify(first));
+  const pinAfterFirst = await pinAt();
+  check('ping economy: the first ping writes the pin', typeof pinAfterFirst === 'string', String(pinAfterFirst));
+  const trackAfterFirst = await trackSize();
+
+  // Four more pings from the same spot, all inside the one-minute interval. Before this
+  // change every one of them wrote the pin AND appended a track point.
+  for (let i = 0; i < 4; i++) {
+    await pinger.call('updateLocation', { ...CLE, ...IN, accuracyMeters: 10 });
+  }
+  check('ping economy: repeated stationary pings do NOT rewrite the pin',
+    (await pinAt()) === pinAfterFirst, `updatedAt moved: ${pinAfterFirst} → ${await pinAt()}`);
+  check('ping economy: a stationary team appends no history points',
+    (await trackSize()) === trackAfterFirst,
+    `locationTrack grew ${trackAfterFirst} → ${await trackSize()} while standing still`);
+
+  // GPS jitter well inside the fix's own error radius is not movement either.
+  await pinger.call('updateLocation', { ...CLE, lat: IN.lat + 18 / 111_320, lng: IN.lng, accuracyMeters: 25 });
+  check('ping economy: jitter within the error radius does not rewrite the pin',
+    (await pinAt()) === pinAfterFirst, String(await pinAt()));
+
+  // A real move beyond the jump threshold must write IMMEDIATELY, without waiting out the
+  // interval — otherwise a moving team would go stale on the staff map.
+  const JUMPED = { lat: IN.lat + 150 / 111_320, lng: IN.lng };
+  await pinger.call('updateLocation', { ...CLE, ...JUMPED, accuracyMeters: 10 });
+  const pinAfterJump = await pinAt();
+  check('ping economy: a significant move writes the pin immediately',
+    typeof pinAfterJump === 'string' && pinAfterJump !== pinAfterFirst,
+    `${pinAfterFirst} → ${pinAfterJump}`);
+  check('ping economy: a real move DOES append a history point',
+    (await trackSize()) > trackAfterFirst,
+    `locationTrack ${trackAfterFirst} → ${await trackSize()} after moving 150m`);
+
+  // ── Safety: suppression must never reach the safe-zone path ────────────────
+  // A team sits motionless well outside the boundary and keeps pinging. Its position
+  // write is suppressed (it is not moving), but the breach MUST still be detected.
+  const OUT = { lat: 32.5, lng: 35.9 };
+  const breachLE = await pinger.call('updateLocation', { ...CLE, ...OUT, accuracyMeters: 10 });
+  check('ping economy: leaving the zone still flags outOfBounds',
+    breachLE?.outOfBounds === true, JSON.stringify(breachLE));
+
+  const pinWhileOut = await pinAt();
+  const alertsPath = `users/${creatorCred.user.uid}/games/${gLE}/runs/${rLE}/alerts`;
+  const alertsAfterBreach = (await creator.getColAt(alertsPath)).length;
+  check('ping economy: the breach raised an alert', alertsAfterBreach > 0, String(alertsAfterBreach));
+
+  // Keep pinging from exactly the same out-of-bounds spot. The pin write is suppressed...
+  for (let i = 0; i < 3; i++) {
+    const still = await pinger.call('updateLocation', { ...CLE, ...OUT, accuracyMeters: 10 });
+    // ...but the boundary verdict is recomputed every single time and still says "outside".
+    check('ping economy: a SUPPRESSED ping still evaluates the safe zone',
+      still?.outOfBounds === true, JSON.stringify(still));
+  }
+  check('ping economy: those stationary out-of-bounds pings did not rewrite the pin',
+    (await pinAt()) === pinWhileOut, String(await pinAt()));
+
+  // And returning inside must clear the flag even though the write may be suppressed.
+  const backLE = await pinger.call('updateLocation', { ...CLE, ...IN, accuracyMeters: 10 });
+  check('ping economy: returning inside clears outOfBounds under suppression',
+    backLE?.outOfBounds === false, JSON.stringify(backLE));
+
+  }); // scenario: location ping economy
 
   await scenario('safe-zone boundary (out-of-bounds soft pause)', async () => {
 

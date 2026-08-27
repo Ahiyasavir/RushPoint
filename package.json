@@ -96,6 +96,8 @@
         "e2e": "node scripts/e2e-verify.mjs",
         "backfill:public-tasks": "node scripts/backfill-public-tasks.mjs",
         "diagnose:task-media": "node scripts/diagnose-task-media.mjs",
+        "measure:location": "node scripts/measure-location-cost.mjs",
+        "fsops:report": "node scripts/fs-ops-report.mjs",
         "i18n:check": "tsx scripts/check-i18n.ts",
         "i18n:check:strict": "tsx scripts/check-i18n.ts --strict",
         "icons": "node scripts/gen-pwa-icons.mjs",

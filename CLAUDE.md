@@ -263,6 +263,21 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   hang wedged the gate forever. `RUSHPOINT_UNIT_CONCURRENCY=1` restores serial live-streamed output
   for debugging. Same lesson elsewhere: `npx <bin>` inside an npm script is pure overhead — npm
   already puts every workspace's and the root's `node_modules/.bin` on PATH.
+- **`scripts/measure-location-cost.mjs` + `scripts/fs-ops-report.mjs`** (the Firestore op counter,
+  change: spark-tier-location-load) — the Spark tier is capped at **50,000 reads / 20,000 writes a
+  day**, and the only honest way to argue about that is to COUNT. `functions/src/opCounter.ts` puts
+  the invoking callable's name in an `AsyncLocalStorage` context (entered once, inside
+  `loggedCallable`, so all ~112 callables are attributed through the one existing wrapper) and the
+  `docCache.ts` proxy tallies reads and writes against it; each invocation emits its own `fsops`
+  record into the structured log, which `fs-ops-report.mjs` aggregates. **Opt-in via
+  `RUSHPOINT_FS_OPCOUNT=1`, inert otherwise, and every hook is wrapped so a counting defect can
+  never fail the operation it is measuring.** Per-INVOCATION records rather than a process-global
+  tally is deliberate: the Functions emulator runs a `RuntimeWorkerPool`, so a global would be split
+  across worker processes and unreadable. `npm run measure:location` (piped through
+  `npm run fsops:report`) drives stationary / drifting / walking ping patterns separately — `simulate-run.mjs` never calls `updateLocation` at all, so it
+  cannot measure this. Pass `--cadence-ms=20000` (play-web's real cadence): firing pings back to
+  back lets the 60 s write interval suppress nearly everything and reports a saving no real run
+  would ever see.
 - **New pure suites in `npm test`** (each is a `scripts/test-*.ts` run by the aggregator):
   `test-bundle-budget` · `test-callable-hardening` · `test-emulator-reap` · `test-play-a11y-scan` ·
   `test-public-task-backfill` · `test-public-task-seed` (publicTasks privacy on the write path) ·
@@ -280,7 +295,13 @@ playtest** use the port-offset lane (`RUSHPOINT_EMULATOR_PORT_OFFSET=1000`, see 
   `test-hidden-search-area` (the coarse sealed-task circle + the play-web selector) ·
   `test-map-recenter` (the play map's recentre verdict) · `test-skip-single-task` (`planTaskSkip`) ·
   `test-gallery-task-detail` (the gallery mission detail view-model + its secrecy sweep) ·
-  `test-creator-tour` (the guided-tour step data, reducer and persistence). The runner
+  `test-creator-tour` (the guided-tour step data, reducer and persistence) ·
+  `test-location-ping-economy` (the ping write/retain verdicts, incl. every fail-open case) ·
+  `test-last-fix-store` (the in-process last-fix map + its eviction) ·
+  `test-firestore-op-counter` (per-callable read/write attribution under interleaved calls) ·
+  `test-fs-ops-aggregate` (the log aggregator, incl. refusing to invent a record) ·
+  `test-heatmap-sampling-fidelity` (a distance-sampled track still ranks cells like the
+  unsampled one — standing still must not become the hottest cell). The runner
   **auto-discovers** every `scripts/test-*.ts` — drop a file in and it is in the gate.
 
 > ⚠️ **Stop with Ctrl+C** so `--export-on-exit` persists emulator data.
@@ -751,6 +772,39 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   on the VPS. Writes are intercepted on the single exported `db` handle rather than at the 216
   write call sites, and `scripts/test-doc-cache-interception.ts` fails the build if a module builds
   its own `admin.firestore()`.
+- **A location ping is the highest-frequency write in the product, so its cost is a DESIGN
+  constraint, not an implementation detail.** `updateLocation` used to cost **2 writes + 3 reads per
+  ping** — and the third read was pure waste: `resolveCallerTeam` had already fetched the team
+  document and `updateLocation` destructured only `teamId` off it, then re-read the same doc for the
+  safe-zone check. At play-web's 20 s cadence that is 81,000 reads and 54,000 writes for 120 players
+  over 75 minutes: **location alone blew both Spark ceilings**, before a single mission, photo or
+  chat message. Now measured at **1.52 reads / 0.43 writes per ping** ⇒ ~41,000 reads and ~11,600
+  writes, inside both. Three levers, in order of size: (1) the pin is written at most once per 60 s,
+  with an immediate write on a jump beyond 75 m; (2) the duplicate team read is gone; (3) the game
+  doc (`safeZone`, immutable mid-run) goes through `cachedGetDoc`. Rules that must survive any future
+  edit here: **the last-fix state lives in an in-process `Map`** (`functions/src/lastFixStore.ts`,
+  modelled on `rateLimitStore.ts`) — reading `teamLocations` to decide whether to write
+  `teamLocations` would add back the read the change exists to remove, so this is now the **third**
+  module depending on the API running as ONE process (with `docCache.ts` and `rateLimitStore.ts`;
+  see the single-process entry above). **Significance is judged against the fix's own accuracy
+  radius**, not a fixed metre threshold — a stationary phone with 20 m accuracy jitters 10–30 m, so
+  a flat 15 m rule would be defeated by noise; this mirrors what `safeZone.ts` already does for
+  boundary crossings. And **the safe-zone evaluation stays strictly UPSTREAM of the suppression
+  decision**: a stationary team standing OUTSIDE the zone must still raise a breach alert while its
+  position write is suppressed, and a suppressed ping from inside must still clear the flag. Those
+  are the two highest-value assertions in `scripts/e2e-verify.mjs` — never let a suppression path
+  reach the safety logic. Verdicts are pure and total in
+  `packages/shared/src/locationPingEconomy.ts`, failing toward WRITING on any malformed input.
+- **A per-ping history track makes a movement heatmap report the opposite of movement.** Retaining
+  a `locationTrack` point per ping meant the places teams **stood still** — at a task, in a queue —
+  became the hottest cells, at >10× a typical moving cell. Retention is now per ~100 m travelled,
+  which takes that distortion to ≤1.5× while keeping the busy-vs-quiet corridor ratio within 35% of
+  the unsampled map (`scripts/test-heatmap-sampling-fidelity.ts`). Sampling by DISTANCE is more
+  truthful here, not merely cheaper — don't "restore fidelity" by going back to per-ping.
+  **Follow-on, deliberately deferred:** a per-run opt-in (default off) would take the track to zero
+  writes for runs that never open the heatmap — it needs a `Game` setting, Builder UI, i18n and a
+  `BUILDER_EDITABLE_FIELDS` entry, which is why it was left out here rather than half-built
+  (design D4 of `spark-tier-location-load`).
 - **`enforceRateLimit` no longer persists anything.** It used to run a Firestore transaction (1
   read + 1 WRITE) on EVERY rate-limited callable — ~1,516 of each in nine minutes of one 29-person
   run, against a 50,000-read / 20,000-write daily quota, which is how the 2026-08-26 exam run hit
