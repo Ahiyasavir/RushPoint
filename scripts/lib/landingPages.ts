@@ -48,6 +48,22 @@ export const LANDING_ORIGIN = 'https://rush-point.com';
 export const CREATOR_ORIGIN = 'https://creator.rush-point.com';
 
 /**
+ * The marketing site (change: marketing-site).
+ *
+ * Linking to it is not decoration. Without a link in each direction these two
+ * page sets are islands: each internally connected, neither reachable from the
+ * other, and neither passing any signal to the other. The destination is always
+ * in the SAME language as the page carrying the link, so a Hebrew reader is not
+ * handed an English page.
+ */
+export const MARKETING_ORIGIN = 'https://www.rush-point.com';
+
+const MARKETING_LABEL: Record<LandingLanguage, string> = {
+  he: 'על RushPoint',
+  en: 'About RushPoint',
+};
+
+/**
  * The directory the generated pages are written into, relative to the repo root.
  *
  * `public/` is copied verbatim into the build output by Vite, so this needs no build
@@ -804,6 +820,7 @@ ${siblingLinks}
     </main>
     <footer>
       <a href="${landingPageUrl(counterpart)}" hreflang="${hreflangFor(counterpart.language)}">${esc(COUNTERPART_LABEL[counterpart.language])}</a>
+      <a href="${MARKETING_ORIGIN}/${page.language}/">${esc(MARKETING_LABEL[page.language])}</a>
       <a href="${LANDING_ORIGIN}/">${esc(page.language === 'he' ? 'הצטרפות למשחק' : 'Join a game')}</a>
       <a href="${LANDING_ORIGIN}/privacy">${esc(page.language === 'he' ? 'פרטיות' : 'Privacy')}</a>
       <a href="${LANDING_ORIGIN}/terms">${esc(page.language === 'he' ? 'תנאים' : 'Terms')}</a>

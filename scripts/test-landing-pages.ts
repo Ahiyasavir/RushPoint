@@ -29,6 +29,7 @@ import {
   alternatesFor,
   renderLandingPage,
   CREATOR_ORIGIN,
+  MARKETING_ORIGIN,
   LANDING_PUBLIC_DIR,
   STATIC_SITE_URLS,
   landingPageFile,
@@ -584,6 +585,46 @@ check('H · the language scan actually reached the copy', copyScanned >= 100,
   check('K · robots.txt disallows no landing page path', blocked.length === 0, blocked.join(' | '));
   check('K · robots.txt advertises the sitemap',
     /^Sitemap:\s*\S+/im.test(robots));
+}
+
+// ── PART L — the two page sets reference each other ──────────────────────────
+// Without a link in each direction, the landing pages and the marketing site are
+// two islands: each internally connected, neither reachable from the other, and
+// neither passing any signal to the other. Checked from BOTH sides here, because
+// a one directional link is the state this is meant to prevent and it looks
+// perfectly healthy from whichever side has the link.
+{
+  const marketingLinks: string[] = [];
+  let scanned = 0;
+
+  for (const page of LANDING_PAGES) {
+    const html = renderLandingPage(page);
+    scanned++;
+    // Same language, always. Handing a Hebrew reader an English page is a worse
+    // outcome than not linking at all.
+    const wanted = `${MARKETING_ORIGIN}/${page.language}/`;
+    if (!html.includes(`href="${wanted}"`)) {
+      marketingLinks.push(`${page.language}/${page.subject} does not link to ${wanted}`);
+    }
+  }
+
+  check('L · every landing page links to the marketing site in its own language',
+    marketingLinks.length === 0, marketingLinks.slice(0, 4).join(' | '));
+  check('L · the cross link scan actually reached the pages', scanned >= 10, `${scanned} page(s)`);
+
+  // The other direction. The marketing site's navigation is the surface that
+  // carries it; reading the built output would make this test depend on that
+  // build having run, which the pure lane cannot assume.
+  const navSource = join(ROOT, 'apps', 'marketing', 'src', 'navigation.ts');
+  if (existsSync(navSource)) {
+    const nav = readFileSync(navSource, 'utf8');
+    check('L · the marketing site links back to the landing pages',
+      nav.includes(LANDING_ORIGIN) && /landingPageUrl/.test(nav),
+      LANDING_ORIGIN);
+  } else {
+    check('L · the marketing site links back to the landing pages', false,
+      `${navSource} is absent`);
+  }
 }
 
 console.log(`\n${failures === 0 ? 'ALL LANDING PAGE TESTS PASSED' : failures + ' TEST(S) FAILED'}`);

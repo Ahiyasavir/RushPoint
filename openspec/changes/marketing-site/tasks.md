@@ -41,13 +41,13 @@
 
 ## 7. Cross linking with the landing pages (RED first)
 
-- [ ] 7.1 Extend `scripts/test-landing-pages.ts` to assert every landing page links to a marketing site page of the same language, and that the marketing site links back to at least one landing page. Run it and confirm it fails.
-- [ ] 7.2 Add the link to the landing page registry and the link back on the marketing site. Regenerate the landing pages with `npm run seo:build` and confirm 7.1 passes and the drift check stays green.
+- [x] 7.1 Extend `scripts/test-landing-pages.ts` to assert every landing page links to a marketing site page of the same language, and that the marketing site links back to at least one landing page. Run it and confirm it fails.
+- [x] 7.2 Add the link to the landing page registry and the link back on the marketing site. Regenerate the landing pages with `npm run seo:build` and confirm 7.1 passes and the drift check stays green.
 
 ## 8. The no dash rule reaches Markdown (RED first)
 
-- [ ] 8.1 Plant a dash separator in a marketing content file, run `scripts/test-no-dashes.ts`, and confirm it passes today, proving the gap.
-- [ ] 8.2 Add PART E scanning marketing content frontmatter and body, exempting list markers, thematic breaks, setext underlines and code, with a reach assertion. Confirm it catches the planted dash and names the field, then remove the plant.
+- [x] 8.1 Plant a dash separator in a marketing content file, run `scripts/test-no-dashes.ts`, and confirm it passes today, proving the gap.
+- [x] 8.2 Add PART E scanning marketing content frontmatter and body, exempting list markers, thematic breaks, setext underlines and code, with a reach assertion. Confirm it catches the planted dash and names the field, then remove the plant.
 
 ## 9. The contact callable (RED first, coverage guard is the starting state)
 
