@@ -48,6 +48,10 @@ const CANONICAL_UPLOAD_ORIGIN = 'https://api.rush-point.com';
 // and Admin-SDK dependencies.
 const { createUploadHandler, sweepStaleTempUploads } = require('./uploadRoute.js');
 
+// The marketing CMS's GitHub token exchange. Same reasoning: a self-contained
+// route factored out so it can be tested without this file's dependencies.
+const { createOAuthHandlers } = require('./oauthRoute.js');
+
 // Initialise the Admin SDK ONCE. With GOOGLE_APPLICATION_CREDENTIALS set it uses
 // that service account; GCLOUD_PROJECT (or the credential's project) picks the
 // Firebase project whose Auth + Firestore this server reads and writes.
@@ -97,6 +101,31 @@ function reflectCors(req, res) {
 
 // Liveness/readiness for the reverse proxy and `docker healthcheck`.
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// ── The marketing CMS's GitHub sign in (change: marketing-cms-oauth) ──────
+//
+// Decap CMS is a static page; the token it needs can only be minted with a client
+// secret, so the exchange lives here. See oauthRoute.js for the whole handshake.
+//
+// The redirect URI must match the GitHub OAuth application's "Authorization
+// callback URL" byte for byte, so it is derived from the same canonical origin
+// the uploads use rather than from the request, which is behind a proxy.
+const oauth = createOAuthHandlers({
+  clientId: process.env.OAUTH_GITHUB_CLIENT_ID || '',
+  clientSecret: process.env.OAUTH_GITHUB_CLIENT_SECRET || '',
+  redirectUri: process.env.OAUTH_GITHUB_REDIRECT_URI
+    || `${VPS_UPLOAD_ORIGIN || CANONICAL_UPLOAD_ORIGIN}/oauth/callback`,
+  // Which pages may be handed a GitHub token. Falls back to the API's own origin
+  // allow-list, which already names the marketing site — a SEPARATE variable
+  // exists so the CMS can be limited to fewer origins than the API serves, never
+  // more. Unset and empty both mean "not configured", and refuse every sign in.
+  allowedOrigins: (process.env.OAUTH_ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+});
+app.get('/oauth/callback', (req, res) => oauth.callback(req, res));
+app.get('/oauth', (req, res) => oauth.begin(req, res));
 
 // ── File upload + serving (change: vps-upload-route) ──────────────────────
 // With Firebase Storage behind Blaze billing (no bucket), uploads are routed

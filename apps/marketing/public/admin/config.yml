@@ -15,11 +15,23 @@ backend:
   # Must be the branch the site is actually deployed from. Content committed to a
   # branch nobody builds is content nobody sees.
   branch: topographic-maps
-  # The token exchange endpoint. Until the OAuth application exists and this is
-  # deployed, the CMS renders but cannot sign in; the site and every content file
-  # are entirely usable meanwhile. See the operator checklist.
+  # The token exchange endpoint: `<base_url>/<auth_endpoint>`, which is
+  # https://api.rush-point.com/oauth — served by functions/oauthRoute.js, mounted
+  # in functions/server.js. Both halves are asserted by
+  # scripts/test-marketing-cms-config.ts, because a base_url pointing at a route
+  # nobody serves fails only when someone tries to sign in.
+  #
+  # The endpoint answers 503 until OAUTH_GITHUB_CLIENT_ID / _SECRET are set on the
+  # API (DEPLOY.md §12E). In that state the CMS renders and says it cannot sign
+  # in; the site and every content file are entirely usable meanwhile.
   base_url: https://api.rush-point.com
   auth_endpoint: oauth
+  # The narrower of GitHub's two repository scopes, and enough because this
+  # repository is PUBLIC. `repo` would additionally grant this browser page write
+  # access to every private repository the editor's account can reach — a large
+  # blast radius for a blog post. If the repository is ever made private, sign in
+  # keeps working and commits start failing: change this to `repo` then.
+  auth_scope: public_repo
 
 # Where an uploaded image or video lands, and how a page refers to it afterwards.
 # public/ is copied to the site root verbatim, so an upload is reachable at

@@ -75,6 +75,17 @@ services:
       # ⚠️ If this service is ever given `deploy.replicas > 1` or put behind a second
       # container, REMOVE this line first.
       RUSHPOINT_DOC_CACHE: "1"
+      # ── The marketing CMS's GitHub sign in (change: marketing-cms-oauth) ────
+      # Which pages may be handed a repo-scoped GitHub token by /oauth/callback.
+      # Deliberately NARROWER than ALLOWED_ORIGINS above: the CMS lives only on
+      # the marketing site, and a token that can write to this repository has no
+      # business being posted to the play or creator apps. The *.web.app entry is
+      # the marketing Hosting site's default address, which is where the admin
+      # page is reachable until www.rush-point.com's DNS is cut over (§12B).
+      #
+      # The client id and secret come from ./api.env — NOT from this file, which
+      # is in git. Without them /oauth answers 503 and nothing else changes.
+      OAUTH_ALLOWED_ORIGINS: "https://www.rush-point.com,https://rushpoint-marketing.web.app"
       VPS_UPLOAD_ORIGIN: "https://api.rush-point.com"
       UPLOAD_DIR: "/data/uploads"
     volumes:

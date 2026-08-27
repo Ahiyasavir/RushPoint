@@ -553,26 +553,70 @@ notification is allowed to be best effort: nothing is lost when an email fails.
 
 ### E. The CMS (`/admin/` on the marketing site)
 
-Decap commits content straight to this repository through GitHub. Two things have to exist
-off-site before anyone can sign in, and **neither of them affects the site itself**: until
-they are done the admin page loads and says it cannot authenticate, while every published
-page, every post and every gate is completely unaffected. Content can still be added by
-editing files in `apps/marketing/src/data/post/` and committing.
+Decap commits content straight to this repository through GitHub. The token that lets it do
+so can only be minted with a client secret, and a secret in a static site is not a secret —
+so the exchange happens on the API. **That endpoint now exists** (`functions/oauthRoute.js`,
+mounted at `/oauth` and `/oauth/callback` by `functions/server.js`); what is left is
+off-site, and **none of it affects the site itself**: until it is done the admin page loads
+and says the editor is not connected to GitHub yet, while every published page, every post
+and every gate is completely unaffected. Content can still be added by editing files in
+`apps/marketing/src/data/post/` and committing.
 
-1. **A GitHub OAuth application.** GitHub → Settings → Developer settings → OAuth Apps →
-   New OAuth App.
-   - Homepage URL: `https://www.rush-point.com`
-   - Authorization callback URL: `https://api.rush-point.com/oauth/callback`
-   - Keep the **Client ID** and generate a **Client secret**. The secret is shown once.
-2. **The token exchange endpoint on the VPS.** Decap's GitHub backend needs a small service
-   at the `base_url` declared in `apps/marketing/public/admin/config.yml`
-   (`https://api.rush-point.com`) serving `/oauth` and `/oauth/callback`. It holds the
-   client secret and swaps GitHub's temporary code for a token; the secret must never be
-   in the built site, which is why this cannot be done in the browser alone.
+**Step 1 — create the GitHub OAuth application.** GitHub → Settings → Developer settings →
+OAuth Apps → New OAuth App. This is the only step that needs a signed-in GitHub session, so
+it is the one that cannot be scripted.
 
-   Set `OAUTH_GITHUB_CLIENT_ID` and `OAUTH_GITHUB_CLIENT_SECRET` in the API's environment
-   and restart. Confirm by opening `https://www.rush-point.com/admin/` and signing in: a
-   successful sign in lands back on the admin page with the post list.
+| Field | Value |
+|---|---|
+| Application name | `RushPoint content` (shown to you on the consent screen, nothing else reads it) |
+| Homepage URL | `https://www.rush-point.com` |
+| Authorization callback URL | `https://api.rush-point.com/oauth/callback` |
+
+The callback URL is compared by GitHub **byte for byte**, including the scheme and the
+absence of a trailing slash. A mismatch is refused by GitHub before our code runs, and the
+popup can only report it vaguely — so if sign in fails with nothing in the API log, this
+field is the first suspect.
+
+Keep the **Client ID** and generate a **Client secret**. The secret is shown once.
+
+**Step 2 — put them on the API.** On the VPS, in `api.env` beside
+`docker-compose.api.yml` (that file is gitignored; `docker-compose.api.yml` is not, which is
+why the secret goes here and not there):
+
+```
+OAUTH_GITHUB_CLIENT_ID=<the client id>
+OAUTH_GITHUB_CLIENT_SECRET=<the client secret>
+```
+
+Then restart the API. This is an environment change, not a code change, so it does not need
+a rebuild:
+
+```bash
+docker compose -f docker-compose.api.yml up -d
+```
+
+`OAUTH_ALLOWED_ORIGINS` is already set in `docker-compose.api.yml` and needs no edit. It is
+deliberately **narrower** than `ALLOWED_ORIGINS`: it lists only the two addresses the admin
+page is served from, because it controls which page may be handed a GitHub token that can
+write to this repository, and the play and creator apps have no business receiving one.
+
+**Step 3 — confirm.** Two checks, in this order, because they fail differently:
+
+```bash
+curl -sI https://api.rush-point.com/oauth | head -1
+```
+
+`302` means configured (it is redirecting to GitHub). `503` means the API still has no
+client id or secret — the restart did not pick up `api.env`. Then open
+`https://www.rush-point.com/admin/` (or `https://rushpoint-marketing.web.app/admin/` before
+the DNS cutover in §B) and sign in: a successful sign in closes the popup and lands on the
+post list.
+
+What the endpoint guarantees, so it does not have to be re-derived when reading it: the
+`state` is checked against an httpOnly cookie (a CSRF check), the token is posted only to an
+origin named in `OAUTH_ALLOWED_ORIGINS`, the requested scope is narrowed to `public_repo`,
+and every refusal path returns no token. `scripts/test-decap-oauth.ts` pins all of it and
+runs in `npm test`.
 
 Two facts worth keeping in mind while configuring it:
 
@@ -606,7 +650,7 @@ should not be confused with each other: the runbook above is config, this list i
 | ❌ | **18 commits of `topographic-maps` deployed to the VPS.** It is on `main`, which predates the marketing site, the contact form, and everything in this file past section 11. `submitContactMessage` 404s: the callable does not exist yet on the running server. |
 | ❌ | `firestore.rules` deployed. `main`'s copy has no `contactMessages` rule at all — not open, not closed, simply absent, which Firestore treats as denied by default, but it is untested drift rather than the deliberate `allow read, write: if false` this repository ships. |
 | ❌ | The `rushpoint-marketing` Hosting site + `www.rush-point.com` DNS (§B) — not checked in this pass. |
-| ❌ | The GitHub OAuth app + token exchange endpoint for the CMS (§E) — optional, site works without it. |
+| ❌ | The GitHub OAuth **app** for the CMS, and its two values in `api.env` (§E). The token exchange **endpoint** is now in the repository and ships with the deploy above; what remains is one GitHub form and one restart. Optional — the site works without it. |
 
 To close the code gap: merge or fast-forward `main` to `topographic-maps` (or deploy
 directly from the branch — this repository has done both before, see the merge commits in
