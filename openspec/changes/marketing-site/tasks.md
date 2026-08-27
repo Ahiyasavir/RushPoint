@@ -7,9 +7,9 @@
 
 ## 2. The site origin is declared once (RED first)
 
-- [ ] 2.1 Write `scripts/test-marketing-output.ts` asserting that every absolute self URL in the built output begins with the declared origin, and that no other origin of ours appears. Run it and confirm it fails against the template's placeholder origin, for that reason.
-- [ ] 2.2 Introduce the single origin declaration and route the template's site config, canonical, Open Graph and sitemap generation through it. Confirm 2.1 passes.
-- [ ] 2.3 Prove the check bites: temporarily hardcode one page's canonical to a different host, confirm the test fails and names it, then revert.
+- [x] 2.1 Write `scripts/test-marketing-output.ts` asserting that every absolute self URL in the built output begins with the declared origin, and that no other origin of ours appears. Run it and confirm it fails against the template's placeholder origin, for that reason.
+- [x] 2.2 Introduce the single origin declaration and route the template's site config, canonical, Open Graph and sitemap generation through it. Confirm 2.1 passes.
+- [x] 2.3 Prove the check bites: temporarily hardcode one page's canonical to a different host, confirm the test fails and names it, then revert.
 
 ## 3. Bilingual routing and derived alternates (RED first)
 

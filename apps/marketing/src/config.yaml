@@ -1,10 +1,13 @@
 site:
-  name: AstroWind
-  site: 'https://astrowind.vercel.app'
+  name: RushPoint
+  # The ONE origin declaration. scripts/lib/marketingSite.ts carries the same
+  # value for the test lane, and scripts/test-marketing-output.ts asserts the
+  # built output agrees with it. Moving the site is a change HERE plus DNS.
+  site: 'https://www.rush-point.com'
   base: '/'
   trailingSlash: false
 
-  googleSiteVerificationId: orcPxI47GSa-cRvY11tUe6iGg2IO_RPvnA1q95iEM3M
+  # googleSiteVerificationId: set once the Search Console property exists.
 
 # Default SEO metadata
 metadata:
