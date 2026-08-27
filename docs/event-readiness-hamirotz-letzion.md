@@ -103,3 +103,92 @@ In priority order, all in the Builder, all quick:
    the two media missions.
 
 Items 1–3 are strictly safer at this scale; none of them changes what the game asks players to do.
+
+---
+
+## 6. Firebase quota — the thing that would actually have stopped the event
+
+Measured against **production** (`api.rush-point.com` with server-side op counting on), not
+estimated. Spark allows **50,000 reads and 20,000 writes per day**, and one event has to fit
+inside one day.
+
+### Writes: fixed
+
+`updateLocation` cost **2 writes per ping**. For 100 teams over 75 minutes that is 54,000 writes
+— 2.7× the daily ceiling from location alone. After `spark-tier-location-load` the pin is
+written at most once a minute (immediately on a real move) and the history track keeps a point
+per ~100 m instead of per ping:
+
+| | before | after | ceiling |
+|---|---|---|---|
+| writes, 100 teams | ~54,000 | **13,500** | 20,000 |
+
+### Reads: found, and fixed
+
+Adding the op counter immediately showed the read side was worse, and that **location was not
+the culprit**:
+
+| source | reads at 100 teams | share |
+|---|---|---|
+| `getMyTeamState` polled every 12 s | 61,125 | **65%** |
+| `updateLocation` every 20 s | 22,500 | 24% |
+| everything else | ~10,000 | 11% |
+| **total** | **~93,600** | vs a 50,000 ceiling |
+
+The participant screen polled every 12 seconds *in addition to* a live document listener that
+already pushes every change. The poll is a fallback for the leaderboard and for listener
+recovery — neither needs 12 seconds. `participant-read-budget` changes it to 45 s and stops the
+client sending location fixes the server was going to discard anyway (it applies the server's
+own verdict, with a 60-second safety floor so a safe-zone breach is still caught).
+
+| | before | after | ceiling |
+|---|---|---|---|
+| reads, 100 teams | ~93,600 | **~33,800** | 50,000 |
+| reads, 120 teams | ~112,300 | **~40,600** | 50,000 |
+
+Measured in the gate's own test: a walking team now sends **76 of 226 fixes — 66% withheld** —
+while still reporting often enough that the live staff map stays useful.
+
+**Verdict: 100 teams fits, with roughly a third of the read budget spare. 120 teams fits at
+about 81% of the ceiling** — enough to run, thin enough that it should be watched rather than
+assumed.
+
+### One caveat worth stating plainly
+
+These figures count reads the **server** performs. The participant app also holds client-side
+Firestore listeners (team document, chat, announcements, photo feed) whose reads are billed but
+are invisible to the server-side counter. They are small per team, but they are not zero, and
+they are not in the table above.
+
+---
+
+## 7. One open defect, found while testing — not yet fixed
+
+The 8-team emulator load simulation occasionally reports:
+
+```
+VIOLATION  no player callable surfaced INTERNAL under load :: 1x [completeTask]
+```
+
+`completeTask` returns an opaque `internal` error to the player. The harness's own comment
+identifies this class as an un-retried Firestore `ABORTED` under the single-run-document lock.
+**The player sees "something went wrong" on an action that actually succeeded server-side** — a
+reload shows the points banked, which is why it reads as random rather than as a bug.
+
+Reproduction rate measured tonight, 8 teams:
+
+| server code | clean runs | violations |
+|---|---|---|
+| before the location change | 3 | 0 |
+| after the location change | 4 | 1 |
+
+That is **not enough evidence to attribute it to the location change**, and it did not reproduce
+in the three most recent runs on current code. It is rare (~1 in 5 at 8 teams) and appears to be
+pre-existing. It is recorded here rather than dismissed because the failure rate under lock
+contention should be expected to rise with team count, and at ~100 teams a rare error becomes a
+regular one. Next step is to reproduce at `--teams=16`, where the harness notes it becomes
+reliable, and capture the underlying Firestore error.
+
+Not a launch blocker on its own: the action succeeds, the score is correct, and the player
+recovers by reloading. But it is the most likely source of "the app showed an error" reports on
+the day.

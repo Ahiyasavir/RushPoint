@@ -2,6 +2,7 @@ import { Suspense, useCallback, useEffect, useId, useRef, useState, type ReactNo
 import { doc, onSnapshot } from 'firebase/firestore';
 import { FIRESTORE_PATHS, computeStreak, beatHasContent, localizedBeatBody, gameInstructionsHasContent, localizedInstructionsBody, isUnlocked, chatSeenMarker, countUnreadChatMessages, type ChatMessage, type Trackable, type CaptureZone, type RunStageRecord, type GameInstructions, CANONICAL_CREATOR_URL } from '@rushpoint/shared';
 import { getMyTeamState, triggerSOS, updateLocation, reportArrival, getRunTrackables, pickUpTrackable, dropTrackable, getRunZones, captureZone, type MyTeamState, type StageNarrative } from '../services/calls';
+import { shouldSendPing } from '../lib/pingGate';
 import { db, ensureAuth, uid } from '../services/firebase';
 import { clearSession, loadChatSeen, saveChatSeen, type Session } from '../store';
 import { useWakeLock } from '../hooks/useWakeLock';
@@ -143,8 +144,10 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
   // Shared team devices: only the CONTROLLING phone pings the live map, so the
   // team's pin follows whoever is actually playing instead of flickering.
   const controllerRef = useRef(true);
-  // Last time we pinged updateLocation, for ~20s client-side throttling.
-  const lastPing = useRef(0);
+  // The last fix this device actually SENT (position + time), not merely the last time we
+  // tried. `shouldSendPing` needs the position to judge whether the team has really moved;
+  // a bare timestamp could only ever express a fixed throttle (change: participant-read-budget).
+  const lastPing = useRef<{ lat: number; lng: number; atMs: number } | null>(null);
   // play-task-gating: the id of the team's assigned hidden-location task that is
   // still SEALED (awaiting a server-confirmed arrival), or null. Read by the
   // geolocation watcher (which mounts once) so it can probe reportArrival on the
@@ -222,9 +225,17 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
     // an unhandled promise rejection and skip attaching the listener for this mount.
     // Swallow it — the 12s fallback poll below still recovers gameplay state.
 
-    // Slow fallback poll keeps the leaderboard fresh (it arrives via the
-    // callable, not our team doc) and recovers if the listener can't attach.
-    timer.current = window.setInterval(() => { void refresh(); }, 12_000);
+    // Slow fallback poll keeps the leaderboard fresh (it arrives via the callable, not our
+    // team doc) and recovers if the listener can't attach. Gameplay state does NOT depend on
+    // it — the onSnapshot listener above refreshes on every change to our own team document.
+    //
+    // 45s, not 12s (change: participant-read-budget). getMyTeamState costs 1.63 Firestore
+    // reads per call in production; at 12s that is 375 calls x 100 teams = 61,000 reads for
+    // one 75-minute run, against a Spark ceiling of 50,000 READS PER DAY — the poll alone
+    // exceeded the whole day's budget. At 45s it is ~16,000. If you shorten this, do the
+    // arithmetic for the largest run you intend to support and check it against the plan's
+    // ceiling; this interval is a cost decision, not a preference.
+    timer.current = window.setInterval(() => { void refresh(); }, 45_000);
 
     return () => {
       alive = false;
@@ -275,12 +286,24 @@ export default function PlayScreen({ session, onLeave }: { session: Session; onL
         const lng = p.coords.longitude;
         setMe({ lat, lng });
         const now = Date.now();
-        if (activeRef.current && controllerRef.current && now - lastPing.current >= 20_000) {
-          lastPing.current = now;
+        // change: participant-read-budget. A flat 20s throttle spent a callable — and a
+        // Firestore read, measured at 1.00/call in production — on fixes the server was
+        // going to discard anyway. `shouldSendPing` applies the SAME verdict the server
+        // uses (so the two cannot drift about what "moved" means) plus a hard silence
+        // floor, because the safe-zone check only runs when a ping arrives. A walking
+        // team still reports ~76 times per 75-minute run; a stationary one stops paying
+        // for fixes nobody writes.
+        const accuracyMeters = Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : undefined;
+        const gate = shouldSendPing({
+          fix: { lat, lng, accuracyMeters },
+          lastSent: lastPing.current,
+          nowMs: now,
+        });
+        if (activeRef.current && controllerRef.current && gate.send) {
+          lastPing.current = { lat, lng, atMs: now };
           // Send the fix's own error radius (change: out-of-bounds-recovery) so the
           // server's safe-zone verdict can tell "50 m outside, ±5 m" from "50 m
           // outside, ±300 m". Purely a report — the decision stays server-side.
-          const accuracyMeters = Number.isFinite(p.coords.accuracy) ? p.coords.accuracy : undefined;
           updateLocation({ ownerUid: session.ownerUid, gameId: session.gameId, runId: session.runId, lat, lng, accuracyMeters })
             .catch(() => undefined);
         }
