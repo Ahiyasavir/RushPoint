@@ -20,6 +20,7 @@ import { load } from 'js-yaml';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_PATH = 'apps/marketing/public/admin/config.yml';
 const SCHEMA_PATH = 'apps/marketing/src/content.config.ts';
+const INDEX_PATH = 'apps/marketing/public/admin/index.html';
 
 let failures = 0;
 // `detail` is shown either way (it usually carries the value under test);
@@ -32,6 +33,24 @@ function check(label: string, cond: boolean, detail = '', hint = ''): void {
 
 const configSource = readFileSync(path.join(root, CONFIG_PATH), 'utf8');
 const schemaSource = readFileSync(path.join(root, SCHEMA_PATH), 'utf8');
+const adminHtml = readFileSync(path.join(root, INDEX_PATH), 'utf8');
+
+// ── The editor has to actually mount ─────────────────────────────────────────
+// Decap appends itself to document.body the moment it runs. Loaded from <head>
+// that body does not exist yet, and the editor dies on load with
+// "Cannot read properties of null (reading 'appendChild')" — a blank page whose
+// only symptom is one line in the browser console. It shipped that way from the
+// day the CMS was added, so /admin/ had never rendered once; every gate was
+// green throughout, because nothing here had ever opened the page.
+{
+  const scriptAt = adminHtml.indexOf('decap-cms.js');
+  const bodyAt = adminHtml.indexOf('<body');
+  check('the admin page loads the Decap script', scriptAt !== -1, '',
+    `no decap-cms.js <script> in ${INDEX_PATH}`);
+  check('the Decap script runs after <body> exists',
+    scriptAt !== -1 && bodyAt !== -1 && scriptAt > bodyAt,
+    '', 'move the <script> to the end of <body> (or give it defer) — from <head> it mounts onto a null body');
+}
 
 // ── The schema's top-level keys, read from source ────────────────────────────
 // The schema cannot simply be imported: it depends on `astro:content`, a virtual
