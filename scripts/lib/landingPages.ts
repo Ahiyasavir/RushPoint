@@ -692,8 +692,16 @@ const STYLE = `
   /* --brand is the FILL, --brand-ink is brand-coloured TEXT, and --cta-ink is what
      sits on the fill. One token was doing all three and failed as two of them:
      #EA580C measured 3.56:1 under white and 3.45:1 as link text, where both need
-     4.5:1. #C2410C is the same hue, one step deeper: 5.18:1 and 5.02:1. */
-  --brand: #c2410c; --brand-ink: #c2410c; --cta-ink: #ffffff; }
+     4.5:1.
+
+     The replacement is play-web's ink-fire token, not a shade invented here. No
+     backticks in this comment: the whole stylesheet is a template literal, and a
+     backtick here ends it several hundred characters early. The
+     product already solved this problem and wrote down the rule beside the token:
+     fills keep the brand orange, TEXT uses a darkened variant. Using it gives
+     5.89:1 as link text and 6.08:1 under white, and means these pages carry the
+     product's colour rather than a third orange that happens to pass. */
+  --brand: #b03a0b; --brand-ink: #b03a0b; --cta-ink: #ffffff; }
 @media (prefers-color-scheme: dark) { :root { --ink: #f5f5f4; --muted: #a8a29e;
   --bg: #0c0a09; --card: #1c1917; --line: #292524;
   /* In dark the fill is a LIGHT orange, so white on it was 2.26:1, the worst

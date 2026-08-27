@@ -63,6 +63,12 @@ function cssToken(source: string, token: string): string | null {
 
 const fire = tailwindToken(creatorTw, 'rp-fire');
 const plasma = tailwindToken(creatorTw, 'rp-plasma');
+// The darkened variant brand-coloured TEXT is drawn in. play-web introduced this
+// scale with the rule beside it: fills, borders, rings and gradients keep the
+// brand orange, and text uses this, because #FF5722 is 3.16:1 on a light surface.
+// Read from the app rather than restated, for the same reason as everything else
+// here: a second copy is a second opinion waiting to disagree.
+const inkFire = tailwindToken(playTw, 'ink-fire');
 const ink1 = cssToken(creatorCss, '--ink-1');
 const ink3 = cssToken(creatorCss, '--ink-3');
 const warmBg = tailwindToken(playTw, 'app-bg');
@@ -73,11 +79,11 @@ const warmBg = tailwindToken(playTw, 'app-bg');
 // alternative is a suite that stops checking and says nothing.
 check(
   'A · the brand was read out of the apps themselves',
-  Boolean(fire && plasma && ink1 && ink3 && warmBg),
-  JSON.stringify({ fire, plasma, ink1, ink3, warmBg }),
+  Boolean(fire && plasma && ink1 && ink3 && warmBg && inkFire),
+  JSON.stringify({ fire, plasma, ink1, ink3, warmBg, inkFire }),
 );
 
-if (!(fire && plasma && ink1 && ink3 && warmBg)) {
+if (!(fire && plasma && ink1 && ink3 && warmBg && inkFire)) {
   console.log('');
   console.log(`MARKETING THEME TESTS FAILED :: ${failures} of ${checks}`);
   process.exit(1);
@@ -100,6 +106,7 @@ const EXPECTED: Array<[string, string, string]> = [
   ['--aw-color-text-default', ink1, 'body text uses the ink scale'],
   ['--aw-color-text-muted', ink3, 'muted text uses the ink scale'],
   ['--aw-color-bg-page', warmBg, "the page surface is the app's own"],
+  ['--aw-color-secondary', inkFire, "brand coloured text uses play-web's ink-fire, not a new shade"],
 ];
 
 for (const [token, expected, label] of EXPECTED) {
@@ -262,7 +269,7 @@ if (pageBg && inkDefault && inkMuted && brandDeep && brand) {
   console.log('');
   console.log(`NOTE  white on the brand accent is ${ctaRatio.toFixed(2)}:1; body sized button text needs 4.50:1.`);
   console.log('NOTE  This is the apps own primary button pairing, so it is a product wide brand decision.');
-  console.log(`NOTE  Options: a deeper fill (white on #c03d14 is ${contrast('#ffffff', '#c03d14').toFixed(2)}:1), or`);
+  console.log(`NOTE  Options: play-web's ink-fire as the fill (white on #b03a0b is ${contrast('#ffffff', '#b03a0b').toFixed(2)}:1), or`);
   console.log(`NOTE  dark text on the existing fill (${inkDefault} on ${brand} is ${contrast(inkDefault, brand).toFixed(2)}:1).`);
   console.log('');
 }
