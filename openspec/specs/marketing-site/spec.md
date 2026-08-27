@@ -389,3 +389,58 @@ branding is indistinguishable from a finished site to whoever is looking at it.
 
 - **WHEN** the default social sharing image is resolved
 - **THEN** it is the product's own image, not one supplied by the template
+
+### Requirement: A page reads in the language it declares
+
+Every published page SHALL be free of text in a language other than the one it declares,
+judged on its RENDERED output rather than on its source.
+
+The judgement SHALL use the repository's single shared language leak predicate, so that
+what counts as a leak has one definition rather than one per checker.
+
+Output rather than source is the substance of this requirement, not an implementation
+note. A source scan can only read the files it thinks to read, so a literal hardcoded
+inside a component, or a default on a property nobody passed, is invisible to it while
+being perfectly visible to a reader.
+
+A brand name, a language's own name in the language switch, and a formatted date SHALL NOT
+count as leaks.
+
+#### Scenario: A page in one language contains no text from the other
+
+- **WHEN** the visible text of a published page is read from the built output
+- **THEN** none of it is in a language other than the one the page declares
+
+#### Scenario: A hardcoded string bypassing the copy modules is still caught
+
+- **WHEN** text in the wrong language is written directly into a component rather than into the copy modules
+- **THEN** the page fails the check and the offending text is quoted
+
+### Requirement: Every page is reachable and readable without a mouse
+
+Every published page SHALL offer a link that skips the navigation, in the page's own
+language, and the target of that link SHALL be focusable.
+
+A skip link whose target cannot receive focus moves the viewport and leaves focus in the
+navigation, which is indistinguishable to the user from the link not working, and is not
+detectable by checking that the link exists.
+
+Every published page SHALL declare exactly one top level heading and exactly one main
+landmark, SHALL give every image an alt attribute, and SHALL write every accessible name
+in the page's own language. An accessible name in the wrong language is read aloud in the
+wrong language and is invisible on screen, so no visual review finds it.
+
+#### Scenario: The skip link moves focus, not just the viewport
+
+- **WHEN** a keyboard user activates the skip link
+- **THEN** focus moves to the main content
+
+#### Scenario: A page states what it is, once
+
+- **WHEN** a published page's headings and landmarks are counted
+- **THEN** there is exactly one top level heading and exactly one main landmark
+
+#### Scenario: Accessible names match the page's language
+
+- **WHEN** a page's accessible names are read
+- **THEN** each is in the language the page declares

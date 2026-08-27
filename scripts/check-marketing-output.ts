@@ -22,6 +22,7 @@
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
+import { hasEnglishWord, hasHebrew } from './lib/i18nLeak.ts';
 import {
   SITE_ORIGIN,
   DIRECTION,
@@ -596,6 +597,75 @@ for (const page of contentPages) {
   const mains = (html.match(/<main[\s>]/g) ?? []).length;
   check(`I · ${urlPath} has exactly one main landmark`, mains === 1, `${mains}`);
 }
+
+// ── J. A page's visible text is in the page's own language ───────────────────
+//
+// The recurring bug in this repository is English showing while the interface is
+// in Hebrew. Both apps have a gate for it. The marketing site had none, and it is
+// the surface where it would matter most: a visitor arriving from a Hebrew search
+// and finding an English paragraph does not file a bug, they leave.
+//
+// Asserted on the BUILT output rather than on source, which is deliberate and
+// stronger. A source scan can only find strings in the files it thinks to read,
+// so a literal hardcoded inside a vendored template component, or a default value
+// on a prop nobody passed, is invisible to it. What a reader sees is the rendered
+// page, so that is what is read.
+//
+// The predicate is IMPORTED, never restated. It already knows that "RushPoint" may
+// stay Latin inside Hebrew, and that the language switch says "English" on a
+// Hebrew page and "עברית" on an English one, both on purpose. Restating any of
+// that here would give the repository a second opinion about what counts as a
+// leak, and the two would drift.
+
+/** Everything that is markup, machinery or code rather than something a person reads. */
+function visibleText(html: string): string {
+  const body = html.slice(html.indexOf('<body'));
+  return body
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    // Tags become line breaks rather than nothing, so two adjacent elements do
+    // not weld into one word that belongs to neither.
+    .replace(/<[^>]*>/g, '\n')
+    .replace(/&[a-z]+;|&#\d+;/gi, ' ');
+}
+
+let leakLines = 0;
+
+for (const page of contentPages) {
+  const { html, urlPath } = page;
+  const expectHebrew = urlPath.startsWith('/he/');
+
+  const lines = visibleText(html)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  // A date renders as "20 August 2026" on an English page and in Hebrew on a
+  // Hebrew one, which is correct in both, and it is the only text on the page
+  // this repository does not author. Skipping a line that is only a date is
+  // narrower than whitelisting month names into the shared predicate, where they
+  // would then be exempt everywhere including in copy.
+  const isDateOnly = (l: string) => /^[\d\s.,/\u0590-\u05FFA-Za-z]{4,24}$/.test(l) && /\d{4}/.test(l);
+
+  const leaks = lines.filter((l) => {
+    if (isDateOnly(l)) return false;
+    return expectHebrew ? hasEnglishWord(l) : hasHebrew(l);
+  });
+
+  leakLines += lines.length;
+
+  check(
+    `J · ${urlPath} reads in its own language`,
+    leaks.length === 0,
+    leaks.slice(0, 3).map((l) => l.slice(0, 60)).join(' | ') || `${lines.length} line(s) read`,
+  );
+}
+
+// Without this, a page whose body failed to render would pass by having no text
+// to be wrong. That is the same vacuous pass this file keeps running into.
+check('J · the language scan actually read page text', leakLines > 200, `${leakLines} line(s)`);
 
 console.log('');
 if (failures > 0) {
