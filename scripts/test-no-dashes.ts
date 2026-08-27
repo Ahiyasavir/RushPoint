@@ -23,12 +23,13 @@
 //            scripts/check-i18n.ts → no className/import false positives. Suppress
 //            a deliberate literal with a trailing `// i18n-ignore`.
 //   npx tsx scripts/test-no-dashes.ts
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, relative, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
+import { LANDING_PAGES } from './lib/landingPages';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -244,6 +245,168 @@ for (const app of ['creator-web', 'play-web']) {
   while ((m = metaRe.exec(html))) if (HTML_TEXT_META.has(m[1])) scanned++;
 }
 check('C · the metadata scan actually reached the fields it polices', scanned >= 14, `${scanned} field(s)`);
+
+// ── PART D — STATIC LANDING PAGE COPY ────────────────────────────────────────
+// Same lesson as PART C, one surface further out. The landing pages under
+// apps/play-web/public/ are prose Google prints directly, and they live in NEITHER of the
+// places the earlier parts look: not in a t.* dictionary (a static HTML file cannot
+// import the module graph) and not in component source. PART C does not reach them either
+// — it scans `apps/<app>/index.html` by name, and these are different files entirely.
+//
+// The REGISTRY is scanned rather than the generated HTML, deliberately: the registry is
+// where a human types, so an offender can be named by its field path
+// (`en/home.sections[0].paragraphs[1]`) instead of by a line number in generated markup
+// that the author would then have to trace back by hand.
+//
+// Slugs and URLs are NOT scanned. The standard governs prose and explicitly exempts file
+// paths, so `bar-mitzva` and `rush-point.com` are correct as they are.
+const landingOffenders: string[] = [];
+let landingScanned = 0;
+
+for (const page of LANDING_PAGES) {
+  const label = `${page.language}/${page.subject}`;
+  const fields: Array<[string, string]> = [
+    [`${label}.title`, page.title],
+    [`${label}.description`, page.description],
+    [`${label}.headline`, page.headline],
+    [`${label}.intro`, page.intro],
+    [`${label}.ctaLabel`, page.ctaLabel],
+  ];
+  page.sections.forEach((s, i) => {
+    fields.push([`${label}.sections[${i}].heading`, s.heading]);
+    s.paragraphs.forEach((t, j) => fields.push([`${label}.sections[${i}].paragraphs[${j}]`, t]));
+  });
+
+  for (const [where, value] of fields) {
+    landingScanned++;
+    if (BANNED_DASH.test(value)) landingOffenders.push(`${where} → "${value.trim()}"`);
+  }
+}
+
+check('D · no hyphen or dash in static landing page copy',
+  landingOffenders.length === 0, landingOffenders.join(' | '));
+
+// Same reach assertion as PART C, for the same reason: a registry reshape that made the
+// loop above iterate nothing would turn this into a green line that checked no copy at
+// all, which is worse than no gate because it looks like one.
+check('D · the landing page scan actually reached the copy', landingScanned >= 100,
+  `${landingScanned} field(s)`);
+
+// ── PART E — MARKETING SITE CONTENT ──────────────────────────────────────────
+// One surface further out again, and the one with the least protection of all.
+//
+// The marketing site (apps/marketing) has no t.* dictionary, so PART A cannot see it, and
+// its copy is not JSX, so PART B cannot either. Worse than the landing pages: most of this
+// copy will eventually be typed by whoever is AUTHORING, through a browser CMS that gives
+// no hint the standard exists. A rule enforced only where developers type is not enforced
+// where most of the words come from.
+//
+// Two sources, scanned differently because they fail differently:
+//   • src/copy/*.ts   — per language prose modules. String literals only, and only the
+//                       ones that are prose: an icon name (`tabler:map-pin`) and a CSS
+//                       class (`text-accent`) both contain hyphens and both are exempt
+//                       under the standard's existing carve out for class names.
+//   • src/data/post/* — Markdown. Frontmatter PROSE fields plus the body. A hyphen that is
+//                       Markdown SYNTAX is not copy: a list marker, a thematic break and a
+//                       setext underline all render as structure, not as a dash in a
+//                       sentence. Code fences and inline code are exempt for exactly the
+//                       reason code comments already are.
+//
+// Slugs, tags, urls and filenames are NOT scanned: the standard exempts file paths, and a
+// url safe slug is required to use hyphens by the schema that validates it.
+const MARKETING_COPY_DIR = join(ROOT, 'apps', 'marketing', 'src', 'copy');
+const MARKETING_POST_DIR = join(ROOT, 'apps', 'marketing', 'src', 'data', 'post');
+
+const marketingOffenders: string[] = [];
+let marketingScanned = 0;
+
+/** True for a literal that is an identifier rather than something a reader reads. */
+function isNotProse(literal: string): boolean {
+  return (
+    /^tabler:/.test(literal) ||               // icon name
+    /^https?:/.test(literal) ||               // url
+    /^\//.test(literal) ||                    // path
+    /^[a-z0-9]+(-[a-z0-9]+)*$/.test(literal) || // slug or single css class
+    /^[a-z-]+(\s+[a-z0-9:_-]+)+$/.test(literal) || // css class list
+    !/[A-Za-z֐-׿]/.test(literal)    // no letters at all
+  );
+}
+
+if (existsSync(MARKETING_COPY_DIR)) {
+  for (const file of readdirSync(MARKETING_COPY_DIR).filter((f) => f.endsWith('.ts'))) {
+    const source = readFileSync(join(MARKETING_COPY_DIR, file), 'utf8');
+    source.split(/\r?\n/).forEach((line, i) => {
+      // Comments are exempt, exactly as they are everywhere else in this standard.
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+      for (const [, literal] of line.matchAll(/'((?:[^'\\]|\\.)*)'/g)) {
+        if (isNotProse(literal)) continue;
+        // Markup inside prose is not prose. A headline may wrap a word in
+        // <span class="text-accent"> to highlight it, and that class name is
+        // already exempt under the standard's carve out for class names; leaving
+        // the tag in would report the author for the framework's punctuation.
+        const prose = literal.replace(/<[^>]*>/g, ' ');
+        marketingScanned++;
+        if (BANNED_DASH.test(prose)) {
+          marketingOffenders.push(`${file}:${i + 1} → "${prose.trim().slice(0, 70)}"`);
+        }
+      }
+    });
+  }
+}
+
+if (existsSync(MARKETING_POST_DIR)) {
+  for (const file of readdirSync(MARKETING_POST_DIR).filter((f) => /\.mdx?$/.test(f))) {
+    const raw = readFileSync(join(MARKETING_POST_DIR, file), 'utf8').replace(/\r\n/g, '\n');
+    const fm = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    const frontmatter = fm ? fm[1] : '';
+    const body = fm ? fm[2] : raw;
+    // Body line numbers must be reported as FILE line numbers. Reporting the
+    // offset within the body sends the reader to the wrong line, which turns a
+    // precise failure into a hunt.
+    const bodyStartLine = fm ? frontmatter.split('\n').length + 2 : 0;
+
+    // Frontmatter: prose fields only. slug, tags, image, video and pairedSubject are
+    // identifiers and are required to contain hyphens.
+    for (const key of ['title', 'excerpt']) {
+      const m = frontmatter.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'));
+      if (!m) continue;
+      marketingScanned++;
+      if (BANNED_DASH.test(m[1])) {
+        marketingOffenders.push(`${file} frontmatter.${key} → "${m[1].trim().slice(0, 70)}"`);
+      }
+    }
+
+    // Body, with Markdown syntax and code removed rather than tolerated: stripping them
+    // means a real dash inside a sentence on the SAME line is still caught.
+    let inFence = false;
+    body.split('\n').forEach((line, i) => {
+      if (/^\s*```/.test(line)) { inFence = !inFence; return; }
+      if (inFence) return;
+      if (/^\s*(-{3,}|_{3,}|\*{3,})\s*$/.test(line)) return;   // thematic break
+      if (/^\s*(-|={2,})+\s*$/.test(line)) return;             // setext underline
+
+      const text = line
+        .replace(/^\s*[-*+]\s+/, '')          // list marker
+        .replace(/`[^`]*`/g, ' ')             // inline code
+        .replace(/\]\([^)]*\)/g, '] ')        // link target
+        .replace(/^\s*\d+\.\s+/, '');         // ordered list marker
+
+      if (!/[A-Za-z֐-׿]/.test(text)) return;
+      marketingScanned++;
+      if (BANNED_DASH.test(text)) {
+        marketingOffenders.push(`${file}:${bodyStartLine + i + 1} → "${text.trim().slice(0, 70)}"`);
+      }
+    });
+  }
+}
+
+check('E · no hyphen or dash in marketing site content',
+  marketingOffenders.length === 0, marketingOffenders.slice(0, 6).join(' | '));
+
+// The reach assertion, same reason as C and D: this whole part is a set of absences, and
+// an empty input set satisfies every one of them.
+check('E · the marketing content scan actually reached the copy', marketingScanned >= 100,
+  `${marketingScanned} field(s)`);
 
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

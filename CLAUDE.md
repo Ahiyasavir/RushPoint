@@ -100,9 +100,12 @@ fuzz**. There is **no emulator authz bypass** — the suite mints a real `admin`
 real staff tokens, so authz runs the same as production. A **callable coverage guard** ends the
 run: it introspects the callables the emulator serves and fails if any was never invoked (bar an
 explicit `EXEMPT` list, itself checked for stale entries), so a **new callable ships RED until it
-has a test** — add a scenario, don't just add the callable. The table below lists **108** callables
-(plus `stripeWebhook`, the `pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which
-are not callables). Keep it green; extend the relevant scenario (not just the lifecycle).
+has a test** — add a scenario, don't just add the callable. On the last green run the guard
+introspected **112** deployed HTTPS functions and covered all of them; that number is printed by
+the run itself (`coverage: introspected the deployed callable set`), so read it there rather than
+trusting this line, which is a snapshot and ages. The table below lists them by module, plus the
+`pruneExpiredRunData` schedule and the `onRunFinalized` trigger, which are not callables.
+Keep it green; extend the relevant scenario (not just the lifecycle).
 `functions/src/__property__/invariants.property.test.ts` is the fast (no-emulator) invariant lane
 — seeded-random property tests for scoring/ranking/answer/geo/rate-limit; run via `npm test`.
 `npm run simulate` (scripts/simulate-run.mjs, `--teams=N`) is the v2 concurrent load sim — N
@@ -326,6 +329,14 @@ helpers are **internal** (not triggers) — never re-export them.
 | `users/index.ts` | updateMyProfile · exportMyData · deleteMyAccount |
 | `maintenance/index.ts` | pruneExpiredRunDataNow · purgeDeletedGamesNow · **backfillPublicTaskCoordinatesNow** · pruneRunNow · pruneExpiredRunData (pubsub schedule, not a callable) |
 | `admin/index.ts` | **listPlatformUsers** (admin-only creator activity rollup: games created, runs launched, derived last-active, time on site, activation stage — see `apps/creator-web` `/admin/users`) · **recordEngagement** (NOT admin-only: every creator flushes their OWN engaged time; uid from the token, value clamped by `clampEngagementDelta`, stored in the server-only `userEngagement/{uid}`) · **setUserNote** (admin-only private note ABOUT a creator, server-only `userNotes/{uid}`; empty CLEARS the doc. Both collections are deleted by `deleteMyAccount` — they live OUTSIDE `users/{uid}` so the recursiveDelete does not reach them) |
+| `contact/index.ts` | **submitContactMessage** (the marketing site's contact form. The ONLY write endpoint an
+unauthenticated stranger can reach, so it is declared in `PUBLIC_CALLABLES` with its reason; validation,
+a size bound and TWO rate budgets stand in for authentication. The wide `submitContactMessageAttempt`
+budget is charged for every call, the tight `submitContactMessage` one only once a payload has PASSED
+validation, so a person who mistypes their own address is not locked out of the only channel they have.
+The key is derived from the connection, never from the payload) · **listContactMessages** (admin only,
+audit logged, read at `apps/creator-web` `/admin/contact`; the collection is closed to clients in both
+directions) |
 | `admin/templates.ts` | **listGameTemplates** (the new-game menu: every admin-authored template, to any authenticated caller — projected through `TEMPLATE_LIST_FIELDS`, see the field-mask gotcha below) · **createGameFromTemplate** (instantiate one into the caller's own games) · **listAdminTemplates** · **setGameTemplateFlag** (admin-only authoring/curation) |
 | `index.ts` (root) | inviteStaff · staffSignIn · updateLocation · triggerSOS · **sendTeamChatMessage** · acknowledgeAlert · **clearTeamOutOfBounds** · pushAnnouncement · deactivateAnnouncement · pushFlashMission · **reactToFeedItem** · **reportFeedItem** · **hideFeedItem** · verifyStationCode · submitStationPhoto · reviewStationSubmission · adjustTeamScore ·
 **setRunTaskStatus** (pause/close/resume ONE task for ONE run) · listAuditLogs |
@@ -741,6 +752,31 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   a leftover from the dark theme. On the light "Warm Trail" surfaces that is pale grey on beige
   (~1.2:1) — the map search results looked like a disabled control, which is most of why search
   read as broken. New UI uses the `--ink-*` / `--surface-*` tokens; don't reach for `text-zinc-*`.
+
+- **A control character where a regex escape was meant renders as NOTHING and matches
+  NOTHING, so the check built on it passes while examining nothing.** A regex intended as
+  `/<img\b[^>]*>/` was written through a tool whose string escaping turned `\b` into a literal
+  BACKSPACE (U+0008). It looked correct in the editor, correct in `git diff`, and correct in
+  review, because a backspace draws as nothing. It found zero `<img>` tags, and therefore
+  reported that zero images were missing `alt` text: **PASS**. A check that examined nothing and
+  a check that examined everything and found no problem print the same line. It arrives easily
+  from any tool that writes files through a language where `\b` in a string literal means
+  backspace (Python, Ruby, JS strings, `echo -e`). `scripts/test-source-control-chars.ts` now
+  fails on any stray control character in `scripts/`, `packages/shared/src`, `functions/src` and
+  `apps`, naming file and line; six legitimate uses are DECLARED with reasons (sanitiser inputs,
+  `adminNotes.ts`'s own strip range, and the NUL delimiter in `hashAnswerForReplay`), and a stale
+  entry fails too. **Corollary worth generalising: whenever a check counts things, print the
+  denominator.** "0 of 1 images missing alt" is a fact; "no images missing alt" is compatible
+  with having looked at none.
+- **The marketing site is theme-coupled to the apps, and repointing semantic tokens is NOT
+  enough.** `apps/marketing` is a vendored template, and a template writes `slate` / `gray` /
+  `blue` DIRECTLY in dozens of class strings, mostly under `dark:`. Repointing
+  `--aw-color-*` fixed the palette exactly where a token happened to be used and left everything
+  else on the template's cool navy, so dark mode looked like a different product than light
+  mode did. The fix is to redefine the SCALES in `src/assets/styles/tailwind.css` (the same lever
+  creator-web already uses to reverse zinc). `scripts/test-marketing-theme.ts` reads the brand
+  OUT of `apps/*/tailwind.config.js` and `creator-web/src/index.css` rather than restating it, so
+  changing the brand in one place and not the other fails.
 
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```

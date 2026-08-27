@@ -1,0 +1,185 @@
+---
+import PageLayout from '~/layouts/PageLayout.astro';
+import HeroText from '~/components/widgets/HeroText.astro';
+
+import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, API_ORIGIN, type Language } from '~/utils/i18n';
+import { contactCopy, CONTACT_FALLBACK_EMAIL } from '~/copy/contact';
+
+export function getStaticPaths() {
+  return LANGUAGES.map((lang) => ({ params: { lang } }));
+}
+
+const language = Astro.params.lang as Language;
+const t = contactCopy[language];
+
+const metadata = {
+  title: t.title,
+  description: t.description,
+  canonical: pageUrl(language, 'contact'),
+  openGraph: { url: pageUrl(language, 'contact'), locale: OG_LOCALE[language], type: 'website' },
+};
+---
+
+<PageLayout metadata={metadata} language={language} alternates={alternatesFor('contact')}>
+  <HeroText title={t.headline} subtitle={t.intro} />
+
+  <section class="px-4 py-8 sm:px-6 mx-auto max-w-xl lg:px-8 lg:py-12">
+    {/*
+      A real <form> with real labels. It posts through script, but the fields,
+      the labels and the copy are all in the static markup, so the page still
+      says what it is for with scripting disabled.
+    */}
+    <form id="contact-form" class="flex flex-col gap-4" novalidate>
+      <div>
+        <label class="block text-sm font-medium mb-1" for="contact-name">{t.nameLabel}</label>
+        <input
+          class="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+          id="contact-name"
+          name="name"
+          type="text"
+          maxlength="120"
+          required
+          autocomplete="name"
+        />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium mb-1" for="contact-email">{t.emailLabel}</label>
+        <input
+          class="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+          id="contact-email"
+          name="email"
+          type="email"
+          maxlength="200"
+          required
+          autocomplete="email"
+          dir="ltr"
+        />
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium mb-1" for="contact-message">{t.messageLabel}</label>
+        <textarea
+          class="w-full rounded-lg border border-gray-200 bg-white px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+          id="contact-message"
+          name="message"
+          rows="6"
+          maxlength="4000"
+          required></textarea>
+      </div>
+
+      <button
+        class="btn btn-primary self-start"
+        id="contact-submit"
+        type="submit"
+        data-label={t.submit}
+        data-sending={t.sending}
+      >
+        {t.submit}
+      </button>
+
+      {/*
+        One status region for every outcome, announced to assistive technology.
+        It starts empty rather than hidden so the live region already exists when
+        the first message lands in it.
+      */}
+      <p class="text-sm min-h-6" id="contact-status" role="status" aria-live="polite"></p>
+    </form>
+
+    <aside class="mt-12 border-t border-gray-200 pt-8 dark:border-slate-700">
+      <h2 class="text-lg font-semibold mb-2">{t.otherWaysTitle}</h2>
+      <p class="text-muted dark:text-slate-400">{t.otherWaysBody}</p>
+      {/*
+        The one fallback channel. Plain mailto, no script: it has to work in
+        exactly the case where the form's own JavaScript, callable or CORS entry
+        is what is broken, so it cannot depend on any of the three.
+      */}
+      <p class="text-muted dark:text-slate-400 mt-2">
+        {t.directEmailLabel}{' '}
+        <a class="text-secondary hover:underline" dir="ltr" href={`mailto:${CONTACT_FALLBACK_EMAIL}`}>
+          {CONTACT_FALLBACK_EMAIL}
+        </a>
+      </p>
+    </aside>
+  </section>
+</PageLayout>
+
+<script
+  define:vars={{
+    language,
+    apiOrigin: API_ORIGIN,
+    messages: {
+      success: t.successBody,
+      invalid: t.errorInvalid,
+      rateLimited: t.errorRateLimited,
+      offline: t.errorOffline,
+      unknown: t.errorUnknown,
+    },
+  }}
+>
+  // Page local. No framework, no hydration: the page is readable without this,
+  // and this only exists to send the form.
+  const form = document.getElementById('contact-form');
+  const status = document.getElementById('contact-status');
+  const submit = document.getElementById('contact-submit');
+
+  function show(text, ok) {
+    status.textContent = text;
+    status.className = ok
+      ? 'text-sm min-h-6 text-green-700 dark:text-green-400'
+      : 'text-sm min-h-6 text-red-700 dark:text-red-400';
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    submit.disabled = true;
+    submit.textContent = submit.dataset.sending;
+    status.textContent = '';
+
+    const data = new FormData(form);
+    try {
+      const response = await fetch(`${apiOrigin}/submitContactMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data: {
+            name: String(data.get('name') ?? ''),
+            email: String(data.get('email') ?? ''),
+            message: String(data.get('message') ?? ''),
+            language,
+          },
+        }),
+      });
+
+      if (response.ok) {
+        // Only clear the fields once the server has actually accepted it.
+        // Clearing on send would throw away what the person wrote if it failed.
+        form.reset();
+        show(messages.success, true);
+        return;
+      }
+
+      // The callable transport reports its reason in the body. Map the ones a
+      // person can act on; anything else is honestly reported as unknown rather
+      // than dressed up as a specific problem.
+      let code = '';
+      try {
+        const body = await response.json();
+        code = body?.error?.status ?? '';
+      } catch {
+        code = '';
+      }
+
+      if (code === 'INVALID_ARGUMENT') show(messages.invalid, false);
+      else if (code === 'RESOURCE_EXHAUSTED') show(messages.rateLimited, false);
+      else show(messages.unknown, false);
+    } catch {
+      // fetch throws on a network failure, which is the one case where the
+      // server never saw the message at all.
+      show(messages.offline, false);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = submit.dataset.label;
+    }
+  });
+</script>

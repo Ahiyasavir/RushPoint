@@ -71,6 +71,10 @@ export {
   backfillPublicTaskCoordinatesNow,
 } from './maintenance/index';
 export { listPlatformUsers, recordEngagement, setUserNote } from './admin/index';
+// Marketing site contact form (change: marketing-site). submitContactMessage is
+// UNAUTHENTICATED by necessity and is declared in PUBLIC_CALLABLES with its
+// reason; listContactMessages is admin only and audit logged.
+export { submitContactMessage, listContactMessages } from './contact/index';
 // Admin-managed game templates (change: admin-manage-game-templates).
 export { setGameTemplateFlag, listAdminTemplates, listGameTemplates, createGameFromTemplate } from './admin/templates';
 export {

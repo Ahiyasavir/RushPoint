@@ -46,10 +46,12 @@ export interface WizardSubmission {
   tags?: string[];
 }
 
-export default function NewGameWizard({ templates, busy, onSubmit }: {
+export default function NewGameWizard({ templates, busy, onSubmit, recentBankKeys }: {
   templates: readonly WizardTemplate[];
   busy?: boolean;
   onSubmit: (submission: WizardSubmission) => void;
+  /** Passed straight through to the smart build — see its own prop note. */
+  recentBankKeys?: string[];
 }) {
   const t = useT();
   const d = t.dashboard;
@@ -112,10 +114,18 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
   const showConsentNotice = (ageBand?.from ?? ADULT_AGE) < GUARDIAN_CONSENT_AGE_THRESHOLD;
 
   // ── Screen 1: name, then the fork ──────────────────────────────────────────
+  // Narrower than the fork/questionnaire screens and centred: a single input
+  // floating in the same width the icon-grid steps need read as unfinished
+  // empty space, not a deliberate first screen (real creator feedback on the
+  // shipped panel — change: smart-build-delight follow-up).
   if (state.step === 'name' || state.step === 'path') {
+    // The name step is a single input: narrow and centred, or it floats lost in
+    // the modal's full width. The path step needs the full width back for its
+    // 3-column card grid, so only 'name' gets the cap.
     return (
-      <div className="flex flex-col gap-4">
-        <div>
+      <div className={['flex flex-col gap-3', state.step === 'name' ? 'mx-auto w-full max-w-sm' : ''].join(' ')}>
+        <div className={state.step === 'name' ? 'text-center' : undefined}>
+          {state.step === 'name' && <div className="text-3xl leading-none mb-1.5" aria-hidden="true">🎲</div>}
           <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.nameTitle}</h3>
           <p className="text-[--ink-3] text-[13px] mt-0.5">{w.nameSub}</p>
         </div>
@@ -142,29 +152,39 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
                 recommended path and carries the accent alone; the other two are
                 neutral peers. On a phone they stack, on a wide screen they sit
                 side by side. */}
-            <div className="grid gap-2.5 sm:grid-cols-3">
+            {/* Icon + title share a row, and the body is clamped to one line
+                (change: smart-build-wizard-no-scroll) — three stacked cards at
+                80-90px each is what pushed this screen into a scroll on a phone,
+                where the grid has no room to go to 3 columns. A card here only
+                needs to be recognisable, not read in full; the real explanation
+                lives in the questionnaire that follows. */}
+            <div className="grid gap-2 sm:grid-cols-3">
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'smart_build' })}
-                className="text-start rounded-xl border-2 border-rp-fire bg-rp-fire/5 p-3.5 hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-2xl leading-none">🧠</span>
-                  <span className="rounded-full bg-rp-fire/15 text-rp-fire text-[10px] font-medium px-2 py-0.5">
+                className="text-start rounded-xl border-2 border-rp-fire bg-rp-fire/5 p-2.5 hover:bg-rp-fire/10 transition-colors disabled:opacity-40">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-lg leading-none shrink-0">🧠</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.smartTitle}</span>
+                  <span className="ms-auto shrink-0 rounded-full bg-rp-fire/15 text-rp-fire text-[10px] font-medium px-1.5 py-0.5">
                     {w.smartRecommended}
                   </span>
                 </div>
-                <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.smartTitle}</div>
-                <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.smartBody}</div>
+                <div className="text-[11px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.smartBody}</div>
               </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'guided' })}
-                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-3.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
-                <div className="text-2xl leading-none">📖</div>
-                <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.guidedTitle}</div>
-                <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.guidedBody}</div>
+                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-lg leading-none shrink-0">📖</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.guidedTitle}</span>
+                </div>
+                <div className="text-[11px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.guidedBody}</div>
               </button>
               <button type="button" disabled={busy} onClick={() => advanceOrCreate({ type: 'choosePath', path: 'scratch' })}
-                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-3.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
-                <div className="text-2xl leading-none">📄</div>
-                <div className="font-brand font-semibold text-[--ink-1] text-sm mt-1.5">{w.scratchTitle}</div>
-                <div className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{w.scratchBody}</div>
+                className="text-start rounded-xl border-2 border-[--rp-border] bg-[--surface-1] p-2.5 hover:border-rp-fire/50 hover:bg-[--surface-2] transition-colors disabled:opacity-40">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-lg leading-none shrink-0">📄</span>
+                  <span className="font-brand font-semibold text-[--ink-1] text-sm truncate">{w.scratchTitle}</span>
+                </div>
+                <div className="text-[11px] text-[--ink-3] mt-1 leading-snug line-clamp-1">{w.scratchBody}</div>
               </button>
             </div>
             <button type="button" onClick={() => dispatch({ type: 'back' })}
@@ -189,11 +209,14 @@ export default function NewGameWizard({ templates, busy, onSubmit }: {
     return (
       <SmartBuildWizard
         busy={busy}
+        recentBankKeys={recentBankKeys}
         onLeave={() => dispatch({ type: 'back' })}
-        onFinish={(answers: ComposerAnswers) => {
-          // Record the answers, THEN finish — `buildCreationPlan` reads them off
-          // the state, so finishing first would compose from the defaults.
-          const withAnswers = wizardReducer(state, { type: 'setComposerAnswers', answers });
+        onFinish={(answers: ComposerAnswers, seed: number) => {
+          // Record the answers AND the seed, THEN finish — `buildCreationPlan`
+          // reads them off the state, so finishing first would compose from the
+          // defaults. The seed rides along so the game composed at the call site
+          // is the one the live shape panel predicted.
+          const withAnswers = wizardReducer(state, { type: 'setComposerAnswers', answers, seed });
           const done = wizardReducer(withAnswers, { type: 'next' });
           const plan = buildCreationPlan(done, d.untitledGame);
           if (plan) onSubmit({ plan });

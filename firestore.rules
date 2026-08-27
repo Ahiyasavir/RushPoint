@@ -289,6 +289,20 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ── CONTACT MESSAGES ─────────────────────────────────────────────────────
+    //    Messages sent from the marketing site's contact form (marketing-site).
+    //    Written ONLY by the submitContactMessage callable, read ONLY by the
+    //    admin-only listContactMessages callable, both through the Admin SDK.
+    //
+    //    Closed to clients in BOTH directions, and the read half matters as much
+    //    as the write half: these carry a name and an email address supplied by
+    //    someone who is not a user, so an open read would be a public list of
+    //    strangers' contact details. The endpoint that accepts them is
+    //    deliberately unauthenticated; the collection they land in must not be.
+    match /contactMessages/{messageId} {
+      allow read, write: if false;
+    }
+
 
     // ═════════════════════════════════════════════════════════════════════════
     // Helpers

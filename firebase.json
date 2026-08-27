@@ -26,6 +26,14 @@
       "public": "apps/play-web/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
       "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    },
+    {
+      "target": "marketing",
+      "public": "apps/marketing/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "cleanUrls": false,
+      "trailingSlash": true,
+      "redirects": [{ "source": "/", "destination": "/he/", "type": 302 }]
     }
   ],
   "emulators": {

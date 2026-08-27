@@ -30,6 +30,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:all"],
       "port": 5180
+    },
+    {
+      "name": "play-dist",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--workspace=apps/play-web", "--", "--port", "5193", "--strictPort", "--outDir", "dist"],
+      "port": 5193
+    },
+    {
+      "name": "marketing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--workspace=apps/marketing", "--", "--port", "5194", "--host", "127.0.0.1"],
+      "port": 5194
     }
   ]
 }

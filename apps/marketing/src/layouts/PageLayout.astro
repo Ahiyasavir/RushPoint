@@ -1,0 +1,69 @@
+---
+import Layout from '~/layouts/Layout.astro';
+import Header from '~/components/widgets/Header.astro';
+import Footer from '~/components/widgets/Footer.astro';
+
+import { headerData, footerData } from '~/navigation';
+
+import { HREFLANG, SITE_ORIGIN, otherLanguage, type Alternate, type Language } from '~/utils/i18n';
+import type { MetaData } from '~/types';
+
+export interface Props {
+  metadata?: MetaData;
+  language: Language;
+  alternates?: Alternate[];
+}
+
+const { metadata, language, alternates } = Astro.props;
+
+/**
+ * Where the language switch goes: this page's counterpart, taken from the very
+ * same alternate set the page publishes as hreflang. Reading it from there
+ * rather than recomputing it is the point. The two can then never disagree about
+ * where the other version of this page lives, which is a disagreement neither a
+ * reader nor a crawler would report.
+ *
+ * A page with no counterpart (an unpaired post) has no matching entry, and the
+ * header falls back to the other language's home.
+ */
+const counterpart = (alternates ?? []).find((a) => a.hreflang === HREFLANG[otherLanguage(language)]);
+const counterpartHref = counterpart?.href.startsWith(SITE_ORIGIN)
+  ? counterpart.href.slice(SITE_ORIGIN.length)
+  : undefined;
+
+// Navigation is per language: a Hebrew page must not offer an English menu.
+const header = headerData(language, counterpartHref);
+const footer = footerData(language);
+---
+
+<Layout metadata={metadata} language={language} alternates={alternates}>
+  {/*
+    Skip link. Every page puts four navigation links, a language switch, a call
+    to action and a theme toggle ahead of the content, and a keyboard or screen
+    reader user otherwise walks all of them again on every page. It is visually
+    hidden until focused, which is the point: it costs a sighted mouse user
+    nothing and saves everyone else eight keystrokes per page.
+
+    First in the DOM on purpose. A skip link that is not the first focusable
+    thing is a skip link you have to tab past the navigation to reach.
+  */}
+  <a
+    href="#main"
+    class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-3 focus:start-3 focus:rounded-full focus:bg-primary focus:text-white focus:px-5 focus:py-2.5 focus:font-semibold"
+  >
+    {header.skipToContent}
+  </a>
+  <slot name="header">
+    <Header {...header} isSticky showToggleTheme />
+  </slot>
+  {/* `tabindex=-1` so the browser actually moves focus here, not just the
+      viewport. Without it the skip link scrolls the page and leaves focus in
+      the navigation, which is the failure mode that makes skip links feel
+      broken. */}
+  <main id="main" tabindex="-1">
+    <slot />
+  </main>
+  <slot name="footer">
+    <Footer {...footer} />
+  </slot>
+</Layout>

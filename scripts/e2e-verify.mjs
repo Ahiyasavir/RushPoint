@@ -10893,6 +10893,122 @@ async function main() {
       JSON.stringify({ before: scoreBefore, after: afterPrune?.players?.[0]?.score }));
   });
 
+  // ── contact messages (change: marketing-site) ───────────────────────────────
+  // The marketing site's contact form. Unauthenticated by necessity: the sender
+  // is by definition someone who does not have an account yet. That makes it the
+  // only write endpoint on the platform a stranger can reach, so validation, the
+  // bound on size and the rate limit are the whole safety story and each is
+  // asserted rather than assumed.
+  await scenario('contact messages (public submit, bounded, rate limited, owner only read)', async () => {
+    // A party with NO sign in at all. Every other scenario authenticates first;
+    // this one must not, because that is the actual condition on the site.
+    const visitor = makeParty('contactVisitor');
+
+    const valid = {
+      name: 'Dana Levi',
+      email: 'dana@example.com',
+      message: 'Hello, I am organising a school trip and wanted to ask about group sizes.',
+      language: 'he',
+    };
+
+    const ok = await visitor.call('submitContactMessage', valid);
+    check('an unauthenticated visitor can send a message', ok?.ok === true, JSON.stringify(ok));
+    // The response must not hand back where it was stored. A document id is an
+    // internal fact, and returning it to an anonymous caller invites probing.
+    check('the response reveals no document id or storage path',
+      !/contactMessages|\/|id/i.test(JSON.stringify(ok ?? {}).replace(/"ok"|true/g, '')),
+      JSON.stringify(ok));
+
+    // Validation, one rejection per rule, each with nothing stored.
+    await expectError('a message with no body is refused',
+      visitor.call('submitContactMessage', { ...valid, message: '' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('a message with no sender name is refused',
+      visitor.call('submitContactMessage', { ...valid, name: '' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('a message with a malformed address is refused',
+      visitor.call('submitContactMessage', { ...valid, email: 'not-an-address' }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    await expectError('a wrongly typed field is refused',
+      visitor.call('submitContactMessage', { ...valid, name: 42 }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // The bound. An unauthenticated endpoint that accepts an unbounded string is
+    // a way to write megabytes into the database for free.
+    await expectError('an oversized body is refused',
+      visitor.call('submitContactMessage', { ...valid, message: 'x'.repeat(20_000) }),
+      { codeIn: ['functions/invalid-argument'] });
+
+    // Five refusals have just happened. If they were charged against the budget
+    // that governs stored messages, the sender would now be locked out of the
+    // only channel they have — for typing their own address wrong. The two
+    // budgets exist precisely so this next call still works.
+    const afterMistakes = await visitor.call('submitContactMessage', {
+      ...valid, message: 'Sent right after several validation mistakes.',
+    });
+    check('a refused payload does not consume the budget for accepted ones',
+      afterMistakes?.ok === true, JSON.stringify(afterMistakes));
+
+    // The transport encodes an absent optional value as null, so the two must be
+    // treated identically or a caller is rejected for omitting an optional field.
+    const absent = await visitor.call('submitContactMessage', {
+      name: valid.name, email: valid.email, message: 'No language field at all.',
+    });
+    const explicitNull = await visitor.call('submitContactMessage', {
+      ...valid, message: 'Explicit null language.', language: null,
+    });
+    check('an omitted optional field and an explicit null behave identically',
+      absent?.ok === true && explicitNull?.ok === true,
+      JSON.stringify({ absent, explicitNull }));
+
+    // The rate limit. Refusal must be resource-exhausted, not a silent drop that
+    // looks like success to the sender.
+    let exhausted = null;
+    for (let i = 0; i < 40 && !exhausted; i++) {
+      try {
+        await visitor.call('submitContactMessage', { ...valid, message: `Flood ${i}.` });
+      } catch (e) {
+        exhausted = e;
+      }
+    }
+    check('a flood of submissions is eventually refused',
+      exhausted?.code === 'functions/resource-exhausted',
+      exhausted ? `${exhausted.code} :: ${exhausted.message}` : 'never refused');
+
+    // ...and the refusal must not be escapable by the caller. The key is derived
+    // from the connection precisely so that nothing in the payload can move it:
+    // a key the sender chooses is a key the sender can rotate, which turns the
+    // limit off for exactly the sender who is abusing it.
+    await expectError('a forged client identifier does not reset the limit',
+      visitor.call('submitContactMessage', {
+        ...valid, message: 'Forged identity.', clientId: 'someone-else', ip: '10.0.0.1', uid: 'not-me',
+      }),
+      { codeIn: ['functions/resource-exhausted'] });
+
+    // Reading them back is owner only.
+    await expectError('a stranger cannot list contact messages',
+      visitor.call('listContactMessages', {}),
+      { codeIn: ['functions/permission-denied', 'functions/unauthenticated'] });
+
+    await expectError('an ordinary signed in creator cannot list contact messages',
+      creator.call('listContactMessages', {}),
+      { codeIn: ['functions/permission-denied'] });
+
+    const listed = await platformAdmin.call('listContactMessages', {});
+    check('an admin can list the messages', Array.isArray(listed?.messages),
+      JSON.stringify(listed).slice(0, 120));
+    check('the messages that were accepted are actually there',
+      (listed?.messages ?? []).some((m) => m.message?.includes('school trip')),
+      `${(listed?.messages ?? []).length} message(s)`);
+    // Ordering and retention must not depend on a value the sender supplied.
+    check('every stored message carries a server assigned arrival time',
+      (listed?.messages ?? []).every((m) => typeof m.receivedAt === 'number' && m.receivedAt > 0),
+      JSON.stringify((listed?.messages ?? [])[0] ?? {}).slice(0, 140));
+  });
+
   await scenario('callable coverage guard', async () => {
     const deployed = listDeployedCallables();
     check('coverage: introspected the deployed callable set', deployed.length > 0, `${deployed.length} callables`);
@@ -10901,6 +11017,8 @@ async function main() {
     // list means 100% callable coverage.
     const EXEMPT = new Map([
       // e.g. ['someCallable', 'reason it genuinely cannot be exercised here'],
+      // NOTE: nothing belongs here for the contact callables. They are covered by
+      // the 'contact messages' scenario above.
     ]);
     const uncovered = deployed.filter((c) => !exercised.has(c) && !EXEMPT.has(c));
     check('coverage: every deployed callable is exercised by the suite (or exempt)',

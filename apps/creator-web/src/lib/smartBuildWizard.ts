@@ -178,6 +178,25 @@ export interface SmartBuildState {
    */
   index: number;
   answers: SmartBuildAnswers;
+  /**
+   * The seed for the game being built. NOT an answer — it is not asked for, it
+   * is not sent to the composer as part of `ComposerAnswers`, and it is not
+   * something the creator can express. It lives here because it must survive
+   * exactly as long as this questionnaire does.
+   *
+   * ⚠️ FIXED WHEN THE QUESTIONNAIRE OPENS, and constant for its whole life. The
+   * live shape panel predicts the game's shape by seeding a stream with this
+   * value; `composeGame` is later handed `seededRng(seed)`. Same seed on both
+   * sides is the ONLY reason the shape a creator watches accumulate is the shape
+   * they get — the stage count comes from a random blueprint draw, so it is not
+   * a function of the answers alone.
+   *
+   * Deliberately NOT derived from the answers: editing any answer would then
+   * re-roll the blueprint and the panel would flicker between shapes for reasons
+   * the creator cannot see. A fresh questionnaire draws a fresh seed, so the same
+   * answers can still yield a different game on a second run.
+   */
+  seed: number;
 }
 
 export type SmartBuildAction =
@@ -216,8 +235,29 @@ export function smartBuildDefaults(): SmartBuildAnswers {
   };
 }
 
+/**
+ * A fresh seed. The ONE impure call in this module, and it is confined to
+ * initial-state construction so every reducer transition stays a pure function
+ * of (state, action) — a reducer that re-seeded would re-roll the shape on every
+ * keystroke.
+ */
+export function drawSmartBuildSeed(random: () => number = Math.random): number {
+  // Total, on the same reasoning as `draw(rng)` in composeGame.ts: a rng that
+  // throws, or returns NaN / a negative / exactly 1, must yield a usable seed
+  // rather than take the questionnaire down. A degenerate seed produces a valid
+  // (if unvaried) game; a throw produces a crash screen.
+  let r: unknown;
+  try {
+    r = typeof random === 'function' ? random() : Math.random();
+  } catch {
+    return 0;
+  }
+  const safe = typeof r === 'number' && Number.isFinite(r) ? Math.abs(r) % 1 : 0;
+  return Math.floor(safe * 0xffffffff) >>> 0;
+}
+
 export function initialSmartBuildState(): SmartBuildState {
-  return { index: 0, answers: smartBuildDefaults() };
+  return { index: 0, answers: smartBuildDefaults(), seed: drawSmartBuildSeed() };
 }
 
 const isState = (s: unknown): s is SmartBuildState =>
@@ -226,10 +266,24 @@ const isState = (s: unknown): s is SmartBuildState =>
   && !!(s as SmartBuildState).answers
   && typeof (s as SmartBuildState).answers === 'object';
 
-/** A usable state, whatever was handed in. */
+/** A seed that is usable as one, whatever was stored. */
+const safeSeed = (v: unknown): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.floor(Math.abs(v)) >>> 0 : 0;
+
+/**
+ * A usable state, whatever was handed in.
+ *
+ * A malformed seed is coerced to a usable one rather than re-drawn: `safeState`
+ * runs on EVERY action, and re-drawing here would hand the shape panel a new
+ * blueprint on every tap.
+ */
 function safeState(s: unknown): SmartBuildState {
   if (!isState(s)) return initialSmartBuildState();
-  return { index: s.index, answers: { ...smartBuildDefaults(), ...s.answers } };
+  return {
+    index: s.index,
+    answers: { ...smartBuildDefaults(), ...s.answers },
+    seed: safeSeed(s.seed),
+  };
 }
 
 const positive = (v: unknown, fallback: number): number =>

@@ -334,6 +334,28 @@ async function main() {
   await check('play client CANNOT list discovery POIs', assertFails(getDocs(collection(team, `users/${OWNER}/games/${GAME}/discoveryPois`))));
   await check('other user CANNOT write a discovery POI', assertFails(setDoc(doc(other, `users/${OWNER}/games/${GAME}/discoveryPois/poi3`), { id: 'poi3' })));
 
+  // ── Contact messages (change: marketing-site) ─────────────────────────────
+  //    The endpoint that ACCEPTS these is deliberately unauthenticated, which
+  //    makes it easy to assume the collection behind it is open too. It is not,
+  //    and the read half matters more than the write half: every document holds
+  //    a name and an email address belonging to someone who is not a user of the
+  //    platform, has no account, and cannot see, correct or delete what is
+  //    stored. An open read would be a public directory of strangers.
+  //
+  //    Both directions are asserted for EVERY kind of caller the platform has,
+  //    including the owner, because "signed in" is not the same as "entitled",
+  //    and the only legitimate reader is the admin-only callable going through
+  //    the Admin SDK, which rules never run for.
+  console.log('\n── Contact messages: closed to clients in both directions ──');
+  for (const [who, ctx] of [['anon', anon], ['a signed-in creator', owner], ['a participant', team]]) {
+    await check(`${who} CANNOT read a contact message`,
+      assertFails(getDoc(doc(ctx, 'contactMessages/msg1'))));
+    await check(`${who} CANNOT list contact messages`,
+      assertFails(getDocs(collection(ctx, 'contactMessages'))));
+    await check(`${who} CANNOT write a contact message directly`,
+      assertFails(setDoc(doc(ctx, 'contactMessages/forged'), { name: 'x', email: 'x@y.z', message: 'x' })));
+  }
+
   console.log('\n── Storage: photo uploads are owner+type+size gated ──');
   const img = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]); // tiny jpeg-ish
   const big = new Uint8Array(11 * 1024 * 1024); // >10MB

@@ -1,0 +1,17 @@
+---
+/**
+ * The site's wordmark.
+ *
+ * The template shipped a rocket emoji beside the site name. An emoji is rendered
+ * by the reader's own font, so the mark changes shape between a phone, a laptop
+ * and a browser with emoji disabled, and on some of them it is not our mark at
+ * all. This uses the same icon the two apps use, from our own bundle.
+ */
+import { SITE } from 'astrowind:config';
+import mark from '~/assets/favicons/favicon.svg';
+---
+
+<span class="self-center flex items-center gap-2 whitespace-nowrap">
+  <img src={mark.src} alt="" width="28" height="28" class="w-7 h-7" aria-hidden="true" />
+  <span class="text-2xl md:text-xl font-bold text-gray-900 dark:text-white">{SITE?.name}</span>
+</span>

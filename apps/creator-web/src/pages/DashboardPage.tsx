@@ -11,7 +11,8 @@ import {
   createGameFromTemplate, importGameFile, type TemplateGroupEntry,
 } from '../services/calls';
 import { peekTemplates, fetchTemplates } from '../lib/templateCache';
-import { composeGame, type ComposerDescriptionCopy } from '../lib/composeGame';
+import { composeGame, previewShape, seededRng, type ComposerDescriptionCopy } from '../lib/composeGame';
+import SmartBuildReveal, { type RevealStage } from '../components/SmartBuildReveal';
 import { readRecentPicks, recordRecentPicks } from '../lib/recentBankPicks';
 import { TASK_BANK } from '../taskBank';
 import NewGameWizard, { type WizardSubmission, type WizardTemplate } from '../components/NewGameWizard';
@@ -207,6 +208,13 @@ export default function DashboardPage() {
 
   const [games, setGames] = useState<Game[] | null>(() => readGamesCache(user?.uid));
   const [picking, setPicking] = useState(false);
+  // The composed game waiting to be revealed (change: smart-build-delight).
+  // Non-null only between "the game was created" and "the creator continued", so
+  // it is never a source of truth for anything — the game is already on the
+  // server by the time this is set.
+  const [reveal, setReveal] = useState<
+    { gameId: string; title: string; stages: RevealStage[] } | null
+  >(null);
   // The template the creator selected but has not confirmed yet — the moment the
   // play mode and scoring style are DISCLOSED instead of silently assigned.
   const [chosen, setChosen] = useState<PickerChoice | null>(null);
@@ -459,11 +467,16 @@ export default function DashboardPage() {
     if (plan.kind === 'smart_build') {
       // Compose FIRST, entirely on the client, before either network call — a
       // composition problem can then never leave a half-built game on the server.
+      // ⚠️ `seededRng(plan.composerSeed)`, NEVER `Math.random`: the questionnaire's
+      // live panel already showed this creator the shape of their game, predicted
+      // from this exact seed. Composing under a different stream would hand them a
+      // different shape from the one they watched being built — the specific lie
+      // this change exists to make impossible (change: smart-build-delight).
       const result = composeGame(
         TASK_BANK,
         plan.composerAnswers,
         composerCopy,
-        Math.random,
+        seededRng(plan.composerSeed),
         readRecentPicks(user?.uid),
       );
 
@@ -514,7 +527,30 @@ export default function DashboardPage() {
           const say = namedPlaces ? d.wizard.shortWithPlaces : d.wizard.shortNoPlaces;
           await dialog.alert(say({ asked: askedMinutes, got: estimatedMinutes }));
         }
-        nav(`/build/${gameId}`);
+        // The reveal, not a navigation (change: smart-build-delight). The game
+        // already exists at this point, so nothing here is load-bearing — the
+        // creator can continue at any moment, and closing the tab loses nothing.
+        //
+        // The PLANNED slot counts are recomputed from the same answers and the
+        // same seed the panel used, which is exactly the agreement
+        // scripts/test-preview-shape.ts pins: it returns the shape the creator
+        // watched accumulate, so the reveal can show which planned slots the
+        // composer could not fill instead of quietly shipping a shorter stage.
+        const planned = previewShape(
+          TASK_BANK,
+          plan.composerAnswers,
+          plan.composerSeed,
+          readRecentPicks(user?.uid),
+        );
+        setPicking(false);
+        setReveal({
+          gameId,
+          title: plan.title,
+          stages: result.stages.map((s, i) => ({
+            missions: (s.tasks ?? []).map((task) => task.title ?? ''),
+            plannedSlots: planned.stages[i]?.slots ?? (s.tasks ?? []).length,
+          })),
+        });
       } catch (e) {
         // Same rule as every other path here: the wizard already closed, so a
         // silent failure would leave the creator on an unchanged dashboard with
@@ -1039,16 +1075,53 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* ── The smart build's reveal (change: smart-build-delight) ────────────
+          Deliberately NOT dismissible by backdrop click or Escape: every other
+          modal here can be cancelled because cancelling means "do not do the
+          thing", but the game already exists. A stray click that dropped the
+          creator back on the dashboard would look exactly like the build having
+          failed. The one way out is the button, and it is live immediately. */}
+      {reveal && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-5 shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up">
+            <SmartBuildReveal
+              gameTitle={reveal.title}
+              stages={reveal.stages}
+              onContinue={() => {
+                const { gameId } = reveal;
+                setReveal(null);
+                nav(`/build/${gameId}`);
+              }}
+              labels={{
+                title: d.wizard.revealTitle,
+                subtitle: d.wizard.revealSub,
+                stage: (n) => d.wizard.shapeStage(n),
+                missions: (n) => d.wizard.revealMissions(n),
+                continue: d.wizard.revealContinue,
+                aria: d.wizard.revealAria,
+              }}
+            />
+          </div>
+        </div>,
+        document.body,
+      )}
+
       {/* ── Template picker modal ─────────────────────────────────────────── */}
       {picking && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
+            // 92vh is a safety net for very short viewports, not the fix: the
+            // questionnaire and shape panel were both trimmed (smaller cards, a
+            // fixed 4-col grid, a one-line stage strip) so the tallest step fits
+            // a normal phone/laptop screen without touching this cap at all
+            // (change: smart-build-wizard-no-scroll).
+            className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header — fixed; never scrolls away. */}
-            <div className="flex items-start justify-between gap-4 p-5 pb-4 shrink-0 border-b border-[--rp-border]">
+            <div className="flex items-start justify-between gap-4 p-4 pb-3 shrink-0 border-b border-[--rp-border]">
               <div>
                 <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
                 <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
@@ -1060,7 +1133,7 @@ export default function DashboardPage() {
             {/* Body — bounded to the modal; the compact cards fit without scrolling
                 on a normal screen, and only this region (never the page) scrolls on
                 a very short viewport. */}
-            <div className="overflow-y-auto p-5 pt-4">
+            <div className="overflow-y-auto p-4 pt-3">
               {templateGroups === null ? (
                 <div className="flex items-center gap-2 text-sm text-[--ink-3] p-3">
                   <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
@@ -1075,6 +1148,10 @@ export default function DashboardPage() {
                   templates={wizardTemplates}
                   busy={busy || newGameAction.busy}
                   onSubmit={(submission) => void newGameAction.run(submission)}
+                  // The SAME list the composer is handed above, so the smart
+                  // build's preview and the game it delivers are priced from one
+                  // pool (change: smart-build-delight, D4).
+                  recentBankKeys={readRecentPicks(user?.uid).recentBankKeys}
                 />
               )}
             </div>

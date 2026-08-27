@@ -37,13 +37,19 @@ services:
       # run on a *.web.app origin, and this list is a CORS allowlist rather than a
       # link — narrowing it during an unrelated fix would silently 403 those users.
       # Matches what the VPS was already running.
-      ALLOWED_ORIGINS: "https://rush-point.com,https://creator.rush-point.com,https://rushpoint-play.web.app,https://rushpoint-creator.web.app,https://rushpoint-play.firebaseapp.com,https://rushpoint-creator.firebaseapp.com"
+      ALLOWED_ORIGINS: "https://rush-point.com,https://www.rush-point.com,https://creator.rush-point.com,https://rushpoint-play.web.app,https://rushpoint-creator.web.app,https://rushpoint-play.firebaseapp.com,https://rushpoint-creator.firebaseapp.com"
       PORT: "8080"
       # Run-summary emails (Resend): the on/off flag + sender/recipient defaults
       # live here; the actual RESEND_API_KEY comes from ./api.env (gitignored,
       # see api.env.example) via env_file above so the secret never lands in git.
       RUN_SUMMARY_EMAIL_FROM: "onboarding@resend.dev"
       RUN_SUMMARY_EMAIL_TO: "spendora.tracker@gmail.com"
+      # The marketing site's contact form recipient (change: marketing-site). Set
+      # explicitly rather than relying on the RUN_SUMMARY_EMAIL_TO fallback in
+      # functions/src/contact/notify.ts: the two happen to be the same address
+      # today, but a future change to who gets run-summary emails should not
+      # silently redirect contact form notifications too.
+      CONTACT_NOTIFY_TO: "spendora.tracker@gmail.com"
       # Daily digest (deploy/rushpoint-digest.timer, 03:30 local). It reports the
       # PREVIOUS complete day in RUN_DIGEST_TIMEZONE — set explicitly because a
       # container's local time is UTC even though the host is Asia/Jerusalem, and

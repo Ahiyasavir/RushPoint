@@ -412,3 +412,23 @@ export const listAdminTemplates = callable<
   Record<string, never>,
   { games: Game[] }
 >('listAdminTemplates');
+
+// Contact messages sent from the marketing site (change: marketing-site). Admin only
+// and audit logged server-side: every document holds the name and email address of
+// someone who is NOT a user of the platform and cannot see, correct or delete what is
+// stored, so "who read this list, and when" is the only accountability available.
+// AdminContactPage gates the call on `isAdminClaim`; `assertAdmin` is the real boundary.
+export interface ContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  language: string | null;
+  receivedAt: number;
+  uid: string | null;
+}
+
+export const listContactMessages = callable<
+  { limit?: number },
+  { messages: ContactMessage[] }
+>('listContactMessages');

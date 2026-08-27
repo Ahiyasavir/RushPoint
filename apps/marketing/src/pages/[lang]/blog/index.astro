@@ -1,0 +1,66 @@
+---
+import PageLayout from '~/layouts/PageLayout.astro';
+import HeroText from '~/components/widgets/HeroText.astro';
+
+import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
+import { publishedPosts, pathOf } from '~/utils/posts';
+import { blogCopy } from '~/copy/blog';
+
+export function getStaticPaths() {
+  return LANGUAGES.map((lang) => ({ params: { lang } }));
+}
+
+const language = Astro.params.lang as Language;
+const t = blogCopy[language];
+const posts = await publishedPosts(language);
+
+const metadata = {
+  title: t.title,
+  description: t.description,
+  canonical: pageUrl(language, 'blog'),
+  openGraph: { url: pageUrl(language, 'blog'), locale: OG_LOCALE[language], type: 'website' },
+};
+
+const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+
+<PageLayout metadata={metadata} language={language} alternates={alternatesFor('blog')}>
+  <HeroText title={t.headline} subtitle={t.intro} />
+
+  <section class="px-4 py-8 sm:px-6 mx-auto max-w-3xl lg:px-8 lg:py-12">
+    {
+      posts.length === 0 ? (
+        <p class="text-muted dark:text-slate-400 text-lg">{t.empty}</p>
+      ) : (
+        <ul class="flex flex-col gap-10">
+          {posts.map((post) => (
+            <li class="border-b border-gray-200 pb-8 dark:border-slate-700">
+              <article>
+                <h2 class="text-2xl font-bold tracking-tight mb-2">
+                  <a class="hover:text-secondary transition" href={pathOf(post)}>
+                    {post.data.title}
+                  </a>
+                </h2>
+                <p class="text-sm text-muted dark:text-slate-400 mb-3">
+                  <time datetime={post.data.publishDate.toISOString()}>
+                    {dateFormat.format(post.data.publishDate)}
+                  </time>
+                </p>
+                {post.data.excerpt && (
+                  <p class="text-lg leading-relaxed text-muted dark:text-slate-400 mb-3">{post.data.excerpt}</p>
+                )}
+                <a class="inline-block py-1 font-medium text-secondary hover:underline" href={pathOf(post)}>
+                  {t.readMore}
+                </a>
+              </article>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+</PageLayout>

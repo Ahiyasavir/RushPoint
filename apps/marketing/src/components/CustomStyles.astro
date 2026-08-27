@@ -1,0 +1,106 @@
+---
+/**
+ * The site's palette and typefaces, matched to the product.
+ *
+ * These are not decorative choices made here. Every value below is the same
+ * value one of the two apps already uses, so that a person who clicks through
+ * from this site to the creator console or to a live game does not experience it
+ * as arriving somewhere else. The template shipped a blue primary, a purple
+ * accent and a lavender selection colour, none of which appear anywhere in
+ * RushPoint.
+ *
+ * Where the values come from:
+ *   • The brand accents are IDENTICAL in both apps
+ *     (`apps/creator-web/tailwind.config.js` and `apps/play-web/tailwind.config.js`):
+ *     rp-fire #FF5722, rp-amber #FFB300, rp-plasma #06B6D4.
+ *   • The ink scale is `--ink-1` / `--ink-3` from `apps/creator-web/src/index.css`,
+ *     which were chosen for measured contrast rather than by eye, so they are
+ *     taken as given rather than re-picked here.
+ *   • The page background is play-web's warm #FFFCF7 rather than creator-web's
+ *     cooler #F6F7FB. The two apps genuinely differ here, so one had to be
+ *     chosen: the warm surface is the one a PARTICIPANT sees, which is the far
+ *     larger audience and the thing this site is mostly describing, and it sits
+ *     better under an orange accent than a blue grey does.
+ *
+ * `scripts/test-marketing-theme.ts` asserts these against the apps' own
+ * configuration, so a change to the brand in one place cannot leave this behind.
+ *
+ * DARK MODE. Neither app has one, so there is no product value to copy and the
+ * palette below is authored: a warm near black rather than the template's navy,
+ * because a cool dark under an orange accent reads as two unrelated designs. The
+ * accents are deliberately unchanged between the two modes, since they ARE the
+ * brand.
+ */
+---
+
+<style is:inline>
+  :root {
+    --aw-font-sans: var(--font-inter);
+    --aw-font-serif: var(--font-inter);
+    /* Space Grotesk is the apps' `--rp-font-display` / `font-brand`. */
+    --aw-font-heading: var(--font-space-grotesk), var(--font-inter);
+
+    /* rp-fire, and a darker press state of the same hue. */
+    --aw-color-primary: #ff5722;
+    /*
+     * play-web's `ink-fire`, not a shade invented here.
+     *
+     * The product already solved this and wrote down the principle: every fill,
+     * border, ring and gradient keeps the brand orange, and TEXT uses a darkened
+     * variant, because #FF5722 is 3.16:1 on white and small text needs 4.5:1.
+     * See the ink scale in apps/play-web/tailwind.config.js, which carries its
+     * measured ratios beside it.
+     *
+     * So this is that token rather than a new one: 5.94:1 on this page surface,
+     * and white on it is 6.08:1 for the button hover fill. Reaching for the
+     * product's existing answer is also the more literal reading of "the same
+     * colours as the app" than picking a fresh orange that merely passes.
+     */
+    --aw-color-secondary: #b03a0b;
+    /* rp-plasma. The second brand accent, used for links and highlights. */
+    --aw-color-accent: #06b6d4;
+
+    /* --ink-1 and --ink-3 from creator-web. */
+    --aw-color-text-heading: #0a0c1a;
+    --aw-color-text-default: #0a0c1a;
+    --aw-color-text-muted: #60657d;
+
+    /* play-web's "Warm Trail" page surface. */
+    --aw-color-bg-page: #fffcf7;
+
+    --aw-color-bg-page-dark: #14110d;
+
+    /* play-web's `glass-border`. A warm hairline, so a divider does not read as
+       a cool grey line drawn across a warm page. */
+    --aw-color-border: rgba(90, 70, 45, 0.16);
+
+    /* A tint of the brand orange. The template used `lavender`, which appears
+       nowhere in the product. */
+    ::selection {
+      background-color: #ffd9cc;
+      color: #0a0c1a;
+    }
+  }
+
+  .dark {
+    --aw-font-sans: var(--font-inter);
+    --aw-font-serif: var(--font-inter);
+    --aw-font-heading: var(--font-space-grotesk), var(--font-inter);
+
+    /* Unchanged. The accents are the brand, not a mode. */
+    --aw-color-primary: #ff5722;
+    --aw-color-secondary: #ff8a00;
+    --aw-color-accent: #22d3ee;
+
+    --aw-color-text-heading: #faf7f2;
+    --aw-color-text-default: #f0ece5;
+    --aw-color-text-muted: #b6ada1;
+    --aw-color-bg-page: #14110d;
+    --aw-color-border: rgba(240, 236, 229, 0.16);
+
+    ::selection {
+      background-color: #ff5722;
+      color: #14110d;
+    }
+  }
+</style>
