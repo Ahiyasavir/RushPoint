@@ -516,6 +516,18 @@ Caddy re-probes. That is expected and self heals.
 |---|---|---|
 | `CONTACT_NOTIFY_TO` | the API's environment | The address a new contact message is announced to. Falls back to `RUN_SUMMARY_EMAIL_TO`. With neither set, and with no provider key, notification is a **logged no-op** — by design. |
 
+Set it alongside `ALLOWED_ORIGINS` in §C, same file, same restart:
+
+```
+CONTACT_NOTIFY_TO=spendora.tracker@gmail.com
+```
+
+This is also the fallback address published on the contact page itself
+(`apps/marketing/src/copy/contact.ts`, `CONTACT_FALLBACK_EMAIL`) — a plain `mailto:` link
+under the form, with no script and no dependency on the API being reachable. It exists
+because it is the one channel that still works in the exact failure mode the form cannot
+detect from the browser: §C's origin misconfiguration.
+
 The message itself is stored either way, and is readable at **`/admin/contact`** on the
 creator console by an account carrying the `admin` claim (§7). That page is the reason
 notification is allowed to be best effort: nothing is lost when an email fails.

@@ -27,7 +27,23 @@ export interface ContactCopy {
   errorUnknown: string;
   otherWaysTitle: string;
   otherWaysBody: string;
+  /**
+   * The fallback channel. The form is the only path INTO the API, and the API
+   * has exactly one origin allow list to misconfigure between here and a reply
+   * (see DEPLOY.md section 12C). A direct address is what keeps a broken form
+   * from being a broken contact page: it needs no JavaScript, no callable and no
+   * CORS entry, so it works even in the specific failure mode the form itself
+   * cannot detect from the browser.
+   */
+  directEmailLabel: string;
 }
+
+/**
+ * The one address published as a fallback, never as the primary path: the form
+ * stores a structured, rate limited, audit logged record, and a plain inbox
+ * reply carries none of that.
+ */
+export const CONTACT_FALLBACK_EMAIL = 'spendora.tracker@gmail.com';
 
 /**
  * A note on `errorOffline`. It is shown when `fetch` THROWS, which the browser does
@@ -60,6 +76,7 @@ export const contactCopy: Record<Language, ContactCopy> = {
     errorUnknown: 'ההודעה לא נשלחה. אפשר לנסות שוב, וההודעה נשארת כאן בינתיים.',
     otherWaysTitle: 'מחפשים משהו אחר',
     otherWaysBody: 'אם אתם רק רוצים לראות איך זה עובד, אפשר לפתוח משחק ולהתנסות בלי לשלוח כלום.',
+    directEmailLabel: 'אפשר גם לכתוב ישירות למייל',
   },
   en: {
     title: 'Contact us',
@@ -80,5 +97,6 @@ export const contactCopy: Record<Language, ContactCopy> = {
     errorUnknown: 'The message was not sent. You can try again, and your message stays here meanwhile.',
     otherWaysTitle: 'Looking for something else',
     otherWaysBody: 'If you just want to see how it works, you can open a game and try it without sending anything.',
+    directEmailLabel: 'You can also write directly to',
   },
 };

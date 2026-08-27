@@ -23,6 +23,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { hasEnglishWord, hasHebrew } from './lib/i18nLeak.ts';
+import { CONTACT_FALLBACK_EMAIL } from '../apps/marketing/src/copy/contact.ts';
 import {
   SITE_ORIGIN,
   DIRECTION,
@@ -382,6 +383,35 @@ for (const language of LANGUAGES) {
   );
 }
 
+// ── F1b. The fallback contact channel is present and consistently declared ───
+//
+// The form is the only path into the API, and there is exactly one origin allow
+// list between the two of them to misconfigure (DEPLOY.md §12C). This address is
+// what keeps that specific failure from being a dead end: it needs no
+// JavaScript, no callable and no CORS entry, so it must actually be ON the page,
+// not merely declared in source.
+//
+// The second half checks DEPLOY.md against the SOURCE constant rather than the
+// other way around, because the constant is what the running site actually
+// uses; the doc is the thing that can go stale next to it.
+for (const lang of LANGUAGES) {
+  const page = byPath.get(pagePath(lang, 'contact'));
+  check(
+    `F1b · the ${lang} contact page publishes the fallback address`,
+    Boolean(page && page.html.includes(`mailto:${CONTACT_FALLBACK_EMAIL}`)),
+    CONTACT_FALLBACK_EMAIL,
+  );
+}
+
+{
+  const deploy = readFileSync(join(ROOT, 'DEPLOY.md'), 'utf8');
+  check(
+    'F1b · DEPLOY.md names the same address for CONTACT_NOTIFY_TO',
+    deploy.includes(`CONTACT_NOTIFY_TO=${CONTACT_FALLBACK_EMAIL}`),
+    'CONTACT_NOTIFY_TO in DEPLOY.md section 12D',
+  );
+}
+
 // ── F2. The language switch agrees with the hreflang cluster ─────────────────
 //
 // A reader and a crawler must be told the SAME thing about where the other
@@ -649,8 +679,14 @@ for (const page of contentPages) {
   // would then be exempt everywhere including in copy.
   const isDateOnly = (l: string) => /^[\d\s.,/\u0590-\u05FFA-Za-z]{4,24}$/.test(l) && /\d{4}/.test(l);
 
+  // An email address is not English (or Hebrew) copy, on either page: it is an
+  // identifier with no translation, the same class as a URL. Recognised by
+  // shape rather than by whitelisting the one address, so a future address
+  // needs no code change here.
+  const isEmailOnly = (l: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(l);
+
   const leaks = lines.filter((l) => {
-    if (isDateOnly(l)) return false;
+    if (isDateOnly(l) || isEmailOnly(l)) return false;
     return expectHebrew ? hasEnglishWord(l) : hasHebrew(l);
   });
 
