@@ -46,7 +46,7 @@ html, body, #root {
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Assistant', system-ui, sans-serif;
   background-color: #FFFCF7;
   color: #1A0A00;
   -webkit-tap-highlight-color: transparent;

@@ -8,6 +8,7 @@
         "apps/play-web",
         "apps/marketing",
         "functions",
+        "packages/brand",
         "packages/shared",
         "scripts"
     ],

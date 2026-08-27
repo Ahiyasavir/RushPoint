@@ -12,6 +12,8 @@ import SiteVerification from '~/components/common/SiteVerification.astro';
 import Analytics from '~/components/common/Analytics.astro';
 import Intersect from '~/components/common/Intersect.astro';
 
+import { FONTS } from '@rushpoint/brand';
+
 import { DIRECTION, type Alternate, type Language } from '~/utils/i18n';
 
 import type { MetaData as MetaDataType } from '~/types';
@@ -41,8 +43,13 @@ const textDirection = DIRECTION[language];
   <head>
     <CommonMeta />
     <Favicons />
-    <Font cssVariable="--font-inter" preload />
-    <Font cssVariable="--font-space-grotesk" />
+    {/*
+      Body face is preloaded because it sets the first paragraph a reader sees;
+      the display face is not, so a heading is not allowed to hold up the text
+      under it. Both come from the brand package (packages/brand/tokens.mjs).
+    */}
+    <Font cssVariable={FONTS.body.cssVariable} preload />
+    <Font cssVariable={FONTS.display.cssVariable} />
     <CustomStyles />
     <ApplyColorMode />
     <Metadata {...metadata} />

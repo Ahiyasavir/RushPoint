@@ -1,14 +1,15 @@
+import { tailwindFontFamily } from '@rushpoint/brand';
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
-      fontFamily: {
-        sans:  ['Inter', 'system-ui', 'sans-serif'],
-        mono:  ['JetBrains Mono', 'monospace'],
-        brand: ['Space Grotesk', 'Inter', 'sans-serif'],
-      },
+      // From the brand package (packages/brand/tokens.mjs), never restated
+      // here. Both faces carry Hebrew AND Latin; the previous pairing loaded
+      // latin only, so Hebrew fell through to the system font.
+      fontFamily: tailwindFontFamily(),
       colors: {
         // ── Brand accent tokens ───────────────────────────────────────────────
         'rp-fire':   '#FF5722',

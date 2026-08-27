@@ -66,7 +66,11 @@
   --rp-glass-border: rgba(10,12,26,0.08);
   --rp-radius: 14px;
   --rp-radius-lg: 20px;
-  --rp-font-display: 'Space Grotesk', 'Inter', sans-serif;
+  /* Brand display face. Kept in sync with packages/brand/tokens.mjs, which is
+     the single source; Rubik replaced Space Grotesk because Space Grotesk has
+     no Hebrew glyphs and this product is Hebrew first. */
+  --rp-font-display: 'Rubik', system-ui, sans-serif;
+  --rp-font-body: 'Assistant', system-ui, sans-serif;
   --rp-font-mono: 'JetBrains Mono', ui-monospace, monospace;
 }
 
@@ -104,7 +108,7 @@ html.dark {
 
 /* ── Base ────────────────────────────────────────────────────────────────── */
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Assistant', system-ui, sans-serif;
   background-color: var(--surface-1);
   color: var(--ink-1);
   margin: 0;

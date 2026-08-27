@@ -12,6 +12,8 @@ import icon from 'astro-icon';
 import compress from 'astro-compress';
 import type { AstroIntegration } from 'astro';
 
+import { WEB_FONTS } from '@rushpoint/brand';
+
 import astrowind from './vendor/integration';
 
 import { readingTimeRemarkPlugin, responsiveTablesRehypePlugin } from './src/utils/frontmatter';
@@ -32,32 +34,29 @@ export default defineConfig({
   // 2.4 KB of script on pages that otherwise need none.
   prefetch: false,
 
-  // Native Fonts API: self-hosts + subsets + preloads Inter and generates
-  // metric-adjusted fallbacks. Injected via <Font /> in Layout.astro and
-  // consumed through the `--font-inter` CSS variable in CustomStyles.astro.
-  fonts: [
-    {
-      provider: fontProviders.fontsource(),
-      name: 'Inter',
-      cssVariable: '--font-inter',
-      weights: ['100 900'],
-      styles: ['normal'],
-      subsets: ['latin'],
-      fallbacks: ['sans-serif'],
-    },
-    {
-      // The apps' display face (`font-brand` in their Tailwind configs,
-      // `--rp-font-display` in creator-web's stylesheet). Headings only, which is
-      // why it carries the heading weights and not the full range.
-      provider: fontProviders.fontsource(),
-      name: 'Space Grotesk',
-      cssVariable: '--font-space-grotesk',
-      weights: ['500 800'],
-      styles: ['normal'],
-      subsets: ['latin'],
-      fallbacks: ['sans-serif'],
-    },
-  ],
+  // Fonts come from the brand package, which is the single source (see
+  // packages/brand/tokens.mjs). Nothing about the typeface is decided here.
+  //
+  // The `hebrew` subset is the whole point of this block. Both faces used to be
+  // loaded latin-only, and the previous display face had no Hebrew glyphs at
+  // all, so every Hebrew character on a Hebrew-first site was rendered by the
+  // browser's default font. The site had a brand typeface in English and Arial
+  // in Hebrew, which is the half most readers actually see.
+  // Fetched from Fontsource at build time and then self hosted, so the browser
+  // never touches a third party. The fetch is the one part that needs the
+  // network: jsdelivr failed intermittently here (two of three attempts for one
+  // file), and Astro caches per file afterwards, so a retried build succeeds.
+  // The installed @fontsource-variable/* packages are kept as the record of
+  // which versions the brand is pinned to.
+  fonts: WEB_FONTS.map((font) => ({
+    provider: fontProviders.fontsource(),
+    name: font.family,
+    cssVariable: font.cssVariable,
+    weights: font.weights,
+    styles: ['normal'],
+    subsets: font.subsets,
+    fallbacks: ['sans-serif'],
+  })),
 
   integrations: [
     sitemap(),

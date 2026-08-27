@@ -1,0 +1,12 @@
+{
+  "name": "@rushpoint/brand",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RushPoint brand tokens: fonts and colours. No build step on purpose, see tokens.mjs.",
+  "main": "./tokens.mjs",
+  "exports": {
+    ".": "./tokens.mjs"
+  },
+  "files": ["tokens.mjs"]
+}
