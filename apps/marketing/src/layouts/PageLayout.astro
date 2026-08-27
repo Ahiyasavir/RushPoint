@@ -37,10 +37,30 @@ const footer = footerData(language);
 ---
 
 <Layout metadata={metadata} language={language} alternates={alternates}>
+  {/*
+    Skip link. Every page puts four navigation links, a language switch, a call
+    to action and a theme toggle ahead of the content, and a keyboard or screen
+    reader user otherwise walks all of them again on every page. It is visually
+    hidden until focused, which is the point: it costs a sighted mouse user
+    nothing and saves everyone else eight keystrokes per page.
+
+    First in the DOM on purpose. A skip link that is not the first focusable
+    thing is a skip link you have to tab past the navigation to reach.
+  */}
+  <a
+    href="#main"
+    class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-3 focus:start-3 focus:rounded-full focus:bg-primary focus:text-white focus:px-5 focus:py-2.5 focus:font-semibold"
+  >
+    {header.skipToContent}
+  </a>
   <slot name="header">
     <Header {...header} isSticky showToggleTheme />
   </slot>
-  <main>
+  {/* `tabindex=-1` so the browser actually moves focus here, not just the
+      viewport. Without it the skip link scrolls the page and leaves focus in
+      the navigation, which is the failure mode that makes skip links feel
+      broken. */}
+  <main id="main" tabindex="-1">
     <slot />
   </main>
   <slot name="footer">

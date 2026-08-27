@@ -753,6 +753,31 @@ uses `dir="auto"` so Hebrew renders RTL without full chrome i18n.
   (~1.2:1) — the map search results looked like a disabled control, which is most of why search
   read as broken. New UI uses the `--ink-*` / `--surface-*` tokens; don't reach for `text-zinc-*`.
 
+- **A control character where a regex escape was meant renders as NOTHING and matches
+  NOTHING, so the check built on it passes while examining nothing.** A regex intended as
+  `/<img\b[^>]*>/` was written through a tool whose string escaping turned `\b` into a literal
+  BACKSPACE (U+0008). It looked correct in the editor, correct in `git diff`, and correct in
+  review, because a backspace draws as nothing. It found zero `<img>` tags, and therefore
+  reported that zero images were missing `alt` text: **PASS**. A check that examined nothing and
+  a check that examined everything and found no problem print the same line. It arrives easily
+  from any tool that writes files through a language where `\b` in a string literal means
+  backspace (Python, Ruby, JS strings, `echo -e`). `scripts/test-source-control-chars.ts` now
+  fails on any stray control character in `scripts/`, `packages/shared/src`, `functions/src` and
+  `apps`, naming file and line; six legitimate uses are DECLARED with reasons (sanitiser inputs,
+  `adminNotes.ts`'s own strip range, and the NUL delimiter in `hashAnswerForReplay`), and a stale
+  entry fails too. **Corollary worth generalising: whenever a check counts things, print the
+  denominator.** "0 of 1 images missing alt" is a fact; "no images missing alt" is compatible
+  with having looked at none.
+- **The marketing site is theme-coupled to the apps, and repointing semantic tokens is NOT
+  enough.** `apps/marketing` is a vendored template, and a template writes `slate` / `gray` /
+  `blue` DIRECTLY in dozens of class strings, mostly under `dark:`. Repointing
+  `--aw-color-*` fixed the palette exactly where a token happened to be used and left everything
+  else on the template's cool navy, so dark mode looked like a different product than light
+  mode did. The fix is to redefine the SCALES in `src/assets/styles/tailwind.css` (the same lever
+  creator-web already uses to reverse zinc). `scripts/test-marketing-theme.ts` reads the brand
+  OUT of `apps/*/tailwind.config.js` and `creator-web/src/index.css` rather than restating it, so
+  changing the brand in one place and not the other fails.
+
 ## Environment files (all gitignored; emulator-safe defaults baked into client configs)
 ```
 apps/creator-web/.env   # VITE_FIREBASE_* (+ VITE_MAPTILER_KEY)

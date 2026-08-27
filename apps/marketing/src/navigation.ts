@@ -41,6 +41,12 @@ interface Copy {
   toggleMenu: string;
   toggleTheme: string;
   mainNav: string;
+  /**
+   * The skip link. Unlike the labels above it is VISIBLE once focused, so it is
+   * read as well as heard, and a keyboard user is the only person who ever sees
+   * it: getting its language wrong is invisible to everyone who would notice.
+   */
+  skipToContent: string;
 }
 
 const COPY: Record<Language, Copy> = {
@@ -59,6 +65,7 @@ const COPY: Record<Language, Copy> = {
     toggleMenu: 'פתיחת התפריט',
     toggleTheme: 'מעבר בין מצב בהיר לכהה',
     mainNav: 'ניווט ראשי',
+    skipToContent: 'דילוג לתוכן',
   },
   en: {
     home: 'Home',
@@ -75,6 +82,7 @@ const COPY: Record<Language, Copy> = {
     toggleMenu: 'Open the menu',
     toggleTheme: 'Switch between light and dark mode',
     mainNav: 'Main navigation',
+    skipToContent: 'Skip to content',
   },
 };
 
@@ -96,6 +104,7 @@ export const headerData = (language: Language, counterpartHref?: string) => {
 
   return {
     labels: { toggleMenu: t.toggleMenu, toggleTheme: t.toggleTheme, mainNav: t.mainNav },
+    skipToContent: t.skipToContent,
     links: [
       { text: t.home, href: pagePath(language, '') },
       { text: t.story, href: pagePath(language, 'story') },

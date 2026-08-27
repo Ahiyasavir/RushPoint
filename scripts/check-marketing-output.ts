@@ -536,6 +536,67 @@ for (const { path } of standingPages()) {
   );
 }
 
+// ── I. The markup a keyboard and a screen reader need ────────────────────────
+//
+// play-web has a source level accessibility scan and the public site had none,
+// which is backwards: this is the page a stranger meets first, and the one most
+// likely to be read by somebody who is not using a mouse.
+//
+// These are the properties a static scan can actually establish. Colour contrast
+// and focus order are not among them and were checked in a browser instead.
+
+const HEBREW = /[֐-׿]/;
+
+// Every page, not only the standing ones: a post is a page too, and posts are the
+// set that grows without anyone re-reading the layout.
+const contentPages = pages.filter((p) => p.file !== '404.html' && !p.urlPath.startsWith(ADMIN_PATH));
+check('I · there are content pages to scan', contentPages.length > 0, `${contentPages.length} page(s)`);
+
+for (const page of contentPages) {
+  const { html, urlPath } = page;
+
+  // Exactly one h1. Zero leaves a screen reader's document outline headless;
+  // more than one leaves it with no single answer to "what is this page".
+  const h1s = (html.match(/<h1[\s>]/g) ?? []).length;
+  check(`I · ${urlPath} has exactly one h1`, h1s === 1, `${h1s}`);
+
+  // An <img> with no alt attribute at all is announced by its filename. An empty
+  // alt is a deliberate "this is decorative" and is correct, so the check is for
+  // the attribute's presence, not its content.
+  const imgs = html.match(/<img\b[^>]*>/g) ?? [];
+  const noAlt = imgs.filter((tag) => !/\balt=/.test(tag));
+  check(`I · ${urlPath} gives every image an alt attribute`, noAlt.length === 0, `${noAlt.length} of ${imgs.length}`);
+
+  // An accessible name written in the wrong language is read out by a screen
+  // reader in the wrong language. It is invisible on screen, so nothing else
+  // catches it, and this site is Hebrew first.
+  const expectHebrew = urlPath.startsWith('/he/');
+  const labels = [...html.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]);
+  const wrongLanguage = labels.filter((l) => (expectHebrew ? !HEBREW.test(l) : HEBREW.test(l)));
+  check(
+    `I · ${urlPath} writes its accessible names in the page's own language`,
+    wrongLanguage.length === 0,
+    wrongLanguage.slice(0, 3).join(' | ') || `${labels.length} label(s) checked`,
+  );
+
+  // The skip link. Without it a keyboard user walks the whole navigation again on
+  // every single page. Three separate things have to be true and each fails
+  // silently on its own: the link must exist, the target must exist, and the
+  // target must be focusable. A skip link whose target lacks tabindex="-1" moves
+  // the viewport but leaves focus in the navigation, which is exactly the failure
+  // that makes people believe skip links do not work.
+  check(`I · ${urlPath} offers a skip link`, /href="#main"/.test(html), '#main');
+  check(
+    `I · ${urlPath} has a focusable skip target`,
+    /<main[^>]*\bid="main"[^>]*\btabindex="-1"|<main[^>]*\btabindex="-1"[^>]*\bid="main"/.test(html),
+    'main#main[tabindex=-1]',
+  );
+
+  // One <main>, so "skip to content" has one unambiguous destination.
+  const mains = (html.match(/<main[\s>]/g) ?? []).length;
+  check(`I · ${urlPath} has exactly one main landmark`, mains === 1, `${mains}`);
+}
+
 console.log('');
 if (failures > 0) {
   console.log(`MARKETING OUTPUT TESTS FAILED :: ${failures} of ${checks}`);
