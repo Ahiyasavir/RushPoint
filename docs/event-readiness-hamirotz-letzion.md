@@ -192,3 +192,69 @@ reliable, and capture the underlying Firestore error.
 Not a launch blocker on its own: the action succeeds, the score is correct, and the player
 recovers by reloading. But it is the most likely source of "the app showed an error" reports on
 the day.
+
+---
+
+## 8. The 120-team production rehearsal — what actually happened
+
+Run against `api.rush-point.com` with the real game copied into the operator's own account,
+100+ real anonymous identities, real GPS movement, and real photo and video uploads.
+
+### It found a genuine event-stopping bug, and the fix is verified
+
+The first attempt died in the **join** phase:
+
+```
+10 ABORTED: Aborted due to cross-transaction contention.
+note: 'Exception occurred in retry method that was not classified as transient'
+```
+
+`joinRun` enforces the capacity cap inside a transaction that reads and writes the ONE run
+document, so every simultaneous join queues on the same lock — and an event begins with the
+whole field scanning the same QR code in the same minute. It reached the participant as an
+opaque `INTERNAL`. `joinTeamAsDevice` had the same flaw on the run-wide device counter.
+
+Both are now wrapped in `withLockRetry` (the helper that already protected the routing paths
+after this same bug class was found in `completeTask`). **Re-run after the fix: 100 of 100
+teams inside the cap joined successfully, zero contention errors.**
+
+A declared static guard (`scripts/test-transaction-retry.ts`) now fails the build if a
+transaction that many participants can enter at once is left unwrapped, or if a declared site
+is renamed out from under the check.
+
+### The 20 refusals were correct behaviour
+
+Teams 101–120 were refused with `resource-exhausted`:
+
+> This free run is full (100 participants max). The host can add an Event Credit or go Pro for more.
+
+**This matters for the event.** A free run caps at **100 participants**, and ~100 teams means
+zero headroom — one extra phone and someone is turned away. Launch with an Event Credit or Pro
+if the field might exceed 100.
+
+### What the run measured
+
+| | |
+|---|---|
+| teams joined | 100 / 100 within cap (20 correctly refused) |
+| teams finished | 75 / 100 within the harness's turn limit |
+| wall time | 9.8 min (compressed — teams do not really walk between stations) |
+| `stationsFull` holds | **2,027** |
+| callable p50 latency | 380–650 ms; `submitTaskAnswer` p50 2.4 s, p95 4.3 s |
+
+**`stationsFull` 2,027 times is the headline.** It is the throughput ceiling from §1 showing up
+in practice: teams spend most of the game queueing for stations, not playing. This is authored
+capacity, not a code limit — raising `maxConcurrentTeams` on the two 10-minute missions is the
+fix.
+
+### Testing stopped deliberately, short of a final clean 120-team pass
+
+The op counter showed **~39,000 of the 50,000 daily reads already spent** on tonight's testing.
+Another full pass costs ~33,000 and would have exhausted the day's quota — which would take the
+**live** site down for real users until the quota resets (07:00 UTC). Stopped rather than
+risk that.
+
+What remains is one clean 120-team pass with the corrected harness, after the quota resets and
+well before the event. Everything it would validate has already been validated at 6 and 100
+teams; the outstanding value is confirming the finish rate once the harness stops re-submitting
+photos.
