@@ -4,6 +4,7 @@ import Hero from '~/components/widgets/Hero.astro';
 import Features from '~/components/widgets/Features.astro';
 import Steps from '~/components/widgets/Steps.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
+import TryMission from '~/components/widgets/TryMission.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
 import { landingPageUrl } from '~/navigation';
@@ -59,6 +60,15 @@ const metadata = {
   />
 
   <Steps title={t.stepsTitle} items={t.steps} isReversed />
+
+  {
+    /*
+      A mission the visitor can actually play (change: try-a-mission). Everything above this
+      point DESCRIBES the product; a field game is a thing you feel. Optional content, so a
+      page without it renders exactly as it did before.
+    */
+    t.tryMission && <TryMission content={t.tryMission} />
+  }
 
   {
     /*

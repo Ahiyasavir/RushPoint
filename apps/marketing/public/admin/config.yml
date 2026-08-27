@@ -114,6 +114,74 @@ collections:
               - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
           - { label: 'כותרת הקריאה לפעולה', name: ctaTitle, widget: string }
           - { label: 'משפט הקריאה לפעולה', name: ctaSubtitle, widget: text }
+          - label: 'המשימה לניסיון (המשחק בתוך העמוד)'
+            name: tryMission
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              הקטע שבו המבקר משחק שלוש משימות אמיתיות בלי להירשם. אפשר להשאיר ריק והקטע פשוט לא יופיע.
+            fields:
+              - { label: 'תגית קטנה', name: tagline, widget: string, required: false }
+              - { label: 'כותרת הקטע', name: title, widget: string }
+              - { label: 'משפט מתחת לכותרת', name: subtitle, widget: text }
+              - { label: 'מה כתוב לפני שמתחילים', name: startBody, widget: text }
+              - { label: 'כפתור התחלה', name: startAction, widget: string }
+              - { label: 'כפתור בדיקה', name: checkAction, widget: string }
+              - { label: 'כפתור איפוס', name: resetAction, widget: string }
+              - { label: 'כפתור לשחק שוב', name: replayAction, widget: string }
+              - { label: 'מה כתוב בתשובה שגויה', name: wrongFeedback, widget: string }
+              - { label: 'שורת ההתקדמות', name: progressLabel, widget: string, hint: 'השתמשו ב {n} ו {total}' }
+              - { label: 'שורת הניקוד', name: scoreLabel, widget: string, hint: 'השתמשו ב {score}' }
+              - { label: 'איך קוראים לשחקן בטבלה', name: youLabel, widget: string }
+              - { label: 'כותרת הסיום', name: doneTitle, widget: string }
+              - { label: 'משפט הסיום', name: doneBody, widget: text }
+              - { label: 'כפתור בסיום', name: doneAction, widget: string }
+              - { label: 'תווית ניקוד', name: doneScoreLabel, widget: string }
+              - { label: 'תווית זמן', name: doneTimeLabel, widget: string }
+              - { label: 'תווית מקום', name: doneRankLabel, widget: string }
+              - { label: 'הערה מתחת לטבלה', name: boardNote, widget: text }
+              - label: 'קבוצות להמחשה בטבלה'
+                name: rivals
+                widget: list
+                fields:
+                  - { label: 'שם הקבוצה', name: name, widget: string }
+                  - { label: 'ניקוד', name: score, widget: number, value_type: int }
+              - label: 'שלוש המשימות'
+                name: missions
+                widget: object
+                fields:
+                  - label: 'משימת סדר'
+                    name: order
+                    widget: object
+                    fields:
+                      - { label: 'סוג המשימה', name: kind, widget: string }
+                      - { label: 'שם המשימה', name: title, widget: string }
+                      - { label: 'ההוראה לשחקן', name: prompt, widget: text }
+                      - { label: 'הפריטים', name: items, widget: list, field: { label: 'פריט', name: item, widget: string }, hint: 'כתבו אותם בסדר הנכון. המערכת מערבבת אותם לשחקן.' }
+                  - label: 'משימת פיצוח'
+                    name: answer
+                    widget: object
+                    fields:
+                      - { label: 'סוג המשימה', name: kind, widget: string }
+                      - { label: 'שם המשימה', name: title, widget: string }
+                      - { label: 'ההוראה לשחקן', name: prompt, widget: text }
+                      - { label: 'רמז', name: hint, widget: string, required: false }
+                      - { label: 'תשובות מתקבלות', name: answers, widget: list, field: { label: 'תשובה', name: answer, widget: string }, hint: 'כל אחת מהן תיחשב נכונה.' }
+                  - label: 'משימת צילום'
+                    name: photo
+                    widget: object
+                    fields:
+                      - { label: 'סוג המשימה', name: kind, widget: string }
+                      - { label: 'שם המשימה', name: title, widget: string }
+                      - { label: 'ההוראה לשחקן', name: prompt, widget: text }
+                      - label: 'האפשרויות'
+                        name: options
+                        widget: list
+                        fields:
+                          - { label: 'מה כתוב', name: label, widget: string }
+                          - { label: 'אימוג׳י', name: emoji, widget: string, required: false }
+                          - { label: 'זו התשובה הנכונה', name: correct, widget: boolean, required: false, default: false }
 
       - name: home-en
         label: 'עמוד הבית (English)'
@@ -176,6 +244,74 @@ collections:
               - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
           - { label: 'כותרת הקריאה לפעולה', name: ctaTitle, widget: string }
           - { label: 'משפט הקריאה לפעולה', name: ctaSubtitle, widget: text }
+          - label: 'Try a mission (the playable demo)'
+            name: tryMission
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              The section where a visitor plays three real missions without signing up. Leave it empty and the section simply does not appear.
+            fields:
+              - { label: 'Small tagline', name: tagline, widget: string, required: false }
+              - { label: 'Section title', name: title, widget: string }
+              - { label: 'Sentence under the title', name: subtitle, widget: text }
+              - { label: 'Text before starting', name: startBody, widget: text }
+              - { label: 'Start button', name: startAction, widget: string }
+              - { label: 'Check button', name: checkAction, widget: string }
+              - { label: 'Reset button', name: resetAction, widget: string }
+              - { label: 'Play again button', name: replayAction, widget: string }
+              - { label: 'Text on a wrong answer', name: wrongFeedback, widget: string }
+              - { label: 'Progress line', name: progressLabel, widget: string, hint: 'Use {n} and {total}' }
+              - { label: 'Score line', name: scoreLabel, widget: string, hint: 'Use {score}' }
+              - { label: 'What the player is called on the board', name: youLabel, widget: string }
+              - { label: 'Finish title', name: doneTitle, widget: string }
+              - { label: 'Finish sentence', name: doneBody, widget: text }
+              - { label: 'Button at the finish', name: doneAction, widget: string }
+              - { label: 'Score label', name: doneScoreLabel, widget: string }
+              - { label: 'Time label', name: doneTimeLabel, widget: string }
+              - { label: 'Place label', name: doneRankLabel, widget: string }
+              - { label: 'Note under the board', name: boardNote, widget: text }
+              - label: 'Illustrative teams on the board'
+                name: rivals
+                widget: list
+                fields:
+                  - { label: 'Team name', name: name, widget: string }
+                  - { label: 'Score', name: score, widget: number, value_type: int }
+              - label: 'The three missions'
+                name: missions
+                widget: object
+                fields:
+                  - label: 'Ordering mission'
+                    name: order
+                    widget: object
+                    fields:
+                      - { label: 'Mission kind', name: kind, widget: string }
+                      - { label: 'Mission name', name: title, widget: string }
+                      - { label: 'Instruction to the player', name: prompt, widget: text }
+                      - { label: 'The items', name: items, widget: list, field: { label: 'Item', name: item, widget: string }, hint: 'Write them in the CORRECT order. They are scrambled for the player.' }
+                  - label: 'Cipher mission'
+                    name: answer
+                    widget: object
+                    fields:
+                      - { label: 'Mission kind', name: kind, widget: string }
+                      - { label: 'Mission name', name: title, widget: string }
+                      - { label: 'Instruction to the player', name: prompt, widget: text }
+                      - { label: 'Hint', name: hint, widget: string, required: false }
+                      - { label: 'Accepted answers', name: answers, widget: list, field: { label: 'Answer', name: answer, widget: string }, hint: 'Any of these counts as correct.' }
+                  - label: 'Photo mission'
+                    name: photo
+                    widget: object
+                    fields:
+                      - { label: 'Mission kind', name: kind, widget: string }
+                      - { label: 'Mission name', name: title, widget: string }
+                      - { label: 'Instruction to the player', name: prompt, widget: text }
+                      - label: 'The options'
+                        name: options
+                        widget: list
+                        fields:
+                          - { label: 'Label', name: label, widget: string }
+                          - { label: 'Emoji', name: emoji, widget: string, required: false }
+                          - { label: 'This is the correct one', name: correct, widget: boolean, required: false, default: false }
 
       - name: story-he
         label: 'הסיפור שלי (עברית)'
@@ -397,11 +533,18 @@ collections:
         widget: image
         required: false
 
-      - label: 'Video embed URL'
-        name: video
-        widget: string
+      - label: 'Picture or video in the post'
+        name: media
+        widget: object
         required: false
-        hint: An embed address, for example a YouTube embed link.
+        collapsed: true
+        hint: A file we host ourselves, shown after the opening text. Leave empty for none.
+        fields:
+          - { label: 'Image or video', name: kind, widget: select, options: [{ label: Image, value: image }, { label: Video, value: video }] }
+          - { label: File, name: src, widget: file }
+          - { label: 'Accessible description (required)', name: alt, widget: string }
+          - { label: 'Caption (optional)', name: caption, widget: string, required: false }
+          - { label: 'Video poster frame (optional)', name: poster, widget: image, required: false }
 
       - label: Category
         name: category

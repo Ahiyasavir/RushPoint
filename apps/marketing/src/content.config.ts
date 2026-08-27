@@ -47,6 +47,32 @@ const metadataDefinition = () =>
     })
     .optional();
 
+/**
+ * A picture or a video, wherever one may appear.
+ *
+ * `src` is a site relative path under /uploads, which is where the CMS puts what
+ * it is given. A video is NOT loaded as an image: `kind` says which it is rather
+ * than the extension being sniffed, because a mis-sniffed video renders as a
+ * broken image with no explanation.
+ */
+const mediaItem = () =>
+  z.object({
+    kind: z.enum(['image', 'video']),
+    src: z.string(),
+    /**
+     * Required for an image, because an image with no alt text is invisible to
+     * anyone using a screen reader and to a search engine. For a video it is the
+     * accessible label.
+     */
+    alt: z.string(),
+    caption: z.string().optional(),
+    /** Shown while a video loads, and as its thumbnail before play. */
+    poster: z.string().optional(),
+  });
+
+/** Media that may be absent. A page without a picture is a page, not an error. */
+const optionalMedia = () => mediaItem().optional();
+
 const postCollection = defineCollection({
   loader: glob({ pattern: ['*.md', '*.mdx'], base: 'src/data/post' }),
   schema: z.object({
@@ -76,8 +102,11 @@ const postCollection = defineCollection({
     title: z.string(),
     excerpt: z.string().optional(),
     image: z.string().optional(),
-    /** A video embed URL for the post body. */
-    video: z.url().optional(),
+    /**
+     * A self-hosted picture or video for the post body, same as the standing
+     * pages: a file the CMS uploaded and we serve, never a third-party embed.
+     */
+    media: optionalMedia(),
 
     category: z.string().optional(),
     tags: z.array(z.string()).optional(),
@@ -98,32 +127,6 @@ const postCollection = defineCollection({
 // one file holding both. Two reasons: a language can then be edited without the
 // risk of touching the other, and it matches how the blog posts already work, so
 // there is one mental model rather than two.
-
-/**
- * A picture or a video, wherever one may appear.
- *
- * `src` is a site relative path under /uploads, which is where the CMS puts what
- * it is given. A video is NOT loaded as an image: `kind` says which it is rather
- * than the extension being sniffed, because a mis-sniffed video renders as a
- * broken image with no explanation.
- */
-const mediaItem = () =>
-  z.object({
-    kind: z.enum(['image', 'video']),
-    src: z.string(),
-    /**
-     * Required for an image, because an image with no alt text is invisible to
-     * anyone using a screen reader and to a search engine. For a video it is the
-     * accessible label.
-     */
-    alt: z.string(),
-    caption: z.string().optional(),
-    /** Shown while a video loads, and as its thumbnail before play. */
-    poster: z.string().optional(),
-  });
-
-/** Media that may be absent. A page without a picture is a page, not an error. */
-const optionalMedia = () => mediaItem().optional();
 
 const homePages = defineCollection({
   // The id is DECLARED, not left to the loader. The default generateId
@@ -157,6 +160,60 @@ const homePages = defineCollection({
     galleryTitle: z.string().optional(),
     gallerySubtitle: z.string().optional(),
     gallery: z.array(mediaItem()).default([]),
+
+    // The playable demo mission (change: try-a-mission). OPTIONAL as a whole: a page with no
+    // `tryMission` renders exactly as it did before, so this is a content decision rather
+    // than a deploy. Every string a visitor can see lives here, in the language's own file,
+    // which is what keeps the Hebrew page from leaking English.
+    tryMission: z
+      .object({
+        tagline: z.string().optional(),
+        title: z.string(),
+        subtitle: z.string(),
+        startBody: z.string(),
+        startAction: z.string(),
+        checkAction: z.string(),
+        resetAction: z.string(),
+        replayAction: z.string(),
+        wrongFeedback: z.string(),
+        // `{n}` and `{total}` / `{score}` are substituted at runtime.
+        progressLabel: z.string(),
+        scoreLabel: z.string(),
+        youLabel: z.string(),
+        doneTitle: z.string(),
+        doneBody: z.string(),
+        doneAction: z.string(),
+        doneScoreLabel: z.string(),
+        doneTimeLabel: z.string(),
+        doneRankLabel: z.string(),
+        boardNote: z.string(),
+        rivals: z.array(z.object({ name: z.string(), score: z.number() })).default([]),
+        missions: z.object({
+          order: z.object({
+            kind: z.string(),
+            title: z.string(),
+            prompt: z.string(),
+            /** Authored in the CORRECT order; the widget scrambles them for display. */
+            items: z.array(z.string()).min(2),
+          }),
+          answer: z.object({
+            kind: z.string(),
+            title: z.string(),
+            prompt: z.string(),
+            hint: z.string().optional(),
+            answers: z.array(z.string()).min(1),
+          }),
+          photo: z.object({
+            kind: z.string(),
+            title: z.string(),
+            prompt: z.string(),
+            options: z
+              .array(z.object({ label: z.string(), emoji: z.string().optional(), correct: z.boolean().optional() }))
+              .min(2),
+          }),
+        }),
+      })
+      .optional(),
   }),
 });
 

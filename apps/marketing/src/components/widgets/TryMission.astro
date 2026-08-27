@@ -1,0 +1,510 @@
+---
+/**
+ * A playable mission, on the marketing page, with no sign-up.
+ *
+ * WHY THIS EXISTS. Everything else on this site DESCRIBES the product: what a mission is,
+ * how scoring works, that the routing is automatic. A field game is a thing you feel, and a
+ * paragraph about "automatic scoring" persuades nobody who has never watched a score land two
+ * seconds after their team solved something. This section lets a visitor play three real
+ * mission types — an ordering puzzle, a typed answer, and a photo prompt — and then shows the
+ * same result card a player sees, with the same speed-weighted scoring.
+ *
+ * DESIGN CONSTRAINTS THIS RESPECTS:
+ *  • No backend, no sign-up, no network. It is a static page; the whole thing runs locally, so
+ *    it cannot spend Firestore quota and cannot fail because an API is down.
+ *  • No framework. This app is Astro with vanilla islands — adding React here for three
+ *    buttons would be the largest dependency on the page.
+ *  • Every string comes from `content`, which is per-language JSON edited through the CMS.
+ *    Nothing user-visible is hardcoded here, so the Hebrew page cannot leak English.
+ *  • Keyboard-operable and screen-reader-labelled: the ordering step is real buttons, not
+ *    drag-and-drop, which is also the only version that works on a phone without a library.
+ *  • RTL by construction — logical properties and `rtl:` variants only, because Hebrew is the
+ *    default language of this site.
+ *
+ * The scoring mirrors packages/shared/src/scoringPresets.ts in SHAPE (points per mission plus
+ * a speed bonus that decays with time) rather than importing it: this is a toy with three
+ * fixed missions, and wiring the real preset machinery to it would imply a fidelity the demo
+ * does not have. The number a visitor sees here is honest about being illustrative — the copy
+ * says so.
+ */
+import type { TryMission as Props } from '~/types';
+
+const { content, id = 'try-mission' } = Astro.props as Props;
+---
+
+<section id={id} class="px-4 py-16 sm:px-6 mx-auto max-w-4xl lg:px-8">
+  <div class="text-center mb-10">
+    {content.tagline && (
+      <p class="text-base font-bold tracking-wide uppercase text-secondary mb-2">{content.tagline}</p>
+    )}
+    <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-3">{content.title}</h2>
+    <p class="text-lg text-muted dark:text-slate-400 max-w-2xl mx-auto">{content.subtitle}</p>
+  </div>
+
+  <div
+    class="rp-demo rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg overflow-hidden"
+    data-rp-demo
+    data-copy={JSON.stringify(content)}
+  >
+    <!-- Status bar: mirrors the player's own header (mission n of 3, live clock, score). -->
+    <div class="flex items-center justify-between gap-4 px-5 py-3 bg-slate-50 dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 text-sm">
+      <span class="font-semibold" data-rp-progress></span>
+      <span class="tabular-nums text-muted dark:text-slate-400" data-rp-clock aria-live="off"></span>
+      <span class="font-bold text-primary tabular-nums" data-rp-score></span>
+    </div>
+
+    <div class="p-5 sm:p-8">
+      <!-- START -->
+      <div data-rp-screen="start" class="text-center">
+        <p class="text-lg mb-6" data-rp-start-body></p>
+        <button type="button" class="btn btn-primary" data-rp-start></button>
+      </div>
+
+      <!-- ORDERING: tap items into the right order. Buttons, not drag-and-drop. -->
+      <div data-rp-screen="order" hidden>
+        <p class="text-sm font-bold uppercase tracking-wide text-secondary mb-1" data-rp-order-kind></p>
+        <h3 class="text-xl font-bold mb-2" data-rp-order-title></h3>
+        <p class="text-muted dark:text-slate-400 mb-5" data-rp-order-prompt></p>
+        <ol class="flex flex-col gap-2 mb-4" data-rp-order-picked aria-live="polite"></ol>
+        <div class="flex flex-wrap gap-2 mb-5" data-rp-order-pool></div>
+        <div class="flex items-center gap-3">
+          <button type="button" class="btn btn-primary" data-rp-order-submit disabled></button>
+          <button type="button" class="btn" data-rp-order-reset></button>
+        </div>
+        <p class="mt-3 text-sm" data-rp-order-feedback role="status"></p>
+      </div>
+
+      <!-- TYPED ANSWER -->
+      <div data-rp-screen="answer" hidden>
+        <p class="text-sm font-bold uppercase tracking-wide text-secondary mb-1" data-rp-answer-kind></p>
+        <h3 class="text-xl font-bold mb-2" data-rp-answer-title></h3>
+        <p class="text-muted dark:text-slate-400 mb-2" data-rp-answer-prompt></p>
+        <p class="text-sm text-muted dark:text-slate-500 mb-5" data-rp-answer-hint></p>
+        <form class="flex flex-col sm:flex-row gap-3" data-rp-answer-form>
+          <label class="sr-only" for="rp-answer-input" data-rp-answer-label></label>
+          <input
+            id="rp-answer-input"
+            type="text"
+            autocomplete="off"
+            class="flex-1 rounded-lg border border-gray-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-3 text-lg"
+            data-rp-answer-input
+          />
+          <button type="submit" class="btn btn-primary" data-rp-answer-submit></button>
+        </form>
+        <p class="mt-3 text-sm" data-rp-answer-feedback role="status"></p>
+      </div>
+
+      <!-- PHOTO PROMPT: the real thing uploads a picture; here the visitor chooses which shot
+           satisfies the brief, which is the judgement the mission actually asks for. -->
+      <div data-rp-screen="photo" hidden>
+        <p class="text-sm font-bold uppercase tracking-wide text-secondary mb-1" data-rp-photo-kind></p>
+        <h3 class="text-xl font-bold mb-2" data-rp-photo-title></h3>
+        <p class="text-muted dark:text-slate-400 mb-5" data-rp-photo-prompt></p>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3" data-rp-photo-options></div>
+        <p class="mt-3 text-sm" data-rp-photo-feedback role="status"></p>
+      </div>
+
+      <!-- RESULT -->
+      <div data-rp-screen="done" hidden class="text-center">
+        <p class="text-5xl mb-3" aria-hidden="true">🏁</p>
+        <h3 class="text-2xl font-bold mb-2" data-rp-done-title></h3>
+        <p class="text-muted dark:text-slate-400 mb-6" data-rp-done-body></p>
+
+        <dl class="grid grid-cols-3 gap-3 max-w-md mx-auto mb-6">
+          <div class="rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+            <dt class="text-xs text-muted dark:text-slate-400" data-rp-done-scorelabel></dt>
+            <dd class="text-2xl font-bold text-primary tabular-nums" data-rp-done-score></dd>
+          </div>
+          <div class="rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+            <dt class="text-xs text-muted dark:text-slate-400" data-rp-done-timelabel></dt>
+            <dd class="text-2xl font-bold tabular-nums" data-rp-done-time></dd>
+          </div>
+          <div class="rounded-xl bg-slate-50 dark:bg-slate-800 p-3">
+            <dt class="text-xs text-muted dark:text-slate-400" data-rp-done-ranklabel></dt>
+            <dd class="text-2xl font-bold tabular-nums" data-rp-done-rank></dd>
+          </div>
+        </dl>
+
+        <!-- The standings a player would see. The other rows are illustrative and the copy
+             below the table says so; presenting invented teams as real results would be a
+             small lie in the middle of a page about trust. -->
+        <ol class="max-w-md mx-auto text-start mb-3" data-rp-board></ol>
+        <p class="text-xs text-muted dark:text-slate-500 mb-6" data-rp-board-note></p>
+
+        <div class="flex flex-wrap gap-3 justify-center">
+          <a class="btn btn-primary" href="https://creator.rush-point.com" target="_blank" rel="noopener" data-rp-done-cta></a>
+          <button type="button" class="btn" data-rp-replay></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* The picked/pool chips. Kept here rather than in Tailwind classes because the states are
+     driven by JS attributes, and a `data-` selector is clearer than toggling six class names. */
+  .rp-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border-radius: 9999px;
+    border: 1px solid var(--aw-color-border, rgb(203 213 225));
+    padding: 0.5rem 1rem;
+    font-size: 0.95rem;
+    line-height: 1.2;
+    transition: transform 0.12s ease, opacity 0.12s ease;
+  }
+  .rp-chip:hover:not(:disabled) { transform: translateY(-1px); }
+  .rp-chip:disabled { opacity: 0.35; cursor: default; }
+  .rp-picked {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    border-radius: 0.75rem;
+    padding: 0.6rem 0.9rem;
+    background: rgb(241 245 249);
+  }
+  :global(.dark) .rp-picked { background: rgb(30 41 59); }
+  .rp-correct { border-color: rgb(22 163 74); color: rgb(21 128 61); }
+  .rp-wrong { border-color: rgb(220 38 38); color: rgb(185 28 28); }
+
+  /* A player who prefers less motion gets none of it. */
+  @media (prefers-reduced-motion: reduce) {
+    .rp-chip { transition: none; }
+    .rp-chip:hover:not(:disabled) { transform: none; }
+  }
+</style>
+
+<script>
+  // ── The demo runtime ───────────────────────────────────────────────────────────────────
+  // Deliberately dependency-free and defensive: this is a marketing page, and a thrown error
+  // here would leave a dead grey box in the middle of it. Every step is guarded, and if
+  // anything is missing the section simply hides itself rather than rendering broken.
+  // `unknown`, not `any`: this object is parsed from a data attribute at runtime, so nothing
+  // about its shape is guaranteed here even though the build validated it. Every read below
+  // goes through a guard, which is what makes the section safe to render on a page where a
+  // thrown error would leave a dead grey box.
+  type Copy = Record<string, unknown>;
+  /** Narrow a copy field to an array, or [] when it is anything else. */
+  const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+  /** Narrow a copy field to a nested object, or {} when it is anything else. */
+  const obj = (v: unknown): Record<string, unknown> =>
+    (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {});
+
+  function initDemo(root: HTMLElement) {
+    let copy: Copy;
+    try {
+      copy = JSON.parse(root.dataset.copy ?? '{}');
+    } catch {
+      root.closest('section')?.remove();
+      return;
+    }
+    const missions = obj(copy.missions);
+    const q = <T extends Element = HTMLElement>(sel: string) => root.querySelector(sel) as T | null;
+    const text = (sel: string, value: unknown) => {
+      const el = q(sel);
+      if (el && typeof value === 'string') el.textContent = value;
+    };
+
+    const screens = {
+      start: q('[data-rp-screen="start"]'),
+      order: q('[data-rp-screen="order"]'),
+      answer: q('[data-rp-screen="answer"]'),
+      photo: q('[data-rp-screen="photo"]'),
+      done: q('[data-rp-screen="done"]'),
+    };
+    const show = (name: keyof typeof screens) => {
+      for (const [k, el] of Object.entries(screens)) {
+        if (el) (el as HTMLElement).hidden = k !== name;
+      }
+    };
+
+    // ── State ──
+    let score = 0;
+    let step = 0;
+    let startedAt = 0;
+    let ticker: number | undefined;
+
+    const TOTAL_STEPS = 3;
+    /** Points a mission is worth before the speed bonus. Mirrors a fixed-points preset. */
+    const BASE_POINTS = 100;
+    /** Seconds after which the speed bonus has fully decayed. */
+    const BONUS_WINDOW_S = 45;
+    /** Most a fast answer can add on top of the base. */
+    const MAX_BONUS = 50;
+
+    const elapsedS = () => (startedAt ? (Date.now() - startedAt) / 1000 : 0);
+    const fmt = (s: number) => {
+      const m = Math.floor(s / 60);
+      const r = Math.floor(s % 60);
+      return `${m}:${String(r).padStart(2, '0')}`;
+    };
+
+    /** Base points plus a bonus that decays linearly over BONUS_WINDOW_S. Never negative. */
+    function award(stepStartedAt: number) {
+      const took = Math.max(0, (Date.now() - stepStartedAt) / 1000);
+      const bonus = Math.round(MAX_BONUS * Math.max(0, 1 - took / BONUS_WINDOW_S));
+      return BASE_POINTS + bonus;
+    }
+
+    function paintStatus() {
+      const progress = String(copy.progressLabel ?? '')
+        .replace('{n}', String(Math.min(step + 1, TOTAL_STEPS)))
+        .replace('{total}', String(TOTAL_STEPS));
+      text('[data-rp-progress]', progress);
+      text('[data-rp-score]', String(copy.scoreLabel ?? '').replace('{score}', String(score)));
+      const clock = q('[data-rp-clock]');
+      if (clock) clock.textContent = fmt(elapsedS());
+    }
+
+    function startClock() {
+      startedAt = Date.now();
+      ticker = window.setInterval(paintStatus, 1000);
+    }
+    function stopClock() {
+      if (ticker) window.clearInterval(ticker);
+      ticker = undefined;
+    }
+
+    // ── Static copy ──
+    text('[data-rp-start-body]', copy.startBody);
+    text('[data-rp-start]', copy.startAction);
+    text('[data-rp-replay]', copy.replayAction);
+    text('[data-rp-done-cta]', copy.doneAction);
+    text('[data-rp-order-reset]', copy.resetAction);
+    text('[data-rp-order-submit]', copy.checkAction);
+    text('[data-rp-answer-submit]', copy.checkAction);
+    text('[data-rp-done-scorelabel]', copy.doneScoreLabel);
+    text('[data-rp-done-timelabel]', copy.doneTimeLabel);
+    text('[data-rp-done-ranklabel]', copy.doneRankLabel);
+    text('[data-rp-board-note]', copy.boardNote);
+
+    // ── Step 1: ordering ──
+    function runOrder() {
+      const m = obj(missions.order);
+      const items: string[] = arr<string>(m.items).slice();
+      if (items.length < 2) return runAnswer(); // nothing to order ⇒ skip rather than stall
+      text('[data-rp-order-kind]', m.kind);
+      text('[data-rp-order-title]', m.title);
+      text('[data-rp-order-prompt]', m.prompt);
+
+      const pool = q('[data-rp-order-pool]')!;
+      const picked = q('[data-rp-order-picked]')!;
+      const submit = q<HTMLButtonElement>('[data-rp-order-submit]')!;
+      const feedback = q('[data-rp-order-feedback]')!;
+      const stepStart = Date.now();
+      let chosen: string[] = [];
+
+      // A deterministic shuffle would show the same "puzzle" to everyone forever; a random one
+      // occasionally hands out the answer already solved. Rotate instead: always scrambled,
+      // never accidentally correct.
+      const shuffled = items.slice(1).concat(items[0]).reverse();
+
+      const paint = () => {
+        picked.innerHTML = '';
+        chosen.forEach((label, i) => {
+          const li = document.createElement('li');
+          li.className = 'rp-picked';
+          li.innerHTML = `<span class="font-bold text-primary">${i + 1}</span><span></span>`;
+          li.lastElementChild!.textContent = label;
+          picked.appendChild(li);
+        });
+        pool.innerHTML = '';
+        shuffled.forEach((label) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'rp-chip';
+          b.textContent = label;
+          b.disabled = chosen.includes(label);
+          b.addEventListener('click', () => {
+            if (chosen.includes(label)) return;
+            chosen.push(label);
+            paint();
+          });
+          pool.appendChild(b);
+        });
+        submit.disabled = chosen.length !== items.length;
+        feedback.textContent = '';
+      };
+
+      q('[data-rp-order-reset]')!.onclick = () => { chosen = []; paint(); };
+      submit.onclick = () => {
+        const right = chosen.every((v, i) => v === items[i]);
+        if (!right) {
+          // Wrong answers cost time, not progress — same as the real game, which never
+          // dead-ends a team on a puzzle.
+          //
+          // paint() clears the feedback line (so it does not linger while the player is
+          // re-picking), which means the message MUST be written after the repaint. Setting
+          // it first left the player watching their answer silently vanish with no reason
+          // given — found by playing it, not by reading it.
+          chosen = [];
+          paint();
+          feedback.textContent = String(copy.wrongFeedback ?? '');
+          feedback.className = 'mt-3 text-sm rp-wrong';
+          return;
+        }
+        score += award(stepStart);
+        step = 1;
+        paintStatus();
+        runAnswer();
+      };
+
+      paint();
+      show('order');
+    }
+
+    // ── Step 2: typed answer ──
+    function runAnswer() {
+      const m = obj(missions.answer);
+      const accepted: string[] = arr<string>(m.answers);
+      if (!accepted.length) return runPhoto();
+      text('[data-rp-answer-kind]', m.kind);
+      text('[data-rp-answer-title]', m.title);
+      text('[data-rp-answer-prompt]', m.prompt);
+      text('[data-rp-answer-hint]', m.hint);
+      text('[data-rp-answer-label]', m.title);
+
+      const form = q<HTMLFormElement>('[data-rp-answer-form]')!;
+      const input = q<HTMLInputElement>('[data-rp-answer-input]')!;
+      const feedback = q('[data-rp-answer-feedback]')!;
+      const stepStart = Date.now();
+      input.value = '';
+
+      // Same leniency the server applies: trimmed, case-insensitive, and Hebrew final forms
+      // folded, so "ירושלים" typed with a final mem still matches.
+      const normalise = (s: string) =>
+        s.trim().toLowerCase()
+          .replace(/[ך]/g, 'כ').replace(/[ם]/g, 'מ')
+          .replace(/[ן]/g, 'נ').replace(/[ף]/g, 'פ')
+          .replace(/[ץ]/g, 'צ')
+          .replace(/[^\p{L}\p{N}]/gu, '');
+
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        const given = normalise(input.value);
+        if (!given) return;
+        if (!accepted.some((a) => normalise(a) === given)) {
+          feedback.textContent = String(copy.wrongFeedback ?? '');
+          feedback.className = 'mt-3 text-sm rp-wrong';
+          input.select();
+          return;
+        }
+        score += award(stepStart);
+        step = 2;
+        paintStatus();
+        runPhoto();
+      };
+
+      show('answer');
+      input.focus({ preventScroll: true });
+    }
+
+    // ── Step 3: photo judgement ──
+    function runPhoto() {
+      const m = obj(missions.photo);
+      const options = arr<{ label: string; emoji?: string; correct?: boolean }>(m.options);
+      if (!options.some((o) => o.correct)) return finish();
+      text('[data-rp-photo-kind]', m.kind);
+      text('[data-rp-photo-title]', m.title);
+      text('[data-rp-photo-prompt]', m.prompt);
+
+      const wrap = q('[data-rp-photo-options]')!;
+      const feedback = q('[data-rp-photo-feedback]')!;
+      const stepStart = Date.now();
+      wrap.innerHTML = '';
+      options.forEach((opt) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'rp-chip flex-col !rounded-xl !py-6 w-full justify-center text-center';
+        const face = document.createElement('span');
+        face.className = 'text-4xl';
+        face.setAttribute('aria-hidden', 'true');
+        face.textContent = opt.emoji ?? '📷';
+        const label = document.createElement('span');
+        label.textContent = opt.label;
+        b.append(face, label);
+        b.addEventListener('click', () => {
+          if (!opt.correct) {
+            feedback.textContent = String(copy.wrongFeedback ?? '');
+            feedback.className = 'mt-3 text-sm rp-wrong';
+            b.classList.add('rp-wrong');
+            b.disabled = true;
+            return;
+          }
+          score += award(stepStart);
+          step = 3;
+          paintStatus();
+          finish();
+        });
+        wrap.appendChild(b);
+      });
+      show('photo');
+    }
+
+    // ── Result ──
+    function finish() {
+      stopClock();
+      const seconds = elapsedS();
+      text('[data-rp-done-title]', copy.doneTitle);
+      text('[data-rp-done-body]', copy.doneBody);
+      text('[data-rp-done-score]', String(score));
+      text('[data-rp-done-time]', fmt(seconds));
+
+      // Illustrative rivals, placed around the visitor's own score so the board reads like a
+      // real one. Labelled as illustrative directly beneath — see boardNote.
+      const rivals = arr<{ name: string; score: number }>(copy.rivals);
+      const rows = rivals
+        .map((r) => ({ name: r.name, score: r.score, you: false }))
+        .concat([{ name: String(copy.youLabel ?? 'You'), score, you: true }])
+        .sort((a, b) => b.score - a.score);
+
+      const rank = rows.findIndex((r) => r.you) + 1;
+      text('[data-rp-done-rank]', `${rank}/${rows.length}`);
+
+      const board = q('[data-rp-board]')!;
+      board.innerHTML = '';
+      rows.forEach((r, i) => {
+        const li = document.createElement('li');
+        li.className =
+          'flex items-center justify-between gap-3 px-4 py-2 rounded-lg mb-1 ' +
+          (r.you ? 'bg-primary/10 font-bold' : 'bg-slate-50 dark:bg-slate-800');
+        const left = document.createElement('span');
+        left.textContent = `${i + 1}. ${r.name}`;
+        const right = document.createElement('span');
+        right.className = 'tabular-nums';
+        right.textContent = String(r.score);
+        li.append(left, right);
+        board.appendChild(li);
+      });
+
+      show('done');
+    }
+
+    // ── Wiring ──
+    const begin = () => {
+      score = 0;
+      step = 0;
+      stopClock();
+      startClock();
+      paintStatus();
+      runOrder();
+    };
+    q('[data-rp-start]')!.addEventListener('click', begin);
+    q('[data-rp-replay]')!.addEventListener('click', begin);
+
+    paintStatus();
+    show('start');
+  }
+
+  // Astro ships this once per page; `astro:page-load` also covers view transitions.
+  const boot = () => {
+    document.querySelectorAll<HTMLElement>('[data-rp-demo]').forEach((el) => {
+      if (el.dataset.rpBooted) return;
+      el.dataset.rpBooted = '1';
+      try { initDemo(el); } catch { el.closest('section')?.remove(); }
+    });
+  };
+  boot();
+  document.addEventListener('astro:page-load', boot);
+</script>

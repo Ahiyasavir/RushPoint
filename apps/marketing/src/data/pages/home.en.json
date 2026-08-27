@@ -7,6 +7,13 @@
   "primaryAction": "Build a game",
   "secondaryAction": "Our story",
   "ideasAction": "Ideas by occasion",
+  "hero": {
+    "kind": "video",
+    "src": "/uploads/rushpoint-explainer.mp4",
+    "alt": "Ahiya Savir explains what RushPoint is and how to build a field game with it",
+    "poster": "/uploads/rushpoint-explainer-poster.jpg",
+    "caption": "Ninety seconds: how RushPoint turns any real space into a field game"
+  },
   "featuresTagline": "Why it works",
   "featuresTitle": "The hard parts now happen on their own",
   "featuresSubtitle": "Almost every field game that falls apart falls apart on logistics rather than on the idea. Everything I learned the hard way is already solved here.",
@@ -61,5 +68,88 @@
     }
   ],
   "ctaTitle": "Your first game is about half an hour away",
-  "ctaSubtitle": "No card needed. Start from a ready made game and change it, and if something is missing, write to me."
+  "ctaSubtitle": "No card needed. Start from a ready made game and change it, and if something is missing, write to me.",
+  "tryMission": {
+    "tagline": "No signup, no download",
+    "title": "Actually, play it yourself",
+    "subtitle": "Three real missions, exactly the kinds your teams get in the field. The clock runs, the scoring happens on its own, and at the end you see the screen your players see.",
+    "startBody": "Three missions. Most people finish in about a minute. The faster you solve them, the more points you get, exactly like the real thing.",
+    "startAction": "Start the run",
+    "checkAction": "Check my answer",
+    "resetAction": "Start over",
+    "replayAction": "Play again",
+    "wrongFeedback": "Not quite. Try again. A wrong answer costs you time, not points.",
+    "progressLabel": "Mission {n} of {total}",
+    "scoreLabel": "{score} pts",
+    "youLabel": "You",
+    "doneTitle": "That is the whole course",
+    "doneBody": "This is exactly what a team sees when they finish: score, time, and where they landed. Nobody sat there with a clipboard.",
+    "doneAction": "Build a game like this",
+    "doneScoreLabel": "Score",
+    "doneTimeLabel": "Time",
+    "doneRankLabel": "Place",
+    "boardNote": "The other teams on this board are illustrative. Your score and your time are entirely real.",
+    "rivals": [
+      {
+        "name": "Desert Tigers",
+        "score": 421
+      },
+      {
+        "name": "The Pomegranate Crew",
+        "score": 388
+      },
+      {
+        "name": "Team Seven",
+        "score": 274
+      },
+      {
+        "name": "Wizards of Vine Street",
+        "score": 219
+      }
+    ],
+    "missions": {
+      "order": {
+        "kind": "Ordering mission",
+        "title": "A Jerusalem timeline",
+        "prompt": "Put these in order, earliest first. Tap them in the right sequence.",
+        "items": [
+          "First Temple",
+          "Babylonian exile",
+          "Second Temple",
+          "State of Israel"
+        ]
+      },
+      "answer": {
+        "kind": "Cipher mission",
+        "title": "The number code",
+        "prompt": "Each number is a letter's place in the alphabet: 1=A, 2=B, and so on. What does this spell?  16 · 18 · 9 · 26 · 5",
+        "hint": "Hint: it is what the winners take home.",
+        "answers": [
+          "prize"
+        ]
+      },
+      "photo": {
+        "kind": "Photo mission",
+        "title": "The team shot",
+        "prompt": "The brief said: every team member in frame, with the station sign behind them. Which photo satisfies it?",
+        "options": [
+          {
+            "label": "Only two of the team, no sign",
+            "emoji": "🙋",
+            "correct": false
+          },
+          {
+            "label": "Everyone in frame, sign visible behind",
+            "emoji": "👨‍👩‍👧‍👦",
+            "correct": true
+          },
+          {
+            "label": "A lovely shot of the sign, nobody in it",
+            "emoji": "🪧",
+            "correct": false
+          }
+        ]
+      }
+    }
+  }
 }
