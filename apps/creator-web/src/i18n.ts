@@ -162,6 +162,21 @@ const HE = {
     // "[object Object]", which is exactly what every new creator used to read.
     agreeToTermsLead: 'בלחיצה על "יצירת חשבון" אתה מסכים ל',
     agreeToTermsBetween: ' ול',
+    // Friendly auth-error popups (change: friendly-auth-errors).
+    errors: {
+      noMatchTitle: 'לא מצאנו חשבון עם הפרטים האלה. אולי עדיין לא נרשמת? אפשר לפתוח חשבון חינם עכשיו.',
+      createAccountCta: 'פתיחת חשבון חינם',
+      emailInUse: 'כבר קיים חשבון עם האימייל הזה. אפשר להתחבר במקום.',
+      goToSignInCta: 'מעבר להתחברות',
+      invalidEmail: 'כתובת האימייל אינה תקינה. בדוק אותה ונסה שוב.',
+      weakPassword: 'הסיסמה חלשה מדי. בחר סיסמה עם 8 תווים לפחות.',
+      tooManyRequests: 'היו יותר מדי ניסיונות התחברות. המתן כמה דקות ונסה שוב, או אפס את הסיסמה.',
+      network: 'אין חיבור לאינטרנט כרגע. בדוק את החיבור ונסה שוב.',
+      userDisabled: 'החשבון הזה מושבת. פנה אלינו לתמיכה כדי להפעיל אותו מחדש.',
+      methodDisabled: 'הכניסה עם אימייל וסיסמה כבויה כרגע. אפשר להיכנס עם כפתור "המשך עם גוגל" שלמעלה.',
+      config: 'יש תקלה זמנית בשירות ההתחברות שלנו. נסה שוב בעוד רגע, ואם התקלה חוזרת פנה אלינו לתמיכה.',
+      unknown: 'ההתחברות נכשלה. נסה שוב בעוד רגע.',
+    },
   },
   // ── היסטוריית ריצות + דוח שחקנים (change: post-run-player-report) ──
   runHistory: {
@@ -2520,6 +2535,21 @@ const EN: typeof HE = {
     validationPwdMatch: 'Passwords do not match.',
     agreeToTermsLead: 'By creating an account you agree to the ',
     agreeToTermsBetween: ' and ',
+    // Friendly auth-error popups (change: friendly-auth-errors).
+    errors: {
+      noMatchTitle: "We couldn't find an account with those details. Maybe you haven't signed up yet? You can create a free account now.",
+      createAccountCta: 'Create a free account',
+      emailInUse: 'An account with this email already exists. You can sign in instead.',
+      goToSignInCta: 'Go to sign in',
+      invalidEmail: 'That email address looks invalid. Check it and try again.',
+      weakPassword: 'That password is too weak. Pick one with at least 8 characters.',
+      tooManyRequests: 'Too many attempts. Wait a few minutes and try again, or reset your password.',
+      network: "You're offline right now. Check your connection and try again.",
+      userDisabled: 'This account is disabled. Contact support to turn it back on.',
+      methodDisabled: 'Signing in with an email and password is switched off right now. Use the "Continue with Google" button above.',
+      config: 'Our login service is having a temporary problem. Try again in a moment; if it keeps happening, contact support.',
+      unknown: 'Sign in failed. Please try again in a moment.',
+    },
   },
   // ── Run history + the per-player report (change: post-run-player-report) ──
   runHistory: {

@@ -18,6 +18,7 @@ import {
 import { Button, Card, Input, Label, Spinner } from './ui';
 import { claimReferral } from '../services/calls';
 import { dialog, DialogHost } from './dialog';
+import { authErrorInfo } from '../lib/authError';
 import { ToastHost } from './toast';
 import { REFERRAL_BONUS_FREE_RUNS, FREE_PARTICIPANTS_PER_FREE_RUN, resolvePlayOrigin, CANONICAL_PLAY_URL } from '@rushpoint/shared';
 import { useT } from './LanguageContext';
@@ -130,6 +131,27 @@ function LoginScreen() {
     setMode(next); setErr(''); setPassword(''); setConfirm('');
   }
 
+  // Every auth failure is shown as a popup, not raw red text under the field
+  // (change: friendly-auth-errors). "No account with those details" offers a
+  // one-tap jump to sign-up; "email already in use" offers a jump to sign-in;
+  // everything else is a plain, translated alert instead of
+  // "Error (auth/api-key-not-valid…)".
+  async function handleAuthError(e: unknown) {
+    const info = authErrorInfo(e);
+    if (info.silent) return; // the user closed / blocked the Google popup
+    const ae = t.auth.errors;
+    setErr('');
+    if (info.suggestSignUp) {
+      if (await dialog.confirm(ae.noMatchTitle, ae.createAccountCta)) switchMode('up');
+      return;
+    }
+    if (info.suggestSignIn) {
+      if (await dialog.confirm(ae.emailInUse, ae.goToSignInCta)) switchMode('in');
+      return;
+    }
+    await dialog.alert((ae as Record<string, string>)[info.key] ?? ae.unknown);
+  }
+
   function validateSignUp(): string | null {
     if (!fullName.trim()) return t.auth.validationName;
     if (!email.trim())    return t.auth.validationEmail;
@@ -160,7 +182,7 @@ function LoginScreen() {
         landAfterAuth(true);
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.signInFailed);
+      await handleAuthError(e);
     } finally {
       setBusy(false);
     }
@@ -186,8 +208,7 @@ function LoginScreen() {
       landAfterAuth(getAdditionalUserInfo(cred)?.isNewUser === true);
     }
     catch (e) {
-      const msg = e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.googleSignInFailed;
-      if (!/popup-closed-by-user|cancelled-popup-request|popup-blocked/.test(msg)) setErr(msg);
+      await handleAuthError(e);
     }
     finally { setBusy(false); }
   }
@@ -200,7 +221,7 @@ function LoginScreen() {
       await resetPassword(email.trim());
       await dialog.alert(t.auth.resetSent(email.trim()));
     } catch (e) {
-      setErr(e instanceof Error ? e.message.replace(/^Firebase: /, '') : t.auth.resetFailed);
+      await handleAuthError(e);
     } finally {
       setBusy(false);
     }
