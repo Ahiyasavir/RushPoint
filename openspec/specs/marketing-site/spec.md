@@ -1,6 +1,12 @@
 # marketing-site Specification
 
-## ADDED Requirements
+## Purpose
+The public marketing site: a bilingual, statically built set of pages describing what the
+product is, who it is for, and how to start, plus a blog that can grow. It is separate from
+the two applications, carries its own indexing signals, and is authorable without a
+developer.
+
+## Requirements
 
 ### Requirement: The site is static output with no runtime framework on the page
 
@@ -111,6 +117,83 @@ Hebrew copy SHALL be authored, not machine translated from English.
 
 - **WHEN** the visible copy of each page is checked with the shared leak predicate
 - **THEN** no Hebrew page contains English copy and no English page contains Hebrew copy
+
+### Requirement: The language switch reaches the same page, not a home page
+
+A page offering a language switch SHALL link to that page's own counterpart in the other
+language, and SHALL derive it from the same alternate set the page publishes to crawlers.
+
+A reader and a crawler must not be told different things about where the other version of
+a page lives. Deriving both from one source makes the two answers the same by
+construction, rather than by two pieces of code happening to agree.
+
+A page with no counterpart SHALL fall back to the other language's home page, which is the
+accurate answer, rather than linking to a page that does not exist.
+
+#### Scenario: The switch lands on the counterpart
+
+- **WHEN** a reader on a standing page in one language follows the language switch
+- **THEN** they arrive at the same subject in the other language, not at its home page
+
+#### Scenario: The switch agrees with the published alternates
+
+- **WHEN** a page's language switch target is compared with the counterpart it declares to crawlers
+- **THEN** the two are the same URL
+
+#### Scenario: A page with no counterpart says so honestly
+
+- **WHEN** a reader on an unpaired post follows the language switch
+- **THEN** they arrive at the other language's home page rather than at a URL with no page behind it
+
+### Requirement: The site is visually the same product as the applications
+
+The site SHALL use the product's own accent colours, text scale, page surface and
+typefaces, taken from the applications' own configuration rather than restated.
+
+The neutral and accent SCALES SHALL be redefined, not only the semantic tokens that
+reference them. A vendored template writes palette names directly in component class
+strings, so repointing tokens alone leaves every direct use on the template's palette,
+which typically shows up as one colour mode looking like a different product than the
+other.
+
+The agreement SHALL be asserted mechanically against the applications' configuration, so
+that changing the brand in one place and not the other fails rather than quietly shipping
+two products.
+
+#### Scenario: The brand is the applications' brand
+
+- **WHEN** the site's declared accent, text and surface colours are compared with the applications' own
+- **THEN** they are the same values
+
+#### Scenario: A one sided brand change fails
+
+- **WHEN** the site's primary accent is changed to something the applications do not use
+- **THEN** the comparison fails and names the token
+
+#### Scenario: A direct palette use is on brand too
+
+- **WHEN** a colour is written by name rather than through a semantic token
+- **THEN** it resolves to the product's palette rather than the template's
+
+### Requirement: A published post carries structured data a crawler can use
+
+A blog post SHALL publish structured data naming its headline, its publication date, its
+language and the page it describes.
+
+Any URL in that structured data SHALL be absolute and resolvable. An authoring time
+reference SHALL be resolved to the built asset before publication: structured data is
+emitted verbatim and read by nobody, so an unresolved path is a broken reference that no
+reader and no test notices.
+
+#### Scenario: A post declares itself
+
+- **WHEN** a published post's structured data is parsed
+- **THEN** it names the post's own URL, its language, its headline and its publication date
+
+#### Scenario: An image reference is resolvable
+
+- **WHEN** a post's structured data names an image
+- **THEN** the value is an absolute URL to the built asset, not an authoring path
 
 ### Requirement: Every page carries a complete and self consistent signal set
 
