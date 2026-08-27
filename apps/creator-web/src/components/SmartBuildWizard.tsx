@@ -258,11 +258,11 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
     // presentational-only and the story path is due to move onto it, so a shell
     // that had learned what a game's shape is would have to be untangled first.
     //
-    // Order is deliberate. On a phone the panel is a scrollable strip ABOVE the
+    // Order is deliberate. On a phone the panel is a one-line pill ABOVE the
     // question (a second column at 390px would squeeze both into uselessness);
     // from `lg` it becomes the trailing column, which in the RTL default leaves
     // the questions in the reading-start position.
-    <div className="flex flex-col gap-4 lg:flex-row-reverse lg:items-start lg:gap-5">
+    <div className="flex flex-col gap-2 lg:flex-row-reverse lg:items-start lg:gap-5">
       <div className="lg:w-64 lg:shrink-0">
         <SmartBuildShapePanel
           stages={shape.stages}
@@ -273,7 +273,6 @@ export default function SmartBuildWizard({ busy, onLeave, onFinish, recentBankKe
             stage: (n) => w.shapeStage(n),
             slots: (n) => w.shapeSlots(n),
             empty: w.shapeEmpty,
-            slotPending: w.shapeSlotPending,
           }}
         />
       </div>

@@ -34,8 +34,6 @@ export interface SmartBuildShapePanelProps {
     stage: (n: number) => string;
     slots: (n: number) => string;
     empty: string;
-    /** The accessible name of one unfilled slot. */
-    slotPending: string;
   };
 }
 
@@ -58,59 +56,76 @@ function useGrownCount(count: number): number {
 export default function SmartBuildShapePanel({ stages, possible, labels }: SmartBuildShapePanelProps) {
   const list = Array.isArray(stages) ? stages : [];
   const previousCount = useGrownCount(list.length);
+  const totalSlots = list.reduce((sum, s) => sum + Math.max(0, Math.floor(s?.slots ?? 0)), 0);
+  const hasShape = possible && list.length > 0;
 
   return (
-    <aside
-      className="rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3 sm:p-4"
-      // A live region: the panel changes in response to an answer given
-      // elsewhere, which a screen-reader user would otherwise never learn about.
-      // `polite` so it waits for them to finish with the question they are on.
-      aria-live="polite"
-    >
-      <h4 className="font-brand font-bold text-[--ink-1] text-sm">{labels.title}</h4>
-      <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{labels.hint}</p>
-
-      {!possible || list.length === 0 ? (
-        <p className="text-[12px] text-[--ink-3] mt-3 py-6 text-center">{labels.empty}</p>
-      ) : (
-        <ol className="mt-3 flex flex-row gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
-          {list.map((stage, i) => {
-            const slots = Math.max(0, Math.floor(stage?.slots ?? 0));
-            // Only a card that was not there a render ago animates in.
-            const isNew = i >= previousCount;
-            return (
-              <li
-                key={i}
-                className={[
-                  'shrink-0 min-w-[9rem] lg:min-w-0 rounded-xl border border-[--rp-border]',
-                  'bg-[--surface-0] px-3 py-2.5',
-                  // The app's own keyframe, not a bespoke one; `motion-safe`
-                  // is what honours a reduced-motion preference.
-                  isNew ? 'motion-safe:animate-fade-up' : '',
-                ].join(' ')}
-              >
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[12px] font-semibold text-[--ink-1]">{labels.stage(i + 1)}</span>
-                  <span className="text-[11px] text-[--ink-3]">{labels.slots(slots)}</span>
-                </div>
-                {/* One bar per stage, not one per mission (change: smart-build-delight
-                    follow-up) — a stage with 6-7 missions used to enumerate 6-7
-                    individual dots and push the panel past the modal's height,
-                    forcing an internal scroll the questionnaire never needed before
-                    this panel existed. The bar still fills as `slots` grows, so the
-                    "building" feeling survives; it just costs one row instead of N. */}
-                <div
-                  title={labels.slotPending}
-                  aria-hidden="true"
-                  className="mt-2 h-1.5 w-full rounded-full bg-[--surface-2] overflow-hidden"
-                >
-                  <div className="h-full w-full rounded-full bg-[--rp-border]" />
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+    // Two renderings of the same fact, toggled by CSS alone — never a JS
+    // breakpoint check, so there is nothing to get out of sync on resize
+    // (change: smart-build-wizard-no-scroll).
+    //
+    // Below `lg` the panel sits ABOVE the question (see SmartBuildWizard's
+    // layout note), and the full card-per-stage aside was costing it ~100px
+    // of stacked height for a delight, not information — exactly what pushed
+    // a normal phone into an internal scroll on the denser questions. There,
+    // a one-line pill carries the one fact worth knowing before the reveal:
+    // how big this is getting. The full growing-stages view is a desktop-only
+    // treat, where it sits beside the question instead of above it.
+    <>
+      {hasShape && (
+        <div className="flex lg:hidden items-center gap-1.5 w-fit rounded-full border border-[--rp-border] bg-[--surface-1] px-3 py-1 text-[11px] text-[--ink-2]" aria-live="polite">
+          <span aria-hidden="true">🧩</span>
+          <span>{labels.slots(totalSlots)}</span>
+        </div>
       )}
-    </aside>
+      <aside
+        className="hidden lg:block rounded-2xl border border-[--rp-border] bg-[--surface-1] p-3"
+        // A live region: the panel changes in response to an answer given
+        // elsewhere, which a screen-reader user would otherwise never learn about.
+        // `polite` so it waits for them to finish with the question they are on.
+        aria-live="polite"
+      >
+        <div className="flex items-baseline justify-between gap-2">
+          <h4 className="font-brand font-bold text-[--ink-1] text-sm">{labels.title}</h4>
+          {hasShape && (
+            <span className="shrink-0 text-[11px] text-[--ink-3]">{labels.slots(totalSlots)}</span>
+          )}
+        </div>
+        <p className="text-[11px] text-[--ink-3] mt-0.5 leading-relaxed">{labels.hint}</p>
+
+        {!hasShape ? (
+          <p className="text-[12px] text-[--ink-3] mt-2 text-center">{labels.empty}</p>
+        ) : (
+          // One small numbered tile per stage, not a card (change:
+          // smart-build-wizard-no-scroll) — a card-per-stage list grew without
+          // bound (6-8 stages stacked into 300-400px) and forced the modal to
+          // scroll on exactly the answers that produce a bigger game. A
+          // flex-wrap row of tiles stays roughly one line tall regardless of
+          // stage count: it wraps instead of growing downward per item.
+          <ol className="mt-2 flex flex-wrap gap-1.5" aria-label={labels.title}>
+            {list.map((stage, i) => {
+              const slots = Math.max(0, Math.floor(stage?.slots ?? 0));
+              // Only a tile that was not there a render ago animates in.
+              const isNew = i >= previousCount;
+              return (
+                <li
+                  key={i}
+                  title={`${labels.stage(i + 1)} · ${labels.slots(slots)}`}
+                  className={[
+                    'flex h-6 min-w-[1.5rem] items-center justify-center rounded-md border border-[--rp-border]',
+                    'bg-[--surface-0] px-1.5 text-[11px] font-semibold text-[--ink-2]',
+                    // The app's own keyframe, not a bespoke one; `motion-safe`
+                    // is what honours a reduced-motion preference.
+                    isNew ? 'motion-safe:animate-fade-up' : '',
+                  ].join(' ')}
+                >
+                  {i + 1}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </aside>
+    </>
   );
 }

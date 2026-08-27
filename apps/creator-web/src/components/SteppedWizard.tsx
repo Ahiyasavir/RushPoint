@@ -128,7 +128,7 @@ export default function SteppedWizard({
   const percent = total > 0 ? Math.round(((index + 1) / total) * 100) : 0;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {/* Progress first: a creator deciding whether to start should see the cost
           before the first question, not after the third. */}
       <div>
@@ -151,7 +151,7 @@ export default function SteppedWizard({
       <div
         key={index}
         className={[
-          'flex flex-col gap-4',
+          'flex flex-col gap-3',
           'motion-safe:transition-all motion-safe:duration-200 motion-safe:ease-out',
           entered ? 'opacity-100 translate-x-0' : 'motion-safe:opacity-0',
           entered ? '' : direction > 0 ? 'motion-safe:translate-x-4' : 'motion-safe:-translate-x-4',
@@ -162,7 +162,7 @@ export default function SteppedWizard({
           {step.subtitle && <p className="text-[--ink-3] text-[13px] mt-0.5">{step.subtitle}</p>}
         </div>
 
-        <div className="flex flex-col gap-4">{step.render()}</div>
+        <div className="flex flex-col gap-3">{step.render()}</div>
       </div>
 
       {isLast && finalNote && (

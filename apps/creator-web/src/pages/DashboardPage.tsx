@@ -1112,12 +1112,16 @@ export default function DashboardPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => { setPicking(false); setChosen(null); }}>
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            // 92vh (not 85vh): the questionnaire's densest step (11 place buttons) overflowed at 85vh.
+            // 92vh is a safety net for very short viewports, not the fix: the
+            // questionnaire and shape panel were both trimmed (smaller cards, a
+            // fixed 4-col grid, a one-line stage strip) so the tallest step fits
+            // a normal phone/laptop screen without touching this cap at all
+            // (change: smart-build-wizard-no-scroll).
             className="relative glass-card grad-border bg-[--surface-0] dark:bg-[--surface-1]/80 border border-[--rp-border] rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-[0_24px_80px_rgba(0,0,0,0.4)] animate-fade-up"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header — fixed; never scrolls away. */}
-            <div className="flex items-start justify-between gap-4 p-5 pb-4 shrink-0 border-b border-[--rp-border]">
+            <div className="flex items-start justify-between gap-4 p-4 pb-3 shrink-0 border-b border-[--rp-border]">
               <div>
                 <h3 className="font-brand font-bold text-[--ink-1] text-xl">{d.modalTitle}</h3>
                 <p className="text-[--ink-3] text-sm mt-0.5">{d.modalSub}</p>
@@ -1129,7 +1133,7 @@ export default function DashboardPage() {
             {/* Body — bounded to the modal; the compact cards fit without scrolling
                 on a normal screen, and only this region (never the page) scrolls on
                 a very short viewport. */}
-            <div className="overflow-y-auto p-5 pt-4">
+            <div className="overflow-y-auto p-4 pt-3">
               {templateGroups === null ? (
                 <div className="flex items-center gap-2 text-sm text-[--ink-3] p-3">
                   <Skeleton className="h-10 w-10 rounded-xl shrink-0" />

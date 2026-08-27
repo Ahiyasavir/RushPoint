@@ -530,11 +530,10 @@ const HE = {
       // are drawn after every mission is chosen, so no preview can know them.
       // They are part of the reveal.
       shapeTitle:       'המשחק שלכם מתחיל להיבנות',
-      shapeHint:        'כל תשובה מוסיפה עוד. המשימות עצמן ייחשפו בסוף.',
+      shapeHint:        'כל תשובה מוסיפה עוד שלב.',
       shapeStage:       (n: number) => `שלב ${n}`,
       shapeSlots:       (n: number) => (n === 1 ? 'משימה אחת' : `${n} משימות`),
       shapeEmpty:       'עוד רגע נדע איך המשחק ייראה.',
-      shapeSlotPending: 'משימה שתיחשף בסוף',
       // ── The reveal (change: smart-build-delight) ───────────────────────────
       revealTitle:      'המשחק שלכם מוכן',
       revealSub:        'הנה מה שהרכבנו לכם. אפשר לשנות הכול בעורך.',
@@ -2840,11 +2839,10 @@ const EN: typeof HE = {
       previewCount:     (missions: number) => `We will compose a game of about ${missions} missions`,
       // The live shape panel. Stages are labelled by POSITION — see the Hebrew note.
       shapeTitle:       'Your game is taking shape',
-      shapeHint:        'Every answer adds to it. The missions themselves are revealed at the end.',
+      shapeHint:        'Every answer adds another stage.',
       shapeStage:       (n: number) => `Stage ${n}`,
       shapeSlots:       (n: number) => (n === 1 ? '1 mission' : `${n} missions`),
       shapeEmpty:       'In a moment we will know what your game looks like.',
-      shapeSlotPending: 'A mission revealed at the end',
       // The reveal. See the note on the Hebrew entries.
       revealTitle:      'Your game is ready',
       revealSub:        'Here is what we composed. You can change any of it in the editor.',

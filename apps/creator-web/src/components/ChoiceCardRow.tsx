@@ -19,8 +19,8 @@ import ChoiceArt from './illustrations/ChoiceArt';
 /** Shared card chrome, so single- and multi-select cannot drift apart visually. */
 function cardClass(on: boolean): string {
   return [
-    'group relative flex flex-col items-center gap-1.5 rounded-xl px-2 py-3',
-    'min-h-[84px] text-center transition-all duration-150',
+    'group relative flex flex-col items-center gap-1 rounded-xl px-1.5 py-2',
+    'min-h-[64px] text-center transition-all duration-150',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rp-fire/60',
     'focus-visible:ring-offset-2 focus-visible:ring-offset-[--surface-1]',
     on
@@ -45,7 +45,13 @@ function Check() {
   );
 }
 
-const GRID = 'grid grid-cols-3 gap-2 sm:grid-cols-4';
+// Fixed at 4 columns — not responsive by viewport width — because this row can
+// render inside a full-width mobile step OR beside the shape panel in a
+// squeezed desktop column (change: smart-build-wizard-no-scroll), and a
+// viewport-keyed breakpoint has no idea which one it's in. 4 columns keeps a
+// dense question (11 areas) to 3 rows everywhere instead of 4 on a narrow
+// phone, which is what forced the modal to scroll.
+const GRID = 'grid grid-cols-4 gap-1.5';
 
 export function ChoiceCardRow<T extends string>({ label, options, value, onChange, render }: {
   label: string;
@@ -70,7 +76,7 @@ export function ChoiceCardRow<T extends string>({ label, options, value, onChang
               className={cardClass(on)}
             >
               {on && <Check />}
-              <ChoiceArt id={String(o)} className="h-7 w-7" />
+              <ChoiceArt id={String(o)} className="h-5 w-5" />
               <span className="text-[12px] leading-tight">{render(o)}</span>
             </button>
           );
@@ -111,7 +117,7 @@ export function MultiChoiceCardRow<T extends string>({ label, options, values, o
               className={cardClass(on)}
             >
               {on && <Check />}
-              <ChoiceArt id={String(o)} className="h-7 w-7" />
+              <ChoiceArt id={String(o)} className="h-5 w-5" />
               <span className="text-[12px] leading-tight">{render(o)}</span>
             </button>
           );
