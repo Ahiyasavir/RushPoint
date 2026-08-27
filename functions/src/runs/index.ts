@@ -601,7 +601,13 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
   // Capacity is a hard ceiling fixed at launch (free run = 5, credit = package
   // size, Pro = 50). Enforced inside a transaction so concurrent joins can't
   // overshoot the cap. No per-participant billing — the run was already paid for.
-  const joined = await db.runTransaction<{ already: boolean }>(async (t) => {
+  // withLockRetry (change: contended-transaction-retry): this transaction reads AND
+  // writes the ONE run document to enforce the capacity cap, so every simultaneous join
+  // queues on the same lock — and an event begins with the whole field scanning the same
+  // QR at the same moment. A 120-team production run lost joins here to
+  // "10 ABORTED: cross-transaction contention", which reached the player as an opaque
+  // INTERNAL. The lock frees in milliseconds; the jittered retry absorbs the burst.
+  const joined = await withLockRetry(() => db.runTransaction<{ already: boolean }>(async (t) => {
     const [runFresh, teamFresh] = await Promise.all([t.get(runRef), t.get(teamRef)]);
     if (teamFresh.exists) return { already: true };
     const r = runFresh.data() as Run;
@@ -629,7 +635,7 @@ export const joinRun = loggedCallable('joinRun', async (data, context) => {
     t.set(teamRef, team);
     t.update(runRef, { participantCount: used + 1, deviceCount: usedDevices + 1, updatedAt: now });
     return { already: false };
-  });
+  }));
 
   // Hand out the first task exactly as startTeams/startInstantPlay do. AFTER the
   // commit and only for a freshly self-started team, so a re-join short-circuits
@@ -3789,7 +3795,11 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
 
   const runRef = db.doc(runPath(ownerUid, gameId, runId));
   const now = new Date().toISOString();
-  await db.runTransaction(async (tx) => {
+  // withLockRetry (change: contended-transaction-retry): this transaction increments the
+  // run-wide device counter, so every extra phone on every team contends on the SAME run
+  // document. Same lock, same burst, same failure mode joinRun hit in production — a
+  // second phone joining reached the player as an opaque INTERNAL instead of retrying.
+  await withLockRetry(() => db.runTransaction(async (tx) => {
     // All reads before any write (Firestore transaction rule).
     const [snap, runFresh] = await Promise.all([tx.get(teamRef), tx.get(runRef)]);
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Team not found');
@@ -3836,7 +3846,7 @@ export const joinTeamAsDevice = loggedCallable('joinTeamAsDevice', async (data, 
     tx.set(db.doc(FIRESTORE_PATHS.runDeviceMember(ownerUid, gameId, runId, uid)), {
       teamId: teamRef.id, deviceUid: uid, joinedAt: now,
     });
-  });
+  }));
 
   return { ownerUid, gameId, runId, teamId: teamRef.id, role: 'viewer', alreadyAttached: false };
 });
