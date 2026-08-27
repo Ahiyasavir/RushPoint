@@ -6,6 +6,7 @@
     "workspaces": [
         "apps/creator-web",
         "apps/play-web",
+        "apps/marketing",
         "functions",
         "packages/shared",
         "scripts"
