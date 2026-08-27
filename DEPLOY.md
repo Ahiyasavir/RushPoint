@@ -477,8 +477,23 @@ npm run marketing:build && firebase deploy --only hosting:marketing
 
 ### C. The contact form: allow the site's origin on the API ⚠
 
+**Status as of 2026-08-27: `ALLOWED_ORIGINS` and `CONTACT_NOTIFY_TO` are set correctly on
+the running container** (verified: both values read back from `docker exec … printenv`,
+container healthy). **This did NOT make the contact form work**, because of a separate and
+bigger gap: the VPS is running `main`, which is 18 commits behind `topographic-maps` and
+predates the contact feature entirely. `submitContactMessage` returns `404 Not Found` —
+there is no CORS problem, there is no code deployed to have one. Confirmed with a direct
+`POST` from a shell (not a browser origin check — a 404 needs no Origin header to prove).
+
+**This is a real deploy, not a config edit, so it was not done without asking**: it means
+building and shipping 18 commits of backend, Firestore rules (`contactMessages` has no
+protection on `main` today) and hosting to production. See the checklist this status leaves
+open, folded into section F below.
+
 `functions/server.js` refuses any browser `Origin` that is not in its `ALLOWED_ORIGINS`
-environment variable, before the request reaches a callable.
+environment variable, before the request reaches a callable. This subsection is left in
+place for the next time this origin (or a new one) needs adding, independent of the deploy
+above.
 
 On the VPS, add the marketing origin to that list and restart the API container:
 
@@ -512,11 +527,15 @@ Caddy re-probes. That is expected and self heals.
 
 ### D. Where the messages go
 
+**Status as of 2026-08-27: done**, set alongside `ALLOWED_ORIGINS` in §C.
+
 | Setting | Where | Effect |
 |---|---|---|
 | `CONTACT_NOTIFY_TO` | the API's environment | The address a new contact message is announced to. Falls back to `RUN_SUMMARY_EMAIL_TO`. With neither set, and with no provider key, notification is a **logged no-op** — by design. |
 
-Set it alongside `ALLOWED_ORIGINS` in §C, same file, same restart:
+Set explicitly rather than left to the `RUN_SUMMARY_EMAIL_TO` fallback, even though the two
+values are the same address today: a future change to who receives run-summary emails
+should not silently redirect contact form notifications too.
 
 ```
 CONTACT_NOTIFY_TO=spendora.tracker@gmail.com
@@ -574,3 +593,25 @@ Two facts worth keeping in mind while configuring it:
 5. A URL that does not exist returns a real **404**, not a page. There is deliberately no
    catch-all rewrite on this target: a soft 200 is indexable, which is worse than an honest
    404 for a site whose whole purpose is being crawled correctly.
+
+### G. What is actually still needed to go live (status: 2026-08-27)
+
+Everything above assumes the code is already on the VPS. It is not, and the two things
+should not be confused with each other: the runbook above is config, this list is a deploy.
+
+| Done | Item |
+|---|---|
+| ✅ | `ALLOWED_ORIGINS` includes `https://www.rush-point.com` (§C) |
+| ✅ | `CONTACT_NOTIFY_TO` set (§D) |
+| ❌ | **18 commits of `topographic-maps` deployed to the VPS.** It is on `main`, which predates the marketing site, the contact form, and everything in this file past section 11. `submitContactMessage` 404s: the callable does not exist yet on the running server. |
+| ❌ | `firestore.rules` deployed. `main`'s copy has no `contactMessages` rule at all — not open, not closed, simply absent, which Firestore treats as denied by default, but it is untested drift rather than the deliberate `allow read, write: if false` this repository ships. |
+| ❌ | The `rushpoint-marketing` Hosting site + `www.rush-point.com` DNS (§B) — not checked in this pass. |
+| ❌ | The GitHub OAuth app + token exchange endpoint for the CMS (§E) — optional, site works without it. |
+
+To close the code gap: merge or fast-forward `main` to `topographic-maps` (or deploy
+directly from the branch — this repository has done both before, see the merge commits in
+`git log --merges`), then on the VPS: `git pull`, `docker compose -f docker-compose.api.yml
+up -d --build` (rebuild this time — code changed, not just env), `firebase deploy --only
+firestore:rules`, and `npm run deploy:hosting` for the three Hosting targets. This is a real
+production release and was deliberately NOT done automatically while investigating the
+config — see the session note for 2026-08-27.
