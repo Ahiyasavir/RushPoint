@@ -1,0 +1,99 @@
+# Build and publish the marketing site when its content changes.
+#
+# WHY THIS EXISTS. Decap CMS (/admin/ on the marketing site) commits posts
+# straight to this branch. A commit is not a published page: the site is static
+# output, so until someone runs the build and deploys it, an author who pressed
+# "Publish" has changed a file in git and nothing else. They get no error and no
+# hint — the post simply is not on the site. This closes that gap.
+#
+# WHAT TRIGGERS IT. Only changes under apps/marketing/ — which covers both things
+# the CMS writes: posts (src/data/post/) and uploaded media (public/uploads/).
+# Everything else in the repository leaves this workflow alone, so a backend
+# commit does not redeploy the site for no reason.
+#
+# THE BUILD IS A GATE, NOT JUST A STEP. A post authored in the CMS is validated
+# by the Astro content schema at build time, and by check-marketing-output.ts
+# afterwards (language correctness, the no-dashes rule, alt text, canonicals).
+# A bad post therefore fails HERE and the previous site stays live, rather than
+# replacing a good page with a broken one. This is the whole reason the deploy
+# is not simply `firebase deploy` on its own.
+name: Deploy marketing site
+
+on:
+  push:
+    branches: [topographic-maps]
+    paths:
+      - 'apps/marketing/**'
+      # This file itself, so a change to the pipeline is exercised by the
+      # pipeline rather than discovered on the next content commit.
+      - '.github/workflows/deploy-marketing.yml'
+  # Lets a deploy be re-run by hand — after fixing a bad post, or to republish
+  # without inventing an empty commit.
+  workflow_dispatch:
+
+# Deploys are serialised, and a running one is NEVER cancelled: killing a deploy
+# midway can leave Hosting holding a half-uploaded release. A newer commit waits
+# its turn instead, and wins because it runs last.
+concurrency:
+  group: deploy-marketing
+  cancel-in-progress: false
+
+# Least privilege: this job reads the repository and talks to Firebase. It has no
+# reason to write anything back to git.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # apps/marketing declares node >=22.22.3 (Astro 7). The repository's
+          # other CI jobs run node 20; this one must not, or the build fails on
+          # an engine mismatch that has nothing to do with the content.
+          node-version: 22
+          cache: npm
+
+      # `npm ci` at the ROOT: this is an npm-workspaces monorepo and the
+      # marketing app's dependencies are hoisted into the root lockfile.
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run marketing:build
+
+      # Runs against the BUILT output, so it must come after the build. This is
+      # what stops a CMS-authored post with English copy on a Hebrew page, or a
+      # missing alt attribute, from reaching the live site.
+      - name: Check the built site
+        run: npx tsx scripts/check-marketing-output.ts
+
+      - name: Deploy to Firebase Hosting
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MARKETING }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT_MARKETING is not set. See DEPLOY.md section 12H."
+            exit 1
+          fi
+          # Written to the runner's private temp dir, not the workspace, so it
+          # cannot be picked up by a later step that globs the checkout. The
+          # runner is torn down after the job, taking the file with it.
+          key_file="$RUNNER_TEMP/firebase-key.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$key_file"
+          export GOOGLE_APPLICATION_CREDENTIALS="$key_file"
+          # The Firebase CLI is invoked through npx rather than a third-party
+          # action, so the credential is only ever handed to Google's own tool.
+          # Pinned to the major version this repository actually uses (15.x, the
+          # same one the emulator notes in CLAUDE.md are written against) — an
+          # unpinned npx would silently move to a new major mid-deploy.
+          npx --yes firebase-tools@15 deploy \
+            --only hosting:marketing \
+            --project rushpoint-pwa-7daaa \
+            --non-interactive \
+            --message "${GITHUB_SHA:0:7} via ${GITHUB_EVENT_NAME}"
+          rm -f "$key_file"

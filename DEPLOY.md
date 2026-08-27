@@ -659,3 +659,54 @@ up -d --build` (rebuild this time — code changed, not just env), `firebase dep
 firestore:rules`, and `npm run deploy:hosting` for the three Hosting targets. This is a real
 production release and was deliberately NOT done automatically while investigating the
 config — see the session note for 2026-08-27.
+
+### H. Publishing automatically after a CMS commit
+
+`.github/workflows/deploy-marketing.yml` builds and publishes the site whenever anything
+under `apps/marketing/` changes on `topographic-maps` — which is exactly what Decap writes
+when an author presses Publish (`src/data/post/` for posts, `public/uploads/` for media).
+
+Without it, "Publish" in the CMS means *a file changed in git* and nothing more: the site is
+static output, so the post is not on the site until someone builds and deploys. The author
+gets no error and no hint, which is the worst kind of broken — it looks like it worked.
+
+The build is a **gate**, not just a step. A post is validated by the Astro content schema
+during the build and by `scripts/check-marketing-output.ts` afterwards (language
+correctness, the no-dashes rule, alt text, canonicals). A bad post therefore fails in CI and
+**the previous site stays live**, instead of a broken page replacing a good one.
+
+**The one thing that must be set up by hand: a deploy credential.**
+
+The workflow reads a Google service-account key from the repository secret
+`FIREBASE_SERVICE_ACCOUNT_MARKETING`. Until it exists, the workflow runs, builds, checks —
+and then fails at the deploy step with a message pointing here, which is deliberate: a
+pipeline that silently skips its own deploy is indistinguishable from one that worked.
+
+Create a **dedicated, least-privilege** account rather than reusing an existing key:
+
+1. [Google Cloud Console → Service accounts](https://console.cloud.google.com/iam-admin/serviceaccounts?project=rushpoint-pwa-7daaa)
+   → **Create service account**. Name it `github-deploy-marketing`.
+2. Grant it exactly two roles, and no others:
+   - **Firebase Hosting Admin** (`roles/firebasehosting.admin`) — publish releases.
+   - **Firebase Viewer** (`roles/firebase.viewer`) — read the project and resolve the
+     `marketing` Hosting target.
+3. Open the account → **Keys** → **Add key** → **Create new key** → **JSON**. Downloads once.
+4. Put the whole file contents in the repository secret:
+
+```bash
+gh secret set FIREBASE_SERVICE_ACCOUNT_MARKETING --repo Ahiyasavir/RushPoint < ~/Downloads/<the-key>.json
+```
+
+**Do NOT reuse `service-account.json` from the VPS for this.** That is the Admin SDK
+credential: it carries full read/write access to Firestore and Auth, and putting it in a
+GitHub secret would hand the entire database to any workflow — and to anyone able to land a
+workflow file. Hosting deploy needs neither of those permissions.
+
+**Confirm it works:** Actions → *Deploy marketing site* → **Run workflow**. A green run ends
+with a Hosting release; check the site afterwards rather than trusting the green tick,
+because a deploy that publishes the wrong directory also reports success (§12B's base-path
+story is the same class of failure).
+
+**If the deployed branch ever changes**, change it in three places in the same commit: this
+workflow's `branches:` filter, `backend.branch` in `apps/marketing/public/admin/config.yml`,
+and the assertion in `scripts/test-marketing-cms-config.ts` that pins it.
