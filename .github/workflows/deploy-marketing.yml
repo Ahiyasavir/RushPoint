@@ -48,9 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           # apps/marketing declares node >=22.22.3 (Astro 7). The repository's
           # other CI jobs run node 20; this one must not, or the build fails on
@@ -84,6 +84,14 @@ jobs:
           # cannot be picked up by a later step that globs the checkout. The
           # runner is torn down after the job, taking the file with it.
           key_file="$RUNNER_TEMP/firebase-key.json"
+          # Removed via trap, not a trailing `rm`: these steps run under `set -e`,
+          # so a failed deploy would exit before a final line ever ran — leaving
+          # the key on disk for every later step in the job.
+          trap 'rm -f "$key_file"' EXIT
+          # Created empty and locked down BEFORE the secret is written, so it is
+          # never briefly world-readable on the runner.
+          touch "$key_file"
+          chmod 600 "$key_file"
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$key_file"
           export GOOGLE_APPLICATION_CREDENTIALS="$key_file"
           # The Firebase CLI is invoked through npx rather than a third-party
@@ -96,4 +104,3 @@ jobs:
             --project rushpoint-pwa-7daaa \
             --non-interactive \
             --message "${GITHUB_SHA:0:7} via ${GITHUB_EVENT_NAME}"
-          rm -f "$key_file"
