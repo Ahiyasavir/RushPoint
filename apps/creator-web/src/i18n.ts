@@ -65,6 +65,10 @@ const HE = {
     referralBonusApplied: 'בונוס הפניה הוחל! קיבלת ריצה חינמית נוספת.',
     privacyLink: 'מדיניות פרטיות',
     termsLink:   'תנאי שימוש',
+    // Points at the static marketing pages under rush-point.com (change:
+    // seo-landing-pages). They are files, not routes in this SPA, so the footer
+    // renders this one with <a> while the legal links stay <Link>.
+    ideasLink:   'רעיונות לפי סוג אירוע',
   },
   // What a creator is told when a server action fails (change:
   // creator-no-silent-failures). One entry per outcome of describeCallFailure;
@@ -2413,6 +2417,9 @@ const EN: typeof HE = {
     referralBonusApplied: "Referral bonus applied! You got an extra free run.",
     privacyLink: 'Privacy Policy',
     termsLink:   'Terms of Service',
+    // See the Hebrew entry: these are static files on the participant origin, not
+    // routes in this SPA (change: seo-landing-pages).
+    ideasLink:   'Ideas by occasion',
   },
   callFailure: {
     offline:     'No connection to the server right now. Nothing was lost: your work is still here on screen. Try again once you are back online.',

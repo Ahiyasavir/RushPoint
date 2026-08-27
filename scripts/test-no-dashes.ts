@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { translations as creatorT } from '../apps/creator-web/src/i18n';
 import { translations as playT } from '../apps/play-web/src/i18n';
+import { LANDING_PAGES } from './lib/landingPages';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -244,6 +245,52 @@ for (const app of ['creator-web', 'play-web']) {
   while ((m = metaRe.exec(html))) if (HTML_TEXT_META.has(m[1])) scanned++;
 }
 check('C · the metadata scan actually reached the fields it polices', scanned >= 14, `${scanned} field(s)`);
+
+// ── PART D — STATIC LANDING PAGE COPY ────────────────────────────────────────
+// Same lesson as PART C, one surface further out. The landing pages under
+// apps/play-web/public/ are prose Google prints directly, and they live in NEITHER of the
+// places the earlier parts look: not in a t.* dictionary (a static HTML file cannot
+// import the module graph) and not in component source. PART C does not reach them either
+// — it scans `apps/<app>/index.html` by name, and these are different files entirely.
+//
+// The REGISTRY is scanned rather than the generated HTML, deliberately: the registry is
+// where a human types, so an offender can be named by its field path
+// (`en/home.sections[0].paragraphs[1]`) instead of by a line number in generated markup
+// that the author would then have to trace back by hand.
+//
+// Slugs and URLs are NOT scanned. The standard governs prose and explicitly exempts file
+// paths, so `bar-mitzva` and `rush-point.com` are correct as they are.
+const landingOffenders: string[] = [];
+let landingScanned = 0;
+
+for (const page of LANDING_PAGES) {
+  const label = `${page.language}/${page.subject}`;
+  const fields: Array<[string, string]> = [
+    [`${label}.title`, page.title],
+    [`${label}.description`, page.description],
+    [`${label}.headline`, page.headline],
+    [`${label}.intro`, page.intro],
+    [`${label}.ctaLabel`, page.ctaLabel],
+  ];
+  page.sections.forEach((s, i) => {
+    fields.push([`${label}.sections[${i}].heading`, s.heading]);
+    s.paragraphs.forEach((t, j) => fields.push([`${label}.sections[${i}].paragraphs[${j}]`, t]));
+  });
+
+  for (const [where, value] of fields) {
+    landingScanned++;
+    if (BANNED_DASH.test(value)) landingOffenders.push(`${where} → "${value.trim()}"`);
+  }
+}
+
+check('D · no hyphen or dash in static landing page copy',
+  landingOffenders.length === 0, landingOffenders.join(' | '));
+
+// Same reach assertion as PART C, for the same reason: a registry reshape that made the
+// loop above iterate nothing would turn this into a green line that checked no copy at
+// all, which is worse than no gate because it looks like one.
+check('D · the landing page scan actually reached the copy', landingScanned >= 100,
+  `${landingScanned} field(s)`);
 
 console.log(`\n${failures === 0 ? 'ALL NO-DASHES TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

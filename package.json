@@ -117,7 +117,8 @@
         "verify:graph": "turbo run typecheck lint test",
         "verify:builds": "concurrently --group --names CREATOR,PLAY,UNIT,I18N \"npm run creator:build\" \"npm run play:build\" \"node scripts/run-unit-tests.mjs\" \"tsx scripts/check-i18n.ts --strict\"",
         "verify:artifacts": "concurrently --group --names BUNDLE,BASE,ORIGIN \"node scripts/check-bundle-budget.mjs\" \"node scripts/check-build-base.mjs\" \"node scripts/check-backend-origin.mjs\"",
-        "test:rules:both": "node scripts/run-rules-suites.mjs"
+        "test:rules:both": "node scripts/run-rules-suites.mjs",
+        "seo:build": "tsx scripts/build-landing-pages.ts"
     },
     "devDependencies": {
         "@firebase/rules-unit-testing": "^4.0.1",
