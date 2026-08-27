@@ -1,0 +1,58 @@
+---
+import PageLayout from '~/layouts/PageLayout.astro';
+import Hero from '~/components/widgets/Hero.astro';
+import Features from '~/components/widgets/Features.astro';
+import Steps from '~/components/widgets/Steps.astro';
+import CallToAction from '~/components/widgets/CallToAction.astro';
+
+import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
+import { landingPageUrl } from '~/navigation';
+import { homeCopy } from '~/copy/home';
+
+export function getStaticPaths() {
+  return LANGUAGES.map((lang) => ({ params: { lang } }));
+}
+
+const language = Astro.params.lang as Language;
+const t = homeCopy[language];
+
+const metadata = {
+  title: t.title,
+  description: t.description,
+  canonical: pageUrl(language, ''),
+  openGraph: { url: pageUrl(language, ''), locale: OG_LOCALE[language], type: 'website' },
+};
+---
+
+<PageLayout metadata={metadata} language={language} alternates={alternatesFor('')}>
+  <Hero
+    tagline={t.tagline}
+    actions={[
+      { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
+      { text: t.secondaryAction, href: pagePath(language, 'story') },
+    ]}
+  >
+    <Fragment slot="title" set:html={t.headline} />
+    <Fragment slot="subtitle" set:html={t.subhead} />
+  </Hero>
+
+  <Features
+    id="what-it-is"
+    tagline={t.featuresTagline}
+    title={t.featuresTitle}
+    subtitle={t.featuresSubtitle}
+    items={t.features}
+  />
+
+  <Steps title={t.stepsTitle} items={t.steps} isReversed />
+
+  <CallToAction
+    actions={[
+      { variant: 'primary', text: t.primaryAction, href: 'https://creator.rush-point.com', target: '_blank' },
+      { text: t.ideasAction, href: landingPageUrl(language) },
+    ]}
+  >
+    <Fragment slot="title" set:html={t.ctaTitle} />
+    <Fragment slot="subtitle" set:html={t.ctaSubtitle} />
+  </CallToAction>
+</PageLayout>

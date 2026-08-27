@@ -1,182 +1,130 @@
-import { getPermalink, getBlogPermalink, getAsset } from './utils/permalinks';
+/**
+ * Header and footer navigation, per language.
+ *
+ * Both are FUNCTIONS of the language rather than constants: a Hebrew page that
+ * renders an English menu is the exact bug the i18n gate exists to catch in the
+ * two React apps, and this site has no dictionary to catch it for us. Taking the
+ * language as an argument means a page cannot forget to pass one.
+ *
+ * Change: marketing-site.
+ */
+import { pagePath, otherLanguage, LANGUAGE_NAME, type Language } from './utils/i18n';
 
-export const headerData = {
-  links: [
-    {
-      text: 'Homes',
-      links: [
-        {
-          text: 'SaaS',
-          href: getPermalink('/homes/saas'),
-        },
-        {
-          text: 'Startup',
-          href: getPermalink('/homes/startup'),
-        },
-        {
-          text: 'Mobile App',
-          href: getPermalink('/homes/mobile-app'),
-        },
-        {
-          text: 'Personal',
-          href: getPermalink('/homes/personal'),
-        },
-      ],
-    },
-    {
-      text: 'Pages',
-      links: [
-        {
-          text: 'Features (Anchor Link)',
-          href: getPermalink('/#features'),
-        },
-        {
-          text: 'Services',
-          href: getPermalink('/services'),
-        },
-        {
-          text: 'Pricing',
-          href: getPermalink('/pricing'),
-        },
-        {
-          text: 'About us',
-          href: getPermalink('/about'),
-        },
-        {
-          text: 'Contact',
-          href: getPermalink('/contact'),
-        },
-        {
-          text: 'Terms',
-          href: getPermalink('/terms'),
-        },
-        {
-          text: 'Privacy policy',
-          href: getPermalink('/privacy'),
-        },
-      ],
-    },
-    {
-      text: 'Landing',
-      links: [
-        {
-          text: 'Lead Generation',
-          href: getPermalink('/landing/lead-generation'),
-        },
-        {
-          text: 'Long-form Sales',
-          href: getPermalink('/landing/sales'),
-        },
-        {
-          text: 'Click-Through',
-          href: getPermalink('/landing/click-through'),
-        },
-        {
-          text: 'Product Details (or Services)',
-          href: getPermalink('/landing/product'),
-        },
-        {
-          text: 'Coming Soon or Pre-Launch',
-          href: getPermalink('/landing/pre-launch'),
-        },
-        {
-          text: 'Subscription',
-          href: getPermalink('/landing/subscription'),
-        },
-      ],
-    },
-    {
-      text: 'Blog',
-      links: [
-        {
-          text: 'Blog List',
-          href: getBlogPermalink(),
-        },
-        {
-          text: 'Article',
-          href: getPermalink('get-started-website-with-astro-tailwind-css', 'post'),
-        },
-        {
-          text: 'Article (with MDX)',
-          href: getPermalink('markdown-elements-demo-post', 'post'),
-        },
-        {
-          text: 'Category Page',
-          href: getPermalink('tutorials', 'category'),
-        },
-        {
-          text: 'Tag Page',
-          href: getPermalink('astro', 'tag'),
-        },
-      ],
-    },
-    {
-      text: 'Widgets',
-      href: '#',
-    },
-  ],
-  actions: [{ text: 'Download', href: 'https://github.com/arthelokyo/astrowind', target: '_blank' }],
+/** Where a reader goes to actually use the product. */
+const CREATOR_APP = 'https://creator.rush-point.com';
+/** The participant origin, which also serves the occasion landing pages. */
+const PLAY_ORIGIN = 'https://rush-point.com';
+
+/**
+ * The occasion landing pages (change: seo-landing-pages). Linking to them is a
+ * requirement, not decoration: without it the two page sets are islands that
+ * pass no signal to each other. The language must match the page carrying the
+ * link, so a Hebrew reader is not handed an English destination.
+ */
+export const landingPageUrl = (language: Language, slug = ''): string =>
+  slug === '' ? `${PLAY_ORIGIN}/${language}/` : `${PLAY_ORIGIN}/${language}/${slug}/`;
+
+interface Copy {
+  home: string;
+  story: string;
+  blog: string;
+  contact: string;
+  ideas: string;
+  startBuilding: string;
+  legal: string;
+  terms: string;
+  privacy: string;
+  product: string;
+  footNote: string;
+  // Accessible names. These are read aloud, so an English label on a Hebrew
+  // page is the same leak as visible English copy, just harder to notice.
+  toggleMenu: string;
+  toggleTheme: string;
+  mainNav: string;
+}
+
+const COPY: Record<Language, Copy> = {
+  he: {
+    home: 'ראשי',
+    story: 'הסיפור שלנו',
+    blog: 'הבלוג',
+    contact: 'דברו איתנו',
+    ideas: 'רעיונות לפי סוג אירוע',
+    startBuilding: 'בונים משחק',
+    legal: 'מידע משפטי',
+    terms: 'תנאי שימוש',
+    privacy: 'מדיניות פרטיות',
+    product: 'המוצר',
+    footNote: 'RushPoint. המשחק יוצא החוצה.',
+    toggleMenu: 'פתיחת התפריט',
+    toggleTheme: 'מעבר בין מצב בהיר לכהה',
+    mainNav: 'ניווט ראשי',
+  },
+  en: {
+    home: 'Home',
+    story: 'Our story',
+    blog: 'Blog',
+    contact: 'Contact',
+    ideas: 'Ideas by occasion',
+    startBuilding: 'Build a game',
+    legal: 'Legal',
+    terms: 'Terms of Service',
+    privacy: 'Privacy Policy',
+    product: 'Product',
+    footNote: 'RushPoint. The game goes outside.',
+    toggleMenu: 'Open the menu',
+    toggleTheme: 'Switch between light and dark mode',
+    mainNav: 'Main navigation',
+  },
 };
 
-export const footerData = {
-  links: [
-    {
-      title: 'Product',
-      links: [
-        { text: 'Features', href: '#' },
-        { text: 'Security', href: '#' },
-        { text: 'Team', href: '#' },
-        { text: 'Enterprise', href: '#' },
-        { text: 'Customer stories', href: '#' },
-        { text: 'Pricing', href: '#' },
-        { text: 'Resources', href: '#' },
-      ],
-    },
-    {
-      title: 'Platform',
-      links: [
-        { text: 'Developer API', href: '#' },
-        { text: 'Partners', href: '#' },
-        { text: 'Atom', href: '#' },
-        { text: 'Electron', href: '#' },
-        { text: 'AstroWind Desktop', href: '#' },
-      ],
-    },
-    {
-      title: 'Support',
-      links: [
-        { text: 'Docs', href: '#' },
-        { text: 'Community Forum', href: '#' },
-        { text: 'Professional Services', href: '#' },
-        { text: 'Skills', href: '#' },
-        { text: 'Status', href: '#' },
-      ],
-    },
-    {
-      title: 'Company',
-      links: [
-        { text: 'About', href: '#' },
-        { text: 'Blog', href: '#' },
-        { text: 'Careers', href: '#' },
-        { text: 'Press', href: '#' },
-        { text: 'Inclusion', href: '#' },
-        { text: 'Social Impact', href: '#' },
-        { text: 'Shop', href: '#' },
-      ],
-    },
-  ],
-  secondaryLinks: [
-    { text: 'Terms', href: getPermalink('/terms') },
-    { text: 'Privacy Policy', href: getPermalink('/privacy') },
-  ],
-  socialLinks: [
-    { ariaLabel: 'X', icon: 'tabler:brand-x', href: '#' },
-    { ariaLabel: 'Instagram', icon: 'tabler:brand-instagram', href: '#' },
-    { ariaLabel: 'Facebook', icon: 'tabler:brand-facebook', href: '#' },
-    { ariaLabel: 'RSS', icon: 'tabler:rss', href: getAsset('/rss.xml') },
-    { ariaLabel: 'Github', icon: 'tabler:brand-github', href: 'https://github.com/arthelokyo/astrowind' },
-  ],
-  footNote: `
-    Made by <a class="text-blue-600 underline dark:text-muted" href="https://github.com/arthelokyo"> Arthelokyo</a> · All rights reserved.
-  `,
+export const headerData = (language: Language) => {
+  const t = COPY[language];
+  const other = otherLanguage(language);
+
+  return {
+    labels: { toggleMenu: t.toggleMenu, toggleTheme: t.toggleTheme, mainNav: t.mainNav },
+    links: [
+      { text: t.home, href: pagePath(language, '') },
+      { text: t.story, href: pagePath(language, 'story') },
+      { text: t.blog, href: pagePath(language, 'blog') },
+      { text: t.contact, href: pagePath(language, 'contact') },
+    ],
+    actions: [
+      // The language switch is an ordinary link to the counterpart page, so it
+      // works with scripting disabled and reads as a real destination.
+      { text: LANGUAGE_NAME[other], href: pagePath(other, ''), variant: 'secondary' as const },
+      { text: t.startBuilding, href: CREATOR_APP, target: '_blank' },
+    ],
+  };
+};
+
+export const footerData = (language: Language) => {
+  const t = COPY[language];
+
+  return {
+    links: [
+      {
+        title: t.product,
+        links: [
+          { text: t.startBuilding, href: CREATOR_APP },
+          { text: t.ideas, href: landingPageUrl(language, '') },
+          { text: t.blog, href: pagePath(language, 'blog') },
+        ],
+      },
+      {
+        title: t.legal,
+        links: [
+          { text: t.terms, href: `${PLAY_ORIGIN}/terms` },
+          { text: t.privacy, href: `${PLAY_ORIGIN}/privacy` },
+        ],
+      },
+    ],
+    secondaryLinks: [
+      { text: t.story, href: pagePath(language, 'story') },
+      { text: t.contact, href: pagePath(language, 'contact') },
+    ],
+    socialLinks: [],
+    footNote: t.footNote,
+  };
 };

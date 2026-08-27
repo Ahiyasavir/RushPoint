@@ -1,2 +1,8 @@
 User-agent: *
-Disallow:
+# The content editor is not a page of this site. It is also excluded from the
+# sitemap and marked noindex in its own markup: each of those alone can be
+# missed, so all three say the same thing.
+Disallow: /admin/
+Allow: /
+
+# The build appends the Sitemap directive below.

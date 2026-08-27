@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Not a page of the site. It is excluded from the sitemap, disallowed in
+      robots.txt, and marked unindexable here as well, because any one of those
+      alone can be missed.
+    -->
+    <meta name="robots" content="noindex, nofollow" />
+    <title>RushPoint content</title>
+    <!--
+      The Netlify Identity widget the template shipped is gone: this uses the
+      GitHub backend, so identity comes from GitHub through our own token
+      exchange. Loading a second, unused identity provider would be a third party
+      script on an authenticated surface for no purpose.
+    -->
+    <script src="https://unpkg.com/decap-cms@^3.0.0/dist/decap-cms.js"></script>
+  </head>
+  <body>
+    <noscript>
+      This page is the content editor and needs JavaScript. Every page of the site
+      itself works without it.
+    </noscript>
+  </body>
+</html>

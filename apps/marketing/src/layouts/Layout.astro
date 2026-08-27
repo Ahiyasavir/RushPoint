@@ -3,8 +3,6 @@ import '~/assets/styles/tailwind.css';
 
 import { Font } from 'astro:assets';
 
-import { I18N } from 'astrowind:config';
-
 import CommonMeta from '~/components/common/CommonMeta.astro';
 import Favicons from '~/components/Favicons.astro';
 import CustomStyles from '~/components/CustomStyles.astro';
@@ -14,17 +12,28 @@ import SiteVerification from '~/components/common/SiteVerification.astro';
 import Analytics from '~/components/common/Analytics.astro';
 import Intersect from '~/components/common/Intersect.astro';
 
-// Comment the line below to disable View Transitions
-import { ClientRouter } from 'astro:transitions';
+import { DIRECTION, type Alternate, type Language } from '~/utils/i18n';
 
 import type { MetaData as MetaDataType } from '~/types';
 
 export interface Props {
   metadata?: MetaDataType;
+  /** The language THIS page is written in. Not a site wide setting. */
+  language: Language;
+  /**
+   * The hreflang cluster for this page. Standing pages pass the derived set; a
+   * post with no counterpart passes an empty array, which is the accurate
+   * statement that no equivalent exists.
+   */
+  alternates?: Alternate[];
 }
 
-const { metadata = {} } = Astro.props;
-const { language, textDirection } = I18N;
+const { metadata = {}, language, alternates = [] } = Astro.props;
+
+// The template read one global language out of config. This site publishes two,
+// so direction is a property of the PAGE. Getting it from the language rather
+// than from a second prop means a page cannot declare lang="he" and dir="ltr".
+const textDirection = DIRECTION[language];
 ---
 
 <!doctype html>
@@ -36,13 +45,26 @@ const { language, textDirection } = I18N;
     <CustomStyles />
     <ApplyColorMode />
     <Metadata {...metadata} />
+    {
+      /*
+        hreflang lives in the STATIC markup, never injected by script: a crawler
+        that does not execute JavaScript still has to see the cluster. The set is
+        derived (see ~/utils/i18n), so symmetry holds by construction rather than
+        by anyone remembering to update both sides.
+      */
+    }
+    {alternates.map((alt) => <link rel="alternate" hreflang={alt.hreflang} href={alt.href} />)}
     <SiteVerification />
     <Analytics />
 
-    <link rel="preconnect" href="https://images.unsplash.com" />
-
-    <!-- Comment the line below to disable View Transitions -->
-    <ClientRouter fallback="swap" />
+    {
+      /*
+        No <ClientRouter />. The template enables view transitions, which ship a
+        navigation script; this site is static content that does not change after
+        load, and a language switch here also flips text direction, which a
+        swapped DOM handles poorly. Removing it keeps the pages script free.
+      */
+    }
   </head>
 
   <body class="antialiased text-default bg-page tracking-tight">

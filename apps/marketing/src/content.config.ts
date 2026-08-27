@@ -50,13 +50,34 @@ const metadataDefinition = () =>
 const postCollection = defineCollection({
   loader: glob({ pattern: ['*.md', '*.mdx'], base: 'src/data/post' }),
   schema: z.object({
-    publishDate: z.date().optional(),
+    // REQUIRED, deliberately. An optional publishDate would let a post with no
+    // date sort anywhere at all, and the index promises newest first.
+    publishDate: z.date(),
     updateDate: z.date().optional(),
-    draft: z.boolean().optional(),
+    draft: z.boolean().default(false),
+
+    // REQUIRED. A post belongs to exactly one language: it appears in that
+    // language's index and feed, and nowhere else. There is no default, because
+    // a defaulted language is a Hebrew post quietly filed as English.
+    language: z.enum(['he', 'en']),
+
+    // REQUIRED and DECLARED, never derived from the title or the filename.
+    // A URL derived from a title breaks the moment someone edits the title, and
+    // it breaks silently: the old address 404s and the new one has no history.
+    slug: z
+      .string()
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'slug must be lowercase words joined by single hyphens'),
+
+    // Set on BOTH posts of a translated pair, to the same value, to make them
+    // annotate each other. Absent means this post has no counterpart, which is
+    // the honest state for most posts and is not an error.
+    pairedSubject: z.string().optional(),
 
     title: z.string(),
     excerpt: z.string().optional(),
     image: z.string().optional(),
+    /** A video embed URL for the post body. */
+    video: z.url().optional(),
 
     category: z.string().optional(),
     tags: z.array(z.string()).optional(),

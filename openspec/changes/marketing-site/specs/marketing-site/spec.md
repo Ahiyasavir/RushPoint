@@ -63,10 +63,21 @@ page with a success status.
 - **WHEN** every path listed in the site's sitemap is resolved against the built output
 - **THEN** a real file exists for each one
 
-### Requirement: Every page exists in both Hebrew and English
+### Requirement: Every standing page exists in both Hebrew and English
 
-Pages SHALL be published as language pairs. For every page in one language there SHALL
-exist a counterpart in the other language covering the same subject.
+The site's STANDING pages (home, story, contact, and the blog index) SHALL be published as
+language pairs. For every standing page in one language there SHALL exist a counterpart in
+the other language covering the same subject.
+
+Blog posts SHALL NOT be required to have a counterpart. A post declares one language and
+appears only in that language's index and feed. This is deliberate: requiring a
+counterpart for every post would either block publishing until a translation exists, or
+produce the machine translated Hebrew this design rejects. A post therefore carries a self
+referencing canonical and no counterpart annotation, which is the accurate statement that
+no equivalent exists, rather than a claim pointing at a page that says something else.
+
+A post whose author DOES write both languages SHALL be able to declare the pairing, and
+the two SHALL then annotate each other exactly as standing pages do.
 
 A Hebrew page SHALL declare `lang="he"` and `dir="rtl"`. An English page SHALL declare
 `lang="en"` and `dir="ltr"`. A page's visible copy SHALL be written in the language it
@@ -76,10 +87,20 @@ English page SHALL NOT leak Hebrew copy.
 
 Hebrew copy SHALL be authored, not machine translated from English.
 
-#### Scenario: Pages are paired
+#### Scenario: Standing pages are paired
 
-- **WHEN** the set of published pages is enumerated
-- **THEN** every page has exactly one counterpart of the other language for the same subject
+- **WHEN** the set of published standing pages is enumerated
+- **THEN** every standing page has exactly one counterpart of the other language for the same subject
+
+#### Scenario: An unpaired post is publishable
+
+- **WHEN** a post is published in one language with no counterpart
+- **THEN** the build succeeds, the post appears in that language's index and feed only, and it declares no counterpart annotation
+
+#### Scenario: A paired post annotates its counterpart
+
+- **WHEN** two posts declare each other as the same subject in different languages
+- **THEN** each names the other as an alternate, symmetrically
 
 #### Scenario: Declared language matches declared direction
 

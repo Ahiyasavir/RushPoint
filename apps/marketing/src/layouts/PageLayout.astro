@@ -2,30 +2,33 @@
 import Layout from '~/layouts/Layout.astro';
 import Header from '~/components/widgets/Header.astro';
 import Footer from '~/components/widgets/Footer.astro';
-import Announcement from '~/components/widgets/Announcement.astro';
 
 import { headerData, footerData } from '~/navigation';
 
+import type { Alternate, Language } from '~/utils/i18n';
 import type { MetaData } from '~/types';
 
 export interface Props {
   metadata?: MetaData;
+  language: Language;
+  alternates?: Alternate[];
 }
 
-const { metadata } = Astro.props;
+const { metadata, language, alternates } = Astro.props;
+
+// Navigation is per language: a Hebrew page must not offer an English menu.
+const header = headerData(language);
+const footer = footerData(language);
 ---
 
-<Layout metadata={metadata}>
-  <slot name="announcement">
-    <Announcement />
-  </slot>
+<Layout metadata={metadata} language={language} alternates={alternates}>
   <slot name="header">
-    <Header {...headerData} isSticky showRssFeed showToggleTheme />
+    <Header {...header} isSticky showToggleTheme />
   </slot>
   <main>
     <slot />
   </main>
   <slot name="footer">
-    <Footer {...footerData} />
+    <Footer {...footer} />
   </slot>
 </Layout>

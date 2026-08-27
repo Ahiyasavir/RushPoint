@@ -25,12 +25,12 @@ const whenExternalScripts = (items: (() => AstroIntegration) | (() => AstroInteg
 export default defineConfig({
   output: 'static',
 
-  // Prefetch links as they enter the viewport for snappier navigations
-  // (works together with <ClientRouter />, which enables prefetch by default).
-  prefetch: {
-    prefetchAll: true,
-    defaultStrategy: 'viewport',
-  },
+  // Prefetch OFF. The template prefetched every link entering the viewport,
+  // which downloads whole pages a reader never opens. On a twelve page static
+  // site the saving is imperceptible, and the cost lands on exactly the reader
+  // this site is written for: someone on a phone, on mobile data. It also left
+  // 2.4 KB of script on pages that otherwise need none.
+  prefetch: false,
 
   // Native Fonts API: self-hosts + subsets + preloads Inter and generates
   // metric-adjusted fallbacks. Injected via <Font /> in Layout.astro and

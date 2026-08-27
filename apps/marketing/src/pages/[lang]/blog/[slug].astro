@@ -1,0 +1,94 @@
+---
+import { render } from 'astro:content';
+
+import PageLayout from '~/layouts/PageLayout.astro';
+import Image from '~/components/common/Image.astro';
+
+import { pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
+import { publishedPosts, urlOf, alternatesOfPost } from '~/utils/posts';
+import { blogCopy } from '~/copy/blog';
+
+// One entry per PUBLISHED post. A draft produces no path, so it is absent from
+// the output entirely rather than merely unlinked.
+export async function getStaticPaths() {
+  const posts = await publishedPosts();
+  return posts.map((post) => ({
+    params: { lang: post.data.language, slug: post.data.slug },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const language = post.data.language as Language;
+const t = blogCopy[language];
+
+const { Content } = await render(post);
+const alternates = await alternatesOfPost(post);
+
+const metadata = {
+  title: post.data.title,
+  description: post.data.excerpt,
+  canonical: urlOf(post),
+  openGraph: {
+    url: urlOf(post),
+    locale: OG_LOCALE[language],
+    type: 'article',
+  },
+};
+
+const dateFormat = new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-GB', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+});
+---
+
+<PageLayout metadata={metadata} language={language} alternates={alternates}>
+  <article class="px-4 py-8 sm:px-6 mx-auto max-w-3xl lg:px-8 lg:py-12">
+    <header class="mb-8">
+      <p class="text-sm text-muted dark:text-slate-400 mb-2">
+        {t.publishedOn}{' '}
+        <time datetime={post.data.publishDate.toISOString()}>{dateFormat.format(post.data.publishDate)}</time>
+      </p>
+      <h1 class="text-4xl font-bold tracking-tight leading-tight mb-4">{post.data.title}</h1>
+      {post.data.excerpt && <p class="text-xl text-muted dark:text-slate-400">{post.data.excerpt}</p>}
+    </header>
+
+    {
+      post.data.image && (
+        <Image
+          class="mb-8 rounded-lg w-full"
+          src={post.data.image}
+          alt={post.data.title}
+          width={1024}
+          height={576}
+          loading="eager"
+        />
+      )
+    }
+
+    {
+      post.data.video && (
+        // 16:9 without a layout shift. A video is an addition to the post, never
+        // a prerequisite for reading it, so it sits after the opening text.
+        <div class="mb-8 relative w-full" style="padding-top:56.25%">
+          <iframe
+            class="absolute inset-0 h-full w-full rounded-lg"
+            src={post.data.video}
+            title={post.data.title}
+            loading="lazy"
+            allowfullscreen
+          />
+        </div>
+      )
+    }
+
+    <div class="prose prose-lg dark:prose-invert max-w-none">
+      <Content />
+    </div>
+
+    <footer class="mt-12 border-t border-gray-200 pt-6 dark:border-slate-700">
+      <a class="inline-block py-1 font-medium text-primary hover:underline" href={pagePath(language, 'blog')}>{t.backToBlog}</a>
+    </footer>
+  </article>
+</PageLayout>

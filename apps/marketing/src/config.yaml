@@ -5,29 +5,35 @@ site:
   # built output agrees with it. Moving the site is a change HERE plus DNS.
   site: 'https://www.rush-point.com'
   base: '/'
-  trailingSlash: false
+  # TRUE, matching pagePath() in src/utils/i18n.ts. With false the sitemap listed
+  # /he while the canonical said /he/, so every sitemap entry pointed at a URL
+  # that redirects to the one the page itself claims is canonical.
+  trailingSlash: true
 
   # googleSiteVerificationId: set once the Search Console property exists.
 
 # Default SEO metadata
 metadata:
   title:
-    default: AstroWind
-    template: '%s — AstroWind'
-  description: "\U0001F680 Suitable for Startups, Small Business, Sass Websites, Professional Portfolios, Marketing Websites, Landing Pages & Blogs."
+    default: RushPoint
+    # A COMMA, not an em dash. The no dash standard covers page metadata, and a
+    # title template applies to every page on the site at once, so one dash here
+    # is a dash on every title the site publishes.
+    template: '%s, RushPoint'
+  description: 'Build a real field game: a route through real places, navigation on the phone, and scoring that takes care of itself.'
   robots:
     index: true
     follow: true
   openGraph:
-    site_name: AstroWind
+    site_name: RushPoint
     images:
       - url: '~/assets/images/default.png'
         width: 1200
         height: 628
     type: website
   twitter:
-    handle: '@arthelokyo'
-    site: '@arthelokyo'
+    # No handle or site. Those were the template author's accounts. A card still
+    # renders without them; naming someone else's would be worse than omitting.
     cardType: summary_large_image
 
 i18n:

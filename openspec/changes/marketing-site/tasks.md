@@ -13,31 +13,31 @@
 
 ## 3. Bilingual routing and derived alternates (RED first)
 
-- [ ] 3.1 Extend `scripts/test-marketing-output.ts` with page pairing, `lang`/`dir` agreement, hreflang symmetry, self reference and exactly one `x-default`. Run it and confirm it fails because no `/he/` or `/en/` page exists yet.
-- [ ] 3.2 Restructure routing so every page lives under `/he/…` or `/en/…`, and derive the alternate set by prefix swap. Confirm 3.1 passes.
-- [ ] 3.3 Prove symmetry is derived rather than authored: mutate the derivation so one page names the wrong counterpart while the entry count stays correct, confirm the symmetry check fails naming both directions, then revert.
-- [ ] 3.4 Add the `/` redirect to `/he/` as a declared single path redirect, and assert no catch all rewrite exists for this target.
+- [x] 3.1 Extend `scripts/test-marketing-output.ts` with page pairing, `lang`/`dir` agreement, hreflang symmetry, self reference and exactly one `x-default`. Run it and confirm it fails because no `/he/` or `/en/` page exists yet.
+- [x] 3.2 Restructure routing so every page lives under `/he/…` or `/en/…`, and derive the alternate set by prefix swap. Confirm 3.1 passes.
+- [x] 3.3 Prove symmetry is derived rather than authored: mutate the derivation so one page names the wrong counterpart while the entry count stays correct, confirm the symmetry check fails naming both directions, then revert.
+- [x] 3.4 Add the `/` redirect to `/he/` as a declared single path redirect, and assert no catch all rewrite exists for this target.
 
 ## 4. Content shape and draft handling (RED first)
 
-- [ ] 4.1 Write `scripts/test-marketing-content.ts` asserting required frontmatter fields, rejection of a wrongly typed field, slug stability independent of title, newest first ordering, draft exclusion, language correctness via the shared `scripts/lib/i18nLeak.ts` predicate, and that the scan reached a non zero number of files. Run it and confirm it fails.
-- [ ] 4.2 Define the content collection schema (title, description, language, slug, publication date, draft, optional cover image and video) and wire the published set filter that the index, sitemap and feed all read. Confirm 4.1 passes.
-- [ ] 4.3 Prove a malformed post fails the build: temporarily remove a required field from a post, confirm the build fails naming the file, then revert.
-- [ ] 4.4 Prove the vacuous pass is closed: temporarily point the content scan at an empty directory and confirm it fails on the reach assertion rather than reporting green.
+- [x] 4.1 Write `scripts/test-marketing-content.ts` asserting required frontmatter fields, rejection of a wrongly typed field, slug stability independent of title, newest first ordering, draft exclusion, language correctness via the shared `scripts/lib/i18nLeak.ts` predicate, and that the scan reached a non zero number of files. Run it and confirm it fails.
+- [x] 4.2 Define the content collection schema (title, description, language, slug, publication date, draft, optional cover image and video) and wire the published set filter that the index, sitemap and feed all read. Confirm 4.1 passes.
+- [x] 4.3 Prove a malformed post fails the build: temporarily remove a required field from a post, confirm the build fails naming the file, then revert.
+- [x] 4.4 Prove the vacuous pass is closed: temporarily point the content scan at an empty directory and confirm it fails on the reach assertion rather than reporting green.
 
 ## 5. Author the pages and posts
 
-- [ ] 5.1 Write the home page in Hebrew and English: what RushPoint is, who it is for, and a way in.
-- [ ] 5.2 Write the story page in both languages.
-- [ ] 5.3 Write the contact page in both languages, with the form.
-- [ ] 5.4 Write the blog index and at least two real posts per language, authored in Hebrew rather than translated.
+- [x] 5.1 Write the home page in Hebrew and English: what RushPoint is, who it is for, and a way in.
+- [x] 5.2 Write the story page in both languages.
+- [x] 5.3 Write the contact page in both languages, with the form.
+- [x] 5.4 Write the blog index and at least two real posts per language, authored in Hebrew rather than translated.
 - [ ] 5.5 Replace the template's branding, navigation, footer, colors and images with RushPoint's, and remove every remaining piece of template placeholder copy.
 
 ## 6. Crawler surfaces (RED first)
 
-- [ ] 6.1 Extend `scripts/test-marketing-output.ts` with sitemap set equality against the published set, `robots.txt` allowing every published path and advertising the sitemap, the feed listing published posts and no draft, and `/admin/` being disallowed, `noindex`, and absent from the sitemap. Run it and confirm it fails.
-- [ ] 6.2 Configure the sitemap, `robots.txt` and feed to generate from the published set. Confirm 6.1 passes.
-- [ ] 6.3 Assert no framework runtime or hydration bundle is referenced by the home, story, blog index or post pages.
+- [x] 6.1 Extend `scripts/test-marketing-output.ts` with sitemap set equality against the published set, `robots.txt` allowing every published path and advertising the sitemap, the feed listing published posts and no draft, and `/admin/` being disallowed, `noindex`, and absent from the sitemap. Run it and confirm it fails.
+- [x] 6.2 Configure the sitemap, `robots.txt` and feed to generate from the published set. Confirm 6.1 passes.
+- [x] 6.3 Assert no framework runtime or hydration bundle is referenced by the home, story, blog index or post pages.
 
 ## 7. Cross linking with the landing pages (RED first)
 
@@ -65,14 +65,14 @@
 
 ## 11. Deployment wiring
 
-- [ ] 11.1 Add the third hosting target to `firebase.json` pointing at `apps/marketing/dist`, with the single `/` redirect and no catch all rewrite. Extend `scripts/lib/buildArtifactGuard.mjs` and its test so the new target's asset base and serve path are covered by `npm run base:check`.
-- [ ] 11.2 Add the marketing build to `npm run verify`'s builds phase, and a `preview` entry so the built site can be served locally.
+- [x] 11.1 Add the third hosting target to `firebase.json` pointing at `apps/marketing/dist`, with the single `/` redirect and no catch all rewrite. Extend `scripts/lib/buildArtifactGuard.mjs` and its test so the new target's asset base and serve path are covered by `npm run base:check`.
+- [x] 11.2 Add the marketing build to `npm run verify`'s builds phase, and a `preview` entry so the built site can be served locally.
 
 ## 12. CMS configuration
 
-- [ ] 12.1 Write `scripts/test-marketing-cms-config.ts` comparing the Decap field set against the content schema in both directions. Run it and confirm it fails against the template's stock configuration.
-- [ ] 12.2 Re-point the Decap collections at our content shape, our two languages and our repository, restricted to the content directory. Confirm 12.1 passes.
-- [ ] 12.3 Prove the site does not depend on the CMS: build with the admin assets removed and confirm every published page is still emitted.
+- [x] 12.1 Write `scripts/test-marketing-cms-config.ts` comparing the Decap field set against the content schema in both directions. Run it and confirm it fails against the template's stock configuration.
+- [x] 12.2 Re-point the Decap collections at our content shape, our two languages and our repository, restricted to the content directory. Confirm 12.1 passes.
+- [x] 12.3 Prove the site does not depend on the CMS: build with the admin assets removed and confirm every published page is still emitted.
 - [ ] 12.4 Write the operator checklist for the GitHub OAuth application and the token exchange endpoint on the VPS, including the exact steps and what stays broken until they are done.
 
 ## 13. Gates

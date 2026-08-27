@@ -1,0 +1,132 @@
+# Decap CMS. A SECOND editor for the content files, never the source of truth.
+#
+# Every field below has to match the collection schema in src/content.config.ts.
+# A CMS that offers a field the schema rejects produces a document that fails the
+# build AFTER the author pressed publish, which is the worst possible moment to
+# find out. scripts/test-marketing-cms-config.ts compares the two sets in both
+# directions so they cannot drift apart.
+#
+# Paths are relative to the REPOSITORY root, not to this workspace: Decap commits
+# through the git provider, which knows nothing about npm workspaces.
+
+backend:
+  name: github
+  repo: Ahiyasavir/RushPoint
+  # Must be the branch the site is actually deployed from. Content committed to a
+  # branch nobody builds is content nobody sees.
+  branch: topographic-maps
+  # The token exchange endpoint. Until the OAuth application exists and this is
+  # deployed, the CMS renders but cannot sign in; the site and every content file
+  # are entirely usable meanwhile. See the operator checklist.
+  base_url: https://api.rush-point.com
+  auth_endpoint: oauth
+
+# Where an uploaded image or video lands, and how a page refers to it afterwards.
+# public/ is copied to the site root verbatim, so an upload is reachable at
+# /uploads/<file> with no build step and no import.
+media_folder: apps/marketing/public/uploads
+public_folder: /uploads
+
+publish_mode: simple
+
+collections:
+  - name: post
+    label: Post
+    label_singular: Post
+    folder: apps/marketing/src/data/post
+    create: true
+    # Mirrors the two language prefixes used by the existing files, so a post
+    # created here sorts beside its hand written neighbours.
+    slug: '{{fields.language}}-{{fields.slug}}'
+    # A post is addressed by its DECLARED slug, so the CMS must never quietly
+    # rename the file when a title changes.
+    identifier_field: slug
+    summary: '{{fields.language}} · {{title}}'
+    sortable_fields: [publishDate, title]
+    fields:
+      - label: Language
+        name: language
+        widget: select
+        options:
+          - { label: 'עברית', value: 'he' }
+          - { label: 'English', value: 'en' }
+        # No default. A defaulted language is a Hebrew post quietly filed as
+        # English, and nothing downstream would notice.
+        required: true
+
+      - label: 'Slug (the address, lowercase words joined by hyphens)'
+        name: slug
+        widget: string
+        pattern:
+          - '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+          - 'Lowercase words joined by single hyphens, for example: tasks-that-always-work'
+        required: true
+        hint: >-
+          This becomes the page address and should not change after publishing.
+          Changing it breaks every link anyone already has.
+
+      - label: Title
+        name: title
+        widget: string
+        required: true
+
+      - label: Excerpt
+        name: excerpt
+        widget: text
+        required: false
+        hint: One or two sentences. Shown in the blog list and used as the page description.
+
+      - label: 'Publish date'
+        name: publishDate
+        widget: datetime
+        required: true
+
+      - label: 'Last updated'
+        name: updateDate
+        widget: datetime
+        required: false
+
+      - label: Draft
+        name: draft
+        widget: boolean
+        default: false
+        required: false
+        hint: A draft is not published at all. It is absent from the site, the sitemap and the feed.
+
+      - label: 'Translated pair key'
+        name: pairedSubject
+        widget: string
+        required: false
+        hint: >-
+          Leave empty unless this post exists in both languages. If it does, put
+          the SAME value on both posts and they will point at each other.
+
+      - label: 'Cover image'
+        name: image
+        widget: image
+        required: false
+
+      - label: 'Video embed URL'
+        name: video
+        widget: string
+        required: false
+        hint: An embed address, for example a YouTube embed link.
+
+      - label: Category
+        name: category
+        widget: string
+        required: false
+
+      - label: Tags
+        name: tags
+        widget: list
+        required: false
+        field: { label: Tag, name: tag, widget: string }
+
+      - label: Content
+        name: body
+        widget: markdown
+        required: true
+        hint: >-
+          Avoid dash separators in the text. Use a comma, a full stop or a new
+          line instead. The build checks this.

@@ -1,23 +1,38 @@
 ---
 import Layout from '~/layouts/Layout.astro';
-import { getHomePermalink } from '~/utils/permalinks';
+import { pagePath, LANGUAGE_NAME } from '~/utils/i18n';
 
-const title = `Error 404`;
+// The one page that cannot know its reader's language: a 404 is served for a
+// path that matched nothing, so there is no language prefix to read it from.
+// It therefore says the same thing twice rather than guessing, and offers a way
+// back in both. Declared `en` because the document has to declare something, and
+// English is the x-default for the same reason.
+const title = 'Page not found';
 ---
 
-<Layout metadata={{ title }}>
+<Layout metadata={{ title, robots: { index: false, follow: false } }} language="en">
   <section class="flex items-center h-full p-16">
     <div class="container flex flex-col items-center justify-center px-5 mx-auto my-8">
       <div class="max-w-md text-center">
-        <h2 class="mb-8 font-bold text-9xl">
+        <h1 class="mb-8 font-bold text-9xl">
           <span class="sr-only">Error</span>
           <span class="text-primary">404</span>
-        </h2>
-        <p class="text-3xl font-semibold md:text-3xl">Sorry, we couldn't find this page.</p>
-        <p class="mt-4 mb-8 text-lg text-muted dark:text-slate-400">
-          But don't worry, you can find plenty of other things on our homepage.
+        </h1>
+
+        <p class="text-2xl font-semibold" dir="rtl" lang="he">הדף הזה לא נמצא</p>
+        <p class="mt-2 mb-6 text-lg text-muted dark:text-slate-400" dir="rtl" lang="he">
+          יכול להיות שהקישור ישן, או שיש בו טעות. אפשר לחזור לדף הראשי.
         </p>
-        <a rel="noopener noreferrer" href={getHomePermalink()} class="btn ml-4">Back to homepage</a>
+
+        <p class="text-2xl font-semibold" dir="ltr" lang="en">We could not find this page</p>
+        <p class="mt-2 mb-8 text-lg text-muted dark:text-slate-400" dir="ltr" lang="en">
+          The link may be old, or it may have a typo in it. You can head back to the home page.
+        </p>
+
+        <div class="flex flex-wrap justify-center gap-3">
+          <a class="btn" href={pagePath('he', '')} lang="he">{LANGUAGE_NAME.he}</a>
+          <a class="btn" href={pagePath('en', '')} lang="en">{LANGUAGE_NAME.en}</a>
+        </div>
       </div>
     </div>
   </section>
