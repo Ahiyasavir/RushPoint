@@ -252,3 +252,62 @@ What remains is one clean 120-team pass with the corrected harness, after the qu
 well before the event. Everything it would validate has already been validated at 6 and 100
 teams; the outstanding value is confirming the finish rate once the harness stops re-submitting
 photos.
+
+---
+
+## 9. Read cost after the fixes: MEASURED, 0.69x of the ceiling
+
+Section 6 projected the read budget and was **wrong twice** before it was right, both times for
+the same reason: per-call costs were measured in a compressed simulation, where anything
+throttled by wall-clock fires far less often per unit of game time than it really does. Modelled
+honestly at real time-scale the figure was ~83,000 reads, 1.66x over.
+
+Two costs dominated, and both were invisible:
+
+- **The live leaderboard refresh** runs inside player callables on a 20-second throttle and read
+  **every team document** uncached: ~27,450 reads at 120 teams. Its cost was billed to whichever
+  player action triggered it, which is why `submitTaskAnswer` measured 10.53 reads/call while its
+  own logic touches three documents.
+- **`resolveCallerTeam`** is the most-called read in the product: every participant callable
+  resolves its team through it, ~23,000 times per run, one uncached read each.
+
+Both now use the cache that `listRunTeams` already used. Measured against production, before and
+after, per call:
+
+| callable | before | after | |
+|---|---|---|---|
+| `listRunTeams` | 68.31 | **8.00** | -88% |
+| `updateLocation` | 1.01 | **0.07** | -93% |
+| `reportArrival` | 2.00 | **0.00** | -100% |
+| `submitTaskAnswer` | 10.53 | **6.81** | -35% |
+| `completeTask` | 10.69 | **8.00** | -25% |
+| `joinRun` | 15.15 | **10.25** | -32% |
+| `getMyTeamState` | 1.54 | **1.37** | -11% |
+
+Projected from those measured costs, 120 teams over 75 minutes:
+
+| | reads | |
+|---|---|---|
+| players | 24,030 | |
+| run console | 7,200 | |
+| leaderboard refresh | 2,700 | |
+| one-off (launch, joins) | 320 | |
+| **total** | **34,250** | **0.69x of the 50,000 ceiling** |
+
+Writes land around 15,600 of 20,000 (0.78x) and are now the **tighter** of the two. The
+identified lever if that ever needs headroom is the post-run movement track, which exists only
+to draw the heatmap: making it a per-run opt-in takes it to zero for runs nobody analyses.
+
+### What is still owed
+
+**A full 120-team production run against these fixes.** Tonight's testing had already spent
+roughly 39,000 of the day's 50,000 reads before these changes landed, and another full pass
+costs ~34,000 — it would have exhausted the quota and taken the **live** site down for real
+users. The Spark day resets at 07:00 UTC (10:00 Israel time).
+
+Everything the final pass would exercise has been validated at 8 and 100 teams: 100 concurrent
+joins with zero contention errors, every mission type completing, real photo and video uploads,
+and the per-call costs above. What the full pass adds is confirmation that the projection holds
+at the real number, which is worth having before an event and is not worth breaking the live site
+for tonight.
+
