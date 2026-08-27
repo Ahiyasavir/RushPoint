@@ -627,5 +627,98 @@ check('H · the language scan actually reached the copy', copyScanned >= 100,
   }
 }
 
+// ── PART M — THE PALETTE IS READABLE, IN BOTH COLOUR SCHEMES ─────────────────
+//
+// These pages are the product's public face for organic search, and they ship a
+// dark scheme that nobody had ever looked at. It was the worst pairing in the
+// repository: white on the dark scheme's light orange fill measured 2.26:1,
+// where 4.5:1 is required, so the primary call to action was close to invisible
+// to anyone whose device is set to dark.
+//
+// The reason it survived is worth naming. One `--brand` token was doing three
+// different jobs: the colour a fill is painted, the colour brand text is drawn,
+// and by omission the colour that sits ON the fill. A single value cannot be
+// right for all three, because two of them are judged AGAINST it. Splitting it
+// into `--brand`, `--brand-ink` and `--cta-ink` is what makes each pair
+// answerable, and this part answers them.
+//
+// Ratios are COMPUTED here rather than asserted as remembered numbers, so
+// changing a colour re-derives the verdict instead of silently disagreeing with
+// a comment.
+
+function relativeLuminance(hex: string): number {
+  const h = hex.replace('#', '');
+  const channels = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const linear = channels.map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+}
+
+function contrastRatio(a: string, b: string): number {
+  const l1 = relativeLuminance(a);
+  const l2 = relativeLuminance(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+
+{
+  const sample = renderLandingPage(LANDING_PAGES[0]);
+  const styleMatch = sample.match(/<style>([\s\S]*?)<\/style>/);
+  check('M · the page carries its stylesheet inline', Boolean(styleMatch), 'inline <style>');
+
+  if (styleMatch) {
+    const css = styleMatch[1];
+    const darkAt = css.indexOf('prefers-color-scheme: dark');
+    check('M · a dark colour scheme is declared', darkAt > -1, 'prefers-color-scheme: dark');
+
+    const scopes: Record<string, string> = {
+      light: darkAt > -1 ? css.slice(0, darkAt) : css,
+      dark: darkAt > -1 ? css.slice(darkAt) : '',
+    };
+
+    function paletteToken(scope: string, name: string): string | null {
+      const m = scopes[scope].match(new RegExp(`${name}:[ ]*(#[0-9a-fA-F]{6})`));
+      return m ? m[1] : null;
+    }
+
+    for (const scope of ['light', 'dark']) {
+      const bg = paletteToken(scope, '--bg');
+      const ink = paletteToken(scope, '--ink');
+      const muted = paletteToken(scope, '--muted');
+      const brand = paletteToken(scope, '--brand');
+      const brandInk = paletteToken(scope, '--brand-ink');
+      const ctaInk = paletteToken(scope, '--cta-ink');
+
+      // The reach assertion for this scope. Every ratio below is meaningless if a
+      // token could not be read, and a missing token would otherwise skip the
+      // check rather than fail it.
+      const complete = Boolean(bg && ink && muted && brand && brandInk && ctaInk);
+      check(
+        `M · the ${scope} palette declares every token these pairs need`,
+        complete,
+        JSON.stringify({ bg, ink, muted, brand, brandInk, ctaInk }),
+      );
+      if (!complete) continue;
+
+      // Body sized text throughout. Nothing on these pages is large enough to
+      // qualify for the 3:1 allowance except the h1, which uses --ink anyway.
+      const PAIRS: Array<[string, string, string]> = [
+        ['body text on the page', ink!, bg!],
+        ['muted text on the page', muted!, bg!],
+        ['brand coloured links', brandInk!, bg!],
+        // The one that was failing, and the reason the token split exists.
+        ['call to action text on its fill', ctaInk!, brand!],
+      ];
+
+      for (const [label, fg, back] of PAIRS) {
+        const ratio = contrastRatio(fg, back);
+        check(
+          `M · ${scope}: ${label} meets 4.5:1`,
+          ratio >= 4.5,
+          `${ratio.toFixed(2)}:1 (${fg} on ${back})`,
+        );
+      }
+    }
+  }
+}
+
 console.log(`\n${failures === 0 ? 'ALL LANDING PAGE TESTS PASSED' : failures + ' TEST(S) FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

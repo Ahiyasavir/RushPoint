@@ -41,29 +41,38 @@
     </script>
     <style>
 :root { color-scheme: light dark; --ink: #1c1917; --muted: #57534e; --bg: #fffbf5;
-  --card: #ffffff; --line: #e7e0d6; --brand: #ea580c; }
+  --card: #ffffff; --line: #e7e0d6;
+  /* --brand is the FILL, --brand-ink is brand-coloured TEXT, and --cta-ink is what
+     sits on the fill. One token was doing all three and failed as two of them:
+     #EA580C measured 3.56:1 under white and 3.45:1 as link text, where both need
+     4.5:1. #C2410C is the same hue, one step deeper: 5.18:1 and 5.02:1. */
+  --brand: #c2410c; --brand-ink: #c2410c; --cta-ink: #ffffff; }
 @media (prefers-color-scheme: dark) { :root { --ink: #f5f5f4; --muted: #a8a29e;
-  --bg: #0c0a09; --card: #1c1917; --line: #292524; --brand: #fb923c; } }
+  --bg: #0c0a09; --card: #1c1917; --line: #292524;
+  /* In dark the fill is a LIGHT orange, so white on it was 2.26:1, the worst
+     pairing on either page set. The fix is the TEXT, not the fill: the page's own
+     near-black on that orange is 8.73:1 and the fill is unchanged. */
+  --brand: #fb923c; --brand-ink: #fb923c; --cta-ink: #0c0a09; } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.7;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 main, header, footer { max-width: 46rem; margin-inline: auto; padding-inline: 1.25rem; }
 header { padding-block: 2.5rem 1rem; }
-.brand { font-weight: 700; letter-spacing: .02em; color: var(--brand); text-decoration: none; }
+.brand { font-weight: 700; letter-spacing: .02em; color: var(--brand-ink); text-decoration: none; }
 h1 { font-size: clamp(1.9rem, 5vw, 2.75rem); line-height: 1.2; margin-block: .75rem .5rem; }
 h2 { font-size: 1.3rem; margin-block: 2.25rem .5rem; }
 .intro { font-size: 1.15rem; color: var(--muted); margin-block: 0 1.5rem; }
 p { margin-block: 0 1rem; }
-.cta { display: inline-block; background: var(--brand); color: #fff; text-decoration: none;
+.cta { display: inline-block; background: var(--brand); color: var(--cta-ink); text-decoration: none;
   font-weight: 600; padding: .85rem 1.6rem; border-radius: .6rem; margin-block: 1.5rem; }
 .cta:hover { filter: brightness(1.08); }
 nav.more { border-top: 1px solid var(--line); margin-block-start: 3rem; padding-block-start: 1.25rem; }
 nav.more ul { list-style: none; padding-inline-start: 0; margin: 0;
   display: flex; flex-wrap: wrap; gap: .5rem 1.25rem; }
-nav.more a { color: var(--brand); }
+nav.more a { color: var(--brand-ink); }
 footer { border-top: 1px solid var(--line); margin-block-start: 2rem; padding-block: 1.25rem 3rem;
   color: var(--muted); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 1rem; }
-footer a { color: var(--brand); }
+footer a { color: var(--brand-ink); }
     </style>
   </head>
   <body>
