@@ -137,15 +137,15 @@ function stripMarkup(text: string): string {
   return text.replace(/<[^>]*>/g, ' ');
 }
 
-function assertLanguage(label: string, language: Language, raw: string): void {
+function assertLanguage(label: string, language: Language, raw: string, part = 'C'): void {
   fieldsScanned += 1;
   const text = stripMarkup(raw);
   if (language === 'he') {
     // Hebrew copy leaking English words is the recurring bug the dictionaries
     // have a gate for; this surface needs the same one.
-    check(`C · ${label} is Hebrew without English leaking in`, !hasEnglishWord(text), text.slice(0, 60));
+    check(`${part} · ${label} is Hebrew without English leaking in`, !hasEnglishWord(text), text.slice(0, 60));
   } else {
-    check(`C · ${label} is English without Hebrew leaking in`, !hasHebrew(text), text.slice(0, 60));
+    check(`${part} · ${label} is English without Hebrew leaking in`, !hasHebrew(text), text.slice(0, 60));
   }
 }
 
@@ -194,6 +194,84 @@ for (const file of copyFiles) {
 // this the suite reports green over zero files, which is the vacuous pass the
 // landing page drift check hit.
 check('D · the content scan reached a non zero number of fields', fieldsScanned > 0, `${fieldsScanned} field(s)`);
+
+// ── F. The PAGE content files ────────────────────────────────────────────────
+//
+// The home, story and contact pages moved out of src/copy/*.ts into JSON data
+// files so the CMS can edit them (change: editable-pages-and-media). Section C
+// above scans the copy MODULES, and after that move it was scanning a directory
+// the site barely uses: every check stayed green while the words a reader
+// actually sees went unchecked in both languages.
+//
+// This is the same "silence is not coverage" trap the i18n checker had. The
+// language rules follow the content.
+{
+  const beforePages = fieldsScanned;
+  const PAGES_DIR = join(MARKETING, 'src', 'data', 'pages');
+  const pageFiles = existsSync(PAGES_DIR)
+    ? readdirSync(PAGES_DIR).filter((f) => f.endsWith('.json'))
+    : [];
+
+  check('F · page content files were found', pageFiles.length > 0, `${pageFiles.length} file(s)`);
+
+  // Every standing page must exist in BOTH languages, as a file. A missing one
+  // fails the build, but failing here names it before a build has to.
+  for (const page of ['home', 'story', 'contact']) {
+    for (const language of LANGUAGES) {
+      check(
+        `F · ${page} exists in ${language}`,
+        pageFiles.includes(`${page}.${language}.json`),
+        `${page}.${language}.json`,
+      );
+    }
+  }
+
+  /** Every string leaf in a parsed JSON value, with a dotted path. */
+  function leaves(value: unknown, path = ''): Array<[string, string]> {
+    if (typeof value === 'string') return [[path, value]];
+    if (Array.isArray(value)) return value.flatMap((v, i) => leaves(v, `${path}[${i}]`));
+    if (value && typeof value === 'object') {
+      return Object.entries(value).flatMap(([k, v]) => leaves(v, path ? `${path}.${k}` : k));
+    }
+    return [];
+  }
+
+  // Fields that are identifiers rather than prose. `src`, `poster` and `icon`
+  // are paths and icon names: they are Latin by necessity in both languages, and
+  // the standard already exempts file paths.
+  const NOT_PROSE = /(^|\.)(src|poster|icon|kind)$/;
+
+  for (const file of pageFiles) {
+    const language = file.split('.')[1] as Language;
+    if (!(LANGUAGES as readonly string[]).includes(language)) {
+      check(`F · ${file} names a known language`, false, language);
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(join(PAGES_DIR, file), 'utf8'));
+    } catch (e) {
+      check(`F · ${file} is valid JSON`, false, (e as Error).message);
+      continue;
+    }
+
+    for (const [path, text] of leaves(parsed)) {
+      if (NOT_PROSE.test(path)) continue;
+      if (!/[A-Za-z\u0590-\u05FF]/.test(text)) continue;
+      assertLanguage(`${file} ${path}`, language, text, 'F');
+    }
+  }
+
+  // Counted, not assumed. Every language check above is a check on a field that
+  // was found; if the leaf walk or the NOT_PROSE filter ever stopped yielding
+  // anything, this section would print nothing but passes.
+  check(
+    'F · the page scan actually reached page fields',
+    fieldsScanned - beforePages > 0,
+    `${fieldsScanned - beforePages} page field(s)`,
+  );
+}
 
 console.log('');
 if (failures > 0) {

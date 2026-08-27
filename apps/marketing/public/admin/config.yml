@@ -42,6 +42,285 @@ public_folder: /uploads
 publish_mode: simple
 
 collections:
+  # ── The standing pages ──────────────────────────────────────────────────────
+  #
+  # A "files" collection, not a "folder" one: these six documents are the whole
+  # set and nobody should be able to create a seventh home page or delete the
+  # only Hebrew one. Every field list mirrors src/content.config.ts, and
+  # scripts/test-marketing-cms-config.ts fails if the two drift, because a CMS
+  # offering a field the schema rejects produces a document that fails the build
+  # AFTER publish, which is the worst moment to find out.
+  - name: pages
+    label: 'עמודי האתר'
+    files:
+      - name: home-he
+        label: 'עמוד הבית (עברית)'
+        file: apps/marketing/src/data/pages/home.he.json
+        fields:
+          - { label: 'כותרת הדפדפן', name: title, widget: string }
+          - { label: 'תיאור לגוגל', name: description, widget: text }
+          - { label: 'תגית קטנה מעל הכותרת', name: tagline, widget: string }
+          - { label: 'הכותרת הגדולה', name: headline, widget: string, hint: 'אפשר להדגיש מילה עם <span class="text-accent">מילה</span>' }
+          - { label: 'משפט מתחת לכותרת', name: subhead, widget: text }
+          - { label: 'כפתור ראשי', name: primaryAction, widget: string }
+          - { label: 'כפתור משני', name: secondaryAction, widget: string }
+          - { label: 'קישור לרעיונות', name: ideasAction, widget: string }
+
+          - label: 'תמונה או סרטון בראש העמוד'
+            name: hero
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              מופיע מתחת לכותרת הראשית. אפשר להשאיר ריק.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - { label: 'תגית מעל היתרונות', name: featuresTagline, widget: string }
+          - { label: 'כותרת היתרונות', name: featuresTitle, widget: string }
+          - { label: 'משפט מתחת לכותרת היתרונות', name: featuresSubtitle, widget: text }
+          - label: 'היתרונות'
+            name: features
+            widget: list
+            fields:
+              - { label: 'כותרת', name: title, widget: string }
+              - { label: 'תיאור', name: description, widget: text }
+              - { label: 'שם האייקון', name: icon, widget: string, hint: 'למשל tabler:map-pin' }
+          - { label: 'כותרת השלבים', name: stepsTitle, widget: string }
+          - label: 'השלבים'
+            name: steps
+            widget: list
+            fields:
+              - { label: 'כותרת', name: title, widget: string }
+              - { label: 'תיאור', name: description, widget: text }
+              - { label: 'שם האייקון', name: icon, widget: string }
+          - { label: 'כותרת הגלריה', name: galleryTitle, widget: string, required: false }
+          - { label: 'משפט מתחת לכותרת הגלריה', name: gallerySubtitle, widget: text, required: false }
+          - label: 'גלריה: תמונות וסרטונים'
+            name: gallery
+            widget: list
+            required: false
+            label_singular: 'פריט'
+            hint: >-
+              כאן מוסיפים תמונות וסרטונים מהמשחקים. אפשר לגרור כדי לשנות סדר.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - { label: 'כותרת הקריאה לפעולה', name: ctaTitle, widget: string }
+          - { label: 'משפט הקריאה לפעולה', name: ctaSubtitle, widget: text }
+
+      - name: home-en
+        label: 'עמוד הבית (English)'
+        file: apps/marketing/src/data/pages/home.en.json
+        fields:
+          - { label: 'כותרת הדפדפן', name: title, widget: string }
+          - { label: 'תיאור לגוגל', name: description, widget: text }
+          - { label: 'תגית קטנה מעל הכותרת', name: tagline, widget: string }
+          - { label: 'הכותרת הגדולה', name: headline, widget: string, hint: 'אפשר להדגיש מילה עם <span class="text-accent">מילה</span>' }
+          - { label: 'משפט מתחת לכותרת', name: subhead, widget: text }
+          - { label: 'כפתור ראשי', name: primaryAction, widget: string }
+          - { label: 'כפתור משני', name: secondaryAction, widget: string }
+          - { label: 'קישור לרעיונות', name: ideasAction, widget: string }
+
+          - label: 'תמונה או סרטון בראש העמוד'
+            name: hero
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              מופיע מתחת לכותרת הראשית. אפשר להשאיר ריק.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - { label: 'תגית מעל היתרונות', name: featuresTagline, widget: string }
+          - { label: 'כותרת היתרונות', name: featuresTitle, widget: string }
+          - { label: 'משפט מתחת לכותרת היתרונות', name: featuresSubtitle, widget: text }
+          - label: 'היתרונות'
+            name: features
+            widget: list
+            fields:
+              - { label: 'כותרת', name: title, widget: string }
+              - { label: 'תיאור', name: description, widget: text }
+              - { label: 'שם האייקון', name: icon, widget: string, hint: 'למשל tabler:map-pin' }
+          - { label: 'כותרת השלבים', name: stepsTitle, widget: string }
+          - label: 'השלבים'
+            name: steps
+            widget: list
+            fields:
+              - { label: 'כותרת', name: title, widget: string }
+              - { label: 'תיאור', name: description, widget: text }
+              - { label: 'שם האייקון', name: icon, widget: string }
+          - { label: 'כותרת הגלריה', name: galleryTitle, widget: string, required: false }
+          - { label: 'משפט מתחת לכותרת הגלריה', name: gallerySubtitle, widget: text, required: false }
+          - label: 'גלריה: תמונות וסרטונים'
+            name: gallery
+            widget: list
+            required: false
+            label_singular: 'פריט'
+            hint: >-
+              כאן מוסיפים תמונות וסרטונים מהמשחקים. אפשר לגרור כדי לשנות סדר.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - { label: 'כותרת הקריאה לפעולה', name: ctaTitle, widget: string }
+          - { label: 'משפט הקריאה לפעולה', name: ctaSubtitle, widget: text }
+
+      - name: story-he
+        label: 'הסיפור שלי (עברית)'
+        file: apps/marketing/src/data/pages/story.he.json
+        fields:
+          - { label: 'כותרת הדפדפן', name: title, widget: string }
+          - { label: 'תיאור לגוגל', name: description, widget: text }
+          - { label: 'הכותרת הגדולה', name: headline, widget: string }
+          - { label: 'פסקת פתיחה', name: intro, widget: text }
+
+          - label: 'תמונה שלך'
+            name: portrait
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              מופיעה בראש עמוד הסיפור. אפשר להשאיר ריק.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - label: 'פרקי הסיפור'
+            name: sections
+            widget: list
+            label_singular: 'פרק'
+            fields:
+              - { label: 'כותרת הפרק', name: title, widget: string }
+              - label: 'פסקאות'
+                name: body
+                widget: list
+                field: { label: 'פסקה', name: paragraph, widget: text }
+
+              - label: 'תמונה או סרטון לפרק הזה'
+                name: media
+                widget: object
+                required: false
+                collapsed: true
+                hint: >-
+                  מופיע בתוך הפרק. אפשר להשאיר ריק.
+                fields:
+                  - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+                  - { label: 'הקובץ', name: src, widget: file }
+                  - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+                  - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+                  - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - { label: 'משפט סיום', name: closing, widget: text }
+          - { label: 'כפתור בסוף', name: action, widget: string }
+
+      - name: story-en
+        label: 'הסיפור שלי (English)'
+        file: apps/marketing/src/data/pages/story.en.json
+        fields:
+          - { label: 'כותרת הדפדפן', name: title, widget: string }
+          - { label: 'תיאור לגוגל', name: description, widget: text }
+          - { label: 'הכותרת הגדולה', name: headline, widget: string }
+          - { label: 'פסקת פתיחה', name: intro, widget: text }
+
+          - label: 'תמונה שלך'
+            name: portrait
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              מופיעה בראש עמוד הסיפור. אפשר להשאיר ריק.
+            fields:
+              - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+              - { label: 'הקובץ', name: src, widget: file }
+              - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+              - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+              - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - label: 'פרקי הסיפור'
+            name: sections
+            widget: list
+            label_singular: 'פרק'
+            fields:
+              - { label: 'כותרת הפרק', name: title, widget: string }
+              - label: 'פסקאות'
+                name: body
+                widget: list
+                field: { label: 'פסקה', name: paragraph, widget: text }
+
+              - label: 'תמונה או סרטון לפרק הזה'
+                name: media
+                widget: object
+                required: false
+                collapsed: true
+                hint: >-
+                  מופיע בתוך הפרק. אפשר להשאיר ריק.
+                fields:
+                  - { label: 'תמונה או וידאו', name: kind, widget: select, options: [{ label: 'תמונה', value: image }, { label: 'וידאו', value: video }] }
+                  - { label: 'הקובץ', name: src, widget: file }
+                  - { label: 'תיאור לקורא מסך (חובה)', name: alt, widget: string }
+                  - { label: 'כיתוב מתחת (לא חובה)', name: caption, widget: string, required: false }
+                  - { label: 'תמונת פתיחה לוידאו (לא חובה)', name: poster, widget: image, required: false }
+          - { label: 'משפט סיום', name: closing, widget: text }
+          - { label: 'כפתור בסוף', name: action, widget: string }
+
+      - name: contact-he
+        label: 'צור קשר (עברית)'
+        file: apps/marketing/src/data/pages/contact.he.json
+        fields:
+          - { label: 'כותרת הדפדפן', name: title, widget: string }
+          - { label: 'תיאור לגוגל', name: description, widget: text }
+          - { label: 'הכותרת הגדולה', name: headline, widget: string }
+          - { label: 'פסקת פתיחה', name: intro, widget: text }
+          - { label: 'תווית שדה השם', name: nameLabel, widget: string }
+          - { label: 'תווית שדה המייל', name: emailLabel, widget: string }
+          - { label: 'תווית שדה ההודעה', name: messageLabel, widget: string }
+          - { label: 'כפתור שליחה', name: submit, widget: string }
+          - { label: 'כפתור בזמן שליחה', name: sending, widget: string }
+          - { label: 'כותרת הצלחה', name: successTitle, widget: string }
+          - { label: 'הודעת הצלחה', name: successBody, widget: text }
+          - { label: 'שגיאה: טופס לא תקין', name: errorInvalid, widget: text }
+          - { label: 'שגיאה: יותר מדי הודעות', name: errorRateLimited, widget: text }
+          - { label: 'שגיאה: אין חיבור', name: errorOffline, widget: text }
+          - { label: 'שגיאה: לא ידוע', name: errorUnknown, widget: text }
+          - { label: 'כותרת אפשרויות אחרות', name: otherWaysTitle, widget: string }
+          - { label: 'טקסט אפשרויות אחרות', name: otherWaysBody, widget: text }
+          - { label: 'משפט מעל כתובת המייל הישירה', name: directEmailLabel, widget: string, required: false }
+
+      - name: contact-en
+        label: 'צור קשר (English)'
+        file: apps/marketing/src/data/pages/contact.en.json
+        fields:
+          - { label: 'כותרת הדפדפן', name: title, widget: string }
+          - { label: 'תיאור לגוגל', name: description, widget: text }
+          - { label: 'הכותרת הגדולה', name: headline, widget: string }
+          - { label: 'פסקת פתיחה', name: intro, widget: text }
+          - { label: 'תווית שדה השם', name: nameLabel, widget: string }
+          - { label: 'תווית שדה המייל', name: emailLabel, widget: string }
+          - { label: 'תווית שדה ההודעה', name: messageLabel, widget: string }
+          - { label: 'כפתור שליחה', name: submit, widget: string }
+          - { label: 'כפתור בזמן שליחה', name: sending, widget: string }
+          - { label: 'כותרת הצלחה', name: successTitle, widget: string }
+          - { label: 'הודעת הצלחה', name: successBody, widget: text }
+          - { label: 'שגיאה: טופס לא תקין', name: errorInvalid, widget: text }
+          - { label: 'שגיאה: יותר מדי הודעות', name: errorRateLimited, widget: text }
+          - { label: 'שגיאה: אין חיבור', name: errorOffline, widget: text }
+          - { label: 'שגיאה: לא ידוע', name: errorUnknown, widget: text }
+          - { label: 'כותרת אפשרויות אחרות', name: otherWaysTitle, widget: string }
+          - { label: 'טקסט אפשרויות אחרות', name: otherWaysBody, widget: text }
+          - { label: 'משפט מעל כתובת המייל הישירה', name: directEmailLabel, widget: string, required: false }
+
   - name: post
     label: Post
     label_singular: Post

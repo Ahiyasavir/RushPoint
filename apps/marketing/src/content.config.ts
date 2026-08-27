@@ -87,6 +87,145 @@ const postCollection = defineCollection({
   }),
 });
 
+// ── Pages (change: editable-pages-and-media) ─────────────────────────────────
+//
+// The home, story and contact pages used to be TypeScript modules under
+// src/copy/. That made every word on them a developer task: to change a headline
+// you had to edit code, commit and deploy. They are content, so they live in
+// content files and the CMS can reach them.
+//
+// One file per page PER LANGUAGE (`home.he.json`, `home.en.json`), rather than
+// one file holding both. Two reasons: a language can then be edited without the
+// risk of touching the other, and it matches how the blog posts already work, so
+// there is one mental model rather than two.
+
+/**
+ * A picture or a video, wherever one may appear.
+ *
+ * `src` is a site relative path under /uploads, which is where the CMS puts what
+ * it is given. A video is NOT loaded as an image: `kind` says which it is rather
+ * than the extension being sniffed, because a mis-sniffed video renders as a
+ * broken image with no explanation.
+ */
+const mediaItem = () =>
+  z.object({
+    kind: z.enum(['image', 'video']),
+    src: z.string(),
+    /**
+     * Required for an image, because an image with no alt text is invisible to
+     * anyone using a screen reader and to a search engine. For a video it is the
+     * accessible label.
+     */
+    alt: z.string(),
+    caption: z.string().optional(),
+    /** Shown while a video loads, and as its thumbnail before play. */
+    poster: z.string().optional(),
+  });
+
+/** Media that may be absent. A page without a picture is a page, not an error. */
+const optionalMedia = () => mediaItem().optional();
+
+const homePages = defineCollection({
+  // The id is DECLARED, not left to the loader. The default generateId
+  // slugifies a filename, so `home.he.json` becomes `home-he`, and every read
+  // that assumed the filename silently found nothing.
+  loader: glob({
+    pattern: 'home.*.json',
+    base: 'src/data/pages',
+    generateId: ({ entry }) => entry.replace(/.json$/, ''),
+  }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    tagline: z.string(),
+    headline: z.string(),
+    subhead: z.string(),
+    primaryAction: z.string(),
+    secondaryAction: z.string(),
+    ideasAction: z.string(),
+    featuresTagline: z.string(),
+    featuresTitle: z.string(),
+    featuresSubtitle: z.string(),
+    features: z.array(z.object({ title: z.string(), description: z.string(), icon: z.string() })),
+    stepsTitle: z.string(),
+    steps: z.array(z.object({ title: z.string(), description: z.string(), icon: z.string() })),
+    ctaTitle: z.string(),
+    ctaSubtitle: z.string(),
+
+    // Media. All optional, so the page keeps working with none of it.
+    hero: optionalMedia(),
+    galleryTitle: z.string().optional(),
+    gallerySubtitle: z.string().optional(),
+    gallery: z.array(mediaItem()).default([]),
+  }),
+});
+
+const storyPages = defineCollection({
+  // The id is DECLARED, not left to the loader. The default generateId
+  // slugifies a filename, so `home.he.json` becomes `home-he`, and every read
+  // that assumed the filename silently found nothing.
+  loader: glob({
+    pattern: 'story.*.json',
+    base: 'src/data/pages',
+    generateId: ({ entry }) => entry.replace(/.json$/, ''),
+  }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    headline: z.string(),
+    intro: z.string(),
+    sections: z.array(
+      z.object({
+        title: z.string(),
+        body: z.array(z.string()),
+        // A picture belonging to THIS part of the story, so the page can be told
+        // in pictures as well as words instead of stacking them all at the end.
+        media: optionalMedia(),
+      }),
+    ),
+    closing: z.string(),
+    action: z.string(),
+    portrait: optionalMedia(),
+  }),
+});
+
+const contactPages = defineCollection({
+  // The id is DECLARED, not left to the loader. The default generateId
+  // slugifies a filename, so `home.he.json` becomes `home-he`, and every read
+  // that assumed the filename silently found nothing.
+  loader: glob({
+    pattern: 'contact.*.json',
+    base: 'src/data/pages',
+    generateId: ({ entry }) => entry.replace(/.json$/, ''),
+  }),
+  schema: z.object({
+    title: z.string(),
+    description: z.string(),
+    headline: z.string(),
+    intro: z.string(),
+    nameLabel: z.string(),
+    emailLabel: z.string(),
+    messageLabel: z.string(),
+    submit: z.string(),
+    sending: z.string(),
+    successTitle: z.string(),
+    successBody: z.string(),
+    errorInvalid: z.string(),
+    errorRateLimited: z.string(),
+    errorOffline: z.string(),
+    errorUnknown: z.string(),
+    otherWaysTitle: z.string(),
+    otherWaysBody: z.string(),
+    // The label above the direct address shown when the form cannot reach the
+    // API. The address itself is configuration (utils/i18n.ts); this is the
+    // sentence around it, which is copy and differs per language.
+    directEmailLabel: z.string().optional(),
+  }),
+});
+
 export const collections = {
   post: postCollection,
+  homePages,
+  storyPages,
+  contactPages,
 };

@@ -400,6 +400,49 @@ if (existsSync(MARKETING_POST_DIR)) {
   }
 }
 
+// The PAGE content files. The standing pages moved out of `src/copy/*.ts` into
+// JSON (change: editable-pages-and-media), and this part was left scanning the
+// directory they came from. The reach assertion below is what caught it: the
+// field count fell from 226 to 95 while every offender check stayed green,
+// because there was almost nothing left to find.
+const MARKETING_PAGES_DIR = join(ROOT, 'apps', 'marketing', 'src', 'data', 'pages');
+
+if (existsSync(MARKETING_PAGES_DIR)) {
+  // Identifiers, not prose: media paths, icon names and the media discriminator
+  // are Latin by necessity in both languages, and the standard already exempts
+  // file paths.
+  const NOT_PROSE_KEY = /(^|\.)(src|poster|icon|kind)$/;
+
+  const leavesOf = (value: unknown, path: string, out: Array<[string, string]>): Array<[string, string]> => {
+    if (typeof value === 'string') {
+      out.push([path, value]);
+      return out;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((v, i) => leavesOf(v, `${path}[${i}]`, out));
+      return out;
+    }
+    if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value)) leavesOf(v, path ? `${path}.${k}` : k, out);
+    }
+    return out;
+  };
+
+  for (const file of readdirSync(MARKETING_PAGES_DIR).filter((f) => f.endsWith('.json'))) {
+    const parsed: unknown = JSON.parse(readFileSync(join(MARKETING_PAGES_DIR, file), 'utf8'));
+    for (const [path, text] of leavesOf(parsed, '', [])) {
+      if (NOT_PROSE_KEY.test(path)) continue;
+      if (!/[A-Za-z֐-׿]/.test(text)) continue;
+      marketingScanned++;
+      // Markup inside prose is not prose, same as the copy modules above.
+      const prose = text.replace(/<[^>]*>/g, ' ');
+      if (BANNED_DASH.test(prose)) {
+        marketingOffenders.push(`${file} ${path} → "${prose.trim().slice(0, 60)}"`);
+      }
+    }
+  }
+}
+
 check('E · no hyphen or dash in marketing site content',
   marketingOffenders.length === 0, marketingOffenders.slice(0, 6).join(' | '));
 

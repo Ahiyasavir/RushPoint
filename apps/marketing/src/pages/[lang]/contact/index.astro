@@ -2,15 +2,15 @@
 import PageLayout from '~/layouts/PageLayout.astro';
 import HeroText from '~/components/widgets/HeroText.astro';
 
-import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, API_ORIGIN, type Language } from '~/utils/i18n';
-import { contactCopy, CONTACT_FALLBACK_EMAIL } from '~/copy/contact';
+import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, API_ORIGIN, CONTACT_FALLBACK_EMAIL, type Language } from '~/utils/i18n';
+import { pageContent } from '~/utils/pages';
 
 export function getStaticPaths() {
   return LANGUAGES.map((lang) => ({ params: { lang } }));
 }
 
 const language = Astro.params.lang as Language;
-const t = contactCopy[language];
+const t = await pageContent('contactPages', 'contact', language);
 
 const metadata = {
   title: t.title,

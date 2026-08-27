@@ -7,14 +7,15 @@ import CallToAction from '~/components/widgets/CallToAction.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
 import { landingPageUrl } from '~/navigation';
-import { homeCopy } from '~/copy/home';
+import { pageContent } from '~/utils/pages';
+import Media from '~/components/Media.astro';
 
 export function getStaticPaths() {
   return LANGUAGES.map((lang) => ({ params: { lang } }));
 }
 
 const language = Astro.params.lang as Language;
-const t = homeCopy[language];
+const t = await pageContent('homePages', 'home', language);
 
 const metadata = {
   title: t.title,
@@ -36,6 +37,19 @@ const metadata = {
     <Fragment slot="subtitle" set:html={t.subhead} />
   </Hero>
 
+  {
+    /*
+      A picture or a video of a real game, straight after the headline. Optional:
+      with none set the page is exactly what it was, so adding one is a content
+      decision rather than a deploy.
+    */
+    t.hero && (
+      <section class="px-4 sm:px-6 mx-auto max-w-5xl">
+        <Media media={t.hero} eager />
+      </section>
+    )
+  }
+
   <Features
     id="what-it-is"
     tagline={t.featuresTagline}
@@ -45,6 +59,32 @@ const metadata = {
   />
 
   <Steps title={t.stepsTitle} items={t.steps} isReversed />
+
+  {
+    /*
+      The gallery. This is the section that shows what a game actually looks
+      like, which no amount of description does. It renders only when there is
+      something in it: an empty gallery is not an empty section with a heading
+      over it, it is absent.
+    */
+    t.gallery.length > 0 && (
+      <section class="px-4 py-12 sm:px-6 mx-auto max-w-6xl lg:px-8">
+        {t.galleryTitle && (
+          <h2 class="mb-3 text-3xl font-bold tracking-tight text-center">{t.galleryTitle}</h2>
+        )}
+        {t.gallerySubtitle && (
+          <p class="mb-10 text-lg text-muted dark:text-slate-400 text-center max-w-2xl mx-auto">
+            {t.gallerySubtitle}
+          </p>
+        )}
+        <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {t.gallery.map((item) => (
+            <Media media={item} />
+          ))}
+        </div>
+      </section>
+    )
+  }
 
   <CallToAction
     actions={[

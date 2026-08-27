@@ -6,7 +6,14 @@
   "description": "RushPoint brand tokens: fonts and colours. No build step on purpose, see tokens.mjs.",
   "main": "./tokens.mjs",
   "exports": {
-    ".": "./tokens.mjs"
+    ".": {
+      "types": "./tokens.d.ts",
+      "default": "./tokens.mjs"
+    }
   },
-  "files": ["tokens.mjs"]
+  "files": [
+    "tokens.mjs",
+    "tokens.d.ts"
+  ],
+  "types": "./tokens.d.ts"
 }

@@ -12,7 +12,7 @@
 // did not. A promised check that does not run is worse than an absent one,
 // because the promise is what stops anyone looking.
 //   npx tsx scripts/test-marketing-cms-config.ts
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { load } from 'js-yaml';
@@ -204,6 +204,70 @@ check('backend requests no more scope than it needs',
 check('the post folder is repository-relative', post?.folder === 'apps/marketing/src/data/post');
 check('uploads land inside the built site', config.media_folder === 'apps/marketing/public/uploads');
 check('an upload is addressed from the site root', config.public_folder === '/uploads');
+
+// ── The standing pages (change: editable-pages-and-media) ───────────────────
+//
+// The home, story and contact pages became editable content. Their CMS fields
+// have to agree with the collection schemas in content.config.ts in BOTH
+// directions: a field the CMS offers but the schema rejects produces a document
+// that fails the build after someone pressed publish, and a field the schema
+// REQUIRES but the CMS never shows is a document nobody can create correctly.
+{
+  const pages = (config.collections ?? []).find((c: Record<string, unknown>) => c.name === 'pages') as
+    | { files?: Array<{ name: string; file: string; fields: Array<Record<string, unknown>> }> }
+    | undefined;
+
+  check('the standing pages are editable at all', Boolean(pages?.files?.length), `${pages?.files?.length ?? 0} file(s)`);
+
+  const files = pages?.files ?? [];
+
+  // Every page, both languages. A "files" collection is a fixed set, so a
+  // missing entry is a page that silently cannot be edited rather than an error
+  // anyone sees.
+  for (const page of ['home', 'story', 'contact']) {
+    for (const language of ['he', 'en']) {
+      const entry = files.find((f) => f.name === `${page}-${language}`);
+      check(
+        `${page} (${language}) is editable`,
+        Boolean(entry) && entry!.file === `apps/marketing/src/data/pages/${page}.${language}.json`,
+        entry ? entry.file : '(absent)',
+      );
+    }
+  }
+
+  // Each entry must point at a file that EXISTS. A files collection entry naming
+  // a path that is not there shows an empty editor and saves a new file
+  // somewhere nothing reads.
+  for (const entry of files) {
+    check(
+      `${entry.name} points at a file that exists`,
+      existsSync(path.join(root, entry.file)),
+      entry.file,
+    );
+  }
+
+  // And the field names must be the schema's field names. Compared against the
+  // real JSON documents rather than a re-typed list: the documents are what the
+  // schema validated at build time, so they are the honest statement of the shape.
+  for (const entry of files) {
+    const [page, language] = entry.name.split('-');
+    const docPath = path.join(root, 'apps', 'marketing', 'src', 'data', 'pages', `${page}.${language}.json`);
+    if (!existsSync(docPath)) continue;
+
+    const doc = JSON.parse(readFileSync(docPath, 'utf8')) as Record<string, unknown>;
+    const cmsNames = new Set(entry.fields.map((f) => String(f.name)));
+    const docNames = Object.keys(doc);
+
+    // Every field the document HAS must be editable, or editing the page through
+    // the CMS would silently drop it on save.
+    const notEditable = docNames.filter((name) => !cmsNames.has(name));
+    check(
+      `${entry.name}: every stored field is editable`,
+      notEditable.length === 0,
+      notEditable.join(', ') || `${docNames.length} field(s)`,
+    );
+  }
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`);
 process.exit(failures === 0 ? 0 : 1);

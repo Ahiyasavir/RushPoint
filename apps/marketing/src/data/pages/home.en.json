@@ -1,0 +1,65 @@
+{
+  "title": "Build a real field game",
+  "description": "A platform for building field games: a real route through real places, navigation on the phone, automatic scoring. No judges, no paper, no chasing everyone around.",
+  "tagline": "Field game",
+  "headline": "The game goes <span class=\"text-primary\">outside</span>",
+  "subhead": "I built this after trying to run a real mission race and watching how fast it fell apart. You design the route, teams play on their own phones, and the scoring sorts itself out. You keep the part you started for.",
+  "primaryAction": "Build a game",
+  "secondaryAction": "Our story",
+  "ideasAction": "Ideas by occasion",
+  "featuresTagline": "Why it works",
+  "featuresTitle": "The hard parts now happen on their own",
+  "featuresSubtitle": "Almost every field game that falls apart falls apart on logistics rather than on the idea. Everything I learned the hard way is already solved here.",
+  "features": [
+    {
+      "title": "Automatic scoring",
+      "description": "Answers are checked on the server the moment they are sent. Nobody has to stand at a station, and nobody argues afterwards about who got what.",
+      "icon": "tabler:trophy"
+    },
+    {
+      "title": "Real navigation",
+      "description": "Every task has a place on the map, and arriving is verified against the device GPS. A team gets there rather than reporting that it did.",
+      "icon": "tabler:map-pin"
+    },
+    {
+      "title": "Smart routing between teams",
+      "description": "Each team is sent to a station that is free and close to it. Instead of a queue at one stop, everyone keeps moving.",
+      "icon": "tabler:route"
+    },
+    {
+      "title": "Survives a bad signal",
+      "description": "The app is built for open ground: it holds its state, keeps working, and syncs when reception comes back.",
+      "icon": "tabler:wifi-off"
+    },
+    {
+      "title": "Live control while you run it",
+      "description": "One console shows where every team is, who is stuck and who is ahead. Send a message, close a station or adjust a score without stopping the game.",
+      "icon": "tabler:device-desktop-analytics"
+    },
+    {
+      "title": "Joining takes no install",
+      "description": "Players open a link and type a code. Nothing to download, nothing to sign up for, no passwords forgotten at the worst moment.",
+      "icon": "tabler:qrcode"
+    }
+  ],
+  "stepsTitle": "From an idea to teams in the field",
+  "steps": [
+    {
+      "title": "Design the route",
+      "description": "Drop stations on the map and write a task for each one. Start from a ready made game and change it, or let the system compose one for the occasion.",
+      "icon": "tabler:map-2"
+    },
+    {
+      "title": "Launch and share a code",
+      "description": "Press launch and you get a join code. Send it to the group and that is the setup done.",
+      "icon": "tabler:send"
+    },
+    {
+      "title": "Watch it happen",
+      "description": "Teams start moving, scores update themselves, and you follow all of it on one screen until the finish.",
+      "icon": "tabler:eye"
+    }
+  ],
+  "ctaTitle": "Your first game is about half an hour away",
+  "ctaSubtitle": "No card needed. Start from a ready made game and change it, and if something is missing, write to me."
+}

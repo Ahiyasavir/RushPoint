@@ -4,14 +4,15 @@ import HeroText from '~/components/widgets/HeroText.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, OG_LOCALE, type Language } from '~/utils/i18n';
-import { storyCopy } from '~/copy/story';
+import { pageContent } from '~/utils/pages';
+import Media from '~/components/Media.astro';
 
 export function getStaticPaths() {
   return LANGUAGES.map((lang) => ({ params: { lang } }));
 }
 
 const language = Astro.params.lang as Language;
-const t = storyCopy[language];
+const t = await pageContent('storyPages', 'story', language);
 
 const metadata = {
   title: t.title,
@@ -24,6 +25,14 @@ const metadata = {
 <PageLayout metadata={metadata} language={language} alternates={alternatesFor('story')}>
   <HeroText title={t.headline} subtitle={t.intro} />
 
+  {
+    t.portrait && (
+      <section class="px-4 sm:px-6 mx-auto max-w-3xl">
+        <Media media={t.portrait} eager />
+      </section>
+    )
+  }
+
   <section class="px-4 py-8 sm:px-6 mx-auto max-w-3xl lg:px-8 lg:py-12">
     {
       t.sections.map((section) => (
@@ -32,6 +41,7 @@ const metadata = {
           {section.body.map((paragraph) => (
             <p class="mb-4 text-muted dark:text-slate-400 text-lg leading-relaxed">{paragraph}</p>
           ))}
+          {section.media && <Media class="mt-6" media={section.media} />}
         </article>
       ))
     }

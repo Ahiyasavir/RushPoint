@@ -1,0 +1,63 @@
+---
+/**
+ * One picture or one video, from the content files.
+ *
+ * A video is rendered as a real <video>, not an iframe: these are files the
+ * owner uploaded and we serve, so there is no third party to embed and nobody
+ * outside gets to watch who is watching. That is the whole reason uploads were
+ * chosen over YouTube links.
+ *
+ * Change: editable-pages-and-media.
+ */
+export interface MediaItem {
+  kind: 'image' | 'video';
+  src: string;
+  alt: string;
+  caption?: string;
+  poster?: string;
+}
+
+export interface Props {
+  media: MediaItem;
+  class?: string;
+  /** Eager for the one at the top of the page, lazy for everything below it. */
+  eager?: boolean;
+}
+
+const { media, class: className = '', eager = false } = Astro.props;
+---
+
+<figure class={`m-0 ${className}`}>
+  {
+    media.kind === 'video' ? (
+      <video
+        class="w-full rounded-2xl"
+        src={media.src}
+        poster={media.poster}
+        aria-label={media.alt}
+        controls
+        preload={eager ? 'metadata' : 'none'}
+        playsinline
+      >
+        {/*
+          Not autoplay, not muted-autoplay, not looping. A video that starts on
+          its own takes over the page, spends someone's mobile data without
+          asking, and is the single most common reason a page gets closed.
+        */}
+      </video>
+    ) : (
+      <img
+        class="w-full rounded-2xl"
+        src={media.src}
+        alt={media.alt}
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+      />
+    )
+  }
+  {
+    media.caption && (
+      <figcaption class="mt-2 text-sm text-muted dark:text-slate-400">{media.caption}</figcaption>
+    )
+  }
+</figure>

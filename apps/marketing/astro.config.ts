@@ -12,7 +12,7 @@ import icon from 'astro-icon';
 import compress from 'astro-compress';
 import type { AstroIntegration } from 'astro';
 
-import { WEB_FONTS } from '@rushpoint/brand';
+import { FONTS } from '@rushpoint/brand';
 
 import astrowind from './vendor/integration';
 
@@ -34,29 +34,44 @@ export default defineConfig({
   // 2.4 KB of script on pages that otherwise need none.
   prefetch: false,
 
-  // Fonts come from the brand package, which is the single source (see
-  // packages/brand/tokens.mjs). Nothing about the typeface is decided here.
+  // Fonts come from the brand package (packages/brand/tokens.mjs), which is the
+  // single source. Nothing about the typeface is decided here.
   //
   // The `hebrew` subset is the whole point of this block. Both faces used to be
-  // loaded latin-only, and the previous display face had no Hebrew glyphs at
-  // all, so every Hebrew character on a Hebrew-first site was rendered by the
-  // browser's default font. The site had a brand typeface in English and Arial
-  // in Hebrew, which is the half most readers actually see.
+  // loaded latin-only and the previous display face had no Hebrew glyphs at all,
+  // so every Hebrew character on a Hebrew-first site was rendered by the
+  // browser's default font: a brand typeface in English and Arial in Hebrew,
+  // which is the half most readers actually see.
+  //
   // Fetched from Fontsource at build time and then self hosted, so the browser
-  // never touches a third party. The fetch is the one part that needs the
-  // network: jsdelivr failed intermittently here (two of three attempts for one
-  // file), and Astro caches per file afterwards, so a retried build succeeds.
-  // The installed @fontsource-variable/* packages are kept as the record of
-  // which versions the brand is pinned to.
-  fonts: WEB_FONTS.map((font) => ({
-    provider: fontProviders.fontsource(),
-    name: font.family,
-    cssVariable: font.cssVariable,
-    weights: font.weights,
-    styles: ['normal'],
-    subsets: font.subsets,
-    fallbacks: ['sans-serif'],
-  })),
+  // never touches a third party. That fetch is the one part that needs the
+  // network, and jsdelivr failed intermittently here (two of three attempts for
+  // one file); Astro caches per file, so a retried build succeeds and warm
+  // builds never reach out at all.
+  //
+  // Written out rather than mapped: Astro derives a literal union of css
+  // variables from this list and expects each entry to name exactly one, and a
+  // map gives every element the union of both.
+  fonts: [
+    {
+      provider: fontProviders.fontsource(),
+      name: FONTS.display.family,
+      cssVariable: FONTS.display.cssVariable,
+      weights: FONTS.display.weights,
+      styles: ['normal'],
+      subsets: FONTS.display.subsets,
+      fallbacks: ['sans-serif'],
+    },
+    {
+      provider: fontProviders.fontsource(),
+      name: FONTS.body.family,
+      cssVariable: FONTS.body.cssVariable,
+      weights: FONTS.body.weights,
+      styles: ['normal'],
+      subsets: FONTS.body.subsets,
+      fallbacks: ['sans-serif'],
+    },
+  ],
 
   integrations: [
     sitemap(),

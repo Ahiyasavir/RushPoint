@@ -129,3 +129,11 @@ export function standingPages(): Array<{ language: Language; subject: string; pa
     })),
   );
 }
+
+/**
+ * A direct address to fall back to when the contact form cannot reach the API.
+ *
+ * Configuration rather than copy: it is the same in both languages, and it must
+ * not be something an editor can change in one language and not the other.
+ */
+export const CONTACT_FALLBACK_EMAIL = 'spendora.tracker@gmail.com';
