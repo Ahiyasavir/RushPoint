@@ -114,10 +114,18 @@ export default function NewGameWizard({ templates, busy, onSubmit, recentBankKey
   const showConsentNotice = (ageBand?.from ?? ADULT_AGE) < GUARDIAN_CONSENT_AGE_THRESHOLD;
 
   // ── Screen 1: name, then the fork ──────────────────────────────────────────
+  // Narrower than the fork/questionnaire screens and centred: a single input
+  // floating in the same width the icon-grid steps need read as unfinished
+  // empty space, not a deliberate first screen (real creator feedback on the
+  // shipped panel — change: smart-build-delight follow-up).
   if (state.step === 'name' || state.step === 'path') {
+    // The name step is a single input: narrow and centred, or it floats lost in
+    // the modal's full width. The path step needs the full width back for its
+    // 3-column card grid, so only 'name' gets the cap.
     return (
-      <div className="flex flex-col gap-4">
-        <div>
+      <div className={['flex flex-col gap-4', state.step === 'name' ? 'mx-auto w-full max-w-sm' : ''].join(' ')}>
+        <div className={state.step === 'name' ? 'text-center' : undefined}>
+          {state.step === 'name' && <div className="text-3xl leading-none mb-1.5" aria-hidden="true">🎲</div>}
           <h3 className="font-brand font-bold text-[--ink-1] text-lg">{w.nameTitle}</h3>
           <p className="text-[--ink-3] text-[13px] mt-0.5">{w.nameSub}</p>
         </div>

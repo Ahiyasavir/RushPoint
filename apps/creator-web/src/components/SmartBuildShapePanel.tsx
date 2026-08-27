@@ -93,18 +93,18 @@ export default function SmartBuildShapePanel({ stages, possible, labels }: Smart
                   <span className="text-[12px] font-semibold text-[--ink-1]">{labels.stage(i + 1)}</span>
                   <span className="text-[11px] text-[--ink-3]">{labels.slots(slots)}</span>
                 </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {Array.from({ length: slots }, (_, s) => (
-                    <span
-                      key={s}
-                      // An empty slot is decoration with a name: sighted users
-                      // read the count above it, so the individual placeholders
-                      // are announced only through their title.
-                      title={labels.slotPending}
-                      aria-hidden="true"
-                      className="h-2 w-8 rounded-full bg-[--surface-2]"
-                    />
-                  ))}
+                {/* One bar per stage, not one per mission (change: smart-build-delight
+                    follow-up) — a stage with 6-7 missions used to enumerate 6-7
+                    individual dots and push the panel past the modal's height,
+                    forcing an internal scroll the questionnaire never needed before
+                    this panel existed. The bar still fills as `slots` grows, so the
+                    "building" feeling survives; it just costs one row instead of N. */}
+                <div
+                  title={labels.slotPending}
+                  aria-hidden="true"
+                  className="mt-2 h-1.5 w-full rounded-full bg-[--surface-2] overflow-hidden"
+                >
+                  <div className="h-full w-full rounded-full bg-[--rp-border]" />
                 </div>
               </li>
             );
