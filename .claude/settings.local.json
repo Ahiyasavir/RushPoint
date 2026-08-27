@@ -7,7 +7,16 @@
       "Bash(echo \"EXIT: $?\")",
       "PowerShell(npm run typecheck 2>&1)",
       "Bash(openspec status *)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(ssh root@31.70.107.184 \"ls /root/RushPoint/service-account.json && echo OK\")",
+      "Bash(npm view *)",
+      "Bash(git diff *)",
+      "Read(//tmp/**)",
+      "Bash(grep -v \"^\\\\s*//\")",
+      "Bash(grep -vE \"^[0-9]+:\\\\s*//\")",
+      "Bash(npm run *)",
+      "Bash(gcloud --version)",
+      "Bash(gh auth *)"
     ]
   }
 }
