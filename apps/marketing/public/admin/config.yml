@@ -155,7 +155,7 @@ collections:
                     name: order
                     widget: object
                     fields:
-                      - { label: 'סוג המשימה', name: kind, widget: string }
+                      - { label: 'סוג המשימה', name: kindLabel, widget: string }
                       - { label: 'שם המשימה', name: title, widget: string }
                       - { label: 'ההוראה לשחקן', name: prompt, widget: text }
                       - { label: 'הפריטים', name: items, widget: list, field: { label: 'פריט', name: item, widget: string }, hint: 'כתבו אותם בסדר הנכון. המערכת מערבבת אותם לשחקן.' }
@@ -163,7 +163,7 @@ collections:
                     name: answer
                     widget: object
                     fields:
-                      - { label: 'סוג המשימה', name: kind, widget: string }
+                      - { label: 'סוג המשימה', name: kindLabel, widget: string }
                       - { label: 'שם המשימה', name: title, widget: string }
                       - { label: 'ההוראה לשחקן', name: prompt, widget: text }
                       - { label: 'רמז', name: hint, widget: string, required: false }
@@ -172,7 +172,7 @@ collections:
                     name: photo
                     widget: object
                     fields:
-                      - { label: 'סוג המשימה', name: kind, widget: string }
+                      - { label: 'סוג המשימה', name: kindLabel, widget: string }
                       - { label: 'שם המשימה', name: title, widget: string }
                       - { label: 'ההוראה לשחקן', name: prompt, widget: text }
                       - label: 'האפשרויות'
@@ -182,6 +182,46 @@ collections:
                           - { label: 'מה כתוב', name: label, widget: string }
                           - { label: 'אימוג׳י', name: emoji, widget: string, required: false }
                           - { label: 'זו התשובה הנכונה', name: correct, widget: boolean, required: false, default: false }
+          - label: 'מחולל רעיונות למשימות'
+            name: missionIdeas
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              המבקר בוחר אירוע ומקום ומקבל שלוש משימות. אפשר להשאיר ריק והקטע לא יופיע.
+            fields:
+              - { label: 'תגית קטנה', name: tagline, widget: string, required: false }
+              - { label: 'כותרת הקטע', name: title, widget: string }
+              - { label: 'משפט מתחת לכותרת', name: subtitle, widget: text }
+              - { label: 'השאלה על האירוע', name: occasionLabel, widget: string }
+              - { label: 'השאלה על המקום', name: placeLabel, widget: string }
+              - { label: 'כפתור הפקה', name: generateAction, widget: string }
+              - { label: 'כפתור שלוש נוספות', name: againAction, widget: string }
+              - { label: 'כפתור המשך', name: ctaAction, widget: string }
+              - { label: 'הערה מתחת לתוצאות', name: note, widget: text }
+              - label: 'סוגי אירועים'
+                name: occasions
+                widget: list
+                hint: 'המזהה משמש לסינון. השאירו אותו באנגלית וללא רווחים.'
+                fields:
+                  - { label: 'מזהה', name: id, widget: string }
+                  - { label: 'מה רואים', name: label, widget: string }
+              - label: 'סוגי מקומות'
+                name: places
+                widget: list
+                hint: 'המזהה משמש לסינון. השאירו אותו באנגלית וללא רווחים.'
+                fields:
+                  - { label: 'מזהה', name: id, widget: string }
+                  - { label: 'מה רואים', name: label, widget: string }
+              - label: 'מאגר הרעיונות'
+                name: ideas
+                widget: list
+                hint: 'צריך לפחות שלושה. רעיון בלי תגיות עדיין יופיע כשאין התאמה טובה יותר.'
+                fields:
+                  - { label: 'סוג המשימה', name: kindLabel, widget: string, required: false }
+                  - { label: 'הרעיון עצמו', name: text, widget: text }
+                  - { label: 'מתאים לאירועים', name: occasions, widget: list, field: { label: 'מזהה', name: occasion, widget: string }, required: false }
+                  - { label: 'מתאים למקומות', name: places, widget: list, field: { label: 'מזהה', name: place, widget: string }, required: false }
 
       - name: home-en
         label: 'עמוד הבית (English)'
@@ -285,7 +325,7 @@ collections:
                     name: order
                     widget: object
                     fields:
-                      - { label: 'Mission kind', name: kind, widget: string }
+                      - { label: 'Mission kind', name: kindLabel, widget: string }
                       - { label: 'Mission name', name: title, widget: string }
                       - { label: 'Instruction to the player', name: prompt, widget: text }
                       - { label: 'The items', name: items, widget: list, field: { label: 'Item', name: item, widget: string }, hint: 'Write them in the CORRECT order. They are scrambled for the player.' }
@@ -293,7 +333,7 @@ collections:
                     name: answer
                     widget: object
                     fields:
-                      - { label: 'Mission kind', name: kind, widget: string }
+                      - { label: 'Mission kind', name: kindLabel, widget: string }
                       - { label: 'Mission name', name: title, widget: string }
                       - { label: 'Instruction to the player', name: prompt, widget: text }
                       - { label: 'Hint', name: hint, widget: string, required: false }
@@ -302,7 +342,7 @@ collections:
                     name: photo
                     widget: object
                     fields:
-                      - { label: 'Mission kind', name: kind, widget: string }
+                      - { label: 'Mission kind', name: kindLabel, widget: string }
                       - { label: 'Mission name', name: title, widget: string }
                       - { label: 'Instruction to the player', name: prompt, widget: text }
                       - label: 'The options'
@@ -312,6 +352,46 @@ collections:
                           - { label: 'Label', name: label, widget: string }
                           - { label: 'Emoji', name: emoji, widget: string, required: false }
                           - { label: 'This is the correct one', name: correct, widget: boolean, required: false, default: false }
+          - label: 'Mission idea generator'
+            name: missionIdeas
+            widget: object
+            required: false
+            collapsed: true
+            hint: >-
+              The visitor picks an occasion and a place and gets three missions. Leave it empty and the section does not appear.
+            fields:
+              - { label: 'Small tagline', name: tagline, widget: string, required: false }
+              - { label: 'Section title', name: title, widget: string }
+              - { label: 'Sentence under the title', name: subtitle, widget: text }
+              - { label: 'The occasion question', name: occasionLabel, widget: string }
+              - { label: 'The place question', name: placeLabel, widget: string }
+              - { label: 'Generate button', name: generateAction, widget: string }
+              - { label: 'Three more button', name: againAction, widget: string }
+              - { label: 'Continue button', name: ctaAction, widget: string }
+              - { label: 'Note under the results', name: note, widget: text }
+              - label: 'Occasion types'
+                name: occasions
+                widget: list
+                hint: 'The id is used for filtering. Keep it in English with no spaces.'
+                fields:
+                  - { label: 'Id', name: id, widget: string }
+                  - { label: 'What people see', name: label, widget: string }
+              - label: 'Place types'
+                name: places
+                widget: list
+                hint: 'The id is used for filtering. Keep it in English with no spaces.'
+                fields:
+                  - { label: 'Id', name: id, widget: string }
+                  - { label: 'What people see', name: label, widget: string }
+              - label: 'The idea bank'
+                name: ideas
+                widget: list
+                hint: 'At least three. An idea with no tags still appears when nothing better matches.'
+                fields:
+                  - { label: 'Mission kind', name: kindLabel, widget: string, required: false }
+                  - { label: 'The idea itself', name: text, widget: text }
+                  - { label: 'Fits these occasions', name: occasions, widget: list, field: { label: 'Id', name: occasion, widget: string }, required: false }
+                  - { label: 'Fits these places', name: places, widget: list, field: { label: 'Id', name: place, widget: string }, required: false }
 
       - name: story-he
         label: 'הסיפור שלי (עברית)'

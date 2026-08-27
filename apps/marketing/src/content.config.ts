@@ -190,21 +190,21 @@ const homePages = defineCollection({
         rivals: z.array(z.object({ name: z.string(), score: z.number() })).default([]),
         missions: z.object({
           order: z.object({
-            kind: z.string(),
+            kindLabel: z.string(),
             title: z.string(),
             prompt: z.string(),
             /** Authored in the CORRECT order; the widget scrambles them for display. */
             items: z.array(z.string()).min(2),
           }),
           answer: z.object({
-            kind: z.string(),
+            kindLabel: z.string(),
             title: z.string(),
             prompt: z.string(),
             hint: z.string().optional(),
             answers: z.array(z.string()).min(1),
           }),
           photo: z.object({
-            kind: z.string(),
+            kindLabel: z.string(),
             title: z.string(),
             prompt: z.string(),
             options: z
@@ -212,6 +212,35 @@ const homePages = defineCollection({
               .min(2),
           }),
         }),
+      })
+      .optional(),
+
+    // The mission idea generator (change: mission-ideas). Optional as a whole, like the demo
+    // above it: a page without it renders exactly as before. The bank is CONTENT so adding an
+    // idea is a CMS edit rather than a deploy, and each language's bank is written in that
+    // language rather than translated from the other.
+    missionIdeas: z
+      .object({
+        tagline: z.string().optional(),
+        title: z.string(),
+        subtitle: z.string(),
+        occasionLabel: z.string(),
+        placeLabel: z.string(),
+        generateAction: z.string(),
+        againAction: z.string(),
+        ctaAction: z.string(),
+        note: z.string(),
+        occasions: z.array(z.object({ id: z.string(), label: z.string() })).min(1),
+        places: z.array(z.object({ id: z.string(), label: z.string() })).min(1),
+        /** At least three, because the generator hands out three at a time. */
+        ideas: z
+          .array(z.object({
+            kindLabel: z.string().optional(),
+            text: z.string(),
+            occasions: z.array(z.string()).default([]),
+            places: z.array(z.string()).default([]),
+          }))
+          .min(3),
       })
       .optional(),
   }),

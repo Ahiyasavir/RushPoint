@@ -109,7 +109,6 @@
     ],
     "missions": {
       "order": {
-        "kind": "Ordering mission",
         "title": "A Jerusalem timeline",
         "prompt": "Put these in order, earliest first. Tap them in the right sequence.",
         "items": [
@@ -117,19 +116,19 @@
           "Babylonian exile",
           "Second Temple",
           "State of Israel"
-        ]
+        ],
+        "kindLabel": "Ordering mission"
       },
       "answer": {
-        "kind": "Cipher mission",
         "title": "The number code",
         "prompt": "Each number is a letter's place in the alphabet: 1=A, 2=B, and so on. What does this spell?  16 · 18 · 9 · 26 · 5",
         "hint": "Hint: it is what the winners take home.",
         "answers": [
           "prize"
-        ]
+        ],
+        "kindLabel": "Cipher mission"
       },
       "photo": {
-        "kind": "Photo mission",
         "title": "The team shot",
         "prompt": "The brief said: every team member in frame, with the station sign behind them. Which photo satisfies it?",
         "options": [
@@ -148,8 +147,303 @@
             "emoji": "🪧",
             "correct": false
           }
-        ]
+        ],
+        "kindLabel": "Photo mission"
       }
     }
+  },
+  "missionIdeas": {
+    "tagline": "Free ideas, no signup",
+    "title": "Not sure what your teams would do? Start here",
+    "subtitle": "The hard part is not the software, it is the blank page. Pick the occasion and the place, and get three real missions you can use exactly as they are.",
+    "occasionLabel": "What is the occasion?",
+    "placeLabel": "Where is it happening?",
+    "generateAction": "Give me three missions",
+    "againAction": "Three more",
+    "ctaAction": "Turn this into a game",
+    "note": "Take these and run a game on paper if you like. They are yours.",
+    "occasions": [
+      {
+        "id": "bar",
+        "label": "Bar or bat mitzvah"
+      },
+      {
+        "id": "school",
+        "label": "School trip"
+      },
+      {
+        "id": "work",
+        "label": "Team day at work"
+      },
+      {
+        "id": "youth",
+        "label": "Youth group"
+      },
+      {
+        "id": "birthday",
+        "label": "Birthday"
+      }
+    ],
+    "places": [
+      {
+        "id": "city",
+        "label": "City centre"
+      },
+      {
+        "id": "park",
+        "label": "Park or nature"
+      },
+      {
+        "id": "campus",
+        "label": "Campus or closed venue"
+      },
+      {
+        "id": "hood",
+        "label": "A neighbourhood"
+      }
+    ],
+    "ideas": [
+      {
+        "text": "Recreate an old photo of the guest of honour, same pose, whole team in frame.",
+        "occasions": [
+          "bar",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Photo mission"
+      },
+      {
+        "text": "Letters are hidden on the sign at the entrance. Arrange them into one word and send it.",
+        "occasions": [
+          "school",
+          "youth",
+          "work"
+        ],
+        "places": [
+          "city",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Cipher mission"
+      },
+      {
+        "text": "Find the oldest tree in the park and send your estimate of its age. Closest wins.",
+        "occasions": [
+          "school",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "park"
+        ],
+        "kindLabel": "Field mission"
+      },
+      {
+        "text": "Find someone who has lived here over twenty years and ask for one story about the street. Record it.",
+        "occasions": [
+          "school",
+          "work",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Interview mission"
+      },
+      {
+        "text": "Put the five places on the list in the order they were built, earliest first.",
+        "occasions": [
+          "school",
+          "work"
+        ],
+        "places": [
+          "city",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Ordering mission"
+      },
+      {
+        "text": "Shoot a twenty second advert for the spot you are standing in. Everyone appears in it.",
+        "occasions": [
+          "work",
+          "birthday",
+          "bar"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Video mission"
+      },
+      {
+        "text": "How many steps are in the main staircase? Send a number. There is a tolerance.",
+        "occasions": [
+          "school",
+          "youth",
+          "work"
+        ],
+        "places": [
+          "campus",
+          "city"
+        ],
+        "kindLabel": "Counting mission"
+      },
+      {
+        "text": "Buy something sweet nobody on the team has tried before, and film the first bite.",
+        "occasions": [
+          "birthday",
+          "bar",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Taste mission"
+      },
+      {
+        "text": "Who is this street named after, and in what year? Two answers, both must be right.",
+        "occasions": [
+          "school",
+          "work",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Quiz mission"
+      },
+      {
+        "text": "Build a tower from things you find on the ground, buying nothing. Photograph it standing.",
+        "occasions": [
+          "school",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "park",
+          "campus"
+        ],
+        "kindLabel": "Making mission"
+      },
+      {
+        "text": "Get the whole team across the square without stepping on the paving lines. Film the attempt.",
+        "occasions": [
+          "birthday",
+          "youth",
+          "bar"
+        ],
+        "places": [
+          "city",
+          "campus"
+        ],
+        "kindLabel": "Movement mission"
+      },
+      {
+        "text": "Stand still for one minute and record. Then list three sounds you identified.",
+        "occasions": [
+          "school",
+          "work"
+        ],
+        "places": [
+          "park",
+          "hood"
+        ],
+        "kindLabel": "Listening mission"
+      },
+      {
+        "text": "Get to the point marked on the map. There is no clue beyond the location itself.",
+        "occasions": [
+          "bar",
+          "school",
+          "work",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Location mission"
+      },
+      {
+        "text": "Find one stranger willing to be photographed with you, holding your team sign.",
+        "occasions": [
+          "work",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Together mission"
+      },
+      {
+        "text": "Study the shop window for thirty seconds, walk away, and list every item you remember.",
+        "occasions": [
+          "school",
+          "youth"
+        ],
+        "places": [
+          "city",
+          "hood"
+        ],
+        "kindLabel": "Memory mission"
+      },
+      {
+        "text": "Another team is near you. Photograph both teams together. You both score.",
+        "occasions": [
+          "bar",
+          "birthday",
+          "youth"
+        ],
+        "places": [
+          "park",
+          "campus"
+        ],
+        "kindLabel": "Meeting mission"
+      },
+      {
+        "text": "The code for the next station is written on something green within fifty metres. Find it.",
+        "occasions": [
+          "school",
+          "youth",
+          "birthday"
+        ],
+        "places": [
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Riddle mission"
+      },
+      {
+        "text": "One of you gives a thirty second toast to the guest of honour, in public. Film it.",
+        "occasions": [
+          "bar",
+          "birthday"
+        ],
+        "places": [
+          "city",
+          "park",
+          "campus",
+          "hood"
+        ],
+        "kindLabel": "Speech mission"
+      }
+    ]
   }
 }

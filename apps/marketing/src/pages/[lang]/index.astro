@@ -5,6 +5,7 @@ import Features from '~/components/widgets/Features.astro';
 import Steps from '~/components/widgets/Steps.astro';
 import CallToAction from '~/components/widgets/CallToAction.astro';
 import TryMission from '~/components/widgets/TryMission.astro';
+import MissionIdeas from '~/components/widgets/MissionIdeas.astro';
 
 import { LANGUAGES, alternatesFor, pageUrl, pagePath, OG_LOCALE, type Language } from '~/utils/i18n';
 import { landingPageUrl } from '~/navigation';
@@ -68,6 +69,14 @@ const metadata = {
       page without it renders exactly as it did before.
     */
     t.tryMission && <TryMission content={t.tryMission} />
+  }
+
+  {
+    /*
+      Having felt what playing is like, the visitor's next question is what they would have to
+      WRITE. This answers it with ideas they can use as they are, signed up or not.
+    */
+    t.missionIdeas && <MissionIdeas content={t.missionIdeas} />
   }
 
   {

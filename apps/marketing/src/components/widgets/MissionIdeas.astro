@@ -1,0 +1,202 @@
+---
+/**
+ * "What would my teams actually DO?" — a mission idea generator.
+ *
+ * WHY THIS EXISTS. The hardest part of running a field game is not the software, it is the
+ * blank page: a person who has decided to run one for a bar mitzvah, a school trip or a work
+ * day still has to invent twelve things for teams to do, and that is where most people give up.
+ * `TryMission.astro` lets a visitor feel what PLAYING is like; this answers the question they
+ * have immediately afterwards, which is what they would have to write.
+ *
+ * It is deliberately useful on its own. Someone can take three ideas from here and run a game
+ * on paper without ever signing up — and that is the point. A tool that only works if you
+ * convert is an advertisement; one that works anyway is worth linking to.
+ *
+ * DESIGN NOTES:
+ *  • The ideas are CONTENT, not code: a tagged bank in the per-language JSON, editable in the
+ *    CMS. Adding an idea is an edit, not a deploy, and the Hebrew bank is written in Hebrew
+ *    rather than translated from the English one.
+ *  • Filtering is by tag with a deliberate fallback: if a combination has fewer than three
+ *    matches it widens to the occasion alone rather than showing an empty result. A generator
+ *    that can return nothing is worse than one that is occasionally generic.
+ *  • Repeat presses rotate through the matches instead of re-randomising, so pressing again
+ *    always shows something new and never repeats an idea until the pool is exhausted.
+ *  • No framework, no network, same as the demo above it.
+ */
+import type { MissionIdeas as Props } from '~/types';
+
+const { content, id = 'mission-ideas' } = Astro.props as Props;
+---
+
+<section id={id} class="px-4 py-16 sm:px-6 mx-auto max-w-4xl lg:px-8">
+  <div class="text-center mb-10">
+    {content.tagline && (
+      <p class="text-base font-bold tracking-wide uppercase text-secondary mb-2">{content.tagline}</p>
+    )}
+    <h2 class="text-3xl md:text-4xl font-bold tracking-tight mb-3">{content.title}</h2>
+    <p class="text-lg text-muted dark:text-slate-400 max-w-2xl mx-auto">{content.subtitle}</p>
+  </div>
+
+  <div
+    class="rounded-2xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg overflow-hidden"
+    data-rp-ideas
+    data-copy={JSON.stringify(content)}
+  >
+    <div class="p-5 sm:p-8">
+      <!-- The two questions. Real <fieldset>s so a screen reader hears the grouping, and
+           real radios so the whole thing is keyboard-operable with arrow keys. -->
+      <fieldset class="mb-6">
+        <legend class="block text-sm font-bold mb-3">{content.occasionLabel}</legend>
+        <div class="flex flex-wrap gap-2" data-rp-occasions></div>
+      </fieldset>
+
+      <fieldset class="mb-7">
+        <legend class="block text-sm font-bold mb-3">{content.placeLabel}</legend>
+        <div class="flex flex-wrap gap-2" data-rp-places></div>
+      </fieldset>
+
+      <button type="button" class="btn btn-primary w-full sm:w-auto" data-rp-generate></button>
+
+      <div class="mt-7" data-rp-results hidden>
+        <ol class="flex flex-col gap-4" data-rp-list aria-live="polite"></ol>
+        <p class="mt-4 text-xs text-muted dark:text-slate-500" data-rp-note></p>
+        <div class="mt-6 flex flex-wrap gap-3">
+          <a class="btn btn-primary" href="https://creator.rush-point.com" target="_blank" rel="noopener" data-rp-cta></a>
+          <button type="button" class="btn" data-rp-again></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .rp-pick {
+    border-radius: 9999px;
+    border: 1px solid var(--aw-color-border, rgb(203 213 225));
+    padding: 0.5rem 1.1rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
+  }
+  .rp-pick[aria-pressed='true'] {
+    border-color: var(--aw-color-primary, rgb(37 99 235));
+    background: color-mix(in srgb, var(--aw-color-primary, rgb(37 99 235)) 12%, transparent);
+    font-weight: 700;
+  }
+  .rp-idea {
+    border-inline-start: 3px solid var(--aw-color-primary, rgb(37 99 235));
+    padding-inline-start: 1rem;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rp-pick { transition: none; }
+  }
+</style>
+
+<script>
+  // Dependency-free and defensive, for the same reason as the demo above: a thrown error on a
+  // marketing page leaves a dead grey box, so anything missing removes the section instead.
+  type Bag = Record<string, unknown>;
+  interface Idea { text: string; kindLabel?: string; occasions?: string[]; places?: string[] }
+
+  function initIdeas(root: HTMLElement) {
+    let copy: Bag;
+    try {
+      copy = JSON.parse(root.dataset.copy ?? '{}');
+    } catch {
+      root.closest('section')?.remove();
+      return;
+    }
+    const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+    const q = (sel: string) => root.querySelector(sel) as HTMLElement | null;
+
+    const occasions = arr<{ id: string; label: string }>(copy.occasions);
+    const places = arr<{ id: string; label: string }>(copy.places);
+    const ideas = arr<Idea>(copy.ideas);
+    if (!occasions.length || !places.length || ideas.length < 3) {
+      root.closest('section')?.remove();
+      return;
+    }
+
+    let occasion = occasions[0].id;
+    let place = places[0].id;
+    /** Where in the matching pool the next press starts, so repeats never repeat. */
+    let cursor = 0;
+
+    function chips(host: HTMLElement, items: { id: string; label: string }[], selected: () => string, onPick: (id: string) => void) {
+      host.innerHTML = '';
+      for (const it of items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'rp-pick';
+        b.textContent = it.label;
+        b.setAttribute('aria-pressed', String(it.id === selected()));
+        b.addEventListener('click', () => {
+          onPick(it.id);
+          cursor = 0; // a new question deserves a fresh answer, not the next page of the old one
+          paintChips();
+        });
+        host.appendChild(b);
+      }
+    }
+    function paintChips() {
+      chips(q('[data-rp-occasions]')!, occasions, () => occasion, (id) => { occasion = id; });
+      chips(q('[data-rp-places]')!, places, () => place, (id) => { place = id; });
+    }
+
+    /**
+     * Ideas matching both answers; widened to the occasion alone, then to everything, rather
+     * than ever returning fewer than three. Generic beats empty.
+     */
+    function pool(): Idea[] {
+      const both = ideas.filter((i) => arr<string>(i.occasions).includes(occasion) && arr<string>(i.places).includes(place));
+      if (both.length >= 3) return both;
+      const byOccasion = ideas.filter((i) => arr<string>(i.occasions).includes(occasion));
+      if (byOccasion.length >= 3) return byOccasion;
+      return ideas;
+    }
+
+    function generate() {
+      const p = pool();
+      const picked: Idea[] = [];
+      for (let n = 0; n < 3 && n < p.length; n++) picked.push(p[(cursor + n) % p.length]);
+      cursor = (cursor + 3) % Math.max(p.length, 1);
+
+      const list = q('[data-rp-list]')!;
+      list.innerHTML = '';
+      picked.forEach((idea) => {
+        const li = document.createElement('li');
+        li.className = 'rp-idea';
+        const kind = document.createElement('p');
+        kind.className = 'text-xs font-bold uppercase tracking-wide text-secondary mb-1';
+        kind.textContent = idea.kindLabel ?? '';
+        const text = document.createElement('p');
+        text.className = 'text-base';
+        text.textContent = idea.text;
+        li.append(kind, text);
+        list.appendChild(li);
+      });
+
+      const results = q('[data-rp-results]')!;
+      results.hidden = false;
+      const note = q('[data-rp-note]');
+      if (note && typeof copy.note === 'string') note.textContent = copy.note;
+    }
+
+    if (typeof copy.generateAction === 'string') q('[data-rp-generate]')!.textContent = copy.generateAction;
+    if (typeof copy.againAction === 'string') q('[data-rp-again]')!.textContent = copy.againAction;
+    if (typeof copy.ctaAction === 'string') q('[data-rp-cta]')!.textContent = copy.ctaAction;
+    q('[data-rp-generate]')!.addEventListener('click', generate);
+    q('[data-rp-again]')!.addEventListener('click', generate);
+    paintChips();
+  }
+
+  const bootIdeas = () => {
+    document.querySelectorAll<HTMLElement>('[data-rp-ideas]').forEach((el) => {
+      if (el.dataset.rpBooted) return;
+      el.dataset.rpBooted = '1';
+      try { initIdeas(el); } catch { el.closest('section')?.remove(); }
+    });
+  };
+  bootIdeas();
+  document.addEventListener('astro:page-load', bootIdeas);
+</script>

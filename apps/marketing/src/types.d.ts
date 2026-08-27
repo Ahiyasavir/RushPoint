@@ -280,10 +280,10 @@ export interface TryMissionContent {
   boardNote: string;
   rivals: { name: string; score: number }[];
   missions: {
-    order: { kind: string; title: string; prompt: string; items: string[] };
-    answer: { kind: string; title: string; prompt: string; hint?: string; answers: string[] };
+    order: { kindLabel: string; title: string; prompt: string; items: string[] };
+    answer: { kindLabel: string; title: string; prompt: string; hint?: string; answers: string[] };
     photo: {
-      kind: string;
+      kindLabel: string;
       title: string;
       prompt: string;
       options: { label: string; emoji?: string; correct?: boolean }[];
@@ -293,5 +293,31 @@ export interface TryMissionContent {
 
 export interface TryMission {
   content: TryMissionContent;
+  id?: string;
+}
+
+/**
+ * The mission idea generator (change: mission-ideas). Like TryMission, the widget takes its
+ * whole visible surface as `content` so it holds no copy of its own. `occasions` and `places`
+ * are the tag vocabulary; each idea declares which of them it belongs to, and the generator
+ * widens its filter rather than ever returning an empty result.
+ */
+export interface MissionIdeasContent {
+  tagline?: string;
+  title: string;
+  subtitle: string;
+  occasionLabel: string;
+  placeLabel: string;
+  generateAction: string;
+  againAction: string;
+  ctaAction: string;
+  note: string;
+  occasions: { id: string; label: string }[];
+  places: { id: string; label: string }[];
+  ideas: { kindLabel?: string; text: string; occasions: string[]; places: string[] }[];
+}
+
+export interface MissionIdeas {
+  content: MissionIdeasContent;
   id?: string;
 }

@@ -284,7 +284,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
       const m = obj(missions.order);
       const items: string[] = arr<string>(m.items).slice();
       if (items.length < 2) return runAnswer(); // nothing to order ⇒ skip rather than stall
-      text('[data-rp-order-kind]', m.kind);
+      text('[data-rp-order-kind]', m.kindLabel);
       text('[data-rp-order-title]', m.title);
       text('[data-rp-order-prompt]', m.prompt);
 
@@ -359,7 +359,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
       const m = obj(missions.answer);
       const accepted: string[] = arr<string>(m.answers);
       if (!accepted.length) return runPhoto();
-      text('[data-rp-answer-kind]', m.kind);
+      text('[data-rp-answer-kind]', m.kindLabel);
       text('[data-rp-answer-title]', m.title);
       text('[data-rp-answer-prompt]', m.prompt);
       text('[data-rp-answer-hint]', m.hint);
@@ -405,7 +405,7 @@ const { content, id = 'try-mission' } = Astro.props as Props;
       const m = obj(missions.photo);
       const options = arr<{ label: string; emoji?: string; correct?: boolean }>(m.options);
       if (!options.some((o) => o.correct)) return finish();
-      text('[data-rp-photo-kind]', m.kind);
+      text('[data-rp-photo-kind]', m.kindLabel);
       text('[data-rp-photo-title]', m.title);
       text('[data-rp-photo-prompt]', m.prompt);
 
